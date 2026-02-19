@@ -1,0 +1,15 @@
+{
+  "name": "@clawd-cursor/vision",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@clawd-cursor/shared": "workspace:*",
+    "sharp": "^0.33.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  }
+}

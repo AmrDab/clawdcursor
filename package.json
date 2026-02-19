@@ -1,0 +1,19 @@
+{
+  "name": "clawd-cursor",
+  "version": "0.1.0",
+  "description": "AI desktop overlay agent — your AI gets its own cursor",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel dev",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT"
+}

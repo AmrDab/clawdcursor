@@ -1,0 +1,15 @@
+{
+  "name": "@clawd-cursor/overlay",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "dependencies": {
+    "@clawd-cursor/shared": "workspace:*",
+    "electron": "^28.0.0"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "electron .",
+    "start": "electron ."
+  }
+}

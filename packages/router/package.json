@@ -1,0 +1,16 @@
+{
+  "name": "@clawd-cursor/router",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "dependencies": {
+    "@clawd-cursor/shared": "workspace:*",
+    "@clawd-cursor/automation": "workspace:*",
+    "@clawd-cursor/vision": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  }
+}
