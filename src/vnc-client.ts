@@ -132,9 +132,15 @@ export class VNCClient extends EventEmitter {
 
     const { format, quality } = this.config.capture;
 
-    // Send at NATIVE resolution — no resizing
-    // The AI needs accurate coordinates matching the real screen
-    const pipeline = sharp(Buffer.from(this.fullFrameBuffer), {
+    // VNC sends BGRA — swap to RGBA for correct colors
+    const rgbaBuffer = Buffer.from(this.fullFrameBuffer);
+    for (let i = 0; i < rgbaBuffer.length; i += 4) {
+      const b = rgbaBuffer[i];
+      rgbaBuffer[i] = rgbaBuffer[i + 2];     // R <- B
+      rgbaBuffer[i + 2] = b;                  // B <- R
+    }
+
+    const pipeline = sharp(rgbaBuffer, {
       raw: {
         width: this.screenWidth,
         height: this.screenHeight,

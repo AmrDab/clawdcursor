@@ -3,6 +3,8 @@
  * Now supports action sequences (multi-step without re-screenshotting).
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { VNCClient } from './vnc-client';
 import { AIBrain } from './ai-brain';
 import { SafetyLayer } from './safety';
@@ -53,10 +55,23 @@ export class Agent {
 
     console.log(`\n🐾 Starting task: ${task}`);
 
+    // Debug directory — clean old screenshots on each new task
+    const debugDir = path.join(process.cwd(), 'debug');
+    if (fs.existsSync(debugDir)) {
+      for (const f of fs.readdirSync(debugDir)) fs.unlinkSync(path.join(debugDir, f));
+    } else {
+      fs.mkdirSync(debugDir);
+    }
+
     // Initial screenshot
     let lastScreenshot = await this.vnc.captureScreen();
     console.log(`   Screen: ${lastScreenshot.width}x${lastScreenshot.height}`);
     console.log(`   Screenshot size: ${(lastScreenshot.buffer.length / 1024).toFixed(0)}KB`);
+    
+    // Save debug screenshot
+    const ext = lastScreenshot.format === 'jpeg' ? 'jpg' : 'png';
+    fs.writeFileSync(path.join(debugDir, `step-0.${ext}`), lastScreenshot.buffer);
+    console.log(`   💾 Saved debug/step-0.${ext}`);
 
     for (let i = 0; i < MAX_STEPS; i++) {
       if (this.aborted) {
@@ -69,6 +84,8 @@ export class Agent {
         console.log(`\n📸 Step ${i + 1}: Capturing screen...`);
         await this.delay(1000);
         lastScreenshot = await this.vnc.captureScreen();
+        fs.writeFileSync(path.join(debugDir, `step-${i}.${ext}`), lastScreenshot.buffer);
+        console.log(`   💾 Saved debug/step-${i}.${ext} (${(lastScreenshot.buffer.length / 1024).toFixed(0)}KB)`);
       } else {
         console.log(`\n📸 Step 1: Using initial screenshot`);
       }
