@@ -8,8 +8,9 @@ import * as path from 'path';
 import { VNCClient } from './vnc-client';
 import { AIBrain } from './ai-brain';
 import { SafetyLayer } from './safety';
+import { AccessibilityBridge } from './accessibility';
 import { SafetyTier } from './types';
-import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction, ActionSequence } from './types';
+import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction, ActionSequence, A11yAction } from './types';
 
 const MAX_STEPS = 15;
 const MAX_SIMILAR_ACTION = 3;
@@ -18,6 +19,7 @@ export class Agent {
   private vnc: VNCClient;
   private brain: AIBrain;
   private safety: SafetyLayer;
+  private a11y: AccessibilityBridge;
   private config: ClawdConfig;
   private state: AgentState = {
     status: 'idle',
@@ -31,6 +33,7 @@ export class Agent {
     this.vnc = new VNCClient(config);
     this.brain = new AIBrain(config);
     this.safety = new SafetyLayer(config);
+    this.a11y = new AccessibilityBridge();
   }
 
   async connect(): Promise<void> {
@@ -90,9 +93,17 @@ export class Agent {
         console.log(`\n📸 Step 1: Using initial screenshot`);
       }
 
+      // Get accessibility context (best effort — don't fail if unavailable)
+      let a11yContext: string | undefined;
+      try {
+        a11yContext = await this.a11y.getScreenContext();
+      } catch {
+        // Accessibility not available — rely on vision only
+      }
+
       // Ask AI what to do
       this.state.status = 'thinking';
-      const decision = await this.brain.decideNextAction(lastScreenshot, task, stepDescriptions);
+      const decision = await this.brain.decideNextAction(lastScreenshot, task, stepDescriptions, a11yContext);
 
       // Done?
       if (decision.done) {
@@ -139,10 +150,12 @@ export class Agent {
 
           // Execute the step
           try {
-            if ('x' in seqStep) {
-              await this.vnc.executeMouseAction(seqStep);
+            if (seqStep.kind.startsWith('a11y_')) {
+              await this.executeA11yAction(seqStep as any);
+            } else if ('x' in seqStep) {
+              await this.vnc.executeMouseAction(seqStep as any);
             } else {
-              await this.vnc.executeKeyboardAction(seqStep);
+              await this.vnc.executeKeyboardAction(seqStep as any);
             }
             steps.push({ action: seqStep.kind, description: seqStep.description, success: true, timestamp: Date.now() });
             stepDescriptions.push(seqStep.description);
@@ -195,10 +208,12 @@ export class Agent {
         this.state.currentStep = decision.description;
 
         try {
-          if ('x' in decision.action) {
-            await this.vnc.executeMouseAction(decision.action);
+          if (decision.action.kind.startsWith('a11y_')) {
+            await this.executeA11yAction(decision.action as A11yAction);
+          } else if ('x' in decision.action) {
+            await this.vnc.executeMouseAction(decision.action as any);
           } else {
-            await this.vnc.executeKeyboardAction(decision.action);
+            await this.vnc.executeKeyboardAction(decision.action as any);
           }
           steps.push({ action: decision.action.kind, description: decision.description, success: true, timestamp: Date.now() });
           stepDescriptions.push(decision.description);
@@ -238,6 +253,31 @@ export class Agent {
 
   disconnect(): void {
     this.vnc.disconnect();
+  }
+
+  private async executeA11yAction(action: A11yAction): Promise<void> {
+    const actionMap: Record<string, 'click' | 'set-value' | 'get-value' | 'focus'> = {
+      'a11y_click': 'click',
+      'a11y_set_value': 'set-value',
+      'a11y_get_value': 'get-value',
+      'a11y_focus': 'focus',
+    };
+    const a11yAction = actionMap[action.kind];
+    if (!a11yAction) throw new Error(`Unknown a11y action: ${action.kind}`);
+
+    console.log(`   ♿ A11y ${a11yAction}: ${action.name || action.automationId} [${action.controlType || 'any'}]`);
+
+    const result = await this.a11y.invokeElement({
+      name: action.name,
+      automationId: action.automationId,
+      controlType: action.controlType,
+      action: a11yAction,
+      value: action.value,
+    });
+
+    if (!result.success) {
+      throw new Error(result.error || 'A11y action failed');
+    }
   }
 
   private delay(ms: number): Promise<void> {

@@ -31,7 +31,15 @@ export interface KeyboardAction {
   key?: string;
 }
 
-export type InputAction = MouseAction | KeyboardAction;
+export interface A11yAction {
+  kind: 'a11y_click' | 'a11y_set_value' | 'a11y_focus' | 'a11y_get_value';
+  name?: string;
+  automationId?: string;
+  controlType?: string;
+  value?: string;
+}
+
+export type InputAction = MouseAction | KeyboardAction | A11yAction;
 
 // A sequence of actions to execute without re-screenshotting
 export interface ActionSequence {

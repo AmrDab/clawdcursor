@@ -41,6 +41,11 @@ COMPLETION:
 ERROR:
 {"kind": "error", "description": "Cannot proceed because X"}
 
+ACCESSIBILITY ACTION (use when element name/ID is in the accessibility tree — PREFERRED over click coordinates):
+{"kind": "a11y_click", "name": "Compose", "controlType": "Button", "description": "Click Compose button via accessibility"}
+{"kind": "a11y_set_value", "name": "To", "controlType": "Edit", "value": "user@email.com", "description": "Set To field value"}
+{"kind": "a11y_focus", "name": "Subject", "controlType": "Edit", "description": "Focus the Subject field"}
+
 WAIT (for loading):
 {"kind": "wait", "description": "Waiting for page to load", "waitMs": 2000}
 
@@ -51,7 +56,9 @@ CRITICAL RULES:
 4. NEVER repeat an action that was already performed in previous steps
 5. If you typed text and it appeared, that step is DONE — move to the next part of the task
 6. Track progress: if you've done steps A, B, C of a task, do step D next — don't restart
-7. Use sequences for form-filling (To, Subject, Body) to avoid re-screenshotting between each field`;
+7. Use sequences for form-filling (To, Subject, Body) to avoid re-screenshotting between each field
+8. PREFER accessibility actions (a11y_*) over pixel coordinates when the accessibility tree provides element info
+9. Accessibility actions are faster and more reliable than clicking coordinates`;
 
 interface ConversationTurn {
   role: 'user' | 'assistant';
@@ -78,6 +85,7 @@ export class AIBrain {
     screenshot: ScreenFrame,
     task: string,
     previousSteps: string[] = [],
+    accessibilityContext?: string,
   ): Promise<{
     action: InputAction | null;
     sequence: ActionSequence | null;
@@ -91,6 +99,11 @@ export class AIBrain {
 
     // Build user message
     let userMessage = `TASK: ${task}\n`;
+
+    if (accessibilityContext) {
+      userMessage += `\nACCESSIBILITY TREE (use element names/IDs for precise targeting):\n${accessibilityContext}\n`;
+    }
+
     if (previousSteps.length > 0) {
       userMessage += `\nCOMPLETED STEPS (${previousSteps.length} so far):\n`;
       previousSteps.forEach((s, i) => {
