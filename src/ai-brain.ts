@@ -36,10 +36,11 @@ Special responses:
 
 Rules:
 - ONE action per response, ONLY JSON
+- BEFORE acting, check: is the task ALREADY COMPLETE? If yes, respond with {"kind":"done","description":"..."}
 - Use exact pixel coordinates from the screenshot — coordinates correspond to ACTUAL screen pixels
 - Be precise — aim for the CENTER of buttons/links/icons
-- If the same action fails 2+ times, try a different approach (keyboard shortcut instead of click, etc.)
-- If you see the task is already done (e.g. Start menu already open), respond with done
+- If you already performed the action in previous steps, the task is DONE — do not repeat it
+- If the same action was tried before and didn't work, try a DIFFERENT approach
 - The screenshot is the FULL screen at native resolution`;
 
 export class AIBrain {

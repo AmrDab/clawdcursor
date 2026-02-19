@@ -15,8 +15,8 @@ import { SafetyLayer } from './safety';
 import { SafetyTier } from './types';
 import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction } from './types';
 
-const MAX_STEPS = 20;  // Reduced — if it takes 20 steps, something's wrong
-const MAX_SAME_ACTION = 3;  // Abort if same action repeated this many times
+const MAX_STEPS = 15;
+const MAX_SIMILAR_ACTION = 3;  // Abort if similar action repeated this many times
 
 export class Agent {
   private vnc: VNCClient;
@@ -55,8 +55,7 @@ export class Agent {
     const steps: StepResult[] = [];
     const stepDescriptions: string[] = [];
     const startTime = Date.now();
-    let lastDescription = '';
-    let sameActionCount = 0;
+    let recentActions: string[] = [];
     let needsScreenshot = true;
     let lastScreenshot = await this.vnc.captureScreen(); // Initial capture
 
@@ -121,22 +120,19 @@ export class Agent {
 
       if (!decision.action) continue;
 
-      // 6. Detect repeated failures
-      if (decision.description === lastDescription) {
-        sameActionCount++;
-        if (sameActionCount >= MAX_SAME_ACTION) {
-          console.log(`🔄 Same action repeated ${MAX_SAME_ACTION} times — aborting`);
-          steps.push({
-            action: 'stuck',
-            description: `Stuck: repeated "${decision.description}" ${MAX_SAME_ACTION} times`,
-            success: false,
-            timestamp: Date.now(),
-          });
-          break;
-        }
-      } else {
-        sameActionCount = 0;
-        lastDescription = decision.description;
+      // 6. Detect repeated/similar actions (fuzzy match)
+      const actionKey = decision.action.kind + ('x' in decision.action ? `@${decision.action.x},${decision.action.y}` : ('key' in decision.action ? `@${decision.action.key}` : ''));
+      recentActions.push(actionKey);
+      const lastN = recentActions.slice(-MAX_SIMILAR_ACTION);
+      if (lastN.length >= MAX_SIMILAR_ACTION && lastN.every(a => a === lastN[0])) {
+        console.log(`🔄 Same action repeated ${MAX_SIMILAR_ACTION} times — aborting`);
+        steps.push({
+          action: 'stuck',
+          description: `Stuck: repeated "${actionKey}" ${MAX_SIMILAR_ACTION} times`,
+          success: false,
+          timestamp: Date.now(),
+        });
+        break;
       }
 
       // 7. Safety check
