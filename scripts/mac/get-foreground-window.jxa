@@ -1,0 +1,93 @@
+#!/usr/bin/env osascript -l JavaScript
+
+/**
+ * get-foreground-window.jxa
+ * 
+ * Gets the currently focused/foreground window.
+ * 
+ * Returns JSON with:
+ *   - handle: Window identifier (on macOS this is the process ID as a proxy)
+ *   - processId: Unix process ID of the foreground application
+ *   - processName: Name of the foreground application
+ *   - title: Title of the frontmost window
+ *   - success: Boolean indicating success
+ * 
+ * Usage: osascript -l JavaScript get-foreground-window.jxa
+ */
+
+ObjC.import('stdlib');
+
+// Utility function to safely get property values
+function safeGet(obj, property, defaultValue) {
+    try {
+        var val = obj[property]();
+        return val !== undefined && val !== null ? val : defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+try {
+    var SystemEvents = Application('System Events');
+    SystemEvents.includeStandardAdditions = true;
+    
+    // Get the frontmost process
+    var frontProcesses = SystemEvents.processes.where({ frontmost: true });
+    
+    if (frontProcesses.length === 0) {
+        console.log(JSON.stringify({ 
+            success: false, 
+            error: 'No foreground window found' 
+        }));
+        $.exit(1);
+    }
+    
+    var frontProcess = frontProcesses[0];
+    var processId = safeGet(frontProcess, 'unixId', 0);
+    var processName = safeGet(frontProcess, 'name', 'unknown');
+    
+    // Get the frontmost window title
+    var title = '';
+    try {
+        var windows = frontProcess.windows;
+        if (windows.length > 0) {
+            // Try to get the name of the first (frontmost) window
+            try {
+                title = windows[0].name() || '';
+            } catch (e) {}
+            
+            // If no title, try to find a focused window
+            if (!title) {
+                for (var i = 0; i < windows.length; i++) {
+                    try {
+                        if (windows[i].focused && windows[i].focused()) {
+                            title = windows[i].name() || '';
+                            break;
+                        }
+                    } catch (e) {}
+                }
+            }
+        }
+    } catch (e) {
+        // No windows accessible
+    }
+    
+    // On macOS, we don't have window handles like Win32 HWND
+    // We use processId as a proxy identifier
+    var result = {
+        success: true,
+        handle: processId,  // Using processId as handle equivalent
+        processId: processId,
+        processName: processName,
+        title: title
+    };
+    
+    console.log(JSON.stringify(result));
+    
+} catch (error) {
+    console.log(JSON.stringify({ 
+        success: false, 
+        error: error.toString() 
+    }));
+    $.exit(1);
+}

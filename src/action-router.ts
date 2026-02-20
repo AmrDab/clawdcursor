@@ -6,9 +6,12 @@
  * patterns that don't need vision AI to execute.
  */
 
+import * as os from 'os';
 import { AccessibilityBridge } from './accessibility';
 import { VNCClient } from './vnc-client';
 import type { WindowInfo } from './accessibility';
+
+const PLATFORM = os.platform();
 
 export interface RouteResult {
   handled: boolean;
@@ -117,19 +120,20 @@ export class ActionRouter {
     }
 
     // 9. "select all" / "copy" / "paste" / "undo" / "redo" / "save"
+    const mod = PLATFORM === 'darwin' ? 'Super' : 'ctrl'; // Cmd on macOS, Ctrl on Windows
     const shortcutMap: Record<string, string> = {
-      'select all': 'ctrl+a',
-      'copy': 'ctrl+c',
-      'paste': 'ctrl+v',
-      'cut': 'ctrl+x',
-      'undo': 'ctrl+z',
-      'redo': 'ctrl+y',
-      'save': 'ctrl+s',
-      'save as': 'ctrl+shift+s',
-      'find': 'ctrl+f',
-      'new tab': 'ctrl+t',
-      'close tab': 'ctrl+w',
-      'new window': 'ctrl+n',
+      'select all': `${mod}+a`,
+      'copy': `${mod}+c`,
+      'paste': `${mod}+v`,
+      'cut': `${mod}+x`,
+      'undo': `${mod}+z`,
+      'redo': PLATFORM === 'darwin' ? 'Super+shift+z' : 'ctrl+y',
+      'save': `${mod}+s`,
+      'save as': `${mod}+shift+s`,
+      'find': `${mod}+f`,
+      'new tab': `${mod}+t`,
+      'close tab': `${mod}+w`,
+      'new window': `${mod}+n`,
     };
 
     for (const [pattern, combo] of Object.entries(shortcutMap)) {
@@ -207,16 +211,21 @@ export class ActionRouter {
     } catch { /* proceed without snapshot */ }
 
     try {
-      // Press Win key to open Start Menu
-      await this.vnc.keyPress('Super');
-      await this.delay(600);
-
-      // Type the app name to search
-      await this.vnc.typeText(searchTerm);
-      await this.delay(800);
-
-      // Press Enter to launch the top result
-      await this.vnc.keyPress('Return');
+      if (PLATFORM === 'darwin') {
+        // macOS: Use Spotlight (Cmd+Space)
+        await this.vnc.keyPress('Super+ '); // Cmd+Space
+        await this.delay(400);
+        await this.vnc.typeText(searchTerm);
+        await this.delay(600);
+        await this.vnc.keyPress('Return');
+      } else {
+        // Windows: Use Start Menu (Win key)
+        await this.vnc.keyPress('Super');
+        await this.delay(600);
+        await this.vnc.typeText(searchTerm);
+        await this.delay(800);
+        await this.vnc.keyPress('Return');
+      }
 
       // Poll until a NEW window appears (or timeout)
       const readyResult = await this.waitForAppReady(searchTerm, windowsBefore);
@@ -447,10 +456,14 @@ export class ActionRouter {
       const focusResult = await this.handleFocusWindow(appName);
       if (focusResult.handled) {
         await this.delay(200);
-        await this.vnc.keyPress('alt+F4');
+        if (PLATFORM === 'darwin') {
+          await this.vnc.keyPress('Super+q'); // Cmd+Q on macOS
+        } else {
+          await this.vnc.keyPress('alt+F4');
+        }
         return {
           handled: true,
-          description: `Closed "${appName}" with Alt+F4`,
+          description: `Closed "${appName}" with ${PLATFORM === 'darwin' ? 'Cmd+Q' : 'Alt+F4'}`,
         };
       }
       return { handled: false, description: `Cannot close — window "${appName}" not found` };

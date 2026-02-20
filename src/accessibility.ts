@@ -1,23 +1,47 @@
 /**
- * Accessibility Bridge — calls PowerShell scripts to query
- * the Windows UI Automation tree. No vision needed for most actions.
+ * Accessibility Bridge — calls platform-specific scripts to query
+ * the native accessibility tree. No vision needed for most actions.
  * 
- * Flow: Node.js → spawn powershell → .NET UI Automation → JSON back
+ * Windows: Node.js → spawn powershell → .NET UI Automation → JSON
+ * macOS:   Node.js → spawn osascript → JXA (Accessibility API) → JSON
  * 
  * v2: Added window management helpers (focusWindow, launchApp, getActiveWindow)
  * v2.1: Fixed hardcoded process IDs, added PowerShell check, proper foreground window detection
+ * v3: Cross-platform support (Windows + macOS)
  */
 
 import { execFile } from 'child_process';
+import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+const PLATFORM = os.platform(); // 'win32' | 'darwin' | 'linux'
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
-const PS_TIMEOUT = 10000; // 10s timeout for PowerShell calls
+const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
+const SCRIPT_TIMEOUT = 10000; // 10s timeout
 
-/** Cached PowerShell availability */
-let psAvailable: boolean | null = null;
+/** Platform script file mapping: Windows (.ps1) → macOS (.jxa) */
+const SCRIPT_MAP: Record<string, Record<string, string>> = {
+  win32: {
+    'get-windows': 'get-windows.ps1',
+    'find-element': 'find-element.ps1',
+    'invoke-element': 'invoke-element.ps1',
+    'focus-window': 'focus-window.ps1',
+    'get-foreground-window': 'get-foreground-window.ps1',
+    'get-ui-tree': 'get-ui-tree.ps1',
+  },
+  darwin: {
+    'get-windows': 'get-windows.jxa',
+    'find-element': 'find-element.jxa',
+    'invoke-element': 'invoke-element.jxa',
+    'focus-window': 'focus-window.jxa',
+    'get-foreground-window': 'get-foreground-window.jxa',
+  },
+};
+
+/** Cached shell availability */
+let shellAvailable: boolean | null = null;
 
 export interface UIElement {
   name: string;
@@ -49,35 +73,46 @@ export class AccessibilityBridge {
   private explorerProcessId: number | null = null; // Cached Explorer PID for taskbar detection
 
   /**
-   * Check if PowerShell is available on this system.
-   * Caches result after first check.
+   * Check if the platform's script shell is available.
+   * Windows: PowerShell, macOS: osascript
    */
-  async isPowerShellAvailable(): Promise<boolean> {
-    if (psAvailable !== null) return psAvailable;
+  async isShellAvailable(): Promise<boolean> {
+    if (shellAvailable !== null) return shellAvailable;
     
     try {
-      await execFileAsync('powershell.exe', ['-Command', 'exit 0'], { timeout: 5000 });
-      psAvailable = true;
+      if (PLATFORM === 'win32') {
+        await execFileAsync('powershell.exe', ['-Command', 'exit 0'], { timeout: 5000 });
+      } else if (PLATFORM === 'darwin') {
+        await execFileAsync('osascript', ['-l', 'JavaScript', '-e', '""'], { timeout: 5000 });
+      } else {
+        console.error(`❌ Unsupported platform: ${PLATFORM}. Accessibility requires Windows or macOS.`);
+        shellAvailable = false;
+        return false;
+      }
+      shellAvailable = true;
+      console.log(`✅ Accessibility bridge ready (${PLATFORM === 'win32' ? 'PowerShell' : 'osascript'})`);
     } catch {
-      psAvailable = false;
-      console.error('❌ PowerShell not available. Accessibility bridge will not function.');
+      shellAvailable = false;
+      const shell = PLATFORM === 'win32' ? 'PowerShell' : 'osascript';
+      console.error(`❌ ${shell} not available. Accessibility bridge will not function.`);
     }
-    return psAvailable;
+    return shellAvailable;
   }
 
   /**
-   * Get the Explorer process ID (for taskbar detection).
+   * Get the Explorer/Finder process ID (for taskbar/dock detection).
    * Caches result to avoid repeated lookups.
    */
   private async getExplorerProcessId(): Promise<number | null> {
     if (this.explorerProcessId !== null) return this.explorerProcessId;
     
+    const targetProcess = PLATFORM === 'darwin' ? 'finder' : 'explorer';
     try {
       const windows = await this.getWindows(true);
-      const explorer = windows.find(w => w.processName.toLowerCase() === 'explorer');
-      if (explorer) {
-        this.explorerProcessId = explorer.processId;
-        return explorer.processId;
+      const match = windows.find(w => w.processName.toLowerCase() === targetProcess);
+      if (match) {
+        this.explorerProcessId = match.processId;
+        return match.processId;
       }
     } catch {
       // Fall through to null
@@ -89,11 +124,11 @@ export class AccessibilityBridge {
    * List all visible top-level windows (cached for 2s)
    */
   async getWindows(forceRefresh = false): Promise<WindowInfo[]> {
-    // Check PowerShell availability on first call
-    if (psAvailable === null) {
-      const available = await this.isPowerShellAvailable();
+    // Check shell availability on first call
+    if (shellAvailable === null) {
+      const available = await this.isShellAvailable();
       if (!available) {
-        throw new Error('PowerShell is not available. Accessibility features disabled.');
+        throw new Error(`Accessibility shell not available on ${PLATFORM}. Features disabled.`);
       }
     }
     
@@ -346,22 +381,44 @@ export class AccessibilityBridge {
     return result;
   }
 
+  /**
+   * Run a platform-specific accessibility script.
+   * Accepts either a direct filename (e.g. 'get-windows.ps1') or
+   * a logical name (e.g. 'get-windows') that gets mapped per platform.
+   */
   private runScript(scriptName: string, args: string[] = []): Promise<any> {
     return new Promise((resolve, reject) => {
-      const scriptPath = path.join(SCRIPTS_DIR, scriptName);
+      let command: string;
+      let commandArgs: string[];
 
-      execFile('powershell.exe', [
-        '-NoProfile',
-        '-NonInteractive',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', scriptPath,
-        ...args,
-      ], {
-        timeout: PS_TIMEOUT,
+      // Resolve script name — accept both logical names and direct filenames
+      const logicalName = scriptName.replace(/\.(ps1|jxa)$/, '');
+      const platformScripts = SCRIPT_MAP[PLATFORM] || SCRIPT_MAP['win32'];
+      const resolvedScript = platformScripts[logicalName] || scriptName;
+
+      if (PLATFORM === 'darwin') {
+        const scriptPath = path.join(MAC_SCRIPTS_DIR, resolvedScript);
+        command = 'osascript';
+        commandArgs = ['-l', 'JavaScript', scriptPath, ...args];
+      } else {
+        // Windows (default)
+        const scriptPath = path.join(SCRIPTS_DIR, resolvedScript);
+        command = 'powershell.exe';
+        commandArgs = [
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy', 'Bypass',
+          '-File', scriptPath,
+          ...args,
+        ];
+      }
+
+      execFile(command, commandArgs, {
+        timeout: SCRIPT_TIMEOUT,
         maxBuffer: 1024 * 1024 * 5, // 5MB buffer
       }, (error, stdout, stderr) => {
         if (error) {
-          console.error(`Accessibility script error (${scriptName}):`, error.message);
+          console.error(`Accessibility script error (${resolvedScript}):`, error.message);
           reject(error);
           return;
         }
@@ -374,7 +431,7 @@ export class AccessibilityBridge {
             resolve(result);
           }
         } catch (parseErr) {
-          console.error(`Failed to parse ${scriptName} output:`, stdout.substring(0, 200));
+          console.error(`Failed to parse ${resolvedScript} output:`, stdout.substring(0, 200));
           reject(parseErr);
         }
       });

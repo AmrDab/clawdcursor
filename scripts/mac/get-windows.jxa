@@ -1,0 +1,118 @@
+#!/usr/bin/env osascript -l JavaScript
+
+/**
+ * get-windows.jxa
+ * 
+ * Lists all visible top-level windows with their properties.
+ * Returns a JSON array of all visible windows including:
+ * - title: Window title (name)
+ * - processName: Name of the owning application
+ * - processId: Unix process ID
+ * - bounds: {x, y, width, height} window position and size
+ * - isMinimized: Boolean indicating if window is minimized
+ * 
+ * Usage: osascript -l JavaScript get-windows.jxa
+ */
+
+// Enable access to Objective-C bridge
+ObjC.import('stdlib');
+
+// Utility function to safely get property values
+function safeGet(obj, property, defaultValue) {
+    try {
+        var val = obj[property]();
+        return val !== undefined && val !== null ? val : defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+// Utility function to safely get UI element properties
+function safeElementProp(element, propName, defaultValue) {
+    try {
+        if (element[propName]) {
+            return element[propName]();
+        }
+        return defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+try {
+    // Get System Events application
+    var SystemEvents = Application('System Events');
+    SystemEvents.includeStandardAdditions = true;
+    
+    // Get all processes with UI
+    var processes = SystemEvents.processes.where({ backgroundOnly: false });
+    var results = [];
+    
+    for (var i = 0; i < processes.length; i++) {
+        try {
+            var process = processes[i];
+            var processName = safeGet(process, 'name', 'unknown');
+            var processId = safeGet(process, 'unixId', 0);
+            
+            // Get all windows for this process
+            var windows = process.windows;
+            
+            for (var j = 0; j < windows.length; j++) {
+                try {
+                    var win = windows[j];
+                    var title = safeElementProp(win, 'name', '');
+                    
+                    // Skip windows with no name (invisible/system windows)
+                    if (!title || title.trim().length === 0) {
+                        continue;
+                    }
+                    
+                    // Get window bounds
+                    var bounds = { x: 0, y: 0, width: 0, height: 0 };
+                    try {
+                        var position = win.position();
+                        var size = win.size();
+                        bounds = {
+                            x: position[0],
+                            y: position[1],
+                            width: size[0],
+                            height: size[1]
+                        };
+                    } catch (e) {
+                        // Bounds not available
+                    }
+                    
+                    // Check if minimized - macOS uses "miniaturized"
+                    var isMinimized = false;
+                    try {
+                        isMinimized = win.miniaturized();
+                    } catch (e) {
+                        // Property not available, assume not minimized
+                    }
+                    
+                    // macOS doesn't have window handles like Windows,
+                    // but we can use a combination of processId and index
+                    results.push({
+                        title: title,
+                        processName: processName,
+                        processId: processId,
+                        bounds: bounds,
+                        isMinimized: isMinimized
+                    });
+                } catch (e) {
+                    // Skip windows that throw on property access
+                }
+            }
+        } catch (e) {
+            // Skip processes that throw
+        }
+    }
+    
+    // Output JSON to stdout
+    console.log(JSON.stringify(results, null, 0));
+    
+} catch (error) {
+    // Output error as JSON
+    console.log(JSON.stringify({ error: error.toString() }));
+    $.exit(1);
+}

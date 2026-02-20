@@ -1,0 +1,210 @@
+#!/usr/bin/env osascript -l JavaScript
+
+/**
+ * find-element.jxa
+ * 
+ * Searches the UI tree for elements matching given criteria.
+ * 
+ * Parameters:
+ *   -name <string>       - Match elements whose name contains this string (case-insensitive)
+ *   -role <string>       - Match elements whose role matches this string (e.g., "button", "text field")
+ *   -processId <number>  - If specified, only search within the process with this PID
+ * 
+ * Returns JSON array of matches with:
+ *   - name: Element name/label
+ *   - role: UI role (button, text field, etc.)
+ *   - bounds: {x, y, width, height} element position and size
+ *   - processId: Owning process ID
+ *   - value: Current value (if applicable)
+ * 
+ * Usage: osascript -l JavaScript find-element.jxa -name "OK" -role "button" -processId 1234
+ */
+
+ObjC.import('stdlib');
+
+// Parse command line arguments
+function parseArgs() {
+    var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
+    var result = { name: null, role: null, processId: null };
+    
+    for (var i = 0; i < args.length; i++) {
+        var arg = ObjC.unwrap(args[i]);
+        if (arg === '-name' && i + 1 < args.length) {
+            result.name = ObjC.unwrap(args[i + 1]);
+        } else if (arg === '-role' && i + 1 < args.length) {
+            result.role = ObjC.unwrap(args[i + 1]);
+        } else if (arg === '-processId' && i + 1 < args.length) {
+            result.processId = parseInt(ObjC.unwrap(args[i + 1]), 10);
+        }
+    }
+    
+    return result;
+}
+
+// Utility function to safely get property values
+function safeGet(obj, property, defaultValue) {
+    try {
+        var val = obj[property]();
+        return val !== undefined && val !== null ? val : defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+// Recursively search for UI elements
+function searchElements(element, targetName, targetRole, maxDepth, currentDepth) {
+    var matches = [];
+    
+    if (currentDepth > maxDepth) {
+        return matches;
+    }
+    
+    try {
+        var elName = '';
+        var elRole = '';
+        var elValue = '';
+        var bounds = { x: 0, y: 0, width: 0, height: 0 };
+        
+        try {
+            elName = element.name() || '';
+        } catch (e) {}
+        
+        try {
+            elRole = element.role() || '';
+        } catch (e) {}
+        
+        try {
+            elValue = element.value() || '';
+        } catch (e) {}
+        
+        try {
+            // Try to get position/size
+            if (element.position && element.size) {
+                var pos = element.position();
+                var sz = element.size();
+                bounds = {
+                    x: pos[0] || 0,
+                    y: pos[1] || 0,
+                    width: sz[0] || 0,
+                    height: sz[1] || 0
+                };
+            }
+        } catch (e) {}
+        
+        // Check if this element matches
+        var nameMatch = !targetName || 
+            (elName && elName.toLowerCase().indexOf(targetName.toLowerCase()) !== -1);
+        var roleMatch = !targetRole || 
+            (elRole && elRole.toLowerCase().indexOf(targetRole.toLowerCase()) !== -1);
+        
+        if (nameMatch && roleMatch && (elName || elRole)) {
+            matches.push({
+                name: elName,
+                role: elRole,
+                value: elValue,
+                bounds: bounds
+            });
+        }
+        
+        // Recursively search child elements
+        try {
+            var children = element.uiElements();
+            for (var i = 0; i < children.length; i++) {
+                var childMatches = searchElements(
+                    children[i], 
+                    targetName, 
+                    targetRole, 
+                    maxDepth, 
+                    currentDepth + 1
+                );
+                matches = matches.concat(childMatches);
+            }
+        } catch (e) {
+            // No children or not accessible
+        }
+        
+        // Also check specific element types commonly found
+        var elementTypes = ['buttons', 'textFields', 'popUpButtons', 'checkboxes', 'radioButtons'];
+        for (var j = 0; j < elementTypes.length; j++) {
+            try {
+                var typedElements = element[elementTypes[j]]();
+                for (var k = 0; k < typedElements.length; k++) {
+                    var typedMatches = searchElements(
+                        typedElements[k],
+                        targetName,
+                        targetRole,
+                        maxDepth,
+                        currentDepth + 1
+                    );
+                    matches = matches.concat(typedMatches);
+                }
+            } catch (e) {
+                // Type not available
+            }
+        }
+    } catch (e) {
+        // Element not accessible
+    }
+    
+    return matches;
+}
+
+try {
+    var params = parseArgs();
+    var SystemEvents = Application('System Events');
+    SystemEvents.includeStandardAdditions = true;
+    
+    var results = [];
+    var maxResults = 20;
+    
+    // Get target process(es)
+    var targetProcesses;
+    if (params.processId) {
+        targetProcesses = SystemEvents.processes.where({ unixId: params.processId });
+        if (targetProcesses.length === 0) {
+            console.log(JSON.stringify({ error: 'No process found with ID ' + params.processId }));
+            $.exit(0);
+        }
+    } else {
+        targetProcesses = SystemEvents.processes.where({ backgroundOnly: false });
+    }
+    
+    // Search each process
+    for (var p = 0; p < targetProcesses.length && results.length < maxResults; p++) {
+        try {
+            var process = targetProcesses[p];
+            var processId = safeGet(process, 'unixId', 0);
+            
+            // Search windows
+            var windows = process.windows;
+            for (var w = 0; w < windows.length && results.length < maxResults; w++) {
+                try {
+                    var windowMatches = searchElements(
+                        windows[w],
+                        params.name,
+                        params.role,
+                        10,  // max depth
+                        0    // current depth
+                    );
+                    
+                    // Add processId to each match
+                    for (var m = 0; m < windowMatches.length; m++) {
+                        windowMatches[m].processId = processId;
+                        results.push(windowMatches[m]);
+                        if (results.length >= maxResults) break;
+                    }
+                } catch (e) {
+                    // Window not accessible
+                }
+            }
+        } catch (e) {
+            // Process not accessible
+        }
+    }
+    
+    console.log(JSON.stringify(results, null, 0));
+    
+} catch (error) {
+    console.log(JSON.stringify({ error: error.toString() }));
+    $.exit(1);
+}

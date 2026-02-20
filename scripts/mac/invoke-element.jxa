@@ -1,0 +1,315 @@
+#!/usr/bin/env osascript -l JavaScript
+
+/**
+ * invoke-element.jxa
+ * 
+ * Finds a UI element and invokes an action on it.
+ * 
+ * Parameters:
+ *   -action <string>     - Required. Action to perform: click, set-value, get-value, focus
+ *   -name <string>       - Match elements by name (contains match, case-insensitive)
+ *   -role <string>       - Match elements by role (e.g., "button", "text field")
+ *   -processId <number>  - Required. The process ID of the target application
+ *   -value <string>      - Value to set (only used with set-value action)
+ * 
+ * Returns JSON result with success status and action-specific data.
+ * 
+ * Usage: osascript -l JavaScript invoke-element.jxa -action click -name "OK" -processId 1234
+ *        osascript -l JavaScript invoke-element.jxa -action set-value -name "Username" -value "john" -processId 1234
+ */
+
+ObjC.import('stdlib');
+
+// Parse command line arguments
+function parseArgs() {
+    var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
+    var result = { 
+        action: null,
+        name: null, 
+        role: null, 
+        processId: null,
+        value: null
+    };
+    
+    for (var i = 0; i < args.length; i++) {
+        var arg = ObjC.unwrap(args[i]);
+        if (arg === '-action' && i + 1 < args.length) {
+            result.action = ObjC.unwrap(args[i + 1]);
+        } else if (arg === '-name' && i + 1 < args.length) {
+            result.name = ObjC.unwrap(args[i + 1]);
+        } else if (arg === '-role' && i + 1 < args.length) {
+            result.role = ObjC.unwrap(args[i + 1]);
+        } else if (arg === '-processId' && i + 1 < args.length) {
+            result.processId = parseInt(ObjC.unwrap(args[i + 1]), 10);
+        } else if (arg === '-value' && i + 1 < args.length) {
+            result.value = ObjC.unwrap(args[i + 1]);
+        }
+    }
+    
+    return result;
+}
+
+// Utility function to safely get property values
+function safeGet(obj, property, defaultValue) {
+    try {
+        var val = obj[property]();
+        return val !== undefined && val !== null ? val : defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+// Find element matching criteria
+function findElement(root, targetName, targetRole, maxDepth, currentDepth) {
+    if (currentDepth > maxDepth) {
+        return null;
+    }
+    
+    try {
+        var elName = '';
+        var elRole = '';
+        
+        try {
+            elName = root.name() || '';
+        } catch (e) {}
+        
+        try {
+            elRole = root.role() || '';
+        } catch (e) {}
+        
+        // Check if this element matches
+        var nameMatch = !targetName || 
+            (elName && elName.toLowerCase().indexOf(targetName.toLowerCase()) !== -1);
+        var roleMatch = !targetRole || 
+            (elRole && elRole.toLowerCase().indexOf(targetRole.toLowerCase()) !== -1);
+        
+        if (nameMatch && roleMatch && (elName || elRole)) {
+            return root;
+        }
+        
+        // Search children
+        try {
+            var children = root.uiElements();
+            for (var i = 0; i < children.length; i++) {
+                var found = findElement(children[i], targetName, targetRole, maxDepth, currentDepth + 1);
+                if (found) return found;
+            }
+        } catch (e) {}
+        
+        // Check specific element types
+        var elementTypes = ['buttons', 'textFields', 'popUpButtons', 'checkboxes', 'radioButtons', 'menus'];
+        for (var j = 0; j < elementTypes.length; j++) {
+            try {
+                var typedElements = root[elementTypes[j]]();
+                for (var k = 0; k < typedElements.length; k++) {
+                    var found = findElement(typedElements[k], targetName, targetRole, maxDepth, currentDepth + 1);
+                    if (found) return found;
+                }
+            } catch (e) {}
+        }
+    } catch (e) {}
+    
+    return null;
+}
+
+// Get element bounds for coordinate fallback
+function getElementBounds(element) {
+    try {
+        if (element.position && element.size) {
+            var pos = element.position();
+            var sz = element.size();
+            return {
+                x: pos[0] || 0,
+                y: pos[1] || 0,
+                width: sz[0] || 0,
+                height: sz[1] || 0
+            };
+        }
+    } catch (e) {}
+    return null;
+}
+
+try {
+    var params = parseArgs();
+    
+    // Validate required parameters
+    if (!params.action) {
+        console.log(JSON.stringify({ 
+            success: false, 
+            error: 'Missing required parameter: -action' 
+        }));
+        $.exit(1);
+    }
+    
+    if (!params.processId) {
+        console.log(JSON.stringify({ 
+            success: false, 
+            error: 'Missing required parameter: -processId' 
+        }));
+        $.exit(1);
+    }
+    
+    var SystemEvents = Application('System Events');
+    SystemEvents.includeStandardAdditions = true;
+    
+    // Find the target process
+    var targetProcess = null;
+    var processes = SystemEvents.processes.where({ unixId: params.processId });
+    
+    if (processes.length === 0) {
+        console.log(JSON.stringify({ 
+            success: false, 
+            error: 'No process found with ID ' + params.processId 
+        }));
+        $.exit(0);
+    }
+    
+    targetProcess = processes[0];
+    
+    // Find target element
+    var targetElement = null;
+    var windows = targetProcess.windows;
+    
+    for (var w = 0; w < windows.length && !targetElement; w++) {
+        targetElement = findElement(windows[w], params.name, params.role, 10, 0);
+    }
+    
+    if (!targetElement) {
+        var searchDesc = '';
+        if (params.name) searchDesc += 'name="' + params.name + '" ';
+        if (params.role) searchDesc += 'role="' + params.role + '" ';
+        console.log(JSON.stringify({ 
+            success: false, 
+            error: 'Element not found: ' + searchDesc.trim() 
+        }));
+        $.exit(0);
+    }
+    
+    // Execute the requested action
+    var result = { success: false };
+    
+    switch (params.action) {
+        case 'click':
+            try {
+                targetElement.click();
+                result = { 
+                    success: true, 
+                    action: 'click',
+                    method: 'click()'
+                };
+            } catch (e) {
+                // Fallback: return bounds for coordinate click
+                var bounds = getElementBounds(targetElement);
+                if (bounds) {
+                    result = {
+                        success: false,
+                        action: 'click',
+                        error: 'Element does not support click(). Use coordinate click.',
+                        clickPoint: {
+                            x: bounds.x + Math.floor(bounds.width / 2),
+                            y: bounds.y + Math.floor(bounds.height / 2)
+                        }
+                    };
+                } else {
+                    result = {
+                        success: false,
+                        action: 'click',
+                        error: 'Click failed and no bounds available: ' + e.toString()
+                    };
+                }
+            }
+            break;
+            
+        case 'set-value':
+            if (params.value === null) {
+                result = {
+                    success: false,
+                    error: 'Value parameter required for set-value action'
+                };
+            } else {
+                try {
+                    targetElement.value = params.value;
+                    result = {
+                        success: true,
+                        action: 'set-value',
+                        value: params.value
+                    };
+                } catch (e) {
+                    // Try setting through focused property
+                    try {
+                        targetElement.focused = true;
+                        // Use System Events to type the value
+                        var app = Application.currentApplication();
+                        app.includeStandardAdditions = true;
+                        app.keystroke(params.value);
+                        result = {
+                            success: true,
+                            action: 'set-value',
+                            value: params.value,
+                            method: 'keystroke'
+                        };
+                    } catch (ke) {
+                        result = {
+                            success: false,
+                            error: 'Failed to set value: ' + e.toString()
+                        };
+                    }
+                }
+            }
+            break;
+            
+        case 'get-value':
+            try {
+                var val = targetElement.value();
+                result = {
+                    success: true,
+                    action: 'get-value',
+                    value: val
+                };
+            } catch (e) {
+                // Fallback to name property
+                try {
+                    var name = targetElement.name();
+                    result = {
+                        success: true,
+                        action: 'get-value',
+                        value: name,
+                        method: 'name'
+                    };
+                } catch (ne) {
+                    result = {
+                        success: false,
+                        error: 'Element has no value or name property'
+                    };
+                }
+            }
+            break;
+            
+        case 'focus':
+            try {
+                targetElement.focused = true;
+                result = {
+                    success: true,
+                    action: 'focus'
+                };
+            } catch (e) {
+                result = {
+                    success: false,
+                    error: 'Failed to set focus: ' + e.toString()
+                };
+            }
+            break;
+            
+        default:
+            result = {
+                success: false,
+                error: 'Unknown action: ' + params.action
+            };
+    }
+    
+    console.log(JSON.stringify(result));
+    
+} catch (error) {
+    console.log(JSON.stringify({ success: false, error: error.toString() }));
+    $.exit(1);
+}
