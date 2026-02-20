@@ -1,20 +1,26 @@
 /**
  * Agent — the main orchestration loop.
  *
- * v2 Flow (optimized):
- * 1. Decompose task into subtasks (1 text-only LLM call)
+ * v3 Flow (API key optional):
+ * 1. Decompose task:
+ *    a. Try LocalTaskParser first (regex, no LLM, instant)
+ *    b. If parser returns null AND API key is set → LLM decomposition
+ *    c. If parser returns null AND no API key → error: task too complex
  * 2. For each subtask:
  *    a. Try Action Router (accessibility + VNC, NO LLM) ← handles 80%+ of tasks
- *    b. If router can't handle it → LLM vision fallback (with resized screenshot)
+ *    b. If router can't handle it AND API key set → LLM vision fallback
+ *    c. If router can't handle it AND no API key → skip subtask
  * 3. Track what approach worked for each subtask
  *
- * Target: "Open Paint and type hello world" in <15s with 0-1 LLM calls.
+ * No API key = works for 80% of tasks (regex + accessibility)
+ * With API key = unlocks LLM fallback for complex/unknown tasks
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { VNCClient } from './vnc-client';
 import { AIBrain } from './ai-brain';
+import { LocalTaskParser } from './local-parser';
 import { SafetyLayer } from './safety';
 import { AccessibilityBridge } from './accessibility';
 import { ActionRouter } from './action-router';
@@ -28,10 +34,12 @@ const MAX_LLM_FALLBACK_STEPS = 10;
 export class Agent {
   private vnc: VNCClient;
   private brain: AIBrain;
+  private parser: LocalTaskParser;
   private safety: SafetyLayer;
   private a11y: AccessibilityBridge;
   private router: ActionRouter;
   private config: ClawdConfig;
+  private hasApiKey: boolean;
   private state: AgentState = {
     status: 'idle',
     stepsCompleted: 0,
@@ -43,9 +51,16 @@ export class Agent {
     this.config = config;
     this.vnc = new VNCClient(config);
     this.brain = new AIBrain(config);
+    this.parser = new LocalTaskParser();
     this.safety = new SafetyLayer(config);
     this.a11y = new AccessibilityBridge();
     this.router = new ActionRouter(this.a11y, this.vnc);
+    this.hasApiKey = !!(config.ai.apiKey && config.ai.apiKey.length > 0);
+
+    if (!this.hasApiKey) {
+      console.log(`⚡ Running in offline mode (no API key). Local parser + action router only.`);
+      console.log(`   To unlock AI vision fallback, set AI_API_KEY in .env`);
+    }
   }
 
   async connect(): Promise<void> {
@@ -78,16 +93,37 @@ export class Agent {
     };
 
     // ═══════════════════════════════════════════════════════════════
-    // PHASE 1: Decompose task into subtasks (1 LLM text call — fast)
+    // PHASE 1: Decompose task — try local parser first, LLM fallback
     // ═══════════════════════════════════════════════════════════════
     console.log(`\n📋 Phase 1: Decomposing task...`);
     const decompositionStart = Date.now();
-    const subtasks = await this.brain.decomposeTask(task);
-    console.log(`   Decomposed in ${Date.now() - decompositionStart}ms into ${subtasks.length} subtask(s):`);
-    subtasks.forEach((st, i) => console.log(`   ${i + 1}. "${st}"`));
+    let subtasks: string[];
+    let llmCallCount = 0;
 
+    // Try local parser first (instant, no API key needed)
+    const localResult = this.parser.decomposeTask(task);
+    if (localResult) {
+      subtasks = localResult;
+      console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (no LLM)`);
+    } else if (this.hasApiKey) {
+      // Fall back to LLM decomposition
+      console.log(`   🧠 Local parser can't handle this, using LLM...`);
+      subtasks = await this.brain.decomposeTask(task);
+      llmCallCount = 1;
+      console.log(`   Decomposed via LLM in ${Date.now() - decompositionStart}ms`);
+    } else {
+      console.log(`   ❌ Task too complex for local parser and no API key set.`);
+      console.log(`   Set AI_API_KEY in .env to handle complex tasks.`);
+      return {
+        success: false,
+        steps: [{ action: 'error', description: 'Task too complex for offline mode. Set AI_API_KEY to unlock AI fallback.', success: false, timestamp: Date.now() }],
+        duration: Date.now() - startTime,
+      };
+    }
+
+    console.log(`   ${subtasks.length} subtask(s):`);
+    subtasks.forEach((st, i) => console.log(`   ${i + 1}. "${st}"`));
     this.state.stepsTotal = subtasks.length;
-    let llmCallCount = 1; // Count the decomposition call
 
     // ═══════════════════════════════════════════════════════════════
     // PHASE 2: Execute each subtask via Router → LLM Fallback
@@ -131,16 +167,24 @@ export class Agent {
 
       console.log(`   ⚠️ Router couldn't handle: ${routeResult.description}`);
 
-      // ─── LLM Vision Fallback ───────────────────────────────────
-      // Brief pause before LLM fallback — let any pending UI transitions settle
-      await this.delay(500);
-      console.log(`   🧠 Falling back to LLM vision...`);
-      const fallbackResult = await this.executeLLMFallback(subtask, steps, debugDir, i);
-      llmCallCount += fallbackResult.llmCalls;
+      // ─── LLM Vision Fallback (only if API key is set) ──────────
+      if (this.hasApiKey) {
+        await this.delay(500);
+        console.log(`   🧠 Falling back to LLM vision...`);
+        const fallbackResult = await this.executeLLMFallback(subtask, steps, debugDir, i);
+        llmCallCount += fallbackResult.llmCalls;
 
-      if (!fallbackResult.success) {
-        console.log(`   ❌ LLM fallback failed for subtask: "${subtask}"`);
-        // Don't abort entire task — try next subtask
+        if (!fallbackResult.success) {
+          console.log(`   ❌ LLM fallback failed for subtask: "${subtask}"`);
+        }
+      } else {
+        console.log(`   ⏭️ Skipping — no API key for LLM fallback`);
+        steps.push({
+          action: 'skipped',
+          description: `Skipped "${subtask}" — no API key for vision fallback`,
+          success: false,
+          timestamp: Date.now(),
+        });
       }
     }
 
