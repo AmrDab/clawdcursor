@@ -155,6 +155,88 @@ Once running, Clawd Cursor exposes a REST API at `http://localhost:3847`:
 | `/confirm` | POST | Approve/reject pending action: `{"approved": true}` |
 | `/abort` | POST | Stop the current task |
 
+## How It Actually Works
+
+Clawd Cursor uses a **hybrid approach** — it tries the fastest method first, then falls back to more expensive methods only when needed:
+
+### The Decision Flow
+
+```
+User Request: "Open Chrome and go to github.com"
+         │
+         ▼
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  1. Parse Intent │────▶│ 2. Try Action    │────▶│ 3. LLM Vision   │
+│                 │     │    Router        │     │   Fallback      │
+│  Decompose into │     │                  │     │                 │
+│  subtasks via   │     │  Query Windows   │     │  Screenshot     │
+│  text-only LLM  │     │  UI Automation   │     │  → LLM decides  │
+│  (fast, cheap)  │     │  tree (no LLM!)  │     │  next action    │
+└─────────────────┘     └──────────────────┘     └─────────────────┘
+         │                         │                        │
+         │              ┌──────────┘                        │
+         │              │ (if not found)                   │
+         │              ▼                                  │
+         │     "Open Chrome" ──▶ Find "Chrome" in        │
+         │                   taskbar via UI Automation   │
+         │                   Click it directly            │
+         │                                              │
+         └──────────────────────────────────────────────┘
+```
+
+### The Two Paths
+
+**Path A: Action Router (80% of tasks, zero LLM calls)**
+
+The Action Router intercepts common patterns and handles them via **Windows UI Automation** — the same system screen readers use:
+
+| Task Pattern | How It's Handled |
+|--------------|------------------|
+| `open [app]` | Query taskbar/start menu → click via accessibility |
+| `type [text]` | Direct VNC keystroke injection |
+| `click [button]` | Find element by name/ID in UI tree → invoke action |
+| `go to [url]` | Focus browser → Ctrl+L → type URL |
+| `focus [window]` | Win32 `SetForegroundWindow` via accessibility |
+
+**Path B: LLM Vision Fallback (complex/new situations)**
+
+When the router can't handle a task:
+1. Capture resized screenshot
+2. Send to vision LLM (Claude/GPT-4o)
+3. LLM returns coordinates/actions
+4. Execute via VNC
+
+### Why This Matters
+
+- **Speed**: "Open Paint" happens in ~500ms (no LLM round-trip)
+- **Cost**: 80% of tasks use zero LLM tokens
+- **Reliability**: UI Automation is more precise than pixel-clicking
+- **Privacy**: Common actions never leave your machine for AI processing
+
+### Windows UI Automation (The "Screen Reader" Layer)
+
+On Windows, Clawd Cursor queries the **UI Automation tree** — a structured representation of all UI elements:
+
+```typescript
+// Example: Find and click a button without using mouse coordinates
+const element = await a11y.findElement({ 
+  name: "Submit", 
+  controlType: "Button" 
+});
+await a11y.invokeElement({ 
+  name: "Submit", 
+  action: "click" 
+});
+```
+
+This works because Windows exposes:
+- **Window titles** and **process names**
+- **Control types** (Button, Edit, Menu, etc.)
+- **Automation IDs** (programmatic element names)
+- **Bounding boxes** (for fallback coordinate clicking)
+
+PowerShell scripts bridge Node.js → .NET UI Automation → Windows API.
+
 ## Safety Tiers
 
 - 🟢 **Auto**: Navigation, reading, opening apps
