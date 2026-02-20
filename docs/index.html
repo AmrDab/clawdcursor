@@ -851,95 +851,156 @@
         ::-webkit-scrollbar-thumb { background: var(--surface); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: var(--surface2); }
 
-        /* Data Viz / Charts */
+        /* Data Viz / Charts - Professional */
         .viz-grid {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 24px;
-            margin-top: 48px;
+            margin-top: 56px;
         }
         .viz-card {
-            background: var(--bg2);
+            background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, var(--bg2) 100%);
             border: 1px solid var(--border);
-            border-radius: 16px;
-            padding: 32px;
+            border-radius: 20px;
+            padding: 36px 28px;
             text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+        .viz-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent), transparent);
+            opacity: 0.5;
         }
         .viz-card h4 {
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: var(--text2);
-            margin-bottom: 24px;
+            margin-bottom: 28px;
             font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
         }
+        
+        /* Professional Bar Chart */
         .bar-chart {
             display: flex;
             align-items: flex-end;
             justify-content: center;
-            gap: 32px;
-            height: 160px;
-            margin-bottom: 16px;
+            gap: 40px;
+            height: 180px;
+            margin-bottom: 24px;
+            padding: 0 20px;
+            position: relative;
+        }
+        .bar-chart::before {
+            content: '';
+            position: absolute;
+            bottom: 28px;
+            left: 20px;
+            right: 20px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--border2), transparent);
         }
         .bar-group {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 8px;
+            gap: 12px;
+            z-index: 1;
         }
         .bar {
-            width: 60px;
-            border-radius: 8px 8px 0 0;
+            width: 56px;
+            border-radius: 10px 10px 4px 4px;
             position: relative;
-            transition: all 0.3s;
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
-        .bar:hover { opacity: 0.8; }
+        .bar:hover { 
+            transform: translateY(-4px);
+            filter: brightness(1.1);
+        }
         .bar.vision {
-            background: linear-gradient(180deg, var(--red), var(--orange));
+            background: linear-gradient(180deg, #ff6b7a 0%, #ff4d6a 50%, #e63950 100%);
+            box-shadow: 0 4px 24px rgba(255,77,106,0.25);
         }
         .bar.clawd {
-            background: linear-gradient(180deg, var(--accent), #00c9ff);
+            background: linear-gradient(180deg, #00ffa8 0%, #00e89d 50%, #00c9a0 100%);
+            box-shadow: 0 4px 24px rgba(0,232,157,0.3);
+        }
+        .bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 40%;
+            background: linear-gradient(180deg, rgba(255,255,255,0.2), transparent);
+            border-radius: 10px 10px 0 0;
         }
         .bar-label {
             font-size: 0.75rem;
             color: var(--text3);
-            font-weight: 500;
+            font-weight: 600;
+            letter-spacing: 0.5px;
         }
         .bar-value {
             position: absolute;
-            top: -20px;
+            top: -28px;
             left: 50%;
             transform: translateX(-50%);
-            font-size: 0.75rem;
+            font-size: 0.8rem;
             font-weight: 700;
-            color: var(--text);
+            color: #fff;
             white-space: nowrap;
+            background: rgba(0,0,0,0.5);
+            padding: 4px 10px;
+            border-radius: 6px;
+            backdrop-filter: blur(4px);
         }
         .savings-badge {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            background: var(--accent-dim);
+            gap: 8px;
+            background: linear-gradient(135deg, rgba(0,232,157,0.12), rgba(0,201,255,0.08));
             color: var(--accent2);
-            padding: 6px 14px;
+            padding: 8px 18px;
             border-radius: 100px;
-            font-size: 0.8rem;
+            font-size: 0.85rem;
             font-weight: 700;
-            margin-top: 8px;
+            border: 1px solid rgba(0,232,157,0.2);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
+        
+        /* Professional Donut Chart */
         .donut-chart {
-            width: 140px;
-            height: 140px;
-            margin: 0 auto 16px;
+            width: 160px;
+            height: 160px;
+            margin: 0 auto 20px;
             position: relative;
+            filter: drop-shadow(0 8px 32px rgba(0,232,157,0.15));
         }
         .donut-chart svg {
             transform: rotate(-90deg);
         }
         .donut-chart circle {
             fill: none;
-            stroke-width: 20;
+            stroke-width: 18;
         }
-        .donut-bg { stroke: var(--surface); }
-        .donut-fill { stroke: var(--accent); stroke-linecap: round; }
+        .donut-bg { 
+            stroke: var(--surface); 
+            stroke-linecap: round;
+        }
+        .donut-fill { 
+            stroke: url(#donutGrad); 
+            stroke-linecap: round;
+            filter: drop-shadow(0 0 8px rgba(0,232,157,0.4));
+        }
         .donut-center {
             position: absolute;
             inset: 0;
@@ -949,35 +1010,59 @@
             justify-content: center;
         }
         .donut-value {
-            font-size: 2rem;
-            font-weight: 800;
-            color: var(--accent);
+            font-size: 2.4rem;
+            font-weight: 900;
+            background: linear-gradient(135deg, #fff, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            line-height: 1;
         }
         .donut-label {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text3);
+            margin-top: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
         }
         .metric-row {
             display: flex;
-            justify-content: space-around;
-            margin-top: 24px;
+            justify-content: center;
+            gap: 40px;
+            margin-top: 28px;
             padding-top: 24px;
             border-top: 1px solid var(--border);
         }
         .metric-item {
             text-align: center;
+            position: relative;
+        }
+        .metric-item:first-child::after {
+            content: '';
+            position: absolute;
+            right: -20px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 1px;
+            height: 30px;
+            background: var(--border);
         }
         .metric-value {
-            font-size: 1.5rem;
+            font-size: 1.6rem;
             font-weight: 800;
             background: linear-gradient(135deg, var(--accent), #00c9ff);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
+            background-clip: text;
         }
         .metric-label {
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text3);
-            margin-top: 4px;
+            margin-top: 6px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
         /* Coming Soon Overlay */
@@ -1314,10 +1399,16 @@
                 <div class="viz-card">
                     <h4>🎯 Tasks Without LLM Calls</h4>
                     <div class="donut-chart">
-                        <svg viewBox="0 0 140 140" width="140" height="140">
-                            <circle class="donut-bg" cx="70" cy="70" r="50"/>
-                            <circle class="donut-fill" cx="70" cy="70" r="50" 
-                                    stroke-dasharray="251.2" stroke-dashoffset="50.24"/>
+                        <svg viewBox="0 0 160 160" width="160" height="160">
+                            <defs>
+                                <linearGradient id="donutGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                                    <stop offset="0%" stop-color="#00ffa8"/>
+                                    <stop offset="100%" stop-color="#00c9ff"/>
+                                </linearGradient>
+                            </defs>
+                            <circle class="donut-bg" cx="80" cy="80" r="55"/>
+                            <circle class="donut-fill" cx="80" cy="80" r="55" 
+                                    stroke-dasharray="345.6" stroke-dashoffset="69.12"/>
                         </svg>
                         <div class="donut-center">
                             <span class="donut-value">80%</span>
