@@ -80,11 +80,9 @@ export class Agent {
 
   async executeTask(task: string): Promise<TaskResult> {
     this.aborted = false;
-    const steps: StepResult[] = [];
     const startTime = Date.now();
 
     console.log(`\n🐾 Starting task: ${task}`);
-    console.log(`   Using optimized v2 pipeline: decompose → route → (fallback to LLM)`);
 
     // Setup debug directory
     const debugDir = path.join(process.cwd(), 'debug');
@@ -98,44 +96,88 @@ export class Agent {
       status: 'thinking',
       currentTask: task,
       stepsCompleted: 0,
-      stepsTotal: MAX_STEPS,
+      stepsTotal: 1,
     };
 
     // ═══════════════════════════════════════════════════════════════
-    // PHASE 1: Decompose task — try local parser first, LLM fallback
+    // TWO COMPLETELY SEPARATE PATHS:
+    //
+    // PATH A: Computer Use (Anthropic)
+    //   → Full task goes directly to Claude Computer Use API
+    //   → Claude screenshots, plans with visual context, executes
+    //   → No decomposer, no router, no blind text parsing
+    //
+    // PATH B: Decompose + Route (OpenAI / offline)
+    //   → LLM or regex decomposes into subtasks
+    //   → Router handles simple subtasks
+    //   → LLM vision fallback for complex ones
     // ═══════════════════════════════════════════════════════════════
-    console.log(`\n📋 Phase 1: Decomposing task...`);
-    const decompositionStart = Date.now();
-    let subtasks: string[];
+
+    if (this.computerUse) {
+      return this.executeWithComputerUse(task, debugDir, startTime);
+    } else {
+      return this.executeWithDecomposeAndRoute(task, debugDir, startTime);
+    }
+  }
+
+  /**
+   * PATH A: Anthropic Computer Use
+   * Give the full task to Claude — it screenshots, plans, and executes.
+   */
+  private async executeWithComputerUse(
+    task: string,
+    debugDir: string,
+    startTime: number,
+  ): Promise<TaskResult> {
+    console.log(`   🖥️  Using Computer Use API (screenshot-first)\n`);
+
+    this.state.status = 'acting';
+    const cuResult = await this.computerUse!.executeSubtask(task, debugDir, 0);
+
+    this.state.status = 'idle';
+    this.state.currentTask = undefined;
+
+    const result: TaskResult = {
+      success: cuResult.success,
+      steps: cuResult.steps,
+      duration: Date.now() - startTime,
+    };
+
+    console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s with ${cuResult.steps.length} steps (${cuResult.llmCalls} LLM call(s))`);
+    return result;
+  }
+
+  /**
+   * PATH B: Decompose + Route + LLM Fallback
+   * For non-Anthropic providers or offline mode.
+   */
+  private async executeWithDecomposeAndRoute(
+    task: string,
+    debugDir: string,
+    startTime: number,
+  ): Promise<TaskResult> {
+    const steps: StepResult[] = [];
     let llmCallCount = 0;
 
-    // When Computer Use is available (Anthropic), try the router first for
-    // the whole task. If router can't handle it, give the ENTIRE task to
-    // Computer Use — it takes a screenshot, plans with visual context, and
-    // executes. No blind text-only decomposition needed.
-    //
-    // When no Computer Use (OpenAI or other), use LLM text decomposition.
-    // Local parser is ONLY for offline mode (no API key).
-    if (this.computerUse) {
-      // Computer Use: give the FULL task — Claude screenshots first,
-      // sees the screen, plans and executes with visual context.
-      // No blind text parsing that misinterprets user intent.
-      subtasks = [task];
-      console.log(`   🖥️  Full task → Computer Use (screenshot-first)`);
-    } else if (this.hasApiKey) {
+    console.log(`   Using decompose → route → LLM fallback pipeline\n`);
+
+    // ─── Decompose ───────────────────────────────────────────────
+    console.log(`📋 Decomposing task...`);
+    const decompositionStart = Date.now();
+    let subtasks: string[];
+
+    if (this.hasApiKey) {
       console.log(`   🧠 Using LLM to decompose task...`);
       subtasks = await this.brain.decomposeTask(task);
       llmCallCount = 1;
       console.log(`   Decomposed via LLM in ${Date.now() - decompositionStart}ms`);
     } else {
-      // Offline: try local parser (regex, no LLM)
       const localResult = this.parser.decomposeTask(task);
       if (localResult) {
         subtasks = localResult;
-        console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (offline mode)`);
+        console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (offline)`);
       } else {
-        console.log(`   ❌ Task too complex for local parser and no API key set.`);
-        console.log(`   Set AI_API_KEY in .env to handle complex tasks.`);
+        console.log(`   ❌ Task too complex for offline mode.`);
         return {
           success: false,
           steps: [{ action: 'error', description: 'Task too complex for offline mode. Set AI_API_KEY to unlock AI fallback.', success: false, timestamp: Date.now() }],
@@ -148,14 +190,11 @@ export class Agent {
     subtasks.forEach((st, i) => console.log(`   ${i + 1}. "${st}"`));
     this.state.stepsTotal = subtasks.length;
 
-    // ═══════════════════════════════════════════════════════════════
-    // PHASE 2: Execute each subtask via Router → LLM Fallback
-    // ═══════════════════════════════════════════════════════════════
-    console.log(`\n⚡ Phase 2: Executing subtasks...`);
+    // ─── Execute each subtask ────────────────────────────────────
+    console.log(`\n⚡ Executing subtasks...`);
 
     for (let i = 0; i < subtasks.length; i++) {
       if (this.aborted) {
-        console.log('⛔ Task aborted by user');
         steps.push({ action: 'aborted', description: 'User aborted', success: false, timestamp: Date.now() });
         break;
       }
@@ -165,71 +204,34 @@ export class Agent {
       this.state.currentStep = subtask;
       this.state.stepsCompleted = i;
 
-      // ─── Try Action Router first (NO LLM) ─────────────────────
+      // Try router first
       this.state.status = 'acting';
-      const routeStart = Date.now();
       const routeResult = await this.router.route(subtask);
 
       if (routeResult.handled) {
-        const routeMs = Date.now() - routeStart;
-        console.log(`   ✅ Router handled in ${routeMs}ms: ${routeResult.description}`);
-        steps.push({
-          action: 'routed',
-          description: routeResult.description,
-          success: true,
-          timestamp: Date.now(),
-        });
-
-        // Router now handles its own readiness polling for launches.
-        // Small cooldown between subtasks so UI can settle.
-        const isLaunch = routeResult.description.toLowerCase().includes('launch') ||
-                         routeResult.description.toLowerCase().includes('window ready');
+        console.log(`   ✅ Router: ${routeResult.description}`);
+        steps.push({ action: 'routed', description: routeResult.description, success: true, timestamp: Date.now() });
+        const isLaunch = routeResult.description.toLowerCase().includes('launch');
         await this.delay(isLaunch ? 300 : 200);
         continue;
       }
 
-      console.log(`   ⚠️ Router couldn't handle: ${routeResult.description}`);
+      console.log(`   ⚠️ Router can't handle: ${routeResult.description}`);
 
-      // ─── Vision Fallback (only if API key is set) ──────────────
+      // LLM vision fallback
       if (this.hasApiKey) {
         await this.delay(500);
-
-        if (this.computerUse) {
-          // Anthropic: use native Computer Use API (preferred)
-          console.log(`   🖥️  Using Computer Use API...`);
-          // Pass prior completed steps so Claude has context
-          const priorSteps = steps.filter(s => s.success).map(s => s.description);
-          const cuResult = await this.computerUse.executeSubtask(subtask, debugDir, i, priorSteps);
-          steps.push(...cuResult.steps);
-          llmCallCount += cuResult.llmCalls;
-
-          if (!cuResult.success) {
-            console.log(`   ❌ Computer Use failed for subtask: "${subtask}"`);
-          }
-        } else {
-          // Other providers: use custom prompt LLM fallback
-          console.log(`   🧠 Falling back to LLM vision...`);
-          const fallbackResult = await this.executeLLMFallback(subtask, steps, debugDir, i);
-          llmCallCount += fallbackResult.llmCalls;
-
-          if (!fallbackResult.success) {
-            console.log(`   ❌ LLM fallback failed for subtask: "${subtask}"`);
-          }
+        console.log(`   🧠 LLM vision fallback...`);
+        const fallbackResult = await this.executeLLMFallback(subtask, steps, debugDir, i);
+        llmCallCount += fallbackResult.llmCalls;
+        if (!fallbackResult.success) {
+          console.log(`   ❌ LLM fallback failed for: "${subtask}"`);
         }
       } else {
-        console.log(`   ⏭️ Skipping — no API key for LLM fallback`);
-        steps.push({
-          action: 'skipped',
-          description: `Skipped "${subtask}" — no API key for vision fallback`,
-          success: false,
-          timestamp: Date.now(),
-        });
+        steps.push({ action: 'skipped', description: `Skipped "${subtask}" — no API key`, success: false, timestamp: Date.now() });
       }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Done
-    // ═══════════════════════════════════════════════════════════════
     this.state.status = 'idle';
     this.state.currentTask = undefined;
     this.brain.resetConversation();
