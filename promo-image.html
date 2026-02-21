@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { margin: 0; background: #050510; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .promo-card {
+            width: 1200px;
+            height: 630px;
+            background: linear-gradient(135deg, #050510 0%, #0a0a1f 50%, #0f1029 100%);
+            border-radius: 24px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .grid {
+            position: absolute;
+            inset: 0;
+            background-image: 
+                linear-gradient(rgba(0,232,157,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,232,157,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+        .orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(60px);
+        }
+        .orb-1 {
+            width: 300px; height: 300px;
+            background: radial-gradient(circle, rgba(0,232,157,0.15), transparent 70%);
+            top: -100px; left: -50px;
+        }
+        .orb-2 {
+            width: 250px; height: 250px;
+            background: radial-gradient(circle, rgba(77,124,255,0.12), transparent 70%);
+            bottom: -50px; right: -50px;
+        }
+        .logo-container {
+            position: relative;
+            z-index: 10;
+            text-align: center;
+        }
+        .cursor-icon {
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 24px;
+            filter: drop-shadow(0 0 30px rgba(0,232,157,0.5));
+        }
+        h1 {
+            font-size: 72px;
+            font-weight: 900;
+            margin: 0 0 16px 0;
+            background: linear-gradient(135deg, #ffffff 0%, #00e89d 50%, #00c9ff 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -2px;
+        }
+        .tagline {
+            font-size: 32px;
+            color: #8b8fb0;
+            margin: 0 0 40px 0;
+            font-weight: 500;
+        }
+        .stats {
+            display: flex;
+            gap: 48px;
+            z-index: 10;
+        }
+        .stat {
+            text-align: center;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 20px 32px;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #00e89d, #00c9ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .stat-label {
+            font-size: 14px;
+            color: #5a5e80;
+            margin-top: 4px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .claw-marks {
+            position: absolute;
+            top: 40px;
+            right: 60px;
+            opacity: 0.3;
+        }
+        .github {
+            position: absolute;
+            bottom: 30px;
+            font-size: 16px;
+            color: #5a5e80;
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="promo-card">
+        <div class="grid"></div>
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        
+        <svg class="claw-marks" width="120" height="100" viewBox="0 0 120 100">
+            <path d="M10 90 L30 10" stroke="#00e89d" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+            <path d="M40 95 L55 20" stroke="#00c9ff" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+            <path d="M70 85 L85 15" stroke="#a855f7" stroke-width="4" stroke-linecap="round" opacity="0.4"/>
+        </svg>
+        
+        <div class="logo-container">
+            <svg class="cursor-icon" viewBox="0 0 80 80" fill="none">
+                <path d="M10 10L40 70L48 50L70 40L10 10Z" fill="url(#grad)" stroke="#00e89d" stroke-width="3" stroke-linejoin="round"/>
+                <path d="M50 25L65 10" stroke="#00e89d" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+                <path d="M55 35L75 20" stroke="#00c9ff" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
+                <path d="M45 20L55 5" stroke="#a855f7" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+                <defs>
+                    <linearGradient id="grad" x1="10" y1="10" x2="70" y2="70">
+                        <stop stop-color="#00e89d"/>
+                        <stop offset="1" stop-color="#00c9ff"/>
+                    </linearGradient>
+                </defs>
+            </svg>
+            <h1>Clawd Cursor</h1>
+            <p class="tagline">Give eyes to your AI assistant</p>
+        </div>
+        
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-value">80%</div>
+                <div class="stat-label">Zero LLM</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">6x</div>
+                <div class="stat-label">Faster</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">30x</div>
+                <div class="stat-label">Cheaper</div>
+            </div>
+        </div>
+        
+        <div class="github">github.com/AmrDab/clawd-cursor</div>
+    </div>
+</body>
+</html>

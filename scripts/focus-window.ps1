@@ -97,7 +97,7 @@ try {
             }
 "@
         $hwnd = [IntPtr]$targetWindow.Current.NativeWindowHandle
-        [Win32Focus]::ShowWindow($hwnd, 9) # SW_RESTORE
+        [Win32Focus]::ShowWindow($hwnd, 9) | Out-Null # SW_RESTORE
         Start-Sleep -Milliseconds 100
         [Win32Focus]::SetForegroundWindow($hwnd) | Out-Null
     }

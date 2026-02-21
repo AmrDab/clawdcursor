@@ -25,30 +25,58 @@ const BETA_HEADER = 'computer-use-2025-01-24';
 const MAX_ITERATIONS = 30;
 
 const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent controlling a Windows 11 computer via VNC.
+You MUST complete the user's task reliably. Think step by step, verify your progress, and recover from mistakes.
 
 WINDOWS 11 LAYOUT:
 - Taskbar at BOTTOM, icons CENTERED
-- Start button in CENTER of taskbar
+- Start button in CENTER of taskbar  
 - System tray (clock, icons) bottom-RIGHT
+- Resolution: high-DPI display
 
 ACCESSIBILITY CONTEXT:
-Each tool_result includes an ACCESSIBILITY section listing open windows, UI elements, and their coordinates. USE THIS to:
-- Know which apps are open without guessing
-- Find exact element positions instead of clicking blindly
-- Identify the focused window and its UI tree
+Each tool_result includes an ACCESSIBILITY section with:
+- WINDOWS: all open windows with process names, titles, PIDs, and bounds
+- FOCUSED WINDOW UI TREE: interactive elements (buttons, text fields, menus) with coordinates
+- TASKBAR APPS: pinned/running apps in the taskbar
 
-EFFICIENT PATTERNS (use these, don't click around guessing):
-- Open an app: key "super", wait, type app name, key "Return"
-- Navigate to URL: key "ctrl+l" (focuses address bar), type URL, key "Return"
-- New browser tab: key "ctrl+t"
-- Switch windows: click the window listed in ACCESSIBILITY section
+USE THE ACCESSIBILITY DATA TO:
+1. KNOW what's on screen — don't guess from pixels alone
+2. VERIFY state after actions — check if the right window/page is active
+3. FIND exact element positions — click coordinates from the UI tree, not estimated pixel locations
+4. DETECT errors — if a dialog/popup appeared, handle it before continuing
 
-EFFICIENCY RULES:
-- Read the ACCESSIBILITY context FIRST before deciding actions
-- Use keyboard shortcuts over mouse clicks when possible
-- For drawing: chain multiple drags WITHOUT screenshots between them
-- Only screenshot after major state changes — not after every action
-- Be decisive. Don't click randomly to "explore" — the accessibility tree tells you what's there.`;
+PLANNING RULES:
+1. Before EVERY action, state what you expect to happen and why
+2. After seeing the result, CHECK: did it work? Is the right window focused? Did the expected UI appear?
+3. If something went wrong (wrong page, popup, ad, error dialog), STOP and recover before continuing
+4. Never repeat the same failed action — try an alternative approach
+5. If stuck after 3 attempts at the same goal, try a completely different strategy
+
+RELIABLE PATTERNS (use these, they work consistently):
+- Open any app: key "super", wait 500ms, type app name, wait 500ms, key "Return"
+- Navigate to URL in browser: key "ctrl+l" (focuses address bar), type FULL URL, key "Return"
+  - ALWAYS use ctrl+l first — never click the address bar manually
+  - Type the complete URL including https:// 
+  - Example: key "ctrl+l", type "https://docs.google.com/document/create", key "Return"
+- New browser tab: key "ctrl+t", then ctrl+l to type URL
+- Close popup/dialog: key "Escape" or look for X button in accessibility tree
+- Switch apps: key "alt+Tab" or click window from ACCESSIBILITY WINDOWS list
+- Select all text: key "ctrl+a"
+- Copy/paste: key "ctrl+c" / key "ctrl+v"
+
+MISTAKES TO AVOID:
+- Do NOT use search engines to navigate to known URLs — type the URL directly
+- Do NOT click on ads or sponsored results — they are never the target
+- Do NOT click randomly hoping to find something — read the accessibility tree
+- Do NOT take a screenshot after every single action — only after state-changing actions
+- Do NOT keep retrying the same click coordinates — if it didn't work, the element might have moved
+- If a page is loading, use "wait" action (1-3 seconds) instead of clicking again
+
+RECOVERY:
+- Unexpected popup/ad: press Escape, or find close button in accessibility tree
+- Wrong page: use ctrl+l to navigate to correct URL
+- App not responding: try alt+F4 and reopen
+- Browser went to wrong site: ctrl+l, type correct URL, Enter`;
 
 interface ToolUseBlock {
   type: 'tool_use';
@@ -244,20 +272,29 @@ export class ComputerUseBrain {
             timestamp: Date.now(),
           });
 
+          // Adaptive delay — longer for state-changing actions
+          const isNavigation = action === 'key' && toolUse.input.text?.toLowerCase().includes('return');
+          const isAppLaunch = action === 'key' && toolUse.input.text?.toLowerCase().includes('super');
+          const isTyping = action === 'type';
+          const delayMs = isAppLaunch ? 1000 : isNavigation ? 800 : isTyping ? 100 : 300;
+          await this.delay(delayMs);
+
           // Take a screenshot + a11y context after the action
-          await this.delay(200); // let UI settle
           const screenshot = await this.vnc.captureForLLM();
           this.saveDebugScreenshot(screenshot.buffer, debugDir, subtaskIndex, i, action);
           const a11yContext = await this.getA11yContext();
+
+          // Add verification prompt to help Claude check its work
+          const verifyHint = this.getVerificationHint(action, toolUse.input);
 
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
             content: result.error
-              ? [{ type: 'text', text: `Error: ${result.error}` }]
+              ? [{ type: 'text', text: `Error: ${result.error}\nCheck the accessibility tree and screenshot to understand what went wrong.` }]
               : [
                   this.screenshotToContent(screenshot),
-                  { type: 'text', text: a11yContext },
+                  { type: 'text', text: `${verifyHint}${a11yContext}` },
                 ],
           });
         }
@@ -455,10 +492,48 @@ export class ComputerUseBrain {
       const activeWindow = await this.a11y.getActiveWindow();
       const processId = activeWindow?.processId;
       const context = await this.a11y.getScreenContext(processId);
-      return `\nACCESSIBILITY:\n${context}`;
+      
+      // Add focused window summary at the top for quick orientation
+      let header = '';
+      if (activeWindow) {
+        header = `FOCUSED: [${activeWindow.processName}] "${activeWindow.title}" (pid:${activeWindow.processId})\n`;
+        // Extract URL from browser title if applicable
+        const browserProcesses = ['chrome', 'msedge', 'firefox', 'brave', 'opera'];
+        if (browserProcesses.some(b => activeWindow.processName.toLowerCase().includes(b))) {
+          header += `BROWSER DETECTED — use ctrl+l to navigate, ctrl+t for new tab\n`;
+        }
+      }
+      
+      return `\nACCESSIBILITY:\n${header}${context}`;
     } catch {
       return '\nACCESSIBILITY: (unavailable)';
     }
+  }
+
+  /** Generate a verification hint based on what action was just performed */
+  private getVerificationHint(action: string, input: ToolUseBlock['input']): string {
+    if (action === 'key' && input.text) {
+      const key = input.text.toLowerCase();
+      if (key === 'return' || key === 'enter') {
+        return 'VERIFY: Did the expected action happen? Check if a page loaded, app opened, or form submitted.\n';
+      }
+      if (key.includes('super')) {
+        return 'VERIFY: Did the Start menu or search open? Look for the search box in the accessibility tree.\n';
+      }
+      if (key === 'ctrl+l') {
+        return 'VERIFY: Is the browser address bar now focused? You should see a text field selected.\n';
+      }
+      if (key === 'escape') {
+        return 'VERIFY: Did the popup/dialog close? Check if it\'s still in the accessibility tree.\n';
+      }
+    }
+    if (action === 'left_click') {
+      return 'VERIFY: Did the click hit the intended target? Check the focused element in accessibility.\n';
+    }
+    if (action === 'type') {
+      return 'VERIFY: Was the text entered in the right field? Check the focused element.\n';
+    }
+    return '';
   }
 
   /** Scale LLM coordinates to real screen coordinates */

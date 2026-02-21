@@ -174,7 +174,14 @@ try {
         }
     }
 
-    [Console]::Out.Write(($results | ConvertTo-Json -Depth 10 -Compress))
+    # Always output a JSON array (PowerShell ConvertTo-Json returns object for single item, empty for none)
+    if ($results.Count -eq 0) {
+        [Console]::Out.Write("[]")
+    } elseif ($results.Count -eq 1) {
+        [Console]::Out.Write(("[" + ($results[0] | ConvertTo-Json -Depth 10 -Compress) + "]"))
+    } else {
+        [Console]::Out.Write(($results | ConvertTo-Json -Depth 10 -Compress))
+    }
 } catch {
     [Console]::Out.Write((@{ error = $_.Exception.Message } | ConvertTo-Json -Compress))
     exit 1
