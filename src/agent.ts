@@ -256,6 +256,14 @@ export class Agent {
 
       // Error?
       if (decision.error) {
+        const isParseError = decision.error.startsWith('Parse error:') || decision.error.startsWith('Failed to parse');
+        if (isParseError) {
+          // Parse errors are retryable — LLM returned prose or bad JSON, take a fresh screenshot and try again
+          console.log(`   ⚠️ LLM returned bad JSON, retrying... (${decision.error.substring(0, 80)})`);
+          steps.push({ action: 'retry', description: `Retryable: ${decision.error.substring(0, 100)}`, success: false, timestamp: Date.now() });
+          this.brain.resetConversation(); // clear bad history so next attempt starts fresh
+          continue;
+        }
         console.log(`   ❌ LLM error: ${decision.error}`);
         steps.push({ action: 'error', description: decision.error, success: false, timestamp: Date.now() });
         return { success: false, llmCalls };
