@@ -20,7 +20,7 @@ const program = new Command();
 program
   .name('clawd-cursor')
   .description('🐾 AI Desktop Agent over VNC')
-  .version('0.1.0');
+  .version('0.2.0');
 
 program
   .command('start')
@@ -54,7 +54,7 @@ program
 
     console.log(`
 🐾 ╔═══════════════════════════════════════╗
-   ║         CLAWD CURSOR v0.1.0           ║
+   ║         CLAWD CURSOR v0.2.0           ║
    ║   AI Desktop Agent over VNC           ║
    ╚═══════════════════════════════════════╝
 `);
