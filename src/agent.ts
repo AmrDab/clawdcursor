@@ -25,6 +25,7 @@ import { SafetyLayer } from './safety';
 import { AccessibilityBridge } from './accessibility';
 import { ActionRouter } from './action-router';
 import { SafetyTier } from './types';
+import { ComputerUseBrain } from './computer-use';
 import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction, ActionSequence, A11yAction } from './types';
 
 const MAX_STEPS = 15;
@@ -38,6 +39,7 @@ export class Agent {
   private safety: SafetyLayer;
   private a11y: AccessibilityBridge;
   private router: ActionRouter;
+  private computerUse: ComputerUseBrain | null = null;
   private config: ClawdConfig;
   private hasApiKey: boolean;
   private state: AgentState = {
@@ -65,6 +67,13 @@ export class Agent {
 
   async connect(): Promise<void> {
     await this.vnc.connect();
+
+    // Initialize Computer Use if Anthropic provider
+    if (ComputerUseBrain.isSupported(this.config)) {
+      this.computerUse = new ComputerUseBrain(this.config, this.vnc, this.safety);
+      console.log(`🖥️  Computer Use API enabled (Anthropic native tool)`);
+    }
+
     const size = this.vnc.getScreenSize();
     this.brain.setScreenSize(size.width, size.height);
   }
@@ -167,15 +176,29 @@ export class Agent {
 
       console.log(`   ⚠️ Router couldn't handle: ${routeResult.description}`);
 
-      // ─── LLM Vision Fallback (only if API key is set) ──────────
+      // ─── Vision Fallback (only if API key is set) ──────────────
       if (this.hasApiKey) {
         await this.delay(500);
-        console.log(`   🧠 Falling back to LLM vision...`);
-        const fallbackResult = await this.executeLLMFallback(subtask, steps, debugDir, i);
-        llmCallCount += fallbackResult.llmCalls;
 
-        if (!fallbackResult.success) {
-          console.log(`   ❌ LLM fallback failed for subtask: "${subtask}"`);
+        if (this.computerUse) {
+          // Anthropic: use native Computer Use API (preferred)
+          console.log(`   🖥️  Using Computer Use API...`);
+          const cuResult = await this.computerUse.executeSubtask(subtask, debugDir, i);
+          steps.push(...cuResult.steps);
+          llmCallCount += cuResult.llmCalls;
+
+          if (!cuResult.success) {
+            console.log(`   ❌ Computer Use failed for subtask: "${subtask}"`);
+          }
+        } else {
+          // Other providers: use custom prompt LLM fallback
+          console.log(`   🧠 Falling back to LLM vision...`);
+          const fallbackResult = await this.executeLLMFallback(subtask, steps, debugDir, i);
+          llmCallCount += fallbackResult.llmCalls;
+
+          if (!fallbackResult.success) {
+            console.log(`   ❌ LLM fallback failed for subtask: "${subtask}"`);
+          }
         }
       } else {
         console.log(`   ⏭️ Skipping — no API key for LLM fallback`);

@@ -338,6 +338,38 @@ export class VNCClient extends EventEmitter {
     return this.connected;
   }
 
+  // ─── Low-level pointer control (for Computer Use API) ────────────
+
+  async mouseDown(x: number, y: number, button: number = 1): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    console.log(`   🖱️  Mouse down at (${x}, ${y})`);
+    this.client.pointerEvent(x, y, button);
+  }
+
+  async mouseUp(x: number, y: number): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    console.log(`   🖱️  Mouse up at (${x}, ${y})`);
+    this.client.pointerEvent(x, y, 0);
+  }
+
+  async mouseDrag(sx: number, sy: number, ex: number, ey: number): Promise<void> {
+    if (!this.client) throw new Error('Not connected');
+    console.log(`   🖱️  Drag (${sx},${sy}) → (${ex},${ey})`);
+    await this.mouseMove(sx, sy);
+    this.client.pointerEvent(sx, sy, 1); // mouse down
+    await this.delay(100);
+    // Interpolate intermediate points for smoother drag
+    const steps = Math.max(5, Math.floor(Math.hypot(ex - sx, ey - sy) / 20));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      const ix = Math.round(sx + (ex - sx) * t);
+      const iy = Math.round(sy + (ey - sy) * t);
+      this.client.pointerEvent(ix, iy, 1);
+      await this.delay(15);
+    }
+    this.client.pointerEvent(ex, ey, 0); // mouse up
+  }
+
   getScreenSize(): { width: number; height: number } {
     return { width: this.screenWidth, height: this.screenHeight };
   }
