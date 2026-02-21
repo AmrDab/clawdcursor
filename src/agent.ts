@@ -109,25 +109,29 @@ export class Agent {
     let subtasks: string[];
     let llmCallCount = 0;
 
-    // Try local parser first (instant, no API key needed)
-    const localResult = this.parser.decomposeTask(task);
-    if (localResult) {
-      subtasks = localResult;
-      console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (no LLM)`);
-    } else if (this.hasApiKey) {
-      // Fall back to LLM decomposition
-      console.log(`   🧠 Local parser can't handle this, using LLM...`);
+    // When API key is available, ALWAYS use LLM decomposition — it understands
+    // user intent (e.g. "go to google docs" → "go to docs.google.com").
+    // Local parser is ONLY for offline mode (no API key).
+    if (this.hasApiKey) {
+      console.log(`   🧠 Using LLM to decompose task...`);
       subtasks = await this.brain.decomposeTask(task);
       llmCallCount = 1;
       console.log(`   Decomposed via LLM in ${Date.now() - decompositionStart}ms`);
     } else {
-      console.log(`   ❌ Task too complex for local parser and no API key set.`);
-      console.log(`   Set AI_API_KEY in .env to handle complex tasks.`);
-      return {
-        success: false,
-        steps: [{ action: 'error', description: 'Task too complex for offline mode. Set AI_API_KEY to unlock AI fallback.', success: false, timestamp: Date.now() }],
-        duration: Date.now() - startTime,
-      };
+      // Offline: try local parser (regex, no LLM)
+      const localResult = this.parser.decomposeTask(task);
+      if (localResult) {
+        subtasks = localResult;
+        console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (offline mode)`);
+      } else {
+        console.log(`   ❌ Task too complex for local parser and no API key set.`);
+        console.log(`   Set AI_API_KEY in .env to handle complex tasks.`);
+        return {
+          success: false,
+          steps: [{ action: 'error', description: 'Task too complex for offline mode. Set AI_API_KEY to unlock AI fallback.', success: false, timestamp: Date.now() }],
+          duration: Date.now() - startTime,
+        };
+      }
     }
 
     console.log(`   ${subtasks.length} subtask(s):`);
