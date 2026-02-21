@@ -83,10 +83,16 @@ Rules:
 - Do NOT manually add tool selection or canvas clicks for typing — "type" handles it
 - Only use "click" for UI navigation (menus, dialogs, buttons)
 - For URLs, always use "go to [url]" — not "type [url]" into the address bar
+- For visual/spatial tasks (drawing, dragging, arranging) that need mouse coordinates,
+  keep them as a SINGLE descriptive subtask — do NOT break them into click/type.
+  These will be handled by AI vision, not the router.
 
 Examples:
 Task: "Open Paint and type hello world"
 ["open Paint", "type hello world"]
+
+Task: "Open Paint and draw a stick figure"
+["open Paint", "draw a stick figure on the canvas"]
 
 Task: "Open Chrome and go to google.com"
 ["open Chrome", "go to google.com"]
@@ -99,6 +105,9 @@ Task: "Save the current document as PDF"
 
 Task: "Open Notepad and type hello"
 ["open Notepad", "type hello"]
+
+Task: "Drag the file to the trash"
+["drag the file to the trash"]
 
 Task: "Type hello"
 ["type hello"]`;
