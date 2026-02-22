@@ -1,5 +1,6 @@
 ---
 name: clawd-cursor
+version: 0.3.3
 description: >
   AI desktop agent that controls Windows/Mac via VNC. Gives your agent eyes and full cursor control —
   screen capture, mouse clicks, keyboard input, drag operations, and GUI automation.
@@ -106,3 +107,20 @@ Best for simple tasks. ~2s. Works offline.
 - Run in a **sandbox or VM** when testing with sensitive data
 - The `/confirm` endpoint enforces the 🔴 safety tier — verify it works before trusting autonomous operation
 - Review [`setup.ps1`](https://github.com/AmrDab/clawd-cursor/blob/main/setup.ps1) source before running
+
+## Changelog
+
+### v0.3.3
+- **Bulletproof headless setup** — setup.ps1 runs end-to-end in non-interactive AI agent shells
+- Random VNC password generation when not provided interactively
+- Fixed msiexec crash (`-PassThru -WindowStyle Hidden` with try/catch)
+- Fixed Start-Service post-install crash (own try/catch)
+- Replaced emoji with ASCII for cp1252 headless terminal compatibility
+
+### v0.3.0
+- 6 performance optimizations (~70% faster task execution, 90% fewer redundant LLM calls)
+- Screenshot hash cache, adaptive VNC wait, parallel fetch, a11y context cache, async writes, exponential backoff
+
+### v0.2.0
+- Anthropic Computer Use API as primary execution path
+- Action Router (zero-LLM) for simple tasks
