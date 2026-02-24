@@ -852,15 +852,22 @@
                 </div>
                 <pre><code><span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawd-cursor.git</span>
 <span class="c-cmd">cd</span> clawd-cursor
-<span class="c-cmd">npm install</span> && <span class="c-cmd">npm run build</span>
+<span class="c-cmd">npm install</span>; <span class="c-cmd">npm run build</span>
 
 <span class="c-comment"># Auto-detect and configure your AI</span>
-<span class="c-cmd">npx</span> clawd-cursor <span class="c-flag">doctor</span>
+<span class="c-cmd">npm run</span> <span class="c-flag">doctor</span>
 
-<span class="c-comment"># Start</span>
-<span class="c-cmd">npm start</span></code></pre>
+<span class="c-comment"># Start the agent</span>
+<span class="c-cmd">npm start</span>
+
+<span class="c-comment"># Send a task</span>
+<span class="c-cmd">curl</span> -X POST http://127.0.0.1:3847/task -H <span class="c-string">"Content-Type: application/json"</span> \
+  -d <span class="c-string">'{"task": "Open Calculator"}'</span>
+
+<span class="c-comment"># Stop the agent</span>
+<span class="c-cmd">npm run</span> <span class="c-flag">stop</span></code></pre>
             </div>
-            <p style="color: var(--text3); font-size: 0.78rem; margin-top: 10px;">Requires: Node.js 20+. AI API key for vision features. No external servers needed.</p>
+            <p style="color: var(--text3); font-size: 0.78rem; margin-top: 10px;">Requires: Node.js 20+. AI API key for vision features. No external servers needed. On Bash/macOS, you can use <code>&&</code> instead of <code>;</code></p>
         </section>
     </div>
 

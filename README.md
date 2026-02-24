@@ -43,12 +43,13 @@
 ```bash
 git clone https://github.com/AmrDab/clawd-cursor.git
 cd clawd-cursor
-npm install && npm run build
+npm install
+npm run build
 ```
 
 Run the doctor to auto-configure:
 ```bash
-npx clawd-cursor doctor
+npm run doctor
 ```
 
 The doctor will:
@@ -73,21 +74,21 @@ curl http://localhost:3847/task -d '{"task": "Open Notepad and type hello world"
 ```bash
 # Just need Ollama running locally
 ollama pull qwen2.5:7b
-npx clawd-cursor doctor --provider ollama
+npm run doctor -- --provider ollama
 npm start -- --provider ollama
 ```
 
 **Anthropic (recommended for complex tasks):**
 ```bash
 echo "AI_API_KEY=sk-ant-api03-..." > .env
-npx clawd-cursor doctor
+npm run doctor
 npm start
 ```
 
 **OpenAI:**
 ```bash
 echo "AI_API_KEY=sk-..." > .env
-npx clawd-cursor doctor --provider openai
+npm run doctor -- --provider openai
 npm start -- --provider openai
 ```
 
@@ -139,7 +140,7 @@ The pipeline adapts at runtime:
 ## Doctor
 
 ```bash
-npx clawd-cursor doctor
+npm run doctor
 ```
 
 ```
