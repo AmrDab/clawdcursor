@@ -501,15 +501,17 @@ export class AccessibilityBridge {
           return;
         }
 
+        // On macOS, JXA's console.log() writes to stderr, not stdout. Use stdout first, then stderr fallback.
+        const raw = (typeof stdout === 'string' && stdout.trim()) || (typeof stderr === 'string' && stderr.trim()) || '';
         try {
-          const result = JSON.parse(stdout.trim());
+          const result = JSON.parse(raw);
           if (result.error) {
             reject(new Error(result.error));
           } else {
             resolve(result);
           }
         } catch (parseErr) {
-          console.error(`Failed to parse ${resolvedScript} output:`, stdout.substring(0, 200));
+          console.error(`Failed to parse ${resolvedScript} output:`, raw.substring(0, 200));
           reject(parseErr);
         }
       });

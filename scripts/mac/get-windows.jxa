@@ -11,6 +11,9 @@
  * - bounds: {x, y, width, height} window position and size
  * - isMinimized: Boolean indicating if window is minimized
  * 
+ * Output: In JXA, console.log() goes to stderr. We use the script result (last
+ * expression) so stdout receives the JSON for Node.js execFile.
+ * 
  * Usage: osascript -l JavaScript get-windows.jxa
  */
 
@@ -39,6 +42,7 @@ function safeElementProp(element, propName, defaultValue) {
     }
 }
 
+var output;
 try {
     // Get System Events application
     var SystemEvents = Application('System Events');
@@ -90,9 +94,9 @@ try {
                         // Property not available, assume not minimized
                     }
                     
-                    // macOS doesn't have window handles like Windows,
-                    // but we can use a combination of processId and index
+                    // macOS doesn't have window handles like Windows; use processId as handle equivalent
                     results.push({
+                        handle: processId,
                         title: title,
                         processName: processName,
                         processId: processId,
@@ -108,11 +112,9 @@ try {
         }
     }
     
-    // Output JSON to stdout
-    console.log(JSON.stringify(results, null, 0));
-    
+    output = JSON.stringify(results, null, 0);
 } catch (error) {
-    // Output error as JSON
-    console.log(JSON.stringify({ error: error.toString() }));
+    output = JSON.stringify({ error: error.toString() });
     $.exit(1);
 }
+output;
