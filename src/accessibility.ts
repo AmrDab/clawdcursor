@@ -98,7 +98,14 @@ export class AccessibilityBridge {
       if (PLATFORM === 'win32') {
         await execFileAsync('powershell.exe', ['-Command', 'exit 0'], { timeout: 5000 });
       } else if (PLATFORM === 'darwin') {
-        await execFileAsync('osascript', ['-l', 'JavaScript', '-e', '""'], { timeout: 5000 });
+        // Probe System Events directly — a bare osascript -e '""' succeeds even without
+        // Accessibility permissions, giving a false positive. Touching processes.length
+        // forces macOS to check the permission and fail fast with a clear error if not granted.
+        await execFileAsync(
+          'osascript',
+          ['-l', 'JavaScript', '-e', 'Application("System Events").processes.length; true'],
+          { timeout: 5000 },
+        );
       } else {
         console.error(`❌ Unsupported platform: ${PLATFORM}. Accessibility requires Windows or macOS.`);
         shellAvailable = false;
@@ -106,10 +113,22 @@ export class AccessibilityBridge {
       }
       shellAvailable = true;
       console.log(`✅ Accessibility bridge ready (${PLATFORM === 'win32' ? 'PowerShell' : 'osascript'})`);
-    } catch {
+    } catch (err: any) {
       shellAvailable = false;
-      const shell = PLATFORM === 'win32' ? 'PowerShell' : 'osascript';
-      console.error(`❌ ${shell} not available. Accessibility bridge will not function.`);
+      if (PLATFORM === 'darwin') {
+        const isAuthError = err.stderr?.includes('not authorized') || err.message?.includes('not authorized');
+        if (isAuthError) {
+          console.error(
+            `❌ Accessibility: not authorized to control System Events.\n` +
+            `   → System Settings → Privacy & Security → Accessibility\n` +
+            `   → Add your terminal app (Terminal, iTerm2, wezterm, etc.) or Node.js and try again.`
+          );
+        } else {
+          console.error(`❌ osascript not available. Accessibility bridge will not function.`);
+        }
+      } else {
+        console.error(`❌ PowerShell not available. Accessibility bridge will not function.`);
+      }
     }
     return shellAvailable;
   }
@@ -497,8 +516,11 @@ export class AccessibilityBridge {
         maxBuffer: 1024 * 1024 * 5, // 5MB buffer
       }, (error, stdout, stderr) => {
         if (error) {
-          console.error(`Accessibility script error (${resolvedScript}):`, error.message);
-          reject(error);
+          // Include stderr so the real reason (e.g. "not authorized to send Apple events") is visible
+          const stderrDetail = typeof stderr === 'string' && stderr.trim() ? ` — ${stderr.trim()}` : '';
+          const fullMessage = error.message + stderrDetail;
+          console.error(`Accessibility script error (${resolvedScript}):`, fullMessage);
+          reject(new Error(fullMessage));
           return;
         }
 
