@@ -214,6 +214,7 @@
             grid-template-columns: 1fr 1fr;
             gap: 12px;
         }
+        .modes-3col { grid-template-columns: 1fr 1fr 1fr; }
         .mode-card {
             background: var(--bg2);
             border: 1px solid var(--border);
@@ -510,7 +511,7 @@
             .stats { grid-template-columns: repeat(3, 1fr); }
             .stat:nth-child(4), .stat:nth-child(5) { display: none; }
             .hero h1 { font-size: 2rem; }
-            .why-grid, .modes-grid, .metrics-grid, .feat-grid, .safety-grid { grid-template-columns: 1fr; }
+            .why-grid, .modes-grid, .modes-3col, .metrics-grid, .feat-grid, .safety-grid { grid-template-columns: 1fr !important; }
             .cmp-row { grid-template-columns: 1fr; gap: 4px; padding: 14px 18px; }
             .cmp-row.hd { display: none; }
             .sect { padding: 36px 0; }
@@ -692,7 +693,7 @@
             <div class="sect-label">Three Layers</div>
             <h2>Instant, smart, or bulletproof - pick the right layer</h2>
             <p class="sub">Three pipeline layers. Each task falls to the cheapest layer that can handle it.</p>
-            <div class="modes-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+            <div class="modes-grid modes-3col">
                 <div class="mode-card a">
                     <h3>Layer 1 - Action Router</h3>
                     <ol>
