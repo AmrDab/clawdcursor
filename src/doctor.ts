@@ -275,7 +275,7 @@ async function testModel(
           ? (err.message || JSON.stringify(err))
           : String(err);
         const hint = (err.type === 'not_found_error' || err.type === 'invalid_request_error')
-          ? ' — check model id (e.g. claude-haiku-3-5-20241022)'
+          ? ' — check model id (e.g. claude-3-5-haiku-20241022 or claude-haiku-4-5)'
           : '';
         return { ok: false, error: msg + hint };
       }
