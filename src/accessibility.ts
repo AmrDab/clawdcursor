@@ -19,7 +19,10 @@ const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform(); // 'win32' | 'darwin' | 'linux'
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
 const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
-const SCRIPT_TIMEOUT = 10000; // 10s timeout
+// macOS JXA scripts enumerate System Events which can be slow on some versions.
+// 30s gives enough headroom; scripts are cached after first call so this only
+// applies to the first invocation per session.
+const SCRIPT_TIMEOUT = PLATFORM === 'darwin' ? 30000 : 10000;
 
 /** Platform script file mapping: Windows (.ps1) → macOS (.jxa) */
 const SCRIPT_MAP: Record<string, Record<string, string>> = {

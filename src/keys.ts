@@ -39,11 +39,16 @@ const KEY_ALIASES: Record<string, string> = {
   'control': 'Control',
   'ctrl': 'Control',
   'alt': 'Alt',
+  'opt': 'Alt',
+  'option': 'Alt',
   'meta': 'Super',
   'super': 'Super',
   'super_l': 'Super',
   'win': 'Super',
   'windows': 'Super',
+  // macOS Command key — Claude often emits 'cmd' or 'command' for ⌘
+  'cmd': 'Super',
+  'command': 'Super',
 
   // Function keys
   'f1': 'F1', 'f2': 'F2', 'f3': 'F3', 'f4': 'F4',
