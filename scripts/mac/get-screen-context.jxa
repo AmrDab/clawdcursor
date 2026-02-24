@@ -1,0 +1,271 @@
+#!/usr/bin/env osascript -l JavaScript
+
+/**
+ * get-screen-context.jxa
+ * 
+ * macOS equivalent of get-screen-context.ps1.
+ * Combines window listing with UI accessibility tree walking.
+ * 
+ * Parameters:
+ *   -FocusedProcessId <number>  - Process ID to walk the UI tree for (optional)
+ *   -MaxDepth <number>          - Maximum depth for UI tree traversal (default: 2)
+ * 
+ * Returns JSON with:
+ *   {
+ *     windows: [{ title, processName, processId, bounds, isMinimized }],
+ *     uiTree: { name, role, children: [...] }  // only if FocusedProcessId given
+ *   }
+ * 
+ * Usage: osascript -l JavaScript get-screen-context.jxa -FocusedProcessId 1234 -MaxDepth 2
+ */
+
+// Utility function to safely get property values
+function safeGet(obj, property, defaultValue) {
+    try {
+        var val = obj[property]();
+        return val !== undefined && val !== null ? val : defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+// Utility function to safely get UI element properties
+function safeElementProp(element, propName, defaultValue) {
+    try {
+        if (element[propName]) {
+            return element[propName]();
+        }
+        return defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
+
+// Map AX roles to friendlier short names
+function friendlyRole(axRole) {
+    if (!axRole) return '';
+    // Strip "AX" prefix if present
+    var r = axRole;
+    if (r.indexOf('AX') === 0) {
+        r = r.substring(2);
+    }
+    return r;
+}
+
+// Get all visible windows
+function getWindows(SystemEvents) {
+    var results = [];
+    var processes = SystemEvents.processes.where({ backgroundOnly: false });
+    
+    for (var i = 0; i < processes.length; i++) {
+        try {
+            var process = processes[i];
+            var processName = safeGet(process, 'name', 'unknown');
+            var processId = safeGet(process, 'unixId', 0);
+            
+            var windows = process.windows;
+            for (var j = 0; j < windows.length; j++) {
+                try {
+                    var win = windows[j];
+                    var title = safeElementProp(win, 'name', '');
+                    
+                    // Skip windows with no name
+                    if (!title || title.trim().length === 0) {
+                        continue;
+                    }
+                    
+                    var bounds = { x: 0, y: 0, width: 0, height: 0 };
+                    try {
+                        var position = win.position();
+                        var size = win.size();
+                        bounds = {
+                            x: position[0],
+                            y: position[1],
+                            width: size[0],
+                            height: size[1]
+                        };
+                    } catch (e) {}
+                    
+                    var isMinimized = false;
+                    try {
+                        isMinimized = win.miniaturized();
+                    } catch (e) {}
+                    
+                    results.push({
+                        title: title,
+                        processName: processName,
+                        processId: processId,
+                        bounds: bounds,
+                        isMinimized: isMinimized
+                    });
+                } catch (e) {
+                    // Skip inaccessible windows
+                }
+            }
+        } catch (e) {
+            // Skip inaccessible processes
+        }
+    }
+    
+    return results;
+}
+
+// Recursively walk the UI accessibility tree
+function walkTree(element, maxDepth, currentDepth) {
+    if (currentDepth > maxDepth) {
+        return null;
+    }
+    
+    var node = {
+        name: '',
+        role: '',
+        value: '',
+        children: []
+    };
+    
+    try {
+        node.name = safeElementProp(element, 'name', '');
+    } catch (e) {}
+    
+    try {
+        var rawRole = safeElementProp(element, 'role', '');
+        node.role = friendlyRole(rawRole);
+    } catch (e) {}
+    
+    try {
+        var val = safeElementProp(element, 'value', '');
+        if (val !== null && val !== undefined && val !== '') {
+            node.value = String(val);
+        }
+    } catch (e) {}
+    
+    // Try to get subrole for more specific info
+    try {
+        var subrole = safeElementProp(element, 'subrole', '');
+        if (subrole) {
+            node.subrole = friendlyRole(subrole);
+        }
+    } catch (e) {}
+    
+    // Get enabled/focused state for interactive elements
+    try {
+        var enabled = safeElementProp(element, 'enabled', null);
+        if (enabled !== null) {
+            node.enabled = enabled;
+        }
+    } catch (e) {}
+    
+    try {
+        var focused = safeElementProp(element, 'focused', null);
+        if (focused === true) {
+            node.focused = true;
+        }
+    } catch (e) {}
+    
+    // Walk children if not at max depth
+    if (currentDepth < maxDepth) {
+        try {
+            var children = element.uiElements();
+            for (var i = 0; i < children.length; i++) {
+                try {
+                    var childNode = walkTree(children[i], maxDepth, currentDepth + 1);
+                    if (childNode) {
+                        node.children.push(childNode);
+                    }
+                } catch (e) {
+                    // Skip inaccessible children
+                }
+            }
+        } catch (e) {
+            // No children or not accessible
+        }
+    }
+    
+    // Clean up empty arrays/values to reduce JSON size
+    if (node.children.length === 0) {
+        delete node.children;
+    }
+    if (!node.value) {
+        delete node.value;
+    }
+    if (!node.name && !node.role) {
+        return null;  // Skip completely empty nodes
+    }
+    
+    return node;
+}
+
+// Build UI tree for a specific process
+function getUITree(SystemEvents, processId, maxDepth) {
+    var processes = SystemEvents.processes.where({ unixId: processId });
+    
+    if (processes.length === 0) {
+        return { name: '', role: 'Error', value: 'No process found with ID ' + processId };
+    }
+    
+    var process = processes[0];
+    var processName = safeGet(process, 'name', 'unknown');
+    
+    // Get the first (frontmost) window of this process
+    var windows = process.windows;
+    if (windows.length === 0) {
+        return { name: processName, role: 'Application', value: 'No windows found' };
+    }
+    
+    // Walk the first window's tree
+    var win = windows[0];
+    var winName = safeElementProp(win, 'name', '');
+    
+    var tree = walkTree(win, maxDepth, 0);
+    if (!tree) {
+        tree = { name: winName || processName, role: 'Window' };
+    }
+    
+    // Ensure the root has useful context
+    if (!tree.name) {
+        tree.name = winName || processName;
+    }
+    if (!tree.role) {
+        tree.role = 'Window';
+    }
+    tree.processName = processName;
+    tree.processId = processId;
+    
+    return tree;
+}
+
+// run(argv) is the JXA entry point — osascript calls it and its return value becomes stdout.
+// argv receives command-line arguments passed after the script path.
+function run(argv) {
+    try {
+        // Parse arguments from argv array
+        var focusedProcessId = null;
+        var maxDepth = 2;
+        
+        for (var i = 0; i < argv.length; i++) {
+            if (argv[i] === '-FocusedProcessId' && i + 1 < argv.length) {
+                focusedProcessId = parseInt(argv[++i], 10);
+            } else if (argv[i] === '-MaxDepth' && i + 1 < argv.length) {
+                maxDepth = parseInt(argv[++i], 10);
+            }
+        }
+        
+        var SystemEvents = Application('System Events');
+        SystemEvents.includeStandardAdditions = true;
+        
+        // Build result
+        var result = {
+            windows: getWindows(SystemEvents)
+        };
+        
+        // If a focused process ID was given, walk its UI tree
+        if (focusedProcessId) {
+            result.uiTree = getUITree(SystemEvents, focusedProcessId, maxDepth);
+        }
+        
+        return JSON.stringify(result);
+        
+    } catch (error) {
+        return JSON.stringify({ error: error.toString() });
+    }
+}

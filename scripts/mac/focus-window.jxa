@@ -17,25 +17,6 @@
  *        osascript -l JavaScript focus-window.jxa -processId 1234
  */
 
-ObjC.import('stdlib');
-
-// Parse command line arguments
-function parseArgs() {
-    var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
-    var result = { title: null, processId: null };
-    
-    for (var i = 0; i < args.length; i++) {
-        var arg = ObjC.unwrap(args[i]);
-        if (arg === '-title' && i + 1 < args.length) {
-            result.title = ObjC.unwrap(args[i + 1]);
-        } else if (arg === '-processId' && i + 1 < args.length) {
-            result.processId = parseInt(ObjC.unwrap(args[i + 1]), 10);
-        }
-    }
-    
-    return result;
-}
-
 // Utility function to safely get property values
 function safeGet(obj, property, defaultValue) {
     try {
@@ -46,134 +27,143 @@ function safeGet(obj, property, defaultValue) {
     }
 }
 
-try {
-    var params = parseArgs();
-    
-    // Validate parameters
-    if (!params.title && !params.processId) {
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'Must specify -title or -processId' 
-        }));
-        $.exit(0);
-    }
-    
-    var SystemEvents = Application('System Events');
-    SystemEvents.includeStandardAdditions = true;
-    
-    // Get all processes with UI
-    var processes = SystemEvents.processes.where({ backgroundOnly: false });
-    var targetWindow = null;
-    var targetProcess = null;
-    
-    // Search for matching window
-    for (var i = 0; i < processes.length; i++) {
-        try {
-            var process = processes[i];
-            var processId = safeGet(process, 'unixId', 0);
-            var processName = safeGet(process, 'name', 'unknown');
-            
-            // Check process ID match first
-            if (params.processId && processId === params.processId) {
-                targetProcess = process;
-                // Get the first window of this process
-                var windows = process.windows;
-                if (windows.length > 0) {
-                    targetWindow = windows[0];
-                    break;
-                }
+// run(argv) is the JXA entry point — osascript calls it and its return value becomes stdout.
+// argv receives command-line arguments passed after the script path.
+function run(argv) {
+    try {
+        // Parse arguments from argv array
+        var params = { title: null, processId: null };
+        for (var i = 0; i < argv.length; i++) {
+            if (argv[i] === '-title' && i + 1 < argv.length) {
+                params.title = argv[++i];
+            } else if (argv[i] === '-processId' && i + 1 < argv.length) {
+                params.processId = parseInt(argv[++i], 10);
             }
-            
-            // Check title match
-            if (params.title) {
-                var windows = process.windows;
-                var titleLower = params.title.toLowerCase();
+        }
+
+        // Validate parameters
+        if (!params.title && !params.processId) {
+            return JSON.stringify({ 
+                success: false, 
+                error: 'Must specify -title or -processId' 
+            });
+        }
+        
+        var SystemEvents = Application('System Events');
+        SystemEvents.includeStandardAdditions = true;
+        
+        // Get all processes with UI
+        var processes = SystemEvents.processes.where({ backgroundOnly: false });
+        var targetWindow = null;
+        var targetProcess = null;
+        
+        // Search for matching window
+        for (var i = 0; i < processes.length; i++) {
+            try {
+                var process = processes[i];
+                var processId = safeGet(process, 'unixId', 0);
+                var processName = safeGet(process, 'name', 'unknown');
                 
-                for (var j = 0; j < windows.length; j++) {
-                    try {
-                        var win = windows[j];
-                        var winTitle = '';
-                        try {
-                            winTitle = win.name() || '';
-                        } catch (e) {}
-                        
-                        if (winTitle && winTitle.toLowerCase().indexOf(titleLower) !== -1) {
-                            targetWindow = win;
-                            targetProcess = process;
-                            break;
-                        }
-                    } catch (e) {
-                        // Window not accessible
+                // Check process ID match first
+                if (params.processId && processId === params.processId) {
+                    targetProcess = process;
+                    // Get the first window of this process
+                    var windows = process.windows;
+                    if (windows.length > 0) {
+                        targetWindow = windows[0];
+                        break;
                     }
                 }
                 
-                if (targetWindow) break;
+                // Check title match
+                if (params.title) {
+                    var windows = process.windows;
+                    var titleLower = params.title.toLowerCase();
+                    
+                    for (var j = 0; j < windows.length; j++) {
+                        try {
+                            var win = windows[j];
+                            var winTitle = '';
+                            try {
+                                winTitle = win.name() || '';
+                            } catch (e) {}
+                            
+                            if (winTitle && winTitle.toLowerCase().indexOf(titleLower) !== -1) {
+                                targetWindow = win;
+                                targetProcess = process;
+                                break;
+                            }
+                        } catch (e) {
+                            // Window not accessible
+                        }
+                    }
+                    
+                    if (targetWindow) break;
+                }
+            } catch (e) {
+                // Process not accessible
+            }
+        }
+        
+        if (!targetWindow) {
+            return JSON.stringify({ 
+                success: false, 
+                error: 'Window not found matching title="' + (params.title || '') + '" processId=' + (params.processId || 0) 
+            });
+        }
+        
+        // Bring window to front
+        // Method 1: Use System Events to set frontmost
+        try {
+            if (targetProcess) {
+                targetProcess.frontmost = true;
             }
         } catch (e) {
-            // Process not accessible
+            // Continue with other methods
         }
-    }
-    
-    if (!targetWindow) {
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'Window not found matching title="' + (params.title || '') + '" processId=' + (params.processId || 0) 
-        }));
-        $.exit(0);
-    }
-    
-    // Bring window to front
-    // Method 1: Use System Events to set frontmost
-    try {
-        if (targetProcess) {
-            targetProcess.frontmost = true;
+        
+        // Method 2: Focus the window
+        try {
+            targetWindow.focused = true;
+        } catch (e) {
+            // Continue
         }
-    } catch (e) {
-        // Continue with other methods
-    }
-    
-    // Method 2: Focus the window
-    try {
-        targetWindow.focused = true;
-    } catch (e) {
-        // Continue
-    }
-    
-    // Method 3: Use application level activation (if we can get the app name)
-    try {
-        if (targetProcess) {
-            var appName = safeGet(targetProcess, 'name', '');
-            if (appName) {
-                var app = Application(appName);
-                app.activate();
+        
+        // Method 3: Use application level activation (if we can get the app name)
+        try {
+            if (targetProcess) {
+                var appName = safeGet(targetProcess, 'name', '');
+                if (appName) {
+                    var app = Application(appName);
+                    app.activate();
+                }
             }
+        } catch (e) {
+            // Continue
         }
-    } catch (e) {
-        // Continue
+        
+        // Get final window info
+        var winTitle = '';
+        var winProcessId = 0;
+        var winProcessName = 'unknown';
+        
+        try {
+            winTitle = targetWindow.name() || '';
+        } catch (e) {}
+        
+        if (targetProcess) {
+            winProcessId = safeGet(targetProcess, 'unixId', 0);
+            winProcessName = safeGet(targetProcess, 'name', 'unknown');
+        }
+        
+        return JSON.stringify({
+            success: true,
+            title: winTitle,
+            processId: winProcessId,
+            processName: winProcessName
+        });
+        
+    } catch (error) {
+        return JSON.stringify({ success: false, error: error.toString() });
     }
-    
-    // Get final window info
-    var winTitle = '';
-    var winProcessId = 0;
-    var winProcessName = 'unknown';
-    
-    try {
-        winTitle = targetWindow.name() || '';
-    } catch (e) {}
-    
-    if (targetProcess) {
-        winProcessId = safeGet(targetProcess, 'unixId', 0);
-        winProcessName = safeGet(targetProcess, 'name', 'unknown');
-    }
-    
-    console.log(JSON.stringify({
-        success: true,
-        title: winTitle,
-        processId: winProcessId,
-        processName: winProcessName
-    }));
-    
-} catch (error) {
-    console.log(JSON.stringify({ success: false, error: error.toString() }));
-    $.exit(1);
 }

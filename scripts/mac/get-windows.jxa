@@ -14,9 +14,6 @@
  * Usage: osascript -l JavaScript get-windows.jxa
  */
 
-// Enable access to Objective-C bridge
-ObjC.import('stdlib');
-
 // Utility function to safely get property values
 function safeGet(obj, property, defaultValue) {
     try {
@@ -39,80 +36,82 @@ function safeElementProp(element, propName, defaultValue) {
     }
 }
 
-try {
-    // Get System Events application
-    var SystemEvents = Application('System Events');
-    SystemEvents.includeStandardAdditions = true;
-    
-    // Get all processes with UI
-    var processes = SystemEvents.processes.where({ backgroundOnly: false });
-    var results = [];
-    
-    for (var i = 0; i < processes.length; i++) {
-        try {
-            var process = processes[i];
-            var processName = safeGet(process, 'name', 'unknown');
-            var processId = safeGet(process, 'unixId', 0);
-            
-            // Get all windows for this process
-            var windows = process.windows;
-            
-            for (var j = 0; j < windows.length; j++) {
-                try {
-                    var win = windows[j];
-                    var title = safeElementProp(win, 'name', '');
-                    
-                    // Skip windows with no name (invisible/system windows)
-                    if (!title || title.trim().length === 0) {
-                        continue;
-                    }
-                    
-                    // Get window bounds
-                    var bounds = { x: 0, y: 0, width: 0, height: 0 };
+// run(argv) is the JXA entry point — osascript calls it and its return value becomes stdout.
+function run(argv) {
+    try {
+        // Get System Events application
+        var SystemEvents = Application('System Events');
+        SystemEvents.includeStandardAdditions = true;
+        
+        // Get all processes with UI
+        var processes = SystemEvents.processes.where({ backgroundOnly: false });
+        var results = [];
+        
+        for (var i = 0; i < processes.length; i++) {
+            try {
+                var process = processes[i];
+                var processName = safeGet(process, 'name', 'unknown');
+                var processId = safeGet(process, 'unixId', 0);
+                
+                // Get all windows for this process
+                var windows = process.windows;
+                
+                for (var j = 0; j < windows.length; j++) {
                     try {
-                        var position = win.position();
-                        var size = win.size();
-                        bounds = {
-                            x: position[0],
-                            y: position[1],
-                            width: size[0],
-                            height: size[1]
-                        };
+                        var win = windows[j];
+                        var title = safeElementProp(win, 'name', '');
+                        
+                        // Skip windows with no name (invisible/system windows)
+                        if (!title || title.trim().length === 0) {
+                            continue;
+                        }
+                        
+                        // Get window bounds
+                        var bounds = { x: 0, y: 0, width: 0, height: 0 };
+                        try {
+                            var position = win.position();
+                            var size = win.size();
+                            bounds = {
+                                x: position[0],
+                                y: position[1],
+                                width: size[0],
+                                height: size[1]
+                            };
+                        } catch (e) {
+                            // Bounds not available
+                        }
+                        
+                        // Check if minimized - macOS uses "miniaturized"
+                        var isMinimized = false;
+                        try {
+                            isMinimized = win.miniaturized();
+                        } catch (e) {
+                            // Property not available, assume not minimized
+                        }
+                        
+                        // macOS doesn't have window handles like Windows,
+                        // but we can use a combination of processId and index
+                        results.push({
+                            title: title,
+                            processName: processName,
+                            processId: processId,
+                            bounds: bounds,
+                            isMinimized: isMinimized
+                        });
                     } catch (e) {
-                        // Bounds not available
+                        // Skip windows that throw on property access
                     }
-                    
-                    // Check if minimized - macOS uses "miniaturized"
-                    var isMinimized = false;
-                    try {
-                        isMinimized = win.miniaturized();
-                    } catch (e) {
-                        // Property not available, assume not minimized
-                    }
-                    
-                    // macOS doesn't have window handles like Windows,
-                    // but we can use a combination of processId and index
-                    results.push({
-                        title: title,
-                        processName: processName,
-                        processId: processId,
-                        bounds: bounds,
-                        isMinimized: isMinimized
-                    });
-                } catch (e) {
-                    // Skip windows that throw on property access
                 }
+            } catch (e) {
+                // Skip processes that throw
             }
-        } catch (e) {
-            // Skip processes that throw
         }
+        
+        // Return JSON — osascript captures the return value as stdout
+        return JSON.stringify(results);
+        
+    } catch (error) {
+        // Return error as JSON
+        return JSON.stringify({ error: error.toString() });
     }
-    
-    // Output JSON to stdout
-    console.log(JSON.stringify(results, null, 0));
-    
-} catch (error) {
-    // Output error as JSON
-    console.log(JSON.stringify({ error: error.toString() }));
-    $.exit(1);
 }

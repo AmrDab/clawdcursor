@@ -15,8 +15,6 @@
  * Usage: osascript -l JavaScript get-foreground-window.jxa
  */
 
-ObjC.import('stdlib');
-
 // Utility function to safely get property values
 function safeGet(obj, property, defaultValue) {
     try {
@@ -27,67 +25,66 @@ function safeGet(obj, property, defaultValue) {
     }
 }
 
-try {
-    var SystemEvents = Application('System Events');
-    SystemEvents.includeStandardAdditions = true;
-    
-    // Get the frontmost process
-    var frontProcesses = SystemEvents.processes.where({ frontmost: true });
-    
-    if (frontProcesses.length === 0) {
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'No foreground window found' 
-        }));
-        $.exit(1);
-    }
-    
-    var frontProcess = frontProcesses[0];
-    var processId = safeGet(frontProcess, 'unixId', 0);
-    var processName = safeGet(frontProcess, 'name', 'unknown');
-    
-    // Get the frontmost window title
-    var title = '';
+// run(argv) is the JXA entry point — osascript calls it and its return value becomes stdout.
+function run(argv) {
     try {
-        var windows = frontProcess.windows;
-        if (windows.length > 0) {
-            // Try to get the name of the first (frontmost) window
-            try {
-                title = windows[0].name() || '';
-            } catch (e) {}
-            
-            // If no title, try to find a focused window
-            if (!title) {
-                for (var i = 0; i < windows.length; i++) {
-                    try {
-                        if (windows[i].focused && windows[i].focused()) {
-                            title = windows[i].name() || '';
-                            break;
-                        }
-                    } catch (e) {}
+        var SystemEvents = Application('System Events');
+        SystemEvents.includeStandardAdditions = true;
+        
+        // Get the frontmost process
+        var frontProcesses = SystemEvents.processes.where({ frontmost: true });
+        
+        if (frontProcesses.length === 0) {
+            return JSON.stringify({ 
+                success: false, 
+                error: 'No foreground window found' 
+            });
+        }
+        
+        var frontProcess = frontProcesses[0];
+        var processId = safeGet(frontProcess, 'unixId', 0);
+        var processName = safeGet(frontProcess, 'name', 'unknown');
+        
+        // Get the frontmost window title
+        var title = '';
+        try {
+            var windows = frontProcess.windows;
+            if (windows.length > 0) {
+                // Try to get the name of the first (frontmost) window
+                try {
+                    title = windows[0].name() || '';
+                } catch (e) {}
+                
+                // If no title, try to find a focused window
+                if (!title) {
+                    for (var i = 0; i < windows.length; i++) {
+                        try {
+                            if (windows[i].focused && windows[i].focused()) {
+                                title = windows[i].name() || '';
+                                break;
+                            }
+                        } catch (e) {}
+                    }
                 }
             }
+        } catch (e) {
+            // No windows accessible
         }
-    } catch (e) {
-        // No windows accessible
+        
+        // On macOS, we don't have window handles like Win32 HWND
+        // We use processId as a proxy identifier
+        return JSON.stringify({
+            success: true,
+            handle: processId,  // Using processId as handle equivalent
+            processId: processId,
+            processName: processName,
+            title: title
+        });
+        
+    } catch (error) {
+        return JSON.stringify({ 
+            success: false, 
+            error: error.toString() 
+        });
     }
-    
-    // On macOS, we don't have window handles like Win32 HWND
-    // We use processId as a proxy identifier
-    var result = {
-        success: true,
-        handle: processId,  // Using processId as handle equivalent
-        processId: processId,
-        processName: processName,
-        title: title
-    };
-    
-    console.log(JSON.stringify(result));
-    
-} catch (error) {
-    console.log(JSON.stringify({ 
-        success: false, 
-        error: error.toString() 
-    }));
-    $.exit(1);
 }

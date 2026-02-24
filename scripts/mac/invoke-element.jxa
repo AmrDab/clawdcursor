@@ -18,37 +18,6 @@
  *        osascript -l JavaScript invoke-element.jxa -action set-value -name "Username" -value "john" -processId 1234
  */
 
-ObjC.import('stdlib');
-
-// Parse command line arguments
-function parseArgs() {
-    var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
-    var result = { 
-        action: null,
-        name: null, 
-        role: null, 
-        processId: null,
-        value: null
-    };
-    
-    for (var i = 0; i < args.length; i++) {
-        var arg = ObjC.unwrap(args[i]);
-        if (arg === '-action' && i + 1 < args.length) {
-            result.action = ObjC.unwrap(args[i + 1]);
-        } else if (arg === '-name' && i + 1 < args.length) {
-            result.name = ObjC.unwrap(args[i + 1]);
-        } else if (arg === '-role' && i + 1 < args.length) {
-            result.role = ObjC.unwrap(args[i + 1]);
-        } else if (arg === '-processId' && i + 1 < args.length) {
-            result.processId = parseInt(ObjC.unwrap(args[i + 1]), 10);
-        } else if (arg === '-value' && i + 1 < args.length) {
-            result.value = ObjC.unwrap(args[i + 1]);
-        }
-    }
-    
-    return result;
-}
-
 // Utility function to safely get property values
 function safeGet(obj, property, defaultValue) {
     try {
@@ -129,187 +98,206 @@ function getElementBounds(element) {
     return null;
 }
 
-try {
-    var params = parseArgs();
-    
-    // Validate required parameters
-    if (!params.action) {
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'Missing required parameter: -action' 
-        }));
-        $.exit(1);
-    }
-    
-    if (!params.processId) {
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'Missing required parameter: -processId' 
-        }));
-        $.exit(1);
-    }
-    
-    var SystemEvents = Application('System Events');
-    SystemEvents.includeStandardAdditions = true;
-    
-    // Find the target process
-    var targetProcess = null;
-    var processes = SystemEvents.processes.where({ unixId: params.processId });
-    
-    if (processes.length === 0) {
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'No process found with ID ' + params.processId 
-        }));
-        $.exit(0);
-    }
-    
-    targetProcess = processes[0];
-    
-    // Find target element
-    var targetElement = null;
-    var windows = targetProcess.windows;
-    
-    for (var w = 0; w < windows.length && !targetElement; w++) {
-        targetElement = findElement(windows[w], params.name, params.role, 10, 0);
-    }
-    
-    if (!targetElement) {
-        var searchDesc = '';
-        if (params.name) searchDesc += 'name="' + params.name + '" ';
-        if (params.role) searchDesc += 'role="' + params.role + '" ';
-        console.log(JSON.stringify({ 
-            success: false, 
-            error: 'Element not found: ' + searchDesc.trim() 
-        }));
-        $.exit(0);
-    }
-    
-    // Execute the requested action
-    var result = { success: false };
-    
-    switch (params.action) {
-        case 'click':
-            try {
-                targetElement.click();
-                result = { 
-                    success: true, 
-                    action: 'click',
-                    method: 'click()'
-                };
-            } catch (e) {
-                // Fallback: return bounds for coordinate click
-                var bounds = getElementBounds(targetElement);
-                if (bounds) {
-                    result = {
-                        success: false,
-                        action: 'click',
-                        error: 'Element does not support click(). Use coordinate click.',
-                        clickPoint: {
-                            x: bounds.x + Math.floor(bounds.width / 2),
-                            y: bounds.y + Math.floor(bounds.height / 2)
-                        }
-                    };
-                } else {
-                    result = {
-                        success: false,
-                        action: 'click',
-                        error: 'Click failed and no bounds available: ' + e.toString()
-                    };
-                }
+// run(argv) is the JXA entry point — osascript calls it and its return value becomes stdout.
+// argv receives command-line arguments passed after the script path.
+function run(argv) {
+    try {
+        // Parse arguments from argv array
+        var params = { 
+            action: null,
+            name: null, 
+            role: null, 
+            processId: null,
+            value: null
+        };
+        for (var i = 0; i < argv.length; i++) {
+            if (argv[i] === '-action' && i + 1 < argv.length) {
+                params.action = argv[++i];
+            } else if (argv[i] === '-name' && i + 1 < argv.length) {
+                params.name = argv[++i];
+            } else if (argv[i] === '-role' && i + 1 < argv.length) {
+                params.role = argv[++i];
+            } else if (argv[i] === '-processId' && i + 1 < argv.length) {
+                params.processId = parseInt(argv[++i], 10);
+            } else if (argv[i] === '-value' && i + 1 < argv.length) {
+                params.value = argv[++i];
             }
-            break;
-            
-        case 'set-value':
-            if (params.value === null) {
-                result = {
-                    success: false,
-                    error: 'Value parameter required for set-value action'
-                };
-            } else {
+        }
+
+        // Validate required parameters
+        if (!params.action) {
+            return JSON.stringify({ 
+                success: false, 
+                error: 'Missing required parameter: -action' 
+            });
+        }
+        
+        if (!params.processId) {
+            return JSON.stringify({ 
+                success: false, 
+                error: 'Missing required parameter: -processId' 
+            });
+        }
+        
+        var SystemEvents = Application('System Events');
+        SystemEvents.includeStandardAdditions = true;
+        
+        // Find the target process
+        var targetProcess = null;
+        var processes = SystemEvents.processes.where({ unixId: params.processId });
+        
+        if (processes.length === 0) {
+            return JSON.stringify({ 
+                success: false, 
+                error: 'No process found with ID ' + params.processId 
+            });
+        }
+        
+        targetProcess = processes[0];
+        
+        // Find target element
+        var targetElement = null;
+        var windows = targetProcess.windows;
+        
+        for (var w = 0; w < windows.length && !targetElement; w++) {
+            targetElement = findElement(windows[w], params.name, params.role, 10, 0);
+        }
+        
+        if (!targetElement) {
+            var searchDesc = '';
+            if (params.name) searchDesc += 'name="' + params.name + '" ';
+            if (params.role) searchDesc += 'role="' + params.role + '" ';
+            return JSON.stringify({ 
+                success: false, 
+                error: 'Element not found: ' + searchDesc.trim() 
+            });
+        }
+        
+        // Execute the requested action
+        var result = { success: false };
+        
+        switch (params.action) {
+            case 'click':
                 try {
-                    targetElement.value = params.value;
-                    result = {
-                        success: true,
-                        action: 'set-value',
-                        value: params.value
+                    targetElement.click();
+                    result = { 
+                        success: true, 
+                        action: 'click',
+                        method: 'click()'
                     };
                 } catch (e) {
-                    // Try setting through focused property
-                    try {
-                        targetElement.focused = true;
-                        // Use System Events to type the value
-                        var app = Application.currentApplication();
-                        app.includeStandardAdditions = true;
-                        app.keystroke(params.value);
-                        result = {
-                            success: true,
-                            action: 'set-value',
-                            value: params.value,
-                            method: 'keystroke'
-                        };
-                    } catch (ke) {
+                    // Fallback: return bounds for coordinate click
+                    var bounds = getElementBounds(targetElement);
+                    if (bounds) {
                         result = {
                             success: false,
-                            error: 'Failed to set value: ' + e.toString()
+                            action: 'click',
+                            error: 'Element does not support click(). Use coordinate click.',
+                            clickPoint: {
+                                x: bounds.x + Math.floor(bounds.width / 2),
+                                y: bounds.y + Math.floor(bounds.height / 2)
+                            }
+                        };
+                    } else {
+                        result = {
+                            success: false,
+                            action: 'click',
+                            error: 'Click failed and no bounds available: ' + e.toString()
                         };
                     }
                 }
-            }
-            break;
-            
-        case 'get-value':
-            try {
-                var val = targetElement.value();
-                result = {
-                    success: true,
-                    action: 'get-value',
-                    value: val
-                };
-            } catch (e) {
-                // Fallback to name property
+                break;
+                
+            case 'set-value':
+                if (params.value === null) {
+                    result = {
+                        success: false,
+                        error: 'Value parameter required for set-value action'
+                    };
+                } else {
+                    try {
+                        targetElement.value = params.value;
+                        result = {
+                            success: true,
+                            action: 'set-value',
+                            value: params.value
+                        };
+                    } catch (e) {
+                        // Try setting through focused property
+                        try {
+                            targetElement.focused = true;
+                            // Use System Events to type the value
+                            var app = Application.currentApplication();
+                            app.includeStandardAdditions = true;
+                            app.keystroke(params.value);
+                            result = {
+                                success: true,
+                                action: 'set-value',
+                                value: params.value,
+                                method: 'keystroke'
+                            };
+                        } catch (ke) {
+                            result = {
+                                success: false,
+                                error: 'Failed to set value: ' + e.toString()
+                            };
+                        }
+                    }
+                }
+                break;
+                
+            case 'get-value':
                 try {
-                    var name = targetElement.name();
+                    var val = targetElement.value();
                     result = {
                         success: true,
                         action: 'get-value',
-                        value: name,
-                        method: 'name'
+                        value: val
                     };
-                } catch (ne) {
+                } catch (e) {
+                    // Fallback to name property
+                    try {
+                        var name = targetElement.name();
+                        result = {
+                            success: true,
+                            action: 'get-value',
+                            value: name,
+                            method: 'name'
+                        };
+                    } catch (ne) {
+                        result = {
+                            success: false,
+                            error: 'Element has no value or name property'
+                        };
+                    }
+                }
+                break;
+                
+            case 'focus':
+                try {
+                    targetElement.focused = true;
+                    result = {
+                        success: true,
+                        action: 'focus'
+                    };
+                } catch (e) {
                     result = {
                         success: false,
-                        error: 'Element has no value or name property'
+                        error: 'Failed to set focus: ' + e.toString()
                     };
                 }
-            }
-            break;
-            
-        case 'focus':
-            try {
-                targetElement.focused = true;
-                result = {
-                    success: true,
-                    action: 'focus'
-                };
-            } catch (e) {
+                break;
+                
+            default:
                 result = {
                     success: false,
-                    error: 'Failed to set focus: ' + e.toString()
+                    error: 'Unknown action: ' + params.action
                 };
-            }
-            break;
-            
-        default:
-            result = {
-                success: false,
-                error: 'Unknown action: ' + params.action
-            };
+        }
+        
+        return JSON.stringify(result);
+        
+    } catch (error) {
+        return JSON.stringify({ success: false, error: error.toString() });
     }
-    
-    console.log(JSON.stringify(result));
-    
-} catch (error) {
-    console.log(JSON.stringify({ success: false, error: error.toString() }));
-    $.exit(1);
 }
