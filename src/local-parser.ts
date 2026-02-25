@@ -147,14 +147,14 @@ export class LocalTaskParser {
     }
 
     // 4. Minimize [window/app]
-    const minimizeMatch = normalized.match(/^minimize\s*(?:the\s+)?(.+)?$/i);
+    const minimizeMatch = normalized.match(/^minimize(?:\s+the)?\s*(.*)$/i);
     if (minimizeMatch) {
       const target = minimizeMatch[1]?.trim();
       return target ? `minimize ${target}` : 'minimize window';
     }
 
     // 5. Maximize [window/app]
-    const maximizeMatch = normalized.match(/^maximize\s*(?:the\s+)?(.+)?$/i);
+    const maximizeMatch = normalized.match(/^maximize(?:\s+the)?\s*(.*)$/i);
     if (maximizeMatch) {
       const target = maximizeMatch[1]?.trim();
       return target ? `maximize ${target}` : 'maximize window';
@@ -171,7 +171,7 @@ export class LocalTaskParser {
     if (typeMatch) {
       const text = typeMatch[1].trim();
       // Remove surrounding quotes if present
-      const cleanText = text.replace(/^["'](.+)["']$/, '$1');
+      const cleanText = text.replace(/^["']([^"']+)["']$/, '$1');
       return `type ${cleanText}`;
     }
 
@@ -222,28 +222,32 @@ export class LocalTaskParser {
     }
 
     // 11. Wait commands
-    const waitMatch = normalized.match(/^wait(?:\s+for)?\s*(\d+)?\s*(?:seconds?|ms|milliseconds?)?$/i);
+    const waitMatch = normalized.match(/^wait(?:\s+for)?\s+(\d+)\s*(?:seconds?|ms|milliseconds?)?$/i);
     if (waitMatch) {
-      const duration = waitMatch[1];
-      return duration ? `wait ${duration}s` : 'wait';
+      return `wait ${waitMatch[1]}s`;
+    }
+    if (/^wait$/i.test(normalized)) {
+      return 'wait';
     }
 
     // 12. Scroll commands
-    const scrollMatch = normalized.match(/^scroll\s+(up|down|left|right)(?:\s+by)?\s*(\d+)?\s*(?:px|pixels?)?$/i);
+    const scrollWithAmountMatch = normalized.match(/^scroll\s+(up|down|left|right)(?:\s+by)?\s+(\d+)\s*(?:px|pixels?)?$/i);
+    if (scrollWithAmountMatch) {
+      return `scroll ${scrollWithAmountMatch[1]} ${scrollWithAmountMatch[2]}px`;
+    }
+    const scrollMatch = normalized.match(/^scroll\s+(up|down|left|right)$/i);
     if (scrollMatch) {
-      const direction = scrollMatch[1];
-      const amount = scrollMatch[2] || '';
-      return amount ? `scroll ${direction} ${amount}px` : `scroll ${direction}`;
+      return `scroll ${scrollMatch[1]}`;
     }
 
     // 13. Double-click [element]
-    const doubleClickMatch = normalized.match(/^(?:double[-\s]?click|doubleclick)\s+(.+)$/i);
+    const doubleClickMatch = normalized.match(/^(?:double[- ]click|doubleclick)\s+(.+)$/i);
     if (doubleClickMatch) {
       return `double click ${doubleClickMatch[1].trim()}`;
     }
 
     // 14. Right-click [element]
-    const rightClickMatch = normalized.match(/^(?:right[-\s]?click|rightclick)\s+(.+)$/i);
+    const rightClickMatch = normalized.match(/^(?:right[- ]click|rightclick)\s+(.+)$/i);
     if (rightClickMatch) {
       return `right click ${rightClickMatch[1].trim()}`;
     }

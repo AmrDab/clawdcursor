@@ -372,10 +372,10 @@ export class BrowserLayer {
    * Extract a search query from a task.
    */
   private extractSearchQuery(task: string): string | null {
-    const searchMatch = task.match(/\b(?:search|look up|find|google)\s+(?:for\s+)?["']?(.+?)["']?\s*$/i);
+    const searchMatch = task.match(/\b(?:search|look up|find|google)\s+(?:for\s+)?["']?([^"']+?)["']?$/i);
     if (searchMatch) return searchMatch[1];
     
-    const webSearchMatch = task.match(/\b(?:search the web|web search|search online)\s+(?:for\s+)?["']?(.+?)["']?\s*$/i);
+    const webSearchMatch = task.match(/\b(?:search the web|web search|search online)\s+(?:for\s+)?["']?([^"']+?)["']?$/i);
     if (webSearchMatch) return webSearchMatch[1];
 
     return null;

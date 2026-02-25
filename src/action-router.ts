@@ -7,7 +7,7 @@
  */
 
 import * as os from 'os';
-import { exec as execCb } from 'child_process';
+import { exec as execCb, execFile } from 'child_process';
 import { promisify } from 'util';
 import { AccessibilityBridge } from './accessibility';
 import { NativeDesktop } from './native-desktop';
@@ -15,6 +15,7 @@ import { normalizeKey } from './keys';
 import type { WindowInfo } from './accessibility';
 
 const execAsync = promisify(execCb);
+const execFileAsync = promisify(execFile);
 
 const PLATFORM = os.platform();
 
@@ -89,9 +90,9 @@ export class ActionRouter {
     }
 
     // 2. "type [text]" / "type '[text]'" / "enter [text]"
-    const typeMatch = task.match(/^(?:type|enter|write|input)\s+['"]?(.+?)['"]?\s*$/i);
+    const typeMatch = task.match(/^(?:type|enter|write|input)\s+(?:['"]([^'"]*)['"]\s*|(.+))$/i);
     if (typeMatch) {
-      return this.handleType(typeMatch[1]);
+      return this.handleType(typeMatch[1] ?? typeMatch[2]);
     }
 
     // 3. "go to [url]" / "navigate to [url]" / "visit [url]"
@@ -107,7 +108,7 @@ export class ActionRouter {
     }
 
     // 5. "click [element]" — try a11y lookup (no "press"/"hit" — handled above)
-    const clickMatch = task.match(/^(?:click|tap)\s+(?:the\s+)?(?:on\s+)?['"]?(.+?)['"]?\s*(?:button|link|tab|menu|item)?$/i);
+    const clickMatch = task.match(/^(?:click|tap)\s+(?:the\s+)?(?:on\s+)?['"]?([^'"]+?)['"]?(?:\s+(?:button|link|tab|menu|item))?$/i);
     if (clickMatch) {
       return this.handleClick(clickMatch[1].trim());
     }
@@ -225,9 +226,8 @@ export class ActionRouter {
     try {
       if (PLATFORM === 'darwin') {
         // macOS: use `open -a` — directly launches & focuses, no Spotlight needed
-        const appToOpen = (macOSAppName || searchTerm).replace(/"/g, '\\"');
         try {
-          await execAsync(`open -a "${appToOpen}"`);
+          await execFileAsync('open', ['-a', macOSAppName || searchTerm]);
           await this.delay(800); // give app time to surface
         } catch {
           // Fallback: Spotlight if open -a fails (e.g. non-standard app name)
@@ -362,8 +362,11 @@ export class ActionRouter {
         await this.delay(300);
       } else {
         // No browser running — launch default browser via OS default handler
-        const launchCmd = PLATFORM === 'darwin' ? `open "${fullUrl}"` : `start "" "${fullUrl}"`;
-        await execAsync(launchCmd);
+        if (PLATFORM === 'darwin') {
+          await execFileAsync('open', [fullUrl]);
+        } else {
+          await execFileAsync('cmd', ['/c', 'start', '', fullUrl]);
+        }
         await this.delay(2000);
         return {
           handled: true,
