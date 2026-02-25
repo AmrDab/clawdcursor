@@ -33,6 +33,7 @@ const SCRIPT_MAP: Record<string, Record<string, string>> = {
   },
   darwin: {
     'get-windows': 'get-windows.jxa',
+    'get-screen-context': 'get-screen-context.jxa',
     'find-element': 'find-element.jxa',
     'invoke-element': 'invoke-element.jxa',
     'focus-window': 'focus-window.jxa',

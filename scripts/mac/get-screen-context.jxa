@@ -2,173 +2,186 @@
 
 /**
  * get-screen-context.jxa
- * 
+ *
+ * Combined script: gets windows list + focused window UI tree in ONE osascript spawn.
  * macOS equivalent of get-screen-context.ps1.
- * Combines window listing with focused window UI tree for screen context.
- * 
- * Parameters:
- *   -FocusedProcessId <number>  - PID of the focused process (optional; auto-detects if omitted)
- *   -MaxDepth <number>          - Max depth for UI tree traversal (default: 2)
- * 
- * Returns JSON with:
- *   - windows: Array of visible windows with title, processName, processId, bounds
- *   - focusedWindow: Info about the focused window
- *   - uiTree: UI element tree of the focused window (up to MaxDepth)
- * 
- * Usage: osascript -l JavaScript get-screen-context.jxa
- *        osascript -l JavaScript get-screen-context.jxa -FocusedProcessId 1046 -MaxDepth 2
+ *
+ * Output shape (matches PS1 exactly so accessibility.ts needs no changes):
+ *   { windows: WindowInfo[], uiTree: UINode | null }
+ *
+ * Parameters (read from argv):
+ *   -FocusedProcessId <number>  — if provided, include UI tree for that process
+ *   -MaxDepth <number>          — max UI tree depth (default 2)
+ *
+ * Output: script result (last expression) goes to stdout for Node.js execFile.
+ *
+ * Usage: osascript -l JavaScript get-screen-context.jxa -FocusedProcessId 1234 -MaxDepth 2
  */
 
-function safeGet(obj, property, defaultValue) {
+ObjC.import('stdlib');
+
+// ─── Argument parsing ────────────────────────────────────────────────────────
+
+function parseArgs() {
+    var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
+    var result = { focusedProcessId: 0, maxDepth: 2 };
+    for (var i = 0; i < args.length; i++) {
+        var arg = ObjC.unwrap(args[i]);
+        if (arg === '-FocusedProcessId' && i + 1 < args.length) {
+            result.focusedProcessId = parseInt(ObjC.unwrap(args[i + 1]), 10) || 0;
+        } else if (arg === '-MaxDepth' && i + 1 < args.length) {
+            result.maxDepth = parseInt(ObjC.unwrap(args[i + 1]), 10) || 2;
+        }
+    }
+    return result;
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function safeGet(obj, prop, def) {
+    try { var v = obj[prop](); return (v !== undefined && v !== null) ? v : def; }
+    catch (e) { return def; }
+}
+
+function safeProp(el, prop, def) {
+    try { return el[prop] ? el[prop]() : def; }
+    catch (e) { return def; }
+}
+
+function getBounds(el) {
     try {
-        var val = obj[property]();
-        return val !== undefined && val !== null ? val : defaultValue;
+        var pos = el.position();
+        var sz  = el.size();
+        return { x: pos[0], y: pos[1], width: sz[0], height: sz[1] };
     } catch (e) {
-        return defaultValue;
+        return { x: 0, y: 0, width: 0, height: 0 };
     }
 }
 
-function getElementTree(element, maxDepth, currentDepth) {
-    if (currentDepth > maxDepth) return null;
-    
-    var node = { role: '', name: '', value: '' };
-    
-    try { node.role = element.role() || ''; } catch (e) {}
-    try { node.name = element.name() || ''; } catch (e) {}
-    try { 
-        var v = element.value();
-        if (v !== undefined && v !== null) node.value = String(v);
-    } catch (e) {}
-    
-    // Get bounds
-    try {
-        var pos = element.position();
-        var sz = element.size();
-        node.bounds = {
-            x: pos[0] || 0,
-            y: pos[1] || 0,
-            width: sz[0] || 0,
-            height: sz[1] || 0
-        };
-    } catch (e) {}
-    
-    // Get children
-    if (currentDepth < maxDepth) {
+// ─── Part 1: windows list (same logic as get-windows.jxa) ────────────────────
+
+function getWindows(SystemEvents) {
+    var processes = SystemEvents.processes.where({ backgroundOnly: false });
+    var results = [];
+
+    for (var i = 0; i < processes.length; i++) {
         try {
-            var children = element.uiElements();
-            if (children.length > 0) {
-                node.children = [];
-                for (var i = 0; i < children.length && i < 50; i++) {
-                    var child = getElementTree(children[i], maxDepth, currentDepth + 1);
-                    if (child) node.children.push(child);
-                }
+            var proc       = processes[i];
+            var procName   = safeGet(proc, 'name', 'unknown');
+            var procId     = safeGet(proc, 'unixId', 0);
+            var windows    = proc.windows;
+
+            for (var j = 0; j < windows.length; j++) {
+                try {
+                    var win   = windows[j];
+                    var title = safeProp(win, 'name', '');
+                    if (!title || title.trim().length === 0) continue;
+
+                    var isMinimized = false;
+                    try { isMinimized = win.miniaturized(); } catch (e) {}
+
+                    results.push({
+                        handle:      procId,
+                        title:       title,
+                        processName: procName,
+                        processId:   procId,
+                        bounds:      getBounds(win),
+                        isMinimized: isMinimized
+                    });
+                } catch (e) {}
             }
         } catch (e) {}
     }
-    
-    return node;
+
+    return results;
 }
 
-function run(argv) {
+// ─── Part 2: UI tree for focused process ─────────────────────────────────────
+
+// Interactive macOS roles worth sending to the LLM
+var INTERACTIVE_ROLES = {
+    'AXButton': true, 'AXTextField': true, 'AXTextArea': true,
+    'AXComboBox': true, 'AXCheckBox': true, 'AXRadioButton': true,
+    'AXLink': true, 'AXMenuItem': true, 'AXMenu': true,
+    'AXTab': true, 'AXTabGroup': true, 'AXList': true,
+    'AXOutline': true, 'AXSlider': true, 'AXScrollBar': true,
+    'AXToolbar': true, 'AXWebArea': true, 'AXStaticText': true,
+    'AXGroup': true
+};
+
+function buildUINode(element, maxDepth, depth) {
+    if (depth > maxDepth) return null;
+
+    var name  = '';
+    var role  = '';
+    var value = '';
+
+    try { name  = element.name()  || ''; } catch (e) {}
+    try { role  = element.role()  || ''; } catch (e) {}
+    try { value = element.value() || ''; } catch (e) {}
+
+    var isInteractive = !!INTERACTIVE_ROLES[role];
+    var hasName       = name.trim().length > 0;
+
+    // Build children first so we can decide whether to include this node
+    var children = [];
+    if (depth < maxDepth) {
+        try {
+            var kids = element.uiElements();
+            for (var i = 0; i < kids.length; i++) {
+                try {
+                    var child = buildUINode(kids[i], maxDepth, depth + 1);
+                    if (child) children.push(child);
+                } catch (e) {}
+            }
+        } catch (e) {}
+    }
+
+    // Skip uninteresting, unnamed leaf nodes (mirrors PS1 behaviour)
+    if (!isInteractive && !hasName && children.length === 0) return null;
+
+    return {
+        name:         name,
+        automationId: '',            // macOS has no AutomationId concept
+        controlType:  role,
+        bounds:       getBounds(element),
+        value:        value || undefined,
+        children:     children.length > 0 ? children : undefined
+    };
+}
+
+function getUITree(SystemEvents, focusedProcessId, maxDepth) {
+    if (!focusedProcessId) return null;
+
     try {
-        // Parse arguments
-        var focusedProcessId = null;
-        var maxDepth = 2;
-        
-        for (var i = 0; i < argv.length; i++) {
-            if ((argv[i] === '-FocusedProcessId' || argv[i] === '-processId') && i + 1 < argv.length) {
-                focusedProcessId = parseInt(argv[++i], 10);
-            } else if ((argv[i] === '-MaxDepth' || argv[i] === '-maxDepth') && i + 1 < argv.length) {
-                maxDepth = parseInt(argv[++i], 10);
-            }
-        }
-        
-        var SystemEvents = Application('System Events');
-        SystemEvents.includeStandardAdditions = true;
-        
-        var result = {
-            windows: [],
-            focusedWindow: null,
-            uiTree: null
-        };
-        
-        // 1. Get all visible windows
-        var processes = SystemEvents.processes.where({ backgroundOnly: false });
-        
-        var focusedProcess = null;
-        
-        for (var p = 0; p < processes.length; p++) {
-            try {
-                var process = processes[p];
-                var processName = safeGet(process, 'name', 'unknown');
-                var processId = safeGet(process, 'unixId', 0);
-                var isFrontmost = safeGet(process, 'frontmost', false);
-                
-                // Track focused process
-                if (isFrontmost || (focusedProcessId && processId === focusedProcessId)) {
-                    focusedProcess = process;
-                    if (!focusedProcessId) focusedProcessId = processId;
-                }
-                
-                var windows = process.windows;
-                for (var w = 0; w < windows.length; w++) {
-                    try {
-                        var win = windows[w];
-                        var title = '';
-                        try { title = win.name() || ''; } catch (e) {}
-                        
-                        if (!title || title.trim().length === 0) continue;
-                        
-                        var bounds = { x: 0, y: 0, width: 0, height: 0 };
-                        try {
-                            var position = win.position();
-                            var size = win.size();
-                            bounds = {
-                                x: position[0],
-                                y: position[1],
-                                width: size[0],
-                                height: size[1]
-                            };
-                        } catch (e) {}
-                        
-                        var isMinimized = false;
-                        try { isMinimized = win.miniaturized(); } catch (e) {}
-                        
-                        var winInfo = {
-                            title: title,
-                            processName: processName,
-                            processId: processId,
-                            bounds: bounds,
-                            isMinimized: isMinimized,
-                            isFocused: isFrontmost
-                        };
-                        
-                        result.windows.push(winInfo);
-                        
-                        // Capture focused window info
-                        if ((isFrontmost || processId === focusedProcessId) && !result.focusedWindow) {
-                            result.focusedWindow = winInfo;
-                        }
-                    } catch (e) {}
-                }
-            } catch (e) {}
-        }
-        
-        // 2. Get UI tree for focused window
-        if (focusedProcess) {
-            try {
-                var focusedWindows = focusedProcess.windows;
-                if (focusedWindows.length > 0) {
-                    result.uiTree = getElementTree(focusedWindows[0], maxDepth, 0);
-                }
-            } catch (e) {
-                result.uiTree = { error: e.toString() };
-            }
-        }
-        
-        return JSON.stringify(result);
-        
-    } catch (error) {
-        return JSON.stringify({ error: error.toString() });
+        var procs = SystemEvents.processes.where({ unixId: focusedProcessId });
+        if (procs.length === 0) return null;
+
+        var proc    = procs[0];
+        var windows = proc.windows;
+        if (windows.length === 0) return null;
+
+        // Use the first (frontmost) window
+        return buildUINode(windows[0], maxDepth, 0);
+    } catch (e) {
+        return null;
     }
 }
+
+// ─── Main ────────────────────────────────────────────────────────────────────
+
+var output;
+try {
+    var params       = parseArgs();
+    var SystemEvents = Application('System Events');
+    SystemEvents.includeStandardAdditions = true;
+
+    var windows = getWindows(SystemEvents);
+    var uiTree  = getUITree(SystemEvents, params.focusedProcessId, params.maxDepth);
+
+    output = JSON.stringify({ windows: windows, uiTree: uiTree });
+} catch (error) {
+    output = JSON.stringify({ error: error.toString() });
+    $.exit(1);
+}
+output;
