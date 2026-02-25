@@ -242,7 +242,10 @@ async function testModel(
 
       const data = await response.json() as any;
       if (data.error) {
-        return { ok: false, error: data.error.message || JSON.stringify(data.error) };
+        const msg = typeof data.error === 'object' && data.error !== null
+          ? (data.error.message || JSON.stringify(data.error))
+          : String(data.error);
+        return { ok: false, error: msg };
       }
       const text = data.choices?.[0]?.message?.content || '';
       if (!text) return { ok: false, error: 'Empty response' };
@@ -266,8 +269,21 @@ async function testModel(
       });
 
       const data = await response.json() as any;
+      if (data.type === 'error' && data.error) {
+        const err = data.error;
+        const msg = typeof err === 'object' && err !== null
+          ? (err.message || JSON.stringify(err))
+          : String(err);
+        const hint = (err.type === 'not_found_error' || err.type === 'invalid_request_error')
+          ? ' — check model id (e.g. claude-haiku-3-5-20241022)'
+          : '';
+        return { ok: false, error: msg + hint };
+      }
       if (data.error) {
-        return { ok: false, error: data.error.message || JSON.stringify(data.error) };
+        const msg = typeof data.error === 'object' && data.error !== null
+          ? (data.error.message || JSON.stringify(data.error))
+          : String(data.error);
+        return { ok: false, error: msg };
       }
 
       return { ok: true, latencyMs: Math.round(performance.now() - start) };
