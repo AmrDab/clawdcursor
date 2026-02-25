@@ -41,7 +41,6 @@ const SCRIPT_MAP: Record<string, Record<string, string>> = {
     'invoke-element': 'invoke-element.jxa',
     'focus-window': 'focus-window.jxa',
     'get-foreground-window': 'get-foreground-window.jxa',
-    'get-screen-context': 'get-screen-context.jxa',
   },
 };
 
