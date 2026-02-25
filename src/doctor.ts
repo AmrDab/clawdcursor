@@ -1,5 +1,5 @@
 /**
- * 🩺 Clawd Cursor Doctor — diagnoses setup and auto-configures the pipeline.
+ * 🩺 Clawd Cursor Doctor - diagnoses setup and auto-configures the pipeline.
  *
  * Tests:
  * 1. Screen capture (nut-js)
@@ -33,7 +33,7 @@ export async function runDoctor(opts: {
 }): Promise<PipelineConfig | null> {
   const results: DiagResult[] = [];
 
-  console.log(`\n🩺 Clawd Cursor Doctor — diagnosing your setup...\n`);
+  console.log(`\n🩺 Clawd Cursor Doctor - diagnosing your setup...\n`);
 
   // ─── 1. Screen Capture ───────────────────────────────────────────
   console.log('📸 Screen capture...');
@@ -112,7 +112,7 @@ export async function runDoctor(opts: {
     results.push({ name: `Text model (${textModel})`, ok: false, detail: textResult.error || 'Failed' });
     console.log(`   ❌ ${textModel}: ${textResult.error}`);
 
-    // Try fallback — if Anthropic fails, try Ollama
+    // Try fallback - if Anthropic fails, try Ollama
     if (providerKey !== 'ollama') {
       console.log(`   🔄 Trying Ollama fallback...`);
       const ollamaResult = await testModel(PROVIDERS['ollama'], '', 'qwen2.5:7b', false);
@@ -144,7 +144,7 @@ export async function runDoctor(opts: {
       console.log(`   ❌ ${visionModel}: ${visionResult.error}`);
     }
   } else {
-    console.log(`   ⚠️  No API key — vision model skipped`);
+    console.log(`   ⚠️  No API key - vision model skipped`);
     results.push({ name: 'Vision model', ok: false, detail: 'No API key' });
   }
 
@@ -204,7 +204,7 @@ export async function runDoctor(opts: {
       console.log(`   ❌ ${f.name}: ${f.detail}`);
     }
     if (!visionModelWorks && textModelWorks) {
-      console.log(`\n💡 Running without vision — accessibility reasoner + action router will handle most tasks.`);
+      console.log(`\n💡 Running without vision - accessibility reasoner + action router will handle most tasks.`);
     }
   }
   console.log('');
@@ -275,7 +275,7 @@ async function testModel(
           ? (err.message || JSON.stringify(err))
           : String(err);
         const hint = (err.type === 'not_found_error' || err.type === 'invalid_request_error')
-          ? ' — check model id (e.g. claude-haiku-3-5-20241022)'
+          ? ' — check model id (e.g. claude-3-5-haiku-20241022 or claude-haiku-4-5)'
           : '';
         return { ok: false, error: msg + hint };
       }

@@ -19,7 +19,10 @@ const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform(); // 'win32' | 'darwin' | 'linux'
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
 const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
-const SCRIPT_TIMEOUT = 10000; // 10s timeout
+// macOS JXA scripts enumerate System Events which can be slow on some versions.
+// 30s gives enough headroom; scripts are cached after first call so this only
+// applies to the first invocation per session.
+const SCRIPT_TIMEOUT = PLATFORM === 'darwin' ? 30000 : 10000;
 
 /** Platform script file mapping: Windows (.ps1) → macOS (.jxa) */
 const SCRIPT_MAP: Record<string, Record<string, string>> = {
@@ -98,7 +101,14 @@ export class AccessibilityBridge {
       if (PLATFORM === 'win32') {
         await execFileAsync('powershell.exe', ['-Command', 'exit 0'], { timeout: 5000 });
       } else if (PLATFORM === 'darwin') {
-        await execFileAsync('osascript', ['-l', 'JavaScript', '-e', '""'], { timeout: 5000 });
+        // Probe System Events directly — a bare osascript -e '""' succeeds even without
+        // Accessibility permissions, giving a false positive. Touching processes.length
+        // forces macOS to check the permission and fail fast with a clear error if not granted.
+        await execFileAsync(
+          'osascript',
+          ['-l', 'JavaScript', '-e', 'Application("System Events").processes.length; true'],
+          { timeout: 5000 },
+        );
       } else {
         console.error(`❌ Unsupported platform: ${PLATFORM}. Accessibility requires Windows or macOS.`);
         shellAvailable = false;
@@ -106,10 +116,22 @@ export class AccessibilityBridge {
       }
       shellAvailable = true;
       console.log(`✅ Accessibility bridge ready (${PLATFORM === 'win32' ? 'PowerShell' : 'osascript'})`);
-    } catch {
+    } catch (err: any) {
       shellAvailable = false;
-      const shell = PLATFORM === 'win32' ? 'PowerShell' : 'osascript';
-      console.error(`❌ ${shell} not available. Accessibility bridge will not function.`);
+      if (PLATFORM === 'darwin') {
+        const isAuthError = err.stderr?.includes('not authorized') || err.message?.includes('not authorized');
+        if (isAuthError) {
+          console.error(
+            `❌ Accessibility: not authorized to control System Events.\n` +
+            `   → System Settings → Privacy & Security → Accessibility\n` +
+            `   → Add your terminal app (Terminal, iTerm2, wezterm, etc.) or Node.js and try again.`
+          );
+        } else {
+          console.error(`❌ osascript not available. Accessibility bridge will not function.`);
+        }
+      } else {
+        console.error(`❌ PowerShell not available. Accessibility bridge will not function.`);
+      }
     }
     return shellAvailable;
   }
@@ -497,13 +519,11 @@ export class AccessibilityBridge {
         maxBuffer: 1024 * 1024 * 5, // 5MB buffer
       }, (error, stdout, stderr) => {
         if (error) {
-          const stderrMsg = stderr ? stderr.trim().substring(0, 500) : '';
-          const stdoutMsg = stdout ? stdout.trim().substring(0, 300) : '';
-          console.error(`Accessibility script error (${resolvedScript}): ${error.message}${stderrMsg ? '\n  stderr: ' + stderrMsg : ''}${stdoutMsg ? '\n  stdout: ' + stdoutMsg : ''}`);
-          if (PLATFORM === 'darwin' && !stderrMsg && !stdoutMsg) {
-            console.error(`  hint: On macOS, grant Accessibility permission to Terminal/iTerm in System Settings > Privacy & Security > Accessibility. The app running "node" (not just Terminal) may need permission.`);
-          }
-          reject(error);
+          // Include stderr so the real reason (e.g. "not authorized to send Apple events") is visible
+          const stderrDetail = typeof stderr === 'string' && stderr.trim() ? ` — ${stderr.trim()}` : '';
+          const fullMessage = error.message + stderrDetail;
+          console.error(`Accessibility script error (${resolvedScript}): ${fullMessage}`);
+          reject(new Error(fullMessage));
           return;
         }
 

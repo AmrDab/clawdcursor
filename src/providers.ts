@@ -29,7 +29,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
       'x-api-key': key,
       'anthropic-version': '2023-06-01',
     }),
-    textModel: 'claude-haiku-3-5-20241022',  // Claude 3.5 Haiku
+    textModel: 'claude-3-5-haiku-20241022',  // Claude 3.5 Haiku — fallback to claude-haiku-4-5 if not on your plan
     visionModel: 'claude-sonnet-4-20250514',
     openaiCompat: false,
     computerUse: true,

@@ -39,6 +39,8 @@ const KEY_ALIASES: Record<string, string> = {
   'control': 'Control',
   'ctrl': 'Control',
   'alt': 'Alt',
+  'opt': 'Alt',
+  'option': 'Alt',
   'meta': 'Super',
   'super': 'Super',
   'super_l': 'Super',
