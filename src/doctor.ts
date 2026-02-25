@@ -244,7 +244,10 @@ async function checkForUpdates(results: DiagResult[]): Promise<void> {
 
       if (latestTag && latestTag !== currentVersion && compareVersions(latestTag, currentVersion) > 0) {
         console.log(`   ⬆️  Update available: v${latestTag} (you have v${currentVersion})`);
-        console.log(`   Run: git pull origin main && npm install && npm run build`);
+        const updateCmd = process.platform === 'win32'
+          ? 'git pull origin main; npm install; npm run build'
+          : 'git pull origin main && npm install && npm run build';
+        console.log(`   Run: ${updateCmd}`);
         results.push({
           name: 'Version',
           ok: false,
