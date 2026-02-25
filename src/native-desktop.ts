@@ -9,11 +9,15 @@
  * - Coordinate scaling handled transparently
  */
 
+import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
 import { normalizeKey } from './keys';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from './types';
+
+// On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
+const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 
 // nut-js Key enum mapping from canonical key names (see keys.ts for normalization)
 const KEY_MAP: Record<string, Key> = {
@@ -36,7 +40,7 @@ const KEY_MAP: Record<string, Key> = {
   'Shift': Key.LeftShift,
   'Control': Key.LeftControl,
   'Alt': Key.LeftAlt,
-  'Super': Key.LeftSuper,
+  'Super': SUPER_KEY,
   'Space': Key.Space,
 };
 

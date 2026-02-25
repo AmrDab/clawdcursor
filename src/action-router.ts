@@ -7,10 +7,14 @@
  */
 
 import * as os from 'os';
+import { exec as execCb } from 'child_process';
+import { promisify } from 'util';
 import { AccessibilityBridge } from './accessibility';
 import { NativeDesktop } from './native-desktop';
 import { normalizeKey } from './keys';
 import type { WindowInfo } from './accessibility';
+
+const execAsync = promisify(execCb);
 
 const PLATFORM = os.platform();
 
@@ -23,30 +27,36 @@ export interface RouteResult {
 /**
  * Known app aliases → process names / Start Menu search terms
  */
-const APP_ALIASES: Record<string, { processNames: string[]; searchTerm: string }> = {
+const APP_ALIASES: Record<string, { processNames: string[]; searchTerm: string; macOSAppName?: string }> = {
   'paint':        { processNames: ['mspaint'],              searchTerm: 'Paint' },
   'mspaint':      { processNames: ['mspaint'],              searchTerm: 'Paint' },
-  'notepad':      { processNames: ['notepad', 'Notepad'],   searchTerm: 'Notepad' },
-  'calculator':   { processNames: ['Calculator', 'calc'],   searchTerm: 'Calculator' },
-  'calc':         { processNames: ['Calculator', 'calc'],   searchTerm: 'Calculator' },
-  'chrome':       { processNames: ['chrome'],               searchTerm: 'Chrome' },
-  'firefox':      { processNames: ['firefox'],              searchTerm: 'Firefox' },
-  'edge':         { processNames: ['msedge'],               searchTerm: 'Edge' },
-  'explorer':     { processNames: ['explorer'],             searchTerm: 'File Explorer' },
-  'file explorer': { processNames: ['explorer'],            searchTerm: 'File Explorer' },
-  'cmd':          { processNames: ['cmd'],                  searchTerm: 'Command Prompt' },
-  'terminal':     { processNames: ['WindowsTerminal', 'cmd'], searchTerm: 'Terminal' },
+  'notepad':      { processNames: ['notepad', 'Notepad'],   searchTerm: 'Notepad',            macOSAppName: 'TextEdit' },
+  'calculator':   { processNames: ['Calculator', 'calc'],   searchTerm: 'Calculator',         macOSAppName: 'Calculator' },
+  'calc':         { processNames: ['Calculator', 'calc'],   searchTerm: 'Calculator',         macOSAppName: 'Calculator' },
+  'chrome':       { processNames: ['chrome', 'Google Chrome'], searchTerm: 'Chrome',          macOSAppName: 'Google Chrome' },
+  'google chrome': { processNames: ['chrome', 'Google Chrome'], searchTerm: 'Chrome',         macOSAppName: 'Google Chrome' },
+  'firefox':      { processNames: ['firefox'],              searchTerm: 'Firefox',            macOSAppName: 'Firefox' },
+  'safari':       { processNames: ['Safari'],               searchTerm: 'Safari',             macOSAppName: 'Safari' },
+  'edge':         { processNames: ['msedge'],               searchTerm: 'Edge',               macOSAppName: 'Microsoft Edge' },
+  'explorer':     { processNames: ['explorer'],             searchTerm: 'File Explorer',      macOSAppName: 'Finder' },
+  'finder':       { processNames: ['Finder'],               searchTerm: 'Finder',             macOSAppName: 'Finder' },
+  'file explorer': { processNames: ['explorer'],            searchTerm: 'File Explorer',      macOSAppName: 'Finder' },
+  'cmd':          { processNames: ['cmd'],                  searchTerm: 'Command Prompt',     macOSAppName: 'Terminal' },
+  'terminal':     { processNames: ['WindowsTerminal', 'cmd', 'Terminal'], searchTerm: 'Terminal', macOSAppName: 'Terminal' },
   'powershell':   { processNames: ['powershell', 'pwsh'],   searchTerm: 'PowerShell' },
-  'word':         { processNames: ['WINWORD'],              searchTerm: 'Word' },
-  'excel':        { processNames: ['EXCEL'],                searchTerm: 'Excel' },
-  'vscode':       { processNames: ['Code'],                 searchTerm: 'Visual Studio Code' },
-  'code':         { processNames: ['Code'],                 searchTerm: 'Visual Studio Code' },
-  'settings':     { processNames: ['SystemSettings'],       searchTerm: 'Settings' },
-  'task manager':  { processNames: ['Taskmgr'],             searchTerm: 'Task Manager' },
-  'spotify':      { processNames: ['Spotify'],              searchTerm: 'Spotify' },
-  'teams':        { processNames: ['ms-teams', 'Teams'],    searchTerm: 'Teams' },
-  'slack':        { processNames: ['slack'],                searchTerm: 'Slack' },
-  'discord':      { processNames: ['Discord'],              searchTerm: 'Discord' },
+  'word':         { processNames: ['WINWORD'],              searchTerm: 'Word',               macOSAppName: 'Microsoft Word' },
+  'excel':        { processNames: ['EXCEL'],                searchTerm: 'Excel',              macOSAppName: 'Microsoft Excel' },
+  'vscode':       { processNames: ['Code'],                 searchTerm: 'Visual Studio Code', macOSAppName: 'Visual Studio Code' },
+  'code':         { processNames: ['Code'],                 searchTerm: 'Visual Studio Code', macOSAppName: 'Visual Studio Code' },
+  'settings':     { processNames: ['SystemSettings'],       searchTerm: 'Settings',           macOSAppName: 'System Settings' },
+  'system settings': { processNames: ['System Preferences', 'System Settings'], searchTerm: 'System Settings', macOSAppName: 'System Settings' },
+  'task manager':  { processNames: ['Taskmgr'],             searchTerm: 'Task Manager',       macOSAppName: 'Activity Monitor' },
+  'activity monitor': { processNames: ['Activity Monitor'], searchTerm: 'Activity Monitor',   macOSAppName: 'Activity Monitor' },
+  'figma':        { processNames: ['Figma'],                searchTerm: 'Figma',              macOSAppName: 'Figma' },
+  'spotify':      { processNames: ['Spotify'],              searchTerm: 'Spotify',            macOSAppName: 'Spotify' },
+  'slack':        { processNames: ['Slack', 'slack'],       searchTerm: 'Slack',              macOSAppName: 'Slack' },
+  'teams':        { processNames: ['ms-teams', 'Teams'],    searchTerm: 'Teams',              macOSAppName: 'Microsoft Teams' },
+  'discord':      { processNames: ['Discord'],              searchTerm: 'Discord',            macOSAppName: 'Discord' },
 };
 
 /** Browser process names for URL navigation */
@@ -173,9 +183,10 @@ export class ActionRouter {
       // a11y unavailable, proceed with launch
     }
 
-    // App not running — launch via Start Menu
+    // App not running — launch via Start Menu (or open -a on macOS)
     const searchTerm = alias?.searchTerm || appName;
-    return this.launchViaStartMenu(searchTerm);
+    const macOSAppName = alias?.macOSAppName || appName;
+    return this.launchViaStartMenu(searchTerm, macOSAppName);
   }
 
   private findWindowForApp(
@@ -204,7 +215,7 @@ export class ActionRouter {
     );
   }
 
-  private async launchViaStartMenu(searchTerm: string): Promise<RouteResult> {
+  private async launchViaStartMenu(searchTerm: string, macOSAppName?: string): Promise<RouteResult> {
     // Snapshot windows BEFORE launch so we can detect the new one
     let windowsBefore: WindowInfo[] = [];
     try {
@@ -213,12 +224,19 @@ export class ActionRouter {
 
     try {
       if (PLATFORM === 'darwin') {
-        // macOS: Use Spotlight (Cmd+Space)
-        await this.desktop.keyPress('Super+ '); // Cmd+Space
-        await this.delay(400);
-        await this.desktop.typeText(searchTerm);
-        await this.delay(600);
-        await this.desktop.keyPress('Return');
+        // macOS: use `open -a` — directly launches & focuses, no Spotlight needed
+        const appToOpen = (macOSAppName || searchTerm).replace(/"/g, '\\"');
+        try {
+          await execAsync(`open -a "${appToOpen}"`);
+          await this.delay(800); // give app time to surface
+        } catch {
+          // Fallback: Spotlight if open -a fails (e.g. non-standard app name)
+          await this.desktop.keyPress('Super+Space');
+          await this.delay(400);
+          await this.desktop.typeText(searchTerm);
+          await this.delay(600);
+          await this.desktop.keyPress('Return');
+        }
       } else {
         // Windows: Use Start Menu (Win key)
         await this.desktop.keyPress('Super');
@@ -344,11 +362,8 @@ export class ActionRouter {
         await this.delay(300);
       } else {
         // No browser running — launch default browser via OS default handler
-        const { exec: execCb } = await import('child_process');
         const launchCmd = PLATFORM === 'darwin' ? `open "${fullUrl}"` : `start "" "${fullUrl}"`;
-        await new Promise<void>((resolve, reject) => {
-          execCb(launchCmd, (err) => err ? reject(err) : resolve());
-        });
+        await execAsync(launchCmd);
         await this.delay(2000);
         return {
           handled: true,

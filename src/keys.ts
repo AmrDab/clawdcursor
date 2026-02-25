@@ -46,6 +46,7 @@ const KEY_ALIASES: Record<string, string> = {
   'windows': 'Super',
   'cmd': 'Super',
   'command': 'Super',
+  'command_l': 'Super',
 
   // Function keys
   'f1': 'F1', 'f2': 'F2', 'f3': 'F3', 'f4': 'F4',
