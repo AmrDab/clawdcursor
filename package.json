@@ -1,7 +1,7 @@
 {
   "name": "clawd-cursor",
   "version": "0.5.1",
-  "description": "AI Desktop Agent — Native screen control via @nut-tree-fork/nut-js. Your AI sees the screen, moves the mouse, types, and completes tasks autonomously.",
+  "description": "AI Desktop Agent \u2014 Native screen control via @nut-tree-fork/nut-js. Your AI sees the screen, moves the mouse, types, and completes tasks autonomously.",
   "main": "dist/index.js",
   "bin": {
     "clawd-cursor": "dist/index.js"
@@ -13,7 +13,8 @@
     "stop": "node dist/index.js stop",
     "doctor": "node dist/index.js doctor",
     "lint": "eslint src/",
-    "test": "vitest"
+    "test": "vitest",
+    "postinstall": "bash scripts/arm-fix-libnut.sh"
   },
   "dependencies": {
     "@nut-tree-fork/nut-js": "^4.2.0",
