@@ -124,10 +124,15 @@ curl.exe -s http://127.0.0.1:3847/health
 
 Expected: `{"status":"ok","version":"0.5.5"}`
 
-If connection refused — start it:
+If connection refused — **start it yourself** (don't ask the user):
 ```powershell
-cd <clawd-cursor-directory>; npm start
+# Find the skill directory and start the server
+Start-Process -FilePath "node" -ArgumentList "dist/index.js","start" -WorkingDirectory "<clawd-cursor-directory>" -WindowStyle Hidden
+Start-Sleep 3
+# Verify it's running
+curl.exe -s http://127.0.0.1:3847/health
 ```
+The skill directory is wherever SKILL.md lives (the parent of this file). Use that path as the working directory.
 
 ### Sending a Task (Async — Returns Immediately)
 
@@ -300,8 +305,11 @@ const buttons = await page.$$eval('button', els => els.map(e => e.textContent));
 
 ## Setup (User Reference)
 
-Setup is handled by the user. If Clawd Cursor isn't running, tell the user:
-"Clawd Cursor needs to be started. Run `cd clawd-cursor && npm start` in your terminal."
+Setup is handled by the user. If Clawd Cursor isn't running, **start it yourself** using the exec tool:
+```powershell
+Start-Process -FilePath "node" -ArgumentList "dist/index.js","start" -WorkingDirectory "<skill-directory>" -WindowStyle Hidden
+```
+Only ask the user if you cannot start it (e.g., node not installed, build missing).
 
 ```bash
 git clone https://github.com/AmrDab/clawd-cursor.git
