@@ -5,16 +5,27 @@
  * 1. Screen capture (nut-js)
  * 2. Accessibility bridge (PowerShell / osascript)
  * 3. Input control (keyboard/mouse)
- * 4. AI provider connectivity + model availability
- * 5. Builds optimal 3-layer pipeline config
+ * 4. AI provider connectivity + model availability (ALL providers in parallel)
+ * 5. Builds optimal mixed 3-layer pipeline config
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { NativeDesktop } from './native-desktop';
 import { AccessibilityBridge } from './accessibility';
-import { PROVIDERS, detectProvider, buildPipeline } from './providers';
-import type { PipelineConfig, ProviderProfile } from './providers';
+import {
+  PROVIDERS,
+  detectProvider,
+  buildPipeline,
+  scanProviders,
+  buildMixedPipeline,
+} from './providers';
+import type {
+  PipelineConfig,
+  ProviderProfile,
+  ProviderScanResult,
+  ModelTestResult,
+} from './providers';
 import { DEFAULT_CONFIG } from './types';
 
 const CONFIG_FILE = '.clawd-config.json';
@@ -88,17 +99,120 @@ export async function runDoctor(opts: {
     console.log(`   ❌ ${err}`);
   }
 
-  // ─── 3. AI Provider ─────────────────────────────────────────────
+  // ─── 3. AI Providers — Multi-Provider Scan ──────────────────────
+  // If --provider and --api-key are explicitly given, use the legacy single-provider path
+  if (opts.provider && opts.apiKey) {
+    return runSingleProviderFlow(opts, results);
+  }
+
+  // Otherwise scan ALL providers in parallel
+  console.log(`\n🔍 Scanning providers...`);
+  const scanResults = await scanProviders();
+
+  // If --api-key is given without --provider, inject it into scan results
+  if (opts.apiKey) {
+    const detectedKey = detectProvider(opts.apiKey, opts.provider);
+    const existing = scanResults.find(s => s.key === detectedKey);
+    if (existing) {
+      existing.available = true;
+      existing.apiKey = opts.apiKey;
+      existing.detail = `key provided via CLI (${opts.apiKey.substring(0, 8)}...)`;
+    }
+  }
+
+  // Print scan results
+  for (const scan of scanResults) {
+    const icon = scan.available ? '✅' : '❌';
+    const padded = (scan.name + ':').padEnd(20);
+    console.log(`   ${padded} ${icon} ${scan.detail}`);
+  }
+
+  const anyAvailable = scanResults.some(s => s.available);
+
+  if (!anyAvailable) {
+    // Nothing available at all — show setup instructions
+    printNoProvidersHelp(results);
+    return buildMixedPipeline(scanResults, []);
+  }
+
+  // ─── 4. Test discovered providers ───────────────────────────────
+  console.log(`\n   Testing models...`);
+  const modelTests = await testAllProviders(scanResults);
+
+  // Print test results
+  for (const test of modelTests) {
+    const icon = test.ok ? '✅' : '❌';
+    const providerName = PROVIDERS[test.providerKey]?.name || test.providerKey;
+    const latency = test.latencyMs ? `${test.latencyMs}ms` : test.error || 'failed';
+    console.log(`   ${test.role === 'text' ? 'Text:  ' : 'Vision:'} ${test.model} (${providerName}) ${icon} ${latency}`);
+  }
+
+  const workingText = modelTests.filter(t => t.role === 'text' && t.ok);
+  const workingVision = modelTests.filter(t => t.role === 'vision' && t.ok);
+
+  if (workingText.length > 0) {
+    results.push({
+      name: 'Text model',
+      ok: true,
+      detail: workingText.map(t => `${t.model} via ${t.providerKey}`).join(', '),
+    });
+  } else {
+    results.push({ name: 'Text model', ok: false, detail: 'No working text model found' });
+  }
+
+  if (workingVision.length > 0) {
+    results.push({
+      name: 'Vision model',
+      ok: true,
+      detail: workingVision.map(t => `${t.model} via ${t.providerKey}`).join(', '),
+    });
+  } else {
+    results.push({ name: 'Vision model', ok: false, detail: 'No working vision model found' });
+  }
+
+  // ─── 5. Build Optimal Mixed Pipeline ────────────────────────────
+  const pipeline = buildMixedPipeline(scanResults, modelTests);
+
+  console.log(`\n🧠 Recommended pipeline:`);
+  console.log(`   Layer 1: Action Router (offline) ✅`);
+  console.log(`   Layer 2: ${pipeline.layer2.enabled ? `${pipeline.layer2.model} via ${providerNameForUrl(pipeline.layer2.baseUrl)}` : 'DISABLED'} ${pipeline.layer2.enabled ? '✅' : '❌'}`);
+  console.log(`   Layer 3: ${pipeline.layer3.enabled ? `${pipeline.layer3.model} via ${providerNameForUrl(pipeline.layer3.baseUrl)}` : 'DISABLED'} ${pipeline.layer3.enabled ? '✅' : '❌'}`);
+  if (pipeline.layer3.computerUse) {
+    console.log(`   🖥️  Computer Use API: enabled (Anthropic native)`);
+  }
+
+  // ─── 6. Save Config ─────────────────────────────────────────────
+  if (opts.save !== false) {
+    savePipelineConfig(pipeline, scanResults);
+  }
+
+  // ─── 7. OpenClaw Skill Registration ──────────────────────────────
+  await registerOpenClawSkill(results);
+
+  // ─── Summary ────────────────────────────────────────────────────
+  printSummary(results, pipeline);
+
+  return pipeline;
+}
+
+/**
+ * Legacy single-provider flow — used when both --provider and --api-key are explicitly given.
+ * Preserves backward compatibility with CLI flags.
+ */
+async function runSingleProviderFlow(
+  opts: { apiKey?: string; provider?: string; save?: boolean },
+  results: DiagResult[],
+): Promise<PipelineConfig | null> {
   const apiKey = opts.apiKey || process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
   const providerKey = detectProvider(apiKey, opts.provider);
   const provider = PROVIDERS[providerKey];
 
-  console.log(`\n🔑 AI Provider: ${provider.name}`);
+  console.log(`\n🔑 AI Provider: ${provider.name} (explicit override)`);
 
   let textModelWorks = false;
   let visionModelWorks = false;
   let textModel = provider.textModel;
-  let visionModel = provider.visionModel;
+  const visionModel = provider.visionModel;
 
   // Test text model (Layer 2)
   console.log(`   Testing ${textModel} (text)...`);
@@ -116,7 +230,7 @@ export async function runDoctor(opts: {
     results.push({ name: `Text model (${textModel})`, ok: false, detail: textResult.error || 'Failed' });
     console.log(`   ❌ ${textModel}: ${textResult.error}`);
 
-    // Try fallback - if Anthropic fails, try Ollama
+    // Try fallback - if explicit provider fails, try Ollama
     if (providerKey !== 'ollama') {
       console.log(`   🔄 Trying Ollama fallback...`);
       const ollamaResult = await testModel(PROVIDERS['ollama'], '', 'qwen2.5:7b', false);
@@ -126,20 +240,14 @@ export async function runDoctor(opts: {
         console.log(`   ✅ Ollama qwen2.5:7b: ${ollamaResult.latencyMs}ms (fallback)`);
       } else {
         console.log(`   ❌ Ollama not available either`);
-        console.log(`   💡 To set up a text model:`);
-        console.log(`      Free (local):  ollama pull qwen2.5:7b && ollama serve`);
-        console.log(`      Cloud:         clawdcursor doctor --provider anthropic --api-key YOUR_KEY`);
       }
-    } else {
-      console.log(`   💡 Make sure Ollama is running: ollama serve`);
-      console.log(`      Or use a cloud provider: clawdcursor doctor --provider anthropic --api-key YOUR_KEY`);
     }
   }
 
   // Test vision model (Layer 3)
   if (apiKey) {
     console.log(`   Testing ${visionModel} (vision)...`);
-    const visionResult = await testModel(provider, apiKey, visionModel, false); // text-only test is enough to verify API access
+    const visionResult = await testModel(provider, apiKey, visionModel, false);
     if (visionResult.ok) {
       visionModelWorks = true;
       results.push({
@@ -152,21 +260,17 @@ export async function runDoctor(opts: {
     } else {
       results.push({ name: `Vision model (${visionModel})`, ok: false, detail: visionResult.error || 'Failed' });
       console.log(`   ❌ ${visionModel}: ${visionResult.error}`);
-      console.log(`   💡 API key may be invalid or expired. Re-run:`);
-      console.log(`      clawdcursor install --provider ${providerKey} --api-key YOUR_API_KEY_HERE`);
     }
   } else {
     console.log(`   ⚠️  No API key — vision model skipped`);
-    console.log(`   💡 Run: clawdcursor install --provider anthropic --api-key YOUR_API_KEY_HERE`);
     results.push({ name: 'Vision model', ok: false, detail: 'No API key' });
   }
 
-  // ─── 4. Build Pipeline ──────────────────────────────────────────
+  // Build pipeline
   const pipeline = buildPipeline(
     providerKey, apiKey,
     textModelWorks, visionModelWorks,
     textModel !== provider.textModel ? textModel : undefined,
-    visionModel !== provider.visionModel ? visionModel : undefined,
   );
 
   // Handle mixed providers (e.g., Ollama for text, Anthropic for vision)
@@ -182,7 +286,7 @@ export async function runDoctor(opts: {
     console.log(`   🖥️  Computer Use API: enabled (Anthropic native)`);
   }
 
-  // ─── 5. Save Config ─────────────────────────────────────────────
+  // Save Config
   if (opts.save !== false) {
     const configPath = path.join(process.cwd(), CONFIG_FILE);
     const configData = {
@@ -205,10 +309,215 @@ export async function runDoctor(opts: {
     console.log(`\n💾 Config saved to ${CONFIG_FILE}`);
   }
 
-  // ─── 6. OpenClaw Skill Registration ──────────────────────────────
+  // OpenClaw Skill Registration
   await registerOpenClawSkill(results);
 
-  // ─── Summary ────────────────────────────────────────────────────
+  // Summary
+  printSummary(results, pipeline);
+
+  return pipeline;
+}
+
+/**
+ * Test all available providers in parallel. Returns model test results.
+ */
+async function testAllProviders(scanResults: ProviderScanResult[]): Promise<ModelTestResult[]> {
+  const promises: Promise<ModelTestResult>[] = [];
+
+  for (const scan of scanResults) {
+    if (!scan.available) continue;
+
+    const provider = PROVIDERS[scan.key];
+    if (!provider) continue;
+
+    // ── Text model test ──────────────────────────────────────────
+    if (scan.key === 'ollama') {
+      // For Ollama, pick the best available text model
+      const ollamaTextModel = pickOllamaTextModel(scan.ollamaModels || []);
+      if (ollamaTextModel) {
+        promises.push(
+          testModelAsync(provider, scan.apiKey, ollamaTextModel, 'text', scan.key),
+        );
+      }
+    } else {
+      promises.push(
+        testModelAsync(provider, scan.apiKey, provider.textModel, 'text', scan.key),
+      );
+    }
+
+    // ── Vision model test ────────────────────────────────────────
+    if (scan.key === 'ollama') {
+      // For Ollama, only test vision if a vision-capable model exists
+      const ollamaVisionModels = scan.ollamaVisionModels || [];
+      if (ollamaVisionModels.length > 0) {
+        promises.push(
+          testModelAsync(provider, scan.apiKey, ollamaVisionModels[0], 'vision', scan.key),
+        );
+      }
+    } else {
+      // Cloud providers: test vision model
+      promises.push(
+        testModelAsync(provider, scan.apiKey, provider.visionModel, 'vision', scan.key),
+      );
+    }
+  }
+
+  const settled = await Promise.allSettled(promises);
+  const testResults: ModelTestResult[] = [];
+
+  for (const result of settled) {
+    if (result.status === 'fulfilled') {
+      testResults.push(result.value);
+    }
+    // rejected promises are silently dropped — the provider just doesn't work
+  }
+
+  return testResults;
+}
+
+/**
+ * Pick the best Ollama text model from available models.
+ * Prefers: qwen2.5 variants, then llama variants, then first available.
+ */
+function pickOllamaTextModel(models: string[]): string | null {
+  if (models.length === 0) return null;
+
+  // Prefer qwen2.5 models (good for tool calling)
+  const qwen = models.find(m => m.toLowerCase().startsWith('qwen2.5'));
+  if (qwen) return qwen;
+
+  // Then llama models
+  const llama = models.find(m => m.toLowerCase().startsWith('llama'));
+  if (llama) return llama;
+
+  // Then qwen3 models
+  const qwen3 = models.find(m => m.toLowerCase().startsWith('qwen3'));
+  if (qwen3) return qwen3;
+
+  // Then deepseek models
+  const deepseek = models.find(m => m.toLowerCase().startsWith('deepseek'));
+  if (deepseek) return deepseek;
+
+  // Skip vision-only models
+  const nonVision = models.find(m => !isLikelyVisionOnly(m));
+  if (nonVision) return nonVision;
+
+  // Last resort: first model
+  return models[0];
+}
+
+function isLikelyVisionOnly(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return lower.startsWith('llava') || lower.startsWith('bakllava') || lower.startsWith('moondream');
+}
+
+/**
+ * Test a model asynchronously, returning a ModelTestResult.
+ */
+async function testModelAsync(
+  provider: ProviderProfile,
+  apiKey: string,
+  model: string,
+  role: 'text' | 'vision',
+  providerKey: string,
+): Promise<ModelTestResult> {
+  const result = await testModel(provider, apiKey, model, role === 'vision');
+  return {
+    providerKey,
+    model,
+    role,
+    ok: result.ok,
+    latencyMs: result.latencyMs,
+    error: result.error,
+  };
+}
+
+/**
+ * Save pipeline config to disk, including multi-provider info.
+ */
+function savePipelineConfig(pipeline: PipelineConfig, scanResults: ProviderScanResult[]): void {
+  const configPath = path.join(process.cwd(), CONFIG_FILE);
+
+  // Determine which providers are actually used
+  const layer2ProviderKey = providerKeyForUrl(pipeline.layer2.baseUrl) || pipeline.providerKey;
+  const layer3ProviderKey = providerKeyForUrl(pipeline.layer3.baseUrl) || pipeline.providerKey;
+  const layer2Scan = scanResults.find(s => s.key === layer2ProviderKey);
+  const layer3Scan = scanResults.find(s => s.key === layer3ProviderKey);
+
+  const configData = {
+    provider: pipeline.providerKey,
+    pipeline: {
+      layer2: {
+        enabled: pipeline.layer2.enabled,
+        model: pipeline.layer2.model,
+        baseUrl: pipeline.layer2.baseUrl,
+        provider: layer2ProviderKey,
+      },
+      layer3: {
+        enabled: pipeline.layer3.enabled,
+        model: pipeline.layer3.model,
+        baseUrl: pipeline.layer3.baseUrl,
+        computerUse: pipeline.layer3.computerUse,
+        provider: layer3ProviderKey,
+      },
+    },
+    // Store API keys by provider so we can reconstruct later
+    providerKeys: Object.fromEntries(
+      scanResults
+        .filter(s => s.available && s.apiKey)
+        .map(s => [s.key, '(set via env)'])
+    ),
+    diagnosedAt: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(configPath, JSON.stringify(configData, null, 2));
+  console.log(`\n💾 Config saved to ${CONFIG_FILE}`);
+}
+
+/**
+ * Look up provider key from a base URL.
+ */
+function providerKeyForUrl(baseUrl: string): string | null {
+  for (const [key, profile] of Object.entries(PROVIDERS)) {
+    if (profile.baseUrl === baseUrl) return key;
+  }
+  return null;
+}
+
+/**
+ * Get a human-friendly provider name from a base URL.
+ */
+function providerNameForUrl(baseUrl: string): string {
+  for (const profile of Object.values(PROVIDERS)) {
+    if (profile.baseUrl === baseUrl) return profile.name;
+  }
+  return baseUrl;
+}
+
+/**
+ * Print "no providers found" help message.
+ */
+function printNoProvidersHelp(results: DiagResult[]): void {
+  console.log(`\n   ❌ No AI providers found!\n`);
+  console.log(`   Option 1 (Free, local):`);
+  console.log(`      Install Ollama: https://ollama.ai`);
+  console.log(`      Then: ollama pull qwen2.5:7b\n`);
+  console.log(`   Option 2 (Cloud):`);
+  console.log(`      Get an API key from one of:`);
+  console.log(`      - Anthropic: https://console.anthropic.com (recommended, has Computer Use)`);
+  console.log(`      - OpenAI: https://platform.openai.com`);
+  console.log(`      - Kimi: https://platform.moonshot.cn`);
+  console.log(`      Then: clawdcursor install --api-key YOUR_KEY\n`);
+
+  results.push({ name: 'AI Providers', ok: false, detail: 'No providers available' });
+  results.push({ name: 'Text model', ok: false, detail: 'No providers available' });
+  results.push({ name: 'Vision model', ok: false, detail: 'No providers available' });
+}
+
+/**
+ * Print the final summary.
+ */
+function printSummary(results: DiagResult[], pipeline: PipelineConfig): void {
   const allOk = results.every(r => r.ok);
   console.log(`\n${'═'.repeat(50)}`);
   if (allOk) {
@@ -220,26 +529,29 @@ export async function runDoctor(opts: {
       console.log(`   ❌ ${f.name}: ${f.detail}`);
     }
 
-    console.log(`\n💡 Quick fixes:\n`);
-    if (!textModelWorks) {
+    const textFailed = !pipeline.layer2.enabled;
+    const visionFailed = !pipeline.layer3.enabled;
+
+    if (textFailed || visionFailed) {
+      console.log(`\n💡 Quick fixes:\n`);
+    }
+    if (textFailed) {
       console.log(`   Text LLM missing — needed for accessibility reasoning (Layer 2)`);
       console.log(`   Free (local):  ollama pull qwen2.5:7b && ollama serve`);
       console.log(`   Cloud:         clawdcursor install --provider anthropic --api-key YOUR_API_KEY_HERE`);
       console.log('');
     }
-    if (!visionModelWorks) {
+    if (visionFailed) {
       console.log(`   Vision LLM missing — needed for screenshot analysis (Layer 3)`);
       console.log(`   Run:           clawdcursor install --provider anthropic --api-key YOUR_API_KEY_HERE`);
       console.log(`   Supported:     Anthropic, OpenAI, or Kimi (requires API key)`);
       console.log('');
     }
-    if (!visionModelWorks && textModelWorks) {
+    if (visionFailed && !textFailed) {
       console.log(`   ℹ️  Running without vision — action router + accessibility reasoner handle most tasks.`);
     }
   }
   console.log('');
-
-  return pipeline;
 }
 
 /**
@@ -505,6 +817,10 @@ export function loadPipelineConfig(): PipelineConfig | null {
     const provider = PROVIDERS[providerKey] || PROVIDERS['ollama'];
     const apiKey = process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
 
+    // Support mixed-provider configs saved by the new doctor
+    const layer2BaseUrl = raw.pipeline?.layer2?.baseUrl ?? provider.baseUrl;
+    const layer3BaseUrl = raw.pipeline?.layer3?.baseUrl ?? provider.baseUrl;
+
     return {
       provider,
       providerKey,
@@ -513,12 +829,12 @@ export function loadPipelineConfig(): PipelineConfig | null {
       layer2: {
         enabled: raw.pipeline?.layer2?.enabled ?? false,
         model: raw.pipeline?.layer2?.model ?? provider.textModel,
-        baseUrl: raw.pipeline?.layer2?.baseUrl ?? provider.baseUrl,
+        baseUrl: layer2BaseUrl,
       },
       layer3: {
         enabled: raw.pipeline?.layer3?.enabled ?? false,
         model: raw.pipeline?.layer3?.model ?? provider.visionModel,
-        baseUrl: provider.baseUrl,
+        baseUrl: layer3BaseUrl,
         computerUse: raw.pipeline?.layer3?.computerUse ?? false,
       },
     };
