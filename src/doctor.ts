@@ -220,8 +220,18 @@ export async function runDoctor(opts: {
     for (const f of failures) {
       console.log(`   ❌ ${f.name}: ${f.detail}`);
     }
+
+    console.log(`\n💡 Quick fixes:`);
+    if (!textModelWorks) {
+      console.log(`   Text model (free):   ollama pull qwen2.5:7b && ollama serve`);
+      console.log(`   Text model (cloud):  clawdcursor doctor --provider anthropic --api-key YOUR_KEY`);
+    }
+    if (!visionModelWorks) {
+      console.log(`   Vision model:        clawdcursor doctor --provider anthropic --api-key YOUR_KEY`);
+      console.log(`   Or set AI_API_KEY=YOUR_KEY in your .env file`);
+    }
     if (!visionModelWorks && textModelWorks) {
-      console.log(`\n💡 Running without vision - accessibility reasoner + action router will handle most tasks.`);
+      console.log(`\n   Running without vision — accessibility reasoner + action router will handle most tasks.`);
     }
   }
   console.log('');
