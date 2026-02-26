@@ -26,7 +26,7 @@
 - **🔒 Credential detection** — warns when starring tasks that contain API keys or passwords
 - **🩺 Doctor UX** — shows exact fix commands for missing text/vision models in summary
 - **🌐 OS tabs on website** — Windows/macOS/Linux install instructions with auto-detect
-- **🧠 Dynamic OS detection** — system prompt uses actual OS, not hardcoded "Windows 11" (thanks @joshjolly)
+- **🧠 Dynamic OS detection** — system prompt uses actual OS, not hardcoded "Windows 11" (thanks @joshholly)
 - **🛡️ Security** — agents cannot self-approve confirm-tier actions, autonomous use scoped to read-only
 - **📝 SKILL.md rewrite** — agent identity shift framing, trigger lists, CDP direct path, async polling, error recovery
 
