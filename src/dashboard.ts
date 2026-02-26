@@ -6,6 +6,7 @@
  */
 
 import type { Express } from 'express';
+import { VERSION } from './version';
 
 export function mountDashboard(app: Express): void {
   app.get('/', (_req, res) => {
@@ -465,7 +466,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     <span class="status-dot idle" id="statusDot"></span>
     <span id="statusText">Idle</span>
   </div>
-  <span class="version-tag" id="versionTag">v0.5.1</span>
+  <span class="version-tag" id="versionTag">v${VERSION}</span>
   <button class="kill-btn" onclick="killSwitch()">⛔ Kill</button>
 </div>
 

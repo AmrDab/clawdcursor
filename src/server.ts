@@ -19,9 +19,11 @@
 import express from 'express';
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { z } from 'zod';
 import type { ClawdConfig } from './types';
 import { Agent } from './agent';
 import { mountDashboard } from './dashboard';
+import { VERSION } from './version';
 
 // Favorites persistence
 const FAVORITES_PATH = join(process.cwd(), '.clawd-favorites.json');
@@ -68,7 +70,11 @@ function addLog(level: LogEntry['level'], message: string): void {
  * Intercept console methods to capture logs into the buffer.
  * Preserves original behavior.
  */
+let consoleHooked = false;
 function hookConsole(): void {
+  if (consoleHooked) return;
+  consoleHooked = true;
+
   const origLog = console.log;
   const origError = console.error;
   const origWarn = console.warn;
@@ -102,6 +108,14 @@ function hookConsole(): void {
   };
 }
 
+const taskSchema = z.object({
+  task: z.string().trim().min(1).max(2000),
+});
+
+const confirmSchema = z.object({
+  approved: z.boolean(),
+});
+
 export function createServer(agent: Agent, config: ClawdConfig): express.Express {
   // Hook console to capture logs
   hookConsole();
@@ -121,15 +135,12 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Add a favorite
   app.post('/favorites', (req, res) => {
-    const { task } = req.body;
-    if (!task || typeof task !== 'string') {
+    const parsed = taskSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "task" string in body' });
     }
     const favorites = loadFavorites();
-    const trimmed = task.trim();
-    if (!trimmed) {
-      return res.status(400).json({ error: 'Task cannot be empty' });
-    }
+    const trimmed = parsed.data.task;
     if (!favorites.includes(trimmed)) {
       favorites.push(trimmed);
       saveFavorites(favorites);
@@ -139,12 +150,12 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Remove a favorite
   app.delete('/favorites', (req, res) => {
-    const { task } = req.body;
-    if (!task || typeof task !== 'string') {
+    const parsed = taskSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "task" string in body' });
     }
     const favorites = loadFavorites();
-    const trimmed = task.trim();
+    const trimmed = parsed.data.task;
     const idx = favorites.indexOf(trimmed);
     if (idx === -1) {
       return res.status(404).json({ error: 'Favorite not found' });
@@ -156,11 +167,12 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Submit a task
   app.post('/task', async (req, res) => {
-    const { task } = req.body;
-    if (!task) {
+    const parsed = taskSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "task" in body' });
     }
 
+    const { task } = parsed.data;
     const state = agent.getState();
     if (state.status !== 'idle') {
       return res.status(409).json({
@@ -188,11 +200,12 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Approve or reject a pending confirmation
   app.post('/confirm', (req, res) => {
-    const { approved } = req.body;
-    if (typeof approved !== 'boolean') {
+    const parsed = confirmSchema.safeParse(req.body);
+    if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "approved" boolean in body' });
     }
 
+    const { approved } = parsed.data;
     const safety = agent.getSafety();
     if (!safety.hasPendingConfirmation()) {
       return res.status(404).json({ error: 'No pending confirmation' });
@@ -220,7 +233,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Health check
   app.get('/health', (req, res) => {
-    res.json({ status: 'ok', version: '0.5.1' });
+    res.json({ status: 'ok', version: VERSION });
   });
 
   // Graceful shutdown (localhost only)

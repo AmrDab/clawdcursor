@@ -11,6 +11,7 @@ import { Agent } from './agent';
 import { createServer } from './server';
 import { DEFAULT_CONFIG } from './types';
 import type { ClawdConfig } from './types';
+import { VERSION } from './version';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -20,7 +21,7 @@ const program = new Command();
 program
   .name('clawd-cursor')
   .description('🐾 AI Desktop Agent — native screen control')
-  .version('0.5.1');
+  .version(VERSION);
 
 program
   .command('start')
@@ -48,7 +49,7 @@ program
 
     console.log(`
 🐾 ╔═══════════════════════════════════════╗
-   ║       CLAWD CURSOR v0.5.5             ║
+   ║       CLAWD CURSOR v${VERSION}             ║
    ║   AI Desktop Agent — Smart Pipeline   ║
    ╚═══════════════════════════════════════╝
 `);
