@@ -2,6 +2,20 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [0.5.6] - 2026-02-26 — Global CLI Setup, Stop/Kill Hardening
+
+### Added
+- **`npm run setup`** — new script that builds and registers `clawdcursor` as a global command via `npm link`. Works on Windows, macOS, and Linux.
+
+### Fixed
+- **Stop/kill port validation** — port input is now sanitized (parseInt + range check 1-65535) to prevent command injection
+- **Kill health verification** — kill command now verifies `/health` returns a Clawd Cursor response before force-killing, preventing wrong-process termination
+- **Stop verification** — stop command waits for `/health` to fail and warns if the server is still running
+
+### Changed
+- **Install instructions updated** — README, website, and all docs now use `npm run setup` instead of `npm run build` for the recommended install flow
+- **Build script kept pure** — `npm run build` no longer has global side effects; global registration is opt-in via `npm run setup`
+
 ## [0.5.5] - 2026-02-26 — Install/Uninstall, OpenClaw Auto-Registration, Doctor UX
 
 ### Added

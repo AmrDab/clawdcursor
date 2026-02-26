@@ -1,6 +1,6 @@
 {
   "name": "clawd-cursor",
-  "version": "0.5.5",
+  "version": "0.5.6",
   "description": "AI Desktop Agent — Native screen control via @nut-tree-fork/nut-js. Your AI sees the screen, moves the mouse, types, and completes tasks autonomously.",
   "main": "dist/index.js",
   "bin": {
@@ -9,6 +9,7 @@
   },
   "scripts": {
     "build": "tsc && node dist/postbuild.js",
+    "setup": "npm run build && npm link",
     "postbuild:msg": "handled by postbuild.js",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js start",

@@ -71,16 +71,16 @@ openclaw skills install clawd-cursor
 git clone https://github.com/AmrDab/clawd-cursor.git
 cd clawd-cursor
 npm install
-npm run build
-npm run doctor
-npm start
+npm run setup      # builds + registers 'clawdcursor' command globally
+clawdcursor doctor
+clawdcursor start
 ```
 
 ### macOS
 
 ```bash
 git clone https://github.com/AmrDab/clawd-cursor.git
-cd clawd-cursor && npm install && npm run build
+cd clawd-cursor && npm install && npm run setup
 
 # Grant Accessibility permissions to your terminal first!
 # System Settings → Privacy & Security → Accessibility → Add Terminal/iTerm
@@ -88,8 +88,19 @@ cd clawd-cursor && npm install && npm run build
 # Make macOS scripts executable
 chmod +x scripts/mac/*.sh scripts/mac/*.jxa
 
-npm run doctor
-npm start
+clawdcursor doctor
+clawdcursor start
+```
+
+### Linux
+
+```bash
+git clone https://github.com/AmrDab/clawd-cursor.git
+cd clawd-cursor && npm install && npm run setup
+
+# Linux: browser control via CDP only (no native desktop automation)
+clawdcursor doctor
+clawdcursor start
 ```
 
 > 📖 See [docs/MACOS-SETUP.md](docs/MACOS-SETUP.md) for the full macOS onboarding guide.
@@ -102,9 +113,14 @@ The doctor will:
 
 Send a task:
 ```bash
+clawdcursor task "Open Notepad and type hello world"
+
+# Or via API:
 curl http://localhost:3847/task -H "Content-Type: application/json" \
   -d '{"task": "Open Notepad and type hello world"}'
 ```
+
+> **Note:** `npm run setup` runs `npm run build && npm link`, which registers `clawdcursor` as a global command. If you prefer not to link globally, run `npm run build` instead and use `npx clawdcursor` or `node dist/index.js` to run commands.
 
 ### Provider Quick Setup
 
@@ -112,22 +128,22 @@ curl http://localhost:3847/task -H "Content-Type: application/json" \
 ```bash
 # Just need Ollama running locally
 ollama pull qwen2.5:7b
-npm run doctor -- --provider ollama
-npm start -- --provider ollama
+clawdcursor doctor --provider ollama
+clawdcursor start --provider ollama
 ```
 
 **Anthropic (recommended for complex tasks):**
 ```bash
 echo "AI_API_KEY=sk-ant-api03-..." > .env
-npm run doctor
-npm start
+clawdcursor doctor
+clawdcursor start
 ```
 
 **OpenAI:**
 ```bash
 echo "AI_API_KEY=sk-..." > .env
-npm run doctor -- --provider openai
-npm start -- --provider openai
+clawdcursor doctor --provider openai
+clawdcursor start --provider openai
 ```
 
 ---

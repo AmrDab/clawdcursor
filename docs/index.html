@@ -668,7 +668,7 @@
     <div class="wrap">
         <!-- Hero -->
         <div class="hero">
-            <div class="hero-badge"><div class="pulse"></div> v0.5.1 - Smart Pipeline + HD Vision</div>
+            <div class="hero-badge"><div class="pulse"></div> v0.5.6 - Global CLI + Multi-Provider Doctor</div>
             <h1>One skill replaces<br><span class="gr">a dozen APIs</span></h1>
             <p>Give your agent a screen. Gmail, Slack, Jira, Figma - if you can click it, your agent can too. Native desktop control. No servers. No API keys per service.</p>
             <div class="hero-btns">
@@ -884,7 +884,8 @@
                 </div>
                 <pre><code><span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawd-cursor.git</span>
 <span class="c-cmd">cd</span> clawd-cursor
-<span class="c-cmd">npm install</span>; <span class="c-cmd">npm run build</span></code></pre>
+<span class="c-cmd">npm install</span>; <span class="c-cmd">npm run setup</span>
+<span class="c-cmd">clawdcursor doctor</span></code></pre>
             </div>
 
             <div class="code-box" id="os-macos" style="display:none;">
@@ -893,10 +894,11 @@
                     <span>Terminal</span>
                 </div>
                 <pre><code><span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawd-cursor.git</span>
-<span class="c-cmd">cd</span> clawd-cursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run build</span>
+<span class="c-cmd">cd</span> clawd-cursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
 
 <span class="c-comment"># Grant Accessibility permissions first:</span>
-<span class="c-comment"># System Settings → Privacy & Security → Accessibility → Add Terminal</span></code></pre>
+<span class="c-comment"># System Settings → Privacy & Security → Accessibility → Add Terminal</span>
+<span class="c-cmd">clawdcursor doctor</span></code></pre>
             </div>
 
             <div class="code-box" id="os-linux" style="display:none;">
@@ -905,12 +907,13 @@
                     <span>Terminal</span>
                 </div>
                 <pre><code><span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawd-cursor.git</span>
-<span class="c-cmd">cd</span> clawd-cursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run build</span>
+<span class="c-cmd">cd</span> clawd-cursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
 
-<span class="c-comment"># Linux: browser control via CDP only (no native desktop automation)</span></code></pre>
+<span class="c-comment"># Linux: browser control via CDP only (no native desktop automation)</span>
+<span class="c-cmd">clawdcursor doctor</span></code></pre>
             </div>
 
-            <p style="color: var(--text3); font-size: 0.78rem; margin-top: 10px;">Requires: Node.js 20+. Available commands will display in your terminal after build.</p>
+            <p style="color: var(--text3); font-size: 0.78rem; margin-top: 10px;">Requires: Node.js 20+. <code>npm run setup</code> builds and registers <code>clawdcursor</code> globally. Use <code>npm run build</code> if you prefer <code>npx clawdcursor</code> instead.</p>
         </section>
     </div>
 
