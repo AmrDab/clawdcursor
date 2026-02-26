@@ -7,14 +7,14 @@
  */
 
 import * as os from 'os';
-import { exec as execCb } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { AccessibilityBridge } from './accessibility';
 import { NativeDesktop } from './native-desktop';
 import { normalizeKey } from './keys';
 import type { WindowInfo } from './accessibility';
 
-const execAsync = promisify(execCb);
+const execFileAsync = promisify(execFile);
 
 const PLATFORM = os.platform();
 
@@ -83,49 +83,50 @@ export class ActionRouter {
     const task = subtask.trim().toLowerCase();
 
     // 1. "open [app]" / "launch [app]" / "start [app]"
-    const openMatch = task.match(/^(?:open|launch|start|run)\s+(.+)$/i);
+    const openMatch = task.match(/^(?:open|launch|start|run)\s+(\S.*)$/i);
     if (openMatch) {
       return this.handleOpenApp(openMatch[1].trim());
     }
 
     // 2. "type [text]" / "type '[text]'" / "enter [text]"
-    const typeMatch = task.match(/^(?:type|enter|write|input)\s+['"]?(.+?)['"]?\s*$/i);
+    const typeMatch = task.match(/^(?:type|enter|write|input)\s+(?:['"]([^'"]*)['"]\s*|(\S.*))$/i);
     if (typeMatch) {
-      return this.handleType(typeMatch[1]);
+      return this.handleType(typeMatch[1] ?? typeMatch[2]);
     }
 
     // 3. "go to [url]" / "navigate to [url]" / "visit [url]"
-    const urlMatch = task.match(/^(?:go to|navigate to|visit|browse to|open)\s+(https?:\/\/\S+|www\.\S+|\S+\.\w{2,}(?:\/\S*)?)$/i);
+    const urlMatch = task.match(/^(?:go to|navigate to|visit|browse to|open)\s+(https?:\/\/[^\s]+|www\.[^\s]+|[^\s.]+\.\w{2,}(?:\/[^\s]*)?)$/i);
     if (urlMatch) {
       return this.handleNavigateToUrl(urlMatch[1]);
     }
 
     // 4. "press [key]" — direct key press (BEFORE click to avoid "press enter" being caught as click)
-    const keyMatch = task.match(/^(?:press|hit)\s+(.+)$/i);
+    const keyMatch = task.match(/^(?:press|hit)\s+(\S.*)$/i);
     if (keyMatch) {
       return this.handleKeyPress(keyMatch[1].trim());
     }
 
     // 5. "click [element]" — try a11y lookup (no "press"/"hit" — handled above)
-    const clickMatch = task.match(/^(?:click|tap)\s+(?:the\s+)?(?:on\s+)?['"]?(.+?)['"]?\s*(?:button|link|tab|menu|item)?$/i);
+    const clickMatch = task.match(/^(?:click|tap)\s+(?:the\s+)?(?:on\s+)?['"]([^'"]+)['"](?:\s+(?:button|link|tab|menu|item))?$/i) ||
+                       task.match(/^(?:click|tap)\s+(?:the\s+)?(?:on\s+)?(\S.*)$/i);
     if (clickMatch) {
       return this.handleClick(clickMatch[1].trim());
     }
 
     // 6. "focus [window]" / "switch to [window]"
-    const focusMatch = task.match(/^(?:focus|switch to|bring up|activate|go to)\s+(.+)$/i);
+    const focusMatch = task.match(/^(?:focus|switch to|bring up|activate|go to)\s+(\S.*)$/i);
     if (focusMatch) {
       return this.handleFocusWindow(focusMatch[1].trim());
     }
 
     // 7. "close [window/app]"
-    const closeMatch = task.match(/^(?:close)\s+(.+)$/i);
+    const closeMatch = task.match(/^(?:close)\s+(\S.*)$/i);
     if (closeMatch) {
       return this.handleClose(closeMatch[1].trim());
     }
 
     // 8. "minimize [window]" / "maximize [window]"
-    const winCtrlMatch = task.match(/^(minimize|maximize)\s+(.+)$/i);
+    const winCtrlMatch = task.match(/^(minimize|maximize)\s+(\S.*)$/i);
     if (winCtrlMatch) {
       return this.handleWindowControl(winCtrlMatch[1].toLowerCase(), winCtrlMatch[2].trim());
     }
@@ -225,9 +226,8 @@ export class ActionRouter {
     try {
       if (PLATFORM === 'darwin') {
         // macOS: use `open -a` — directly launches & focuses, no Spotlight needed
-        const appToOpen = (macOSAppName || searchTerm).replace(/"/g, '\\"');
         try {
-          await execAsync(`open -a "${appToOpen}"`);
+          await execFileAsync('open', ['-a', macOSAppName || searchTerm]);
           await this.delay(800); // give app time to surface
         } catch {
           // Fallback: Spotlight if open -a fails (e.g. non-standard app name)
@@ -349,6 +349,16 @@ export class ActionRouter {
       fullUrl = 'https://' + fullUrl;
     }
 
+    // Validate URL to prevent command injection
+    try {
+      const parsed = new URL(fullUrl);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return { handled: false, description: `Invalid URL protocol: ${parsed.protocol}`, error: 'Invalid URL protocol' };
+      }
+    } catch {
+      return { handled: false, description: `Invalid URL: ${fullUrl}`, error: 'Invalid URL' };
+    }
+
     try {
       // Try to find and focus a browser window
       const windows = await this.a11y.getWindows();
@@ -362,8 +372,11 @@ export class ActionRouter {
         await this.delay(300);
       } else {
         // No browser running — launch default browser via OS default handler
-        const launchCmd = PLATFORM === 'darwin' ? `open "${fullUrl}"` : `start "" "${fullUrl}"`;
-        await execAsync(launchCmd);
+        if (PLATFORM === 'darwin') {
+          await execFileAsync('open', [fullUrl]);
+        } else {
+          await execFileAsync('explorer', [fullUrl]);
+        }
         await this.delay(2000);
         return {
           handled: true,

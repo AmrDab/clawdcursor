@@ -2,6 +2,53 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [0.5.4] - 2026-02-25 — SKILL.md Rewrite + Security Hardening
+
+### Changed
+- **Privacy language clarified** — explicit per-provider data flow (Ollama = fully local, cloud = data to that API only)
+- **Added homepage and source URLs** to skill metadata
+- **Removed hard-coded paths** from SKILL.md
+- **Security section expanded** — includes localhost bind verification command
+- **Security scan addressed** — all flagged documentation gaps resolved
+
+## [0.5.3] - 2026-02-25 — SKILL.md Rewrite for Agent Autonomy
+
+### Changed
+- **SKILL.md rewritten** — agents now understand they have full desktop control and stop asking users to do things they can do themselves
+- **Agent identity shift framing** — blockquote at top overrides default "I can't do desktop things" behavior
+- **"When to Use This" trigger list** — comprehensive decision framework for when to reach for Clawd Cursor
+- **Two paths documented** — REST API (port 3847) for full desktop control, CDP Direct (port 9222) for fast browser reads
+- **Async flow clarified** — concrete polling pattern agents can follow step-by-step
+- **Error recovery table** — 8 common problems with exact solutions
+- **Expanded task examples** — cross-app workflows, data extraction, verification scenarios
+- **README** — added OpenClaw Integration section
+
+## [0.5.2] - 2026-02-25 — Web Dashboard + Browser Foreground Focus
+
+### Added
+- **Web Dashboard** — full single-page UI served at `GET /` (port 3847). Task submission, real-time logs, status indicators, approve/reject for safety confirmations, kill switch. Dark theme, fully responsive, zero external dependencies.
+- **`clawdcursor dashboard`** — CLI command to open the dashboard in your default browser
+- **`clawdcursor kill`** — CLI command to send a stop signal to the running server
+- **`GET /logs`** — API endpoint returning last 200 log entries with timestamps and levels
+- **Browser foreground focus** — Playwright navigation now brings Chrome to the front via `page.bringToFront()` + OS-level window activation (PowerShell `SetForegroundWindow` on Windows, `osascript` on macOS). The AI acts like a visible cursor — you see everything it does.
+- **Console hook** — `hookConsole()` intercepts all server logs for the dashboard log feed with auto-classification (error/success/warn/info)
+
+### Changed
+- **Smart task handoff** — Browser layer no longer uses regex word lists to detect multi-step tasks. Pure navigation ("open youtube") completes in browser layer; anything more complex falls through to SmartInteraction where the LLM plans the steps. No more missed verbs.
+
+### Architecture
+```
+Layer 0: Browser (Playwright) — navigate + foreground focus
+    ↓ more than navigation? → fall through
+Layer 1: Action Router — regex patterns, zero LLM calls
+    ↓ no match? → fall through
+Layer 1.5: Smart Interaction — 1 LLM call plans steps, CDP/UIDriver executes
+    ↓ failed? → fall through
+Layer 2: Accessibility Reasoner — reads UI tree, cheap LLM
+    ↓ failed? → fall through
+Layer 3: Screenshot + Vision — full screenshot, Computer Use API
+```
+
 ## [0.5.1] - 2026-02-23 — HD Screenshots + Focus Stability
 
 ### Fixed

@@ -1,15 +1,18 @@
 ---
-name: clawd-cursor
-version: 0.5.1
+name: clawdcursor
+version: 0.5.4
 description: >
-  AI desktop agent with smart 4-layer pipeline. Controls Windows and macOS natively via screen + accessibility APIs.
-  Works with any AI provider (Anthropic, OpenAI, Ollama, Kimi) or completely free with local models.
-  Auto-configures via 'clawd-cursor doctor'. Smart Interaction Layer handles browser tasks with 95% fewer tokens.
-  Cross-platform: Windows (PowerShell/.NET) + macOS (JXA/AppleScript).
+  AI desktop agent — control any app on Windows/macOS from your OpenClaw agent.
+  Send natural language tasks to the Clawd Cursor API and it handles everything:
+  opening apps, clicking buttons, typing text, navigating browsers, filling forms.
+  If you can click it, your agent can too.
+homepage: https://clawdcursor.com
+source: https://github.com/AmrDab/clawd-cursor
 privacy: >
-  All screenshots and data stay local on the user's machine. AI calls go only to the user's own configured
-  API provider and key — no data is sent to third-party servers or skill authors. With Ollama, everything
-  runs 100% locally with zero external network calls.
+  Screenshots and UI data stay on the user's machine. If using Ollama (local), zero data leaves the host.
+  If using a cloud provider (Anthropic, OpenAI, Kimi), screenshots/text are sent to that provider's API
+  only — never to third-party servers or skill authors. The user controls which provider is used.
+  The REST API binds to 127.0.0.1 only and is not network-accessible.
 metadata:
   openclaw:
     requires:
@@ -20,9 +23,12 @@ metadata:
       - git clone https://github.com/AmrDab/clawd-cursor.git
       - cd clawd-cursor && npm install && npm run build
       - cd clawd-cursor && npx clawd-cursor doctor
+      - cd clawd-cursor && npm start
     privacy:
       - Screenshots processed by user's own configured AI provider only
       - With Ollama, fully offline — no external API calls
+      - With cloud providers, data goes only to user's chosen API endpoint
+      - REST API binds to 127.0.0.1 only — not network accessible
 credentials:
   - name: AI_API_KEY
     sensitivity: high
@@ -32,118 +38,321 @@ credentials:
 
 # Clawd Cursor
 
-**One skill, every app.** Instead of integrating dozens of APIs, give your agent a screen. Gmail, Slack, Jira, Figma — if you can click it, your agent can too.
+**If a human can do it on a screen, you can too.** No API? No integration? No problem.
+Every app already has a UI — Clawd Cursor gives you eyes and hands to use all of them.
 
-## What's New in v0.5.1
+No task is impossible. If it's on the screen, it's within reach.
 
-- **Smart Interaction Layer** — Browser tasks use 1 LLM call instead of 18 (95% token savings)
-- **CDP Driver** — Chrome DevTools Protocol for fast, free browser DOM interaction
-- **UI Driver** — Native UI Automation for Windows (.NET) and macOS (JXA)
-- **macOS Support** — Full cross-platform: JXA scripts for accessibility, AppleScript for UI control
-- **Doctor Version Check** — Tells you when updates are available
-- **Self-healing pipeline** — Falls through layers automatically on failure
+> **IMPORTANT — READ THIS BEFORE ANYTHING ELSE**
+>
+> You have a desktop AI agent over GUI running on the user's machine. This means:
+> 1. You **CAN** open apps, click buttons, type text, fill forms, send emails
+> 2. You **CAN** see what's on screen (via Clawd Cursor's screenshot pipeline)
+> 3. You **CAN** interact with ANY application — browser, desktop apps, settings, everything
+> 4. You **SHOULD NOT** ask the user to do things you can do via this tool
+> 5. You **SHOULD NOT** say "I can't interact with your desktop" — you can
+>
+> Think of Clawd Cursor as your hands and eyes on the user's computer.
 
-## Quick Start
+---
+
+## When to Use This (AGENTS: READ THIS)
+
+You have a desktop AI agent over GUI at your disposal. **Use it.** Don't say "I can't access that" or "I don't have a way to check." If it's visible on a screen, you can interact with it.
+
+### Use Clawd Cursor when you need to:
+- **Read a webpage** — navigate there, extract the text, bring it back
+- **Interact with any app** — click buttons, fill forms, read results
+- **Check something visual** — take a screenshot, read what's on screen
+- **Do browser tasks** — search, navigate, log in, download, fill forms
+- **Control desktop apps** — Notepad, Calculator, VS Code, Settings, anything
+- **Complete YOUR own tasks** — not just user requests. If YOU need to **read** data from a webpage or app to answer a question, use this. (Read-only autonomy — never send messages, delete, or modify things without the user explicitly asking.)
+- **Send emails, messages, or communications** via desktop apps
+- **Configure settings** in any application
+- **Transfer data between apps** — copy from one, paste in another
+- **Automate multi-step workflows** across apps
+- **Verify something visual** — did the page load? what does the UI show?
+
+### Don't ask the user to do things you can do yourself.
+❌ "Can you screenshot that page for me?"
+❌ "Can you paste the contents of that website?"
+❌ "I don't have access to that application."
+
+✅ Send the task to Clawd Cursor. Get the answer. Be independent.
+
+### Don't use Clawd Cursor when:
+- You can do it with a direct API call or CLI command (faster)
+- The task is purely computational (math, text generation, code writing)
+- You can already read/write the file directly
+
+### Direct Browser Access (Fast Path)
+For quick page reads without a full task, connect to Chrome via Playwright CDP:
+```js
+const pw = require('playwright');
+const browser = await pw.chromium.connectOverCDP('http://127.0.0.1:9222');
+const pages = browser.contexts()[0].pages();
+const text = await pages[0].innerText('body');
+```
+
+Use this when you just need page content — faster than sending a task.
+
+| Scenario | Use | Why |
+|----------|-----|-----|
+| Read page content/text | CDP Direct | Instant, free |
+| Fill a web form | REST API | Clawd handles multi-step planning |
+| Check if a page loaded | CDP Direct | Just read the title/URL |
+| Click through a complex UI flow | REST API | Clawd handles planning |
+| Get a list of elements on page | CDP Direct | Fast DOM query |
+| Interact with a desktop app | REST API | CDP is browser-only |
+
+---
+
+## REST API Reference
+
+Base URL: `http://127.0.0.1:3847`
+
+> **Note:** On Windows PowerShell, use `curl.exe` (with .exe) or `Invoke-RestMethod`. Bare `curl` is aliased to `Invoke-WebRequest` which behaves differently.
+
+### Pre-flight Check
+
+Before your first task, verify Clawd Cursor is running:
+
+```bash
+curl.exe -s http://127.0.0.1:3847/health
+```
+
+Expected: `{"status":"ok","version":"0.5.4"}`
+
+If connection refused — start it:
+```powershell
+cd <clawd-cursor-directory>; npm start
+```
+
+### Sending a Task (Async — Returns Immediately)
+
+`POST /task` accepts the task and returns immediately. The task runs in the background. **You must poll `/status` to know when it's done.**
+
+```bash
+curl.exe -s -X POST http://127.0.0.1:3847/task -H "Content-Type: application/json" -d "{\"task\": \"YOUR_TASK_HERE\"}"
+```
+
+PowerShell:
+```powershell
+Invoke-RestMethod -Uri http://127.0.0.1:3847/task -Method POST -ContentType "application/json" -Body '{"task": "YOUR_TASK_HERE"}'
+```
+
+### Polling Pattern (Follow This)
+
+```
+1. POST /task → get accepted
+2. Wait 2 seconds
+3. GET /status
+4. If status is "idle" → done
+5. If status is "waiting_confirm" → ASK THE USER, then POST /confirm based on their answer
+6. If still running → wait 2 more seconds, go to step 3
+7. If 60+ seconds → POST /abort and retry with clearer instructions
+```
+
+### Checking Status
+
+```bash
+curl.exe -s http://127.0.0.1:3847/status
+```
+
+### Confirming Safety-Gated Actions
+
+Some actions (sending messages, deleting) require approval. **🔴 NEVER self-approve these.** Always ask the user for confirmation before POST /confirm. These exist to protect the user — do not bypass them.
+```bash
+curl.exe -s -X POST http://127.0.0.1:3847/confirm -H "Content-Type: application/json" -d "{\"approved\": true}"
+```
+
+### Aborting a Task
+
+```bash
+curl.exe -s -X POST http://127.0.0.1:3847/abort
+```
+
+### Reading Logs (Debugging)
+
+```bash
+curl.exe -s http://127.0.0.1:3847/logs
+```
+
+Returns last 200 log entries. Check for `error` or `warn` entries when tasks fail.
+
+### Response States
+
+| State | Response | What to do |
+|-------|----------|------------|
+| **Accepted** | `{"accepted": true, "task": "..."}` | Start polling |
+| **Running** | `{"status": "acting", "currentTask": "...", "stepsCompleted": 2}` | Keep polling |
+| **Waiting confirm** | `{"status": "waiting_confirm", "currentStep": "..."}` | POST /confirm |
+| **Done** | `{"status": "idle"}` | Task complete |
+| **Busy** | `{"error": "Agent is busy", "state": {...}}` | Wait or POST /abort first |
+
+---
+
+## CDP Direct Reference
+
+Chrome must be running with `--remote-debugging-port=9222`.
+
+### Quick check:
+```bash
+curl.exe -s http://127.0.0.1:9222/json/version
+```
+
+If this returns JSON, Chrome is ready.
+
+### Connecting via Playwright:
+
+```javascript
+const { chromium } = require('playwright');
+const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
+const context = browser.contexts()[0];
+const page = context.pages()[0];
+
+// Read page content
+const title = await page.title();
+const url = page.url();
+const text = await page.textContent('body');
+
+// Click by role
+await page.getByRole('button', { name: 'Submit' }).click();
+
+// Fill a field
+await page.getByLabel('Email').fill('user@example.com');
+
+// Read specific elements
+const buttons = await page.$$eval('button', els => els.map(e => e.textContent));
+```
+
+---
+
+## Task Writing Guidelines
+
+1. **Be specific** — include app names, URLs, exact text to type, button names
+2. **One task at a time** — wait for completion before sending the next
+3. **Describe the goal, not the clicks** — say "Send an email to john@example.com about the meeting" not "click compose, click to field..."
+4. **Check status** if a task seems to hang
+5. **Don't include credentials in task text** — tasks are logged
+
+## Task Examples
+
+| Goal | Task to send |
+|------|-------------|
+| **Simple navigation** | `Open Chrome and go to github.com` |
+| **Read screen content** | `What text is currently displayed in Notepad?` |
+| **Cross-app workflow** | `Copy the email address from the Chrome tab and paste it into the To field in Outlook` |
+| **Form filling** | `In the open Chrome tab, fill the contact form: name "John Doe", email "john@example.com"` |
+| **App interaction** | `Open Spotify and play the Discover Weekly playlist` |
+| **Settings change** | `Open Windows Settings and turn on Dark Mode` |
+| **Data extraction** | `Read the stock price shown in the Bloomberg tab in Chrome` |
+| **Complex browser** | `Open YouTube, search for "Adele Hello", and play the first video result` |
+| **Verification** | `Check if the deployment succeeded — look at the Vercel dashboard in Chrome` |
+| **Send email** | `Open Gmail, compose email to john@example.com, subject: Meeting Tomorrow, body: Confirming 2pm. Best regards.` |
+| **Take screenshot** | `Take a screenshot` |
+
+## Error Recovery
+
+| Problem | Solution |
+|---------|----------|
+| Connection refused on :3847 | Start Clawd Cursor: `cd clawd-cursor && npm start` |
+| Connection refused on :9222 | Start Chrome with CDP: `Start-Process chrome -ArgumentList "--remote-debugging-port=9222"` |
+| Agent returns "busy" | Poll `/status` — wait for idle, or POST `/abort` |
+| Task fails with no details | Check `/logs` for error entries |
+| Task completes but wrong result | Rephrase with more specifics: exact app name, button text, field labels |
+| Same task fails repeatedly | Break into smaller tasks (one action per task) |
+| Safety confirmation pending | POST `/confirm` with `{"approved": true}` or `{"approved": false}` |
+| Task hangs > 60 seconds | POST `/abort`, then retry with simpler phrasing |
+
+---
+
+## How It Works — 4-Layer Pipeline
+
+| Layer | What | Speed | Cost |
+|-------|------|-------|------|
+| **0: Browser Layer** | URL detection → direct navigation | Instant | Free |
+| **1: Action Router** | Regex + UI Automation | Instant | Free |
+| **1.5: Smart Interaction** | 1 LLM plan → CDP/UIDriver executes | ~2-5s | 1 LLM call |
+| **2: Accessibility Reasoner** | UI tree → text LLM decides | ~1s | Cheap |
+| **3: Computer Use** | Screenshot → vision LLM | ~5-8s | Expensive |
+
+80%+ of tasks handled by Layer 0-1 (free, instant). Vision model is last resort only.
+
+## Safety Tiers
+
+| Tier | Actions | Behavior |
+|------|---------|----------|
+| 🟢 Auto | Navigation, reading, opening apps | Runs immediately |
+| 🟡 Preview | Typing, form filling | Logs before executing |
+| 🔴 Confirm | Sending messages, deleting | Pauses — **ask the user** before POST `/confirm`. Never self-approve. |
+
+## Security
+
+- API binds to `127.0.0.1` only — **not network accessible**. Verify: `netstat -an | findstr 3847` should show `127.0.0.1:3847`
+- Screenshots stay in memory, never saved to disk (unless `--debug`)
+- **With Ollama**: 100% local — zero external network calls. No data leaves the machine.
+- **With cloud providers** (Anthropic, OpenAI, Kimi): screenshots/text are sent to that provider's API only. No data goes to skill authors or third parties.
+- The user chooses their provider — this controls whether data stays local or goes to a cloud API.
+
+---
+
+## Setup (User Reference)
+
+Setup is handled by the user. If Clawd Cursor isn't running, tell the user:
+"Clawd Cursor needs to be started. Run `cd clawd-cursor && npm start` in your terminal."
 
 ```bash
 git clone https://github.com/AmrDab/clawd-cursor.git
 cd clawd-cursor
 npm install && npm run build
 npx clawd-cursor doctor    # auto-detects and configures everything
-npm start
+npm start                  # starts on port 3847
 ```
 
-That's it. The doctor handles provider detection, model testing, and pipeline configuration.
+**macOS:** Grant Accessibility permission to terminal: System Settings → Privacy & Security → Accessibility
 
-### macOS Users
-Grant **Accessibility permission** to your terminal app:
-**System Settings → Privacy & Security → Accessibility → add Terminal/iTerm**
+| Provider | Setup | Cost |
+|----------|-------|------|
+| **Ollama (free)** | `ollama pull qwen2.5:7b` | $0 |
+| **Anthropic** | Set `AI_API_KEY=sk-ant-...` | ~$3/M tokens |
+| **OpenAI** | Set `AI_API_KEY=sk-...` | ~$5/M tokens |
+| **Kimi** | Set `AI_API_KEY=sk-...` | ~$1/M tokens |
 
-See `docs/MACOS-SETUP.md` for full setup guide.
+---
 
-## How It Works — 4-Layer Pipeline
+## Performance Optimization
 
-Every task flows through layers. Most tasks are handled by Layer 1 (free, instant). Only complex tasks reach Layer 3.
+Proven optimizations applied to reduce task execution latency and LLM API costs. Reference files in `perf/references/patches/`.
 
-| Layer | What | Speed | Cost |
-|-------|------|-------|------|
-| **0: Browser Layer** | URL detection → direct navigation | Instant | Free |
-| **1: Action Router** | Regex + UI Automation. Opens apps, types, clicks by name | Instant | Free |
-| **1.5: Smart Interaction** | 1 LLM plan → CDP/UIDriver executes steps free | ~2-5s | 1 LLM call |
-| **2: Accessibility Reasoner** | Reads UI tree → cheap text LLM decides action | ~1s | Free (Qwen) or $0.25/M (Haiku) |
-| **3: Computer Use** | Full screenshot → vision LLM or Anthropic Computer Use | ~5-8s | ~$3/M (Sonnet) |
+### Applied Optimizations
 
-**Example:** Sending a Gmail email — Layer 1.5 does it in **1 LLM call, 21 seconds**. Computer Use would take 18 LLM calls, 162 seconds.
+| # | Name | Impact |
+|---|------|--------|
+| 1 | Screenshot hash cache | 90% fewer LLM calls on static screens |
+| 2 | Parallel screenshot+a11y | 30-40% per-step latency cut |
+| 3 | A11y context cache (2s TTL) | Eliminates redundant PS spawns |
+| 4 | Screenshot compression | 52% smaller payload (58KB vs 120KB) |
+| 5 | Async debug writes | 94% less event loop blocking |
+| 6 | Streaming LLM responses | 1-3s faster per LLM call |
+| 7 | Trimmed system prompts | ~60% fewer prompt tokens |
+| 8 | A11y tree filtering | Interactive elements only, 3000 char cap |
+| 9 | Combined PS script | 1 spawn instead of 3 |
+| 10 | Taskbar cache (30s TTL) | Skip expensive taskbar query |
+| 11 | Delay reduction | 50-150ms vs 200-1500ms |
 
-## Provider Support
+### Benchmarks (2560x1440)
 
-| Provider | Setup | Layer 2 | Layer 3 | Computer Use |
-|----------|-------|---------|---------|-------------|
-| **Ollama** | `ollama pull qwen2.5:7b` | Qwen (free) | Limited | ❌ |
-| **Anthropic** | `AI_API_KEY=sk-ant-...` | Haiku or Qwen | Sonnet | ✅ |
-| **OpenAI** | `AI_API_KEY=sk-...` | GPT-4o-mini | GPT-4o | ❌ |
-| **Kimi** | `AI_API_KEY=sk-...` | Moonshot-8k | Moonshot-8k | ❌ |
+| Metric | v0.3 (VNC) | v0.4 (Native) | v0.4.1+ (Optimized) |
+|--------|------------|---------------|----------------------|
+| Screenshot capture | ~850ms | ~50ms | ~57ms |
+| Screenshot size | ~200KB | ~120KB | ~58KB |
+| A11y context (uncached) | N/A | ~600ms | ~462ms |
+| A11y context (cached) | N/A | 0ms | 0ms (2s TTL) |
+| Delays (per step) | N/A | 200-1500ms | 50-600ms |
+| System prompt tokens | N/A | ~800 | ~300 |
 
-## Platform Support
+### Perf Tools
 
-| Platform | UI Automation | Accessibility | Browser (CDP) |
-|----------|--------------|---------------|---------------|
-| **Windows** | PowerShell/.NET UIAutomation | ✅ Full | ✅ Edge/Chrome |
-| **macOS** | JXA/AppleScript + System Events | ✅ Full | ✅ Chrome |
-| **Linux** | Not yet | Not yet | ✅ Chrome |
-
-## OpenClaw Agent Instructions
-
-When an OpenClaw agent dispatches Clawd Cursor tasks:
-
-### Simple Tasks
-```
-POST http://localhost:3847/task
-{"task": "Open Notepad and type hello world"}
-```
-
-### Complex Tasks (two-agent pattern)
-For heavy workloads, spawn two sub-agents:
-1. **Setup agent** — runs `doctor`, starts server, validates connectivity
-2. **Task agent** — sends tasks via REST API, monitors status, reports results
-
-## Doctor (Self-Healing)
-
-```bash
-npx clawd-cursor doctor
-```
-
-The doctor:
-1. Checks for updates against GitHub releases
-2. Tests screen capture and accessibility bridge
-3. Detects available AI providers and tests models
-4. Builds the optimal pipeline config
-5. Falls back gracefully if models are unavailable
-6. Saves config to `.clawd-config.json`
-
-## API Endpoints
-
-`http://localhost:3847`
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/task` | POST | `{"task": "Open Chrome"}` |
-| `/status` | GET | Agent state |
-| `/confirm` | POST | `{"approved": true}` |
-| `/abort` | POST | Stop current task |
-
-## Safety
-
-| Tier | Actions | Behavior |
-|------|---------|----------|
-| 🟢 Auto | Navigation, reading, opening apps | Runs immediately |
-| 🟡 Preview | Typing, form filling | Logs before executing |
-| 🔴 Confirm | Sending messages, deleting | Pauses for approval |
-
-## Security
-
-- Screenshots are NOT saved to disk by default (memory only, sent to user's own AI provider)
-- API binds to 127.0.0.1 only — not network accessible
-- Use `--debug` to opt-in to disk screenshot saves
-- Run in a sandbox/VM when testing with sensitive screen content
-- With Ollama, everything runs 100% locally — no external API calls
+- `perf/apply-optimizations.ps1` — apply all patches
+- `perf/perf-test.ts` — benchmark harness (`npx ts-node perf/perf-test.ts`)

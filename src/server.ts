@@ -2,20 +2,86 @@
  * HTTP Server — REST API for controlling the agent.
  * 
  * Endpoints:
- *   POST /task          — submit a new task
- *   GET  /status        — get agent state
- *   POST /confirm       — approve/reject a pending action
- *   POST /abort         — abort current task
- *   GET  /screenshot    — get current screen
+ *   GET  /           — Web dashboard
+ *   POST /task       — submit a new task
+ *   GET  /status     — get agent state
+ *   POST /confirm    — approve/reject a pending action
+ *   POST /abort      — abort current task
+ *   GET  /screenshot — get current screen
+ *   GET  /logs       — recent log entries as JSON
+ *   GET  /health     — health check
+ *   POST /stop       — graceful shutdown (localhost only)
  */
 
 import express from 'express';
 import type { ClawdConfig } from './types';
 import { Agent } from './agent';
+import { mountDashboard } from './dashboard';
+
+// In-memory log buffer
+interface LogEntry {
+  timestamp: number;
+  level: 'info' | 'success' | 'warn' | 'error';
+  message: string;
+}
+
+const MAX_LOGS = 200;
+const logBuffer: LogEntry[] = [];
+
+function addLog(level: LogEntry['level'], message: string): void {
+  logBuffer.push({ timestamp: Date.now(), level, message });
+  if (logBuffer.length > MAX_LOGS) {
+    logBuffer.splice(0, logBuffer.length - MAX_LOGS);
+  }
+}
+
+/**
+ * Intercept console methods to capture logs into the buffer.
+ * Preserves original behavior.
+ */
+function hookConsole(): void {
+  const origLog = console.log;
+  const origError = console.error;
+  const origWarn = console.warn;
+
+  console.log = (...args: unknown[]) => {
+    origLog.apply(console, args);
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+    // Classify message
+    const lower = msg.toLowerCase();
+    if (lower.includes('error') || lower.includes('failed') || lower.includes('❌')) {
+      addLog('error', msg);
+    } else if (lower.includes('✅') || lower.includes('success') || lower.includes('completed')) {
+      addLog('success', msg);
+    } else if (lower.includes('⚠') || lower.includes('warn')) {
+      addLog('warn', msg);
+    } else {
+      addLog('info', msg);
+    }
+  };
+
+  console.error = (...args: unknown[]) => {
+    origError.apply(console, args);
+    const msg = args.map(a => typeof a === 'string' ? a : (a instanceof Error ? a.message : JSON.stringify(a))).join(' ');
+    addLog('error', msg);
+  };
+
+  console.warn = (...args: unknown[]) => {
+    origWarn.apply(console, args);
+    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
+    addLog('warn', msg);
+  };
+}
 
 export function createServer(agent: Agent, config: ClawdConfig): express.Express {
+  // Hook console to capture logs
+  hookConsole();
+
   const app = express();
   app.use(express.json());
+
+  // Mount the web dashboard at GET /
+  mountDashboard(app);
 
   // Submit a task
   app.post('/task', async (req, res) => {
@@ -76,6 +142,11 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
     res.json({ aborted: true });
   });
 
+  // Get recent log entries
+  app.get('/logs', (req, res) => {
+    res.json(logBuffer);
+  });
+
   // Health check
   app.get('/health', (req, res) => {
     res.json({ status: 'ok', version: '0.5.1' });
@@ -101,4 +172,3 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   return app;
 }
-

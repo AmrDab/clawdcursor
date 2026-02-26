@@ -15,8 +15,12 @@
  */
 
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import type { ClawdConfig, StepResult } from './types';
 import type { PipelineConfig } from './providers';
+
+const execFileAsync = promisify(execFile);
 
 const CDP_PORT = 9222;
 
@@ -185,6 +189,42 @@ export class BrowserLayer {
   }
 
   /**
+   * Bring the browser window to the foreground so the user sees it.
+   * CDP bringToFront + OS-level window activation.
+   */
+  async bringBrowserToFront(): Promise<void> {
+    try {
+      // CDP level
+      if (this.page) await this.page.bringToFront();
+
+      // OS level — actually activate the Chrome window
+      if (process.platform === 'win32') {
+        // PowerShell: find Chrome process and bring its main window to front
+        await execFileAsync('powershell', ['-NoProfile', '-Command', `
+          Add-Type @"
+            using System;
+            using System.Runtime.InteropServices;
+            public class WinAPI {
+              [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+              [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+            }
+"@
+          $chrome = Get-Process chrome -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+          if ($chrome) {
+            [WinAPI]::ShowWindow($chrome.MainWindowHandle, 9)
+            [WinAPI]::SetForegroundWindow($chrome.MainWindowHandle)
+          }
+        `], { timeout: 5000 });
+      } else if (process.platform === 'darwin') {
+        await execFileAsync('osascript', ['-e', 'tell application "Google Chrome" to activate'], { timeout: 5000 });
+      }
+      console.log(`   🪟 Brought browser to foreground`);
+    } catch (e: any) {
+      console.log(`   ⚠️ Could not bring browser to foreground: ${e.message}`);
+    }
+  }
+
+  /**
    * Execute a browser task using Playwright.
    * Uses the LLM to plan actions, then executes them natively.
    */
@@ -218,6 +258,9 @@ export class BrowserLayer {
           timestamp: Date.now(),
         });
 
+        // Bring browser to foreground so user sees it
+        await this.bringBrowserToFront();
+
         // Wait for page to settle
         await this.page!.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
         
@@ -249,25 +292,26 @@ export class BrowserLayer {
           };
         }
 
-        // Multi-step task detection — if the task involves more than navigation
-        // (compose, send, type, click, fill, write, etc.), browser layer only did
-        // the navigation part. Fall through to SmartInteraction for the rest.
-        const actionWords = /\b(compose|send|type|click|fill|write|enter|submit|reply|forward|delete|create|add|edit|search for|upload|download|select|check|uncheck|toggle|drag|drop|scroll|copy|paste|save|print|attach)\b/i;
-        if (actionWords.test(task)) {
-          console.log(`   🧩 Multi-step task detected — navigation done, falling through to SmartInteraction`);
+        // Browser layer only handles pure navigation.
+        // If the task is JUST "open youtube" / "go to google.com" — we're done.
+        // Anything more complex → fall through to SmartInteraction and let the LLM plan the steps.
+        const pureNavigation = /^(?:open|go to|navigate to|visit|launch|load)\s+[\w./:]+(?:\s+[\w./:]+)*$/i;
+        if (pureNavigation.test(task.trim()) && !task.includes(' and ')) {
           return {
-            handled: false,
-            success: false,
+            handled: true,
+            success: true,
             steps,
-            description: `Navigated to ${url} but task requires more actions — handing off`,
+            description: `Navigated to ${url} — page title: "${title}"`,
           };
         }
 
+        // Task has more to it than just navigation — hand off to SmartInteraction
+        console.log(`   🧩 Navigation done, handing off to SmartInteraction for remaining steps`);
         return {
-          handled: true,
-          success: true,
+          handled: false,
+          success: false,
           steps,
-          description: `Navigated to ${url} — page title: "${title}"`,
+          description: `Navigated to ${url} — handing off remaining steps to SmartInteraction`,
         };
       }
 
@@ -372,10 +416,12 @@ export class BrowserLayer {
    * Extract a search query from a task.
    */
   private extractSearchQuery(task: string): string | null {
-    const searchMatch = task.match(/\b(?:search|look up|find|google)\s+(?:for\s+)?["']?(.+?)["']?\s*$/i);
+    const searchMatch = task.match(/\b(?:search|look up|find|google)\s+(?:for\s+)?["']([^"']+)["']$/i) ||
+                        task.match(/\b(?:search|look up|find|google)\s+(?:for\s+)?(\S.*)$/i);
     if (searchMatch) return searchMatch[1];
     
-    const webSearchMatch = task.match(/\b(?:search the web|web search|search online)\s+(?:for\s+)?["']?(.+?)["']?\s*$/i);
+    const webSearchMatch = task.match(/\b(?:search the web|web search|search online)\s+(?:for\s+)?["']([^"']+)["']$/i) ||
+                           task.match(/\b(?:search the web|web search|search online)\s+(?:for\s+)?(\S.*)$/i);
     if (webSearchMatch) return webSearchMatch[1];
 
     return null;

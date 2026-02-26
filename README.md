@@ -15,29 +15,47 @@
 
 ---
 
-## What's New in v0.5.1
+## What's New in v0.5.4
 
-**Onboarding fixes + smart pipeline.** All blockers from fresh-user testing resolved. PowerShell-compatible install, fixed model IDs, zero npm audit vulnerabilities, plus the full v0.5.0 smart pipeline.
+**SKILL.md Rewrite for Agent Autonomy.** Agents now understand they have full desktop control. Identity shift framing, trigger lists, CDP direct path, async polling pattern, error recovery — all documented so agents act independently instead of asking users to do things for them.
 
-- **PowerShell-compatible install** — no more `&&` breaking Windows setup
-- **`npm run doctor` / `npm run stop`** — proper npm scripts (no npx issues)
-- **Fixed Haiku model ID** — Layer 2 accessibility reasoner works out of the box
-- **Zero vulnerabilities** — `npm audit` clean
-- **3-layer pipeline** - Action Router → Accessibility Reasoner → Screenshot fallback
-- **Multi-provider** - Anthropic, OpenAI, Ollama (local/free), Kimi
-- **95% cheaper** - simple tasks run for $0 with local Qwen
-- **HD screenshots at 1280px** — clear enough for Claude to identify toolbar icons reliably
-- **Streaming responses** - early JSON return saves 1-3s per LLM call
-- **Self-healing** - if a model fails, the pipeline adapts automatically
+- **🧠 Agent identity shift** — SKILL.md opens with clear framing that overrides "I can't do desktop things" behavior
+- **📋 Decision framework** — "When to Use This" trigger list so agents know exactly when to reach for Clawd Cursor
+- **⚡ Two paths** — REST API for full desktop, CDP Direct for fast browser reads
+- **🔄 Async polling pattern** — step-by-step algorithm agents follow to track task completion
+- **🛠️ Error recovery** — 8 common problems with exact solutions
+- **🔗 OpenClaw integration** — documented as an installable OpenClaw skill
+
+### v0.5.2 — Web Dashboard + Browser Foreground Focus Full web UI for controlling tasks, real-time logs, and the AI now brings the browser to the foreground so you see everything it does — like watching a cursor move.
+
+- **🖥️ Web Dashboard** — open `http://localhost:3847` or run `clawdcursor dashboard`. Submit tasks, view real-time logs, approve/reject safety confirmations, kill switch. Dark theme, zero dependencies.
+- **🪟 Browser foreground focus** — Playwright navigation now activates Chrome at the OS level. No more invisible background tabs.
+- **🧠 Smart task handoff** — no more regex word lists. LLM plans multi-step browser tasks (e.g. "open youtube and play adele") instead of pattern matching.
+- **Multi-provider** — Anthropic, OpenAI, Ollama (local/free), Kimi
+- **95% cheaper** — simple tasks run for $0 with local Qwen
+- **Self-healing** — if a model fails, the pipeline adapts automatically
 
 ### Performance
 
-| Task | v0.4 (Anthropic only) | v0.5 (Ollama, $0) | v0.5 (Anthropic) |
+| Task | v0.4 (Anthropic only) | v0.5+ (Ollama, $0) | v0.5+ (Anthropic) |
 |------|-----------------------|---------------------|-------------------|
 | Calculator (255*38=) | 43s | **2.6s** | **20.1s** |
 | Notepad (type hello) | 73s | **2.0s** | **54.2s** |
 | File Explorer | 53s | **1.9s** | **22.1s** |
-| GitHub → read → Notepad | N/A | - | **134.1s** |
+| Gmail compose | 162s (18 LLM calls) | — | **21.7s** (1 LLM call) |
+
+---
+
+## OpenClaw Integration
+
+Clawd Cursor ships as an [OpenClaw](https://openclaw.ai) skill. Install it and any OpenClaw agent — yours or community-built — can control your desktop through natural language.
+
+The [`SKILL.md`](SKILL.md) teaches agents **when and how** to use Clawd Cursor: REST API for full desktop control, CDP direct for fast browser reads. Agents learn to be independent — no more asking you to screenshot or copy-paste things they can do themselves.
+
+```bash
+# Install as OpenClaw skill
+openclaw skills install clawd-cursor
+```
 
 ---
 
@@ -112,15 +130,23 @@ npm start -- --provider openai
 
 ## How It Works
 
-### The 3-Layer Pipeline
+### The 5-Layer Pipeline
 
-Every task flows through up to 3 layers. Each layer is cheaper and faster than the next. Most tasks never reach Layer 3.
+Every task flows through up to 5 layers. Each layer is cheaper and faster than the next. Most tasks never reach Layer 3.
 
 ```
 ┌─────────────────────────────────────────────────────┐
+│  Layer 0: Browser (Playwright — free, instant)       │
+│  Direct browser control via CDP. page.goto(),        │
+│  brings Chrome to foreground. Zero vision tokens.     │
+├─────────────────────────────────────────────────────┤
 │  Layer 1: Action Router (instant, free)              │
 │  Regex + UI Automation. "Open X", "type Y", "click Z"│
 │  Handles ~80% of simple tasks with ZERO LLM calls    │
+├─────────────────────────────────────────────────────┤
+│  Layer 1.5: Smart Interaction (1 LLM call)           │
+│  CDPDriver (browser) or UIDriver (desktop apps).     │
+│  LLM plans steps → executes via selectors/a11y.      │
 ├─────────────────────────────────────────────────────┤
 │  Layer 2: Accessibility Reasoner (fast, cheap/free)   │
 │  Reads the accessibility tree, sends to cheap LLM     │
@@ -132,7 +158,7 @@ Every task flows through up to 3 layers. Each layer is cheaper and faster than t
 └─────────────────────────────────────────────────────┘
 ```
 
-**The doctor decides which layers are available** based on your setup. No API key? Layers 1+2 with Ollama. Anthropic key? All 3 layers with Computer Use.
+**The doctor decides which layers are available** based on your setup. No API key? Layers 0-2 with Ollama. Anthropic key? All layers with Computer Use.
 
 ### Provider-Specific Behavior
 
@@ -195,10 +221,14 @@ Options:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/` | GET | Web dashboard UI |
 | `/task` | POST | Execute a task: `{"task": "Open Chrome"}` |
 | `/status` | GET | Agent state and current task |
+| `/logs` | GET | Last 200 log entries (JSON array) |
 | `/confirm` | POST | Approve/reject pending action |
 | `/abort` | POST | Stop the current task |
+| `/stop` | POST | Graceful server shutdown |
+| `/health` | GET | Server health + version |
 
 ---
 
@@ -207,22 +237,23 @@ Options:
 ```
 ┌───────────────────────────────────────────────────┐
 │           Your Desktop (Native Control)            │
-│        @nut-tree-fork/nut-js · OS-level            │
+│     @nut-tree-fork/nut-js · Playwright · OS-level  │
 └──────────────────────┬────────────────────────────┘
                        │
 ┌──────────────────────┴────────────────────────────┐
 │              Clawd Cursor Agent                    │
 │                                                    │
-│  ┌──────────┐  ┌──────────────┐  ┌─────────────┐ │
-│  │ Layer 1   │  │ Layer 2       │  │ Layer 3     │ │
-│  │ Action    │→ │ Accessibility │→ │ Screenshot  │ │
-│  │ Router    │  │ Reasoner      │  │ + Vision    │ │
-│  │ (free)    │  │ (cheap/free)  │  │ (powerful)  │ │
-│  └──────────┘  └──────────────┘  └─────────────┘ │
+│  ┌────────┐ ┌────────┐ ┌───────┐ ┌─────┐ ┌─────┐│
+│  │Layer 0 │ │Layer 1 │ │L 1.5  │ │ L2  │ │ L3  ││
+│  │Browser │→│Action  │→│Smart  │→│A11y │→│Vision││
+│  │Playwrt │ │Router  │ │Interac│ │Tree │ │+CU   ││
+│  │(free)  │ │(free)  │ │(1 LLM)│ │(cheap│ │(full)││
+│  └────────┘ └────────┘ └───────┘ └─────┘ └─────┘│
 │       ↑                                            │
-│  ┌──────────┐                                     │
-│  │ Doctor   │ ← Auto-configures pipeline          │
-│  └──────────┘                                     │
+│  ┌──────────┐  ┌────────────────┐                 │
+│  │ Doctor   │  │ Web Dashboard  │                 │
+│  │ Auto-cfg │  │ localhost:3847 │                 │
+│  └──────────┘  └────────────────┘                 │
 │                                                    │
 │  Safety Layer · REST API · Circuit Breaker         │
 └────────────────────────────────────────────────────┘
@@ -241,9 +272,12 @@ Options:
 ## CLI Options
 
 ```
-clawd-cursor start      Start the agent
-clawd-cursor doctor     Diagnose and auto-configure
-clawd-cursor task <t>   Send a task to running agent
+clawdcursor start        Start the agent
+clawdcursor doctor       Diagnose and auto-configure
+clawdcursor task <t>     Send a task to running agent
+clawdcursor dashboard    Open the web dashboard in your browser
+clawdcursor kill         Stop the running server
+clawdcursor stop         Stop the running server
 
 Options:
   --port <port>          API port (default: 3847)
