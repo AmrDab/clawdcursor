@@ -12,7 +12,7 @@
 import * as crypto from 'crypto';
 import type { ClawdConfig, InputAction, ActionSequence, ScreenFrame } from './types';
 
-const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on Windows 11.
+const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on {OS_NAME}.
 Screen: {REAL_WIDTH}x{REAL_HEIGHT}. Screenshot: {LLM_WIDTH}x{LLM_HEIGHT} (scale {SCALE}x).
 All coordinates in SCREENSHOT space — auto-scaled to real screen.
 
@@ -207,7 +207,8 @@ export class AIBrain {
       .replace(/{REAL_HEIGHT}/g, String(this.screenHeight))
       .replace(/{LLM_WIDTH}/g, String(llmWidth))
       .replace(/{LLM_HEIGHT}/g, String(llmHeight))
-      .replace(/{SCALE}/g, scale.toFixed(2));
+      .replace(/{SCALE}/g, scale.toFixed(2))
+      .replace(/{OS_NAME}/g, this.getOSName());
 
     const response = await this.callLLM(systemPrompt);
 
@@ -454,6 +455,21 @@ export class AIBrain {
 
     return result;
   }
+
+ private getOSName(): string {
+  switch (process.platform) {
+    case 'win32':
+      return 'Windows 11';
+    case 'darwin':
+      return 'MacOS';
+    case 'linux':
+      return 'Linux';
+    default:
+      return 'An Uknown OS';
+  }
+}
+
+
 
   private async callOpenAICompat(
     systemPrompt: string,
