@@ -321,7 +321,23 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     border-radius: 6px;
     padding: 10px 14px;
     font-size: 0.88rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 6px;
   }
+  .history-item .star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0 4px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: transform 0.15s;
+  }
+  .history-item .star-btn:hover { transform: scale(1.25); }
+  .history-item .history-content { flex: 1; min-width: 0; }
   .history-item .task-text { color: var(--accent); font-weight: 500; }
   .history-item .task-time { color: var(--text-muted); font-size: 0.75rem; margin-left: 8px; }
   .history-item .task-result {
@@ -332,6 +348,66 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     white-space: pre-wrap;
     word-break: break-word;
   }
+
+  /* Favorites section */
+  .favorites-section {
+    margin-bottom: 16px;
+    display: none;
+  }
+  .favorites-section.visible { display: block; }
+  .favorites-title {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+  .favorites-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .fav-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--accent);
+    font-size: 0.85rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: var(--font-sans);
+    max-width: 100%;
+  }
+  .fav-chip:hover {
+    background: var(--accent);
+    color: var(--bg-primary);
+    border-color: var(--accent);
+  }
+  .fav-chip .fav-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .fav-chip .fav-remove {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 2px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .fav-chip .fav-remove:hover { color: var(--red); }
+  .fav-chip:hover .fav-remove { color: var(--bg-primary); }
+  .fav-chip:hover .fav-remove:hover { color: var(--red); }
 
   /* Logs Tab */
   .log-area {
@@ -404,6 +480,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   <!-- Task Tab -->
   <div class="tab-content active" id="panelTask">
+
+    <!-- Favorites Section -->
+    <div class="favorites-section" id="favoritesSection">
+      <div class="favorites-title">⭐ Favorites</div>
+      <div class="favorites-chips" id="favoritesChips"></div>
+    </div>
+
     <div class="task-input-area">
       <input type="text" class="task-input" id="taskInput"
              placeholder="Enter a task... e.g. Open Chrome and go to github.com"
@@ -451,6 +534,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   let lastLogCount = 0;
   let taskHistory = [];
   let currentStatus = 'idle';
+  let favorites = [];
 
   // DOM refs
   const statusDot = document.getElementById('statusDot');
@@ -470,6 +554,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   const emptyTask = document.getElementById('emptyTask');
   const logArea = document.getElementById('logArea');
   const emptyLogs = document.getElementById('emptyLogs');
+  const favoritesSection = document.getElementById('favoritesSection');
+  const favoritesChips = document.getElementById('favoritesChips');
 
   // Tab switching
   window.switchTab = function(tab) {
@@ -649,14 +735,118 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       return;
     }
     historySection.style.display = 'block';
-    historyList.innerHTML = taskHistory.map(h =>
-      '<li class="history-item">' +
-        '<span class="task-text">' + escHtml(h.task) + '</span>' +
-        '<span class="task-time">' + escHtml(h.time) + '</span>' +
-        '<div class="task-result">' + escHtml(h.result) + '</div>' +
-      '</li>'
-    ).join('');
+    historyList.innerHTML = taskHistory.map(function(h, idx) {
+      var isFav = favorites.indexOf(h.task) !== -1;
+      var starIcon = isFav ? '⭐' : '☆';
+      return '<li class="history-item">' +
+        '<button class="star-btn" onclick="toggleStar(' + idx + ')" title="' + (isFav ? 'Unstar' : 'Star') + '">' + starIcon + '</button>' +
+        '<div class="history-content">' +
+          '<span class="task-text">' + escHtml(h.task) + '</span>' +
+          '<span class="task-time">' + escHtml(h.time) + '</span>' +
+          '<div class="task-result">' + escHtml(h.result) + '</div>' +
+        '</div>' +
+      '</li>';
+    }).join('');
   }
+
+  // Favorites
+  async function loadFavorites() {
+    try {
+      var res = await fetch('/favorites');
+      if (res.ok) {
+        favorites = await res.json();
+        renderFavorites();
+        renderHistory();
+      }
+    } catch(e) { /* ignore */ }
+  }
+
+  function renderFavorites() {
+    if (favorites.length === 0) {
+      favoritesSection.classList.remove('visible');
+      return;
+    }
+    favoritesSection.classList.add('visible');
+    favoritesChips.innerHTML = favorites.map(function(fav) {
+      return '<div class="fav-chip" title="Click to run: ' + escHtml(fav) + '">' +
+        '<span class="fav-text" onclick="runFavorite(this)">' + escHtml(fav) + '</span>' +
+        '<button class="fav-remove" onclick="event.stopPropagation();removeFavorite(this)" title="Remove from favorites">&times;</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  function looksLikeCredential(text) {
+    var patterns = [
+      /sk-[a-zA-Z0-9]{20,}/,        // OpenAI / generic API keys
+      /sk-ant-[a-zA-Z0-9-]{20,}/,    // Anthropic keys
+      /password\s*[:=]\s*\S+/i,      // password: xxx
+      /secret\s*[:=]\s*\S+/i,        // secret: xxx
+      /token\s*[:=]\s*\S+/i,         // token: xxx
+      /api[_-]?key\s*[:=]\s*\S+/i,   // api_key: xxx
+      /Bearer\s+[a-zA-Z0-9._-]{20,}/ // Bearer tokens
+    ];
+    for (var i = 0; i < patterns.length; i++) {
+      if (patterns[i].test(text)) return true;
+    }
+    return false;
+  }
+
+  window.toggleStar = async function(idx) {
+    var item = taskHistory[idx];
+    if (!item) return;
+    var isFav = favorites.indexOf(item.task) !== -1;
+
+    // When starring, check for credentials
+    if (!isFav && looksLikeCredential(item.task)) {
+      var msg = '🔒 This task may contain sensitive info (API key, password, or token).\\n\\n' +
+        'Starred commands are saved locally in .clawd-favorites.json on your machine — ' +
+        'never sent over the network. Your credentials stay secure on your device.\\n\\n' +
+        'Star this command anyway?';
+      if (!confirm(msg)) return;
+    }
+
+    try {
+      var res = await fetch('/favorites', {
+        method: isFav ? 'DELETE' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: item.task })
+      });
+      if (res.ok) {
+        var data = await res.json();
+        favorites = data.favorites || [];
+        renderFavorites();
+        renderHistory();
+      }
+    } catch(e) {
+      console.error('Failed to toggle star:', e);
+    }
+  };
+
+  window.runFavorite = function(el) {
+    var text = el.textContent;
+    taskInput.value = text;
+    sendTask();
+  };
+
+  window.removeFavorite = async function(el) {
+    var chip = el.parentElement;
+    var text = chip.querySelector('.fav-text').textContent;
+    try {
+      var res = await fetch('/favorites', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task: text })
+      });
+      if (res.ok) {
+        var data = await res.json();
+        favorites = data.favorites || [];
+        renderFavorites();
+        renderHistory();
+      }
+    } catch(e) {
+      console.error('Failed to remove favorite:', e);
+    }
+  };
 
   // Logs polling
   async function pollLogs() {
@@ -713,6 +903,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   // Init
   fetchVersion();
+  loadFavorites();
   pollStatus();
   setInterval(pollStatus, 2000);
   setInterval(pollLogs, 2000);

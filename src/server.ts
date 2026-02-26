@@ -11,12 +11,41 @@
  *   GET  /logs       — recent log entries as JSON
  *   GET  /health     — health check
  *   POST /stop       — graceful shutdown (localhost only)
+ *   GET  /favorites  — list saved favorite commands
+ *   POST /favorites  — add a command to favorites
+ *   DELETE /favorites — remove a command from favorites
  */
 
 import express from 'express';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { join } from 'path';
 import type { ClawdConfig } from './types';
 import { Agent } from './agent';
 import { mountDashboard } from './dashboard';
+
+// Favorites persistence
+const FAVORITES_PATH = join(process.cwd(), '.clawd-favorites.json');
+
+function loadFavorites(): string[] {
+  try {
+    if (existsSync(FAVORITES_PATH)) {
+      const data = readFileSync(FAVORITES_PATH, 'utf-8');
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('⚠ Failed to load favorites:', (e as Error).message);
+  }
+  return [];
+}
+
+function saveFavorites(favorites: string[]): void {
+  try {
+    writeFileSync(FAVORITES_PATH, JSON.stringify(favorites, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('❌ Failed to save favorites:', (e as Error).message);
+  }
+}
 
 // In-memory log buffer
 interface LogEntry {
@@ -82,6 +111,48 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Mount the web dashboard at GET /
   mountDashboard(app);
+
+  // --- Favorites endpoints ---
+
+  // Get all favorites
+  app.get('/favorites', (_req, res) => {
+    res.json(loadFavorites());
+  });
+
+  // Add a favorite
+  app.post('/favorites', (req, res) => {
+    const { task } = req.body;
+    if (!task || typeof task !== 'string') {
+      return res.status(400).json({ error: 'Missing "task" string in body' });
+    }
+    const favorites = loadFavorites();
+    const trimmed = task.trim();
+    if (!trimmed) {
+      return res.status(400).json({ error: 'Task cannot be empty' });
+    }
+    if (!favorites.includes(trimmed)) {
+      favorites.push(trimmed);
+      saveFavorites(favorites);
+    }
+    res.json({ ok: true, favorites });
+  });
+
+  // Remove a favorite
+  app.delete('/favorites', (req, res) => {
+    const { task } = req.body;
+    if (!task || typeof task !== 'string') {
+      return res.status(400).json({ error: 'Missing "task" string in body' });
+    }
+    const favorites = loadFavorites();
+    const trimmed = task.trim();
+    const idx = favorites.indexOf(trimmed);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Favorite not found' });
+    }
+    favorites.splice(idx, 1);
+    saveFavorites(favorites);
+    res.json({ ok: true, favorites });
+  });
 
   // Submit a task
   app.post('/task', async (req, res) => {
