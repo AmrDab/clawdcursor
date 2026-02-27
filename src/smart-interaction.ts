@@ -68,6 +68,8 @@ export interface SmartInteractionResult {
 
 // ── System prompt for the planning LLM call ──
 
+const DESCRIBE_SYSTEM_PROMPT = `You are a screen-reading assistant. Given the accessibility tree of the current screen, describe what the user sees in clear, concise plain English (2–4 sentences). Focus on the active window and the most prominent content visible. Do not mention accessibility tree internals or element IDs.`;
+
 const PLANNING_SYSTEM_PROMPT = `You are a UI automation planner. Given a task and the current page/app context (list of interactive elements), return a JSON plan of steps to accomplish the task.
 
 RESPONSE FORMAT — return ONLY valid JSON, no other text:
@@ -168,7 +170,11 @@ export class SmartInteractionLayer {
     try {
       let result: SmartInteractionResult;
 
-      if (isBrowserTask) {
+      // Fast path: describe/read-only tasks are answered directly from a11y context
+      // — no Computer Use (screenshot + vision) needed.
+      if (this.isDescribeTask(task)) {
+        result = await this.handleDescribeTask(task);
+      } else if (isBrowserTask) {
         result = await this.handleBrowserTask(task);
       } else {
         result = await this.handleNativeTask(task);
@@ -547,6 +553,52 @@ export class SmartInteractionLayer {
   }
 
   // ════════════════════════════════════════════════════════════════════
+  // DESCRIBE TASK HANDLING
+  // ════════════════════════════════════════════════════════════════════
+
+  /**
+   * Returns true if the task is purely a read/describe request that requires
+   * no UI actions — only a plain-English summary of what's on screen.
+   */
+  private isDescribeTask(task: string): boolean {
+    const t = task.trim();
+    return /^(describe|what(?:'s| is)|tell me|show me|explain)\s+(what'?s?\s+)?(on|the|in|about)?\s*(screen|page|window|app|visible|open|current)/i.test(t)
+      || /^what(?:'s| is)\s+(on\s+)?(my\s+)?(screen|page|window|display)/i.test(t)
+      || /^(look at|read)\s+(the\s+)?(screen|page|window)/i.test(t);
+  }
+
+  /**
+   * Handle describe-only tasks by fetching the a11y context and asking the LLM
+   * to summarise it in plain English — no screenshot or Computer Use needed.
+   */
+  private async handleDescribeTask(task: string): Promise<SmartInteractionResult> {
+    console.log(`   🔍 Smart Interaction: describe task detected — using a11y context directly`);
+
+    const activeWindow = await this.a11y.getActiveWindow();
+    const a11yContext = await this.a11y.getScreenContext(activeWindow?.processId).catch(() => '');
+
+    if (!a11yContext || a11yContext.includes('unavailable')) {
+      console.log(`   ⚠️ Smart Interaction: a11y context unavailable for describe task — falling through`);
+      return { handled: false, success: false, steps: [], llmCalls: 0, description: 'A11y context unavailable' };
+    }
+
+    const userMessage = `TASK: ${task}\n\nACCESSIBILITY CONTEXT:\n${a11yContext}`;
+    const description = await this.callTextModel(userMessage, DESCRIBE_SYSTEM_PROMPT).catch(() => null);
+
+    if (!description) {
+      return { handled: false, success: false, steps: [], llmCalls: 1, description: 'Description LLM call failed' };
+    }
+
+    return {
+      handled: true,
+      success: true,
+      steps: [{ action: 'describe', description, success: true, timestamp: Date.now() }],
+      llmCalls: 1,
+      description,
+    };
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   // LLM PLANNING
   // ════════════════════════════════════════════════════════════════════
 
@@ -606,15 +658,16 @@ export class SmartInteractionLayer {
   /**
    * Call the cheapest available text model.
    * Prefers: Ollama local → Haiku → whatever is configured.
+   * @param systemPrompt Optional override; defaults to PLANNING_SYSTEM_PROMPT.
    */
-  private async callTextModel(userMessage: string): Promise<string> {
+  private async callTextModel(userMessage: string, systemPrompt = PLANNING_SYSTEM_PROMPT): Promise<string> {
     // Use pipeline config if available
     if (this.pipelineConfig?.layer2.enabled) {
       const { model, baseUrl } = this.pipelineConfig.layer2;
       const apiKey = this.pipelineConfig.apiKey;
       const provider = this.pipelineConfig.provider;
 
-      return this.callLLM(baseUrl, model, apiKey, provider, userMessage);
+      return this.callLLM(baseUrl, model, apiKey, provider, userMessage, systemPrompt);
     }
 
     // Fallback: use the main config's provider
@@ -656,7 +709,7 @@ export class SmartInteractionLayer {
       computerUse: false,
     };
 
-    return this.callLLM(baseUrl, model, apiKey, provider, userMessage);
+    return this.callLLM(baseUrl, model, apiKey, provider, userMessage, systemPrompt);
   }
 
   private async callLLM(
@@ -665,6 +718,7 @@ export class SmartInteractionLayer {
     apiKey: string,
     provider: ProviderProfile,
     userMessage: string,
+    systemPrompt = PLANNING_SYSTEM_PROMPT,
   ): Promise<string> {
     if (provider.openaiCompat || baseUrl.includes('localhost') || baseUrl.includes('11434')) {
       // OpenAI-compatible (Ollama, OpenAI, Kimi)
@@ -679,7 +733,7 @@ export class SmartInteractionLayer {
           max_tokens: 500,
           temperature: 0,
           messages: [
-            { role: 'system', content: PLANNING_SYSTEM_PROMPT },
+            { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage },
           ],
         }),
@@ -700,7 +754,7 @@ export class SmartInteractionLayer {
         body: JSON.stringify({
           model,
           max_tokens: 500,
-          system: PLANNING_SYSTEM_PROMPT,
+          system: systemPrompt,
           messages: [{ role: 'user', content: userMessage }],
         }),
         signal: AbortSignal.timeout(15000),

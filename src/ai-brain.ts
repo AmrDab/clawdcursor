@@ -465,7 +465,7 @@ export class AIBrain {
     case 'linux':
       return 'Linux';
     default:
-      return 'An Uknown OS';
+      return 'An Unknown OS';
   }
 }
 
