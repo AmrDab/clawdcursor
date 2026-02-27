@@ -11,6 +11,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import * as readline from 'readline';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { NativeDesktop } from './native-desktop';
 import { AccessibilityBridge } from './accessibility';
 import {
@@ -29,6 +32,7 @@ import type {
 import { DEFAULT_CONFIG } from './types';
 
 const CONFIG_FILE = '.clawd-config.json';
+const execFileAsync = promisify(execFile);
 
 interface DiagResult {
   name: string;
@@ -127,6 +131,61 @@ export async function runDoctor(opts: {
     console.log(`   ${padded} ${icon} ${scan.detail}`);
   }
 
+  // Show unavailable cloud providers with setup instructions
+  const unavailableCloud = scanResults.filter(s => !s.available && s.key !== 'ollama');
+  if (unavailableCloud.length > 0) {
+    console.log(`\n   💡 Cloud providers not configured (add API keys to unlock):`);
+    const keyInfo: Record<string, string> = {
+      anthropic: 'ANTHROPIC_API_KEY — https://console.anthropic.com (best vision + computer use)',
+      openai: 'OPENAI_API_KEY — https://platform.openai.com (GPT-4o vision)',
+      kimi: 'MOONSHOT_API_KEY — https://platform.moonshot.cn (256k context, affordable)',
+    };
+    for (const scan of unavailableCloud) {
+      if (keyInfo[scan.key]) {
+        console.log(`      ${scan.name}: set ${keyInfo[scan.key]}`);
+      }
+    }
+    console.log(`      Set in .env file or as environment variable, then re-run: clawdcursor doctor`);
+
+    // Offer to input key right now if interactive
+    if (process.stdin.isTTY && process.stdout.isTTY) {
+      const rlSetup = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const keyInput = await new Promise<string>(resolve =>
+        rlSetup.question('\n   🔑 Paste an API key now to add a provider (or Enter to skip): ', resolve)
+      );
+      rlSetup.close();
+
+      const trimmedKey = keyInput.trim();
+      if (trimmedKey) {
+        const detectedKey = detectProvider(trimmedKey);
+        if (detectedKey && PROVIDERS[detectedKey]) {
+          const matchingScan = scanResults.find(s => s.key === detectedKey);
+          if (matchingScan) {
+            matchingScan.available = true;
+            matchingScan.apiKey = trimmedKey;
+            matchingScan.detail = `key added (${trimmedKey.substring(0, 8)}...)`;
+            console.log(`   ✅ Detected ${PROVIDERS[detectedKey].name} key! Testing...`);
+
+            // Save to .env for persistence
+            const envPath = path.join(process.cwd(), '.env');
+            const envVarName = detectedKey === 'anthropic' ? 'ANTHROPIC_API_KEY' :
+                               detectedKey === 'openai' ? 'OPENAI_API_KEY' :
+                               detectedKey === 'kimi' ? 'MOONSHOT_API_KEY' : 'AI_API_KEY';
+            const envLine = `${envVarName}=${trimmedKey}\n`;
+            try {
+              fs.appendFileSync(envPath, envLine);
+              console.log(`   💾 Saved to .env as ${envVarName}`);
+            } catch {
+              console.log(`   ⚠️ Could not save to .env — set ${envVarName} manually`);
+            }
+          }
+        } else {
+          console.log(`   ⚠️ Could not detect provider for this key. Set it manually in .env`);
+        }
+      }
+    }
+  }
+
   const anyAvailable = scanResults.some(s => s.available);
 
   if (!anyAvailable) {
@@ -170,10 +229,21 @@ export async function runDoctor(opts: {
     results.push({ name: 'Vision model', ok: false, detail: 'No working vision model found' });
   }
 
-  // ─── 5. Build Optimal Mixed Pipeline ────────────────────────────
-  const pipeline = buildMixedPipeline(scanResults, modelTests);
+  // ─── 5. Interactive provider/model selection ───────────────────
+  const recommendedPipeline = buildMixedPipeline(scanResults, modelTests);
+  const gpuInfo = await detectGpuInfo();
+  if (gpuInfo) {
+    console.log(`\n🎮 GPU detected: ${gpuInfo}`);
+  }
 
-  console.log(`\n🧠 Recommended pipeline:`);
+  const selected = await promptPipelineSelection(
+    workingText,
+    workingVision,
+    recommendedPipeline,
+  );
+  const pipeline = buildPipelineFromSelection(scanResults, selected);
+
+  console.log(`\n🧠 Selected pipeline:`);
   console.log(`   Layer 1: Action Router (offline) ✅`);
   console.log(`   Layer 2: ${pipeline.layer2.enabled ? `${pipeline.layer2.model} via ${providerNameForUrl(pipeline.layer2.baseUrl)}` : 'DISABLED'} ${pipeline.layer2.enabled ? '✅' : '❌'}`);
   console.log(`   Layer 3: ${pipeline.layer3.enabled ? `${pipeline.layer3.model} via ${providerNameForUrl(pipeline.layer3.baseUrl)}` : 'DISABLED'} ${pipeline.layer3.enabled ? '✅' : '❌'}`);
@@ -373,6 +443,174 @@ async function testAllProviders(scanResults: ProviderScanResult[]): Promise<Mode
   }
 
   return testResults;
+}
+
+interface ModelChoice {
+  providerKey: string;
+  model: string;
+}
+
+interface PipelineSelection {
+  layer2: ModelChoice | null;
+  layer3: ModelChoice | null;
+}
+
+function buildPipelineFromSelection(
+  scanResults: ProviderScanResult[],
+  selected: PipelineSelection,
+): PipelineConfig {
+  const primaryProviderKey = selected.layer3?.providerKey || selected.layer2?.providerKey || 'ollama';
+  const primaryProvider = PROVIDERS[primaryProviderKey] || PROVIDERS['ollama'];
+  const primaryScan = scanResults.find(s => s.key === primaryProviderKey);
+  const primaryApiKey = primaryScan?.apiKey || '';
+
+  const layer2Provider = selected.layer2 ? (PROVIDERS[selected.layer2.providerKey] || PROVIDERS['ollama']) : primaryProvider;
+  const layer3Provider = selected.layer3 ? (PROVIDERS[selected.layer3.providerKey] || PROVIDERS['ollama']) : primaryProvider;
+
+  return {
+    provider: primaryProvider,
+    providerKey: primaryProviderKey,
+    apiKey: primaryApiKey,
+    layer1: true,
+    layer2: {
+      enabled: !!selected.layer2,
+      model: selected.layer2?.model || layer2Provider.textModel,
+      baseUrl: layer2Provider.baseUrl,
+    },
+    layer3: {
+      enabled: !!selected.layer3,
+      model: selected.layer3?.model || layer3Provider.visionModel,
+      baseUrl: layer3Provider.baseUrl,
+      computerUse: !!selected.layer3 && layer3Provider.computerUse,
+    },
+  };
+}
+
+async function detectGpuInfo(): Promise<string | null> {
+  if (process.platform !== 'win32') {
+    return null;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('nvidia-smi', [
+      '--query-gpu=name,memory.total',
+      '--format=csv,noheader,nounits',
+    ]);
+    const lines = stdout
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    if (lines.length === 0) return null;
+
+    const summarized = lines.map(line => {
+      const parts = line.split(',').map(p => p.trim());
+      if (parts.length >= 2) {
+        return `${parts[0]} (${parts[1]} MB VRAM)`;
+      }
+      return line;
+    });
+
+    return summarized.join(' | ');
+  } catch {
+    return null;
+  }
+}
+
+async function promptPipelineSelection(
+  workingText: ModelTestResult[],
+  workingVision: ModelTestResult[],
+  recommended: PipelineConfig,
+): Promise<PipelineSelection> {
+  const recommendedText = recommended.layer2.enabled
+    ? { providerKey: providerKeyForUrl(recommended.layer2.baseUrl) || recommended.providerKey, model: recommended.layer2.model }
+    : null;
+  const recommendedVision = recommended.layer3.enabled
+    ? { providerKey: providerKeyForUrl(recommended.layer3.baseUrl) || recommended.providerKey, model: recommended.layer3.model }
+    : null;
+
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    return {
+      layer2: recommendedText,
+      layer3: recommendedVision,
+    };
+  }
+
+  console.log('\n🧩 Choose your pipeline models (press Enter for recommended).');
+
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+
+  try {
+    const layer2 = await promptCategoryChoice(
+      rl,
+      'TEXT LLM (Layer 2)',
+      workingText,
+      recommendedText,
+    );
+    const layer3 = await promptCategoryChoice(
+      rl,
+      'VISION LLM (Layer 3)',
+      workingVision,
+      recommendedVision,
+    );
+    return { layer2, layer3 };
+  } finally {
+    rl.close();
+  }
+}
+
+async function promptCategoryChoice(
+  rl: readline.Interface,
+  title: string,
+  options: ModelTestResult[],
+  recommendedChoice: ModelChoice | null,
+): Promise<ModelChoice | null> {
+  console.log(`\n${title}:`);
+
+  if (options.length === 0) {
+    console.log('   No working models found. This layer will be disabled.');
+    return null;
+  }
+
+  options.forEach((opt, idx) => {
+    const providerName = PROVIDERS[opt.providerKey]?.name || opt.providerKey;
+    const recommendedMark = (recommendedChoice && opt.providerKey === recommendedChoice.providerKey && opt.model === recommendedChoice.model) ? ' ★ recommended' : '';
+    const latency = opt.latencyMs ? `, ${opt.latencyMs}ms` : '';
+    console.log(`   ${idx + 1}. ${opt.model} (${providerName}${latency})${recommendedMark}`);
+  });
+
+  const recommendedIndex = recommendedChoice
+    ? options.findIndex(opt => opt.providerKey === recommendedChoice.providerKey && opt.model === recommendedChoice.model)
+    : -1;
+  const defaultIndex = recommendedIndex >= 0 ? recommendedIndex : 0;
+
+  const input = await askQuestion(
+    rl,
+    `   Pick 1-${options.length} (Enter=${defaultIndex + 1}): `,
+  );
+  const trimmed = input.trim();
+
+  if (!trimmed) {
+    const selected = options[defaultIndex];
+    return { providerKey: selected.providerKey, model: selected.model };
+  }
+
+  const selectedIdx = Number(trimmed);
+  if (!Number.isInteger(selectedIdx) || selectedIdx < 1 || selectedIdx > options.length) {
+    console.log(`   Invalid choice "${trimmed}". Using default ${defaultIndex + 1}.`);
+    const selected = options[defaultIndex];
+    return { providerKey: selected.providerKey, model: selected.model };
+  }
+
+  const selected = options[selectedIdx - 1];
+  return { providerKey: selected.providerKey, model: selected.model };
+}
+
+function askQuestion(rl: readline.Interface, prompt: string): Promise<string> {
+  return new Promise(resolve => rl.question(prompt, resolve));
 }
 
 /**

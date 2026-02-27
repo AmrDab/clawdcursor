@@ -69,18 +69,38 @@ export class Agent {
     this.safety = new SafetyLayer(config);
     this.a11y = new AccessibilityBridge();
     this.router = new ActionRouter(this.a11y, this.desktop);
-    this.hasApiKey = !!(config.ai.apiKey && config.ai.apiKey.length > 0);
-
-    if (!this.hasApiKey) {
-      console.log(`⚡ Running in offline mode (no API key). Local parser + action router only.`);
-      console.log(`   To unlock AI vision fallback, set AI_API_KEY in .env`);
-    }
-
     // Load pipeline config from doctor (if available)
     const pipelineConfig = loadPipelineConfig();
+
     if (pipelineConfig && pipelineConfig.layer2.enabled) {
       this.reasoner = new A11yReasoner(this.a11y, pipelineConfig);
       console.log(`🧠 Layer 2 (Accessibility Reasoner): ${pipelineConfig.layer2.model}`);
+    }
+
+    // hasApiKey gates LLM decomposition — true if cloud key OR local LLM (Ollama) is available
+    const hasCloudKey = !!(config.ai.apiKey && config.ai.apiKey.length > 0);
+    const hasLocalLLM = !!this.reasoner;  // If reasoner loaded, we have an LLM for decomposition
+    this.hasApiKey = hasCloudKey || hasLocalLLM;
+
+    // If no cloud key but Ollama is available, reconfigure brain to use Ollama for decomposition
+    if (!hasCloudKey && hasLocalLLM && pipelineConfig) {
+      const ollamaModel = pipelineConfig.layer2.model || 'qwen2.5:7b';
+      this.config = {
+        ...config,
+        ai: {
+          ...config.ai,
+          provider: 'ollama' as any,
+          model: ollamaModel,
+          apiKey: '',  // Ollama doesn't need a key
+        },
+      };
+      this.brain = new AIBrain(this.config);
+      console.log(`🔄 Brain reconfigured: using Ollama/${ollamaModel} for decomposition`);
+    }
+
+    if (!this.hasApiKey) {
+      console.log(`⚡ Running in offline mode (no API key or local LLM). Local parser + action router only.`);
+      console.log(`   To unlock AI fallback, set AI_API_KEY in .env or run: clawdcursor doctor`);
     }
   }
 
