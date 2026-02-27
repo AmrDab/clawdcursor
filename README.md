@@ -10,7 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="https://clawdcursor.com">Website</a> · <a href="#quick-start">Quick Start</a> · <a href="#how-it-works">How It Works</a> · <a href="#api-endpoints">API</a> · <a href="CHANGELOG.md">Changelog</a>
+  <a href="https://discord.gg/YOUR_INVITE_CODE"><img src="https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Discord"></a>
+</p>
+
+<p align="center">
+  <a href="https://clawdcursor.com">Website</a> · <a href="https://discord.gg/YOUR_INVITE_CODE">Discord</a> · <a href="#quick-start">Quick Start</a> · <a href="#how-it-works">How It Works</a> · <a href="#api-endpoints">API</a> · <a href="CHANGELOG.md">Changelog</a>
 </p>
 
 ---
