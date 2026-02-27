@@ -98,6 +98,11 @@ export interface ElementInfo extends UIElement {
   isEnabled: boolean;
 }
 
+interface ElementCacheEntry {
+  timestamp: number;
+  results: ElementInfo[];
+}
+
 /** Bounding rectangle in screen coordinates */
 export interface BoundingRect {
   x: number;
@@ -136,6 +141,8 @@ export interface InteractionResult {
 export class UIDriver {
   private defaultProcessId?: number;
   private readonly platform: 'win32' | 'darwin' | 'unsupported';
+  private elementCache = new Map<string, ElementCacheEntry>();
+  private readonly ELEMENT_CACHE_TTL = 2000; // ms
 
   /**
    * @param defaultProcessId Optional — if set, all queries default to this process.
@@ -158,6 +165,7 @@ export class UIDriver {
   /** Update the default process ID (e.g., after focusing a new window) */
   setDefaultProcess(processId: number): void {
     this.defaultProcessId = processId;
+    this.elementCache.clear();
   }
 
   /** Check if the current platform is supported */
@@ -187,6 +195,13 @@ export class UIDriver {
 
     const args = this.buildFindArgs(query);
 
+    // Check cache (2s TTL)
+    const cacheKey = JSON.stringify({ query, platform: this.platform, pid: this.defaultProcessId || null });
+    const cached = this.elementCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < this.ELEMENT_CACHE_TTL) {
+      return cached.results;
+    }
+
     try {
       const result = this.platform === 'win32'
         ? await this.runPowerShell(WIN_FIND_SCRIPT, args)
@@ -194,12 +209,16 @@ export class UIDriver {
 
       // Scripts return a JSON array
       if (Array.isArray(result)) {
-        return result as ElementInfo[];
+        const items = result as ElementInfo[];
+        this.elementCache.set(cacheKey, { timestamp: Date.now(), results: items });
+        return items;
       }
 
       // Single object wrapped
       if (result && typeof result === 'object' && !result.error) {
-        return [result as ElementInfo];
+        const items = [result as ElementInfo];
+        this.elementCache.set(cacheKey, { timestamp: Date.now(), results: items });
+        return items;
       }
 
       // Error or empty
@@ -207,6 +226,7 @@ export class UIDriver {
         throw new Error(result.error);
       }
 
+      this.elementCache.set(cacheKey, { timestamp: Date.now(), results: [] });
       return [];
     } catch (err) {
       console.error(`   ❌ UIDriver.findElements failed:`, err);

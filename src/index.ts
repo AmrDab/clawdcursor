@@ -173,8 +173,8 @@ program
       const scriptContent = platform === 'win32'
         ? // Windows: PowerShell script
           `
-$host.UI.RawUI.WindowTitle = "🐾 Clawd Cursor — Task Console"
-Write-Host "🐾 Clawd Cursor — Interactive Task Mode" -ForegroundColor Cyan
+$host.UI.RawUI.WindowTitle = "Clawd Cursor - Task Console"
+Write-Host "Clawd Cursor - Interactive Task Mode" -ForegroundColor Cyan
 Write-Host "   Type a task and press Enter. Type 'quit' to exit." -ForegroundColor Gray
 Write-Host ""
 while ($true) {

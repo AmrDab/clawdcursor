@@ -82,6 +82,18 @@ export class ActionRouter {
   async route(subtask: string): Promise<RouteResult> {
     const task = subtask.trim().toLowerCase();
 
+    // Guard: compound/multi-step tasks should NOT be routed here.
+    // Pattern 1: action verb after a separator (comma, "then", "and then")
+    //   e.g. "Open Notepad, type hello" or "click OK, then close"
+    // Pattern 2: starts with action verb ... "and" ... another action verb
+    //   e.g. "open google docs and write a sentence" or "find the file and delete it"
+    // Avoids false positives like "click the save button" (save is a label, not a clause start)
+    const separatorVerb = /(?:,\s*|\band\s+then\s+|\bthen\s+)\b(open|launch|start|type|click|tap|save|close|find|press|navigate|go to|draw|write|send|create|delete|move|drag|search|download|upload)\b/i;
+    const verbAndVerb = /^(open|launch|start|type|click|tap|navigate|go to|find|press)\b.+\band\s+(open|launch|start|type|click|tap|save|close|find|press|navigate|go to|draw|write|send|create|delete|move|drag|search|download|upload)\b/i;
+    if (separatorVerb.test(task) || verbAndVerb.test(task)) {
+      return { handled: false, description: 'Compound task — needs decomposition' };
+    }
+
     // 1. "open [app]" / "launch [app]" / "start [app]"
     const openMatch = task.match(/^(?:open|launch|start|run)\s+(\S.*)$/i);
     if (openMatch) {
@@ -131,7 +143,7 @@ export class ActionRouter {
       return this.handleWindowControl(winCtrlMatch[1].toLowerCase(), winCtrlMatch[2].trim());
     }
 
-    // 9. "select all" / "copy" / "paste" / "undo" / "redo" / "save"
+    // 9. "select all" / "copy" / "paste" / "undo" / "redo" / "save" + common shortcuts
     const mod = PLATFORM === 'darwin' ? 'Super' : 'ctrl'; // Cmd on macOS, Ctrl on Windows
     const shortcutMap: Record<string, string> = {
       'select all': `${mod}+a`,
@@ -146,6 +158,18 @@ export class ActionRouter {
       'new tab': `${mod}+t`,
       'close tab': `${mod}+w`,
       'new window': `${mod}+n`,
+      'refresh': PLATFORM === 'darwin' ? 'Super+r' : 'F5',
+      'reload': PLATFORM === 'darwin' ? 'Super+r' : 'F5',
+      'go back': PLATFORM === 'darwin' ? 'Super+[' : 'Alt+Left',
+      'back': PLATFORM === 'darwin' ? 'Super+[' : 'Alt+Left',
+      'go forward': PLATFORM === 'darwin' ? 'Super+]' : 'Alt+Right',
+      'forward': PLATFORM === 'darwin' ? 'Super+]' : 'Alt+Right',
+      'zoom in': `${mod}+plus`,
+      'zoom out': `${mod}+minus`,
+      'page down': 'PageDown',
+      'page up': 'PageUp',
+      'home': 'Home',
+      'end': 'End',
     };
 
     for (const [pattern, combo] of Object.entries(shortcutMap)) {
@@ -153,6 +177,42 @@ export class ActionRouter {
         await this.desktop.keyPress(combo);
         return { handled: true, description: `Pressed ${combo} (${pattern})` };
       }
+    }
+
+    // 10. "find <text>" → Ctrl/Cmd+F then type
+    const findMatch = task.match(/^(?:find|search in page|search within|search)\s+(.+)$/i);
+    if (findMatch) {
+      await this.desktop.keyPress(`${mod}+f`);
+      await this.delay(200);
+      await this.desktop.typeText(findMatch[1]);
+      return { handled: true, description: `Find "${findMatch[1]}"` };
+    }
+
+    // 11. Screenshot / show desktop / lock screen
+    if (/^(take|capture)\s+(a\s+)?screenshot$/.test(task)) {
+      const combo = PLATFORM === 'darwin' ? 'Super+Shift+4' : 'Super+Shift+s';
+      await this.desktop.keyPress(combo);
+      return { handled: true, description: `Screenshot via ${combo}` };
+    }
+
+    if (/^(show|go to)\s+desktop|minimize all$/.test(task)) {
+      const combo = PLATFORM === 'darwin' ? 'Super+Option+m' : 'Super+d';
+      await this.desktop.keyPress(combo);
+      return { handled: true, description: `Show desktop via ${combo}` };
+    }
+
+    if (/^lock\s+screen$/.test(task)) {
+      const combo = PLATFORM === 'darwin' ? 'Control+Super+q' : 'Super+l';
+      await this.desktop.keyPress(combo);
+      return { handled: true, description: `Lock screen via ${combo}` };
+    }
+
+    // 12. Select all + delete
+    if (task === 'select all and delete') {
+      await this.desktop.keyPress(`${mod}+a`);
+      await this.delay(100);
+      await this.desktop.keyPress('Delete');
+      return { handled: true, description: 'Select all and delete' };
     }
 
     // Not handled — fall back to LLM

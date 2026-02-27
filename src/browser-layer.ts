@@ -57,6 +57,19 @@ export class BrowserLayer {
    * Detect if a task is browser-related.
    */
   static isBrowserTask(task: string): boolean {
+    const lower = task.toLowerCase();
+
+    // Negative hints for native/desktop tasks — these should NOT go through Browser Layer
+    const nativeHints = [
+      'file explorer', 'finder', 'notepad', 'calculator', 'settings', 'system settings',
+      'task manager', 'activity monitor', 'terminal', 'powershell', 'cmd',
+      'desktop', 'folder', 'window', 'control panel', 'registry',
+    ];
+    const hasPathLike = /[a-z]:\\/i.test(task) || /%userprofile%/i.test(task) || /\\(desktop|documents|downloads)/i.test(task);
+    if ((nativeHints.some(h => lower.includes(h)) || hasPathLike) && !/https?:\/\//i.test(task) && !/www\./i.test(task) && !/\.(com|org|net|io|dev|ai)\b/i.test(task)) {
+      return false;
+    }
+
     const browserPatterns = [
       /\b(chrome|firefox|browser|edge|safari)\b/i,
       /\b(navigate|browse|go to|open|visit)\b.*\b(url|http|www\.|\.com|\.org|\.net|\.io|\.dev|\.ai)\b/i,

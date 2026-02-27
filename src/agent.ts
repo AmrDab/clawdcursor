@@ -183,6 +183,32 @@ export class Agent {
       }
     }
 
+    // ── Layer 1: Action Router (regex + a11y, zero LLM calls) ──
+    // Pattern-matched tasks: refresh, go back, zoom, find, open app, etc.
+    // Instant execution — no screenshots, no API calls.
+    if (!isBrowserTask) {
+      this.state.status = 'acting';
+      console.log(`\n⚡ Action Router: attempting "${task}"`);
+      const routeResult = await this.router.route(task);
+      if (routeResult.handled) {
+        const step: StepResult = {
+          action: 'action-router',
+          description: routeResult.description,
+          success: !routeResult.error,
+          timestamp: Date.now(),
+        };
+        const result: TaskResult = {
+          success: !routeResult.error,
+          steps: [step],
+          duration: Date.now() - startTime,
+        };
+        console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s — Action Router (0 LLM calls, $0)`);
+        this.state = { status: 'idle', stepsCompleted: 1, stepsTotal: 1 };
+        return result;
+      }
+      console.log(`   ⚡ Action Router: not matched — falling through`);
+    }
+
     // ── Layer 1.5: Smart Interaction (CDPDriver + UIDriver) ──
     // Uses 1 cheap LLM call to read context + plan, then executes all steps free.
     // For browser tasks: CDPDriver via CDP port 9222

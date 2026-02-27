@@ -103,6 +103,7 @@ export class CDPDriver {
   private connected = false;
   private cdpPort: number;
   private ownsBrowser = false; // true if we created the browser connection
+  private cursorInjected = false;
 
   /**
    * @param cdpPort CDP debugging port (default 9222)
@@ -444,6 +445,7 @@ export class CDPDriver {
   async click(selector: string): Promise<CDPInteractionResult> {
     const pg = this.requirePage();
     try {
+      await this.moveCursorToSelector(selector);
       await pg.click(selector, { timeout: 5000 });
       return { success: true, method: 'playwright.click' };
     } catch (err) {
@@ -506,6 +508,7 @@ export class CDPDriver {
   async typeInField(selector: string, text: string): Promise<CDPInteractionResult> {
     const pg = this.requirePage();
     try {
+      await this.moveCursorToSelector(selector);
       // Try fill() first — works for inputs, textareas, and [contenteditable]
       await pg.fill(selector, text, { timeout: 5000 });
       return { success: true, method: 'playwright.fill' };
@@ -592,6 +595,7 @@ export class CDPDriver {
   async focus(selector: string): Promise<CDPInteractionResult> {
     const pg = this.requirePage();
     try {
+      await this.moveCursorToSelector(selector);
       await pg.focus(selector, { timeout: 3000 });
       return { success: true, method: 'playwright.focus' };
     } catch (err) {
@@ -849,6 +853,81 @@ export class CDPDriver {
   // ════════════════════════════════════════════════════════════════════
   // PRIVATE
   // ════════════════════════════════════════════════════════════════════
+
+  /**
+  /** Ensure a virtual cursor overlay exists in the page */
+  private async ensureCursorOverlay(): Promise<void> {
+    const pg = this.requirePage();
+    if (this.cursorInjected) return;
+    try {
+      await pg.evaluate(() => {
+        if (document.getElementById('__clawd_cursor')) return;
+        const cursor = document.createElement('div');
+        cursor.id = '__clawd_cursor';
+        cursor.style.position = 'fixed';
+        cursor.style.width = '12px';
+        cursor.style.height = '12px';
+        cursor.style.borderRadius = '50%';
+        cursor.style.background = '#ff6b6b';
+        cursor.style.boxShadow = '0 0 6px rgba(0,0,0,0.4)';
+        cursor.style.zIndex = '2147483647';
+        cursor.style.pointerEvents = 'none';
+        cursor.style.transform = 'translate(-50%, -50%)';
+        cursor.style.left = '10px';
+        cursor.style.top = '10px';
+        const label = document.createElement('div');
+        label.id = '__clawd_cursor_label';
+        label.textContent = 'Clawd';
+        label.style.position = 'fixed';
+        label.style.fontSize = '10px';
+        label.style.fontFamily = 'sans-serif';
+        label.style.color = '#ff6b6b';
+        label.style.zIndex = '2147483647';
+        label.style.pointerEvents = 'none';
+        label.style.transform = 'translate(6px, -18px)';
+        label.style.left = '10px';
+        label.style.top = '10px';
+        document.body.appendChild(cursor);
+        document.body.appendChild(label);
+      });
+      this.cursorInjected = true;
+    } catch {
+      // Ignore overlay failures
+    }
+  }
+
+  private async moveVirtualCursor(x: number, y: number): Promise<void> {
+    const pg = this.requirePage();
+    try {
+      await this.ensureCursorOverlay();
+      await pg.evaluate(({ x, y }) => {
+        const cursor = document.getElementById('__clawd_cursor');
+        const label = document.getElementById('__clawd_cursor_label');
+        if (cursor) {
+          cursor.style.left = `${x}px`;
+          cursor.style.top = `${y}px`;
+        }
+        if (label) {
+          label.style.left = `${x}px`;
+          label.style.top = `${y}px`;
+        }
+      }, { x, y });
+    } catch {
+      // ignore
+    }
+  }
+
+  private async moveCursorToSelector(selector: string): Promise<void> {
+    const pg = this.requirePage();
+    try {
+      const box = await pg.locator(selector).first().boundingBox();
+      if (box) {
+        await this.moveVirtualCursor(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   /**
    * Guard: ensure we have an active page and return it.
