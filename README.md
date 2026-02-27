@@ -150,6 +150,25 @@ clawdcursor start --provider openai
 
 ---
 
+## Compatibility (v0.5.6 Audit)
+
+| OS | Status | Notes |
+|----|--------|-------|
+| Windows 10/11 | ✅ Full support | Native desktop automation via PowerShell + UI Automation scripts. |
+| macOS 13+ | ✅ Full support | Native desktop automation via JXA/System Events scripts. |
+| Linux | ⚠️ Partial support | Browser/CDP flows work. Native desktop automation requires X11 native libs (for `@nut-tree-fork/nut-js`) and may still vary by distro/desktop environment. |
+
+**Linux prerequisites for native automation** (Debian/Ubuntu example):
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libxtst6 libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxtst-dev
+```
+
+If these libraries are missing, `clawdcursor doctor` can fail on startup with errors like `libXtst.so.6: cannot open shared object file`.
+
+---
+
 ## How It Works
 
 ### The 5-Layer Pipeline

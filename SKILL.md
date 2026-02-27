@@ -1,6 +1,6 @@
 ---
 name: clawdcursor
-version: 0.5.5
+version: 0.5.6
 description: >
   AI desktop agent — control any app on Windows/macOS from your OpenClaw agent.
   Send natural language tasks to the Clawd Cursor API and it handles everything:
@@ -122,7 +122,7 @@ Before your first task, verify Clawd Cursor is running:
 curl.exe -s http://127.0.0.1:3847/health
 ```
 
-Expected: `{"status":"ok","version":"0.5.5"}`
+Expected: `{"status":"ok","version":"0.5.6"}`
 
 If connection refused — **start it yourself** (don't ask the user):
 ```powershell
