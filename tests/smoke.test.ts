@@ -23,7 +23,7 @@ describe('config defaults', () => {
   it('keeps expected defaults', () => {
     expect(DEFAULT_CONFIG.server.port).toBe(3847);
     expect(DEFAULT_CONFIG.server.host).toBe('127.0.0.1');
-    expect(DEFAULT_CONFIG.ai.provider).toBe('anthropic');
+    expect(DEFAULT_CONFIG.ai.provider).toBe('auto');
     expect(DEFAULT_CONFIG.safety.defaultTier).toBe(SafetyTier.Preview);
   });
 });
