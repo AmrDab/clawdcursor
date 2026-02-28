@@ -87,6 +87,12 @@ export interface ClawdConfig {
     apiKey?: string;
     /** Optional OpenAI-compatible endpoint override (skill-host supplied). */
     baseUrl?: string;
+    /** Optional text-only endpoint/key for decomposition (can differ from vision). */
+    textBaseUrl?: string;
+    textApiKey?: string;
+    /** Optional vision endpoint/key for screenshot reasoning (can differ from text). */
+    visionBaseUrl?: string;
+    visionApiKey?: string;
     model: string;
     visionModel: string;
   };

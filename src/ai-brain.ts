@@ -306,25 +306,29 @@ export class AIBrain {
   };
 
   private async callLLM(systemPrompt: string): Promise<string> {
-    const { provider, apiKey, visionModel, baseUrl } = this.config.ai;
+    const { provider, apiKey, visionModel, baseUrl, visionApiKey, visionBaseUrl } = this.config.ai;
+    const effectiveVisionKey = visionApiKey || apiKey || '';
+    const effectiveVisionBaseUrl = visionBaseUrl || baseUrl;
 
-    if (provider === 'anthropic' && !baseUrl) {
-      return this.callAnthropic(systemPrompt, apiKey!, visionModel);
+    if (provider === 'anthropic' && !effectiveVisionBaseUrl) {
+      return this.callAnthropic(systemPrompt, effectiveVisionKey, visionModel);
     }
 
-    const resolvedBaseUrl = baseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
-    return this.callOpenAICompat(systemPrompt, apiKey || '', visionModel, resolvedBaseUrl);
+    const resolvedBaseUrl = effectiveVisionBaseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
+    return this.callOpenAICompat(systemPrompt, effectiveVisionKey, visionModel, resolvedBaseUrl);
   }
 
   /**
    * Text-only LLM call (no images). Used for task decomposition.
    */
   private async callLLMText(systemPrompt: string, userMessage: string): Promise<string> {
-    const { provider, apiKey, model, baseUrl } = this.config.ai;
+    const { provider, apiKey, model, baseUrl, textApiKey, textBaseUrl } = this.config.ai;
+    const effectiveTextKey = textApiKey || apiKey || '';
+    const effectiveTextBaseUrl = textBaseUrl || baseUrl;
 
     const MAX_RETRIES = 2;
 
-    if (provider === 'anthropic' && !baseUrl) {
+    if (provider === 'anthropic' && !effectiveTextBaseUrl) {
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           console.log(`   🔗 LLM text call (attempt ${attempt + 1}): model=${model}`);
@@ -332,7 +336,7 @@ export class AIBrain {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'x-api-key': apiKey!,
+              'x-api-key': effectiveTextKey,
               'anthropic-version': '2023-06-01',
             },
             body: JSON.stringify({
@@ -359,12 +363,12 @@ export class AIBrain {
       }
       throw new Error('LLM text call failed after retries');
     } else {
-      const resolvedBaseUrl = baseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
+      const resolvedBaseUrl = effectiveTextBaseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
       const response = await fetch(`${resolvedBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
+          ...(effectiveTextKey ? { 'Authorization': `Bearer ${effectiveTextKey}` } : {}),
         },
         body: JSON.stringify({
           model,

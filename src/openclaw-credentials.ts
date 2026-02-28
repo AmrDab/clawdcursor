@@ -15,6 +15,10 @@ export interface ResolvedApiConfig {
   baseUrl?: string;
   textModel?: string;
   visionModel?: string;
+  textApiKey?: string;
+  textBaseUrl?: string;
+  visionApiKey?: string;
+  visionBaseUrl?: string;
   source: 'openclaw' | 'local';
 }
 
@@ -28,6 +32,13 @@ interface ProviderInfo {
   apiKey?: string;
   baseUrl?: string;
   models: ModelInfo[];
+}
+
+
+function normalizeProviderKey(key: string): string {
+  const lower = key.toLowerCase().trim();
+  if (!lower) return lower;
+  return lower.split(':')[0];
 }
 
 function normalizeProvider(provider?: string): ResolvedApiConfig['provider'] {
@@ -85,7 +96,13 @@ function extractApiKeyLike(value: any): string | undefined {
       value.token,
       value.accessToken,
       value.access_token,
+      value.access,
+      value.oauthAccessToken,
+      value.oauth_access_token,
       value.bearer,
+      value.oauth?.accessToken,
+      value.oauth?.access_token,
+      value.oauth?.access,
     );
   }
   return undefined;
@@ -126,7 +143,7 @@ function loadOpenClawProviderMap(): Record<string, ProviderInfo> {
   const providers: Record<string, ProviderInfo> = {};
 
   const ensureProvider = (key: string): ProviderInfo => {
-    const normalizedKey = key.toLowerCase();
+    const normalizedKey = normalizeProviderKey(key);
     if (!providers[normalizedKey]) {
       providers[normalizedKey] = { key: normalizedKey, models: [] };
     }
@@ -244,10 +261,14 @@ function resolveFromOpenClawFiles(): ResolvedApiConfig | null {
     || textProvider?.models[0]?.id;
 
   return {
-    apiKey: selectedProvider.apiKey || '',
-    baseUrl: selectedProvider.baseUrl,
+    apiKey: visionProvider?.apiKey || selectedProvider.apiKey || textProvider?.apiKey || '',
+    baseUrl: visionProvider?.baseUrl || selectedProvider.baseUrl || textProvider?.baseUrl,
     textModel,
     visionModel,
+    textApiKey: textProvider?.apiKey,
+    textBaseUrl: textProvider?.baseUrl,
+    visionApiKey: visionProvider?.apiKey || selectedProvider.apiKey,
+    visionBaseUrl: visionProvider?.baseUrl || selectedProvider.baseUrl,
     provider: normalizeProvider(selectedProvider.key) || inferProviderFromBaseUrl(selectedProvider.baseUrl),
     source: 'openclaw',
   };
@@ -306,6 +327,10 @@ export function resolveApiConfig(opts?: {
       baseUrl: openClawBaseUrl,
       textModel: openClawTextModel,
       visionModel: openClawVisionModel,
+      textApiKey: openClawKey,
+      textBaseUrl: openClawBaseUrl,
+      visionApiKey: openClawKey,
+      visionBaseUrl: openClawBaseUrl,
       source: 'openclaw',
     };
   }
@@ -322,6 +347,10 @@ export function resolveApiConfig(opts?: {
       baseUrl: localBaseUrl,
       textModel: localTextModel,
       visionModel: localVisionModel,
+      textApiKey: explicitApiKey,
+      textBaseUrl: localBaseUrl,
+      visionApiKey: explicitApiKey,
+      visionBaseUrl: localBaseUrl,
       source: 'local',
     };
   }
@@ -340,6 +369,10 @@ export function resolveApiConfig(opts?: {
     baseUrl: localBaseUrl,
     textModel: localTextModel,
     visionModel: localVisionModel,
+    textApiKey: localApiKey,
+    textBaseUrl: localBaseUrl,
+    visionApiKey: localApiKey,
+    visionBaseUrl: localBaseUrl,
     source: 'local',
   };
 }
