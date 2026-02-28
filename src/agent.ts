@@ -106,7 +106,7 @@ export class Agent {
 
     if (!this.hasApiKey) {
       console.log(`⚡ Running in offline mode (no API key or local LLM). Local parser + action router only.`);
-      console.log(`   To unlock AI fallback, set AI_API_KEY in .env or run: clawdcursor doctor`);
+      console.log(`   To unlock AI fallback, configure your OpenClaw agent provider (or set AI_API_KEY in standalone mode) and run: clawdcursor doctor`);
     }
   }
 
@@ -411,7 +411,7 @@ export class Agent {
         console.log(`   ❌ Task too complex for offline mode.`);
         return {
           success: false,
-          steps: [{ action: 'error', description: 'Task too complex for offline mode. Set AI_API_KEY to unlock AI fallback.', success: false, timestamp: Date.now() }],
+          steps: [{ action: 'error', description: 'Task too complex for offline mode. Configure OpenClaw agent provider (or set AI_API_KEY in standalone mode) to unlock AI fallback.', success: false, timestamp: Date.now() }],
           duration: Date.now() - startTime,
         };
       }

@@ -30,6 +30,7 @@ import type {
   ModelTestResult,
 } from './providers';
 import { DEFAULT_CONFIG } from './types';
+import { resolveApiConfig } from './openclaw-credentials';
 
 const CONFIG_FILE = '.clawd-config.json';
 const execFileAsync = promisify(execFile);
@@ -273,7 +274,8 @@ async function runSingleProviderFlow(
   opts: { apiKey?: string; provider?: string; save?: boolean },
   results: DiagResult[],
 ): Promise<PipelineConfig | null> {
-  const apiKey = opts.apiKey || process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
+  const resolvedApi = resolveApiConfig(opts);
+  const apiKey = resolvedApi.apiKey;
   const providerKey = detectProvider(apiKey, opts.provider);
   const provider = PROVIDERS[providerKey];
 
@@ -1092,7 +1094,7 @@ export function loadPipelineConfig(): PipelineConfig | null {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const providerKey = raw.provider || 'ollama';
     const provider = PROVIDERS[providerKey] || PROVIDERS['ollama'];
-    const apiKey = process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '';
+    const apiKey = resolveApiConfig().apiKey;
 
     // Support mixed-provider configs saved by the new doctor
     const layer2BaseUrl = raw.pipeline?.layer2?.baseUrl ?? provider.baseUrl;

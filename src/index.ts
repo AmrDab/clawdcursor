@@ -13,6 +13,7 @@ import { DEFAULT_CONFIG } from './types';
 import type { ClawdConfig } from './types';
 import { VERSION } from './version';
 import dotenv from 'dotenv';
+import { resolveApiConfig } from './openclaw-credentials';
 
 dotenv.config();
 
@@ -32,6 +33,8 @@ program
   .option('--api-key <key>', 'AI provider API key')
   .option('--debug', 'Save screenshots to debug/ folder (off by default)')
   .action(async (opts) => {
+    const resolvedApi = resolveApiConfig({ apiKey: opts.apiKey, provider: opts.provider });
+
     const config: ClawdConfig = {
       ...DEFAULT_CONFIG,
       server: {
@@ -39,8 +42,8 @@ program
         port: parseInt(opts.port),
       },
       ai: {
-        provider: opts.provider as any,
-        apiKey: opts.apiKey || process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '',
+        provider: (resolvedApi.provider || opts.provider) as any,
+        apiKey: resolvedApi.apiKey,
         model: opts.model || DEFAULT_CONFIG.ai.model,
         visionModel: opts.model || DEFAULT_CONFIG.ai.visionModel,
       },
@@ -53,6 +56,10 @@ program
    ║   AI Desktop Agent — Smart Pipeline   ║
    ╚═══════════════════════════════════════╝
 `);
+
+    if (resolvedApi.source === 'openclaw') {
+      console.log('🔗 Using OpenClaw agent credentials for AI provider routing');
+    }
 
     const agent = new Agent(config);
 
@@ -93,9 +100,10 @@ program
   .option('--no-save', 'Don\'t save config to disk')
   .action(async (opts) => {
     const { runDoctor } = await import('./doctor');
+    const resolvedApi = resolveApiConfig({ apiKey: opts.apiKey, provider: opts.provider });
     await runDoctor({
-      apiKey: opts.apiKey || process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '',
-      provider: opts.provider,
+      apiKey: resolvedApi.apiKey,
+      provider: resolvedApi.provider || opts.provider,
       save: opts.save !== false,
     });
   });
@@ -357,9 +365,10 @@ program
 
     // 2. Run doctor (auto-configures pipeline + registers OpenClaw skill)
     const { runDoctor } = await import('./doctor');
+    const resolvedApi = resolveApiConfig({ apiKey: opts.apiKey, provider: opts.provider });
     await runDoctor({
-      apiKey: opts.apiKey || process.env.AI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENAI_API_KEY || '',
-      provider: opts.provider,
+      apiKey: resolvedApi.apiKey,
+      provider: resolvedApi.provider || opts.provider,
       save: true,
     });
 

@@ -30,11 +30,9 @@ metadata:
       - With Ollama, fully offline — no external API calls
       - With cloud providers, data goes only to user's chosen API endpoint
       - REST API binds to 127.0.0.1 only — not network accessible
-credentials:
-  - name: AI_API_KEY
-    sensitivity: high
-    description: API key for AI provider (Anthropic, OpenAI, or Kimi). Not needed if using Ollama locally.
-    required: false
+notes:
+  - In OpenClaw, this skill inherits the active agent's AI provider + API key.
+  - Standalone CLI mode can still use AI_API_KEY / provider-specific env vars or Ollama.
 ---
 
 # Clawd Cursor

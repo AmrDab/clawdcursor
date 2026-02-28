@@ -192,6 +192,24 @@ function isOllamaVisionModel(modelId: string): boolean {
  * Env var names we check per provider key.
  * AI_API_KEY is a generic fallback — we try to detect its provider from format.
  */
+
+function openClawEnvApiKey(): string {
+  return (
+    process.env.OPENCLAW_AI_API_KEY ||
+    process.env.OPENCLAW_API_KEY ||
+    process.env.OPENCLAW_AGENT_API_KEY ||
+    ''
+  );
+}
+
+function openClawEnvProvider(): string {
+  return (
+    (process.env.OPENCLAW_PROVIDER ||
+    process.env.OPENCLAW_AI_PROVIDER ||
+    process.env.OPENCLAW_AGENT_PROVIDER || '').toLowerCase()
+  );
+}
+
 const PROVIDER_ENV_VARS: Record<string, string[]> = {
   anthropic: ['ANTHROPIC_API_KEY'],
   openai: ['OPENAI_API_KEY'],
@@ -208,13 +226,20 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
   const results: ProviderScanResult[] = [];
 
   // Collect the generic AI_API_KEY — we'll assign it to the matching provider later
-  const genericKey = process.env.AI_API_KEY || '';
+  const genericKey = openClawEnvApiKey() || process.env.AI_API_KEY || '';
 
   // ── Check key-based providers ─────────────────────────────────
   for (const providerKey of ['anthropic', 'openai', 'kimi'] as const) {
     const envVars = PROVIDER_ENV_VARS[providerKey];
     let key = '';
+
+    const openClawProvider = openClawEnvProvider();
+    if (openClawProvider === providerKey && genericKey) {
+      key = genericKey;
+    }
+
     for (const envVar of envVars) {
+      if (key) break;
       if (process.env[envVar]) {
         key = process.env[envVar]!;
         break;
