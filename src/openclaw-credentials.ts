@@ -10,7 +10,7 @@ import * as path from 'path';
  */
 
 export interface ResolvedApiConfig {
-  provider?: 'anthropic' | 'openai' | 'ollama' | 'kimi';
+  provider?: string;
   apiKey: string;
   baseUrl?: string;
   textModel?: string;
@@ -41,11 +41,10 @@ function normalizeProviderKey(key: string): string {
   return lower.split(':')[0];
 }
 
-function normalizeProvider(provider?: string): ResolvedApiConfig['provider'] {
+function normalizeProvider(provider?: string): string | undefined {
   if (!provider) return undefined;
   const p = provider.trim().toLowerCase();
-  if (p === 'anthropic' || p === 'openai' || p === 'ollama' || p === 'kimi') return p;
-  return undefined;
+  return p.length > 0 ? p : undefined;
 }
 
 function normalizeBaseUrl(url?: string): string | undefined {
@@ -61,13 +60,20 @@ function pick(...values: Array<string | undefined>): string | undefined {
   return undefined;
 }
 
-function inferProviderFromBaseUrl(baseUrl?: string): ResolvedApiConfig['provider'] {
+function inferProviderFromBaseUrl(baseUrl?: string): string | undefined {
   const url = (baseUrl || '').toLowerCase();
   if (!url) return undefined;
   if (url.includes('anthropic')) return 'anthropic';
   if (url.includes('moonshot') || url.includes('kimi')) return 'kimi';
   if (url.includes('11434') || url.includes('ollama')) return 'ollama';
   if (url.includes('openai')) return 'openai';
+  if (url.includes('groq')) return 'groq';
+  if (url.includes('together')) return 'together';
+  if (url.includes('deepseek')) return 'deepseek';
+  if (url.includes('nvidia') || url.includes('integrate.api')) return 'nvidia';
+  if (url.includes('mistral')) return 'mistral';
+  if (url.includes('fireworks')) return 'fireworks';
+  // Unknown endpoint — still works, just no provider label
   return undefined;
 }
 
@@ -284,6 +290,26 @@ export function resolveApiConfig(opts?: {
   textModel?: string;
   visionModel?: string;
 }): ResolvedApiConfig {
+  // Explicit CLI flags always win over auto-detection
+  if (opts?.apiKey || opts?.provider || opts?.baseUrl) {
+    const explicitApiKey = opts.apiKey || '';
+    const explicitBaseUrl = normalizeBaseUrl(opts.baseUrl);
+    const explicitTextModel = pick(opts.textModel);
+    const explicitVisionModel = pick(opts.visionModel);
+    return {
+      apiKey: explicitApiKey,
+      provider: normalizeProvider(opts.provider) || inferProviderFromBaseUrl(explicitBaseUrl),
+      baseUrl: explicitBaseUrl,
+      textModel: explicitTextModel,
+      visionModel: explicitVisionModel,
+      textApiKey: explicitApiKey,
+      textBaseUrl: explicitBaseUrl,
+      visionApiKey: explicitApiKey,
+      visionBaseUrl: explicitBaseUrl,
+      source: 'local',
+    };
+  }
+
   const fromFiles = resolveFromOpenClawFiles();
   if (fromFiles) {
     return fromFiles;

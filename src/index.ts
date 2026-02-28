@@ -45,7 +45,7 @@ program
         port: parseInt(opts.port),
       },
       ai: {
-        provider: (resolvedApi.provider || opts.provider || DEFAULT_CONFIG.ai.provider) as any,
+        provider: resolvedApi.provider || opts.provider || DEFAULT_CONFIG.ai.provider,
         apiKey: resolvedApi.apiKey,
         baseUrl: resolvedApi.baseUrl,
         textBaseUrl: resolvedApi.textBaseUrl,
