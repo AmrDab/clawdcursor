@@ -85,10 +85,12 @@ export class Agent {
 
     // hasApiKey gates LLM decomposition — true if cloud key OR local LLM (Ollama) is available
     const hasCloudKey = !!(config.ai.apiKey && config.ai.apiKey.length > 0);
+    const hasVisionKey = !!(config.ai.visionApiKey && config.ai.visionApiKey.length > 0);
     const hasLocalLLM = !!this.reasoner;  // If reasoner loaded, we have an LLM for decomposition
-    this.hasApiKey = hasCloudKey || hasLocalLLM;
+    this.hasApiKey = hasCloudKey || hasVisionKey || hasLocalLLM;
 
     // If no cloud key but Ollama is available, reconfigure brain to use Ollama for decomposition
+    // IMPORTANT: preserve vision credentials so Layer 3 can still use cloud vision (e.g. Anthropic)
     if (!hasCloudKey && hasLocalLLM && pipelineConfig) {
       const ollamaModel = pipelineConfig.layer2.model || 'qwen2.5:7b';
       this.config = {
@@ -98,6 +100,10 @@ export class Agent {
           provider: 'ollama' as any,
           model: ollamaModel,
           apiKey: '',  // Ollama doesn't need a key
+          // Preserve vision credentials for Layer 3 fallback
+          visionApiKey: config.ai.visionApiKey,
+          visionBaseUrl: config.ai.visionBaseUrl,
+          visionModel: config.ai.visionModel,
         },
       };
       this.brain = new AIBrain(this.config);

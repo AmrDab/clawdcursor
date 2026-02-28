@@ -310,7 +310,13 @@ export class AIBrain {
     const effectiveVisionKey = visionApiKey || apiKey || '';
     const effectiveVisionBaseUrl = visionBaseUrl || baseUrl;
 
-    if (provider === 'anthropic' && !effectiveVisionBaseUrl) {
+    // Determine vision provider: if visionApiKey looks like Anthropic key or visionModel contains
+    // 'claude', use Anthropic native API regardless of the main provider (which may be ollama for text)
+    const isAnthropicVision = (provider === 'anthropic' && !effectiveVisionBaseUrl) ||
+      (effectiveVisionKey?.startsWith('sk-ant-') && !effectiveVisionBaseUrl) ||
+      (visionModel?.includes('claude') && effectiveVisionKey?.startsWith('sk-ant-'));
+
+    if (isAnthropicVision) {
       return this.callAnthropic(systemPrompt, effectiveVisionKey, visionModel);
     }
 
