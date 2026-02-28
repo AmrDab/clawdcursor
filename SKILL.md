@@ -60,7 +60,14 @@ No task is impossible. If it's on the screen, it's within reach.
 
 You have a desktop UI agent available. Use it when the user asks you to interact with their desktop, or when no other tool can accomplish the task.
 
-### Use Clawd Cursor for:
+### Tool vs Skill (OpenClaw terminology)
+- **Tool** = direct capability (API call, filesystem, shell, web fetch, browser command).
+- **Skill** = packaged workflow/domain logic that may call one or more tools.
+- **This skill (Clawd Cursor)** = GUI execution skill. Use it after OpenClaw tools/skills that can complete the same work without GUI.
+
+### Use Clawd Cursor for (examples, not limits):
+Clawd Cursor can perform **any action that is visible and interactable in the GUI** (subject to safety policy).
+
 - **User-requested desktop tasks** — "open Gmail and send an email", "check my calendar"
 - **Read a webpage** — when web_fetch or browser tools aren't available
 - **Interact with desktop apps** — click buttons, fill forms, read results
@@ -83,6 +90,29 @@ You have a desktop UI agent available. Use it when the user asks you to interact
 - You can already read/write the file directly
 - The browser tool or web_fetch can handle it
 
+## OpenClaw + Clawd Cursor Routing Contract (Avoid Overlap)
+
+Clawd Cursor should be treated as **OpenClaw's GUI execution layer**, not a competing planner.
+
+### Route tasks in this order:
+1. **OpenClaw native tools first** (filesystem, API, shell, provider-native skills)
+2. **Browser-native automation next** (Playwright/CDP direct) for browser-only reads/clicks
+3. **Clawd Cursor API task (`POST /task`)** only when desktop/UI-level interaction is required
+
+### Practical rule
+- If OpenClaw already has a reliable skill/tool for the domain, use it.
+- Use Clawd Cursor to bridge gaps where no API/tool exists or when the user explicitly asks for GUI interaction.
+
+This keeps behavior predictable, lowers latency/cost, and avoids duplicated logic between the main OpenClaw agent and this skill.
+
+### Universal task pattern
+For broad "get it done" requests, split into three phases:
+1. **Plan in OpenClaw**: break work into API/CLI/browser/GUI subtasks.
+2. **Execute cheap paths first**: API + CLI + browser direct.
+3. **Escalate only residual UI steps** to Clawd Cursor.
+
+Think: **"OpenClaw decides, Clawd Cursor acts on GUI when needed."**
+
 ### Direct Browser Access (Fast Path)
 For quick page reads without a full task, connect to Chrome via Playwright CDP:
 ```js
@@ -97,11 +127,11 @@ Use this when you just need page content — faster than sending a task.
 | Scenario | Use | Why |
 |----------|-----|-----|
 | Read page content/text | CDP Direct | Instant, free |
-| Fill a web form | REST API | Clawd handles multi-step planning |
+| Fill a web form | API task (`POST /task`) | Clawd handles multi-step planning |
 | Check if a page loaded | CDP Direct | Just read the title/URL |
-| Click through a complex UI flow | REST API | Clawd handles planning |
+| Click through a complex UI flow | API task (`POST /task`) | Clawd handles planning |
 | Get a list of elements on page | CDP Direct | Fast DOM query |
-| Interact with a desktop app | REST API | CDP is browser-only |
+| Interact with a desktop app | API task (`POST /task`) | CDP is browser-only |
 
 ---
 

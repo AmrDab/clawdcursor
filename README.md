@@ -60,6 +60,8 @@ Clawd Cursor ships as an [OpenClaw](https://openclaw.ai) skill. Install it and a
 
 The [`SKILL.md`](SKILL.md) teaches agents **when and how** to use Clawd Cursor: REST API for full desktop control, CDP direct for fast browser reads. Agents learn to be independent — no more asking you to screenshot or copy-paste things they can do themselves.
 
+For orchestration best practices (how to avoid overlap and keep OpenClaw + Clawd Cursor efficient), see [docs/OPENCLAW-INTEGRATION-RECOMMENDATIONS.md](docs/OPENCLAW-INTEGRATION-RECOMMENDATIONS.md).
+
 ```bash
 # Install as OpenClaw skill
 openclaw skills install clawd-cursor
