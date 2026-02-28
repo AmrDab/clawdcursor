@@ -19,10 +19,7 @@ const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform(); // 'win32' | 'darwin' | 'linux'
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
 const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
-// macOS JXA scripts enumerate System Events which can be slow on some versions.
-// 30s gives enough headroom; scripts are cached after first call so this only
-// applies to the first invocation per session.
-const SCRIPT_TIMEOUT = PLATFORM === 'darwin' ? 30000 : 10000;
+const SCRIPT_TIMEOUT = 10000; // 10s timeout
 
 /** Platform script file mapping: Windows (.ps1) → macOS (.jxa) */
 const SCRIPT_MAP: Record<string, Record<string, string>> = {
@@ -36,11 +33,11 @@ const SCRIPT_MAP: Record<string, Record<string, string>> = {
   },
   darwin: {
     'get-windows': 'get-windows.jxa',
-    'get-screen-context': 'get-screen-context.jxa',
     'find-element': 'find-element.jxa',
     'invoke-element': 'invoke-element.jxa',
     'focus-window': 'focus-window.jxa',
     'get-foreground-window': 'get-foreground-window.jxa',
+    'get-screen-context': 'get-screen-context.jxa',
   },
 };
 
@@ -101,14 +98,7 @@ export class AccessibilityBridge {
       if (PLATFORM === 'win32') {
         await execFileAsync('powershell.exe', ['-Command', 'exit 0'], { timeout: 5000 });
       } else if (PLATFORM === 'darwin') {
-        // Probe System Events directly — a bare osascript -e '""' succeeds even without
-        // Accessibility permissions, giving a false positive. Touching processes.length
-        // forces macOS to check the permission and fail fast with a clear error if not granted.
-        await execFileAsync(
-          'osascript',
-          ['-l', 'JavaScript', '-e', 'Application("System Events").processes.length; true'],
-          { timeout: 5000 },
-        );
+        await execFileAsync('osascript', ['-l', 'JavaScript', '-e', '""'], { timeout: 5000 });
       } else {
         console.error(`❌ Unsupported platform: ${PLATFORM}. Accessibility requires Windows or macOS.`);
         shellAvailable = false;
@@ -116,22 +106,10 @@ export class AccessibilityBridge {
       }
       shellAvailable = true;
       console.log(`✅ Accessibility bridge ready (${PLATFORM === 'win32' ? 'PowerShell' : 'osascript'})`);
-    } catch (err: any) {
+    } catch {
       shellAvailable = false;
-      if (PLATFORM === 'darwin') {
-        const isAuthError = err.stderr?.includes('not authorized') || err.message?.includes('not authorized');
-        if (isAuthError) {
-          console.error(
-            `❌ Accessibility: not authorized to control System Events.\n` +
-            `   → System Settings → Privacy & Security → Accessibility\n` +
-            `   → Add your terminal app (Terminal, iTerm2, wezterm, etc.) or Node.js and try again.`
-          );
-        } else {
-          console.error(`❌ osascript not available. Accessibility bridge will not function.`);
-        }
-      } else {
-        console.error(`❌ PowerShell not available. Accessibility bridge will not function.`);
-      }
+      const shell = PLATFORM === 'win32' ? 'PowerShell' : 'osascript';
+      console.error(`❌ ${shell} not available. Accessibility bridge will not function.`);
     }
     return shellAvailable;
   }
@@ -519,11 +497,9 @@ export class AccessibilityBridge {
         maxBuffer: 1024 * 1024 * 5, // 5MB buffer
       }, (error, stdout, stderr) => {
         if (error) {
-          // Include stderr so the real reason (e.g. "not authorized to send Apple events") is visible
-          const stderrDetail = typeof stderr === 'string' && stderr.trim() ? ` — ${stderr.trim()}` : '';
-          const fullMessage = error.message + stderrDetail;
-          console.error(`Accessibility script error (${resolvedScript}): ${fullMessage}`);
-          reject(new Error(fullMessage));
+          const stderrMsg = stderr ? stderr.trim().substring(0, 500) : '';
+          console.error(`Accessibility script error (${resolvedScript}): ${error.message}${stderrMsg ? '\n  stderr: ' + stderrMsg : ''}`);
+          reject(error);
           return;
         }
 

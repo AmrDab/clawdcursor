@@ -2,186 +2,270 @@
 
 /**
  * get-screen-context.jxa
- *
- * Combined script: gets windows list + focused window UI tree in ONE osascript spawn.
+ * 
  * macOS equivalent of get-screen-context.ps1.
- *
- * Output shape (matches PS1 exactly so accessibility.ts needs no changes):
- *   { windows: WindowInfo[], uiTree: UINode | null }
- *
- * Parameters (read from argv):
- *   -FocusedProcessId <number>  — if provided, include UI tree for that process
- *   -MaxDepth <number>          — max UI tree depth (default 2)
- *
- * Output: script result (last expression) goes to stdout for Node.js execFile.
- *
+ * Combines window listing with UI accessibility tree walking.
+ * 
+ * Parameters:
+ *   -FocusedProcessId <number>  - Process ID to walk the UI tree for (optional)
+ *   -MaxDepth <number>          - Maximum depth for UI tree traversal (default: 2)
+ * 
+ * Returns JSON with:
+ *   {
+ *     windows: [{ title, processName, processId, bounds, isMinimized }],
+ *     uiTree: { name, role, children: [...] }  // only if FocusedProcessId given
+ *   }
+ * 
  * Usage: osascript -l JavaScript get-screen-context.jxa -FocusedProcessId 1234 -MaxDepth 2
  */
 
-ObjC.import('stdlib');
-
-// ─── Argument parsing ────────────────────────────────────────────────────────
-
-function parseArgs() {
-    var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
-    var result = { focusedProcessId: 0, maxDepth: 2 };
-    for (var i = 0; i < args.length; i++) {
-        var arg = ObjC.unwrap(args[i]);
-        if (arg === '-FocusedProcessId' && i + 1 < args.length) {
-            result.focusedProcessId = parseInt(ObjC.unwrap(args[i + 1]), 10) || 0;
-        } else if (arg === '-MaxDepth' && i + 1 < args.length) {
-            result.maxDepth = parseInt(ObjC.unwrap(args[i + 1]), 10) || 2;
-        }
-    }
-    return result;
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function safeGet(obj, prop, def) {
-    try { var v = obj[prop](); return (v !== undefined && v !== null) ? v : def; }
-    catch (e) { return def; }
-}
-
-function safeProp(el, prop, def) {
-    try { return el[prop] ? el[prop]() : def; }
-    catch (e) { return def; }
-}
-
-function getBounds(el) {
+// Utility function to safely get property values
+function safeGet(obj, property, defaultValue) {
     try {
-        var pos = el.position();
-        var sz  = el.size();
-        return { x: pos[0], y: pos[1], width: sz[0], height: sz[1] };
+        var val = obj[property]();
+        return val !== undefined && val !== null ? val : defaultValue;
     } catch (e) {
-        return { x: 0, y: 0, width: 0, height: 0 };
+        return defaultValue;
     }
 }
 
-// ─── Part 1: windows list (same logic as get-windows.jxa) ────────────────────
+// Utility function to safely get UI element properties
+function safeElementProp(element, propName, defaultValue) {
+    try {
+        if (element[propName]) {
+            return element[propName]();
+        }
+        return defaultValue;
+    } catch (e) {
+        return defaultValue;
+    }
+}
 
+// Map AX roles to friendlier short names
+function friendlyRole(axRole) {
+    if (!axRole) return '';
+    // Strip "AX" prefix if present
+    var r = axRole;
+    if (r.indexOf('AX') === 0) {
+        r = r.substring(2);
+    }
+    return r;
+}
+
+// Get all visible windows
 function getWindows(SystemEvents) {
-    var processes = SystemEvents.processes.where({ backgroundOnly: false });
     var results = [];
-
+    var processes = SystemEvents.processes.where({ backgroundOnly: false });
+    
     for (var i = 0; i < processes.length; i++) {
         try {
-            var proc       = processes[i];
-            var procName   = safeGet(proc, 'name', 'unknown');
-            var procId     = safeGet(proc, 'unixId', 0);
-            var windows    = proc.windows;
-
+            var process = processes[i];
+            var processName = safeGet(process, 'name', 'unknown');
+            var processId = safeGet(process, 'unixId', 0);
+            
+            var windows = process.windows;
             for (var j = 0; j < windows.length; j++) {
                 try {
-                    var win   = windows[j];
-                    var title = safeProp(win, 'name', '');
-                    if (!title || title.trim().length === 0) continue;
-
+                    var win = windows[j];
+                    var title = safeElementProp(win, 'name', '');
+                    
+                    // Skip windows with no name
+                    if (!title || title.trim().length === 0) {
+                        continue;
+                    }
+                    
+                    var bounds = { x: 0, y: 0, width: 0, height: 0 };
+                    try {
+                        var position = win.position();
+                        var size = win.size();
+                        bounds = {
+                            x: position[0],
+                            y: position[1],
+                            width: size[0],
+                            height: size[1]
+                        };
+                    } catch (e) {}
+                    
                     var isMinimized = false;
-                    try { isMinimized = win.miniaturized(); } catch (e) {}
-
+                    try {
+                        isMinimized = win.miniaturized();
+                    } catch (e) {}
+                    
                     results.push({
-                        handle:      procId,
-                        title:       title,
-                        processName: procName,
-                        processId:   procId,
-                        bounds:      getBounds(win),
+                        title: title,
+                        processName: processName,
+                        processId: processId,
+                        bounds: bounds,
                         isMinimized: isMinimized
                     });
-                } catch (e) {}
+                } catch (e) {
+                    // Skip inaccessible windows
+                }
             }
-        } catch (e) {}
+        } catch (e) {
+            // Skip inaccessible processes
+        }
     }
-
+    
     return results;
 }
 
-// ─── Part 2: UI tree for focused process ─────────────────────────────────────
-
-// Interactive macOS roles worth sending to the LLM
-var INTERACTIVE_ROLES = {
-    'AXButton': true, 'AXTextField': true, 'AXTextArea': true,
-    'AXComboBox': true, 'AXCheckBox': true, 'AXRadioButton': true,
-    'AXLink': true, 'AXMenuItem': true, 'AXMenu': true,
-    'AXTab': true, 'AXTabGroup': true, 'AXList': true,
-    'AXOutline': true, 'AXSlider': true, 'AXScrollBar': true,
-    'AXToolbar': true, 'AXWebArea': true, 'AXStaticText': true,
-    'AXGroup': true
-};
-
-function buildUINode(element, maxDepth, depth) {
-    if (depth > maxDepth) return null;
-
-    var name  = '';
-    var role  = '';
-    var value = '';
-
-    try { name  = element.name()  || ''; } catch (e) {}
-    try { role  = element.role()  || ''; } catch (e) {}
-    try { value = element.value() || ''; } catch (e) {}
-
-    var isInteractive = !!INTERACTIVE_ROLES[role];
-    var hasName       = name.trim().length > 0;
-
-    // Build children first so we can decide whether to include this node
-    var children = [];
-    if (depth < maxDepth) {
-        try {
-            var kids = element.uiElements();
-            for (var i = 0; i < kids.length; i++) {
-                try {
-                    var child = buildUINode(kids[i], maxDepth, depth + 1);
-                    if (child) children.push(child);
-                } catch (e) {}
-            }
-        } catch (e) {}
-    }
-
-    // Skip uninteresting, unnamed leaf nodes (mirrors PS1 behaviour)
-    if (!isInteractive && !hasName && children.length === 0) return null;
-
-    return {
-        name:         name,
-        automationId: '',            // macOS has no AutomationId concept
-        controlType:  role,
-        bounds:       getBounds(element),
-        value:        value || undefined,
-        children:     children.length > 0 ? children : undefined
-    };
-}
-
-function getUITree(SystemEvents, focusedProcessId, maxDepth) {
-    if (!focusedProcessId) return null;
-
-    try {
-        var procs = SystemEvents.processes.where({ unixId: focusedProcessId });
-        if (procs.length === 0) return null;
-
-        var proc    = procs[0];
-        var windows = proc.windows;
-        if (windows.length === 0) return null;
-
-        // Use the first (frontmost) window
-        return buildUINode(windows[0], maxDepth, 0);
-    } catch (e) {
+// Recursively walk the UI accessibility tree
+function walkTree(element, maxDepth, currentDepth) {
+    if (currentDepth > maxDepth) {
         return null;
     }
+    
+    var node = {
+        name: '',
+        role: '',
+        value: '',
+        children: []
+    };
+    
+    try {
+        node.name = safeElementProp(element, 'name', '');
+    } catch (e) {}
+    
+    try {
+        var rawRole = safeElementProp(element, 'role', '');
+        node.role = friendlyRole(rawRole);
+    } catch (e) {}
+    
+    try {
+        var val = safeElementProp(element, 'value', '');
+        if (val !== null && val !== undefined && val !== '') {
+            node.value = String(val);
+        }
+    } catch (e) {}
+    
+    // Try to get subrole for more specific info
+    try {
+        var subrole = safeElementProp(element, 'subrole', '');
+        if (subrole) {
+            node.subrole = friendlyRole(subrole);
+        }
+    } catch (e) {}
+    
+    // Get enabled/focused state for interactive elements
+    try {
+        var enabled = safeElementProp(element, 'enabled', null);
+        if (enabled !== null) {
+            node.enabled = enabled;
+        }
+    } catch (e) {}
+    
+    try {
+        var focused = safeElementProp(element, 'focused', null);
+        if (focused === true) {
+            node.focused = true;
+        }
+    } catch (e) {}
+    
+    // Walk children if not at max depth
+    if (currentDepth < maxDepth) {
+        try {
+            var children = element.uiElements();
+            for (var i = 0; i < children.length; i++) {
+                try {
+                    var childNode = walkTree(children[i], maxDepth, currentDepth + 1);
+                    if (childNode) {
+                        node.children.push(childNode);
+                    }
+                } catch (e) {
+                    // Skip inaccessible children
+                }
+            }
+        } catch (e) {
+            // No children or not accessible
+        }
+    }
+    
+    // Clean up empty arrays/values to reduce JSON size
+    if (node.children.length === 0) {
+        delete node.children;
+    }
+    if (!node.value) {
+        delete node.value;
+    }
+    if (!node.name && !node.role) {
+        return null;  // Skip completely empty nodes
+    }
+    
+    return node;
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
-
-var output;
-try {
-    var params       = parseArgs();
-    var SystemEvents = Application('System Events');
-    SystemEvents.includeStandardAdditions = true;
-
-    var windows = getWindows(SystemEvents);
-    var uiTree  = getUITree(SystemEvents, params.focusedProcessId, params.maxDepth);
-
-    output = JSON.stringify({ windows: windows, uiTree: uiTree });
-} catch (error) {
-    output = JSON.stringify({ error: error.toString() });
-    $.exit(1);
+// Build UI tree for a specific process
+function getUITree(SystemEvents, processId, maxDepth) {
+    var processes = SystemEvents.processes.where({ unixId: processId });
+    
+    if (processes.length === 0) {
+        return { name: '', role: 'Error', value: 'No process found with ID ' + processId };
+    }
+    
+    var process = processes[0];
+    var processName = safeGet(process, 'name', 'unknown');
+    
+    // Get the first (frontmost) window of this process
+    var windows = process.windows;
+    if (windows.length === 0) {
+        return { name: processName, role: 'Application', value: 'No windows found' };
+    }
+    
+    // Walk the first window's tree
+    var win = windows[0];
+    var winName = safeElementProp(win, 'name', '');
+    
+    var tree = walkTree(win, maxDepth, 0);
+    if (!tree) {
+        tree = { name: winName || processName, role: 'Window' };
+    }
+    
+    // Ensure the root has useful context
+    if (!tree.name) {
+        tree.name = winName || processName;
+    }
+    if (!tree.role) {
+        tree.role = 'Window';
+    }
+    tree.processName = processName;
+    tree.processId = processId;
+    
+    return tree;
 }
-output;
+
+// run(argv) is the JXA entry point — osascript calls it and its return value becomes stdout.
+// argv receives command-line arguments passed after the script path.
+function run(argv) {
+    try {
+        // Parse arguments from argv array
+        var focusedProcessId = null;
+        var maxDepth = 2;
+        
+        for (var i = 0; i < argv.length; i++) {
+            if (argv[i] === '-FocusedProcessId' && i + 1 < argv.length) {
+                focusedProcessId = parseInt(argv[++i], 10);
+            } else if (argv[i] === '-MaxDepth' && i + 1 < argv.length) {
+                maxDepth = parseInt(argv[++i], 10);
+            }
+        }
+        
+        var SystemEvents = Application('System Events');
+        SystemEvents.includeStandardAdditions = true;
+        
+        // Build result
+        var result = {
+            windows: getWindows(SystemEvents)
+        };
+        
+        // If a focused process ID was given, walk its UI tree
+        if (focusedProcessId) {
+            result.uiTree = getUITree(SystemEvents, focusedProcessId, maxDepth);
+        }
+        
+        return JSON.stringify(result);
+        
+    } catch (error) {
+        return JSON.stringify({ error: error.toString() });
+    }
+}
