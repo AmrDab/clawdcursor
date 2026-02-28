@@ -46,6 +46,7 @@ const KEY_ALIASES: Record<string, string> = {
   'super_l': 'Super',
   'win': 'Super',
   'windows': 'Super',
+  // macOS command key aliases
   'cmd': 'Super',
   'command': 'Super',
   'command_l': 'Super',

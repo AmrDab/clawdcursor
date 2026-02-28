@@ -19,15 +19,6 @@ import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from './ty
 // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 
-/** Safely resolve a nut-js Key enum value from multiple candidate names */
-function resolveNutKey(...candidates: string[]): Key {
-  for (const name of candidates) {
-    const value = Key[name as keyof typeof Key];
-    if (value !== undefined) return value;
-  }
-  throw new Error(`Unable to resolve nut-js key from candidates: ${candidates.join(', ')}`);
-}
-
 // nut-js Key enum mapping from canonical key names (see keys.ts for normalization)
 const KEY_MAP: Record<string, Key> = {
   'Return': Key.Enter,
@@ -51,12 +42,6 @@ const KEY_MAP: Record<string, Key> = {
   'Alt': Key.LeftAlt,
   'Super': SUPER_KEY,
   'Space': Key.Space,
-
-  // Symbol keys for combos like ctrl+plus / ctrl+minus
-  '=': resolveNutKey('Equal', 'Equals'),
-  '+': resolveNutKey('Equal', 'Equals', 'Add', 'NumAdd'),
-  '-': resolveNutKey('Minus', 'Subtract', 'NumSubtract'),
-  '_': resolveNutKey('Minus', 'Subtract', 'NumSubtract'),
 };
 
 /** LLM screenshot target width — smaller = faster API calls + fewer tokens */

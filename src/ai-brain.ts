@@ -12,11 +12,16 @@
 import * as crypto from 'crypto';
 import type { ClawdConfig, InputAction, ActionSequence, ScreenFrame } from './types';
 
-const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on {OS_NAME}.
+import os from 'os';
+const PLATFORM_HINT = os.platform() === 'darwin'
+  ? 'macOS: menu bar TOP, Dock at bottom. Use Cmd (not Ctrl) for shortcuts. Spotlight: Cmd+Space.'
+  : 'Win11: taskbar BOTTOM centered, system tray bottom-right.';
+
+const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on ${os.platform() === 'darwin' ? 'macOS' : 'Windows 11'}.
 Screen: {REAL_WIDTH}x{REAL_HEIGHT}. Screenshot: {LLM_WIDTH}x{LLM_HEIGHT} (scale {SCALE}x).
 All coordinates in SCREENSHOT space — auto-scaled to real screen.
 
-Win11: taskbar BOTTOM centered, system tray bottom-right.
+${PLATFORM_HINT}
 
 Respond with ONLY valid JSON:
 {"kind":"click","x":N,"y":N,"description":"..."}
@@ -215,8 +220,7 @@ export class AIBrain {
       .replace(/{REAL_HEIGHT}/g, String(this.screenHeight))
       .replace(/{LLM_WIDTH}/g, String(llmWidth))
       .replace(/{LLM_HEIGHT}/g, String(llmHeight))
-      .replace(/{SCALE}/g, scale.toFixed(2))
-      .replace(/{OS_NAME}/g, this.getOSName());
+      .replace(/{SCALE}/g, scale.toFixed(2));
 
     const response = await this.callLLM(systemPrompt);
 
