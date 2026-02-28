@@ -1,3 +1,5 @@
+import { resolveApiConfig } from './openclaw-credentials';
+
 /**
  * Provider Model Map — auto-selects cheap/expensive models per provider.
  * Used by the doctor and the agent pipeline to route tasks optimally.
@@ -190,25 +192,8 @@ function isOllamaVisionModel(modelId: string): boolean {
 
 /**
  * Env var names we check per provider key.
- * AI_API_KEY is a generic fallback — we try to detect its provider from format.
+ * AI_API_KEY is a generic fallback; OpenClaw-provided provider hints are preferred.
  */
-
-function openClawEnvApiKey(): string {
-  return (
-    process.env.OPENCLAW_AI_API_KEY ||
-    process.env.OPENCLAW_API_KEY ||
-    process.env.OPENCLAW_AGENT_API_KEY ||
-    ''
-  );
-}
-
-function openClawEnvProvider(): string {
-  return (
-    (process.env.OPENCLAW_PROVIDER ||
-    process.env.OPENCLAW_AI_PROVIDER ||
-    process.env.OPENCLAW_AGENT_PROVIDER || '').toLowerCase()
-  );
-}
 
 const PROVIDER_ENV_VARS: Record<string, string[]> = {
   anthropic: ['ANTHROPIC_API_KEY'],
@@ -226,15 +211,20 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
   const results: ProviderScanResult[] = [];
 
   // Collect the generic AI_API_KEY — we'll assign it to the matching provider later
-  const genericKey = openClawEnvApiKey() || process.env.AI_API_KEY || '';
+  const resolvedApi = resolveApiConfig();
+  const genericKey = resolvedApi.apiKey || process.env.AI_API_KEY || '';
+  const genericProviderHint = resolvedApi.provider || '';
+  const genericIsOpenClaw = resolvedApi.source === 'openclaw';
 
   // ── Check key-based providers ─────────────────────────────────
   for (const providerKey of ['anthropic', 'openai', 'kimi'] as const) {
     const envVars = PROVIDER_ENV_VARS[providerKey];
     let key = '';
 
-    const openClawProvider = openClawEnvProvider();
-    if (openClawProvider === providerKey && genericKey) {
+    if (genericProviderHint === providerKey && genericKey) {
+      key = genericKey;
+    } else if (genericIsOpenClaw && !genericProviderHint && providerKey === 'openai' && genericKey) {
+      // OpenClaw may provide an OpenAI-compatible endpoint without a provider label.
       key = genericKey;
     }
 
@@ -246,8 +236,8 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
       }
     }
 
-    // Also consider AI_API_KEY if it matches this provider's format
-    if (!key && genericKey) {
+    // For standalone AI_API_KEY, infer provider by key format as a best-effort fallback.
+    if (!key && genericKey && !(genericIsOpenClaw && !genericProviderHint)) {
       const detected = detectProvider(genericKey);
       if (detected === providerKey) {
         key = genericKey;

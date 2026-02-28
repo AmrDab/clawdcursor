@@ -45,6 +45,9 @@ interface DiagResult {
 export async function runDoctor(opts: {
   apiKey?: string;
   provider?: string;
+  baseUrl?: string;
+  textModel?: string;
+  visionModel?: string;
   save?: boolean;
 }): Promise<PipelineConfig | null> {
   const results: DiagResult[] = [];
@@ -106,7 +109,7 @@ export async function runDoctor(opts: {
 
   // ─── 3. AI Providers — Multi-Provider Scan ──────────────────────
   // If --provider and --api-key are explicitly given, use the legacy single-provider path
-  if (opts.provider && opts.apiKey) {
+  if (opts.apiKey && (opts.provider || opts.baseUrl || opts.textModel || opts.visionModel)) {
     return runSingleProviderFlow(opts, results);
   }
 
@@ -271,20 +274,31 @@ export async function runDoctor(opts: {
  * Preserves backward compatibility with CLI flags.
  */
 async function runSingleProviderFlow(
-  opts: { apiKey?: string; provider?: string; save?: boolean },
+  opts: { apiKey?: string; provider?: string; baseUrl?: string; textModel?: string; visionModel?: string; save?: boolean },
   results: DiagResult[],
 ): Promise<PipelineConfig | null> {
   const resolvedApi = resolveApiConfig(opts);
   const apiKey = resolvedApi.apiKey;
   const providerKey = detectProvider(apiKey, opts.provider);
-  const provider = PROVIDERS[providerKey];
+  const baseProvider = PROVIDERS[providerKey];
+  const provider: ProviderProfile = opts.baseUrl
+    ? {
+        ...baseProvider,
+        name: `${baseProvider.name} (OpenAI-compatible endpoint)`,
+        baseUrl: opts.baseUrl,
+        openaiCompat: true,
+        computerUse: false,
+        textModel: opts.textModel || baseProvider.textModel,
+        visionModel: opts.visionModel || baseProvider.visionModel,
+      }
+    : baseProvider;
 
   console.log(`\n🔑 AI Provider: ${provider.name} (explicit override)`);
 
   let textModelWorks = false;
   let visionModelWorks = false;
-  let textModel = provider.textModel;
-  const visionModel = provider.visionModel;
+  let textModel = opts.textModel || provider.textModel;
+  const visionModel = opts.visionModel || provider.visionModel;
 
   // Test text model (Layer 2)
   console.log(`   Testing ${textModel} (text)...`);

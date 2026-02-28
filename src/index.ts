@@ -33,7 +33,11 @@ program
   .option('--api-key <key>', 'AI provider API key')
   .option('--debug', 'Save screenshots to debug/ folder (off by default)')
   .action(async (opts) => {
-    const resolvedApi = resolveApiConfig({ apiKey: opts.apiKey, provider: opts.provider });
+    const resolvedApi = resolveApiConfig({
+      apiKey: opts.apiKey,
+      provider: opts.provider,
+      visionModel: opts.model,
+    });
 
     const config: ClawdConfig = {
       ...DEFAULT_CONFIG,
@@ -42,10 +46,11 @@ program
         port: parseInt(opts.port),
       },
       ai: {
-        provider: (resolvedApi.provider || opts.provider) as any,
+        provider: (resolvedApi.provider || opts.provider || DEFAULT_CONFIG.ai.provider) as any,
         apiKey: resolvedApi.apiKey,
-        model: opts.model || DEFAULT_CONFIG.ai.model,
-        visionModel: opts.model || DEFAULT_CONFIG.ai.visionModel,
+        baseUrl: resolvedApi.baseUrl,
+        model: resolvedApi.textModel || opts.model || DEFAULT_CONFIG.ai.model,
+        visionModel: resolvedApi.visionModel || opts.model || DEFAULT_CONFIG.ai.visionModel,
       },
       debug: opts.debug || false,
     };
@@ -100,10 +105,17 @@ program
   .option('--no-save', 'Don\'t save config to disk')
   .action(async (opts) => {
     const { runDoctor } = await import('./doctor');
-    const resolvedApi = resolveApiConfig({ apiKey: opts.apiKey, provider: opts.provider });
+    const resolvedApi = resolveApiConfig({
+      apiKey: opts.apiKey,
+      provider: opts.provider,
+      visionModel: opts.model,
+    });
     await runDoctor({
       apiKey: resolvedApi.apiKey,
       provider: resolvedApi.provider || opts.provider,
+      baseUrl: resolvedApi.baseUrl,
+      textModel: resolvedApi.textModel,
+      visionModel: resolvedApi.visionModel,
       save: opts.save !== false,
     });
   });
@@ -365,10 +377,17 @@ program
 
     // 2. Run doctor (auto-configures pipeline + registers OpenClaw skill)
     const { runDoctor } = await import('./doctor');
-    const resolvedApi = resolveApiConfig({ apiKey: opts.apiKey, provider: opts.provider });
+    const resolvedApi = resolveApiConfig({
+      apiKey: opts.apiKey,
+      provider: opts.provider,
+      visionModel: opts.model,
+    });
     await runDoctor({
       apiKey: resolvedApi.apiKey,
       provider: resolvedApi.provider || opts.provider,
+      baseUrl: resolvedApi.baseUrl,
+      textModel: resolvedApi.textModel,
+      visionModel: resolvedApi.visionModel,
       save: true,
     });
 

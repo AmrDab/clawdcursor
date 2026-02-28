@@ -85,6 +85,8 @@ export interface ClawdConfig {
   ai: {
     provider: 'anthropic' | 'openai' | 'ollama' | 'kimi';
     apiKey?: string;
+    /** Optional OpenAI-compatible endpoint override (skill-host supplied). */
+    baseUrl?: string;
     model: string;
     visionModel: string;
   };

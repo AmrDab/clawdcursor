@@ -306,25 +306,25 @@ export class AIBrain {
   };
 
   private async callLLM(systemPrompt: string): Promise<string> {
-    const { provider, apiKey, visionModel } = this.config.ai;
+    const { provider, apiKey, visionModel, baseUrl } = this.config.ai;
 
-    if (provider === 'anthropic') {
+    if (provider === 'anthropic' && !baseUrl) {
       return this.callAnthropic(systemPrompt, apiKey!, visionModel);
-    } else {
-      const baseUrl = AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
-      return this.callOpenAICompat(systemPrompt, apiKey || '', visionModel, baseUrl);
     }
+
+    const resolvedBaseUrl = baseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
+    return this.callOpenAICompat(systemPrompt, apiKey || '', visionModel, resolvedBaseUrl);
   }
 
   /**
    * Text-only LLM call (no images). Used for task decomposition.
    */
   private async callLLMText(systemPrompt: string, userMessage: string): Promise<string> {
-    const { provider, apiKey, model } = this.config.ai;
+    const { provider, apiKey, model, baseUrl } = this.config.ai;
 
     const MAX_RETRIES = 2;
 
-    if (provider === 'anthropic') {
+    if (provider === 'anthropic' && !baseUrl) {
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         try {
           console.log(`   🔗 LLM text call (attempt ${attempt + 1}): model=${model}`);
@@ -359,8 +359,8 @@ export class AIBrain {
       }
       throw new Error('LLM text call failed after retries');
     } else {
-      const baseUrl = AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
-      const response = await fetch(`${baseUrl}/chat/completions`, {
+      const resolvedBaseUrl = baseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
+      const response = await fetch(`${resolvedBaseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
