@@ -1,8 +1,12 @@
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
 /**
  * OpenClaw-aware credential resolution.
  *
- * In skill mode, Clawd Cursor should reuse the host OpenClaw agent config
- * (key/base URL/models) rather than inferring provider from key prefixes.
+ * In skill mode, Clawd Cursor should reuse OpenClaw's configured providers/models
+ * instead of inferring provider from key prefixes.
  */
 
 export interface ResolvedApiConfig {
@@ -12,6 +16,18 @@ export interface ResolvedApiConfig {
   textModel?: string;
   visionModel?: string;
   source: 'openclaw' | 'local';
+}
+
+interface ModelInfo {
+  id: string;
+  input: string[];
+}
+
+interface ProviderInfo {
+  key: string;
+  apiKey?: string;
+  baseUrl?: string;
+  models: ModelInfo[];
 }
 
 function normalizeProvider(provider?: string): ResolvedApiConfig['provider'] {
@@ -34,6 +50,209 @@ function pick(...values: Array<string | undefined>): string | undefined {
   return undefined;
 }
 
+function inferProviderFromBaseUrl(baseUrl?: string): ResolvedApiConfig['provider'] {
+  const url = (baseUrl || '').toLowerCase();
+  if (!url) return undefined;
+  if (url.includes('anthropic')) return 'anthropic';
+  if (url.includes('moonshot') || url.includes('kimi')) return 'kimi';
+  if (url.includes('11434') || url.includes('ollama')) return 'ollama';
+  if (url.includes('openai')) return 'openai';
+  return undefined;
+}
+
+function safeReadJson(filePath: string): any | null {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const raw = fs.readFileSync(filePath, 'utf-8');
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function isObject(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function extractApiKeyLike(value: any): string | undefined {
+  if (!value) return undefined;
+  if (typeof value === 'string') return value;
+  if (isObject(value)) {
+    return pick(
+      value.apiKey,
+      value.api_key,
+      value.key,
+      value.token,
+      value.accessToken,
+      value.access_token,
+      value.bearer,
+    );
+  }
+  return undefined;
+}
+
+function extractBaseUrlLike(value: any): string | undefined {
+  if (!value) return undefined;
+  if (typeof value === 'string') return normalizeBaseUrl(value);
+  if (isObject(value)) {
+    return normalizeBaseUrl(pick(value.baseUrl, value.base_url, value.endpoint, value.url));
+  }
+  return undefined;
+}
+
+function normalizeModelEntry(model: any): ModelInfo | null {
+  if (!model) return null;
+  const id = typeof model === 'string'
+    ? model
+    : pick(model.id, model.model, model.modelId, model.name);
+  if (!id) return null;
+
+  const input = Array.isArray(model.input)
+    ? model.input.map((x: any) => String(x).toLowerCase())
+    : [];
+
+  return { id, input };
+}
+
+function getOpenClawRoots(): string[] {
+  const home = os.homedir();
+  return [
+    path.join(home, '.openclaw'),
+    path.join(home, '.openclaw-dev'),
+  ];
+}
+
+function loadOpenClawProviderMap(): Record<string, ProviderInfo> {
+  const providers: Record<string, ProviderInfo> = {};
+
+  const ensureProvider = (key: string): ProviderInfo => {
+    const normalizedKey = key.toLowerCase();
+    if (!providers[normalizedKey]) {
+      providers[normalizedKey] = { key: normalizedKey, models: [] };
+    }
+    return providers[normalizedKey];
+  };
+
+  for (const root of getOpenClawRoots()) {
+    const authCandidates = [
+      path.join(root, 'agents', 'main', 'agent', 'auth-profiles.json'),
+      path.join(root, 'agents', 'main', 'auth-profiles.json'),
+    ];
+
+    const configCandidates = [
+      path.join(root, 'openclaw.json'),
+      path.join(root, 'agents', 'main', 'openclaw.json'),
+      path.join(root, 'agents', 'main', 'agent', 'openclaw.json'),
+    ];
+
+    for (const authPath of authCandidates) {
+      const auth = safeReadJson(authPath);
+      if (!auth) continue;
+
+      const containers = [auth, auth.profiles, auth.providers, auth.authProfiles];
+      for (const container of containers) {
+        if (!isObject(container)) continue;
+        for (const [key, value] of Object.entries(container)) {
+          const entry = ensureProvider(key);
+          const apiKey = extractApiKeyLike(value);
+          const baseUrl = extractBaseUrlLike(value);
+          if (apiKey) entry.apiKey = apiKey;
+          if (baseUrl) entry.baseUrl = baseUrl;
+
+          const maybeModels = isObject(value) ? (value.models || value.availableModels) : null;
+          if (Array.isArray(maybeModels)) {
+            for (const m of maybeModels) {
+              const normalized = normalizeModelEntry(m);
+              if (normalized) entry.models.push(normalized);
+            }
+          }
+        }
+      }
+    }
+
+    for (const configPath of configCandidates) {
+      const cfg = safeReadJson(configPath);
+      if (!cfg) continue;
+
+      const providerBlocks = [
+        cfg?.models?.providers,
+        cfg?.providers,
+      ];
+
+      for (const block of providerBlocks) {
+        if (!isObject(block)) continue;
+        for (const [key, value] of Object.entries(block)) {
+          const entry = ensureProvider(key);
+          const apiKey = extractApiKeyLike(value);
+          const baseUrl = extractBaseUrlLike(value);
+          if (apiKey && !entry.apiKey) entry.apiKey = apiKey;
+          if (baseUrl && !entry.baseUrl) entry.baseUrl = baseUrl;
+
+          if (isObject(value) && Array.isArray(value.models)) {
+            for (const m of value.models) {
+              const normalized = normalizeModelEntry(m);
+              if (normalized) entry.models.push(normalized);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // De-duplicate models by id
+  for (const entry of Object.values(providers)) {
+    const seen = new Set<string>();
+    entry.models = entry.models.filter(m => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }
+
+  return providers;
+}
+
+function selectVisionProvider(providers: ProviderInfo[]): ProviderInfo | null {
+  for (const p of providers) {
+    if (p.models.some(m => m.input.includes('image') || m.input.includes('vision'))) {
+      return p;
+    }
+  }
+  return null;
+}
+
+function selectTextProvider(providers: ProviderInfo[]): ProviderInfo | null {
+  const ollama = providers.find(p => p.key === 'ollama' && p.models.length > 0);
+  if (ollama) return ollama;
+  return providers.find(p => p.models.length > 0) || null;
+}
+
+function resolveFromOpenClawFiles(): ResolvedApiConfig | null {
+  const providerMap = loadOpenClawProviderMap();
+  const providerList = Object.values(providerMap).filter(p => !!(p.apiKey || p.baseUrl || p.models.length > 0));
+  if (providerList.length === 0) return null;
+
+  const visionProvider = selectVisionProvider(providerList);
+  const textProvider = selectTextProvider(providerList);
+
+  const selectedProvider = visionProvider || textProvider;
+  if (!selectedProvider) return null;
+
+  const visionModel = visionProvider?.models.find(m => m.input.includes('image') || m.input.includes('vision'))?.id
+    || textProvider?.models[0]?.id;
+  const textModel = textProvider?.models.find(m => !m.input.includes('image') && !m.input.includes('vision'))?.id
+    || textProvider?.models[0]?.id;
+
+  return {
+    apiKey: selectedProvider.apiKey || '',
+    baseUrl: selectedProvider.baseUrl,
+    textModel,
+    visionModel,
+    provider: normalizeProvider(selectedProvider.key) || inferProviderFromBaseUrl(selectedProvider.baseUrl),
+    source: 'openclaw',
+  };
+}
+
 /**
  * Resolve key + endpoint + models with OpenClaw-first precedence.
  */
@@ -44,6 +263,12 @@ export function resolveApiConfig(opts?: {
   textModel?: string;
   visionModel?: string;
 }): ResolvedApiConfig {
+  const fromFiles = resolveFromOpenClawFiles();
+  if (fromFiles) {
+    return fromFiles;
+  }
+
+  // Transitional fallback if OpenClaw explicitly injects runtime env vars.
   const openClawKey = pick(
     process.env.OPENCLAW_AI_API_KEY,
     process.env.OPENCLAW_API_KEY,
@@ -72,7 +297,7 @@ export function resolveApiConfig(opts?: {
     process.env.OPENCLAW_PROVIDER,
     process.env.OPENCLAW_AI_PROVIDER,
     process.env.OPENCLAW_AGENT_PROVIDER,
-  ));
+  )) || inferProviderFromBaseUrl(openClawBaseUrl);
 
   if (openClawKey || openClawBaseUrl || openClawTextModel || openClawVisionModel || openClawProvider) {
     return {
@@ -93,7 +318,7 @@ export function resolveApiConfig(opts?: {
   if (explicitApiKey || localBaseUrl || localTextModel || localVisionModel || opts?.provider) {
     return {
       apiKey: explicitApiKey,
-      provider: normalizeProvider(opts?.provider),
+      provider: normalizeProvider(opts?.provider) || inferProviderFromBaseUrl(localBaseUrl),
       baseUrl: localBaseUrl,
       textModel: localTextModel,
       visionModel: localVisionModel,
@@ -111,7 +336,7 @@ export function resolveApiConfig(opts?: {
 
   return {
     apiKey: localApiKey,
-    provider: normalizeProvider(opts?.provider),
+    provider: inferProviderFromBaseUrl(localBaseUrl),
     baseUrl: localBaseUrl,
     textModel: localTextModel,
     visionModel: localVisionModel,

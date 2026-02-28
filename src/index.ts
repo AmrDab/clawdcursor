@@ -36,7 +36,6 @@ program
     const resolvedApi = resolveApiConfig({
       apiKey: opts.apiKey,
       provider: opts.provider,
-      visionModel: opts.model,
     });
 
     const config: ClawdConfig = {
@@ -108,7 +107,6 @@ program
     const resolvedApi = resolveApiConfig({
       apiKey: opts.apiKey,
       provider: opts.provider,
-      visionModel: opts.model,
     });
     await runDoctor({
       apiKey: resolvedApi.apiKey,
@@ -380,7 +378,6 @@ program
     const resolvedApi = resolveApiConfig({
       apiKey: opts.apiKey,
       provider: opts.provider,
-      visionModel: opts.model,
     });
     await runDoctor({
       apiKey: resolvedApi.apiKey,
