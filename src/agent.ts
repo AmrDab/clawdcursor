@@ -252,19 +252,22 @@ export class Agent {
         this.state = { status: 'idle', stepsCompleted: result.steps.length, stepsTotal: result.steps.length };
         return result;
       }
-      // Browser layer couldn't handle it — fall through to Smart Interaction
+      // Browser layer couldn't handle it — fall through
       if (browserResult.handled === false) {
-        console.log(`   🌐 Browser Layer: falling through to Smart Interaction`);
+        console.log(`   🌐 Browser Layer: not handled — falling through to Action Router`);
       }
     }
 
-    // ── Layer 1: Action Router (regex + a11y, zero LLM calls) ──
-    // Pattern-matched tasks: refresh, go back, zoom, find, open app, etc.
+    // ── Layer 1: Action Router + Shortcuts (regex + a11y, zero LLM calls) ──
+    // ALWAYS runs — no isBrowserTask gate. Catches shortcuts even for browser-context tasks.
+    // Pattern-matched tasks: refresh, go back, zoom, find, open app, shortcuts, etc.
     // Instant execution — no screenshots, no API calls.
-    if (!isBrowserTask) {
+    {
       this.state.status = 'acting';
       console.log(`\n⚡ Action Router: attempting "${task}"`);
       const routeResult = await this.router.route(task);
+      const telemetry = this.router.getTelemetry();
+      console.log(`   📊 Telemetry: ${JSON.stringify(telemetry)}`);
       if (routeResult.handled) {
         const step: StepResult = {
           action: 'action-router',

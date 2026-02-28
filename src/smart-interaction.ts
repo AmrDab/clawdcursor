@@ -183,6 +183,11 @@ export class SmartInteractionLayer {
         result = await this.handleDescribeTask(task);
       } else if (isBrowserTask) {
         result = await this.handleBrowserTask(task);
+        // CDP failed → fall back to UIDriver (accessibility tree) before giving up
+        if (!result.handled || !result.success) {
+          console.log(`   🔄 Smart Interaction: CDP path failed — trying UIDriver (accessibility tree)`);
+          result = await this.handleNativeTask(task);
+        }
       } else {
         result = await this.handleNativeTask(task);
       }

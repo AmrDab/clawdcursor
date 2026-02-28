@@ -396,18 +396,40 @@ export class BrowserLayer {
   /**
    * Extract a URL from a task description.
    */
+  /**
+   * Extract the navigation URL from a task.
+   * 
+   * Strategy: extract from the NAVIGATION CLAUSE only (the part after
+   * "go to", "open", "navigate to", "visit"). This avoids grabbing
+   * domains from email addresses, parameters, or unrelated context.
+   * 
+   * For compound tasks (containing " and "), only the first clause
+   * before " and " is considered for URL extraction.
+   */
   private extractUrl(task: string): string | null {
-    // Explicit URL
+    // Explicit URL anywhere in task — always wins
     const urlMatch = task.match(/https?:\/\/[^\s"'<>]+/i);
     if (urlMatch) return urlMatch[0];
 
-    // Domain patterns
-    const domainMatch = task.match(/\b([\w-]+\.(com|org|net|io|dev|ai|co|app|xyz|gg|tv|me)(\/[\w\-./]*)?)\b/i);
+    // Isolate the navigation clause: strip everything after " and " connectors
+    // "open gmail and send an email to foo@bar.com" → "open gmail"
+    const navClause = task.split(/\band\b/i)[0].trim();
+
+    // Extract the navigation target from the clause
+    // Match: "open X", "go to X", "navigate to X", "visit X", "launch X", "load X"
+    const navTargetMatch = navClause.match(
+      /\b(?:open|go\s+to|navigate\s+to|visit|launch|load|browse\s+to)\s+(?:(?:chrome|edge|firefox|browser|safari)\s+(?:and\s+(?:go\s+to|navigate\s+to|open|visit)\s+)?)?(.+)$/i
+    );
+    const target = navTargetMatch ? navTargetMatch[1].trim() : navClause;
+
+    // Try domain match on the extracted target only
+    const domainMatch = target.match(/\b([\w-]+\.(com|org|net|io|dev|ai|co|app|xyz|gg|tv|me)(\/[\w\-./]*)?)\b/i);
     if (domainMatch) return `https://${domainMatch[1]}`;
 
-    // Known site names — check AFTER domain extraction so explicit domains win
+    // Known site names — match against the navigation target, not the full task
     const siteMap: Record<string, string> = {
       'google': 'https://www.google.com',
+      'gmail': 'https://mail.google.com',
       'github': 'https://github.com',
       'youtube': 'https://www.youtube.com',
       'twitter': 'https://twitter.com',
@@ -424,10 +446,13 @@ export class BrowserLayer {
       'twitch': 'https://www.twitch.tv',
       'discord': 'https://discord.com',
       'npm': 'https://www.npmjs.com',
+      'outlook': 'https://outlook.live.com',
+      'hotmail': 'https://outlook.live.com',
     };
 
+    const lowerTarget = target.toLowerCase();
     for (const [name, url] of Object.entries(siteMap)) {
-      if (task.toLowerCase().includes(name)) return url;
+      if (lowerTarget.includes(name)) return url;
     }
 
     return null;
