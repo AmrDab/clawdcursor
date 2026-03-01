@@ -490,6 +490,9 @@ export class ComputerUseBrain {
     let lastActionSignature = '';
     let repeatedActionStreak = 0;
 
+    let verificationFailures = 0;
+    const MAX_VERIFICATION_RETRIES = 2;
+
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       llmCalls++;
       console.log(`   📡 Computer Use call ${i + 1}...`);
@@ -600,7 +603,19 @@ export class ComputerUseBrain {
         }
 
         // Not verified — Claude should continue with recovery
-        console.log(`   ❌ Verification FAILED — continuing with recovery`);
+        verificationFailures++;
+        if (verificationFailures >= MAX_VERIFICATION_RETRIES) {
+          console.log(`   ⚠️ Verification failed ${verificationFailures} times — accepting result to avoid infinite loop`);
+          steps.push({
+            action: 'done',
+            description: `Computer Use completed (unverified after ${verificationFailures} retries): "${subtask}"`,
+            success: false,
+            timestamp: Date.now(),
+          });
+          return { success: false, steps, llmCalls };
+        }
+
+        console.log(`   ❌ Verification FAILED (${verificationFailures}/${MAX_VERIFICATION_RETRIES}) — continuing with recovery`);
         messages.push({
           role: 'assistant',
           content: verifyResponse.content,
