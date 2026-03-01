@@ -143,6 +143,33 @@ export class Agent {
     return null;
   }
 
+  private async getDefaultBrowser(): Promise<string> {
+    // Detect system default browser dynamically
+    if (IS_MAC) {
+      try {
+        const { stdout } = await execFileAsync('defaults', ['read', 'com.apple.LaunchServices/com.apple.launchservices.secure', 'LSHandlers']);
+        if (stdout.includes('chrome')) return 'Google Chrome';
+        if (stdout.includes('firefox')) return 'Firefox';
+        if (stdout.includes('brave')) return 'Brave Browser';
+        if (stdout.includes('arc')) return 'Arc';
+      } catch { /* fall through */ }
+      return 'Safari'; // macOS fallback
+    } else {
+      try {
+        const { stdout } = await execFileAsync('powershell.exe', ['-Command',
+          `(Get-ItemProperty 'HKCU:\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice').ProgId`
+        ]);
+        const progId = stdout.trim().toLowerCase();
+        if (progId.includes('chrome')) return 'Google Chrome';
+        if (progId.includes('firefox')) return 'Firefox';
+        if (progId.includes('brave')) return 'Brave Browser';
+        if (progId.includes('opera')) return 'Opera';
+        if (progId.includes('arc')) return 'Arc';
+      } catch { /* fall through */ }
+      return 'Microsoft Edge'; // Windows fallback
+    }
+  }
+
   async connect(): Promise<void> {
     await this.desktop.connect();
 
@@ -259,7 +286,36 @@ export class Agent {
       }
 
       // Navigate to URL if identified — do it now via keyboard shortcut
-      if (preprocessed.navigate && preprocessed.app) {
+      if (preprocessed.navigate) {
+        // If no app specified but navigation requested, open default browser first
+        if (!preprocessed.app) {
+          const defaultBrowser = await this.getDefaultBrowser();
+          console.log(`   🌐 Opening default browser (${defaultBrowser}) for navigation...`);
+          try {
+            const openResult = await this.router.route(`open ${defaultBrowser}`);
+            if (openResult.handled) {
+              console.log(`   ✅ "${defaultBrowser}" opened via Action Router`);
+              priorContext.push(`Opened "${defaultBrowser}" — it is now the active, focused window`);
+              await new Promise(r => setTimeout(r, 2000));
+
+              // Maximize the window
+              try {
+                await this.router.route('maximize window');
+                await new Promise(r => setTimeout(r, 500));
+                try {
+                  await execFileAsync('powershell.exe', ['-Command',
+                    'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}")'
+                  ]);
+                } catch { /* non-critical */ }
+                await new Promise(r => setTimeout(r, 300));
+                priorContext.push('Window maximized to full screen');
+              } catch { /* not critical */ }
+            }
+          } catch (err) {
+            console.log(`   ⚠️ Default browser open failed: ${err} — proceeding with navigation attempt`);
+          }
+        }
+
         console.log(`   🌐 Navigating to ${preprocessed.navigate}...`);
         try {
           await this.desktop.keyPress('Control+l');
@@ -480,13 +536,20 @@ Your job: identify what app/browser to open FIRST (if any), what URL to navigate
 RULES:
 - "open X on Y" where Y is a browser → app is the browser, navigate is X, task is remaining work
 - "open X and Y" → app is X, task is Y
-- "go to X" or "check X" where X is a website → app is the default browser, navigate is X
+- "go to X" or "check X" where X is a website → app is null (will default to system browser), navigate is X
 - If the task mentions a specific browser (Edge, Chrome, Firefox, Brave, Safari), use it
 - If no app needs opening, set app to null
 - contextHints: list relevant platforms/sites (e.g. "reddit", "twitter", "gmail") for shortcut matching
 - The "task" field MUST contain ALL remaining work after the FIRST app is opened and URL navigated
 - CRITICAL: If the command involves multiple apps (e.g. "copy from X then paste in Y"), the task field MUST include the full chain of remaining actions including switching to other apps
 - If the whole task is just "open X", task should be empty string
+
+VALIDATION RULE: The task field combined with app+navigate must account for EVERY action in the original command. If you drop any part, the agent will fail.
+
+NEVER RULES:
+- NEVER summarize or shorten the task. Include the EXACT remaining actions word for word.
+- NEVER omit steps involving multiple apps, copying/pasting, saving, or switching between applications.
+- NEVER assume steps are "obvious" or can be inferred - spell out every action explicitly.
 
 Browser name mapping:
 - edge → Microsoft Edge
@@ -502,10 +565,16 @@ Examples:
 - "open reddit on edge" → {"app": "Microsoft Edge", "navigate": "reddit.com", "task": "", "contextHints": ["reddit"]}
 - "open paint and draw a cat" → {"app": "Paint", "navigate": null, "task": "draw a cat", "contextHints": ["paint"]}
 - "check my email in chrome" → {"app": "Google Chrome", "navigate": "gmail.com", "task": "check email", "contextHints": ["gmail"]}
-- "go to youtube and find a funny video" → {"app": "Microsoft Edge", "navigate": "youtube.com", "task": "find a funny video", "contextHints": ["youtube"]}
+- "go to youtube and find a funny video" → {"app": null, "navigate": "youtube.com", "task": "find a funny video", "contextHints": ["youtube"]}
+- "go to wikipedia" → {"app": null, "navigate": "wikipedia.org", "task": "", "contextHints": ["wikipedia"]}
 - "scroll down" → {"app": null, "navigate": null, "task": "scroll down", "contextHints": []}
 - "open reddit on edge and scroll down through posts and interact with one" → {"app": "Microsoft Edge", "navigate": "reddit.com", "task": "scroll down through posts and interact with one", "contextHints": ["reddit"]}
-- "open wikipedia on edge, copy a sentence, then paste it in google docs" → {"app": "Microsoft Edge", "navigate": "wikipedia.org", "task": "scroll through an article, copy an interesting sentence, then open Google Docs and paste it there", "contextHints": ["wikipedia", "google docs"]}`;
+- "open wikipedia on edge, copy a sentence, then paste it in google docs" → {"app": "Microsoft Edge", "navigate": "wikipedia.org", "task": "scroll through an article, copy an interesting sentence, then open Google Docs and paste it there", "contextHints": ["wikipedia", "google docs"]}
+- "open wikipedia, copy a sentence, then open notepad and paste it" → {"app": null, "navigate": "wikipedia.org", "task": "copy a sentence from wikipedia, then open notepad and paste the sentence", "contextHints": ["wikipedia", "notepad"]}
+- "search for cats on google, copy the first result link, then open email and paste it" → {"app": null, "navigate": "google.com", "task": "search for cats, copy the first result link, then open email application and paste the link", "contextHints": ["google", "email"]}
+- "open amazon and find a book, then save the title to a text file" → {"app": null, "navigate": "amazon.com", "task": "find a book, copy or note the title, then open text editor and save the title to a file", "contextHints": ["amazon", "text file"]}
+- "compare prices between amazon and ebay for laptops" → {"app": null, "navigate": "amazon.com", "task": "search for laptops and note prices, then open ebay in new tab and compare laptop prices", "contextHints": ["amazon", "ebay"]}
+- "drag an image from browser to desktop" → {"app": null, "navigate": null, "task": "drag an image from browser window to desktop", "contextHints": ["browser", "desktop"]}`;
 
     try {
       console.log(`\n🧠 Pre-processing task with LLM...`);

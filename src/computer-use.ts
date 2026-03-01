@@ -73,6 +73,15 @@ SITE SHORTCUTS (use these instead of clicking — much faster and more reliable)
 
 SUBMITTING IS MANDATORY: After EVERY type() action into a chat or prompt input, you MUST immediately follow with key("Return") in the same response batch. Typing without submitting is an incomplete action. Never end a response after type() without also sending Return.
 
+MULTI-APP WORKFLOWS:
+For tasks involving multiple apps (copy from X, paste in Y):
+1. NEVER declare done until the FINAL paste/save action is confirmed
+2. When copying text: select text (triple-click for sentence, click+drag for custom), then Cmd+C, then verify selection is highlighted before copying
+3. When switching apps: use Cmd+Space (Spotlight) + type name + Return, or Cmd+Tab. After switching, ALWAYS take a screenshot to verify you're in the right app
+4. When pasting: click in the target area first, THEN Cmd+V, THEN take a screenshot to verify the paste worked
+5. The task is NOT done until the pasted content is VISIBLE in the target app
+6. Common multi-app pattern: select text → Cmd+C → open new app (Cmd+Space + type + Return) → wait 2s → click in text area → Cmd+V → verify
+
 WAITING FOR AI APPS (Codex, Claude, ChatGPT, etc.):
 After submitting a message to an AI chat app, the app takes time to generate a response. You MUST wait for it to finish before doing anything else. Here is the exact pattern:
 1. Click input box → type message → key "Return" (all in one batch)
@@ -83,7 +92,7 @@ After submitting a message to an AI chat app, the app takes time to generate a r
 6. Only when you see the AI has FINISHED — input box is active again, send button is available, no stop button, response text has stabilized — THEN read the response and send your next message.
 7. NEVER type into the input box while the AI is still generating. This interrupts it.
 
-Do NOT: press super+d or any "show desktop" shortcut, take screenshots after every single action, use Windows shortcuts (Win key, Alt+F4, etc), retry same failed coordinates, send a new message before the AI finishes responding.`;
+Do NOT: press super+d or any "show desktop" shortcut, take screenshots after every single action, use Windows shortcuts (Win key, Alt+F4, etc), retry same failed coordinates, send a new message before the AI finishes responding, declare a task complete before ALL steps are done — if the task says copy AND paste, you must do BOTH.`;
 
 const SYSTEM_PROMPT_WIN = `You are Clawd Cursor, an AI desktop agent on Windows 11. Complete tasks fast and reliably.
 
@@ -120,7 +129,16 @@ SITE SHORTCUTS (use these instead of clicking — much faster and more reliable)
 - Slack: Ctrl+k quick switcher, Alt+Up/Down move between channels
 - Any site: / often focuses search, ? often shows keyboard shortcuts help
 
-Do NOT: take screenshots after every action, go one action at a time when you can batch, use search engines for known URLs, retry same failed coords.`;
+MULTI-APP WORKFLOWS:
+For tasks involving multiple apps (copy from X, paste in Y):
+1. NEVER declare done until the FINAL paste/save action is confirmed
+2. When copying text: select text (triple-click for sentence, click+drag for custom), then Ctrl+C, then verify selection is highlighted before copying
+3. When switching apps: use Win+search (Super + type name + Return) or Alt+Tab. After switching, ALWAYS take a screenshot to verify you're in the right app
+4. When pasting: click in the target area first, THEN Ctrl+V, THEN take a screenshot to verify the paste worked
+5. The task is NOT done until the pasted content is VISIBLE in the target app
+6. Common multi-app pattern: select text → Ctrl+C → open new app (Super + type + Return) → wait 2s → click in text area → Ctrl+V → verify
+
+Do NOT: take screenshots after every action, go one action at a time when you can batch, use search engines for known URLs, retry same failed coords, declare a task complete before ALL steps are done — if the task says copy AND paste, you must do BOTH.`;
 
 const SYSTEM_PROMPT = IS_MAC ? SYSTEM_PROMPT_MAC : SYSTEM_PROMPT_WIN;
 
@@ -137,42 +155,14 @@ const CHECKPOINT_TEMPLATES: Record<string, string[]> = {
 
 function detectTaskType(task: string): string {
   const lower = task.toLowerCase();
-  // Multi-app: task involves copying/moving between apps or mentions "then open" another app
-  if (/\b(copy.*paste|then open|switch to|move to|from.*to)\b/.test(lower) && /\b(open|app|chrome|edge|firefox|docs|word|notepad|excel)\b/.test(lower)) return 'multi_app';
+  // Multi-app: task involves copying/moving content between apps or switching apps mid-task
+  if (/\b(copy.*paste|then open|switch to|move to|from.*to|paste.*(in|into)|drag.*to)\b/.test(lower)) return 'multi_app';
   if (/\b(email|compose|send.*to|mail)\b/.test(lower)) return 'email';
   if (/\b(fill|form|register|sign.?up)\b/.test(lower)) return 'form';
   if (/\b(go to|navigate|open.*url|visit)\b/.test(lower)) return 'navigate';
   if (/\b(draw|paint|sketch)\b/.test(lower)) return 'draw';
   if (/\b(save|download)\b/.test(lower)) return 'file_save';
   return 'app_interaction'; // generic fallback
-}
-
-function extractSecondAppHints(task: string): string[] {
-  const lower = task.toLowerCase();
-  const knownApps = [
-    'notepad', 'google docs', 'docs', 'word', 'excel', 'powerpoint', 'paint',
-    'chrome', 'edge', 'firefox', 'safari', 'terminal', 'cmd', 'powershell',
-    'vscode', 'code', 'slack', 'teams', 'discord',
-  ];
-  const markers = ['then open', 'switch to', 'paste into', 'into', 'in'];
-  for (const marker of markers) {
-    const idx = lower.indexOf(marker);
-    if (idx >= 0) {
-      const suffix = lower.slice(idx + marker.length);
-      const markerHits = knownApps.filter(app => suffix.includes(app));
-      if (markerHits.length > 0) return Array.from(new Set(markerHits));
-    }
-  }
-
-  const appWithPos = knownApps
-    .map(app => ({ app, pos: lower.indexOf(app) }))
-    .filter(v => v.pos >= 0)
-    .sort((a, b) => a.pos - b.pos);
-  if (appWithPos.length >= 2) {
-    return [appWithPos[appWithPos.length - 1].app];
-  }
-
-  return [];
 }
 
 function updateCheckpoints(tracker: CheckpointTracker, action: string, description: string, claudeText: string): void {
@@ -340,10 +330,10 @@ function updateCheckpoints(tracker: CheckpointTracker, action: string, descripti
         }
         break;
       case 'second_app_opened':
+        // Universal: any window switch action (Alt+Tab, Super/Win key, Cmd+Tab, Cmd+Space, taskbar click)
         if (
-          action === 'key' &&
-          (descriptionLower.includes('alt+tab') || descriptionLower.includes('super')) &&
-          !!tracker.secondAppHints?.some(hint => claudeLower.includes(hint))
+          (action === 'key' && (descriptionLower.includes('alt+tab') || descriptionLower.includes('super') || descriptionLower.includes('cmd+tab') || descriptionLower.includes('cmd+space'))) ||
+          (action === 'left_click' && claudeLower.match(/\b(opened?|switch|launch|start|taskbar)\b/))
         ) {
           cp.detected = true;
           cp.timestamp = Date.now();
@@ -391,7 +381,6 @@ interface TaskCheckpoint {
 
 interface CheckpointTracker {
   taskType: string;
-  secondAppHints?: string[];
   checkpoints: TaskCheckpoint[];
   isComplete(): boolean;
   update(action: string, description: string, claudeText: string): void;
@@ -474,7 +463,6 @@ export class ComputerUseBrain {
     const checkpointNames = CHECKPOINT_TEMPLATES[taskType] || CHECKPOINT_TEMPLATES['app_interaction'];
     const tracker: CheckpointTracker = {
       taskType,
-      secondAppHints: extractSecondAppHints(subtask),
       checkpoints: checkpointNames.map(name => ({ name, detected: false })),
       isComplete() {
         return this.checkpoints.every(cp => cp.detected);
@@ -810,8 +798,8 @@ export class ComputerUseBrain {
       for (let ti = 0; ti < toolUseBlocks.length; ti++) {
         const toolUse = toolUseBlocks[ti];
         const { action } = toolUse.input;
-          const stepDesc = steps[steps.length - toolUseBlocks.length + ti]?.description || '';
-          tracker.update(action, stepDesc, claudeText);
+        const stepDesc = steps[steps.length - toolUseBlocks.length + ti]?.description || '';
+        tracker.update(action, stepDesc, claudeText);
       }
 
       // Send tool results back
