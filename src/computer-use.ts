@@ -104,6 +104,167 @@ Do NOT: take screenshots after every action, go one action at a time when you ca
 
 const SYSTEM_PROMPT = IS_MAC ? SYSTEM_PROMPT_MAC : SYSTEM_PROMPT_WIN;
 
+// Checkpoint system for task completion detection
+const CHECKPOINT_TEMPLATES: Record<string, string[]> = {
+  email: ['compose_opened', 'recipient_filled', 'subject_filled', 'body_filled', 'send_pressed', 'compose_closed'],
+  form: ['form_visible', 'fields_filled', 'submit_pressed'],
+  navigate: ['url_entered', 'page_loaded'],
+  draw: ['tool_selected', 'drawing_started', 'drawing_complete'],
+  file_save: ['save_triggered', 'path_entered', 'save_confirmed'],
+  app_interaction: ['app_focused', 'action_performed', 'result_visible'],
+};
+
+function detectTaskType(task: string): string {
+  const lower = task.toLowerCase();
+  if (/\b(email|compose|send.*to|mail)\b/.test(lower)) return 'email';
+  if (/\b(fill|form|register|sign.?up)\b/.test(lower)) return 'form';
+  if (/\b(go to|navigate|open.*url|visit)\b/.test(lower)) return 'navigate';
+  if (/\b(draw|paint|sketch)\b/.test(lower)) return 'draw';
+  if (/\b(save|download)\b/.test(lower)) return 'file_save';
+  return 'app_interaction'; // generic fallback
+}
+
+function updateCheckpoints(tracker: CheckpointTracker, action: string, description: string, claudeText: string): void {
+  const lower = (description + ' ' + claudeText).toLowerCase();
+  
+  for (const cp of tracker.checkpoints) {
+    if (cp.detected) continue;
+    
+    switch (cp.name) {
+      case 'compose_opened':
+        if (lower.includes('compose') && (lower.includes('open') || lower.includes('new message'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'recipient_filled':
+        if ((action === 'type' && lower.includes('@')) || lower.includes('recipient') || lower.includes('to field') || lower.includes('to:')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'subject_filled':
+        if (lower.includes('subject')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'body_filled':
+        if (lower.includes('body') || (action === 'type' && tracker.checkpoints.find(c => c.name === 'subject_filled')?.detected)) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'send_pressed':
+        if (action === 'key' && (lower.includes('return') || lower.includes('enter')) && lower.includes('ctrl')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        if (action === 'left_click' && (lower.includes('send') || lower.includes('submit'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'compose_closed':
+        if (lower.includes('compose') && (lower.includes('closed') || lower.includes('disappeared'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        if (lower.includes('sent successfully') || lower.includes('email.*sent') || lower.includes('message sent')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'tool_selected':
+        if (action === 'left_click' && (lower.includes('brush') || lower.includes('pencil') || lower.includes('tool'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'drawing_started':
+        if (action === 'left_click_drag') {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'drawing_complete':
+        // Multiple drags completed and Claude says done
+        if (lower.includes('stick figure') && (lower.includes('complete') || lower.includes('success') || lower.includes('done') || lower.includes('finished'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'form_visible':
+        if (lower.includes('form') || lower.includes('field')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'fields_filled':
+        if (action === 'type' || (lower.includes('fill') && lower.includes('complete'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'submit_pressed':
+        if (lower.includes('submit') || lower.includes('send') || (action === 'key' && lower.includes('return'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'url_entered':
+        if (action === 'type' && (lower.includes('http') || lower.includes('www') || lower.includes('.com'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'page_loaded':
+        if (lower.includes('page loaded') || lower.includes('navigated to') || lower.includes('website') && lower.includes('visible')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'save_triggered':
+        if (action === 'key' && (lower.includes('ctrl+s') || lower.includes('save'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'path_entered':
+        if (action === 'type' && (lower.includes('\\') || lower.includes('/') || lower.includes('.'))) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'save_confirmed':
+        if (action === 'key' && lower.includes('return') && tracker.checkpoints.find(c => c.name === 'path_entered')?.detected) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'app_focused':
+        if (action === 'left_click' || action === 'key' && lower.includes('super')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'action_performed':
+        if (action !== 'screenshot' && action !== 'wait') {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      case 'result_visible':
+        if (lower.includes('success') || lower.includes('complete') || lower.includes('done') || lower.includes('finished')) {
+          cp.detected = true;
+          cp.timestamp = Date.now();
+        }
+        break;
+      // Add more as needed
+    }
+  }
+}
+
 interface ToolUseBlock {
   type: 'tool_use';
   id: string;
@@ -126,6 +287,19 @@ interface TextBlock {
 }
 
 type ContentBlock = ToolUseBlock | TextBlock;
+
+interface TaskCheckpoint {
+  name: string;
+  detected: boolean;
+  timestamp?: number;
+}
+
+interface CheckpointTracker {
+  taskType: string;
+  checkpoints: TaskCheckpoint[];
+  isComplete(): boolean;
+  update(action: string, description: string, claudeText: string): void;
+}
 
 export interface ComputerUseResult {
   success: boolean;
@@ -199,6 +373,21 @@ export class ComputerUseBrain {
 
     console.log(`   🖥️  Computer Use: "${subtask}"`);
 
+    // Initialize checkpoint tracker
+    const taskType = detectTaskType(subtask);
+    const checkpointNames = CHECKPOINT_TEMPLATES[taskType] || CHECKPOINT_TEMPLATES['app_interaction'];
+    const tracker: CheckpointTracker = {
+      taskType,
+      checkpoints: checkpointNames.map(name => ({ name, detected: false })),
+      isComplete() {
+        return this.checkpoints.every(cp => cp.detected);
+      },
+      update(action: string, description: string, claudeText: string) {
+        updateCheckpoints(this, action, description, claudeText);
+      },
+    };
+    console.log(`   📋 Task type: ${taskType} — tracking ${checkpointNames.length} checkpoints`);
+
     // Build context from prior completed steps so Claude doesn't redo work
     let taskMessage = subtask;
     if (priorSteps && priorSteps.length > 0) {
@@ -249,8 +438,24 @@ export class ComputerUseBrain {
         }
       }
 
-      // If end_turn → Claude thinks it's done. Verify with a final screenshot.
+      // If end_turn → Claude thinks it's done. Check checkpoints first.
       if (response.stop_reason === 'end_turn') {
+        const completedCount = tracker.checkpoints.filter(c => c.detected).length;
+        const totalCount = tracker.checkpoints.length;
+        const completionRatio = completedCount / totalCount;
+        
+        // If Claude says done + ≥75% checkpoints met, trust it and stop
+        if (completionRatio >= 0.75) {
+          console.log(`   ✅ Claude says done + ${Math.round(completionRatio * 100)}% checkpoints met — accepting completion`);
+          steps.push({
+            action: 'done',
+            description: `Computer Use completed: "${subtask}" (${completedCount}/${totalCount} checkpoints)`,
+            success: true,
+            timestamp: Date.now(),
+          });
+          return { success: true, steps, llmCalls };
+        }
+        
         // Skip verification for visual/loop tasks — trust Claude's judgment,
         // avoid the extra screenshot + API call overhead
         const skipVerify = skipA11yCompletely || /\b(draw|paint|sketch|doodle|color|design)\b/i.test(subtask);
@@ -266,9 +471,12 @@ export class ComputerUseBrain {
           return { success: true, steps, llmCalls };
         }
 
-        // For non-visual tasks: take a verification screenshot and ask Claude to confirm
-        console.log(`   🔍 Verifying outcome...`);
-        llmCalls++;
+        // Only verify when completion is uncertain
+        const completedRatio = tracker.checkpoints.filter(c => c.detected).length / tracker.checkpoints.length;
+        if (completedRatio < 0.5) {
+          // For non-visual tasks: take a verification screenshot and ask Claude to confirm
+          console.log(`   🔍 Verifying outcome...`);
+          llmCalls++;
 
         const [verifyScreenshot, a11yContext] = await Promise.all([
           this.desktop.captureForLLM(),
@@ -337,6 +545,16 @@ export class ComputerUseBrain {
         
         // Continue the loop — Claude will take corrective action
         continue;
+        } else {
+          console.log(`   ✅ Skipping verification — ${Math.round(completedRatio * 100)}% checkpoints already confirmed`);
+          steps.push({
+            action: 'done',
+            description: `Computer Use completed (checkpoints): "${subtask}"`,
+            success: true,
+            timestamp: Date.now(),
+          });
+          return { success: true, steps, llmCalls };
+        }
       }
 
       // If max_tokens → ran out of space
@@ -499,6 +717,35 @@ export class ComputerUseBrain {
             });
           }
         }
+      }
+
+      // Update checkpoints with actions from this iteration
+      const claudeText = response.content
+        .filter((b: any) => b.type === 'text')
+        .map((b: any) => b.text)
+        .join(' ');
+
+      // Update checkpoints for each action executed in this iteration
+      for (let ti = 0; ti < toolUseBlocks.length; ti++) {
+        const toolUse = toolUseBlocks[ti];
+        const { action } = toolUse.input;
+        if (action !== 'screenshot') {
+          const stepDesc = steps[steps.length - toolUseBlocks.length + ti]?.description || '';
+          tracker.update(action, stepDesc, claudeText);
+        }
+      }
+
+      // Check for checkpoint-based completion
+      if (tracker.isComplete()) {
+        console.log(`   ✅ All checkpoints met — task complete`);
+        console.log(`   📋 Checkpoints: ${tracker.checkpoints.map(c => `${c.detected ? '✅' : '❌'} ${c.name}`).join(', ')}`);
+        steps.push({
+          action: 'done',
+          description: `All checkpoints complete for ${taskType} task: "${subtask}"`,
+          success: true,
+          timestamp: Date.now(),
+        });
+        return { success: true, steps, llmCalls };
       }
 
       // Send tool results back

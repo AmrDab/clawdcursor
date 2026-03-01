@@ -2,6 +2,29 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [0.6.5] - 2026-02-28 — Checkpoint System, Task Completion Detection
+
+### Added
+- **Checkpoint-based task completion** — Computer Use tracks milestones (compose opened → fields filled → send pressed → compose closed) and stops when all checkpoints are met. No more wasted calls after successful completion.
+- **Task type detection** — auto-classifies tasks (email, form, navigate, draw, file_save) and applies appropriate checkpoint templates.
+- **Smart early termination** — when Claude says "done" and ≥75% checkpoints confirmed, accepts completion immediately.
+- **Auto-config on first run** — `clawdcursor start` auto-detects providers without needing `clawdcursor doctor`.
+- **Universal provider support** — any OpenAI-compatible endpoint works via `--base-url`.
+- **CLI model selection** — `--text-model` and `--vision-model` flags.
+
+### Fixed
+- **Email domain extraction bug** — "send to user@hotmail.com" no longer navigates to hotmail.com. Email addresses are stripped before URL matching.
+- **Verification override bug** — verification no longer contradicts confirmed checkpoint completion. Skipped when ≥50% checkpoints met.
+- **Context loss between layers** — Computer Use now receives full context of what pre-processing already did.
+- **Drawing quality** — minimum 50px drag distances enforced via system prompt.
+- **OpenClaw credential discovery** — multi-provider scan, template variable resolution, no false overrides.
+- **Pipeline gate** — Action Router always runs, shortcuts work everywhere.
+
+### Changed
+- Pipeline pre-processes "open X and Y" tasks — opens app via Action Router (free), then hands remaining task to deeper layers.
+- Smart Interaction detects visual loop tasks (draw, paint) and skips to Computer Use.
+- Computer Use system prompt includes Snap Assist handling and drawing guidelines.
+
 ## [0.6.2] - 2026-02-28 — Universal Provider Support, Auto-Config
 
 ### Added

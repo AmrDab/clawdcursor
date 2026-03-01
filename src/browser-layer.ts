@@ -422,8 +422,11 @@ export class BrowserLayer {
     );
     const target = navTargetMatch ? navTargetMatch[1].trim() : navClause;
 
-    // Try domain match on the extracted target only
-    const domainMatch = target.match(/\b([\w-]+\.(com|org|net|io|dev|ai|co|app|xyz|gg|tv|me)(\/[\w\-./]*)?)\b/i);
+    // Strip email addresses before domain matching — don't extract domains from emails
+    const taskWithoutEmails = target.replace(/[\w.-]+@[\w.-]+\.\w+/g, '');
+
+    // Try domain match on the extracted target (without emails)
+    const domainMatch = taskWithoutEmails.match(/\b([\w-]+\.(com|org|net|io|dev|ai|co|app|xyz|gg|tv|me)(\/[\w\-./]*)?)\b/i);
     if (domainMatch) return `https://${domainMatch[1]}`;
 
     // Known site names — match against the navigation target, not the full task
@@ -450,7 +453,7 @@ export class BrowserLayer {
       'hotmail': 'https://outlook.live.com',
     };
 
-    const lowerTarget = target.toLowerCase();
+    const lowerTarget = taskWithoutEmails.toLowerCase();
     for (const [name, url] of Object.entries(siteMap)) {
       if (lowerTarget.includes(name)) return url;
     }
