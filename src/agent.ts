@@ -204,9 +204,18 @@ export class Agent {
       console.log(`🧩 Layer 1.5 (Smart Interaction): CDPDriver + UIDriver — 1 LLM call planning`);
     }
 
-    // Initialize Computer Use if Anthropic provider
-    if (ComputerUseBrain.isSupported(this.config)) {
-      this.computerUse = new ComputerUseBrain(this.config, this.desktop, this.a11y, this.safety);
+    // Initialize Computer Use for Anthropic or mixed-provider pipeline overrides
+    const computerUseOverrides = pipelineConfig?.layer3?.computerUse
+      ? {
+          enabled: pipelineConfig.layer3.computerUse,
+          apiKey: pipelineConfig.layer3.apiKey,
+          model: pipelineConfig.layer3.model,
+          baseUrl: pipelineConfig.layer3.baseUrl,
+        }
+      : undefined;
+
+    if (ComputerUseBrain.isSupported(this.config, computerUseOverrides)) {
+      this.computerUse = new ComputerUseBrain(this.config, this.desktop, this.a11y, this.safety, computerUseOverrides);
       console.log(`🖥️  Computer Use API enabled (Anthropic native tool + accessibility)`);
     }
 

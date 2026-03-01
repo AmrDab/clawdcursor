@@ -1330,23 +1330,43 @@ async function testModel(
 /**
  * Load saved pipeline config from disk.
  */
+function resolveProviderApiKey(providerKey: string, fallbackApiKey?: string): string {
+  const normalizedProvider = (providerKey || '').toLowerCase();
+  if (!normalizedProvider) return fallbackApiKey || '';
+
+  const resolved = resolveApiConfig({ provider: normalizedProvider });
+  if (resolved.apiKey) return resolved.apiKey;
+
+  return fallbackApiKey || '';
+}
+
 export function loadPipelineConfig(): PipelineConfig | null {
-  const configPath = path.join(process.cwd(), CONFIG_FILE);
+  const pkgDir = path.resolve(__dirname, '..');
+  let configPath = path.join(pkgDir, CONFIG_FILE);
+
+  if (!fs.existsSync(configPath)) {
+    configPath = path.join(process.cwd(), CONFIG_FILE);
+  }
+
   try {
     if (!fs.existsSync(configPath)) return null;
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const providerKey = raw.provider || 'ollama';
     const provider = PROVIDERS[providerKey] || PROVIDERS['ollama'];
-    const apiKey = resolveApiConfig().apiKey;
+    const resolvedDefault = resolveApiConfig();
+    const defaultApiKey = resolvedDefault.apiKey;
 
     // Support mixed-provider configs saved by the new doctor
     const layer2BaseUrl = raw.pipeline?.layer2?.baseUrl ?? provider.baseUrl;
     const layer3BaseUrl = raw.pipeline?.layer3?.baseUrl ?? provider.baseUrl;
+    const layer3ProviderKey = raw.pipeline?.layer3?.provider || providerKey;
+    const layer3ComputerUse = raw.pipeline?.layer3?.computerUse ?? false;
+    const explicitLayer3ApiKey = raw.pipeline?.layer3?.apiKey;
 
     return {
       provider,
       providerKey,
-      apiKey,
+      apiKey: defaultApiKey,
       layer1: true,
       layer2: {
         enabled: raw.pipeline?.layer2?.enabled ?? false,
@@ -1357,7 +1377,10 @@ export function loadPipelineConfig(): PipelineConfig | null {
         enabled: raw.pipeline?.layer3?.enabled ?? false,
         model: raw.pipeline?.layer3?.model ?? provider.visionModel,
         baseUrl: layer3BaseUrl,
-        computerUse: raw.pipeline?.layer3?.computerUse ?? false,
+        computerUse: layer3ComputerUse,
+        apiKey: layer3ComputerUse
+          ? (explicitLayer3ApiKey || resolveProviderApiKey(layer3ProviderKey, defaultApiKey))
+          : undefined,
       },
     };
   } catch {

@@ -29,6 +29,7 @@ import { CDPDriver } from './cdp-driver';
 import { UIDriver } from './ui-driver';
 import { AccessibilityBridge } from './accessibility';
 import { BrowserLayer } from './browser-layer';
+import { PROVIDERS } from './providers';
 import type { PipelineConfig, ProviderProfile } from './providers';
 import type { ClawdConfig, StepResult } from './types';
 
@@ -715,22 +716,10 @@ export class SmartInteractionLayer {
     const providerKey = this.config.ai.provider;
     const apiKey = this.config.ai.apiKey || '';
 
-    // For Anthropic, use Haiku; for others use their cheap model
-    const modelMap: Record<string, string> = {
-      anthropic: 'claude-haiku-3-5-20241022',
-      openai: 'gpt-4o-mini',
-      ollama: 'qwen2.5:7b',
-      kimi: 'moonshot-v1-8k',
-    };
-    const baseUrlMap: Record<string, string> = {
-      anthropic: 'https://api.anthropic.com/v1',
-      openai: 'https://api.openai.com/v1',
-      ollama: 'http://localhost:11434/v1',
-      kimi: 'https://api.moonshot.cn/v1',
-    };
-
-    const model = modelMap[providerKey] || 'gpt-4o-mini';
-    const baseUrl = baseUrlMap[providerKey] || 'https://api.openai.com/v1';
+    // Prefer provider registry defaults to stay universal as providers evolve
+    const providerProfile = PROVIDERS[providerKey] || PROVIDERS['openai'];
+    const model = providerProfile.textModel || this.config.ai.model || 'gpt-4o-mini';
+    const baseUrl = providerProfile.baseUrl || this.config.ai.baseUrl || 'https://api.openai.com/v1';
 
     // Build a minimal provider profile for the call
     const isAnthropic = providerKey === 'anthropic';

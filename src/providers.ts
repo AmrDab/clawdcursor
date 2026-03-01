@@ -141,6 +141,7 @@ export interface PipelineConfig {
     model: string;
     baseUrl: string;
     computerUse: boolean;
+    apiKey?: string;
   };
 }
 

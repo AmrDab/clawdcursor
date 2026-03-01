@@ -392,6 +392,13 @@ export interface ComputerUseResult {
   llmCalls: number;
 }
 
+export interface ComputerUseOverrides {
+  apiKey?: string;
+  model?: string;
+  baseUrl?: string;
+  enabled?: boolean;
+}
+
 /** How long to reuse a cached a11y context before re-fetching (ms) */
 const A11Y_CACHE_TTL = 30_000;
 
@@ -408,15 +415,23 @@ export class ComputerUseBrain {
   private heldKeys: string[] = [];
   private lastMouseX = 0;
   private lastMouseY = 0;
+  private computerUseOverrides?: ComputerUseOverrides;
 
   // A11y context cache — avoids hammering JXA after every single action
   private a11yCache: { context: string; ts: number; pid?: number } | null = null;
 
-  constructor(config: ClawdConfig, desktop: NativeDesktop, a11y: AccessibilityBridge, safety: SafetyLayer) {
+  constructor(
+    config: ClawdConfig,
+    desktop: NativeDesktop,
+    a11y: AccessibilityBridge,
+    safety: SafetyLayer,
+    pipelineOverrides?: ComputerUseOverrides,
+  ) {
     this.config = config;
     this.desktop = desktop;
     this.a11y = a11y;
     this.safety = safety;
+    this.computerUseOverrides = pipelineOverrides;
 
     const screen = desktop.getScreenSize();
     this.screenWidth = screen.width;
@@ -434,8 +449,10 @@ export class ComputerUseBrain {
   /**
    * Check if the current provider supports native Computer Use.
    */
-  static isSupported(config: ClawdConfig): boolean {
-    return config.ai.provider === 'anthropic' && !!config.ai.apiKey;
+  static isSupported(config: ClawdConfig, pipelineOverrides?: ComputerUseOverrides): boolean {
+    const hasPipelineCu = !!pipelineOverrides?.enabled && !!pipelineOverrides?.apiKey;
+    const hasDirectAnthropic = config.ai.provider === 'anthropic' && !!config.ai.apiKey;
+    return hasPipelineCu || hasDirectAnthropic;
   }
 
   /**
@@ -855,16 +872,25 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
       const timeout = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
 
       try {
-        const response = await fetch('https://api.anthropic.com/v1/messages', {
+        const baseUrl = (this.computerUseOverrides?.baseUrl || 'https://api.anthropic.com/v1').replace(/\/+$/, '');
+        const endpoint = `${baseUrl}/messages`;
+        const apiKey = this.computerUseOverrides?.apiKey || this.config.ai.apiKey;
+        const model = this.computerUseOverrides?.model || this.config.ai.visionModel;
+
+        if (!apiKey) {
+          return { content: [], stop_reason: 'end_turn', error: 'Missing API key for Computer Use provider' };
+        }
+
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-key': this.config.ai.apiKey!,
+            'x-api-key': apiKey,
             'anthropic-version': '2023-06-01',
             'anthropic-beta': BETA_HEADER,
           },
           body: JSON.stringify({
-            model: this.config.ai.visionModel,
+            model,
             max_tokens: 2048,
             system: SYSTEM_PROMPT,
             tools: [{
