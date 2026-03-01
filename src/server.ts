@@ -110,6 +110,10 @@ function hookConsole(): void {
 
 const taskSchema = z.object({
   task: z.string().trim().min(1).max(2000),
+  app: z.string().trim().optional(),
+  navigate: z.string().trim().optional(),
+  context: z.string().trim().optional(),
+  contextHints: z.array(z.string()).optional(),
 });
 
 const confirmSchema = z.object({
@@ -172,7 +176,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
       return res.status(400).json({ error: 'Missing "task" in body' });
     }
 
-    const { task } = parsed.data;
+    const { task, app, navigate, context, contextHints } = parsed.data;
     const state = agent.getState();
     if (state.status !== 'idle') {
       return res.status(409).json({
@@ -181,16 +185,17 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
       });
     }
 
-    console.log(`\n📨 New task received: ${task}`);
+    const isSkillMode = !!(app || navigate || context);
+    console.log(`\n📨 New task received${isSkillMode ? ' (skill mode)' : ''}: ${task}`);
 
     // Execute async — respond immediately
-    agent.executeTask(task).then(result => {
+    agent.executeTask(task, { app, navigate, context, contextHints }).then(result => {
       console.log(`\n📋 Task result:`, JSON.stringify(result, null, 2));
     }).catch(err => {
       console.error(`\n❌ Task execution failed:`, err);
     });
 
-    res.json({ accepted: true, task });
+    res.json({ accepted: true, task, skillMode: isSkillMode });
   });
 
   // Get current status

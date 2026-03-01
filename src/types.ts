@@ -50,6 +50,10 @@ export interface ActionSequence {
 
 export interface TaskRequest {
   task: string;
+  app?: string;            // pre-parsed app to open (skill mode)
+  navigate?: string;       // pre-parsed URL to navigate to (skill mode)
+  context?: string;        // current screen state description (skill mode)
+  contextHints?: string[]; // site/platform hints for shortcut matching
   safetyOverride?: SafetyTier;
 }
 

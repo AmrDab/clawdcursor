@@ -223,7 +223,45 @@ export class Agent {
     this.brain.setScreenSize(size.width, size.height);
   }
 
-  async executeTask(task: string): Promise<TaskResult> {
+  /**
+   * Try to parse common task patterns with regex (free, instant).
+   * Returns structured fields or null if no pattern matches.
+   */
+  private tryRegexParse(task: string): { app?: string; navigate?: string; task: string } | null {
+    const lower = task.toLowerCase().trim();
+
+    // "open X on Y" → app=Y (browser), navigate=X
+    const onMatch = lower.match(/^open\s+(.+?)\s+on\s+(edge|chrome|firefox|brave|safari|microsoft edge|google chrome)$/i);
+    if (onMatch) {
+      const browserMap: Record<string, string> = {
+        edge: 'Microsoft Edge', chrome: 'Google Chrome', firefox: 'Firefox',
+        brave: 'Brave Browser', safari: 'Safari', 'microsoft edge': 'Microsoft Edge', 'google chrome': 'Google Chrome',
+      };
+      return { app: browserMap[onMatch[2].toLowerCase()] || onMatch[2], navigate: onMatch[1], task: '' };
+    }
+
+    // "open X on Y and Z" → app=Y, navigate=X, task=Z
+    const onAndMatch = lower.match(/^open\s+(.+?)\s+on\s+(edge|chrome|firefox|brave|safari|microsoft edge|google chrome)\s+and\s+(.+)$/i);
+    if (onAndMatch) {
+      const browserMap: Record<string, string> = {
+        edge: 'Microsoft Edge', chrome: 'Google Chrome', firefox: 'Firefox',
+        brave: 'Brave Browser', safari: 'Safari', 'microsoft edge': 'Microsoft Edge', 'google chrome': 'Google Chrome',
+      };
+      return { app: browserMap[onAndMatch[2].toLowerCase()] || onAndMatch[2], navigate: onAndMatch[1], task: onAndMatch[3] };
+    }
+
+    // "open X and Y" → app=X, task=Y
+    const andMatch = lower.match(/^open\s+(.+?)\s+and\s+(.+)$/i);
+    if (andMatch) return { app: andMatch[1], task: andMatch[2] };
+
+    // "go to X" / "navigate to X" / "visit X" → navigate=X
+    const goMatch = lower.match(/^(?:go to|navigate to|visit)\s+(.+)$/i);
+    if (goMatch) return { navigate: goMatch[1], task: '' };
+
+    return null;
+  }
+
+  async executeTask(task: string, structured?: { app?: string; navigate?: string; context?: string; contextHints?: string[] }): Promise<TaskResult> {
     // Atomic concurrency guard — prevent TOCTOU race on simultaneous /task requests
     if (this.state.status !== 'idle') {
       return {
@@ -236,7 +274,8 @@ export class Agent {
     this.aborted = false;
     const startTime = Date.now();
 
-    console.log(`\n🐾 Starting task: ${task}`);
+    const isSkillMode = !!(structured?.app || structured?.navigate || structured?.context);
+    console.log(`\n🐾 Starting task${isSkillMode ? ' (skill mode)' : ''}: ${task}`);
 
     // Setup debug directory (only when --debug flag is set)
     const debugDir = this.config.debug ? path.join(process.cwd(), 'debug') : null;
@@ -261,10 +300,35 @@ export class Agent {
       stepsTotal: 1,
     };
 
-    // ── LLM-based task pre-processor ──
-    // One cheap LLM call decomposes ANY natural language into structured intent.
-    // Replaces brittle regex patterns ("open X and Y", "open X on Y") with universal parsing.
-    const preprocessed = await this.preprocessTask(task);
+    // ── Task pre-processing (3-tier priority) ──
+    // 1. Structured API fields (skill mode) → use directly, zero parsing cost
+    // 2. Regex patterns → free, instant
+    // 3. LLM pre-processor → 1 cheap text call, last resort
+    let preprocessed: { app?: string; navigate?: string; task: string; contextHints?: string[] } | null = null;
+
+    if (isSkillMode) {
+      // Tier 1: Structured input from OpenClaw or other orchestrators
+      console.log(`   ⚡ Skill mode: using structured input (zero parsing cost)`);
+      preprocessed = {
+        app: structured!.app || undefined,
+        navigate: structured!.navigate || undefined,
+        task: task,
+        contextHints: structured!.contextHints,
+      };
+      if (structured!.context) {
+        priorContext.push(structured!.context);
+      }
+    } else {
+      // Tier 2: Try regex patterns (free, instant)
+      const regexResult = this.tryRegexParse(task);
+      if (regexResult) {
+        console.log(`   ⚡ Regex pre-processed (free): app=${regexResult.app || 'none'}, navigate=${regexResult.navigate || 'none'}`);
+        preprocessed = { ...regexResult, contextHints: undefined };
+      } else {
+        // Tier 3: LLM pre-processor (last resort)
+        preprocessed = await this.preprocessTask(task);
+      }
+    }
     if (preprocessed) {
       // Open app/browser if LLM identified one
       if (preprocessed.app) {
