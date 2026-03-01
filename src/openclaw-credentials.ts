@@ -47,6 +47,14 @@ function normalizeProvider(provider?: string): string | undefined {
   return p.length > 0 ? p : undefined;
 }
 
+function toEnvStyleKey(value: string): string {
+  return value
+    .replace(/[^a-zA-Z0-9]+/g, '_')
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/^_+|_+$/g, '')
+    .toUpperCase();
+}
+
 function normalizeBaseUrl(url?: string): string | undefined {
   if (!url) return undefined;
   const trimmed = url.trim().replace(/\/+$/, '');
@@ -114,6 +122,36 @@ function extractApiKeyLike(value: any): string | undefined {
   return undefined;
 }
 
+function resolveTemplateVars(value: string, envSources: Array<Record<string, any> | undefined>): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+
+  const hasTemplate = /\$\{[^}]+\}/.test(trimmed);
+  if (!hasTemplate) return trimmed;
+
+  let unresolved = false;
+  const expanded = trimmed.replace(/\$\{([^}]+)\}/g, (_, key: string) => {
+    const normalizedKey = key.trim();
+    for (const source of envSources) {
+      const candidate = source?.[normalizedKey];
+      if (typeof candidate === 'string' && candidate.length > 0) {
+        return candidate;
+      }
+    }
+    unresolved = true;
+    return '';
+  });
+
+  if (unresolved) return undefined;
+  return expanded;
+}
+
+function extractResolvedApiKey(value: any, envSources: Array<Record<string, any> | undefined>): string | undefined {
+  const apiKey = extractApiKeyLike(value);
+  if (!apiKey) return undefined;
+  return resolveTemplateVars(apiKey, envSources);
+}
+
 function extractBaseUrlLike(value: any): string | undefined {
   if (!value) return undefined;
   if (typeof value === 'string') return normalizeBaseUrl(value);
@@ -143,6 +181,31 @@ function getOpenClawRoots(): string[] {
     path.join(home, '.openclaw'),
     path.join(home, '.openclaw-dev'),
   ];
+}
+
+function readConfiguredProvider(): string | undefined {
+  const configPath = path.join(process.cwd(), '.clawd-config.json');
+  const cfg = safeReadJson(configPath);
+  if (!cfg || !isObject(cfg)) return undefined;
+
+  const provider = pick(cfg.provider, cfg?.pipeline?.provider, cfg?.pipeline?.providerKey);
+  return normalizeProvider(provider);
+}
+
+function providerEnvCandidates(provider?: string): string[] {
+  const normalized = normalizeProvider(provider);
+  if (!normalized) return [];
+
+  const bases = [normalized, normalized.split(':')[0]].filter(Boolean);
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const base of bases) {
+    const envBase = toEnvStyleKey(base);
+    if (!envBase || seen.has(envBase)) continue;
+    seen.add(envBase);
+    keys.push(`${envBase}_API_KEY`);
+  }
+  return keys;
 }
 
 function loadOpenClawProviderMap(): Record<string, ProviderInfo> {
@@ -197,6 +260,8 @@ function loadOpenClawProviderMap(): Record<string, ProviderInfo> {
       const cfg = safeReadJson(configPath);
       if (!cfg) continue;
 
+      const envSources = [cfg.env, process.env];
+
       const providerBlocks = [
         cfg?.models?.providers,
         cfg?.providers,
@@ -206,7 +271,7 @@ function loadOpenClawProviderMap(): Record<string, ProviderInfo> {
         if (!isObject(block)) continue;
         for (const [key, value] of Object.entries(block)) {
           const entry = ensureProvider(key);
-          const apiKey = extractApiKeyLike(value);
+          const apiKey = extractResolvedApiKey(value, envSources);
           const baseUrl = extractBaseUrlLike(value);
           if (apiKey && !entry.apiKey) entry.apiKey = apiKey;
           if (baseUrl && !entry.baseUrl) entry.baseUrl = baseUrl;
@@ -244,9 +309,21 @@ function selectVisionProvider(providers: ProviderInfo[]): ProviderInfo | null {
   return null;
 }
 
+function isLikelyLocalProvider(provider: ProviderInfo | undefined): boolean {
+  const url = (provider?.baseUrl || '').toLowerCase();
+  return provider?.key === 'ollama' || url.includes('localhost') || url.includes('127.0.0.1') || url.includes('11434');
+}
+
+function selectProviderWithApiKey(providers: ProviderInfo[]): ProviderInfo | null {
+  for (const p of providers) {
+    if (p.apiKey) return p;
+  }
+  return null;
+}
+
 function selectTextProvider(providers: ProviderInfo[]): ProviderInfo | null {
-  const ollama = providers.find(p => p.key === 'ollama' && p.models.length > 0);
-  if (ollama) return ollama;
+  const withTextModel = providers.find(p => p.models.some(m => !m.input.includes('image') && !m.input.includes('vision')));
+  if (withTextModel) return withTextModel;
   return providers.find(p => p.models.length > 0) || null;
 }
 
@@ -255,10 +332,20 @@ function resolveFromOpenClawFiles(): ResolvedApiConfig | null {
   const providerList = Object.values(providerMap).filter(p => !!(p.apiKey || p.baseUrl || p.models.length > 0));
   if (providerList.length === 0) return null;
 
-  const visionProvider = selectVisionProvider(providerList);
-  const textProvider = selectTextProvider(providerList);
+  const configuredProvider = readConfiguredProvider();
+  const preferredProvider = configuredProvider ? providerMap[normalizeProviderKey(configuredProvider)] : undefined;
+  const preferredCandidates = preferredProvider ? [preferredProvider] : providerList;
 
-  const selectedProvider = visionProvider || textProvider;
+  const preferredProviderWithKey = selectProviderWithApiKey(preferredCandidates);
+  const globalProviderWithKey = selectProviderWithApiKey(providerList);
+  const visionProvider = selectVisionProvider(preferredCandidates) || selectVisionProvider(providerList);
+  const textProvider = selectTextProvider(preferredCandidates) || selectTextProvider(providerList);
+
+  const selectedProvider = preferredProviderWithKey
+    || preferredProvider
+    || visionProvider
+    || textProvider
+    || globalProviderWithKey;
   if (!selectedProvider) return null;
 
   const visionModel = visionProvider?.models.find(m => m.input.includes('image') || m.input.includes('vision'))?.id
@@ -266,15 +353,27 @@ function resolveFromOpenClawFiles(): ResolvedApiConfig | null {
   const textModel = textProvider?.models.find(m => !m.input.includes('image') && !m.input.includes('vision'))?.id
     || textProvider?.models[0]?.id;
 
+  const resolvedApiKey = selectedProvider.apiKey || textProvider?.apiKey || visionProvider?.apiKey || globalProviderWithKey?.apiKey || '';
+
+  if (!resolvedApiKey && !isLikelyLocalProvider(selectedProvider)) {
+    return null;
+  }
+
+  const resolvedTextApiKey = textProvider?.apiKey || selectedProvider.apiKey || resolvedApiKey;
+  const resolvedVisionApiKey = visionProvider?.apiKey || selectedProvider.apiKey || resolvedApiKey;
+  const resolvedBaseUrl = selectedProvider.baseUrl || visionProvider?.baseUrl || textProvider?.baseUrl;
+  const resolvedTextBaseUrl = textProvider?.baseUrl || selectedProvider.baseUrl || visionProvider?.baseUrl;
+  const resolvedVisionBaseUrl = visionProvider?.baseUrl || selectedProvider.baseUrl || textProvider?.baseUrl;
+
   return {
-    apiKey: visionProvider?.apiKey || selectedProvider.apiKey || textProvider?.apiKey || '',
-    baseUrl: visionProvider?.baseUrl || selectedProvider.baseUrl || textProvider?.baseUrl,
+    apiKey: resolvedApiKey,
+    baseUrl: resolvedBaseUrl,
     textModel,
     visionModel,
-    textApiKey: textProvider?.apiKey,
-    textBaseUrl: textProvider?.baseUrl,
-    visionApiKey: visionProvider?.apiKey || selectedProvider.apiKey,
-    visionBaseUrl: visionProvider?.baseUrl || selectedProvider.baseUrl,
+    textApiKey: resolvedTextApiKey,
+    textBaseUrl: resolvedTextBaseUrl,
+    visionApiKey: resolvedVisionApiKey,
+    visionBaseUrl: resolvedVisionBaseUrl,
     provider: normalizeProvider(selectedProvider.key) || inferProviderFromBaseUrl(selectedProvider.baseUrl),
     source: 'openclaw',
   };
@@ -362,32 +461,40 @@ export function resolveApiConfig(opts?: {
   }
 
   const explicitApiKey = opts?.apiKey || '';
+  const localProvider = normalizeProvider(opts?.provider) || normalizeProvider(readConfiguredProvider());
+  const providerScopedEnvKey = pick(
+    ...providerEnvCandidates(localProvider).map((key) => {
+      const value = process.env[key];
+      return typeof value === 'string' ? value : undefined;
+    }),
+  );
   const localBaseUrl = normalizeBaseUrl(pick(opts?.baseUrl, process.env.AI_BASE_URL, process.env.OPENAI_BASE_URL));
   const localTextModel = pick(opts?.textModel, process.env.AI_TEXT_MODEL, process.env.AI_MODEL);
   const localVisionModel = pick(opts?.visionModel, process.env.AI_VISION_MODEL, process.env.AI_MODEL);
-
-  if (explicitApiKey || localBaseUrl || localTextModel || localVisionModel || opts?.provider) {
-    return {
-      apiKey: explicitApiKey,
-      provider: normalizeProvider(opts?.provider) || inferProviderFromBaseUrl(localBaseUrl),
-      baseUrl: localBaseUrl,
-      textModel: localTextModel,
-      visionModel: localVisionModel,
-      textApiKey: explicitApiKey,
-      textBaseUrl: localBaseUrl,
-      visionApiKey: explicitApiKey,
-      visionBaseUrl: localBaseUrl,
-      source: 'local',
-    };
-  }
-
   const localApiKey = pick(
+    explicitApiKey,
     process.env.AI_API_KEY,
+    providerScopedEnvKey,
     process.env.ANTHROPIC_API_KEY,
     process.env.OPENAI_API_KEY,
     process.env.KIMI_API_KEY,
     process.env.MOONSHOT_API_KEY,
   ) || '';
+
+  if (localApiKey || localBaseUrl || localTextModel || localVisionModel || opts?.provider) {
+    return {
+      apiKey: localApiKey,
+      provider: normalizeProvider(opts?.provider) || inferProviderFromBaseUrl(localBaseUrl),
+      baseUrl: localBaseUrl,
+      textModel: localTextModel,
+      visionModel: localVisionModel,
+      textApiKey: localApiKey,
+      textBaseUrl: localBaseUrl,
+      visionApiKey: localApiKey,
+      visionBaseUrl: localBaseUrl,
+      source: 'local',
+    };
+  }
 
   return {
     apiKey: localApiKey,
