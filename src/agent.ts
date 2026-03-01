@@ -225,6 +225,38 @@ export class Agent {
       stepsTotal: 1,
     };
 
+    // Pre-process: for "open X on Y" browser tasks, open the browser first via
+    // Action Router, then continue as a navigation task.
+    const openOnBrowserMatch = task.match(/^(open|launch|start)\s+(.+?)\s+on\s+(edge|chrome|google chrome|firefox|brave|safari)\s*$/i);
+    if (openOnBrowserMatch) {
+      const target = openOnBrowserMatch[2].trim();
+      const browserRaw = openOnBrowserMatch[3].trim().toLowerCase();
+      const browserNameMap: Record<string, string> = {
+        edge: 'Microsoft Edge',
+        chrome: 'Google Chrome',
+        'google chrome': 'Google Chrome',
+        firefox: 'Firefox',
+        brave: 'Brave',
+        safari: 'Safari',
+      };
+      const browserApp = browserNameMap[browserRaw] || openOnBrowserMatch[3].trim();
+      const remainingTask = `go to ${target}`;
+      console.log(`\n🔄 Pre-processing: opening "${browserApp}" first, then handling "${remainingTask}"`);
+
+      try {
+        const openResult = await this.router.route(`open ${browserApp}`);
+        if (openResult.handled) {
+          console.log(`   ✅ "${browserApp}" opened via Action Router`);
+          priorContext.push(`Opened "${browserApp}" — it is now the active, focused window`);
+          await new Promise(r => setTimeout(r, 1200));
+          task = remainingTask;
+          console.log(`   ➡️ Continuing with: "${task}"`);
+        }
+      } catch (err) {
+        console.log(`   ⚠️ Pre-open browser failed: ${err} — proceeding with full task`);
+      }
+    }
+
     // Pre-process: for "open X and Y" tasks, open the app first via Action Router,
     // then let the pipeline handle "Y" with the app already open.
     const openAndMatch = task.match(/^(open|launch|start)\s+(\w[\w\s]*?)\s+and\s+(.+)$/i);

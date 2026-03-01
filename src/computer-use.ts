@@ -61,6 +61,9 @@ PATTERNS:
 - Switch apps: key "super+tab" to cycle, or click the Dock icon.
 - Recovery: dialog → key "Escape", wrong window → click correct window, app frozen → key "super+q" + reopen.
 
+SCROLLING: NEVER use mouse scroll with small amounts. For scrolling web pages use keyboard: PageDown (or fn+Down on Mac keyboards) for full page, Space for half page, or arrow keys. Mouse scroll is unreliable on modern infinite-scroll sites.
+SITE SHORTCUTS: On Reddit use j/k to move between posts, a to upvote, z to downvote, c to open comments. On Twitter/X use j/k for posts, l to like. These are far faster than clicking.
+
 SUBMITTING IS MANDATORY: After EVERY type() action into a chat or prompt input, you MUST immediately follow with key("Return") in the same response batch. Typing without submitting is an incomplete action. Never end a response after type() without also sending Return.
 
 WAITING FOR AI APPS (Codex, Claude, ChatGPT, etc.):
@@ -99,6 +102,9 @@ PATTERNS:
 - Save file: key "ctrl+s", wait 1s, type absolute path, key "Return" — all in one response
 - Recovery: popup → Escape, wrong page → ctrl+l + correct URL, app frozen → alt+F4 + reopen
 - Draw in Paint/canvas: Select brush tool first (click it in toolbar). Use drag operations for lines. A stick figure needs: circle/square for head (~60px), vertical line for body (~150px), diagonal lines for arms and legs (~80px each). Use LARGE coordinates — small drags produce dots. Minimum drag distance: 50 pixels.
+
+SCROLLING: NEVER use mouse scroll with small amounts. For scrolling web pages use keyboard: PageDown (full page), Space (half page), or arrow keys. Mouse scroll is unreliable on modern infinite-scroll sites.
+SITE SHORTCUTS: On Reddit use j/k to move between posts, a to upvote, z to downvote, c to open comments. On Twitter/X use j/k for posts, l to like. These are far faster than clicking.
 
 Do NOT: take screenshots after every action, go one action at a time when you can batch, use search engines for known URLs, retry same failed coords.`;
 
@@ -444,8 +450,8 @@ export class ComputerUseBrain {
         const totalCount = tracker.checkpoints.length;
         const completionRatio = completedCount / totalCount;
         
-        // If Claude says done + ≥75% checkpoints met, trust it and stop
-        if (completionRatio >= 0.75) {
+        // If Claude says done + ≥90% checkpoints met, trust it and stop
+        if (completionRatio >= 0.90) {
           console.log(`   ✅ Claude says done + ${Math.round(completionRatio * 100)}% checkpoints met — accepting completion`);
           steps.push({
             action: 'done',
@@ -473,7 +479,7 @@ export class ComputerUseBrain {
 
         // Only verify when completion is uncertain
         const completedRatio = tracker.checkpoints.filter(c => c.detected).length / tracker.checkpoints.length;
-        if (completedRatio < 0.5) {
+        if (completedRatio < 0.80) {
           // For non-visual tasks: take a verification screenshot and ask Claude to confirm
           console.log(`   🔍 Verifying outcome...`);
           llmCalls++;
@@ -938,7 +944,7 @@ export class ComputerUseBrain {
             ? this.scale(coordinate)
             : [Math.round(this.screenWidth / 2), Math.round(this.screenHeight / 2)];
           const dir = toolUse.input.scroll_direction || 'down';
-          const amount = toolUse.input.scroll_amount || 3;
+          const amount = toolUse.input.scroll_amount || 15;
           const delta = (dir === 'up' || dir === 'left') ? -amount : amount;
           await this.desktop.mouseScroll(x, y, delta);
           return { description: `Scroll ${dir} by ${amount} at (${x}, ${y})` };
