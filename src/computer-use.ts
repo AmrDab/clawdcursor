@@ -2,7 +2,7 @@
  * Computer Use API Adapter
  *
  * Uses Anthropic's native computer_20250124 tool spec instead of
- * custom prompt engineering. Claude natively understands how to
+ * custom prompt engineering. The vision LLM natively understands how to
  * control a desktop — no JSON schema in prompts, no parse errors.
  *
  * The adapter handles:
@@ -231,7 +231,7 @@ function updateCheckpoints(tracker: CheckpointTracker, action: string, descripti
         }
         break;
       case 'drawing_complete':
-        // Multiple drags completed and Claude says done
+        // Multiple drags completed and vision LLM says done
         if (lower.includes('stick figure') && (lower.includes('complete') || lower.includes('success') || lower.includes('done') || lower.includes('finished'))) {
           cp.detected = true;
           cp.timestamp = Date.now();
@@ -440,7 +440,7 @@ export class ComputerUseBrain {
 
   /**
    * Execute a subtask using the Computer Use tool loop.
-   * Claude autonomously takes screenshots, decides actions, and executes them.
+   * The vision LLM autonomously takes screenshots, decides actions, and executes them.
    */
   async executeSubtask(
     subtask: string,
@@ -473,7 +473,7 @@ export class ComputerUseBrain {
     };
     console.log(`   📋 Task type: ${taskType} — tracking ${checkpointNames.length} checkpoints`);
 
-    // Build context from prior completed steps so Claude doesn't redo work
+    // Build context from prior completed steps so the vision LLM doesn't redo work
     let taskMessage = subtask;
     if (priorSteps && priorSteps.length > 0) {
       taskMessage = `CONTEXT — These steps were already completed for you:\n${priorSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nThe app is ALREADY OPEN and FOCUSED. Do NOT reopen it. Do NOT maximize it. Start working immediately.\n\nYOUR TASK: ${subtask}`;
@@ -521,14 +521,14 @@ export class ComputerUseBrain {
         if ((block as TextBlock).type === 'text') {
           const text = (block as TextBlock).text;
           if (text.trim()) {
-            console.log(`   💬 Claude: ${text.substring(0, 120)}${text.length > 120 ? '...' : ''}`);
+            console.log(`   💬 Vision LLM: ${text.substring(0, 120)}${text.length > 120 ? '...' : ''}`);
           }
         }
       }
 
-      // If end_turn → Claude thinks it's done. Verify with checkpoints.
+      // If end_turn → vision LLM thinks it's done. Verify with checkpoints.
       if (response.stop_reason === 'end_turn') {
-        // Skip verification for visual/loop tasks — trust Claude's judgment,
+        // Skip verification for visual/loop tasks — trust the vision LLM's judgment,
         // avoid the extra screenshot + API call overhead
         const skipVerify = skipA11yCompletely || /\b(draw|paint|sketch|doodle|color|design)\b/i.test(subtask);
 
@@ -546,7 +546,7 @@ export class ComputerUseBrain {
         // Only verify when completion is uncertain
         const completedRatio = tracker.checkpoints.filter(c => c.detected).length / tracker.checkpoints.length;
         if (completedRatio < 0.80) {
-          // For non-visual tasks: take a verification screenshot and ask Claude to confirm
+          // For non-visual tasks: take a verification screenshot and ask the vision LLM to confirm
           console.log(`   🔍 Verifying outcome...`);
           llmCalls++;
 
@@ -602,7 +602,7 @@ export class ComputerUseBrain {
           return { success: true, steps, llmCalls };
         }
 
-        // Not verified — Claude should continue with recovery
+        // Not verified — vision LLM should continue with recovery
         verificationFailures++;
         if (verificationFailures >= MAX_VERIFICATION_RETRIES) {
           console.log(`   ⚠️ Verification failed ${verificationFailures} times — accepting result to avoid infinite loop`);
@@ -621,11 +621,11 @@ export class ComputerUseBrain {
           content: verifyResponse.content,
         });
         
-        // Build step log summary so Claude understands what happened
+        // Build step log summary so the vision LLM understands what happened
         const recentSteps = steps.slice(-10).map((s, idx) => `${idx + 1}. [${s.action}] ${s.description} (${s.success ? 'ok' : 'failed'})`).join('\n');
         const checkpointStatus = tracker.checkpoints.map(c => `${c.detected ? '✅' : '❌'} ${c.name}`).join(', ');
         
-        // Push Claude to take corrective action with full context
+        // Push vision LLM to take corrective action with full context
         messages.push({
           role: 'user',
           content: `The task is NOT complete. This is retry ${verificationFailures}/${MAX_VERIFICATION_RETRIES} — if you fail again, the task will be marked incomplete.
@@ -644,7 +644,7 @@ ANALYSIS: Look at the step log and checkpoints above. Identify what was MISSED o
 Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
         });
         
-        // Continue the loop — Claude will take corrective action
+        // Continue the loop — vision LLM will take corrective action
         continue;
         } else {
           console.log(`   ✅ Skipping verification — ${Math.round(completedRatio * 100)}% checkpoints already confirmed`);
@@ -750,7 +750,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
           const loopDetected = !result.error && repeatedActionStreak >= 4;
 
           if (result.error || loopDetected) {
-            // Always send full context on error or loop detection so Claude can recover
+            // Always send full context on error or loop detection so the vision LLM can recover
             const [screenshot, a11yContext] = await Promise.all([
               this.desktop.captureForLLM(),
               this.getA11yContext(true, skipA11yCompletely),
@@ -1145,7 +1145,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
   }
 
   /**
-   * Generate a FOCUS hint telling Claude where to look in the screenshot.
+   * Generate a FOCUS hint telling the vision LLM where to look in the screenshot.
    * Reduces output tokens by directing attention to the relevant area.
    */
   private getFocusHint(action: string, input: ToolUseBlock['input']): string {
@@ -1217,4 +1217,5 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
+
 

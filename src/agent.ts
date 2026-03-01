@@ -348,8 +348,8 @@ export class Agent {
     // TWO COMPLETELY SEPARATE PATHS:
     //
     // PATH A: Computer Use (Anthropic)
-    //   → Full task goes directly to Claude Computer Use API
-    //   → Claude screenshots, plans with visual context, executes
+    //   → Full task goes directly to Computer Use API (vision LLM)
+    //   → Vision LLM screenshots, plans with visual context, executes
     //   → No decomposer, no router, no blind text parsing
     //
     // PATH B: Decompose + Route (OpenAI / offline)
@@ -644,7 +644,7 @@ Examples:
 
   /**
    * PATH A: Anthropic Computer Use
-   * Give the full task to Claude — it screenshots, plans, and executes.
+   * Give the full task to the vision LLM — it screenshots, plans, and executes.
    */
   private async executeWithComputerUse(
     task: string,
@@ -1058,3 +1058,4 @@ function tierEmoji(tier: SafetyTier): string {
     case SafetyTier.Confirm: return '🔴';
   }
 }
+
