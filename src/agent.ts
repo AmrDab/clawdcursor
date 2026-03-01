@@ -215,6 +215,9 @@ export class Agent {
       console.log(`   🐛 Debug mode: screenshots will be saved to ${debugDir}`);
     }
 
+    // Add a context accumulator to track what pre-processing already did
+    const priorContext: string[] = [];
+
     this.state = {
       status: 'thinking',
       currentTask: task,
@@ -234,8 +237,31 @@ export class Agent {
         const openResult = await this.router.route(`open ${appName}`);
         if (openResult.handled) {
           console.log(`   ✅ "${appName}" opened via Action Router`);
+          priorContext.push(`Opened "${appName}" — it is now the active, focused window`);
+          
           // Wait for app to fully launch
-          await new Promise(r => setTimeout(r, 2500));
+          await new Promise(r => setTimeout(r, 2000));
+          
+          // Maximize the window so Computer Use doesn't have to
+          try {
+            await this.router.route('maximize window');
+            // Small delay to let maximize settle and dismiss any Snap Assist
+            await new Promise(r => setTimeout(r, 500));
+            // If Snap Assist appeared, press Escape to dismiss it
+            const { execFile } = require('child_process');
+            const { promisify } = require('util');
+            const execFileAsync = promisify(execFile);
+            try {
+              await execFileAsync('powershell.exe', ['-Command', 
+                'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}")'
+              ]);
+            } catch { /* non-critical */ }
+            await new Promise(r => setTimeout(r, 300));
+            priorContext.push('Window maximized to full screen');
+          } catch {
+            // Not critical, Computer Use can handle it
+          }
+          
           // Now execute the remaining task with the app already open
           task = remainingTask;
           console.log(`   ➡️ Continuing with: "${task}"`);
@@ -336,7 +362,7 @@ export class Agent {
 
     // ── Layer 2: Computer Use / Decompose+Route (expensive fallback) ──
     if (this.computerUse) {
-      return this.executeWithComputerUse(task, debugDir, startTime);
+      return this.executeWithComputerUse(task, debugDir, startTime, priorContext);
     } else {
       return this.executeWithDecomposeAndRoute(task, debugDir, startTime);
     }
@@ -420,6 +446,7 @@ export class Agent {
     task: string,
     debugDir: string | null,
     startTime: number,
+    priorContext?: string[],
   ): Promise<TaskResult> {
     console.log(`   🖥️  Using Computer Use API (screenshot-first)\n`);
 
@@ -428,7 +455,7 @@ export class Agent {
 
     this.state.status = 'acting';
     try {
-      const cuResult = await this.computerUse!.executeSubtask(task, debugDir, 0);
+      const cuResult = await this.computerUse!.executeSubtask(task, debugDir, 0, priorContext);
 
       const result: TaskResult = {
         success: cuResult.success,

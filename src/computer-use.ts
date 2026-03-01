@@ -98,6 +98,7 @@ PATTERNS:
 - Fill forms: tab between fields + type values — batch the entire form in one response
 - Save file: key "ctrl+s", wait 1s, type absolute path, key "Return" — all in one response
 - Recovery: popup → Escape, wrong page → ctrl+l + correct URL, app frozen → alt+F4 + reopen
+- Draw in Paint/canvas: Select brush tool first (click it in toolbar). Use drag operations for lines. A stick figure needs: circle/square for head (~60px), vertical line for body (~150px), diagonal lines for arms and legs (~80px each). Use LARGE coordinates — small drags produce dots. Minimum drag distance: 50 pixels.
 
 Do NOT: take screenshots after every action, go one action at a time when you can batch, use search engines for known URLs, retry same failed coords.`;
 
@@ -201,7 +202,7 @@ export class ComputerUseBrain {
     // Build context from prior completed steps so Claude doesn't redo work
     let taskMessage = subtask;
     if (priorSteps && priorSteps.length > 0) {
-      taskMessage = `ALREADY COMPLETED (do NOT redo these):\n${priorSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nNOW DO THIS: ${subtask}`;
+      taskMessage = `CONTEXT — These steps were already completed for you:\n${priorSteps.map((s, i) => `${i + 1}. ${s}`).join('\n')}\n\nThe app is ALREADY OPEN and FOCUSED. Do NOT reopen it. Do NOT maximize it. Start working immediately.\n\nYOUR TASK: ${subtask}`;
     }
 
     // Initial user message with the subtask
