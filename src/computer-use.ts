@@ -491,7 +491,7 @@ export class ComputerUseBrain {
     let repeatedActionStreak = 0;
 
     let verificationFailures = 0;
-    const MAX_VERIFICATION_RETRIES = 2;
+    const MAX_VERIFICATION_RETRIES = 3;
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       llmCalls++;
@@ -615,16 +615,33 @@ export class ComputerUseBrain {
           return { success: false, steps, llmCalls };
         }
 
-        console.log(`   ❌ Verification FAILED (${verificationFailures}/${MAX_VERIFICATION_RETRIES}) — continuing with recovery`);
+        console.log(`   ❌ Verification FAILED (${verificationFailures}/${MAX_VERIFICATION_RETRIES}) — analyzing logs and retrying`);
         messages.push({
           role: 'assistant',
           content: verifyResponse.content,
         });
         
-        // Push Claude to take corrective action
+        // Build step log summary so Claude understands what happened
+        const recentSteps = steps.slice(-10).map((s, idx) => `${idx + 1}. [${s.action}] ${s.description} (${s.success ? 'ok' : 'failed'})`).join('\n');
+        const checkpointStatus = tracker.checkpoints.map(c => `${c.detected ? '✅' : '❌'} ${c.name}`).join(', ');
+        
+        // Push Claude to take corrective action with full context
         messages.push({
           role: 'user',
-          content: 'The task is NOT complete. Use the recovery steps you identified to fix it. Continue working.',
+          content: `The task is NOT complete. This is retry ${verificationFailures}/${MAX_VERIFICATION_RETRIES} — if you fail again, the task will be marked incomplete.
+
+STEP LOG (last ${Math.min(steps.length, 10)} actions):
+${recentSteps}
+
+CHECKPOINT STATUS: ${checkpointStatus}
+
+ANALYSIS: Look at the step log and checkpoints above. Identify what was MISSED or FAILED. The most common issues are:
+- Forgot to paste (Ctrl+V/Cmd+V) after copying
+- Didn't switch to the target app (Alt+Tab/Cmd+Tab)
+- Clicked wrong area before pasting
+- Didn't wait long enough for app to open
+
+Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
         });
         
         // Continue the loop — Claude will take corrective action
