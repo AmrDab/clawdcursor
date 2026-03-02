@@ -17,6 +17,7 @@ import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform(); // 'win32' | 'darwin' | 'linux'
+const SUPPORTED_PLATFORMS = new Set(['win32', 'darwin']);
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
 const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
 // macOS JXA scripts enumerate System Events which can be slow on some versions.
@@ -96,6 +97,14 @@ export class AccessibilityBridge {
    */
   async isShellAvailable(): Promise<boolean> {
     if (shellAvailable !== null) return shellAvailable;
+
+    if (!SUPPORTED_PLATFORMS.has(PLATFORM)) {
+      console.error(
+        `❌ Unsupported platform: ${PLATFORM}. Native accessibility automation currently supports Windows and macOS only.`
+      );
+      shellAvailable = false;
+      return false;
+    }
     
     try {
       if (PLATFORM === 'win32') {
@@ -109,10 +118,6 @@ export class AccessibilityBridge {
           ['-l', 'JavaScript', '-e', 'Application("System Events").processes.length; true'],
           { timeout: 5000 },
         );
-      } else {
-        console.error(`❌ Unsupported platform: ${PLATFORM}. Accessibility requires Windows or macOS.`);
-        shellAvailable = false;
-        return false;
       }
       shellAvailable = true;
       console.log(`✅ Accessibility bridge ready (${PLATFORM === 'win32' ? 'PowerShell' : 'osascript'})`);
@@ -489,12 +494,17 @@ export class AccessibilityBridge {
    */
   private runScript(scriptName: string, args: string[] = []): Promise<any> {
     return new Promise((resolve, reject) => {
+      if (!SUPPORTED_PLATFORMS.has(PLATFORM)) {
+        reject(new Error(`Accessibility scripts are not supported on platform: ${PLATFORM}`));
+        return;
+      }
+
       let command: string;
       let commandArgs: string[];
 
       // Resolve script name — accept both logical names and direct filenames
       const logicalName = scriptName.replace(/\.(ps1|jxa)$/, '');
-      const platformScripts = SCRIPT_MAP[PLATFORM] || SCRIPT_MAP['win32'];
+      const platformScripts = SCRIPT_MAP[PLATFORM];
       const resolvedScript = platformScripts[logicalName] || scriptName;
 
       if (PLATFORM === 'darwin') {
