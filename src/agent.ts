@@ -171,7 +171,12 @@ export class Agent {
   }
 
   async connect(): Promise<void> {
-    await this.desktop.connect();
+    try {
+      await this.desktop.connect();
+    } catch (error: any) {
+      console.log(`⚠️  Native desktop connection failed: ${error.message}`);
+      console.log(`   Continuing with browser-only mode...`);
+    }
 
     // Initialize Browser Layer (Layer 0) — Playwright for browser tasks
     const pipelineConfig = loadPipelineConfig();

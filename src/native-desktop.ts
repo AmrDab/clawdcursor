@@ -12,15 +12,33 @@
 import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
-import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
 import { normalizeKey } from './keys';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from './types';
 
-// On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
-const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
+// Lazy imports for nut-js to avoid crashes on platforms where it's not available
+let nutjsModule: any = null;
+let nutjsLoadError: Error | null = null;
+
+/** Load nut-js module dynamically to avoid top-level import crashes */
+async function loadNutjs() {
+  if (nutjsModule) return nutjsModule;
+  if (nutjsLoadError) throw nutjsLoadError;
+  
+  try {
+    nutjsModule = await import('@nut-tree-fork/nut-js');
+    return nutjsModule;
+  } catch (error) {
+    nutjsLoadError = error as Error;
+    throw error;
+  }
+}
+
+// Lazy-initialized constants that depend on nut-js
+let SUPER_KEY: any = null;
+let KEY_MAP: Record<string, any> = {};
 
 /** Safely resolve a nut-js Key enum value from multiple candidate names */
-function resolveNutKey(...candidates: string[]): Key {
+function resolveNutKey(Key: any, ...candidates: string[]): any {
   for (const name of candidates) {
     const value = Key[name as keyof typeof Key];
     if (value !== undefined) return value;
@@ -28,36 +46,47 @@ function resolveNutKey(...candidates: string[]): Key {
   throw new Error(`Unable to resolve nut-js key from candidates: ${candidates.join(', ')}`);
 }
 
-// nut-js Key enum mapping from canonical key names (see keys.ts for normalization)
-const KEY_MAP: Record<string, Key> = {
-  'Return': Key.Enter,
-  'Tab': Key.Tab,
-  'Escape': Key.Escape,
-  'Backspace': Key.Backspace,
-  'Delete': Key.Delete,
-  'Home': Key.Home,
-  'End': Key.End,
-  'PageUp': Key.PageUp,
-  'PageDown': Key.PageDown,
-  'Left': Key.Left,
-  'Up': Key.Up,
-  'Right': Key.Right,
-  'Down': Key.Down,
-  'F1': Key.F1, 'F2': Key.F2, 'F3': Key.F3, 'F4': Key.F4,
-  'F5': Key.F5, 'F6': Key.F6, 'F7': Key.F7, 'F8': Key.F8,
-  'F9': Key.F9, 'F10': Key.F10, 'F11': Key.F11, 'F12': Key.F12,
-  'Shift': Key.LeftShift,
-  'Control': Key.LeftControl,
-  'Alt': Key.LeftAlt,
-  'Super': SUPER_KEY,
-  'Space': Key.Space,
+/** Initialize nut-js constants lazily */
+async function initializeConstants() {
+  if (SUPER_KEY !== null) return; // Already initialized
+  
+  const nutjs = await loadNutjs();
+  const { Key } = nutjs;
+  
+  // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
+  SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 
-  // Symbol keys for combos like ctrl+plus / ctrl+minus
-  '=': resolveNutKey('Equal', 'Equals'),
-  '+': resolveNutKey('Equal', 'Equals', 'Add', 'NumAdd'),
-  '-': resolveNutKey('Minus', 'Subtract', 'NumSubtract'),
-  '_': resolveNutKey('Minus', 'Subtract', 'NumSubtract'),
-};
+  // nut-js Key enum mapping from canonical key names (see keys.ts for normalization)
+  KEY_MAP = {
+    'Return': Key.Enter,
+    'Tab': Key.Tab,
+    'Escape': Key.Escape,
+    'Backspace': Key.Backspace,
+    'Delete': Key.Delete,
+    'Home': Key.Home,
+    'End': Key.End,
+    'PageUp': Key.PageUp,
+    'PageDown': Key.PageDown,
+    'Left': Key.Left,
+    'Up': Key.Up,
+    'Right': Key.Right,
+    'Down': Key.Down,
+    'F1': Key.F1, 'F2': Key.F2, 'F3': Key.F3, 'F4': Key.F4,
+    'F5': Key.F5, 'F6': Key.F6, 'F7': Key.F7, 'F8': Key.F8,
+    'F9': Key.F9, 'F10': Key.F10, 'F11': Key.F11, 'F12': Key.F12,
+    'Shift': Key.LeftShift,
+    'Control': Key.LeftControl,
+    'Alt': Key.LeftAlt,
+    'Super': SUPER_KEY,
+    'Space': Key.Space,
+
+    // Symbol keys for combos like ctrl+plus / ctrl+minus
+    '=': resolveNutKey(Key, 'Equal', 'Equals'),
+    '+': resolveNutKey(Key, 'Equal', 'Equals', 'Add', 'NumAdd'),
+    '-': resolveNutKey(Key, 'Minus', 'Subtract', 'NumSubtract'),
+    '_': resolveNutKey(Key, 'Minus', 'Subtract', 'NumSubtract'),
+  };
+}
 
 /** LLM screenshot target width — smaller = faster API calls + fewer tokens */
 // Higher resolution = better tool/icon identification. 1280 is Anthropic's recommended max.
@@ -81,9 +110,16 @@ export class NativeDesktop extends EventEmitter {
   /**
    * "Connect" to the native desktop — detects screen size and configures nut-js.
    * No actual network connection; just initializes the local screen interface.
+   * On Linux or when nut-js is unavailable, logs a warning and sets connected=false.
    */
   async connect(): Promise<void> {
     try {
+      // Try to load nut-js and initialize constants
+      const nutjs = await loadNutjs();
+      await initializeConstants();
+      
+      const { mouse, keyboard, screen } = nutjs;
+
       // Configure nut-js for speed
       mouse.config.mouseSpeed = 2000;    // Fast mouse movement
       mouse.config.autoDelayMs = 0;      // No auto-delay between actions
@@ -107,6 +143,18 @@ export class NativeDesktop extends EventEmitter {
       console.log(`   Screen: ${this.screenWidth}x${this.screenHeight}`);
       console.log(`   LLM scale factor: ${this.scaleFactor.toFixed(2)}x`);
     } catch (err: any) {
+      const isLinux = os.platform() === 'linux';
+      const isDlOpenError = err?.message?.includes('ERR_DLOPEN_FAILED') || 
+                           err?.message?.includes('libnut.node');
+      
+      if (isLinux || isDlOpenError) {
+        console.log(`⚠️  Native desktop automation not available on this platform (${os.platform()})`);
+        console.log(`   Browser control and CDP functionality will still work`);
+        this.connected = false;
+        // Don't throw - allow graceful degradation
+        return;
+      }
+      
       console.error('Native desktop init error:', err?.message);
       this.connected = false;
       throw err;
@@ -118,9 +166,11 @@ export class NativeDesktop extends EventEmitter {
    */
   async captureScreen(): Promise<ScreenFrame> {
     if (!this.connected) {
-      throw new Error('Not connected to native desktop');
+      throw new Error('Native desktop automation is not available on this platform. Use browser automation instead.');
     }
 
+    const nutjs = await loadNutjs();
+    const { screen } = nutjs;
     const img = await screen.grab();
 
     // Update screen dimensions in case of resolution change
@@ -152,9 +202,11 @@ export class NativeDesktop extends EventEmitter {
    */
   async captureForLLM(): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number }> {
     if (!this.connected) {
-      throw new Error('Not connected to native desktop');
+      throw new Error('Native desktop automation is not available on this platform. Use browser automation instead.');
     }
 
+    const nutjs = await loadNutjs();
+    const { screen } = nutjs;
     const img = await screen.grab();
 
     // Update screen dimensions
@@ -200,8 +252,12 @@ export class NativeDesktop extends EventEmitter {
   async captureRegionForLLM(
     x: number, y: number, w: number, h: number
   ): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number; regionX: number; regionY: number }> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Native desktop automation is not available on this platform. Use browser automation instead.');
+    }
 
+    const nutjs = await loadNutjs();
+    const { screen } = nutjs;
     const img = await screen.grab();
 
     // Clamp to screen bounds
@@ -288,8 +344,12 @@ export class NativeDesktop extends EventEmitter {
   // --- Input Methods ---
 
   async mouseClick(x: number, y: number, button: number = 1): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Click at (${x}, ${y})`);
+    const nutjs = await loadNutjs();
+    const { mouse, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
     await this.delay(50);
     const btn = this.mapButton(button);
@@ -297,29 +357,45 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async mouseDoubleClick(x: number, y: number): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Double-click at (${x}, ${y})`);
+    const nutjs = await loadNutjs();
+    const { mouse, Button, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
     await this.delay(50);
     await mouse.doubleClick(Button.LEFT);
   }
 
   async mouseRightClick(x: number, y: number): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Right-click at (${x}, ${y})`);
+    const nutjs = await loadNutjs();
+    const { mouse, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
     await this.delay(50);
     await mouse.rightClick();
   }
 
   async mouseMove(x: number, y: number): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
+    const nutjs = await loadNutjs();
+    const { mouse, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
   }
 
   async mouseScroll(x: number, y: number, delta: number): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Scroll at (${x}, ${y}) delta=${delta}`);
+    const nutjs = await loadNutjs();
+    const { mouse, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
     await this.delay(30);
     const steps = Math.abs(Math.round(delta));
@@ -334,15 +410,23 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async typeText(text: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Keyboard control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   ⌨️  Typing: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
+    const nutjs = await loadNutjs();
+    const { keyboard } = nutjs;
     await keyboard.type(text);
   }
 
   async keyPress(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Keyboard control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   ⌨️  Key press: ${keyCombo}`);
 
+    const nutjs = await loadNutjs();
+    const { keyboard } = nutjs;
     const parts = keyCombo.split('+').map(k => k.trim());
     const keys = parts.map(k => this.mapKey(k));
 
@@ -404,8 +488,12 @@ export class NativeDesktop extends EventEmitter {
   // ─── Low-level key control (for Computer Use API hold_key) ────────
 
   async keyDown(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Keyboard control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   ⌨️  Key down: ${keyCombo}`);
+    const nutjs = await loadNutjs();
+    const { keyboard } = nutjs;
     const parts = keyCombo.split('+').map(k => k.trim());
     for (const k of parts) {
       const key = this.mapKey(k);
@@ -415,8 +503,12 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async keyUp(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Keyboard control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   ⌨️  Key up: ${keyCombo}`);
+    const nutjs = await loadNutjs();
+    const { keyboard } = nutjs;
     const parts = keyCombo.split('+').map(k => k.trim());
     for (const k of [...parts].reverse()) {
       const key = this.mapKey(k);
@@ -428,25 +520,37 @@ export class NativeDesktop extends EventEmitter {
   // ─── Low-level pointer control (for Computer Use API) ────────────
 
   async mouseDown(x: number, y: number, button: number = 1): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Mouse down at (${x}, ${y})`);
+    const nutjs = await loadNutjs();
+    const { mouse, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
     const btn = this.mapButton(button);
     await mouse.pressButton(btn);
   }
 
   async mouseUp(x: number, y: number, button: number = 1): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Mouse up at (${x}, ${y})`);
+    const nutjs = await loadNutjs();
+    const { mouse, Point } = nutjs;
     await mouse.setPosition(new Point(x, y));
     const btn = this.mapButton(button);
     await mouse.releaseButton(btn);
   }
 
   async mouseDrag(sx: number, sy: number, ex: number, ey: number): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
+    if (!this.connected) {
+      throw new Error('Mouse control is not available on this platform. Use browser automation instead.');
+    }
     console.log(`   🖱️  Drag (${sx},${sy}) → (${ex},${ey})`);
 
+    const nutjs = await loadNutjs();
+    const { mouse, Button, Point } = nutjs;
     await mouse.setPosition(new Point(sx, sy));
     await this.delay(50);
     await mouse.pressButton(Button.LEFT);
@@ -483,7 +587,9 @@ export class NativeDesktop extends EventEmitter {
    * Map a button number to nut-js Button enum.
    * 1=left, 2=middle, 4=right
    */
-  private mapButton(buttonId: number): Button {
+  private mapButton(buttonId: number): any {
+    // This assumes nutjsModule is already loaded (called from methods that check connection)
+    const { Button } = nutjsModule;
     switch (buttonId) {
       case 1: return Button.LEFT;
       case 2: return Button.MIDDLE;
@@ -496,7 +602,10 @@ export class NativeDesktop extends EventEmitter {
    * Map a string key name to nut-js Key enum value.
    * Falls back to character-based lookup for single characters.
    */
-  private mapKey(keyName: string): Key {
+  private mapKey(keyName: string): any {
+    // This assumes nutjsModule and KEY_MAP are already initialized
+    const { Key } = nutjsModule;
+    
     // Normalize via canonical key names first
     const normalized = normalizeKey(keyName);
 

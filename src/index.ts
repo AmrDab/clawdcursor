@@ -141,10 +141,10 @@ program
     try {
       await agent.connect();
     } catch (err) {
-      console.error(`\n❌ Failed to initialize native desktop control: ${err}`);
-      console.error(`\nThis usually means @nut-tree-fork/nut-js couldn't access the screen.`);
-      console.error(`Make sure you're running this on a desktop with a display.`);
-      process.exit(1);
+      console.error(`\n❌ Failed to initialize agent: ${err}`);
+      console.error(`\nIf on Linux/ARM64, native desktop control may not be available.`);
+      console.error(`Browser automation and CDP functionality should still work.`);
+      // Continue instead of exiting - allow CDP-only mode
     }
 
     // Start API server
