@@ -24,7 +24,7 @@
 **Universal Pipeline, Multi-App Workflows, Provider-Agnostic.**
 
 - **🧠 LLM-based task pre-processor** — one cheap text LLM call decomposes any command into structured intent. No more brittle regex parsing.
-- **📋 Multi-app workflows** — copy from Wikipedia, paste in Notepad? Works. 6-checkpoint tracking ensures every step completes (select → copy → switch app → click → paste → verify).
+- **📋 Multi-app workflows** — copy from Wikipedia, paste in Notepad. 6-checkpoint tracking ensures every step completes: select → copy → switch app → click → paste → verify.
 - **⌨️ Site-specific shortcuts** — Reddit (j/k/a/c), Twitter/X, YouTube, Gmail, GitHub, Slack + generic hints. Vision LLM uses keyboard instead of slow mouse clicks.
 - **🌐 OS-level browser detection** — reads Windows registry or macOS LaunchServices for actual default browser. No hardcoded Edge/Safari.
 - **🔄 3 smart verification retries** — on failure, builds step log digest + checkpoint status so the vision LLM fixes the exact missed step.
@@ -132,17 +132,17 @@ clawdcursor start
 clawdcursor start --base-url https://api.example.com/v1 --api-key KEY
 ```
 
-### Linux
+### Linux (CDP-only mode)
 
 ```bash
 git clone https://github.com/AmrDab/clawd-cursor.git
 cd clawd-cursor && npm install && npm run setup
 
-# Linux: browser control via CDP only (no native desktop automation)
-# Just start — auto-detects available providers
+# Linux: browser automation via CDP only (no native desktop automation)
+# Auto-detects available providers and starts immediately
 clawdcursor start
 
-# Or specify any provider
+# Or specify any provider explicitly
 clawdcursor start --base-url https://api.example.com/v1 --api-key KEY
 ```
 
@@ -175,11 +175,11 @@ curl http://localhost:3847/task -H "Content-Type: application/json" \
 
 ### Provider Quick Setup
 
-**Free (no API key needed):**
+**Free local setup (no API key):**
 ```bash
-# Just need Ollama running with any model
-ollama pull <model>   # e.g. qwen2.5:7b, llama3.2, gemma2
-clawdcursor doctor
+# Install Ollama, then pull any model
+ollama pull qwen2.5:7b   # or llama3.2, gemma2, etc.
+clawdcursor doctor       # auto-detects and configures
 clawdcursor start
 ```
 
@@ -192,7 +192,7 @@ clawdcursor start
 
 Doctor auto-detects your provider from the key format. Supported out of the box:
 
-| Provider | Key prefix | Vision | Computer Use |
+| Provider | Key prefix | Vision¹ | Computer Use² |
 |----------|-----------|--------|-------------|
 | Anthropic | `sk-ant-` | ✅ | ✅ |
 | OpenAI | `sk-` | ✅ | ❌ |
@@ -202,12 +202,15 @@ Doctor auto-detects your provider from the key format. Supported out of the box:
 | Kimi/Moonshot | `sk-` (long) | ❌ | ❌ |
 | Any OpenAI-compatible | — | varies | ❌ |
 
+¹ **Vision**: Model can see screenshots and analyze UI elements  
+² **Computer Use**: Anthropic's native structured tool API for precise mouse/keyboard actions — only Anthropic provides this specialized desktop automation interface
+
 For providers without key prefix detection, specify explicitly:
 ```bash
 clawdcursor doctor --provider together --api-key YOUR_KEY
 ```
 
-**OpenClaw users:** No setup needed — Clawd Cursor auto-discovers all your configured providers.
+**OpenClaw users:** Zero setup required — Clawd Cursor auto-discovers all configured providers from your OpenClaw auth profiles.
 
 ---
 
@@ -219,16 +222,17 @@ Cross-platform checks are now automated in GitHub Actions on **Windows, macOS, a
 |----|--------|-------|
 | Windows 10/11 | ✅ Full support | Native desktop automation via PowerShell + UI Automation scripts. |
 | macOS 13+ | ✅ Full support | Native desktop automation via JXA/System Events scripts. |
-| Linux | ⚠️ Partial support | Browser/CDP flows work. Native desktop automation requires X11 native libs (for `@nut-tree-fork/nut-js`) and may still vary by distro/desktop environment. |
+| Linux | ⚠️ CDP-only mode | Browser automation works perfectly. Native desktop automation requires X11 libs. |
+| ARM64 (Pi 5, etc.) | ⚠️ Graceful degradation | Automatically falls back to browser-only mode when native libs fail. |
 
-**Linux prerequisites for native automation** (Debian/Ubuntu example):
+**Linux prerequisites for native automation** (Debian/Ubuntu):
 
 ```bash
 sudo apt-get update
 sudo apt-get install -y libxtst6 libx11-xcb1 libxcomposite1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxtst-dev
 ```
 
-If these libraries are missing, `clawdcursor doctor` can fail on startup with errors like `libXtst.so.6: cannot open shared object file`.
+Missing libraries cause `libXtst.so.6: cannot open shared object file` errors. Clawd Cursor gracefully falls back to CDP-only mode on ARM64 systems.
 
 ---
 
@@ -236,7 +240,7 @@ If these libraries are missing, `clawdcursor doctor` can fail on startup with er
 
 ### The Smart Pipeline
 
-Every task is pre-processed by a cheap text LLM, then flows through up to 5 layers. Each layer is cheaper and faster than the next. Most tasks never reach Layer 3.
+Every task is pre-processed by a cheap text LLM to understand intent, then flows through up to 5 execution layers. Each layer is cheaper and faster than the next — most tasks complete in Layer 0-1 without expensive vision calls.
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -342,6 +346,7 @@ npm run doctor
    Text:   claude-haiku-4-5 (Anthropic) ✅ 498ms
    Vision: claude-sonnet-4 (Anthropic) ✅ 1217ms
    Text:   qwen2.5:7b (Ollama) ✅ 4117ms
+   Mixed:  ollama/qwen2.5:7b + anthropic/claude-sonnet-4 ✅
 
 🎮 GPU detected: NVIDIA GeForce RTX 3080 (10240 MB VRAM)
 
@@ -401,20 +406,20 @@ Options:
 ┌──────────────────────┴────────────────────────────┐
 │              Clawd Cursor Agent                    │
 │                                                    │
-│  ┌────────┐ ┌────────┐ ┌───────┐ ┌─────┐ ┌─────┐│
-│  │Layer 0 │ │Layer 1 │ │L 1.5  │ │ L2  │ │ L3  ││
-│  │Browser │→│Action  │→│Smart  │→│A11y │→│Vision││
-│  │Playwrt │ │Router+ │ │Interac│ │Tree │ │+CU   ││
-│  │(free)  │ │Shortct │ │(1 LLM)│ │(cheap│ │(full)││
-│  └────────┘ └────────┘ └───────┘ └─────┘ └─────┘│
-│       ↑                                            │
-│  ┌──────────┐  ┌────────────────┐                 │
-│  │ Doctor   │  │ Web Dashboard  │                 │
-│  │ Auto-cfg │  │ localhost:3847 │                 │
-│  └──────────┘  └────────────────┘                 │
-│                                                    │
-│  Safety Layer · REST API · Circuit Breaker         │
-└────────────────────────────────────────────────────┘
+│  ┌─────────────┐ ┌────────┐ ┌───────┐ ┌─────┐ ┌─────┐│
+│  │ Pre-Process │→│Layer 0 │→│Layer 1│→│ L2  │→│ L3  ││
+│  │ LLM Decomp  │ │Browser │ │Action │ │A11y │ │Vision││
+│  │ (1 text LLM)│ │Playwrt │ │Router+│ │Tree │ │+CU   ││
+│  │ Universal   │ │(free)  │ │Shortct│ │(cheap││(full)││
+│  └─────────────┘ └────────┘ └───────┘ └─────┘ └─────┘│
+│       ↑                                              │
+│  ┌──────────┐  ┌────────────────┐                   │
+│  │ Doctor   │  │ Web Dashboard  │                   │
+│  │ Auto-cfg │  │ localhost:3847 │                   │
+│  └──────────┘  └────────────────┘                   │
+│                                                      │
+│  Multi-Provider · Safety Layer · REST API · Circuit Breaker │
+└──────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -432,14 +437,13 @@ Options:
 ```
 clawdcursor start        Start the agent
 clawdcursor doctor       Diagnose and auto-configure
-clawdcursor task <t>     Send a task to running agent
+clawdcursor task <task>  Send a task to running agent
 clawdcursor dashboard    Open the web dashboard in your browser
-clawdcursor kill         Stop the running server
 clawdcursor stop         Stop the running server
 
 Options:
   --port <port>          API port (default: 3847)
-  --provider <provider>  Auto-detected, or: anthropic|openai|ollama|groq|together|deepseek|kimi|...
+  --provider <provider>  Auto-detected, or: anthropic|openai|ollama|groq|together|deepseek|kimi
   --model <model>        Override vision model
   --api-key <key>        AI provider API key
   --debug                Save screenshots to debug/ folder
