@@ -213,6 +213,8 @@ clawdcursor doctor --provider together --api-key YOUR_KEY
 
 ## Compatibility (v0.6.0 Audit)
 
+Cross-platform checks are now automated in GitHub Actions on **Windows, macOS, and Linux** for both **Node 20** and **Node 22** (build + test).
+
 | OS | Status | Notes |
 |----|--------|-------|
 | Windows 10/11 | ✅ Full support | Native desktop automation via PowerShell + UI Automation scripts. |
