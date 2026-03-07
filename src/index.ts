@@ -66,6 +66,69 @@ async function forceKillPort(port: number): Promise<boolean> {
   }
 }
 
+type LinuxTerminalLauncher = { cmd: string; args: string[] };
+
+function parseCommandLine(value: string): string[] {
+  // Handles simple quoted values in TERMINAL, e.g. "kitty -1" or '/usr/bin/xfce4-terminal --disable-server'
+  const matches = value.match(/([^\s"']+|"[^"]*"|'[^']*')+/g);
+  return (matches || []).map(token => token.replace(/^['"]|['"]$/g, ''));
+}
+
+function findLinuxTerminal(): LinuxTerminalLauncher | null {
+  const pathEnv = process.env.PATH || '';
+  const pathDirs = pathEnv.split(':').filter(Boolean);
+
+  const isExecutablePath = (executablePath: string): boolean => {
+    try {
+      fs.accessSync(executablePath, fs.constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const resolveExecutable = (cmd: string): string | null => {
+    if (!cmd) return null;
+
+    if (cmd.includes('/')) {
+      return isExecutablePath(cmd) ? cmd : null;
+    }
+
+    for (const dir of pathDirs) {
+      const fullPath = path.join(dir, cmd);
+      if (isExecutablePath(fullPath)) return fullPath;
+    }
+
+    return null;
+  };
+
+  const terminalFromEnv = process.env.TERMINAL?.trim();
+  if (terminalFromEnv) {
+    const [terminalCmd, ...terminalArgs] = parseCommandLine(terminalFromEnv);
+    const terminalPath = terminalCmd ? resolveExecutable(terminalCmd) : null;
+    if (terminalPath) {
+      return { cmd: terminalPath, args: [...terminalArgs, '-e'] };
+    }
+  }
+
+  const candidates: LinuxTerminalLauncher[] = [
+    { cmd: 'x-terminal-emulator', args: ['-e'] },
+    { cmd: 'gnome-terminal', args: ['--'] },
+    { cmd: 'konsole', args: ['-e'] },
+    { cmd: 'xfce4-terminal', args: ['-e'] },
+    { cmd: 'xterm', args: ['-e'] },
+  ];
+
+  for (const candidate of candidates) {
+    const resolved = resolveExecutable(candidate.cmd);
+    if (resolved) {
+      return { cmd: resolved, args: candidate.args };
+    }
+  }
+
+  return null;
+}
+
 program
   .name('clawd-cursor')
   .description('🐾 AI Desktop Agent — native screen control')
@@ -334,26 +397,33 @@ done
 
       if (platform === 'win32') {
         // Write temp PS1 and open in new Windows Terminal / PowerShell window
-        const fs = await import('fs');
-        const path = await import('path');
         const tmpScript = path.join(os.tmpdir(), `clawd-task-${Date.now()}.ps1`);
         fs.writeFileSync(tmpScript, scriptContent);
         spawnExec('powershell.exe', [
           '-Command', `Start-Process powershell -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','${tmpScript}'`
         ], { detached: true, stdio: 'ignore' } as any);
       } else if (platform === 'darwin') {
-        const fs = await import('fs');
-        const path = await import('path');
         const tmpScript = path.join(os.tmpdir(), `clawd-task-${Date.now()}.sh`);
         fs.writeFileSync(tmpScript, scriptContent, { mode: 0o755 });
         spawnExec('open', ['-a', 'Terminal', tmpScript], { detached: true, stdio: 'ignore' } as any);
       } else {
         // Linux fallback
-        const fs = await import('fs');
-        const path = await import('path');
         const tmpScript = path.join(os.tmpdir(), `clawd-task-${Date.now()}.sh`);
         fs.writeFileSync(tmpScript, scriptContent, { mode: 0o755 });
-        spawnExec('x-terminal-emulator', ['-e', tmpScript], { detached: true, stdio: 'ignore' } as any);
+
+        const terminal = findLinuxTerminal();
+        if (terminal) {
+          spawnExec(terminal.cmd, [...terminal.args, tmpScript], { detached: true, stdio: 'ignore' } as any);
+        } else {
+          console.warn('⚠️ No supported Linux terminal emulator found. Running interactive mode in the current terminal.');
+          process.stdout.write('\n');
+          await new Promise<void>((resolve) => {
+            const child = spawnExec('bash', [tmpScript], { stdio: 'inherit' } as any);
+            child.on('close', () => resolve());
+            child.on('error', () => resolve());
+          });
+          return;
+        }
       }
 
       console.log('🐾 Task console opened in a new terminal window.');
