@@ -32,12 +32,26 @@ function saveConsent(): void {
   }, null, 2));
 }
 
+/** Write consent file directly (for --accept flag / CI / scripted use) */
+export function writeConsentFile(): void {
+  saveConsent();
+}
+
 /** Run the onboarding consent flow (interactive terminal) */
-export async function runOnboarding(): Promise<boolean> {
+export async function runOnboarding(context: 'start' | 'consent' = 'start'): Promise<boolean> {
   // Non-interactive mode (piped stdin, CI, MCP stdio) — skip consent
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return true;
   }
+
+  const contextNote = context === 'start'
+    ? `\x1b[90m  You are starting:\x1b[0m\n` +
+      `\x1b[90m  → AI Agent + REST API on \x1b[0m\x1b[36mlocalhost:3847\x1b[0m\n` +
+      `\x1b[90m  → Any local process can call tool endpoints on that port\x1b[0m\n`
+    : `\x1b[90m  This one-time consent covers all transport modes:\x1b[0m\n` +
+      `\x1b[90m  → MCP server (Claude Code, Cursor, Windsurf, Zed)\x1b[0m\n` +
+      `\x1b[90m  → REST API (clawdcursor start)\x1b[0m\n` +
+      `\x1b[90m  → Direct agent tasks\x1b[0m\n`;
 
   console.log(`
 \x1b[33m
@@ -56,9 +70,7 @@ export async function runOnboarding(): Promise<boolean> {
 \x1b[31m  ●\x1b[0m Browser DOM interaction via Chrome DevTools Protocol
 \x1b[31m  ●\x1b[0m Read accessibility tree (window contents, UI elements)
 
-\x1b[90m  This is an OS-level automation server. Any AI model that\x1b[0m
-\x1b[90m  connects to it can perform these actions on your machine.\x1b[0m
-
+${contextNote}
 \x1b[32m  SAFETY NOTES:\x1b[0m
 \x1b[90m  ●  Only run on a machine you control\x1b[0m
 \x1b[90m  ●  Only connect AI models you trust\x1b[0m

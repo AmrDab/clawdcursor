@@ -86,7 +86,18 @@ program
   .option('--base-url <url>', 'Custom API base URL (OpenAI-compatible)')
   .option('--api-key <key>', 'AI provider API key')
   .option('--debug', 'Save screenshots to debug/ folder (off by default)')
+  .option('--accept', 'Accept desktop control consent non-interactively and start')
   .action(async (opts) => {
+    // Handle consent before anything else
+    const { hasConsent, writeConsentFile, runOnboarding } = await import('./onboarding');
+    if (opts.accept) {
+      writeConsentFile();
+      console.log('  Consent recorded.\n');
+    } else if (!hasConsent()) {
+      const accepted = await runOnboarding('start');
+      if (!accepted) process.exit(1);
+    }
+
     // Auto-setup on first run
     const configPath = path.join(__dirname, '..', '.clawd-config.json');
     if (!fs.existsSync(configPath)) {
@@ -622,6 +633,20 @@ program
     console.warn = (...args: any[]) => stderrWrite('[WARN] ', args);
     console.error = (...args: any[]) => stderrWrite('[ERROR] ', args);
 
+    // Consent gate — must be accepted before MCP tools become active
+    const { hasConsent } = await import('./onboarding');
+    if (!hasConsent()) {
+      process.stderr.write(
+        `\nERROR: clawd-cursor requires one-time consent before use.\n` +
+        `This tool gives AI models full control of your desktop.\n\n` +
+        `Run one of the following, then retry:\n` +
+        `  clawdcursor consent          # interactive consent prompt\n` +
+        `  clawdcursor consent --accept # non-interactive (CI/scripts)\n` +
+        `  clawdcursor start            # consent + start agent\n\n`
+      );
+      process.exit(1);
+    }
+
     console.log('clawd-cursor MCP mode starting...');
 
     const { NativeDesktop } = await import('./native-desktop');
@@ -839,6 +864,47 @@ program
 
     // Interactive mode
     await interactiveReport();
+  });
+
+// ── Consent management ──────────────────────────────────────────────────────
+program
+  .command('consent')
+  .description('Manage desktop control consent (required before MCP/REST use)')
+  .option('--accept', 'Accept consent non-interactively (CI/scripted environments)')
+  .option('--revoke', 'Remove stored consent')
+  .option('--status', 'Show current consent status')
+  .action(async (opts) => {
+    const { hasConsent, writeConsentFile, revokeConsent, runOnboarding } = await import('./onboarding');
+
+    if (opts.status) {
+      if (hasConsent()) {
+        console.log('✅  Consent: accepted — clawd-cursor is authorized to control this desktop.');
+      } else {
+        console.log('❌  Consent: not given — run `clawdcursor consent` to authorize.');
+      }
+      return;
+    }
+
+    if (opts.revoke) {
+      revokeConsent();
+      console.log('  Consent revoked. clawd-cursor will require re-authorization before next use.');
+      return;
+    }
+
+    if (opts.accept) {
+      writeConsentFile();
+      console.log('  Consent accepted. clawd-cursor can now control your desktop.');
+      console.log('  Run `clawdcursor start` or `clawdcursor mcp` to begin.\n');
+      return;
+    }
+
+    // Interactive flow
+    const accepted = await runOnboarding('consent');
+    if (accepted) {
+      console.log('  Run `clawdcursor start` or `clawdcursor mcp` to begin.\n');
+    } else {
+      process.exit(1);
+    }
   });
 
 program.parse();
