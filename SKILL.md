@@ -18,6 +18,7 @@ metadata:
     requires: {}
     install:
       - npm install -g clawd-cursor
+      - clawd-cursor consent --accept
       - clawd-cursor serve
 ---
 
@@ -38,6 +39,7 @@ ears** for whatever AI model you connect to it.
 
 ```bash
 npm install -g clawd-cursor
+clawd-cursor consent --accept   # one-time: grants desktop control
 clawd-cursor serve
 ```
 
