@@ -1120,7 +1120,7 @@ async function registerExternalSkills(results: DiagResult[]): Promise<void> {
 
     try {
       fs.symlinkSync(clawdCursorRoot, skillTarget, process.platform === 'win32' ? 'junction' : 'dir');
-      console.log(`   🔗 Registered as ${name} skill`);
+      // Silent in v0.7.0 — standalone, external skill link is optional
       results.push({ name: `${name} skill`, ok: true, detail: 'Registered' });
       registered++;
     } catch {

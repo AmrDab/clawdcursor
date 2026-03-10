@@ -273,8 +273,8 @@
   <!-- Hero -->
   <div class="hero">
     <div class="hero-badge"><div class="pulse"></div> v0.7.0 — Architecture Overhaul</div>
-    <h1>The <span class="gr">glove</span> for<br>any AI hand</h1>
-    <p>33 desktop control tools. REST, MCP, or direct agent.<br>Works with Claude, GPT, Gemini, Llama — or any AI that can call tools.</p>
+    <h1>Give your AI<br><span class="gr">eyes and hands</span></h1>
+    <p>Connect any AI to your desktop. It sees your screen, moves the mouse, types, clicks — anything you can do, it can do. Works with Claude, GPT, Gemini, Llama, or any AI.</p>
     <div class="hero-btns">
       <a href="https://github.com/AmrDab/clawd-cursor" class="btn-p">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -295,27 +295,26 @@
 
   <!-- Who -->
   <section class="sect">
-    <div class="sect-label">Start here</div>
-    <h2>Where is the AI coming from?</h2>
-    <p class="sub">Two setup paths. Pick yours before anything else.</p>
+    <div class="sect-label">Use it your way</div>
+    <h2>No app integrations. No API keys per service.</h2>
+    <p class="sub">If it's on your screen, your AI can use it. Gmail, Slack, Figma, Jira, native apps, legacy software — anything with a UI.</p>
     <div class="who-grid">
       <div class="who-card human">
-        <h3>🧑‍💻 I want to give tasks in plain English</h3>
-        <p>Bring an API key. clawd-cursor runs its own 6-layer AI agent — it reasons, plans, and executes tasks end-to-end. You type what you want, it figures out how.</p>
+        <h3>🧑‍💻 Tell it what to do</h3>
+        <p>Bring an API key and just describe what you want. clawd-cursor figures out the steps, executes them, and verifies they worked. You stay in plain English.</p>
         <div class="tag-row">
           <span class="tag g">clawdcursor doctor</span>
           <span class="tag g">clawdcursor start</span>
-          <span class="tag">POST /task</span>
         </div>
       </div>
       <div class="who-card agent">
-        <h3>🤖 I'm connecting an agent that already reasons</h3>
-        <p>No API key inside clawd-cursor needed. Your agent (Claude Code, Cursor, Windsurf, or your own) calls the 33 tools directly. It brings the brain — clawd-cursor is the body.</p>
+        <h3>🤖 Connect your AI directly</h3>
+        <p>Already using Claude Code, Cursor, or Windsurf? Add clawd-cursor and your AI gets full desktop control as a native tool — no extra setup, no extra API calls.</p>
         <div class="tag-row">
-          <span class="tag b">clawdcursor mcp</span>
-          <span class="tag b">POST /execute/{tool}</span>
-          <span class="tag">Claude Code</span>
-          <span class="tag">Cursor</span>
+          <span class="tag b">Claude Code</span>
+          <span class="tag b">Cursor</span>
+          <span class="tag b">Windsurf</span>
+          <span class="tag">Zed</span>
         </div>
       </div>
     </div>
@@ -323,50 +322,50 @@
 
   <!-- Three modes -->
   <section class="sect" id="modes">
-    <div class="sect-label">Three Ways to Connect</div>
-    <h2>Same tools. Different drivers.</h2>
-    <p class="sub">Pick the transport that fits how your AI connects.</p>
+    <div class="sect-label">Setup</div>
+    <h2>Three ways to connect</h2>
+    <p class="sub">Pick the one that matches how you work. They all give your AI the same desktop access.</p>
     <div class="modes-grid">
       <div class="mode-card b">
-        <h3>MCP stdio</h3>
+        <h3>Claude Code / Cursor / Windsurf</h3>
         <ol>
           <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor consent</code> once</li>
-          <li>Add to Claude Code or Cursor config</li>
-          <li>All 33 tools auto-discovered</li>
-          <li>Your AI reasons — clawd-cursor executes</li>
-          <li>No HTTP plumbing, no API key needed</li>
+          <li>Add to your AI client's config (one JSON block)</li>
+          <li>Desktop tools appear natively in your AI</li>
+          <li>No extra API key, no extra setup</li>
+          <li>Your AI decides what to do — clawd-cursor does it</li>
         </ol>
         <div class="mode-stats">
-          <div><div class="mode-stat-val">33</div><div class="mode-stat-lbl">Tools via stdio</div></div>
-          <div><div class="mode-stat-val">$0</div><div class="mode-stat-lbl">Inside clawd-cursor</div></div>
-        </div>
-      </div>
-      <div class="mode-card a">
-        <h3>REST API</h3>
-        <ol>
-          <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor start</code></li>
-          <li>Call tools over HTTP from any code</li>
-          <li><code style="font-size:0.75rem;color:var(--accent2)">POST /execute/mouse_click</code></li>
-          <li>Or send full tasks: <code style="font-size:0.75rem;color:var(--accent2)">POST /task</code></li>
-          <li>Browse all schemas at <code style="font-size:0.75rem;color:var(--accent2)">GET /tools</code></li>
-        </ol>
-        <div class="mode-stats">
-          <div><div class="mode-stat-val">:3847</div><div class="mode-stat-lbl">Localhost port</div></div>
-          <div><div class="mode-stat-val">any</div><div class="mode-stat-lbl">HTTP client</div></div>
+          <div><div class="mode-stat-val">33</div><div class="mode-stat-lbl">Tools available</div></div>
+          <div><div class="mode-stat-val">$0</div><div class="mode-stat-lbl">Extra cost</div></div>
         </div>
       </div>
       <div class="mode-card c">
-        <h3>CLI Agent</h3>
+        <h3>Give it a task directly</h3>
         <ol>
-          <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor doctor</code></li>
-          <li>Auto-detects your AI provider</li>
-          <li>6-layer pipeline reasons and acts</li>
-          <li>Send tasks: <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor task "..."</code></li>
-          <li>Or open an interactive console</li>
+          <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor doctor</code> to set up your AI</li>
+          <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor start</code></li>
+          <li>Type what you want in plain English</li>
+          <li>clawd-cursor figures out the steps and executes</li>
+          <li>Works with Anthropic, OpenAI, Groq, Ollama, and more</li>
         </ol>
         <div class="mode-stats">
           <div><div class="mode-stat-val">6</div><div class="mode-stat-lbl">Pipeline layers</div></div>
-          <div><div class="mode-stat-val">$0</div><div class="mode-stat-lbl">L1 fast path</div></div>
+          <div><div class="mode-stat-val">$0</div><div class="mode-stat-lbl">Simple tasks</div></div>
+        </div>
+      </div>
+      <div class="mode-card a">
+        <h3>Build with it</h3>
+        <ol>
+          <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor start</code></li>
+          <li>33 tools available over HTTP on localhost</li>
+          <li>OpenAI function-calling format</li>
+          <li>Call individual tools or send full tasks</li>
+          <li>Browse all schemas at <code style="font-size:0.75rem;color:var(--accent2)">GET /tools</code></li>
+        </ol>
+        <div class="mode-stats">
+          <div><div class="mode-stat-val">:3847</div><div class="mode-stat-lbl">Localhost</div></div>
+          <div><div class="mode-stat-val">any</div><div class="mode-stat-lbl">HTTP client</div></div>
         </div>
       </div>
     </div>
@@ -447,9 +446,9 @@
     <p class="sub">Install, consent once, connect your AI.</p>
 
     <div class="os-tabs">
-      <button class="os-tab active" onclick="switchOS('mcp')">MCP Client</button>
-      <button class="os-tab" onclick="switchOS('agent')">CLI Agent</button>
-      <button class="os-tab" onclick="switchOS('rest')">REST / Custom</button>
+      <button class="os-tab active" onclick="switchOS('mcp')">Claude Code / Cursor</button>
+      <button class="os-tab" onclick="switchOS('agent')">Give it tasks</button>
+      <button class="os-tab" onclick="switchOS('rest')">Build with it</button>
     </div>
 
     <div class="code-box" id="os-mcp" style="display:block;">
