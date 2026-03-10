@@ -84,9 +84,9 @@ export class Agent {
     this.deterministicFlows = new DeterministicFlows(this.a11y, this.desktop);
     this.logger = new TaskLogger();
     this.workspace = new WorkspaceState();
-    this.verifier = new TaskVerifier(this.a11y);
     // Load pipeline config from doctor (if available)
     const pipelineConfig = loadPipelineConfig();
+    this.verifier = new TaskVerifier(this.a11y, pipelineConfig ?? undefined);
 
     if (pipelineConfig && pipelineConfig.layer2.enabled) {
       this.reasoner = new A11yReasoner(this.a11y, this.desktop, pipelineConfig);

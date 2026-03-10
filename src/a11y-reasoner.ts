@@ -661,10 +661,11 @@ export class A11yReasoner {
             continue;
           }
 
-          // Ground truth check — use TaskVerifier when available, else inline fallback
+          // Ground truth check — LLM-backed semantic verification
           let groundTruthPass = true;
           let groundTruthDetail = 'no specific check';
           let groundTruthMethod = 'none';
+          let attemptLog: import('./verifiers').VerifyAttempt[] = [];
           try {
             if (verifier) {
               const readClip = () => this.a11y.readClipboard();
@@ -672,8 +673,21 @@ export class A11yReasoner {
               groundTruthPass = vResult.pass;
               groundTruthDetail = vResult.detail;
               groundTruthMethod = vResult.method;
+              attemptLog = vResult.attemptLog ?? [];
+
+              // Log every individual check attempt for full traceability
+              if (attemptLog.length > 0) {
+                const attemptSummary = attemptLog
+                  .map(a => `[${a.checkName}] ${a.pass ? 'PASS' : 'FAIL'} conf=${a.confidence.toFixed(2)} (${a.durationMs}ms): ${a.detail.substring(0, 120)}`)
+                  .join('\n     ');
+                console.log(`   🔍 Verifier attempts:\n     ${attemptSummary}`);
+              }
+
+              if (vResult.evidence) {
+                console.log(`   🔍 Verifier evidence: "${vResult.evidence.substring(0, 120)}"`);
+              }
             } else {
-              // Minimal inline fallback
+              // Minimal inline fallback when no verifier injected
               const activeWin = await this.a11y.getActiveWindow().catch(() => null);
               const pn = (activeWin?.processName || '').toLowerCase();
               if (/paste.*notepad|notepad.*paste|copy.*notepad/i.test(subtask) || pn === 'notepad') {
@@ -686,11 +700,17 @@ export class A11yReasoner {
                 }
               }
             }
-          } catch { /* non-critical */ }
+          } catch (verifyErr) {
+            // Verification errors are NOT silent passes — they block completion
+            groundTruthPass = false;
+            groundTruthDetail = `Verifier threw unexpected error: ${String(verifyErr).substring(0, 150)}`;
+            groundTruthMethod = 'error';
+            console.warn(`   ⚠️  Verifier error (blocking as fail): ${groundTruthDetail}`);
+          }
 
           if (!groundTruthPass && step < MAX_LOOP_STEPS - 2) {
             actionHistory.push({ action: 'blocked', description: `BLOCKED done — ground truth check FAILED: ${groundTruthDetail}. The task is NOT complete. Fix it.` });
-            console.log(`   🚫 Blocked done — ground truth failed: ${groundTruthDetail}`);
+            console.log(`   🚫 Blocked done — ground truth failed [${groundTruthMethod}]: ${groundTruthDetail}`);
             continue;
           }
 
@@ -700,10 +720,19 @@ export class A11yReasoner {
             actionType: 'done',
             result: 'success',
             llmReasoning: evidence.substring(0, 300),
+            uiStateSummary: attemptLog.length > 0
+              ? attemptLog.map(a => `${a.checkName}:${a.pass ? 'pass' : 'fail'}(${a.confidence.toFixed(2)})`).join(' | ')
+              : undefined,
             verification: {
               method: groundTruthPass ? (groundTruthMethod as any) || 'a11y_readback' : 'none',
               verified: groundTruthPass,
-              detail: `ground_truth: ${groundTruthDetail} | contradiction=${isContradiction}, requiresWriting=${requiresWriting}, hasTypedContent=${hasTypedContent}`,
+              detail: [
+                `ground_truth: ${groundTruthDetail}`,
+                `contradiction=${isContradiction}`,
+                `requiresWriting=${requiresWriting}`,
+                `hasTypedContent=${hasTypedContent}`,
+                attemptLog.length > 0 ? `checks_run=${attemptLog.map(a => a.checkName).join(',')}` : '',
+              ].filter(Boolean).join(' | '),
             },
           });
           if (processName) this.failuresByApp.delete(processName.toLowerCase());
