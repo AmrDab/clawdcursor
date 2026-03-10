@@ -2,14 +2,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { resolveApiConfig } from '../src/openclaw-credentials';
+import { resolveApiConfig } from '../src/credentials';
 
 function writeJson(filePath: string, value: unknown) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf-8');
 }
 
-describe.sequential('openclaw credential resolution', () => {
+describe.sequential('credential resolution', () => {
   const originalCwd = process.cwd();
   const originalHome = os.homedir();
 
@@ -57,7 +57,7 @@ describe.sequential('openclaw credential resolution', () => {
     });
 
     const resolved = resolveApiConfig();
-    expect(resolved.source).toBe('openclaw');
+    expect(resolved.source).toBe('external');
     expect(resolved.apiKey).toBe('moonshot-real-key');
     expect(resolved.baseUrl).toBe('https://api.moonshot.ai/v1');
     expect(resolved.visionApiKey).toBe('moonshot-real-key');
@@ -98,7 +98,7 @@ describe.sequential('openclaw credential resolution', () => {
     });
 
     const resolved = resolveApiConfig();
-    expect(resolved.source).toBe('openclaw');
+    expect(resolved.source).toBe('external');
     expect(resolved.provider).toBe('anthropic');
     expect(resolved.apiKey).toBe('anthropic-auth-profile-key');
     expect(resolved.baseUrl).toBe('https://api.anthropic.com/v1');
@@ -131,7 +131,7 @@ describe.sequential('openclaw credential resolution', () => {
     });
 
     const resolved = resolveApiConfig();
-    expect(resolved.source).toBe('openclaw');
+    expect(resolved.source).toBe('external');
     expect(resolved.provider).toBe('anthropic');
     expect(resolved.apiKey).toBe('anthropic-auth-profile-key');
     expect(resolved.baseUrl).toBe('https://api.anthropic.com/v1');

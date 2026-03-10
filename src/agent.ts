@@ -37,8 +37,11 @@ import { ActionRouter } from './action-router';
 import { SafetyTier } from './types';
 import { ComputerUseBrain } from './computer-use';
 import { A11yReasoner } from './a11y-reasoner';
+import { TaskLogger, CompletionStatus } from './task-logger';
+import { WorkspaceState } from './workspace-state';
+import { TaskVerifier } from './verifiers';
+import { DeterministicFlows } from './deterministic-flows';
 import { BrowserLayer } from './browser-layer';
-import { SmartInteractionLayer } from './smart-interaction';
 import { loadPipelineConfig } from './doctor';
 import { detectProvider, type PipelineConfig } from './providers';
 import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction, A11yAction } from './types';
@@ -56,8 +59,11 @@ export class Agent {
   private router: ActionRouter;
   private computerUse: ComputerUseBrain | null = null;
   private reasoner: A11yReasoner | null = null;
+  private deterministicFlows: DeterministicFlows;
   private browserLayer: BrowserLayer | null = null;
-  private smartInteraction: SmartInteractionLayer | null = null;
+  private logger: TaskLogger;
+  private workspace: WorkspaceState;
+  private verifier: TaskVerifier;
   private config: ClawdConfig;
   private hasApiKey: boolean;
   private state: AgentState = {
@@ -75,11 +81,15 @@ export class Agent {
     this.safety = new SafetyLayer(config);
     this.a11y = new AccessibilityBridge();
     this.router = new ActionRouter(this.a11y, this.desktop);
+    this.deterministicFlows = new DeterministicFlows(this.a11y, this.desktop);
+    this.logger = new TaskLogger();
+    this.workspace = new WorkspaceState();
+    this.verifier = new TaskVerifier(this.a11y);
     // Load pipeline config from doctor (if available)
     const pipelineConfig = loadPipelineConfig();
 
     if (pipelineConfig && pipelineConfig.layer2.enabled) {
-      this.reasoner = new A11yReasoner(this.a11y, pipelineConfig);
+      this.reasoner = new A11yReasoner(this.a11y, this.desktop, pipelineConfig);
       console.log(`🧠 Layer 2 (Accessibility Reasoner): ${pipelineConfig.layer2.model}`);
     }
 
@@ -112,7 +122,7 @@ export class Agent {
 
     if (!this.hasApiKey) {
       console.log(`⚡ Running in offline mode (no API key or local LLM). Local parser + action router only.`);
-      console.log(`   To unlock AI fallback, configure your OpenClaw agent provider (or set AI_API_KEY in standalone mode) and run: clawdcursor doctor`);
+      console.log(`   To unlock AI fallback, set AI_API_KEY (or run: clawdcursor doctor)`);
     }
   }
 
@@ -173,36 +183,48 @@ export class Agent {
   async connect(): Promise<void> {
     await this.desktop.connect();
 
+    // Minimize the terminal/console window running this agent so it never
+    // appears in screenshots and the vision LLM can't accidentally close it.
+    if (!IS_MAC) {
+      try {
+        await execFileAsync('powershell.exe', ['-Command',
+          `Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public class WinAPI {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+  [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+}
+"@
+[WinAPI]::ShowWindow([WinAPI]::GetConsoleWindow(), 2)`  // SW_MINIMIZE = 2
+        ]);
+      } catch { /* non-fatal — just cosmetic */ }
+    }
+
     // Initialize Browser Layer (Layer 0) — Playwright for browser tasks
     const pipelineConfig = loadPipelineConfig();
-    const textModel = this.config.ai.model || pipelineConfig?.layer2?.model || 'unavailable';
-    const visionModel = this.config.ai.visionModel || pipelineConfig?.layer3?.model || 'unavailable';
+    // Pipeline config (from .clawd-config.json) takes priority for actual model selection
+    const textModel = pipelineConfig?.layer2?.model || this.config.ai.model || 'unavailable';
+    const visionModel = pipelineConfig?.layer3?.model || this.config.ai.visionModel || 'unavailable';
 
     const textProvider = this.inferProviderLabel(
       this.config.ai.textApiKey || this.config.ai.apiKey,
-      this.config.ai.textBaseUrl || this.config.ai.baseUrl || pipelineConfig?.layer2?.baseUrl,
-      this.config.ai.provider,
+      pipelineConfig?.layer2?.baseUrl || this.config.ai.textBaseUrl || this.config.ai.baseUrl,
+      pipelineConfig?.providerKey || this.config.ai.provider,
     );
     const visionProvider = this.inferProviderLabel(
       this.config.ai.visionApiKey || this.config.ai.apiKey,
-      this.config.ai.visionBaseUrl || this.config.ai.baseUrl || pipelineConfig?.layer3?.baseUrl,
-      this.config.ai.provider,
+      pipelineConfig?.layer3?.baseUrl || this.config.ai.visionBaseUrl || this.config.ai.baseUrl,
+      pipelineConfig?.providerKey || this.config.ai.provider,
     );
 
     console.log(`🤖 Active models: text=${textModel} (${textProvider}) | vision=${visionModel} (${visionProvider})`);
 
     this.browserLayer = new BrowserLayer(this.config, pipelineConfig || {} as PipelineConfig);
-    console.log(`🌐 Layer 0 (Browser): Playwright — CDP or managed Chromium`);
+    // Browser layer initialized
 
-    // Initialize Smart Interaction Layer (Layer 1.5) — CDPDriver + UIDriver
-    this.smartInteraction = new SmartInteractionLayer(
-      this.a11y,
-      this.config,
-      pipelineConfig || null,
-    );
-    if (this.smartInteraction.isAvailable()) {
-      console.log(`🧩 Layer 1.5 (Smart Interaction): CDPDriver + UIDriver — 1 LLM call planning`);
-    }
+    // Warm up the PSRunner bridge so assembly loading happens in background
+    this.a11y.warmup().catch(() => {});
 
     // Initialize Computer Use for Anthropic or mixed-provider pipeline overrides
     const computerUseOverrides = pipelineConfig?.layer3?.computerUse
@@ -216,6 +238,7 @@ export class Agent {
 
     if (ComputerUseBrain.isSupported(this.config, computerUseOverrides)) {
       this.computerUse = new ComputerUseBrain(this.config, this.desktop, this.a11y, this.safety, computerUseOverrides);
+      this.computerUse.setVerifier(this.verifier);
       console.log(`🖥️  Computer Use API enabled (Anthropic native tool + accessibility)`);
     }
 
@@ -237,6 +260,13 @@ export class Agent {
     const startTime = Date.now();
 
     console.log(`\n🐾 Starting task: ${task}`);
+    this.logger.startTask(task);
+    this.workspace.reset();
+    // Reset Layer 2 state between tasks — clears circuit breaker, disabledApps, CDP cache
+    if (this.reasoner) this.reasoner.reset();
+
+    // Create isolated virtual desktop for this task
+    await this.createIsolatedDesktop();
 
     // Setup debug directory (only when --debug flag is set)
     const debugDir = this.config.debug ? path.join(process.cwd(), 'debug') : null;
@@ -268,26 +298,26 @@ export class Agent {
     if (preprocessed) {
       // Open app/browser if LLM identified one
       if (preprocessed.app) {
-        console.log(`\n🔀 Pre-processing: opening "${preprocessed.app}" first`);
+        console.log(`   Opening "${preprocessed.app}"...`);
         try {
           const openResult = await this.router.route(`open ${preprocessed.app}`);
           if (openResult.handled) {
-            console.log(`   ✅ "${preprocessed.app}" opened via Action Router`);
-            priorContext.push(`Opened "${preprocessed.app}" — it is now the active, focused window`);
-            await new Promise(r => setTimeout(r, 2000));
+            // app opened
+            priorContext.push(`Opened "${preprocessed.app}" — it is ALREADY the active, focused, maximized window. Do NOT reopen it. Do NOT press Windows key. Start interacting with it IMMEDIATELY.`);
+            // Wait for app to render its UI tree
+            const heavyApps = /outlook|word|excel|teams|powerpoint/i;
+            const settleMs = heavyApps.test(preprocessed.app!) ? 2000 : 500;
+            await new Promise(r => setTimeout(r, settleMs));
 
-            // Maximize the window
+            // Bring the app window to focus — the text LLM handles all further interaction
             try {
-              await this.router.route('maximize window');
-              await new Promise(r => setTimeout(r, 500));
-              try {
-                await execFileAsync('powershell.exe', ['-Command',
-                  'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}")'
-                ]);
-              } catch { /* non-critical */ }
-              await new Promise(r => setTimeout(r, 300));
-              priorContext.push('Window maximized to full screen');
-            } catch { /* not critical */ }
+              const appWin = await this.a11y.findWindow(preprocessed.app!);
+              if (appWin) {
+                await this.a11y.focusWindow(undefined, appWin.processId);
+                await new Promise(r => setTimeout(r, 300));
+                console.log(`   ✅ ${preprocessed.app} focused (pid ${appWin.processId})`);
+              }
+            } catch { /* non-critical — app may self-focus */ }
           }
         } catch (err) {
           console.log(`   ⚠️ Pre-open failed: ${err} — proceeding with full task`);
@@ -295,6 +325,7 @@ export class Agent {
       }
 
       // Navigate to URL if identified — do it now via keyboard shortcut
+      // The preprocessor LLM already outputs smart URLs (e.g. docs.google.com/document/create)
       if (preprocessed.navigate) {
         // If no app specified but navigation requested, open default browser first
         if (!preprocessed.app) {
@@ -304,21 +335,14 @@ export class Agent {
             const openResult = await this.router.route(`open ${defaultBrowser}`);
             if (openResult.handled) {
               console.log(`   ✅ "${defaultBrowser}" opened via Action Router`);
-              priorContext.push(`Opened "${defaultBrowser}" — it is now the active, focused window`);
-              await new Promise(r => setTimeout(r, 2000));
-
-              // Maximize the window
+              priorContext.push(`Opened "${defaultBrowser}" — it is now the active, focused window, maximized to full screen`);
+              // Dismiss Snap Assist if it appeared (Win11 quirk with Super+Up)
               try {
-                await this.router.route('maximize window');
-                await new Promise(r => setTimeout(r, 500));
-                try {
-                  await execFileAsync('powershell.exe', ['-Command',
-                    'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}")'
-                  ]);
-                } catch { /* non-critical */ }
-                await new Promise(r => setTimeout(r, 300));
-                priorContext.push('Window maximized to full screen');
-              } catch { /* not critical */ }
+                await execFileAsync('powershell.exe', ['-Command',
+                  'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}")'
+                ]);
+              } catch { /* non-critical */ }
+              await new Promise(r => setTimeout(r, 300));
             }
           } catch (err) {
             console.log(`   ⚠️ Default browser open failed: ${err} — proceeding with navigation attempt`);
@@ -327,14 +351,28 @@ export class Agent {
 
         console.log(`   🌐 Navigating to ${preprocessed.navigate}...`);
         try {
-          await this.desktop.keyPress('Control+l');
-          await new Promise(r => setTimeout(r, 300));
+          // Ensure browser window has focus before typing URL
+          const windows = await this.a11y.getWindows().catch(() => []);
+          const browserWin = windows.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
+          if (browserWin) {
+            await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => null);
+            await new Promise(r => setTimeout(r, 400));
+          }
+          // Open a NEW tab to avoid conflicts with existing tab content/CDP state
+          await this.desktop.keyPress('Control+t');
+          await new Promise(r => setTimeout(r, 500));
+          // Address bar is already focused in a new tab — type URL directly
           await this.desktop.typeText(preprocessed.navigate);
           await new Promise(r => setTimeout(r, 200));
           await this.desktop.keyPress('Return');
-          await new Promise(r => setTimeout(r, 2000)); // wait for page load
-          priorContext.push(`Navigated to ${preprocessed.navigate} — page is loading`);
-          console.log(`   ✅ Navigated to ${preprocessed.navigate}`);
+          await new Promise(r => setTimeout(r, 3500)); // wait for page load + possible redirects
+          // Re-focus browser after navigation (terminal may have stolen focus)
+          if (browserWin) {
+            await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => null);
+            await new Promise(r => setTimeout(r, 400));
+          }
+          priorContext.push(`Navigated to ${preprocessed.navigate} — page is loading in new tab. Browser is focused.`);
+          console.log(`   ✅ Navigated to ${preprocessed.navigate} (new tab)`);
         } catch (err) {
           console.log(`   ⚠️ Navigation failed: ${err} — Computer Use will handle it`);
           priorContext.push(`Navigate to: ${preprocessed.navigate} (attempted but may need retry)`);
@@ -381,6 +419,7 @@ export class Agent {
         };
         console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s with ${result.steps.length} steps (0 LLM calls — Playwright)`);
         this.state = { status: 'idle', stepsCompleted: result.steps.length, stepsTotal: result.steps.length };
+        await this.closeIsolatedDesktop();
         return result;
       }
       // Browser layer couldn't handle it — fall through
@@ -398,7 +437,7 @@ export class Agent {
       console.log(`\n⚡ Action Router: attempting "${task}"`);
       const routeResult = await this.router.route(task);
       const telemetry = this.router.getTelemetry();
-      console.log(`   📊 Telemetry: ${JSON.stringify(telemetry)}`);
+      // Telemetry logged silently
       if (routeResult.handled) {
         const step: StepResult = {
           action: 'action-router',
@@ -413,41 +452,17 @@ export class Agent {
         };
         console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s — Action Router (0 LLM calls, $0)`);
         this.state = { status: 'idle', stepsCompleted: 1, stepsTotal: 1 };
+        await this.closeIsolatedDesktop();
         return result;
       }
       console.log(`   ⚡ Action Router: not matched — falling through`);
     }
 
-    // ── Layer 1.5: Smart Interaction (CDPDriver + UIDriver) ──
-    // Uses 1 cheap LLM call to read context + plan, then executes all steps free.
-    // For browser tasks: CDPDriver via CDP port 9222
-    // For native tasks: UIDriver via Windows UI Automation
-    if (this.smartInteraction?.isAvailable()) {
-      this.state.status = 'acting';
-      console.log(`\n🧩 Smart Interaction Layer: attempting "${task}"`);
-      const smartResult = await this.smartInteraction.tryHandle(task, isBrowserTask);
-      if (smartResult.handled && smartResult.success) {
-        const result: TaskResult = {
-          success: true,
-          steps: smartResult.steps,
-          duration: Date.now() - startTime,
-        };
-        console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s with ${result.steps.length} steps (${smartResult.llmCalls} LLM call — Smart Interaction)`);
-        this.state = { status: 'idle', stepsCompleted: result.steps.length, stepsTotal: result.steps.length };
-        return result;
-      }
-      // Smart Interaction couldn't handle it — fall through to Computer Use
-      if (!smartResult.handled) {
-        console.log(`   🧩 Smart Interaction: falling through to Computer Use — ${smartResult.description || 'not handled'}`);
-      }
-    }
-
-    // ── Layer 2: Computer Use / Decompose+Route (expensive fallback) ──
-    if (this.computerUse) {
-      return this.executeWithComputerUse(task, debugDir, startTime, priorContext);
-    } else {
-      return this.executeWithDecomposeAndRoute(task, debugDir, startTime);
-    }
+    // ── Layer 2+: Decompose → A11y Reasoner → vision fallback per subtask ──
+    // Always decompose first so the a11y reasoner gets single-step subtasks.
+    // Computer Use is used as a per-subtask fallback inside executeWithDecomposeAndRoute,
+    // not as a first-class handler for the whole task.
+    return this.executeWithDecomposeAndRoute(task, debugDir, startTime, priorContext);
   }
 
   /**
@@ -534,9 +549,24 @@ export class Agent {
     // Need a text model to pre-process
     if (!this.hasApiKey && !this.reasoner) return null;
 
-    // Skip pre-processing for very simple tasks (single action)
-    const simplePatterns = /^(scroll|click|type|press|copy|paste|undo|redo|save|close|minimize|maximize)\b/i;
-    if (simplePatterns.test(task)) return null;
+    // Skip pre-processing only for genuinely simple, non-compound tasks.
+    // A compound task ("open X and send email", "open X then type Y") MUST go through
+    // pre-processing so it gets decomposed properly.
+    const hasCompound = /(?:,|\b(?:and|then)\b)/i.test(task.trim());
+    if (!hasCompound) {
+      const routerHandled = [
+        /^(?:open|launch|start|run)\s+\S/i,
+        /^(?:type|enter|write|input)\s+/i,
+        /^(?:go to|navigate to|visit|browse to)\s+/i,
+        /^(?:press|hit)\s+/i,
+        /^(?:click|tap)\s+/i,
+        /^(?:focus|switch to|bring up|activate)\s+/i,
+        /^(?:close|minimize|maximize)\s+/i,
+        /^(?:find|search in page)\s+/i,
+        /^(?:scroll|copy|paste|undo|redo|save|refresh|back|forward)\b/i,
+      ];
+      if (routerHandled.some(p => p.test(task.trim()))) return null;
+    }
 
     const systemPrompt = `You are a task pre-processor for an AI desktop agent. Parse the user's command into structured JSON.
 
@@ -552,6 +582,30 @@ RULES:
 - The "task" field MUST contain ALL remaining work after the FIRST app is opened and URL navigated
 - CRITICAL: If the command involves multiple apps (e.g. "copy from X then paste in Y"), the task field MUST include the full chain of remaining actions including switching to other apps
 - If the whole task is just "open X", task should be empty string
+
+SMART URL RULE — VERY IMPORTANT:
+When the task involves creating, searching, or navigating directly to content on a website, use the DIRECT ACTION URL that skips the homepage. The agent navigates to this URL immediately, so it must land on the right page.
+
+Creation URLs:
+- "write in a new google doc" → navigate: "docs.google.com/document/create" (NOT docs.google.com)
+- "create a new spreadsheet" → navigate: "docs.google.com/spreadsheets/create"
+- "create a new presentation" → navigate: "docs.google.com/presentation/create"
+- "create a github repo" → navigate: "github.com/new"
+- "create a new notion page" → navigate: "notion.so/new"
+- "compose an email in gmail" → navigate: "mail.google.com/mail/u/0/#inbox?compose=new"
+- "create a new codepen" → navigate: "codepen.io/pen/"
+- "post on twitter" → navigate: "twitter.com/compose/tweet"
+
+Search URLs (use query parameters to skip manual search):
+- "google search for cats" → navigate: "google.com/search?q=cats"
+- "search google for speed of light" → navigate: "google.com/search?q=speed+of+light"
+- "search youtube for music" → navigate: "youtube.com/results?search_query=music"
+- "search amazon for laptops" → navigate: "amazon.com/s?k=laptops"
+- "search wikipedia for Python" → navigate: "en.wikipedia.org/wiki/Python"
+- "search github for react" → navigate: "github.com/search?q=react"
+For search queries, URL-encode spaces as + and special chars as %XX.
+
+Apply this pattern to ANY website you know has a direct create/search/action URL. If unsure, use the base URL.
 
 VALIDATION RULE: The task field combined with app+navigate must account for EVERY action in the original command. If you drop any part, the agent will fail.
 
@@ -580,7 +634,7 @@ Examples:
 - "open reddit on edge and scroll down through posts and interact with one" → {"app": "Microsoft Edge", "navigate": "reddit.com", "task": "scroll down through posts and interact with one", "contextHints": ["reddit"]}
 - "open wikipedia on edge, copy a sentence, then paste it in google docs" → {"app": "Microsoft Edge", "navigate": "wikipedia.org", "task": "scroll through an article, copy an interesting sentence, then open Google Docs and paste it there", "contextHints": ["wikipedia", "google docs"]}
 - "open wikipedia, copy a sentence, then open notepad and paste it" → {"app": null, "navigate": "wikipedia.org", "task": "copy a sentence from wikipedia, then open notepad and paste the sentence", "contextHints": ["wikipedia", "notepad"]}
-- "search for cats on google, copy the first result link, then open email and paste it" → {"app": null, "navigate": "google.com", "task": "search for cats, copy the first result link, then open email application and paste the link", "contextHints": ["google", "email"]}
+- "search for cats on google, copy the first result link, then open email and paste it" → {"app": null, "navigate": "google.com/search?q=cats", "task": "copy the first result link, then open email application and paste the link", "contextHints": ["google", "email"]}
 - "open amazon and find a book, then save the title to a text file" → {"app": null, "navigate": "amazon.com", "task": "find a book, copy or note the title, then open text editor and save the title to a file", "contextHints": ["amazon", "text file"]}
 - "compare prices between amazon and ebay for laptops" → {"app": null, "navigate": "amazon.com", "task": "search for laptops and note prices, then open ebay in new tab and compare laptop prices", "contextHints": ["amazon", "ebay"]}
 - "drag an image from browser to desktop" → {"app": null, "navigate": null, "task": "drag an image from browser window to desktop", "contextHints": ["browser", "desktop"]}`;
@@ -591,13 +645,7 @@ Examples:
 
       let response: string;
 
-      if (this.smartInteraction?.isAvailable()) {
-        // Use SmartInteraction's callTextModel (it handles all providers)
-        response = await (this.smartInteraction as any).callTextModel(
-          `Parse this command: "${task}"`,
-          systemPrompt,
-        );
-      } else if (this.reasoner) {
+      if (this.reasoner) {
         // Use reasoner's provider config via fetch
         const pipelineConfig = loadPipelineConfig();
         if (!pipelineConfig) return null;
@@ -628,6 +676,8 @@ Examples:
 
       const elapsed = Date.now() - startTime;
       console.log(`   ⚡ Pre-processed in ${elapsed}ms`);
+      this.logger.logStep({ layer: 'preprocess', actionType: 'llm_preprocess', result: 'success', durationMs: elapsed, llmReasoning: response.substring(0, 200) });
+      this.logger.recordLlmCall();
 
       // Parse JSON from response
       const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -668,7 +718,7 @@ Examples:
 
     this.state.status = 'acting';
     try {
-      const cuResult = await this.computerUse!.executeSubtask(task, debugDir, 0, priorContext);
+      const cuResult = await this.computerUse!.executeSubtask(task, debugDir, 0, priorContext, this.logger);
 
       const result: TaskResult = {
         success: cuResult.success,
@@ -686,58 +736,68 @@ Examples:
         duration: Date.now() - startTime,
       };
     } finally {
+      await this.closeIsolatedDesktop();
       this.state.status = 'idle';
       this.state.currentTask = undefined;
     }
   }
 
   /**
-   * PATH B: Decompose + Route + LLM Fallback
-   * For non-Anthropic providers or offline mode.
+   * PATH B: Decompose → A11y Reasoner → Computer Use fallback per subtask.
+   * Always used now — Computer Use runs per-subtask, not on the whole task.
    */
   private async executeWithDecomposeAndRoute(
     task: string,
     debugDir: string | null,
     startTime: number,
+    priorContext?: string[],
   ): Promise<TaskResult> {
     const steps: StepResult[] = [];
     let llmCallCount = 0;
 
-    console.log(`   Using decompose → route → LLM fallback pipeline\n`);
+    // decompose → a11y → vision pipeline
 
     try {
 
     // ─── Decompose ───────────────────────────────────────────────
-    console.log(`📋 Decomposing task...`);
+    // decomposing task
     const decompositionStart = Date.now();
     let subtasks: string[];
 
-    if (this.hasApiKey) {
+    // If pre-processing already ran (priorContext exists), the task has been refined
+    // by the LLM. Skip the local parser — it misinterprets creative/contextual tasks
+    // as literal commands (e.g., "write a sentence on dogs" → "type a sentence on dogs").
+    // The task goes straight to Layer 2 (A11y Reasoner) which can see the screen and reason.
+    if (priorContext && priorContext.length > 0) {
+      subtasks = [task];
+      console.log(`   ⚡ Pre-processed task — straight to Layer 2 (${Date.now() - decompositionStart}ms)`);
+    } else {
+    // No pre-processing context — try local parser first (instant, no API call)
+    const localResult = this.parser.decomposeTask(task);
+    if (localResult) {
+      subtasks = localResult;
+      console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (offline)`);
+    } else if (this.hasApiKey) {
       console.log(`   🧠 Using LLM to decompose task...`);
       subtasks = await this.brain.decomposeTask(task);
       llmCallCount = 1;
       console.log(`   Decomposed via LLM in ${Date.now() - decompositionStart}ms`);
     } else {
-      const localResult = this.parser.decomposeTask(task);
-      if (localResult) {
-        subtasks = localResult;
-        console.log(`   ⚡ Local parser handled in ${Date.now() - decompositionStart}ms (offline)`);
-      } else {
-        console.log(`   ❌ Task too complex for offline mode.`);
-        return {
-          success: false,
-          steps: [{ action: 'error', description: 'Task too complex for offline mode. Configure OpenClaw agent provider (or set AI_API_KEY in standalone mode) to unlock AI fallback.', success: false, timestamp: Date.now() }],
-          duration: Date.now() - startTime,
-        };
-      }
+      console.log(`   ❌ Task too complex for offline mode.`);
+      return {
+        success: false,
+        steps: [{ action: 'error', description: 'Task too complex for offline mode. Set AI_API_KEY or run clawdcursor doctor to unlock AI fallback.', success: false, timestamp: Date.now() }],
+        duration: Date.now() - startTime,
+      };
     }
+    } // close the priorContext else block
 
     console.log(`   ${subtasks.length} subtask(s):`);
     subtasks.forEach((st, i) => console.log(`   ${i + 1}. "${st}"`));
     this.state.stepsTotal = subtasks.length;
 
     // ─── Execute each subtask ────────────────────────────────────
-    console.log(`\n⚡ Executing subtasks...`);
+    // executing subtasks
 
     for (let i = 0; i < subtasks.length; i++) {
       if (this.aborted) {
@@ -750,9 +810,15 @@ Examples:
       this.state.currentStep = subtask;
       this.state.stepsCompleted = i;
 
-      // Try router first
+      // Try router first — but ONLY for mechanical subtasks.
+      // If the task came from LLM pre-processing (priorContext exists), it likely needs
+      // reasoning (e.g., "write a sentence on dogs" needs the LLM to compose content,
+      // see the screen, click Blank in Google Docs, etc.). Skip the router for those.
+      const skipRouter = !!(priorContext && priorContext.length > 0);
       this.state.status = 'acting';
-      const routeResult = await this.router.route(subtask);
+      const routeResult = skipRouter
+        ? { handled: false, description: 'Skipped — pre-processed task needs LLM reasoning' }
+        : await this.router.route(subtask);
 
       if (routeResult.handled) {
         console.log(`   ✅ Router: ${routeResult.description}`);
@@ -774,72 +840,153 @@ Examples:
         continue;
       }
 
-      console.log(`   ⚠️ Router can't handle: ${routeResult.description}`);
-
-      // Layer 2: Accessibility Reasoner (text-only LLM, no screenshot)
-      if (this.reasoner?.isAvailable()) {
-        const reasonResult = await this.reasoner.reason(subtask);
-        if (reasonResult.handled) {
-          if (reasonResult.action) {
-            try {
-              await this.executeAction(reasonResult.action as InputAction & { description?: string });
-              steps.push({ action: reasonResult.action.kind, description: reasonResult.description, success: true, timestamp: Date.now() });
-              await this.delay(100);
-              continue;
-            } catch (err) {
-              console.log(`   ⚠️ Layer 2 action failed: ${err} → falling through to Layer 3`);
-              // Layer 2 failed — hand remaining subtasks (including this one) to Computer Use
-              if (this.computerUse) {
-                const remainingTask = subtasks.slice(i).join(', then ');
-                console.log(`   🖥️  Handing off to Computer Use: "${remainingTask}"`);
-                const fallbackResult = await this.executeLLMFallback(remainingTask, steps, debugDir, i);
-                llmCallCount += fallbackResult.llmCalls;
-                i = subtasks.length; // skip remaining — Computer Use handled them
-                break;
-              }
+      // If this is a browser task, ensure Edge has focus before Layer 2 reads the active window.
+      // The preprocessor navigates but may leave the terminal with focus.
+      const isBrowserTask = priorContext?.some(c => /navigated to|opened.*edge|opened.*chrome/i.test(c));
+      let browserProcessName: string | undefined;
+      if (isBrowserTask) {
+        try {
+          const windows = await this.a11y?.getWindows().catch(() => []) ?? [];
+          const edgeWin = windows.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
+          if (edgeWin) {
+            browserProcessName = edgeWin.processName; // remember target process
+            // Try focus up to 3 times with increasing delay
+            for (let attempt = 0; attempt < 3; attempt++) {
+              await this.a11y?.focusWindow(undefined, edgeWin.processId).catch(() => null);
+              await this.delay(500 + attempt * 300);
+              const checkWin = await this.a11y?.getActiveWindow().catch(() => null);
+              if (checkWin && /msedge|chrome/i.test(checkWin.processName)) break;
             }
-          } else {
-            // Task done per reasoner
-            steps.push({ action: 'done', description: reasonResult.description, success: true, timestamp: Date.now() });
-            continue;
           }
-        }
-        // If unsure or failed, fall through to Layer 3
+        } catch { /* non-critical */ }
       }
 
-      // Layer 3: LLM vision fallback — hand off ALL remaining subtasks, not just current one
-      if (this.hasApiKey) {
-        await this.delay(150);
-        const remainingTask = subtasks.slice(i).join(', then ');
-        console.log(`   🧠 LLM vision fallback for remaining: "${remainingTask}"`);
-        const fallbackResult = await this.executeLLMFallback(remainingTask, steps, debugDir, i);
-        llmCallCount += fallbackResult.llmCalls;
-        if (!fallbackResult.success) {
-          console.log(`   ❌ LLM fallback failed for: "${subtask}"`);
+      // router can't handle — pass to Layer 2 (text LLM via accessibility tree)
+      let activeWin = await this.a11y?.getActiveWindow().catch(() => null);
+      if (!activeWin) {
+        await this.delay(400);
+        activeWin = await this.a11y?.getActiveWindow().catch(() => null);
+      }
+      // For browser tasks, use the known browser process even if focus didn't switch
+      const activeProcessName = browserProcessName || activeWin?.processName;
+      let a11yActionHistory: { action: string; description: string }[] | undefined;
+
+      if (this.reasoner?.isAvailable(activeProcessName)) {
+        console.log(`\n🧠 Layer 2 (A11y Reasoner): "${subtask}"`);
+        const reasonStart = Date.now();
+        const reasonResult = await this.reasoner.reason(subtask, activeProcessName, priorContext, this.logger, this.verifier);
+        const reasonDuration = Date.now() - reasonStart;
+        if (reasonResult.handled) {
+          steps.push({
+            action: 'done',
+            description: reasonResult.description,
+            success: true,
+            timestamp: Date.now(),
+          });
+          console.log(`   ✅ Layer 2 done (${reasonResult.steps ?? 0} steps, ${(reasonDuration / 1000).toFixed(1)}s)`);
+          continue;
         }
-        break; // Computer Use handled the rest
+        // Check if needs human intervention (payment, captcha, 2FA, etc.)
+        if (reasonResult.needsHuman) {
+          console.log(`\n🙋 NEEDS HUMAN INTERVENTION: ${reasonResult.description}`);
+          steps.push({
+            action: 'needs-human',
+            description: reasonResult.description,
+            success: false,
+            timestamp: Date.now(),
+          });
+          break; // Stop processing — do NOT fall through to Layer 3
+        }
+
+        a11yActionHistory = reasonResult.actionHistory;
+        const stepCount = reasonResult.steps ?? 0;
+        const duration = (reasonDuration / 1000).toFixed(1);
+        console.log(`   🤷 Layer 2 → Layer 3 (${stepCount} steps, ${duration}s): ${reasonResult.description.substring(0, 100)}`);
+        this.reasoner.recordVisionFallback();
+      } else if (this.reasoner) {
+        console.log(`   ⚠️ Layer 2 circuit breaker (${activeProcessName ?? 'unknown'}) — falling to Layer 3`);
+        this.reasoner.recordVisionFallback();
+      }
+
+      // Layer 3: Vision fallback — Computer Use takes over when text LLM cannot proceed
+      const enrichedContext = [...(priorContext ?? [])];
+      if (a11yActionHistory && a11yActionHistory.length > 0) {
+        enrichedContext.push(
+          `A11y Reasoner already tried these actions (do NOT repeat them):\n` +
+          a11yActionHistory.map((a, idx) => `  ${idx + 1}. ${a.action} — ${a.description}`).join('\n')
+        );
+      }
+
+      if (this.computerUse || this.hasApiKey) {
+        const remainingTask = subtasks.slice(i).join(', then ');
+        if (this.computerUse) {
+          console.log(`   🖥️  Layer 3: "${remainingTask}"`);
+          try {
+            const cuResult = await this.computerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger);
+            steps.push(...cuResult.steps);
+            llmCallCount += cuResult.llmCalls;
+          } catch (err) {
+            steps.push({ action: 'error', description: `Computer Use failed: ${err}`, success: false, timestamp: Date.now() });
+          }
+        } else {
+          await this.delay(150);
+          console.log(`   🧠 LLM vision fallback: "${remainingTask}"`);
+          const fallbackResult = await this.executeLLMFallback(remainingTask, steps, debugDir, i);
+          llmCallCount += fallbackResult.llmCalls;
+          if (!fallbackResult.success) {
+            console.log(`   ❌ LLM fallback failed: "${subtask}"`);
+          }
+        }
+        break;
       } else {
         steps.push({ action: 'skipped', description: `Skipped "${subtask}" — no API key`, success: false, timestamp: Date.now() });
       }
     }
 
+    // Update workspace state after all subtasks
+    try {
+      const windows = await this.a11y.getWindows().catch(() => []);
+      this.workspace.updateWindows(windows);
+      const activeWin = await this.a11y.getActiveWindow().catch(() => null);
+      if (activeWin?.processId) this.workspace.setActiveWindow(activeWin.processId);
+      const clip = await this.a11y.readClipboard().catch(() => '');
+      if (clip) this.workspace.updateClipboard(clip, 'post-task');
+    } catch { /* non-critical */ }
+
+    // Only report success when an explicit 'done' step was recorded by a layer
+    const hasDoneStep = steps.some(s => s.action === 'done' && s.success);
+    // Distinguish verified vs unverified success
+    const hasVerifiedDone = steps.some(s => s.action === 'done' && s.success && s.description?.includes('verified'));
+    const hasNeedsHuman = steps.some(s => s.action === 'needs-human' || s.description?.includes('needs_human'));
+
+    let finalStatus: CompletionStatus;
+    if (hasNeedsHuman) finalStatus = 'needs_human';
+    else if (hasVerifiedDone) finalStatus = 'verified_success';
+    else if (hasDoneStep) finalStatus = 'unverified_success';
+    else finalStatus = 'failed';
+
     const result: TaskResult = {
-      success: steps.length > 0 && steps.some(s => s.success),
+      success: hasDoneStep,
       steps,
       duration: Date.now() - startTime,
     };
 
-    console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s with ${steps.length} steps (${llmCallCount} LLM call(s))`);
+    const statusIcon = finalStatus === 'verified_success' ? '✅' : finalStatus === 'unverified_success' ? '⚠️' : '❌';
+    console.log(`\n${statusIcon} Task ${finalStatus.toUpperCase()} | ${(result.duration / 1000).toFixed(1)}s | ${steps.length} steps | ${llmCallCount} LLM calls`);
+    console.log(`   Workspace: ${this.workspace.getSummary()}`);
+    this.logger.endTask(finalStatus, { refinedTask: task });
     return result;
 
     } catch (err) {
       console.error(`\n❌ Decompose+Route crashed:`, err);
+      this.logger.endTask('failed');
       return {
         success: false,
         steps: [...steps, { action: 'error', description: `Pipeline crashed: ${err}`, success: false, timestamp: Date.now() }],
         duration: Date.now() - startTime,
       };
     } finally {
+      await this.closeIsolatedDesktop();
       this.state.status = 'idle';
       this.state.currentTask = undefined;
       this.brain.resetConversation();
@@ -864,7 +1011,6 @@ Examples:
       if (this.aborted) break;
 
       // ── Perf Opt #2: Parallelize screenshot + a11y fetch ──
-      console.log(`   📸 LLM step ${j + 1}: Capturing screen + a11y context...`);
       if (j > 0) await this.delay(500); // pause between LLM retries to let UI settle
 
       const [screenshot, a11yContext] = await Promise.all([
@@ -879,7 +1025,6 @@ Examples:
           path.join(debugDir, `subtask-${subtaskIndex}-step-${j}.${ext}`),
           screenshot.buffer,
         ).catch(() => {});
-        console.log(`   💾 Debug screenshot saved (${(screenshot.buffer.length / 1024).toFixed(0)}KB, ${screenshot.llmWidth}x${screenshot.llmHeight})`);
       }
 
       // Ask AI what to do
@@ -899,19 +1044,19 @@ Examples:
         const isParseError = decision.error.startsWith('Parse error:') || decision.error.startsWith('Failed to parse');
         if (isParseError) {
           // Parse errors are retryable — LLM returned prose or bad JSON, take a fresh screenshot and try again
-          console.log(`   ⚠️ LLM returned bad JSON, retrying... (${decision.error.substring(0, 80)})`);
+          // retrying after parse error
           steps.push({ action: 'retry', description: `Retryable: ${decision.error.substring(0, 100)}`, success: false, timestamp: Date.now() });
           this.brain.resetConversation(); // clear bad history so next attempt starts fresh
           continue;
         }
-        console.log(`   ❌ LLM error: ${decision.error}`);
+        console.log(`   ❌ ${decision.error}`);
         steps.push({ action: 'error', description: decision.error, success: false, timestamp: Date.now() });
         return { success: false, llmCalls };
       }
 
       // Wait?
       if (decision.waitMs) {
-        console.log(`   ⏳ Waiting ${decision.waitMs}ms: ${decision.description}`);
+        // waiting
         await this.delay(decision.waitMs);
         stepDescriptions.push(decision.description);
         continue;
@@ -919,13 +1064,13 @@ Examples:
 
       // Handle SEQUENCE
       if (decision.sequence) {
-        console.log(`   📋 Sequence: ${decision.sequence.description} (${decision.sequence.steps.length} steps)`);
+        // executing sequence
 
         for (const seqStep of decision.sequence.steps) {
           if (this.aborted) break;
 
           const tier = this.safety.classify(seqStep, seqStep.description);
-          console.log(`   ${tierEmoji(tier)} ${seqStep.description}`);
+          // seq step
 
           if (tier === SafetyTier.Confirm) {
             this.state.status = 'waiting_confirm';
@@ -956,17 +1101,17 @@ Examples:
         recentActions.push(actionKey);
         const lastN = recentActions.slice(-MAX_SIMILAR_ACTION);
         if (lastN.length >= MAX_SIMILAR_ACTION && lastN.every(a => a === lastN[0])) {
-          console.log(`   🔄 Same action repeated ${MAX_SIMILAR_ACTION} times — giving up on this subtask`);
+          console.log(`   ❌ Stuck: repeated "${actionKey}"`);
           steps.push({ action: 'stuck', description: `Stuck: repeated "${actionKey}"`, success: false, timestamp: Date.now() });
           return { success: false, llmCalls };
         }
 
         // Safety check
         const tier = this.safety.classify(decision.action, decision.description);
-        console.log(`   ${tierEmoji(tier)} Action: ${decision.description}`);
+        // action classified
 
         if (this.safety.isBlocked(decision.description)) {
-          console.log(`   🚫 BLOCKED: ${decision.description}`);
+          console.log(`   ❌ BLOCKED: ${decision.description}`);
           steps.push({ action: 'blocked', description: `BLOCKED: ${decision.description}`, success: false, timestamp: Date.now() });
           return { success: false, llmCalls };
         }
@@ -1015,6 +1160,8 @@ Examples:
 
   abort(): void {
     this.aborted = true;
+    this.logger.endTask('aborted');
+    this.state = { status: 'idle', stepsCompleted: 0, stepsTotal: 0 };
   }
 
   getState(): AgentState {
@@ -1025,9 +1172,16 @@ Examples:
     return this.safety;
   }
 
+  getDesktop(): NativeDesktop {
+    return this.desktop;
+  }
+
+  getA11y(): AccessibilityBridge {
+    return this.a11y;
+  }
+
   disconnect(): void {
     this.desktop.disconnect();
-    this.smartInteraction?.disconnect().catch(() => {});
   }
 
   private async executeA11yAction(action: A11yAction): Promise<void> {
@@ -1040,8 +1194,6 @@ Examples:
     const a11yAction = actionMap[action.kind];
     if (!a11yAction) throw new Error(`Unknown a11y action: ${action.kind}`);
 
-    console.log(`   ♿ A11y ${a11yAction}: ${action.name || action.automationId} [${action.controlType || 'any'}]`);
-
     const result = await this.a11y.invokeElement({
       name: action.name,
       automationId: action.automationId,
@@ -1050,9 +1202,78 @@ Examples:
       value: action.value,
     });
 
-    if (!result.success) {
+    this.a11y.invalidateCache();
+
+    if (!result.success && !result.clickPoint) {
       throw new Error(result.error || 'A11y action failed');
     }
+
+    // Coordinate fallback: bridge couldn't invoke but gave us bounds
+    if (result.clickPoint) {
+      await this.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
+      this.a11y.invalidateCache();
+    }
+  }
+
+  /**
+   * Minimize ALL windows on the current desktop (called before desktop switch).
+   * Uses Shell.Application COM object for a clean slate.
+   */
+  private async minimizeAllWindows(): Promise<void> {
+    if (IS_MAC) return;
+    try {
+      await execFileAsync('powershell.exe', ['-Command',
+        `$shell = New-Object -ComObject Shell.Application; $shell.MinimizeAll()`
+      ]);
+      await new Promise(r => setTimeout(r, 400));
+    } catch { /* non-fatal */ }
+  }
+
+  /**
+   * Minimize all windows EXCEPT those matching processName (called after app opens
+   * on the isolated desktop to hide anything that leaked through).
+   */
+  private async minimizeAllExcept(processName: string): Promise<void> {
+    if (IS_MAC) return;
+    try {
+      await execFileAsync('powershell.exe', ['-Command',
+        `Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lp, IntPtr p);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+  public delegate bool EnumWindowsProc(IntPtr h, IntPtr p);
+}
+"@
+$target = "${processName}".ToLower()
+$procs = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.Name.ToLower() -notlike "*$target*" -and $_.Name.ToLower() -notlike "*clawdcursor*" -and $_.Name.ToLower() -notlike "*powershell*" }
+foreach ($p in $procs) { [Win32]::ShowWindow($p.MainWindowHandle, 2) | Out-Null }`
+      ]);
+      await new Promise(r => setTimeout(r, 400));
+    } catch { /* non-fatal */ }
+  }
+
+  /**
+   * Create an isolated Windows virtual desktop so the agent works in a clean
+   * environment away from the user's open windows.
+   * 1. Minimize all windows first (so they don't follow to the new desktop)
+   * 2. Win+Ctrl+D creates a new desktop and switches to it
+   */
+  private async createIsolatedDesktop(): Promise<void> {
+    // Disabled: isolated virtual desktops hide the app that pre-processing just opened,
+    // causing vision/screenshots to see an empty desktop and waste time re-opening apps.
+    // The agent now works on the user's current desktop directly.
+    return;
+  }
+
+  /**
+   * Close the isolated virtual desktop — no-op since we no longer create one.
+   */
+  private async closeIsolatedDesktop(): Promise<void> {
+    return;
   }
 
   private delay(ms: number): Promise<void> {

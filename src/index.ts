@@ -13,11 +13,15 @@ import { DEFAULT_CONFIG } from './types';
 import type { ClawdConfig } from './types';
 import { VERSION } from './version';
 import dotenv from 'dotenv';
-import { resolveApiConfig } from './openclaw-credentials';
+import { resolveApiConfig } from './credentials';
 import * as fs from 'fs';
 import * as path from 'path';
+import { migrateFromLegacyDir } from './paths';
 
 dotenv.config();
+
+// Migrate data from legacy ~/.openclaw/clawd-cursor/ to ~/.clawd-cursor/
+migrateFromLegacyDir();
 
 const program = new Command();
 
@@ -130,10 +134,8 @@ program
    ╚═══════════════════════════════════════╝
 `);
 
-    if (resolvedApi.source === 'openclaw') {
-      console.log('🔗 Using OpenClaw agent credentials for AI provider routing');
-      console.log(`   Text: ${resolvedApi.textModel || 'auto'} via ${resolvedApi.textBaseUrl || 'default'}`);
-      console.log(`   Vision: ${resolvedApi.visionModel || 'auto'} via ${resolvedApi.visionBaseUrl || 'default'}`);
+    if (resolvedApi.source === 'external') {
+      console.log('🔗 External credentials detected — pipeline config (.clawd-config.json) takes priority');
     }
 
     const agent = new Agent(config);
@@ -147,16 +149,36 @@ program
       process.exit(1);
     }
 
-    // Start API server
+    // Start API server (agent API + tool API on same port)
     const app = createServer(agent, config);
+
+    // Mount model-agnostic tool server alongside agent API
+    try {
+      const { createToolServer } = await import('./tool-server');
+      const toolCtx = {
+        desktop: agent.getDesktop(),
+        a11y: (agent as any).a11y,
+        cdp: (agent as any).cdpDriver,
+        getMouseScaleFactor: () => 1,  // start command uses agent's own scaling
+        getScreenshotScaleFactor: () => agent.getDesktop().getScaleFactor(),
+        ensureInitialized: async () => {},  // agent already initialized
+      };
+      app.use(createToolServer(toolCtx));
+    } catch (err) {
+      console.warn('Tool server not loaded:', (err as Error).message);
+    }
+
     app.listen(config.server.port, config.server.host, () => {
       console.log(`\n🌐 API server: http://${config.server.host}:${config.server.port}`);
-      console.log(`\nEndpoints:`);
+      console.log(`\nAgent endpoints:`);
       console.log(`  POST /task     — {"task": "Open Chrome and go to github.com"}`);
       console.log(`  GET  /status   — Agent state`);
-      console.log(`  POST /confirm  — {"approved": true|false}`);
       console.log(`  POST /abort    — Stop current task`);
-      console.log(`\nReady. Send a task to get started! 🐾`);
+      console.log(`\nTool server (model-agnostic):`);
+      console.log(`  GET  /tools    — Tool schemas (OpenAI function format)`);
+      console.log(`  POST /execute/{name} — Execute any tool`);
+      console.log(`  GET  /docs     — Tool documentation`);
+      console.log(`\nReady. 🐾`);
     });
 
     // Graceful shutdown
@@ -190,7 +212,7 @@ program
     }
 
     // Only use explicit CLI flags for single-provider override.
-    // OpenClaw auto-detected credentials should go through multi-provider scan.
+    // Auto-detected external credentials should go through multi-provider scan.
     const isExplicit = !!(opts.apiKey || opts.provider);
     await runDoctor({
       apiKey: isExplicit ? resolvedApi.apiKey : undefined,
@@ -304,9 +326,14 @@ while ($true) {
         Write-Host "👋 Bye!"
         break
     }
+    # Strip control characters (Ctrl+L, etc.) that break JSON
+    $task = $task -replace '[\\x00-\\x1f]', ''
+    $task = $task.Trim()
+    if (-not $task) { continue }
     Write-Host "🐾 Sending: $task" -ForegroundColor Yellow
     try {
-        $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/task -Method POST -ContentType "application/json" -Body ('{"task": "' + $task.Replace('"', '\\"') + '"}')
+        $jsonBody = @{ task = $task } | ConvertTo-Json -Compress
+        $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/task -Method POST -ContentType "application/json" -Body $jsonBody
         $response | ConvertTo-Json -Depth 5
     } catch {
         Write-Host "Failed to connect. Is clawdcursor start running?" -ForegroundColor Red
@@ -428,7 +455,7 @@ program
 
 program
   .command('install')
-  .description('Register Clawd Cursor as an OpenClaw skill and save config')
+  .description('Set up API key, configure pipeline, and auto-detect providers')
   .option('--api-key <key>', 'AI provider API key')
   .option('--provider <provider>', 'AI provider (auto-detected, or specify: anthropic|openai|ollama|kimi|groq|...)')
   .action(async (opts) => {
@@ -448,7 +475,7 @@ program
       console.log('   ✅ API key saved to .env');
     }
 
-    // 2. Run doctor (auto-configures pipeline + registers OpenClaw skill)
+    // 2. Run doctor (auto-configures pipeline)
     const { runDoctor } = await import('./doctor');
     const resolvedApi = resolveApiConfig({
       apiKey: opts.apiKey,
@@ -468,8 +495,13 @@ program
 
 program
   .command('uninstall')
-  .description('Remove all Clawd Cursor config, data, and OpenClaw skill registration')
+  .description('Remove all Clawd Cursor config, data, and skill registrations')
   .action(async () => {
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      console.error('\n❌  clawdcursor uninstall requires an interactive terminal.\n');
+      process.exit(1);
+    }
+
     const fs = await import('fs');
     const path = await import('path');
     const os = await import('os');
@@ -512,11 +544,13 @@ program
       removed++;
     }
 
-    // 3. Remove OpenClaw skill registration
+    // 3. Remove external skill registrations (OpenClaw, Codex, etc.)
     const homeDir = os.homedir();
     const skillPaths = [
       path.join(homeDir, '.openclaw', 'workspace', 'skills', 'clawdcursor'),
       path.join(homeDir, '.openclaw-dev', 'workspace', 'skills', 'clawdcursor'),
+      path.join(homeDir, '.openclaw', 'skills', 'clawdcursor'),
+      path.join(homeDir, '.codex', 'skills', 'clawd-cursor'),
     ];
     for (const sp of skillPaths) {
       if (fs.existsSync(sp)) {
@@ -526,7 +560,7 @@ program
         } else {
           fs.rmSync(sp, { recursive: true, force: true });
         }
-        console.log(`   🗑️  Removed OpenClaw skill: ${sp}`);
+        console.log(`   🗑️  Removed skill registration: ${sp}`);
         removed++;
       }
     }
@@ -545,6 +579,238 @@ program
 
     console.log(`\n🐾 Uninstalled. To fully remove, delete the clawd-cursor folder:`);
     console.log(`   ${clawdRoot}\n`);
+  });
+
+// ── MCP Mode (for Claude Code, Cursor, Windsurf, Zed, etc.) ──
+
+program
+  .command('mcp')
+  .description('Run as MCP tool server over stdio (for Claude Code, Cursor, Windsurf, Zed)')
+  .action(async () => {
+    // MCP mode: stdout is protocol, logs go to stderr
+    const stderrWrite = (prefix: string, args: any[]) =>
+      process.stderr.write(`${prefix}${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`);
+    console.log = (...args: any[]) => stderrWrite('', args);
+    console.warn = (...args: any[]) => stderrWrite('[WARN] ', args);
+    console.error = (...args: any[]) => stderrWrite('[ERROR] ', args);
+
+    console.log('clawd-cursor MCP mode starting...');
+
+    const { NativeDesktop } = await import('./native-desktop');
+    const { AccessibilityBridge } = await import('./accessibility');
+    const { CDPDriver } = await import('./cdp-driver');
+    const { DEFAULT_CONFIG } = await import('./types');
+    const { getAllTools } = await import('./tools');
+
+    const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
+    const a11y = new AccessibilityBridge();
+    const cdp = new CDPDriver(9223);
+
+    let initialized = false;
+    let initPromise: Promise<void> | null = null;
+    let mouseScaleFactor = 1;
+    let screenshotScaleFactor = 1;
+
+    const ensureInitialized = async (): Promise<void> => {
+      if (initialized) return;
+      if (initPromise) return initPromise;
+      initPromise = (async () => {
+        await desktop.connect();
+        screenshotScaleFactor = desktop.getScaleFactor();
+        try {
+          const { execFileSync } = await import('child_process');
+          const result = execFileSync('powershell.exe', [
+            '-NoProfile', '-Command',
+            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
+          ], { timeout: 10000, encoding: 'utf-8' }).trim();
+          const [logicalW] = result.split(',').map(Number);
+          if (logicalW > 0) mouseScaleFactor = logicalW / 1280;
+        } catch {
+          mouseScaleFactor = screenshotScaleFactor;
+        }
+        await a11y.warmup();
+        initialized = true;
+        console.log('Subsystems initialized');
+      })();
+      return initPromise;
+    };
+
+    const ctx = {
+      desktop, a11y, cdp,
+      getMouseScaleFactor: () => mouseScaleFactor,
+      getScreenshotScaleFactor: () => screenshotScaleFactor,
+      ensureInitialized,
+    };
+
+    // Dynamic import MCP SDK (ESM package from CJS)
+    const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js' as any);
+    const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js' as any);
+    const { z } = await import('zod');
+
+    const server = new McpServer({ name: 'clawd-cursor', version: '0.7.0' });
+
+    // Register all tools from the unified registry
+    const tools = getAllTools();
+    for (const tool of tools) {
+      // Convert parameters to Zod schema
+      const zodParams: Record<string, any> = {};
+      for (const [key, def] of Object.entries(tool.parameters)) {
+        let schema: any;
+        if (def.type === 'number') schema = z.number();
+        else if (def.type === 'boolean') schema = z.boolean();
+        else schema = z.string();
+        if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
+        schema = schema.describe(def.description);
+        if (def.required === false) schema = schema.optional();
+        zodParams[key] = schema;
+      }
+
+      server.tool(
+        tool.name,
+        tool.description,
+        Object.keys(zodParams).length > 0 ? zodParams : undefined as any,
+        async (params: any) => {
+          const result = await tool.handler(params, ctx);
+          const content: any[] = [];
+          if (result.image) {
+            content.push({ type: 'image', data: result.image.data, mimeType: result.image.mimeType });
+          }
+          content.push({ type: 'text', text: result.text });
+          return { content, isError: result.isError };
+        },
+      );
+    }
+
+    const transport = new StdioServerTransport();
+    await server.connect(transport);
+    console.log(`clawd-cursor MCP ready — ${tools.length} tools registered`);
+
+    ensureInitialized().catch(err => {
+      console.error('Subsystem init failed:', err?.message);
+    });
+  });
+
+// ── Tool Server (model-agnostic, no LLM needed) ──
+
+program
+  .command('serve')
+  .description('Start the tool server only (no autonomous agent, no LLM). Any AI model can connect via HTTP.')
+  .option('--port <port>', 'HTTP server port', '3847')
+  .option('--skip-consent', 'Skip the first-run consent prompt')
+  .action(async (opts) => {
+    const { runOnboarding, hasConsent } = await import('./onboarding');
+
+    // First-run consent
+    if (!opts.skipConsent && !hasConsent()) {
+      const accepted = await runOnboarding();
+      if (!accepted) process.exit(1);
+    }
+
+    const port = parseInt(opts.port);
+    const express = (await import('express')).default;
+    const { NativeDesktop } = await import('./native-desktop');
+    const { AccessibilityBridge } = await import('./accessibility');
+    const { CDPDriver } = await import('./cdp-driver');
+    const { DEFAULT_CONFIG } = await import('./types');
+    const { createToolServer } = await import('./tool-server');
+    const { VERSION } = await import('./version');
+
+    console.log(`\n🐾 clawd-cursor v${VERSION} — Tool Server mode`);
+    console.log('   No LLM. No autonomous agent. Just OS primitives over HTTP.\n');
+
+    // Initialize subsystems
+    const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
+    const a11y = new AccessibilityBridge();
+    const cdp = new CDPDriver(9223);
+
+    let initialized = false;
+    let initPromise: Promise<void> | null = null;
+    let mouseScaleFactor = 1;
+    let screenshotScaleFactor = 1;
+
+    const ensureInitialized = async (): Promise<void> => {
+      if (initialized) return;
+      if (initPromise) return initPromise;
+      initPromise = (async () => {
+        await desktop.connect();
+        screenshotScaleFactor = desktop.getScaleFactor();
+        try {
+          const { execFileSync } = await import('child_process');
+          const result = execFileSync('powershell.exe', [
+            '-NoProfile', '-Command',
+            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
+          ], { timeout: 10000, encoding: 'utf-8' }).trim();
+          const [logicalW] = result.split(',').map(Number);
+          if (logicalW > 0) mouseScaleFactor = logicalW / 1280;
+        } catch {
+          mouseScaleFactor = screenshotScaleFactor;
+        }
+        await a11y.warmup();
+        initialized = true;
+      })();
+      return initPromise;
+    };
+
+    const ctx = {
+      desktop, a11y, cdp,
+      getMouseScaleFactor: () => mouseScaleFactor,
+      getScreenshotScaleFactor: () => screenshotScaleFactor,
+      ensureInitialized,
+    };
+
+    // Create HTTP server with tool routes
+    const app = express();
+    app.use(express.json());
+    app.use(createToolServer(ctx));
+
+    app.listen(port, '127.0.0.1', () => {
+      console.log(`   Tool server: http://127.0.0.1:${port}`);
+      console.log(`   Tool schemas: http://127.0.0.1:${port}/tools`);
+      console.log(`   Documentation: http://127.0.0.1:${port}/docs`);
+      console.log(`   Execute: POST http://127.0.0.1:${port}/execute/{tool_name}`);
+      console.log(`\n   Ready. Connect your AI model.\n`);
+    });
+
+    // Background init
+    ensureInitialized().catch(err => {
+      console.error('Subsystem init failed:', err?.message);
+    });
+
+    process.on('SIGINT', () => {
+      console.log('\n   Shutting down...');
+      process.exit(0);
+    });
+  });
+
+program
+  .command('report')
+  .description('Send an error report to help improve clawd-cursor. Shows a preview before sending.')
+  .option('--log <path>', 'Path to a specific task log file')
+  .option('--note <text>', 'Add a note describing what went wrong')
+  .option('--save-only', 'Save report locally without sending')
+  .action(async (opts) => {
+    const { interactiveReport, buildReport, saveReportLocally, submitReport } = await import('./report');
+
+    if (!process.stdin.isTTY) {
+      // Non-interactive: build and submit directly
+      const report = buildReport(opts.log, opts.note);
+      if (opts.saveOnly) {
+        const p = saveReportLocally(report);
+        console.log(`Report saved: ${p}`);
+      } else {
+        const result = await submitReport(report);
+        if (result.success) {
+          console.log(`Report sent. ID: ${result.reportId}`);
+        } else {
+          const p = saveReportLocally(report);
+          console.log(`Send failed: ${result.error}. Saved locally: ${p}`);
+        }
+      }
+      return;
+    }
+
+    // Interactive mode
+    await interactiveReport();
   });
 
 program.parse();

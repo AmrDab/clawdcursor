@@ -1,0 +1,145 @@
+/**
+ * Orchestration tools — delegate tasks, launch apps, navigate browser.
+ */
+
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import * as path from 'path';
+import type { ToolDefinition } from './types';
+
+const execFileAsync = promisify(execFile);
+const CDP_PORT = 9223;
+
+export function getOrchestrationTools(): ToolDefinition[] {
+  return [
+    {
+      name: 'delegate_to_agent',
+      description: "Delegate a task to clawd-cursor's autonomous pipeline (runs independently with its own LLM reasoning). Returns when the task completes or times out.",
+      parameters: {
+        task: { type: 'string', description: 'Natural language task description', required: true },
+        timeout: { type: 'number', description: 'Timeout in seconds (default: 300)', required: false },
+      },
+      category: 'orchestration',
+      handler: async ({ task, timeout }) => {
+        const timeoutMs = (timeout ?? 300) * 1000;
+        const start = Date.now();
+        try {
+          const resp = await fetch('http://127.0.0.1:3847/task', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ task }),
+          });
+          if (!resp.ok) {
+            const body = await resp.text().catch(() => '');
+            return { text: `Agent API error ${resp.status}: ${body || resp.statusText}`, isError: true };
+          }
+          while (Date.now() - start < timeoutMs) {
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+              const status = await fetch('http://127.0.0.1:3847/status');
+              const data: any = await status.json();
+              if (data.status === 'idle') {
+                const result = data.lastResult;
+                return {
+                  text: JSON.stringify({
+                    success: result?.success ?? false,
+                    verified: result?.verified ?? false,
+                    steps: result?.steps?.length ?? 0,
+                    duration: `${((Date.now() - start) / 1000).toFixed(1)}s`,
+                    lastAction: result?.steps?.slice(-1)?.[0]?.description ?? '(unknown)',
+                  }, null, 2),
+                };
+              }
+            } catch { /* keep polling */ }
+          }
+          await fetch('http://127.0.0.1:3847/abort', { method: 'POST' }).catch(() => {});
+          return { text: `Agent timed out after ${timeout ?? 300}s. Task aborted.`, isError: true };
+        } catch (err: any) {
+          return { text: `Agent unavailable: ${err.message}. Is clawd-cursor running on port 3847?`, isError: true };
+        }
+      },
+    },
+
+    {
+      name: 'open_app',
+      description: 'Open an application by name. Uses platform-native launch.',
+      parameters: {
+        name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint")', required: true },
+      },
+      category: 'orchestration',
+      handler: async ({ name }, ctx) => {
+        await ctx.ensureInitialized();
+        try {
+          if (process.platform === 'win32') {
+            await execFileAsync('powershell.exe', ['-NoProfile', '-Command', `Start-Process "${name}"`], { timeout: 10000 });
+          } else if (process.platform === 'darwin') {
+            await execFileAsync('open', ['-a', name], { timeout: 10000 });
+          } else {
+            await execFileAsync(name, [], { timeout: 10000 });
+          }
+          await new Promise(r => setTimeout(r, 2000));
+          ctx.a11y.invalidateCache();
+          return { text: `Launched: ${name}` };
+        } catch (err: any) {
+          return { text: `Failed to launch "${name}": ${err.message}`, isError: true };
+        }
+      },
+    },
+
+    {
+      name: 'navigate_browser',
+      description: `Open a URL in the browser. Launches with CDP enabled (port ${CDP_PORT}) for DOM interaction. Call cdp_connect after.`,
+      parameters: {
+        url: { type: 'string', description: 'URL to navigate to', required: true },
+      },
+      category: 'orchestration',
+      handler: async ({ url }, ctx) => {
+        await ctx.ensureInitialized();
+        if (await ctx.cdp.isConnected()) {
+          try {
+            const page = ctx.cdp.getPage();
+            if (page) {
+              await page.goto(url, { timeout: 30000, waitUntil: 'domcontentloaded' });
+              const title = await page.title().catch(() => '(loading)');
+              return { text: `Navigated to: "${title}" at ${url}` };
+            }
+          } catch { /* fall through */ }
+        }
+        try {
+          const userDataDir = path.join(process.env.TEMP || process.env.TMPDIR || '/tmp', 'clawd-edge');
+          if (process.platform === 'win32') {
+            await execFileAsync('powershell.exe', ['-NoProfile', '-Command',
+              `Start-Process "msedge" -ArgumentList @("--remote-debugging-port=${CDP_PORT}","--user-data-dir=${userDataDir}","--no-first-run","--disable-default-apps","${url}")`
+            ], { timeout: 10000 });
+          } else if (process.platform === 'darwin') {
+            await execFileAsync('open', ['-a', 'Google Chrome', '--args',
+              `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
+            ], { timeout: 10000 });
+          } else {
+            await execFileAsync('google-chrome', [
+              `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
+            ], { timeout: 10000 });
+          }
+          await new Promise(r => setTimeout(r, 3000));
+          ctx.a11y.invalidateCache();
+          return { text: `Opened: ${url} (CDP port ${CDP_PORT} enabled)` };
+        } catch (err: any) {
+          return { text: `Navigation failed: ${err.message}`, isError: true };
+        }
+      },
+    },
+
+    {
+      name: 'wait',
+      description: 'Wait for a specified duration. Useful after animations or page loads.',
+      parameters: {
+        seconds: { type: 'number', description: 'Duration to wait (0.1 to 30)', required: true, minimum: 0.1, maximum: 30 },
+      },
+      category: 'orchestration',
+      handler: async ({ seconds }) => {
+        await new Promise(r => setTimeout(r, seconds * 1000));
+        return { text: `Waited ${seconds}s` };
+      },
+    },
+  ];
+}

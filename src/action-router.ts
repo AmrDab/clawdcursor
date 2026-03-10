@@ -7,7 +7,7 @@
  */
 
 import * as os from 'os';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { AccessibilityBridge } from './accessibility';
 import { NativeDesktop } from './native-desktop';
@@ -48,6 +48,9 @@ const APP_ALIASES: Record<string, { processNames: string[]; searchTerm: string; 
   'firefox':      { processNames: ['firefox'],              searchTerm: 'Firefox',            macOSAppName: 'Firefox' },
   'safari':       { processNames: ['Safari'],               searchTerm: 'Safari',             macOSAppName: 'Safari' },
   'edge':         { processNames: ['msedge'],               searchTerm: 'Edge',               macOSAppName: 'Microsoft Edge' },
+  'microsoft edge': { processNames: ['msedge'],            searchTerm: 'Edge',               macOSAppName: 'Microsoft Edge' },
+  'outlook':      { processNames: ['olk', 'msedge'],       searchTerm: 'Outlook',            macOSAppName: 'Microsoft Outlook' },
+  'microsoft outlook': { processNames: ['olk', 'msedge'],  searchTerm: 'Outlook',            macOSAppName: 'Microsoft Outlook' },
   'explorer':     { processNames: ['explorer'],             searchTerm: 'File Explorer',      macOSAppName: 'Finder' },
   'finder':       { processNames: ['Finder'],               searchTerm: 'Finder',             macOSAppName: 'Finder' },
   'file explorer': { processNames: ['explorer'],            searchTerm: 'File Explorer',      macOSAppName: 'Finder' },
@@ -144,7 +147,8 @@ export class ActionRouter {
     }
 
     // 2. "type [text]" / "type '[text]'" / "enter [text]"
-    const typeMatch = rawTask.match(/^(?:type|enter|write|input)\s+(?:['"]([^'"]*)['"]\s*|(\S.*))$/i);
+    // NOTE: "write" is excluded — it implies creative composition (needs LLM), not raw typing
+    const typeMatch = rawTask.match(/^(?:type|enter|input)\s+(?:['"]([^'"]*)['"]\s*|(\S.*))$/i);
     if (typeMatch) {
       this.telemetry.nonShortcutHandled += 1;
       return this.handleType(typeMatch[1] ?? typeMatch[2]);
@@ -211,8 +215,11 @@ export class ActionRouter {
     }
 
     // 10. "find <text>" → Ctrl/Cmd+F then type
+    // Only match explicit in-page find requests (with quotes or "in page" qualifier)
+    // NOT intent-based tasks like "find the cheapest flight" or "find a restaurant"
     const mod = PLATFORM === 'darwin' ? 'Super' : 'Control'; // Cmd on macOS, Ctrl on Windows/Linux
-    const findMatch = rawTask.match(/^(?:find|search in page|search within|search)\s+(.+)$/i);
+    const findMatch = rawTask.match(/^(?:search in page|search within|find in page|find on page)\s+(.+)$/i)
+      || rawTask.match(/^(?:find|search)\s+['"](.+)['"]$/i); // only quoted strings
     if (findMatch) {
       await this.desktop.keyPress(`${mod}+f`);
       await this.delay(200);
@@ -420,6 +427,34 @@ export class ActionRouter {
     return null;
   }
 
+  // ─── Helper: Launch Edge with CDP port ─────────────────────────────
+
+  /**
+   * Try to launch Edge with --remote-debugging-port=9222 so CDPDriver can connect.
+   * Tries common installation paths. Returns true if launched successfully.
+   */
+  private async launchEdgeWithCDP(url: string): Promise<boolean> {
+    const edgePaths = [
+      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+    ];
+    for (const edgePath of edgePaths) {
+      try {
+        spawn(edgePath, [
+          '--remote-debugging-port=9222',
+          '--no-first-run',
+          '--no-default-browser-check',
+          url,
+        ], { detached: true, stdio: 'ignore' }).unref();
+        console.log(`   🔌 Launched Edge with CDP port 9222 — ${url}`);
+        return true;
+      } catch {
+        continue;
+      }
+    }
+    return false;
+  }
+
   // ─── Handler: Type Text ────────────────────────────────────────────
 
   private async handleType(text: string): Promise<RouteResult> {
@@ -469,7 +504,16 @@ export class ActionRouter {
         await this.a11y.focusWindow(undefined, browser.processId);
         await this.delay(300);
       } else {
-        // No browser running — launch default browser via OS default handler
+        // No browser running — launch Edge with CDP debugging port for DOM access
+        const launched = await this.launchEdgeWithCDP(fullUrl);
+        if (launched) {
+          await this.delay(2500);
+          return {
+            handled: true,
+            description: `Opened ${fullUrl} in Edge (CDP port 9222 enabled for DOM interaction)`,
+          };
+        }
+        // Fall back to OS default browser
         if (PLATFORM === 'darwin') {
           await execFileAsync('open', [fullUrl]);
         } else {

@@ -1,7 +1,7 @@
 {
   "name": "clawd-cursor",
-  "version": "0.6.3",
-  "description": "AI Desktop Agent — Native screen control via @nut-tree-fork/nut-js. Your AI sees the screen, moves the mouse, types, and completes tasks autonomously.",
+  "version": "0.7.0",
+  "description": "OS-level desktop automation server. Gives any AI model eyes, hands, and ears on a real computer. Model-agnostic — works with Claude, GPT, Gemini, Llama, or any tool-calling model.",
   "main": "dist/index.js",
   "bin": {
     "clawd-cursor": "dist/index.js",
@@ -19,6 +19,7 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "@nut-tree-fork/nut-js": "^4.2.0",
     "commander": "^12.0.0",
     "dotenv": "^16.4.0",
@@ -47,4 +48,3 @@
   },
   "license": "MIT"
 }
-

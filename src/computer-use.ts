@@ -101,6 +101,9 @@ Win11: taskbar BOTTOM centered, system tray bottom-right, high-DPI.
 ACCESSIBILITY: Each tool_result has WINDOWS list, FOCUSED WINDOW UI TREE (elements+coords), TASKBAR APPS.
 Use accessibility data to find exact element positions and verify state.
 
+CRITICAL — CONTEXT AWARENESS:
+When you receive a task with CONTEXT (prior steps listed), ALWAYS take a screenshot FIRST to assess the current state before acting. Do not assume state from the context alone — verify visually.
+
 CRITICAL — SPEED RULES:
 1. BATCH ACTIONS. Return multiple computer tool calls in ONE response whenever possible. This is the #1 speed optimization.
 2. CHECKPOINT STRATEGY: Take a screenshot after critical state changes. Then batch all predictable actions without screenshots.
@@ -118,6 +121,17 @@ PATTERNS:
 - Save file: key "ctrl+s", wait 1s, type absolute path, key "Return" — all in one response
 - Recovery: popup → Escape, wrong page → ctrl+l + correct URL, app frozen → alt+F4 + reopen
 - Draw in Paint/canvas: Select brush tool first (click it in toolbar). Use drag operations for lines. A stick figure needs: circle/square for head (~60px), vertical line for body (~150px), diagonal lines for arms and legs (~80px each). Use LARGE coordinates — small drags produce dots. Minimum drag distance: 50 pixels.
+- After send/submit (Ctrl+Enter, clicking Send button): WAIT 3 seconds before taking a screenshot. The UI needs time to process. Do NOT immediately retry — wait first, then verify.
+- After closing a dialog (Escape, clicking X): WAIT 1 second before the next action.
+- NEVER assume an action failed just because the UI looks the same immediately after. Always wait before judging.
+
+KEYBOARD-OVER-MOUSE (critical on high-DPI displays):
+- ALWAYS prefer keyboard shortcuts over mouse clicks when both work
+- Email composition: Ctrl+N → Tab → type → Tab → type → Tab → type → Ctrl+Enter
+- Switching to an app: Alt+Tab (cycle) NOT clicking taskbar corners
+- Closing dialogs: Escape NOT clicking X button
+- Form fields: Tab to navigate, type directly — do NOT try to click field labels
+- Only use mouse clicks when there is NO keyboard alternative
 
 SCROLLING: NEVER use mouse scroll with small amounts. For scrolling web pages use keyboard: PageDown (full page), Space (half page), or arrow keys. Mouse scroll is unreliable on modern infinite-scroll sites.
 SITE SHORTCUTS (use these instead of clicking — much faster and more reliable):
@@ -137,6 +151,8 @@ For tasks involving multiple apps (copy from X, paste in Y):
 4. When pasting: click in the target area first, THEN Ctrl+V, THEN take a screenshot to verify the paste worked
 5. The task is NOT done until the pasted content is VISIBLE in the target app
 6. Common multi-app pattern: select text → Ctrl+C → open new app (Super + type + Return) → wait 2s → click in text area → Ctrl+V → verify
+
+CRITICAL — NEVER CLOSE TERMINAL/POWERSHELL WINDOWS: The agent runs inside a PowerShell or terminal window. If you close it, the agent dies and the task fails permanently. NEVER click the X on any window titled "PowerShell", "Windows PowerShell", "Command Prompt", "cmd", "Terminal", "clawdcursor", or any terminal/console window. If a terminal window is in the way, click on the TARGET app in the taskbar to bring it to front — do NOT close the terminal.
 
 Do NOT: take screenshots after every action, go one action at a time when you can batch, use search engines for known URLs, retry same failed coords, declare a task complete before ALL steps are done — if the task says copy AND paste, you must do BOTH.`;
 
@@ -416,6 +432,8 @@ export class ComputerUseBrain {
   private lastMouseX = 0;
   private lastMouseY = 0;
   private computerUseOverrides?: ComputerUseOverrides;
+  private targetProcessName: string | null = null;
+  private verifier: import('./verifiers').TaskVerifier | null = null;
 
   // A11y context cache — avoids hammering JXA after every single action
   private a11yCache: { context: string; ts: number; pid?: number } | null = null;
@@ -443,7 +461,11 @@ export class ComputerUseBrain {
     this.llmWidth = Math.min(screen.width, LLM_WIDTH);
     this.llmHeight = Math.round(screen.height / this.scaleFactor);
 
-    console.log(`   🖥️  Computer Use: declaring ${this.llmWidth}x${this.llmHeight} display (scale ${this.scaleFactor}x from ${this.screenWidth}x${this.screenHeight})`);
+    // Display config logged at debug level only
+  }
+
+  setVerifier(v: import('./verifiers').TaskVerifier): void {
+    this.verifier = v;
   }
 
   /**
@@ -464,6 +486,7 @@ export class ComputerUseBrain {
     debugDir: string | null,
     subtaskIndex: number,
     priorSteps?: string[],
+    logger?: import('./task-logger').TaskLogger,
   ): Promise<ComputerUseResult> {
     const steps: StepResult[] = [];
     let llmCalls = 0;
@@ -473,7 +496,7 @@ export class ComputerUseBrain {
     // they're purely vision-driven. Skip all a11y fetches to cut 3-10s per iteration.
     const skipA11yCompletely = this.isVisualLoopSubtask(subtask);
 
-    console.log(`   🖥️  Computer Use: "${subtask}"`);
+    console.log(`   🖥️  Layer 3: "${subtask.substring(0, 80)}${subtask.length > 80 ? '...' : ''}"`);
 
     // Initialize checkpoint tracker
     const taskType = detectTaskType(subtask);
@@ -488,7 +511,7 @@ export class ComputerUseBrain {
         updateCheckpoints(this, action, description, claudeText);
       },
     };
-    console.log(`   📋 Task type: ${taskType} — tracking ${checkpointNames.length} checkpoints`);
+    // checkpoint tracking is internal
 
     // Build context from prior completed steps so the vision LLM doesn't redo work
     let taskMessage = subtask;
@@ -502,6 +525,82 @@ export class ComputerUseBrain {
       content: taskMessage,
     });
 
+    // Fix 3: Window focus helper — verify target app is focused before starting
+    try {
+      const activeWindow = await this.a11y.getActiveWindow();
+      if (activeWindow) {
+        const activeProc = activeWindow.processName.toLowerCase();
+        const taskLower = subtask.toLowerCase();
+        // Detect expected target app from task text
+        const appHints: Record<string, string[]> = {
+          chrome: ['chrome', 'browser', 'web', 'google', 'gmail', 'youtube'],
+          msedge: ['edge', 'browser', 'web', 'bing'],
+          firefox: ['firefox', 'browser', 'web'],
+          outlook: ['outlook', 'email', 'mail'],
+          thunderbird: ['thunderbird', 'email', 'mail'],
+          notepad: ['notepad', 'text editor', 'note'],
+          code: ['vscode', 'vs code', 'visual studio code', 'code editor'],
+          excel: ['excel', 'spreadsheet'],
+          word: ['word', 'document', 'doc'],
+          explorer: ['file explorer', 'files', 'folder'],
+          slack: ['slack'],
+          teams: ['teams'],
+          discord: ['discord'],
+          paint: ['paint', 'draw', 'sketch'],
+        };
+        let expectedApp: string | null = null;
+        for (const [proc, keywords] of Object.entries(appHints)) {
+          if (keywords.some(kw => taskLower.includes(kw))) {
+            expectedApp = proc;
+            break;
+          }
+        }
+        // Store for continuous focus verification during the action loop
+        this.targetProcessName = expectedApp;
+        this.targetProcessId = null; // will be detected on first focus check
+        // Handle known process name aliases (e.g., new Outlook = "olk", not "outlook")
+        const procAliases: Record<string, string[]> = {
+          outlook: ['outlook', 'olk'],
+          chrome: ['chrome'],
+          firefox: ['firefox'],
+          notepad: ['notepad'],
+          word: ['word', 'winword'],
+          excel: ['excel'],
+        };
+        const matchesExpected = procAliases[expectedApp ?? '']
+          ? procAliases[expectedApp!].some(alias => activeProc.includes(alias))
+          : activeProc.includes(expectedApp ?? '');
+        if (expectedApp && !matchesExpected) {
+          // refocusing to expected app
+          // Try to find and focus the target window directly
+          const targetWin = await this.a11y.findWindow(expectedApp);
+          if (targetWin) {
+            this.targetProcessId = targetWin.processId;
+            await this.a11y.focusWindow(undefined, targetWin.processId);
+            await this.delay(500);
+          } else {
+            for (let attempt = 0; attempt < 3; attempt++) {
+              await this.desktop.keyPress('alt+tab');
+              await this.delay(500);
+              const newWindow = await this.a11y.getActiveWindow();
+              const newProc = (newWindow?.processName || '').toLowerCase();
+              const foundTarget = procAliases[expectedApp]
+                ? procAliases[expectedApp].some(alias => newProc.includes(alias))
+                : newProc.includes(expectedApp);
+              if (newWindow && foundTarget) {
+                this.targetProcessId = newWindow.processId;
+                break;
+              }
+            }
+          }
+        } else {
+          this.targetProcessId = activeWindow.processId;
+        }
+      }
+    } catch {
+      // focus check non-fatal
+    }
+
     let consecutiveErrors = 0;
     const MAX_CONSECUTIVE_ERRORS = 5;
     let lastActionSignature = '';
@@ -512,12 +611,13 @@ export class ComputerUseBrain {
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
       llmCalls++;
-      console.log(`   📡 Computer Use call ${i + 1}...`);
-
+      logger?.recordLlmCall();
+      const cuCallStart = performance.now();
       const response = await this.callAPI(messages);
+      const cuCallMs = Math.round(performance.now() - cuCallStart);
 
       if (response.error) {
-        console.log(`   ❌ API error: ${response.error}`);
+        console.log(`   ❌ Layer 3 API error: ${response.error}`);
         steps.push({
           action: 'error',
           description: `Computer Use API error: ${response.error}`,
@@ -533,15 +633,7 @@ export class ComputerUseBrain {
         content: response.content,
       });
 
-      // Log any text blocks
-      for (const block of response.content) {
-        if ((block as TextBlock).type === 'text') {
-          const text = (block as TextBlock).text;
-          if (text.trim()) {
-            console.log(`   💬 Vision LLM: ${text.substring(0, 120)}${text.length > 120 ? '...' : ''}`);
-          }
-        }
-      }
+      // text blocks logged at debug level only
 
       // If end_turn → vision LLM thinks it's done. Verify with checkpoints.
       if (response.stop_reason === 'end_turn') {
@@ -550,21 +642,34 @@ export class ComputerUseBrain {
         const skipVerify = skipA11yCompletely || /\b(draw|paint|sketch|doodle|color|design)\b/i.test(subtask);
 
         if (skipVerify) {
-          console.log(`   ✅ Computer Use: subtask complete (skipping verification)`);
+          console.log(`   ⚠️ Computer Use: LLM declared done (verification SKIPPED — visual/draw task)`);
+          logger?.logStep({ layer: 3, actionType: 'done', result: 'success', verification: { method: 'none', verified: false, detail: 'visual/draw task — verification skipped' } });
           steps.push({
             action: 'done',
-            description: `Computer Use completed: "${subtask}"`,
+            description: `Computer Use completed (unverified): "${subtask}"`,
             success: true,
             timestamp: Date.now(),
           });
           return { success: true, steps, llmCalls };
         }
 
-        // Only verify when completion is uncertain
-        const completedRatio = tracker.checkpoints.filter(c => c.detected).length / tracker.checkpoints.length;
-        if (completedRatio < 0.80) {
-          // For non-visual tasks: take a verification screenshot and ask the vision LLM to confirm
-          console.log(`   🔍 Verifying outcome...`);
+        // Email-specific shortcut: if task was email-related and compose window closed, trust it
+        const isEmailTask = /\b(email|mail|send|compose|outlook|gmail)\b/i.test(subtask);
+        if (isEmailTask) {
+          const activeWin = await this.a11y.getActiveWindow().catch(() => null);
+          const winTitle = (activeWin?.title || '').toLowerCase();
+          const isCompose = winTitle.includes('new message') ||
+                            winTitle.includes('untitled') ||
+                            winTitle.includes('compose');
+          const isInbox = winTitle.includes('inbox') || winTitle.includes('mail') || winTitle.includes('outlook');
+          if (!isCompose && isInbox) {
+            steps.push({ action: 'done', description: `Task complete — compose window closed, now at inbox (${activeWin?.title})`, success: true, timestamp: Date.now() });
+            return { success: true, steps, llmCalls };
+          }
+        }
+
+        // ALWAYS verify with vision when LLM declares done — take a screenshot and confirm
+        {
           llmCalls++;
 
         const [verifyScreenshot, a11yContext] = await Promise.all([
@@ -585,15 +690,16 @@ export class ComputerUseBrain {
         const verifyResponse = await this.callAPI(messages);
         
         if (verifyResponse.error) {
-          // If verification call fails, trust the original result
-          console.log(`   ⚠️ Verification call failed, trusting original result`);
+          // Verification call failed — report as unverified failure
+          console.log(`   ⚠️ Layer 3 verification API call failed — marking unverified`);
+          logger?.logStep({ layer: 3, actionType: 'done', result: 'fail', verification: { method: 'vision', verified: false, detail: 'verification API call failed' } });
           steps.push({
             action: 'done',
-            description: `Computer Use completed: "${subtask}" (unverified)`,
-            success: true,
+            description: `Computer Use completed (UNVERIFIED — verify call failed): "${subtask}"`,
+            success: false,
             timestamp: Date.now(),
           });
-          return { success: true, steps, llmCalls };
+          return { success: false, steps, llmCalls };
         }
 
         // Parse verification response
@@ -602,27 +708,63 @@ export class ComputerUseBrain {
           .map((b: ContentBlock) => (b as TextBlock).text)
           .join('');
         
-        console.log(`   🔍 Verification: ${verifyText.substring(0, 120)}${verifyText.length > 120 ? '...' : ''}`);
-
-        // Check if verified
         const verifiedMatch = verifyText.match(/"verified"\s*:\s*(true|false)/);
         const isVerified = verifiedMatch ? verifiedMatch[1] === 'true' : !verifyText.toLowerCase().includes('"verified": false');
 
         if (isVerified) {
-          console.log(`   ✅ Computer Use: subtask VERIFIED complete`);
-          steps.push({
-            action: 'done',
-            description: `Computer Use completed (verified): "${subtask}"`,
-            success: true,
-            timestamp: Date.now(),
-          });
-          return { success: true, steps, llmCalls };
+          // Ground truth post-verification — don't trust vision alone
+          const groundTruth = await this.groundTruthCheck(subtask, logger);
+          if (groundTruth.pass) {
+            console.log(`   ✅ Layer 3 verified (ground truth: ${groundTruth.detail})`);
+            logger?.logStep({
+              layer: 3,
+              actionType: 'done',
+              result: 'success',
+              verification: { method: 'vision', verified: true, detail: `vision: ${verifyText.substring(0, 100)} | ground_truth: ${groundTruth.detail}` },
+            });
+            steps.push({
+              action: 'done',
+              description: `Computer Use completed (verified): "${subtask}"`,
+              success: true,
+              timestamp: Date.now(),
+            });
+            return { success: true, steps, llmCalls };
+          } else {
+            // Vision said verified but ground truth disagrees
+            console.log(`   ⚠️ Layer 3 vision said verified but ground truth FAILED: ${groundTruth.detail}`);
+            logger?.logStep({
+              layer: 3,
+              actionType: 'done_rejected',
+              result: 'fail',
+              verification: { method: 'a11y_readback', verified: false, detail: `vision_lied: ${groundTruth.detail}` },
+            });
+            // Push back — don't accept, let the loop continue
+            verificationFailures++;
+            if (verificationFailures >= MAX_VERIFICATION_RETRIES) {
+              steps.push({
+                action: 'done',
+                description: `Computer Use completed (UNVERIFIED — ground truth failed): "${subtask}"`,
+                success: false,
+                timestamp: Date.now(),
+              });
+              return { success: false, steps, llmCalls };
+            }
+            messages.push({
+              role: 'assistant',
+              content: verifyResponse.content,
+            });
+            messages.push({
+              role: 'user',
+              content: `GROUND TRUTH CHECK FAILED: ${groundTruth.detail}. The task is NOT actually done. Take a screenshot and fix the issue.`,
+            });
+            continue;
+          }
         }
 
         // Not verified — vision LLM should continue with recovery
         verificationFailures++;
         if (verificationFailures >= MAX_VERIFICATION_RETRIES) {
-          console.log(`   ⚠️ Verification failed ${verificationFailures} times — accepting result to avoid infinite loop`);
+          // max verification retries reached
           steps.push({
             action: 'done',
             description: `Computer Use completed (unverified after ${verificationFailures} retries): "${subtask}"`,
@@ -632,7 +774,7 @@ export class ComputerUseBrain {
           return { success: false, steps, llmCalls };
         }
 
-        console.log(`   ❌ Verification FAILED (${verificationFailures}/${MAX_VERIFICATION_RETRIES}) — analyzing logs and retrying`);
+        // verification failed — retrying
         messages.push({
           role: 'assistant',
           content: verifyResponse.content,
@@ -663,15 +805,6 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
         
         // Continue the loop — vision LLM will take corrective action
         continue;
-        } else {
-          console.log(`   ✅ Skipping verification — ${Math.round(completedRatio * 100)}% checkpoints already confirmed`);
-          steps.push({
-            action: 'done',
-            description: `Computer Use completed (checkpoints): "${subtask}"`,
-            success: true,
-            timestamp: Date.now(),
-          });
-          return { success: true, steps, llmCalls };
         }
       }
 
@@ -701,7 +834,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
 
         if (action === 'screenshot') {
           // Always provide screenshot for explicit screenshot requests
-          console.log(`   📸 Screenshot requested`);
+          // screenshot requested
           // Run screenshot + a11y in parallel when a11y is needed
           const [screenshot, a11yContext] = await Promise.all([
             this.desktop.captureForLLM(),
@@ -734,7 +867,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
             }
             this.heldKeys = [];
           }
-          console.log(`   ${result.error ? '❌' : '✅'} ${result.description}`);
+          if (result.error) console.log(`   ❌ ${result.description}`);
 
           steps.push({
             action: action,
@@ -744,13 +877,21 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
             timestamp: Date.now(),
           });
 
+          logger?.logStep({
+            layer: 3,
+            actionType: action,
+            result: result.error ? 'fail' : 'success',
+            actionParams: { coordinate: toolUse.input.coordinate, text: toolUse.input.text?.substring(0, 80) },
+            error: result.error,
+          });
+
           // Track consecutive errors for bail-out
           if (result.error) {
             consecutiveErrors++;
             lastActionSignature = '';
             repeatedActionStreak = 0;
             if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-              console.log(`   ❌ ${MAX_CONSECUTIVE_ERRORS} consecutive errors — aborting task`);
+              console.log(`   ❌ Layer 3: too many errors — aborting`);
               return { success: false, steps, llmCalls };
             }
           } else {
@@ -786,7 +927,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
               ],
             });
             if (loopDetected) {
-              console.log(`   ♻️  Loop guard: repeated action detected — forcing recovery context`);
+              // loop guard triggered
               repeatedActionStreak = 0;
               lastActionSignature = '';
             }
@@ -799,25 +940,39 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
             const delayMs = isAppLaunch ? 600 : isNavigation ? 300 : isTyping ? 30 : isDrag ? 30 : 80;
             await this.delay(delayMs);
 
-            // Skip a11y after simple clicks/types, and always when in visual-loop mode.
-            // Run screenshot + a11y in parallel when a11y is needed.
-            const skipA11y = skipA11yCompletely || isTyping || (action === 'left_click' && !isNavigation);
-            const [screenshot, a11yContext] = await Promise.all([
-              this.desktop.captureForLLM(),
-              this.getA11yContext(isAppLaunch, skipA11y),
-            ]);
-            if (debugDir) this.saveDebugScreenshot(screenshot.buffer, debugDir, subtaskIndex, i, action);
-            const verifyHint = this.getVerificationHint(action, toolUse.input);
-            const focusHint = this.getFocusHint(action, toolUse.input);
+            // Fix 1: Wait for UI to settle after critical key actions before screenshot
+            await this.waitForUISettle(action, toolUse.input.text || '');
 
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: [
-                this.screenshotToContent(screenshot),
-                { type: 'text', text: `${focusHint}${verifyHint}${a11yContext}` },
-              ],
-            });
+            // Fix 2: Skip expensive screenshot for type/key actions — use a11y verification instead
+            const skipScreenshot = action === 'type' || (action === 'key' && !isNavigation && !isAppLaunch);
+            if (skipScreenshot) {
+              const a11yContext = await this.getA11yContext(false, false);
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [{ type: 'text', text: `Action executed. Current accessibility state:\n${a11yContext}` }],
+              });
+            } else {
+              // Skip a11y after simple clicks/types, and always when in visual-loop mode.
+              // Run screenshot + a11y in parallel when a11y is needed.
+              const skipA11y = skipA11yCompletely || (action === 'left_click' && !isNavigation);
+              const [screenshot, a11yContext] = await Promise.all([
+                this.desktop.captureForLLM(),
+                this.getA11yContext(isAppLaunch, skipA11y),
+              ]);
+              if (debugDir) this.saveDebugScreenshot(screenshot.buffer, debugDir, subtaskIndex, i, action);
+              const verifyHint = this.getVerificationHint(action, toolUse.input);
+              const focusHint = this.getFocusHint(action, toolUse.input);
+
+              toolResults.push({
+                type: 'tool_result',
+                tool_use_id: toolUse.id,
+                content: [
+                  this.screenshotToContent(screenshot),
+                  { type: 'text', text: `${focusHint}${verifyHint}${a11yContext}` },
+                ],
+              });
+            }
           } else {
             // Not last in batch: lightweight response, skip screenshot
             const isAppLaunch = action === 'key' && toolUse.input.text?.toLowerCase().includes('super');
@@ -827,7 +982,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
             const delayMs = isAppLaunch ? 600 : isDrag ? 20 : isClick ? 30 : 80;
             await this.delay(delayMs);
 
-            console.log(`   ⏭️  Skipping screenshot (batch ${ti+1}/${toolUseBlocks.length})`);
+            // batch action — skip screenshot
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
@@ -858,7 +1013,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
       });
     }
 
-    console.log(`   ⚠️ Max iterations (${MAX_ITERATIONS}) reached`);
+    console.log(`   ⚠️ Layer 3: max iterations reached`);
     return { success: false, steps, llmCalls };
   }
 
@@ -933,6 +1088,42 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
     return { content: [], stop_reason: 'end_turn', error: 'Max retries exceeded' };
   }
 
+  // ─── Ground Truth Post-Verification ──────────────────────────
+
+  /**
+   * Programmatic verification after vision model claims done.
+   * Uses UIA/clipboard/window state — NOT another LLM call.
+   * Returns { pass: true/false, detail: string }
+   */
+  private async groundTruthCheck(
+    subtask: string,
+    _logger?: import('./task-logger').TaskLogger,
+  ): Promise<{ pass: boolean; detail: string }> {
+    try {
+      if (this.verifier) {
+        const readClip = () => this.a11y.readClipboard();
+        const result = await this.verifier.verify(subtask, readClip);
+        return { pass: result.pass, detail: `[${result.method}] ${result.detail}` };
+      }
+
+      // Minimal inline fallback when no verifier is set
+      const activeWin = await this.a11y.getActiveWindow().catch(() => null);
+      const processName = (activeWin?.processName || '').toLowerCase();
+
+      if (/notepad/i.test(subtask) || processName === 'notepad') {
+        const focused = await this.a11y.getFocusedElement().catch(() => null);
+        if (focused?.value && focused.value.trim().length > 10) {
+          return { pass: true, detail: `notepad has ${focused.value.length} chars` };
+        }
+        return { pass: false, detail: `notepad appears empty` };
+      }
+
+      return { pass: true, detail: `no verifier available — trusting vision` };
+    } catch (err) {
+      return { pass: true, detail: `ground truth error: ${String(err).substring(0, 80)}` };
+    }
+  }
+
   // ─── Action Execution ──────────────────────────────────────────
 
   private async executeAction(toolUse: ToolUseBlock): Promise<{ description: string; error?: string }> {
@@ -952,6 +1143,11 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
     }
 
     try {
+      // Verify target app is still focused before executing (prevents typing in wrong window)
+      if (action !== 'screenshot') {
+        await this.verifyAndRefocus();
+      }
+
       switch (action) {
         case 'left_click': {
           const [x, y] = this.scale(coordinate!);
@@ -1026,6 +1222,15 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
 
         case 'key': {
           if (!text) return { description: 'Key press: empty', error: 'No key provided' };
+          // Block Alt+Tab — it breaks window focus and the agent loses context
+          const keyNorm = text.toLowerCase().replace(/\s/g, '');
+          if (keyNorm.includes('alt+tab') || keyNorm.includes('alt+shift+tab')) {
+            return { description: `Key press: ${text} — BLOCKED (Alt+Tab disabled, use focusWindow instead)` };
+          }
+          // Block Win/Super key — opens Start menu chaos
+          if (keyNorm === 'super' || keyNorm === 'win' || keyNorm === 'meta') {
+            return { description: `Key press: ${text} — BLOCKED (Win key disabled)` };
+          }
           // Map Anthropic key names to nut-js key names
           const mappedKey = this.mapKeyName(text);
           await this.desktop.keyPress(mappedKey);
@@ -1086,6 +1291,64 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
     return (hasLoop && hasScreenshot) || (hasLoop && hasWaitRespond);
   }
 
+
+  /**
+   * Verify the target app is still focused. If not, refocus it.
+   * Prevents actions landing in the wrong window (e.g., typing in Edge URL bar).
+   */
+  private targetProcessId: number | null = null;
+
+  private async verifyAndRefocus(): Promise<void> {
+    if (!this.targetProcessName) return;
+    try {
+      const activeWin = await this.a11y.getActiveWindow();
+      if (!activeWin) return;
+      const activeProc = activeWin.processName.toLowerCase();
+      const targetProc = this.targetProcessName.toLowerCase();
+
+      // Handle aliases (e.g., new Outlook = "olk")
+      const procAliases: Record<string, string[]> = {
+        outlook: ['outlook', 'olk'],
+        chrome: ['chrome'],
+        msedge: ['msedge', 'edge'],
+        firefox: ['firefox'],
+        notepad: ['notepad'],
+        word: ['word', 'winword'],
+        excel: ['excel'],
+      };
+
+      const aliases = procAliases[targetProc] || [targetProc];
+      const isFocused = aliases.some(alias => activeProc.includes(alias));
+
+      if (!isFocused) {
+        // refocusing — focus lost
+        // First try by stored processId (fastest, most reliable)
+        if (this.targetProcessId) {
+          await this.a11y.focusWindow(undefined, this.targetProcessId);
+          await this.delay(400);
+          return;
+        }
+        // Try by process name through window search
+        const targetWin = await this.a11y.findWindow(this.targetProcessName);
+        if (targetWin) {
+          this.targetProcessId = targetWin.processId;
+          await this.a11y.focusWindow(undefined, targetWin.processId);
+          await this.delay(400);
+        } else {
+          // Fallback: Alt+Tab to cycle
+          await this.desktop.keyPress('alt+tab');
+          await this.delay(500);
+        }
+      } else {
+        // Store the processId for faster refocus next time
+        if (!this.targetProcessId) {
+          this.targetProcessId = activeWin.processId;
+        }
+      }
+    } catch {
+      // Non-fatal — best effort
+    }
+  }
 
   /** Build a compact signature used to detect repeated no-progress action loops. */
   private actionSignature(toolUse: ToolUseBlock): string {
@@ -1241,6 +1504,35 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * For critical actions (send/submit/confirm/close), wait up to maxMs for
+   * the a11y tree to reflect the expected change, polling every 400ms.
+   * Returns true if a change was detected, false if timed out.
+   */
+  private async waitForUISettle(action: string, keyText: string, maxMs = 4000): Promise<boolean> {
+    const criticalKeys = ['ctrl+return', 'ctrl+enter', 'return', 'enter', 'escape', 'ctrl+s', 'ctrl+w', 'alt+f4'];
+    const keyLower = (keyText || '').toLowerCase().replace(/\s/g, '');
+    if (action !== 'key' || !criticalKeys.some(k => keyLower.includes(k))) return false;
+
+    // settling after key press
+    const before = await this.a11y.getActiveWindow().catch(() => null);
+    const beforeTitle = before?.title || '';
+
+    const interval = 400;
+    const attempts = Math.ceil(maxMs / interval);
+    for (let i = 0; i < attempts; i++) {
+      await this.delay(interval);
+      const after = await this.a11y.getActiveWindow().catch(() => null);
+      const afterTitle = after?.title || '';
+      if (afterTitle !== beforeTitle) {
+        // UI settled
+        return true; // window changed — action took effect
+      }
+    }
+    // settle timeout
+    return false;
   }
 }
 

@@ -14,6 +14,7 @@
  *   GET  /favorites  — list saved favorite commands
  *   POST /favorites  — add a command to favorites
  *   DELETE /favorites — remove a command from favorites
+ *   POST /report     — submit an error report (opt-in)
  */
 
 import express from 'express';
@@ -123,6 +124,14 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   const app = express();
   app.use(express.json());
 
+  // Handle malformed JSON gracefully (e.g. control characters from terminal)
+  app.use((err: any, _req: any, res: any, next: any) => {
+    if (err.type === 'entity.parse.failed') {
+      return res.status(400).json({ error: 'Invalid JSON in request body' });
+    }
+    next(err);
+  });
+
   // Mount the web dashboard at GET /
   mountDashboard(app);
 
@@ -198,6 +207,28 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
     res.json(agent.getState());
   });
 
+  // Task logs — structured JSONL logs for every task
+  app.get('/task-logs', (_req, res) => {
+    try {
+      const logger = (agent as any).logger;
+      if (!logger) return res.json([]);
+      res.json(logger.getRecentSummaries(50));
+    } catch { res.json([]); }
+  });
+
+  app.get('/task-logs/current', (_req, res) => {
+    try {
+      const logger = (agent as any).logger;
+      const logPath = logger?.getCurrentLogPath();
+      if (!logPath || !require('fs').existsSync(logPath)) {
+        return res.status(404).json({ error: 'No current log' });
+      }
+      const content = require('fs').readFileSync(logPath, 'utf-8');
+      const entries = content.trim().split('\n').map((l: string) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean);
+      res.json(entries);
+    } catch { res.status(500).json({ error: 'Failed to read log' }); }
+  });
+
   // Approve or reject a pending confirmation
   app.post('/confirm', (req, res) => {
     const parsed = confirmSchema.safeParse(req.body);
@@ -229,6 +260,99 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   // Get recent log entries
   app.get('/logs', (req, res) => {
     res.json(logBuffer);
+  });
+
+  // Screenshot — returns PNG image of current screen
+  app.get('/screenshot', async (_req, res) => {
+    try {
+      const desktop = agent.getDesktop();
+      const frame = await desktop.captureForLLM();
+      res.set('Content-Type', 'image/png');
+      res.set('X-Scale-Factor', String(frame.scaleFactor));
+      res.set('X-Screen-Width', String(frame.llmWidth));
+      res.set('X-Screen-Height', String(frame.llmHeight));
+      res.send(frame.buffer);
+    } catch (err) {
+      res.status(500).json({ error: `Screenshot failed: ${(err as Error).message}` });
+    }
+  });
+
+  // Direct action execution — lets an external brain (e.g. Claude Code) drive the agent
+  // Coordinates are in LLM-space (1280px wide) — auto-scaled to real screen
+  app.post('/action', async (req, res) => {
+    try {
+      const { action, x, y, text, key, button, scrollDelta } = req.body;
+      if (!action) return res.status(400).json({ error: 'Missing "action" field' });
+
+      const desktop = agent.getDesktop();
+      const screen = desktop.getScreenSize();
+      const LLM_WIDTH = 1280;
+      const scale = screen.width > LLM_WIDTH ? screen.width / LLM_WIDTH : 1;
+
+      const realX = x != null ? Math.round(Number(x) * scale) : 0;
+      const realY = y != null ? Math.round(Number(y) * scale) : 0;
+
+      switch (action) {
+        case 'click':
+          if (x == null || y == null) return res.status(400).json({ error: 'click requires x, y' });
+          await desktop.executeMouseAction({ kind: button === 'right' ? 'right_click' : 'click', x: realX, y: realY });
+          res.json({ ok: true, action: 'click', x, y, realX, realY });
+          break;
+        case 'double_click':
+          if (x == null || y == null) return res.status(400).json({ error: 'double_click requires x, y' });
+          await desktop.executeMouseAction({ kind: 'double_click', x: realX, y: realY });
+          res.json({ ok: true, action: 'double_click', x, y, realX, realY });
+          break;
+        case 'type':
+          if (!text) return res.status(400).json({ error: 'type requires text' });
+          await desktop.executeKeyboardAction({ kind: 'type', text });
+          res.json({ ok: true, action: 'type', length: text.length });
+          break;
+        case 'key':
+          if (!key) return res.status(400).json({ error: 'key requires key' });
+          await desktop.executeKeyboardAction({ kind: 'key_press', key });
+          res.json({ ok: true, action: 'key', key });
+          break;
+        case 'scroll':
+          if (x == null || y == null) return res.status(400).json({ error: 'scroll requires x, y' });
+          await desktop.executeMouseAction({ kind: 'scroll', x: realX, y: realY, scrollDelta: Number(scrollDelta || 3) });
+          res.json({ ok: true, action: 'scroll', x, y, realX, realY, scrollDelta: scrollDelta || 3 });
+          break;
+        case 'move':
+          if (x == null || y == null) return res.status(400).json({ error: 'move requires x, y' });
+          await desktop.executeMouseAction({ kind: 'move', x: realX, y: realY });
+          res.json({ ok: true, action: 'move', x, y, realX, realY });
+          break;
+        default:
+          res.status(400).json({ error: `Unknown action: ${action}` });
+      }
+    } catch (err) {
+      res.status(500).json({ error: `Action failed: ${(err as Error).message}` });
+    }
+  });
+
+  // Error report — opt-in submission of redacted task logs
+  app.post('/report', async (req, res) => {
+    try {
+      const { apiSubmitReport } = await import('./report');
+      const { userNote, logIndex } = req.body || {};
+      const result = await apiSubmitReport({
+        userNote: typeof userNote === 'string' ? userNote : undefined,
+        logIndex: typeof logIndex === 'number' ? logIndex : undefined,
+      });
+      if (result.success) {
+        res.json({ success: true, reportId: result.reportId, preview: result.preview });
+      } else {
+        res.status(result.error === 'No task logs found' ? 404 : 502).json({
+          success: false,
+          error: result.error,
+          reportId: result.reportId,
+          preview: result.preview,
+        });
+      }
+    } catch (err) {
+      res.status(500).json({ error: `Report failed: ${(err as Error).message}` });
+    }
   });
 
   // Health check

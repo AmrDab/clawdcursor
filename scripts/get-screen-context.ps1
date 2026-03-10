@@ -9,7 +9,7 @@
 #>
 param(
     [int]$FocusedProcessId = 0,
-    [int]$MaxDepth = 2
+    [int]$MaxDepth = 4
 )
 
 try {
@@ -34,7 +34,8 @@ $interactiveTypes = @(
 function ConvertTo-UINode {
     param(
         [System.Windows.Automation.AutomationElement]$Element,
-        [int]$Depth = 0
+        [int]$Depth = 0,
+        [int]$TreeMaxDepth = 4
     )
 
     if ($null -eq $Element) { return $null }
@@ -47,23 +48,19 @@ function ConvertTo-UINode {
 
     # Skip non-interactive unnamed elements
     if (-not $isInteractive -and -not $hasName -and $Depth -gt 0) {
-        # Still recurse into children — interactive elements may be nested
+        if ($Depth -ge $TreeMaxDepth) { return $null }
         $childNodes = @()
-        if ($Depth -lt $MaxDepth) {
-            try {
-                $kids = $Element.FindAll(
-                    [System.Windows.Automation.TreeScope]::Children,
-                    [System.Windows.Automation.Condition]::TrueCondition
-                )
-                foreach ($kid in $kids) {
-                    $childNode = ConvertTo-UINode -Element $kid -Depth ($Depth + 1)
-                    if ($null -ne $childNode) { $childNodes += $childNode }
-                }
-            } catch {}
-        }
-        # If this node has no interesting children, skip it entirely
+        try {
+            $kids = $Element.FindAll(
+                [System.Windows.Automation.TreeScope]::Children,
+                [System.Windows.Automation.Condition]::TrueCondition
+            )
+            foreach ($kid in $kids) {
+                $childNode = ConvertTo-UINode -Element $kid -Depth ($Depth + 1) -TreeMaxDepth $TreeMaxDepth
+                if ($null -ne $childNode) { $childNodes += $childNode }
+            }
+        } catch {}
         if ($childNodes.Count -eq 0) { return $null }
-        # Return children directly (flatten)
         return $childNodes
     }
 
@@ -87,20 +84,17 @@ function ConvertTo-UINode {
         children     = @()
     }
 
-    if ($Depth -lt $MaxDepth) {
+    if ($Depth -lt $TreeMaxDepth) {
         try {
             $kids = $Element.FindAll(
                 [System.Windows.Automation.TreeScope]::Children,
                 [System.Windows.Automation.Condition]::TrueCondition
             )
             foreach ($kid in $kids) {
-                $childNode = ConvertTo-UINode -Element $kid -Depth ($Depth + 1)
+                $childNode = ConvertTo-UINode -Element $kid -Depth ($Depth + 1) -TreeMaxDepth $TreeMaxDepth
                 if ($null -ne $childNode) {
-                    if ($childNode -is [array]) {
-                        $node.children += $childNode
-                    } else {
-                        $node.children += $childNode
-                    }
+                    if ($childNode -is [array]) { $node.children += $childNode }
+                    else { $node.children += $childNode }
                 }
             }
         } catch {}
@@ -172,7 +166,7 @@ try {
             $condition
         )
         if ($null -ne $targetWindow) {
-            $uiTree = ConvertTo-UINode -Element $targetWindow -Depth 0
+            $uiTree = ConvertTo-UINode -Element $targetWindow -Depth 0 -TreeMaxDepth $MaxDepth
         }
     }
 

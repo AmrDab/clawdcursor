@@ -289,27 +289,27 @@ export class NativeDesktop extends EventEmitter {
 
   async mouseClick(x: number, y: number, button: number = 1): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Click at (${x}, ${y})`);
     await mouse.setPosition(new Point(x, y));
     await this.delay(50);
     const btn = this.mapButton(button);
     await mouse.click(btn);
+    console.log(`   🖱️  Click at (${x}, ${y})`);
   }
 
   async mouseDoubleClick(x: number, y: number): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Double-click at (${x}, ${y})`);
     await mouse.setPosition(new Point(x, y));
     await this.delay(50);
     await mouse.doubleClick(Button.LEFT);
+    console.log(`   🖱️  Double-click at (${x}, ${y})`);
   }
 
   async mouseRightClick(x: number, y: number): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Right-click at (${x}, ${y})`);
     await mouse.setPosition(new Point(x, y));
     await this.delay(50);
     await mouse.rightClick();
+    console.log(`   🖱️  Right-click at (${x}, ${y})`);
   }
 
   async mouseMove(x: number, y: number): Promise<void> {
@@ -319,7 +319,6 @@ export class NativeDesktop extends EventEmitter {
 
   async mouseScroll(x: number, y: number, delta: number): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Scroll at (${x}, ${y}) delta=${delta}`);
     await mouse.setPosition(new Point(x, y));
     await this.delay(30);
     const steps = Math.abs(Math.round(delta));
@@ -331,17 +330,17 @@ export class NativeDesktop extends EventEmitter {
       }
       await this.delay(30);
     }
+    console.log(`   🖱️  Scroll at (${x}, ${y}) delta=${delta}`);
   }
 
   async typeText(text: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    console.log(`   ⌨️  Typing: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
     await keyboard.type(text);
+    console.log(`   ⌨️  Typed: "${text.substring(0, 60)}${text.length > 60 ? '...' : ''}"`);
   }
 
   async keyPress(keyCombo: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
-    console.log(`   ⌨️  Key press: ${keyCombo}`);
 
     const parts = keyCombo.split('+').map(k => k.trim());
     const keys = parts.map(k => this.mapKey(k));
@@ -361,6 +360,7 @@ export class NativeDesktop extends EventEmitter {
         await this.delay(30);
       }
     }
+    console.log(`   ⌨️  Key press: ${keyCombo}`);
   }
 
   async executeMouseAction(action: MouseAction): Promise<void> {

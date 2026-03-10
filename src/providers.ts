@@ -1,4 +1,4 @@
-import { resolveApiConfig } from './openclaw-credentials';
+import { resolveApiConfig } from './credentials';
 
 /**
  * Provider Model Map — auto-selects cheap/expensive models per provider.
@@ -234,7 +234,7 @@ function isOllamaVisionModel(modelId: string): boolean {
 
 /**
  * Env var names we check per provider key.
- * AI_API_KEY is a generic fallback; OpenClaw-provided provider hints are preferred.
+ * AI_API_KEY is a generic fallback; external config provider hints are preferred.
  */
 
 const PROVIDER_ENV_VARS: Record<string, string[]> = {
@@ -259,11 +259,11 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
   const resolvedApi = resolveApiConfig();
   const genericKey = resolvedApi.apiKey || process.env.AI_API_KEY || '';
   const genericProviderHint = resolvedApi.provider || '';
-  const genericIsOpenClaw = resolvedApi.source === 'openclaw';
+  const isExternalSource = resolvedApi.source === 'external';
 
-  // When OpenClaw is the source, load ALL provider keys from config files
-  const openclawProviderKeys: Record<string, { apiKey: string; baseUrl?: string }> = {};
-  if (resolvedApi.source === 'openclaw') {
+  // When credentials come from external config, load ALL provider keys from config files
+  const externalProviderKeys: Record<string, { apiKey: string; baseUrl?: string }> = {};
+  if (resolvedApi.source === 'external') {
     // resolveApiConfig only returns the "best" provider.
     // We need ALL of them for scanning. Read auth-profiles directly.
     try {
@@ -293,7 +293,7 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
               const apiKey = val?.key || val?.apiKey || val?.api_key || '';
               if (!apiKey) continue;
               
-              // Map OpenClaw provider names to Clawd Cursor provider keys
+              // Map external provider names to Clawd Cursor provider keys
               const providerMap: Record<string, string> = {
                 'anthropic': 'anthropic',
                 'openai': 'openai',
@@ -305,8 +305,8 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
               };
               
               const clawdKey = providerMap[providerName];
-              if (clawdKey && !openclawProviderKeys[clawdKey]) {
-                openclawProviderKeys[clawdKey] = { apiKey };
+              if (clawdKey && !externalProviderKeys[clawdKey]) {
+                externalProviderKeys[clawdKey] = { apiKey };
               }
             }
           } catch { /* skip */ }
@@ -340,17 +340,17 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
               };
               
               const clawdKey = providerMap[provName.toLowerCase()];
-              if (clawdKey && openclawProviderKeys[clawdKey] && baseUrl) {
-                openclawProviderKeys[clawdKey].baseUrl = baseUrl;
+              if (clawdKey && externalProviderKeys[clawdKey] && baseUrl) {
+                externalProviderKeys[clawdKey].baseUrl = baseUrl;
               }
             }
           } catch { /* skip */ }
         }
       }
-    } catch { /* OpenClaw config read failed, continue with existing logic */ }
-    
-    if (Object.keys(openclawProviderKeys).length > 0) {
-      console.log(`   🔗 OpenClaw providers detected: ${Object.keys(openclawProviderKeys).join(', ')}`);
+    } catch { /* External config read failed, continue with existing logic */ }
+
+    if (Object.keys(externalProviderKeys).length > 0) {
+      console.log(`   🔗 External providers detected: ${Object.keys(externalProviderKeys).join(', ')}`);
     }
   }
 
@@ -361,8 +361,8 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
 
     if (genericProviderHint === providerKey && genericKey) {
       key = genericKey;
-    } else if (genericIsOpenClaw && !genericProviderHint && providerKey === 'openai' && genericKey) {
-      // OpenClaw may provide an OpenAI-compatible endpoint without a provider label.
+    } else if (isExternalSource && !genericProviderHint && providerKey === 'openai' && genericKey) {
+      // External config may provide an OpenAI-compatible endpoint without a provider label.
       key = genericKey;
     }
 
@@ -374,13 +374,13 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
       }
     }
 
-    // OpenClaw multi-provider keys
-    if (!key && openclawProviderKeys[providerKey]) {
-      key = openclawProviderKeys[providerKey].apiKey;
+    // External multi-provider keys
+    if (!key && externalProviderKeys[providerKey]) {
+      key = externalProviderKeys[providerKey].apiKey;
     }
 
     // For standalone AI_API_KEY, infer provider by key format as a best-effort fallback.
-    if (!key && genericKey && !(genericIsOpenClaw && !genericProviderHint)) {
+    if (!key && genericKey && !(isExternalSource && !genericProviderHint)) {
       const detected = detectProvider(genericKey);
       if (detected === providerKey) {
         key = genericKey;
@@ -448,8 +448,8 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
 
   results.push(ollamaResult);
 
-  // ── Create dynamic provider entries for unknown OpenClaw providers ──────
-  if (resolvedApi.source === 'openclaw') {
+  // ── Create dynamic provider entries for unknown external providers ──────
+  if (resolvedApi.source === 'external') {
     try {
       const os = await import('os');
       const fs = await import('fs');
@@ -510,7 +510,7 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
               
               if (!apiKey) continue;
               
-              // Extract model names from OpenClaw config
+              // Extract model names from external config
               const textModels = Object.keys(models).filter(m => 
                 !m.toLowerCase().includes('vision') && 
                 !m.toLowerCase().includes('dall-e') &&
@@ -547,7 +547,7 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
                   key: dynamicProviderKey,
                   name: provName,
                   available: true,
-                  detail: `OpenClaw config (${maskKey(apiKey)})`,
+                  detail: `external config (${maskKey(apiKey)})`,
                   apiKey: apiKey,
                 });
                 
@@ -558,22 +558,22 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
           } catch { /* skip */ }
         }
       }
-    } catch { /* OpenClaw dynamic provider creation failed, continue */ }
+    } catch { /* External dynamic provider creation failed, continue */ }
   }
 
-  // Apply OpenClaw base URLs to custom providers (e.g., moonshot uses api.moonshot.cn, not openai.com)
+  // Apply external base URLs to custom providers (e.g., moonshot uses api.moonshot.cn, not openai.com)
   for (const result of results) {
-    if (openclawProviderKeys[result.key]?.baseUrl && result.available) {
+    if (externalProviderKeys[result.key]?.baseUrl && result.available) {
       // Store for later use in pipeline building
-      (result as any).openclawBaseUrl = openclawProviderKeys[result.key].baseUrl;
+      (result as any).externalBaseUrl = externalProviderKeys[result.key].baseUrl;
     }
   }
 
   return results;
 }
 
-/** Text model preference: cheapest/fastest first */
-const TEXT_MODEL_PREFERENCE: string[] = ['ollama', 'groq', 'together', 'deepseek', 'kimi', 'openai', 'anthropic'];
+/** Text model preference: fastest/most-reliable first */
+const TEXT_MODEL_PREFERENCE: string[] = ['ollama', 'groq', 'together', 'deepseek', 'anthropic', 'openai', 'kimi'];
 
 /** Vision model preference: best vision capability first */
 const VISION_MODEL_PREFERENCE: string[] = ['anthropic', 'openai', 'groq', 'together', 'kimi', 'deepseek', 'ollama'];

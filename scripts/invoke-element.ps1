@@ -85,47 +85,57 @@ try {
         exit 0
     }
 
-    # Build the search condition for the element
+    # Build condition (without name — fuzzy name matching done below)
     $conditions = @()
-
     if ($AutomationId -ne "") {
         $conditions += New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::AutomationIdProperty,
-            $AutomationId
+            [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $AutomationId
         )
     }
-
-    if ($Name -ne "") {
-        $conditions += New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::NameProperty,
-            $Name
-        )
-    }
-
     if ($ControlType -ne "" -and $ctMap.ContainsKey($ControlType)) {
         $conditions += New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
-            $ctMap[$ControlType]
+            [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ctMap[$ControlType]
         )
     }
-
-    if ($conditions.Count -eq 0) {
-        [Console]::Out.Write((@{ success = $false; error = "Must specify at least -AutomationId or -Name to identify the element" } | ConvertTo-Json -Compress))
+    if ($conditions.Count -eq 0 -and $Name -eq "") {
+        [Console]::Out.Write((@{ success = $false; error = "Must specify at least -AutomationId or -Name" } | ConvertTo-Json -Compress))
         exit 0
     }
 
-    if ($conditions.Count -eq 1) {
-        $searchCondition = $conditions[0]
-    } else {
-        $searchCondition = New-Object System.Windows.Automation.AndCondition(
-            [System.Windows.Automation.Condition[]]$conditions
-        )
+    $searchCondition = if ($conditions.Count -eq 0) { [System.Windows.Automation.Condition]::TrueCondition }
+        elseif ($conditions.Count -eq 1) { $conditions[0] }
+        else { New-Object System.Windows.Automation.AndCondition([System.Windows.Automation.Condition[]]$conditions) }
+
+    $element = $null
+
+    # Fast path: exact automationId match
+    if ($AutomationId -ne "" -and $conditions.Count -gt 0) {
+        $element = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $searchCondition)
     }
 
-    $element = $window.FindFirst(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        $searchCondition
-    )
+    # Fuzzy name match: strip keyboard shortcut suffix ("Save\tCtrl+S" → "save")
+    if ($null -eq $element -and $Name -ne "") {
+        $nameLower = $Name.ToLower()
+        $candidates = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $searchCondition)
+        # First pass: exact stripped match
+        foreach ($el in $candidates) {
+            try {
+                $elName = ($el.Current.Name -replace '\t.*$', '').Trim().ToLower()
+                if ($elName -eq $nameLower -and $elName.Length -gt 0) { $element = $el; break }
+            } catch {}
+        }
+        # Second pass: contains match
+        if ($null -eq $element) {
+            foreach ($el in $candidates) {
+                try {
+                    $elName = ($el.Current.Name -replace '\t.*$', '').Trim().ToLower()
+                    if ($elName.Length -gt 0 -and ($elName.Contains($nameLower) -or $nameLower.Contains($elName))) {
+                        $element = $el; break
+                    }
+                } catch {}
+            }
+        }
+    }
 
     if ($null -eq $element) {
         $searchDesc = ""

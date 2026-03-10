@@ -129,16 +129,25 @@ export class CDPDriver {
     try {
       this.browser = await chromium.connectOverCDP(
         `http://127.0.0.1:${this.cdpPort}`,
-        { timeout: 5000 },
+        { timeout: 15000 },
       );
       this.ownsBrowser = true;
 
-      // Get the most recent tab
+      // Get the most relevant tab — search ALL browser contexts (not just the first)
       const contexts = this.browser.contexts();
-      if (contexts.length > 0) {
-        const pages = contexts[0].pages();
-        this.activePage = pages.length > 0 ? pages[pages.length - 1] : null;
+      let bestPage: Page | null = null;
+      let fallbackPage: Page | null = null;
+      for (const ctx of contexts) {
+        for (const p of ctx.pages()) {
+          const url = p.url();
+          if (!url.startsWith('edge://') && !url.startsWith('chrome://') && !url.startsWith('about:')) {
+            bestPage = p; // Keep overwriting — last real page wins
+          } else if (!fallbackPage) {
+            fallbackPage = p;
+          }
+        }
       }
+      this.activePage = bestPage || fallbackPage;
 
       if (!this.activePage) {
         console.warn('   ⚠️ CDPDriver: connected but no pages found');
@@ -164,6 +173,33 @@ export class CDPDriver {
     this.connected = true;
     this.ownsBrowser = false;
     console.log(`   🔌 CDPDriver: attached to existing page`);
+  }
+
+  /**
+   * Switch to a tab whose URL contains the given substring.
+   * Useful after navigation when the agent needs to find a specific page.
+   */
+  async switchToTabByUrl(urlSubstring: string): Promise<boolean> {
+    if (!this.browser) return false;
+    try {
+      const contexts = this.browser.contexts();
+      for (const ctx of contexts) {
+        for (const page of ctx.pages()) {
+          const pageUrl = page.url().toLowerCase();
+          if (pageUrl.includes(urlSubstring.toLowerCase())) {
+            this.activePage = page;
+            this.cursorInjected = false; // Reset — new page doesn't have our overlay
+            await page.bringToFront().catch(() => {});
+            const title = await page.title().catch(() => '(unknown)');
+            console.log(`   🔌 CDPDriver: switched to tab "${title}" at ${page.url()}`);
+            return true;
+          }
+        }
+      }
+      return false;
+    } catch {
+      return false;
+    }
   }
 
   /** Check if we're connected and the page is still alive */
@@ -193,6 +229,7 @@ export class CDPDriver {
           const title = (await page.title()).toLowerCase();
           if (url.includes(lower) || title.includes(lower)) {
             this.activePage = page;
+            this.cursorInjected = false; // Reset — new page doesn't have our overlay
             await page.bringToFront();
             console.log(`   🔌 CDPDriver: switched to tab "${await page.title()}"`);
             return true;
@@ -217,7 +254,7 @@ export class CDPDriver {
   async querySelectorAll(selector: string, maxResults = 20): Promise<DOMElementInfo[]> {
     const pg = this.requirePage();
 
-    const results = await pg.evaluate(
+    return pg.evaluate(
       (args: { sel: string; max: number }) => {
         const elements = document.querySelectorAll(args.sel);
         const infos: any[] = [];
@@ -226,11 +263,38 @@ export class CDPDriver {
           const el = elements[i] as HTMLElement;
           const rect = el.getBoundingClientRect();
 
+          // Generate a unique CSS selector inside evaluate where we have DOM access
+          let selector = '';
+          if (el.id) {
+            selector = `#${el.id}`;
+          } else {
+            const testId = el.getAttribute('data-testid');
+            if (testId) {
+              selector = `[data-testid="${testId}"]`;
+            } else {
+              // Calculate correct nth-of-type among siblings
+              const parent = el.parentElement;
+              if (parent) {
+                let typeIndex = 0;
+                for (const sibling of parent.children) {
+                  if (sibling.tagName === el.tagName) {
+                    typeIndex++;
+                    if (sibling === el) break;
+                  }
+                }
+                selector = `${el.tagName.toLowerCase()}:nth-of-type(${typeIndex})`;
+              } else {
+                selector = el.tagName.toLowerCase();
+              }
+            }
+          }
+
           infos.push({
+            selector,
             tagName: el.tagName.toLowerCase(),
             text: (el.textContent || '').trim().substring(0, 100),
             id: el.id || '',
-            className: el.className || '',
+            className: typeof el.className === 'string' ? el.className : '',
             role: el.getAttribute('role') || '',
             ariaLabel: el.getAttribute('aria-label') || '',
             type: (el as HTMLInputElement).type || '',
@@ -251,12 +315,6 @@ export class CDPDriver {
       },
       { sel: selector, max: maxResults },
     );
-
-    // Add unique CSS selectors
-    return results.map((info: any, i: number) => ({
-      ...info,
-      selector: info.id ? `#${info.id}` : `${selector}:nth-of-type(${i + 1})`,
-    }));
   }
 
   /**
@@ -302,7 +360,7 @@ export class CDPDriver {
                 tagName: htmlEl.tagName.toLowerCase(),
                 text: (htmlEl.textContent || '').trim().substring(0, 100),
                 id: htmlEl.id || '',
-                className: htmlEl.className || '',
+                className: typeof htmlEl.className === 'string' ? htmlEl.className : '',
                 role: htmlEl.getAttribute('role') || '',
                 ariaLabel: htmlEl.getAttribute('aria-label') || '',
                 type: (htmlEl as HTMLInputElement).type || '',
@@ -355,7 +413,7 @@ export class CDPDriver {
                   tagName: input.tagName.toLowerCase(),
                   text: '',
                   id: input.id || '',
-                  className: input.className || '',
+                  className: typeof input.className === 'string' ? input.className : '',
                   role: input.getAttribute('role') || '',
                   ariaLabel: input.getAttribute('aria-label') || '',
                   type: (input as HTMLInputElement).type || '',
@@ -377,7 +435,7 @@ export class CDPDriver {
                 tagName: input.tagName.toLowerCase(),
                 text: '',
                 id: htmlInput.id || '',
-                className: htmlInput.className || '',
+                className: typeof htmlInput.className === 'string' ? htmlInput.className : '',
                 role: input.getAttribute('role') || '',
                 ariaLabel: input.getAttribute('aria-label') || '',
                 type: (input as HTMLInputElement).type || '',
@@ -407,7 +465,7 @@ export class CDPDriver {
                 tagName: input.tagName.toLowerCase(),
                 text: '',
                 id: htmlInput.id || '',
-                className: htmlInput.className || '',
+                className: typeof htmlInput.className === 'string' ? htmlInput.className : '',
                 role: input.getAttribute('role') || '',
                 ariaLabel: input.getAttribute('aria-label') || '',
                 type: (input as HTMLInputElement).type || '',
@@ -435,18 +493,23 @@ export class CDPDriver {
 
   /**
    * Click an element by CSS selector.
-   *
-   * Uses Playwright's smart click which:
-   * - Scrolls element into view
-   * - Waits for it to be stable (not moving)
-   * - Waits for it to be actionable (visible, enabled)
-   * - Clicks the center of the element
+   * Uses JS dispatchEvent (reliable on background CDP tabs with 0x0 viewport).
+   * Falls back to Playwright click if JS dispatch doesn't work.
    */
   async click(selector: string): Promise<CDPInteractionResult> {
     const pg = this.requirePage();
     try {
+      // Primary: JS-based click (works on background tabs)
+      const clicked = await pg.evaluate((sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement;
+        if (!el) return false;
+        el.click();
+        return true;
+      }, selector);
+      if (clicked) return { success: true, method: 'js.click' };
+      // Fallback: Playwright click with force
       await this.moveCursorToSelector(selector);
-      await pg.click(selector, { timeout: 5000 });
+      await pg.click(selector, { timeout: 5000, force: true });
       return { success: true, method: 'playwright.click' };
     } catch (err) {
       return {
@@ -468,8 +531,36 @@ export class CDPDriver {
     const pg = this.requirePage();
 
     try {
-      // Playwright has built-in text selectors
-      // Try role-based first (buttons, links), then fall back to text
+      // Primary: JS-based click by text content (works on background tabs)
+      const jsClicked = await pg.evaluate((searchText: string) => {
+        const lower = searchText.toLowerCase();
+        // Deduplicate: elements matching multiple selectors should only appear once
+        const seen = new Set<Element>();
+        const candidates: HTMLElement[] = [];
+        for (const sel of ['button, [role="button"]', 'a[href]', '[role="link"], [role="menuitem"], [role="tab"]']) {
+          for (const el of document.querySelectorAll(sel)) {
+            if (!seen.has(el)) {
+              seen.add(el);
+              candidates.push(el as HTMLElement);
+            }
+          }
+        }
+        for (const htmlEl of candidates) {
+          const elText = (htmlEl.textContent || '').trim().toLowerCase();
+          const ariaLabel = (htmlEl.getAttribute('aria-label') || '').toLowerCase();
+          if (elText.includes(lower) || ariaLabel.includes(lower)) {
+            // Visibility check — skip hidden elements
+            const style = getComputedStyle(htmlEl);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+            htmlEl.click();
+            return true;
+          }
+        }
+        return false;
+      }, text);
+      if (jsClicked) return { success: true, method: 'js.clickByText' };
+
+      // Fallback: Playwright locators with force
       const locators = [
         pg.getByRole('button', { name: text }),
         pg.getByRole('link', { name: text }),
@@ -481,7 +572,7 @@ export class CDPDriver {
         try {
           const count = await locator.count();
           if (count > 0) {
-            await locator.first().click({ timeout: 3000 });
+            await locator.first().click({ timeout: 3000, force: true });
             return { success: true, method: 'playwright.getByText' };
           }
         } catch {
@@ -510,12 +601,12 @@ export class CDPDriver {
     try {
       await this.moveCursorToSelector(selector);
       // Try fill() first — works for inputs, textareas, and [contenteditable]
-      await pg.fill(selector, text, { timeout: 5000 });
+      await pg.fill(selector, text, { timeout: 5000, force: true });
       return { success: true, method: 'playwright.fill' };
     } catch {
       // Fall back to click + clear + type for stubborn elements
       try {
-        await pg.click(selector, { timeout: 3000 });
+        await pg.click(selector, { timeout: 3000, force: true });
         await pg.keyboard.press('Control+a');
         await pg.keyboard.type(text, { delay: 20 });
         return { success: true, method: 'playwright.type' };
@@ -551,7 +642,7 @@ export class CDPDriver {
         return { success: false, error: `No field found with label "${label}"` };
       }
 
-      await locator.first().fill(text, { timeout: 5000 });
+      await locator.first().fill(text, { timeout: 5000, force: true });
       return { success: true, method: 'playwright.getByLabel' };
     } catch (err) {
       return {
@@ -703,18 +794,22 @@ export class CDPDriver {
       const elements = document.querySelectorAll(sel);
       const results: any[] = [];
 
+      // When viewport is 0x0 (background tab via CDP), skip bounds filtering
+      const hasViewport = window.innerWidth > 0 && window.innerHeight > 0;
+
       for (const el of elements) {
         const htmlEl = el as HTMLElement;
         const rect = htmlEl.getBoundingClientRect();
 
-        // Skip invisible elements
+        // Always skip zero-size elements (display:none, collapsed, etc.)
         if (rect.width <= 0 || rect.height <= 0) continue;
-        if (getComputedStyle(htmlEl).visibility === 'hidden') continue;
-        if (getComputedStyle(htmlEl).display === 'none') continue;
-
-        // Skip elements outside viewport
-        if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
-        if (rect.right < 0 || rect.left > window.innerWidth) continue;
+        // Only check viewport bounds when viewport is valid (not background tab)
+        if (hasViewport) {
+          if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+          if (rect.right < 0 || rect.left > window.innerWidth) continue;
+        }
+        const style = getComputedStyle(htmlEl);
+        if (style.visibility === 'hidden' || style.display === 'none') continue;
 
         results.push({
           selector: htmlEl.id ? `#${htmlEl.id}` : '',
@@ -755,9 +850,20 @@ export class CDPDriver {
       const elements = await this.getInteractiveElements();
 
       let context = `PAGE: "${title}" at ${url}\n\n`;
-      context += `INTERACTIVE ELEMENTS (${elements.length}):\n`;
 
-      for (const el of elements) {
+      // Prioritize inputs/buttons/selects over links to keep context manageable
+      const inputs = elements.filter(e => ['input', 'textarea', 'select'].includes(e.tagName));
+      const buttons = elements.filter(e => e.tagName === 'button' || e.role === 'button');
+      const links = elements.filter(e => e.tagName === 'a' && e.role !== 'button');
+      const other = elements.filter(e => !inputs.includes(e) && !buttons.includes(e) && !links.includes(e));
+
+      // Always show all inputs, buttons, and other elements; limit links to 40
+      const shown = [...inputs, ...buttons, ...other, ...links.slice(0, 40)];
+      const hiddenLinks = links.length > 40 ? links.length - 40 : 0;
+
+      context += `INTERACTIVE ELEMENTS (${shown.length}${hiddenLinks > 0 ? `, +${hiddenLinks} more links` : ''}):\n`;
+
+      for (const el of shown) {
         const label = el.ariaLabel || el.text || el.placeholder || el.name || el.id || '(unnamed)';
         const typeInfo = el.type ? ` type="${el.type}"` : '';
         const roleInfo = el.role ? ` role="${el.role}"` : '';
@@ -775,6 +881,40 @@ export class CDPDriver {
   // ════════════════════════════════════════════════════════════════════
   // SCRIPT EVALUATION
   // ════════════════════════════════════════════════════════════════════
+
+  /**
+   * Read text content from a DOM element (safe, parameterized — no CSS injection risk).
+   * @param selector CSS selector for the target element (default: 'body')
+   * @param maxLength Maximum characters to return (default: 3000)
+   */
+  async readText(selector = 'body', maxLength = 3000): Promise<string> {
+    const pg = this.requirePage();
+    return pg.evaluate(
+      (args: { sel: string; max: number }) => {
+        const el = document.querySelector(args.sel);
+        if (!el) return `[element not found: ${args.sel}]`;
+        const raw = (el as HTMLElement).innerText || el.textContent || '';
+        return raw.replace(/\n{3,}/g, '\n\n').trim().substring(0, args.max);
+      },
+      { sel: selector, max: maxLength },
+    );
+  }
+
+  /**
+   * Read the current value of a form field (safe, parameterized — no CSS injection risk).
+   * @param selector CSS selector for the input/textarea element
+   */
+  async readFieldValue(selector: string): Promise<string> {
+    const pg = this.requirePage();
+    return pg.evaluate(
+      (sel: string) => {
+        const el = document.querySelector(sel);
+        if (!el) return '';
+        return ((el as HTMLInputElement).value ?? el.textContent ?? '').substring(0, 60);
+      },
+      selector,
+    );
+  }
 
   /**
    * Evaluate arbitrary JavaScript in the page context.
@@ -843,6 +983,7 @@ export class CDPDriver {
     this.browser = null;
     this.activePage = null;
     this.connected = false;
+    this.cursorInjected = false;
   }
 
   /** Get the underlying Playwright Page (for advanced usage) */
@@ -854,7 +995,6 @@ export class CDPDriver {
   // PRIVATE
   // ════════════════════════════════════════════════════════════════════
 
-  /**
   /** Ensure a virtual cursor overlay exists in the page */
   private async ensureCursorOverlay(): Promise<void> {
     const pg = this.requirePage();

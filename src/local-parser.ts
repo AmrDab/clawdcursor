@@ -166,8 +166,9 @@ export class LocalTaskParser {
       return `focus ${focusMatch[1].trim()}`;
     }
 
-    // 7. Type / Write / Enter [text]
-    const typeMatch = normalized.match(/^(?:type|write|enter)\s+(\S.*)$/i);
+    // 7. Type / Enter [text] — literal keyboard input only
+    // "write" excluded: implies creative composition needing LLM
+    const typeMatch = normalized.match(/^(?:type|enter)\s+(\S.*)$/i);
     if (typeMatch) {
       const text = typeMatch[1].trim();
       // Remove surrounding quotes if present

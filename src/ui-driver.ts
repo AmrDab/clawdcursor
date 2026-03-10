@@ -613,6 +613,45 @@ export class UIDriver {
   }
 
   // ════════════════════════════════════════════════════════════════════
+  // KEYBOARD-FIRST TYPING (no element lookup)
+  // ════════════════════════════════════════════════════════════════════
+
+  /**
+   * Type text directly at the currently focused element — no element lookup.
+   *
+   * Uses PowerShell SendKeys (Windows) or osascript keystroke (macOS) to type
+   * at whatever UI element currently has keyboard focus. Perfect for use after
+   * Tab navigation has moved focus to the desired field.
+   *
+   * @param text The text to type at the current focus
+   */
+  async typeAtCurrentFocus(text: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (this.platform === 'win32') {
+        // Use PowerShell SendKeys to type at current focus
+        // Escape special SendKeys characters: +^%~(){}
+        const escaped = text.replace(/'/g, "''").replace(/[+^%~(){}]/g, '{$&}');
+        await execFileAsync('powershell.exe', [
+          '-NoProfile', '-NonInteractive', '-Command',
+          `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait('${escaped}')`,
+        ], { timeout: SCRIPT_TIMEOUT });
+        return { success: true };
+      } else if (this.platform === 'darwin') {
+        // Use osascript to type at current focus via System Events
+        const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        await execFileAsync('osascript', [
+          '-e', `tell application "System Events" to keystroke "${escaped}"`,
+        ], { timeout: SCRIPT_TIMEOUT });
+        return { success: true };
+      } else {
+        return { success: false, error: 'typeAtCurrentFocus: unsupported platform' };
+      }
+    } catch (err) {
+      return { success: false, error: `typeAtCurrentFocus failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  // ════════════════════════════════════════════════════════════════════
   // POLLING / WAITING
   // ════════════════════════════════════════════════════════════════════
 

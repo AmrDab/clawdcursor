@@ -29,7 +29,9 @@ import { CDPDriver } from './cdp-driver';
 import { UIDriver } from './ui-driver';
 import { AccessibilityBridge } from './accessibility';
 import { BrowserLayer } from './browser-layer';
+import { NativeDesktop } from './native-desktop';
 import { PROVIDERS } from './providers';
+import { uiKnowledge } from './ui-knowledge';
 import type { PipelineConfig, ProviderProfile } from './providers';
 import type { ClawdConfig, StepResult } from './types';
 
@@ -65,6 +67,8 @@ export interface SmartInteractionResult {
   llmCalls: number;
   /** Optional description */
   description?: string;
+  /** Summary of what was accomplished before falling through — passed to Computer Use as prior context */
+  contextSummary?: string;
 }
 
 // ── System prompt for the planning LLM call ──
@@ -97,6 +101,7 @@ AVAILABLE ACTIONS (browser tasks via CDP):
 AVAILABLE ACTIONS (native app tasks via UIDriver):
 - click: Click by element name. method="name" or "automationId"
 - type: Type into element. method="name" or "automationId", text=value
+- typeAtFocus: Type text directly at the currently focused element (no element lookup needed). Use after Tab navigation. text=value to type.
 - pressKey: Press keyboard key. target=key combo
 - focus: Focus element. method="name"
 - select: Select item. method="name"
@@ -116,7 +121,60 @@ RULES:
 9. IMPORTANT: UI elements only exist AFTER their parent action. For example, Gmail compose fields only appear AFTER clicking "Compose". Plan sequentially: click to open a dialog/form FIRST, then add a wait step (1000-2000ms), then interact with the new elements.
 10. For email compose flows: click Compose → wait 2000ms → click/type each field individually. Do NOT use fillForm unless all fields are visible in the current context.
 11. When the context shows an inbox/list view, you MUST click "Compose"/"New"/"Reply" first before trying to fill email fields.
-12. Prefer clicking fields by selector (e.g. [aria-label="To recipients"]) then typing, over fillForm — it's more reliable.`;
+12. Prefer clicking fields by selector (e.g. [aria-label="To recipients"]) then typing, over fillForm — it's more reliable.
+13. CRITICAL: Window titles (e.g. "Mail - John - Outlook", "Inbox - Gmail") are NOT clickable UI elements. Never use a window title as a click target. The window is already focused — proceed directly to interacting with its contents (buttons, fields, etc.).
+14. For Outlook: to compose a new email use pressKey "Control+n" (new message shortcut) rather than trying to click "New Email" button — it's more reliable.`;
+
+/** System prompt for the ReAct-style per-step native task handler */
+const REACT_STEP_SYSTEM_PROMPT = `You are a UI automation agent controlling a native desktop app via accessibility APIs. You operate ONE STEP AT A TIME in a reactive loop.
+
+You will receive:
+- The current TASK
+- The current ACCESSIBILITY TREE (fresh snapshot of visible UI elements)
+- The HISTORY of actions taken so far (with results)
+
+You must decide the SINGLE NEXT action to take. Respond with ONLY valid JSON, no other text.
+
+RESPONSE FORMAT — one of:
+{"action": "click", "target": "Button Name", "method": "name", "reasoning": "Why this click"}
+{"action": "type", "target": "Field Name", "text": "text to type", "method": "name", "reasoning": "Why typing this"}
+{"action": "pressKey", "target": "Control+n", "reasoning": "Keyboard shortcut to open new message"}
+{"action": "focus", "target": "Element Name", "method": "name", "reasoning": "Focus this element"}
+{"action": "select", "target": "Item Name", "method": "name", "reasoning": "Select this item"}
+{"action": "toggle", "target": "Checkbox Name", "method": "name", "reasoning": "Toggle checkbox"}
+{"action": "expand", "target": "Tree Item", "method": "name", "reasoning": "Expand this item"}
+{"action": "menuPath", "target": "File,Save As...", "reasoning": "Navigate menu path"}
+{"action": "wait", "waitMs": 1000, "reasoning": "Wait for UI to update"}
+{"action": "done", "reasoning": "Task is complete because X"}
+{"action": "give_up", "reasoning": "Cannot complete because X"}
+
+AVAILABLE ACTIONS:
+- click: Click by element name/automationId. method="name" or "automationId"
+- type: Type into element. method="name" or "automationId", text=value
+- typeAtFocus: Type text directly at the currently focused element (no element lookup needed). Use after Tab navigation. text=value to type.
+- pressKey: Press keyboard key combo. target=key combo (e.g. "Control+n", "Tab", "Return", "Escape")
+- focus: Focus element. method="name"
+- select: Select item. method="name"
+- toggle: Toggle checkbox. method="name"
+- expand: Expand tree/combo. method="name"
+- menuPath: Navigate menu. target=comma-separated path
+- wait: Wait for UI to settle. waitMs=duration in ms
+- done: Task is complete — explain why in reasoning
+- give_up: Cannot complete — explain why in reasoning
+
+RULES:
+1. Decide ONE action at a time based on what you SEE in the current accessibility tree.
+2. Use ONLY elements visible in the current tree. Don't guess at elements that might appear later.
+3. If the previous action failed, adapt — try an alternative approach (different element, keyboard shortcut, etc.).
+4. If you see an unexpected dialog/popup in the tree, handle it first (Escape or click its button) before continuing.
+5. Window titles like "Mail - John - Outlook" are NOT clickable. The window is already focused.
+6. For Outlook: use pressKey "Control+n" for new message rather than clicking buttons.
+7. After typing in a recipient/to field, use pressKey "Tab" to confirm.
+8. If you've been going in circles or the same action keeps failing, give_up.
+9. When the task appears complete based on what you see, return done.
+10. Prefer keyboard shortcuts when they're reliable (Control+s for save, Control+n for new, etc.).
+11. If an element is not found by name, try Tab key navigation or keyboard shortcuts instead. Do NOT give_up immediately — try at least 2 alternatives first.
+12. KEYBOARD-FIRST RULE: For email composition in any mail app (Outlook, Gmail, etc.), ALWAYS use this exact sequence: pressKey Control+n → pressKey Tab → typeAtFocus (recipient) → pressKey Tab → typeAtFocus (subject) → pressKey Tab → typeAtFocus (body) → pressKey Control+Enter (send). Never try to click field names — use Tab navigation + typeAtFocus instead.`;
 
 /**
  * SmartInteractionLayer — the orchestration layer between BrowserLayer and Computer Use.
@@ -125,6 +183,7 @@ export class SmartInteractionLayer {
   private a11y: AccessibilityBridge;
   private config: ClawdConfig;
   private pipelineConfig: PipelineConfig | null;
+  private desktop: NativeDesktop;
 
   // Lazy-initialized drivers
   private cdpDriver: CDPDriver | null = null;
@@ -135,14 +194,19 @@ export class SmartInteractionLayer {
   private readonly MAX_FAILURES = 3;
   private disabled = false;
 
+  // For state change polling
+  private lastWindowTitle = '';
+
   constructor(
     a11y: AccessibilityBridge,
     config: ClawdConfig,
     pipelineConfig: PipelineConfig | null,
+    desktop: NativeDesktop,
   ) {
     this.a11y = a11y;
     this.config = config;
     this.pipelineConfig = pipelineConfig;
+    this.desktop = desktop;
   }
 
   /** Check if this layer is available (has a text model configured) */
@@ -407,13 +471,15 @@ export class SmartInteractionLayer {
 
   private async handleNativeTask(task: string): Promise<SmartInteractionResult> {
     const steps: StepResult[] = [];
+    const MAX_REACT_STEPS = 10;
+    let llmCalls = 0;
 
     // Lazy-create UIDriver (no connection needed)
     if (!this.uiDriver) {
       this.uiDriver = new UIDriver();
     }
 
-    // Get accessibility tree context
+    // Get accessibility tree context (initial check)
     console.log(`   ♿ Smart Interaction: getting accessibility context...`);
     const activeWindow = await this.a11y.getActiveWindow();
 
@@ -430,65 +496,226 @@ export class SmartInteractionLayer {
       }
     }
 
-    const a11yContext = await this.a11y.getScreenContext(activeWindow?.processId).catch(() => '');
+    // ── UI Knowledge Layer: load app-specific instruction set ──
+    const currentWindow = await this.a11y.getActiveWindow();
+    const windowTitle = currentWindow?.title || '';
+    const knowledgeContext = await uiKnowledge.getContextForTask(task, windowTitle).catch(() => null);
 
-    if (!a11yContext || a11yContext.includes('unavailable')) {
-      return { handled: false, success: false, steps: [], llmCalls: 0, description: 'A11y context unavailable' };
-    }
+    // ── ReAct Loop: step-by-step reactive execution ──
+    const actionHistory: Array<{ action: string; target?: string; text?: string; success: boolean; error?: string; stateAfter?: string }> = [];
+    let successfulActions = 0; // Track meaningful progress for partial-success detection
+    let elementNotFoundRetries = 0; // Separate retry counter for Tab-key fallbacks
 
-    // Make ONE LLM call to plan actions
-    console.log(`   🧠 Smart Interaction: planning with text LLM...`);
-    const plan = await this.planActions(task, a11yContext, 'native');
+    console.log(`   🔄 Smart Interaction: starting ReAct loop (max ${MAX_REACT_STEPS} steps)...`);
 
-    if (!plan || !plan.canHandle) {
-      console.log(`   🤷 Smart Interaction: LLM says can't handle — ${plan?.reasoning || 'no plan'}`);
-      return {
-        handled: false,
-        success: false,
-        steps: [{ action: 'plan', description: `Can't handle: ${plan?.reasoning || 'unknown'}`, success: false, timestamp: Date.now() }],
-        llmCalls: 1,
-        description: plan?.reasoning,
-      };
-    }
+    // Track current a11y state for polling
+    let currentA11yState = '';
 
-    steps.push({
-      action: 'plan',
-      description: `Planned ${plan.steps.length} native steps: ${plan.reasoning || ''}`,
-      success: true,
-      timestamp: Date.now(),
-    });
+    for (let step = 0; step < MAX_REACT_STEPS; step++) {
+      // 1. Get FRESH a11y snapshot each iteration
+      const currentWindow = await this.a11y.getActiveWindow();
+      const a11yContext = await this.a11y.getScreenContext(currentWindow?.processId).catch(() => '');
+      currentA11yState = a11yContext;
 
-    // Execute each planned step — continue on non-critical failures
-    let nativeCriticalFail = false;
-    for (const plannedStep of plan.steps) {
-      const stepResult = await this.executeNativeStep(plannedStep);
-      steps.push(stepResult);
-
-      if (!stepResult.success) {
-        console.log(`   ⚠️ Step failed: ${stepResult.description}`);
-        const criticalActions = ['type', 'fillForm', 'click'];
-        if (criticalActions.includes(plannedStep.action)) {
-          console.log(`   ❌ Critical step failed — falling through`);
-          nativeCriticalFail = true;
-          break;
+      if (!a11yContext || a11yContext.includes('unavailable')) {
+        if (step === 0) {
+          return { handled: false, success: false, steps, llmCalls, description: 'A11y context unavailable' };
         }
-        console.log(`   ⏭️ Non-critical, continuing...`);
+        // Mid-loop: context lost, give up
+        console.log(`   ⚠️ ReAct step ${step + 1}: a11y context lost — giving up`);
+        break;
       }
 
-      // Delay between actions for UI to settle
-      await this.delay(300);
+      // 2. Build history string for LLM context
+      const historyStr = actionHistory.length > 0
+        ? actionHistory.map((h, i) =>
+            `Step ${i + 1}: ${h.action}${h.target ? ` "${h.target}"` : ''}${h.text ? ` text="${h.text}"` : ''} → ${h.success ? 'SUCCESS' : `FAILED: ${h.error || 'unknown'}`}${h.stateAfter ? `\n  State after: ${h.stateAfter}` : ''}`
+          ).join('\n')
+        : '(no actions taken yet)';
+
+      const knowledgeSection = knowledgeContext ? `\nAPP INSTRUCTION MANUAL:\n${knowledgeContext}\n` : '';
+      const userMessage = `TASK: ${task}${knowledgeSection}\n\nACTION HISTORY:\n${historyStr}\n\nCURRENT ACCESSIBILITY TREE:\n${a11yContext}`;
+
+      // 3. LLM decides ONE next action
+      console.log(`   🧠 ReAct step ${step + 1}/${MAX_REACT_STEPS}: asking LLM...`);
+      llmCalls++;
+
+      let response: string;
+      try {
+        response = await this.callTextModel(userMessage, REACT_STEP_SYSTEM_PROMPT);
+      } catch (err) {
+        console.log(`   ⚠️ ReAct step ${step + 1}: LLM call failed — ${err}`);
+        steps.push({ action: 'error', description: `LLM call failed: ${err}`, success: false, timestamp: Date.now() });
+        break;
+      }
+
+      // 4. Parse LLM response
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.log(`   ⚠️ ReAct step ${step + 1}: no JSON in LLM response`);
+        actionHistory.push({ action: 'parse_error', success: false, error: 'LLM returned no JSON' });
+        continue; // Retry with error in history
+      }
+
+      let decision: any;
+      try {
+        decision = JSON.parse(jsonMatch[0]);
+      } catch {
+        console.log(`   ⚠️ ReAct step ${step + 1}: invalid JSON from LLM`);
+        actionHistory.push({ action: 'parse_error', success: false, error: 'Invalid JSON from LLM' });
+        continue;
+      }
+
+      const action = decision.action;
+      const reasoning = decision.reasoning || '';
+
+      // Handle "wait" action — make it free (no step counter increment)
+      if (action === 'wait') {
+        // Don't count as a step — just poll silently
+        console.log(`   ⏳ Auto-polling for state change (free step)...`);
+        currentA11yState = await this.pollUntilStateChanges(currentA11yState, 3000);
+        continue; // don't increment step counter
+      }
+
+      // 5. Handle terminal actions
+      if (action === 'done') {
+        console.log(`   ✅ ReAct: done — ${reasoning}`);
+        steps.push({ action: 'done', description: `ReAct complete: ${reasoning}`, success: true, timestamp: Date.now() });
+        return {
+          handled: true,
+          success: true,
+          steps,
+          llmCalls,
+          description: `ReAct completed in ${step + 1} steps: ${reasoning}`,
+        };
+      }
+
+      if (action === 'give_up') {
+        if (successfulActions > 0) {
+          // Partial progress was made — report success so caller can continue with Computer Use
+          console.log(`   🔄 ReAct: give_up but ${successfulActions} actions succeeded — reporting partial progress`);
+          const completedSteps = actionHistory
+            .filter(h => h.success && h.action !== 'parse_error' && h.action !== 'wait')
+            .map(h => `${h.action}${h.target ? ` "${h.target}"` : ''}${h.text ? ` text="${h.text}"` : ''}`)
+            .join(', ');
+          const contextSummary = `Completed ${successfulActions} actions: ${completedSteps}. Gave up because: ${reasoning}`;
+          steps.push({ action: 'give_up_partial', description: `ReAct partial progress: ${reasoning}`, success: true, timestamp: Date.now() });
+          return {
+            handled: false,
+            success: false,
+            steps,
+            llmCalls,
+            description: `ReAct gave up after ${step + 1} steps (${successfulActions} succeeded): ${reasoning}`,
+            contextSummary,
+          };
+        }
+        console.log(`   🤷 ReAct: give_up (zero progress) — ${reasoning}`);
+        steps.push({ action: 'give_up', description: `ReAct gave up: ${reasoning}`, success: false, timestamp: Date.now() });
+        return {
+          handled: false,
+          success: false,
+          steps,
+          llmCalls,
+          description: `ReAct gave up after ${step + 1} steps: ${reasoning}`,
+        };
+      }
+
+      // 6. Build PlannedStep and execute
+      const plannedStep: PlannedStep = {
+        action: action || 'click',
+        target: decision.target || '',
+        method: decision.method || 'name',
+        text: decision.text,
+        key: decision.key,
+        waitMs: decision.waitMs,
+        fields: decision.fields,
+      };
+
+      console.log(`   ▶️ ReAct step ${step + 1}: ${action} "${plannedStep.target || ''}" — ${reasoning}`);
+
+      let stepResult = await this.executeNativeStep(plannedStep);
+
+      // After pressKey or typeAtFocus — poll for state change instead of burning LLM steps
+      if (stepResult.action === 'pressKey' || stepResult.action === 'typeAtFocus') {
+        const updatedState = await this.pollUntilStateChanges(currentA11yState, 5000);
+        if (updatedState !== currentA11yState) {
+          currentA11yState = updatedState;
+          console.log(`   ✅ State changed after ${stepResult.description} — proceeding`);
+        }
+      }
+
+      // Fallback: if click fails with "Element not found", try Tab key navigation
+      if (!stepResult.success && action === 'click' && stepResult.error?.includes('not found') && elementNotFoundRetries < 3) {
+        elementNotFoundRetries++;
+        console.log(`   🔄 Element not found — trying Tab key fallback (retry ${elementNotFoundRetries}/3)`);
+        const tabStep: PlannedStep = { action: 'pressKey', target: 'Tab', method: 'name' };
+        const tabResult = await this.executeNativeStep(tabStep);
+        steps.push(tabResult);
+        await this.delay(300);
+
+        // Retry the original click after Tab
+        stepResult = await this.executeNativeStep(plannedStep);
+        if (stepResult.success) {
+          console.log(`   ✅ Tab fallback worked — element found after keyboard navigation`);
+          elementNotFoundRetries = 0; // Reset on success
+        }
+        // If fallback also fails, count as a normal step (LLM will adapt)
+      }
+
+      steps.push(stepResult);
+
+      // 7. Capture fresh a11y state AFTER the action for verification
+      // Small delay for UI to settle before capturing state
+      const postActionDelay = action === 'typeAtFocus' ? 300 : action === 'pressKey' ? 500 : 400;
+      await this.delay(postActionDelay);
+
+      let stateAfter: string | undefined;
+      try {
+        const postWindow = await this.a11y.getActiveWindow();
+        const postA11y = await this.a11y.getScreenContext(postWindow?.processId).catch(() => '');
+        if (postA11y && !postA11y.includes('unavailable')) {
+          stateAfter = postA11y.substring(0, 500);
+        }
+      } catch {
+        // Non-fatal — state capture failed
+      }
+
+      // Record result with post-action state for next iteration's history
+      actionHistory.push({
+        action,
+        target: plannedStep.target,
+        text: plannedStep.text,
+        success: stepResult.success,
+        error: stepResult.error,
+        stateAfter,
+      });
+
+      if (stepResult.success && action !== 'wait') {
+        successfulActions++;
+      }
+
+      if (!stepResult.success) {
+        console.log(`   ⚠️ ReAct step ${step + 1} failed: ${stepResult.error || stepResult.description} — LLM will adapt`);
+      }
     }
 
-    if (nativeCriticalFail) {
-      return { handled: false, success: false, steps, llmCalls: 1, description: 'Critical step failed' };
+    // Exhausted max steps without done/give_up — build context summary of what was accomplished
+    console.log(`   ⏰ ReAct: exhausted ${MAX_REACT_STEPS} steps — falling through to Computer Use`);
+    let contextSummary: string | undefined;
+    if (successfulActions > 0) {
+      const completedSteps = actionHistory
+        .filter(h => h.success && h.action !== 'parse_error' && h.action !== 'wait')
+        .map(h => `${h.action}${h.target ? ` "${h.target}"` : ''}${h.text ? ` text="${h.text}"` : ''}`)
+        .join(', ');
+      contextSummary = `Completed ${successfulActions} of ${MAX_REACT_STEPS} steps: ${completedSteps}. Exhausted max steps — remaining work needs to be continued.`;
     }
-
     return {
-      handled: true,
-      success: true,
+      handled: false,
+      success: false,
       steps,
-      llmCalls: 1,
-      description: `Completed ${plan.steps.length} native actions`,
+      llmCalls,
+      description: `ReAct exhausted ${MAX_REACT_STEPS} steps without completing`,
+      contextSummary,
     };
   }
 
@@ -499,6 +726,14 @@ export class SmartInteractionLayer {
     try {
       switch (step.action) {
         case 'click': {
+          // Window titles look like "AppName - WindowTitle" or "Title - AppName".
+          // They are NOT clickable elements — the window is already focused.
+          // Detect and skip them to avoid cascading failures.
+          const isWindowTitle = /\s[-–]\s/.test(step.target) && step.target.length > 20;
+          if (isWindowTitle) {
+            console.log(`   ⏭️ Skipping window-title click target "${step.target}" — window already focused`);
+            return { action: 'click', description: `Skipped window-title: "${step.target}"`, success: true, timestamp: ts };
+          }
           const result = await ui.clickElement(step.target, {
             controlType: step.method === 'automationId' ? undefined : undefined,
           });
@@ -507,16 +742,30 @@ export class SmartInteractionLayer {
 
         case 'type': {
           const result = await ui.typeInElement(step.target, step.text || '');
+          if (!result.success) {
+            // Fallback: type at current focus
+            console.log(`   🔄 Element type failed — falling back to typeAtFocus`);
+            const fallback = await ui.typeAtCurrentFocus(step.text || '');
+            return { action: 'type', description: `Type "${step.text}" (typeAtFocus fallback)`, success: fallback.success, error: fallback.error, timestamp: ts };
+          }
           return { action: 'type', description: `Type "${step.text}" into "${step.target}"`, success: result.success, error: result.error, timestamp: ts };
         }
 
+        case 'typeAtFocus': {
+          // Type directly at current focus — no element lookup
+          const result = await ui.typeAtCurrentFocus(step.text || '');
+          const desc = result.success
+            ? `Typed at focus: '${step.text}' — ⚠️ UNVERIFIED`
+            : `Typed at focus: '${step.text}' — FAILED`;
+          return { action: 'typeAtFocus', description: desc, success: result.success, error: result.error, timestamp: ts };
+        }
+
         case 'pressKey': {
-          // UIDriver doesn't have pressKey — use a11y bridge keyboard action
-          // Return the key info so the agent can execute via native desktop
+          await this.desktop.keyPress(step.target);
           return {
             action: 'pressKey',
-            description: `Press ${step.target} (delegated to native)`,
-            success: true, // Mark as success — the key press step is informational
+            description: `Pressed ${step.target}`,
+            success: true,
             timestamp: ts,
           };
         }
@@ -802,5 +1051,32 @@ export class SmartInteractionLayer {
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Poll the a11y tree every 500ms until it changes from the baseline, or until timeoutMs elapses.
+   * Returns the new state string, or the original if nothing changed.
+   * This replaces burning LLM "wait" steps — completely free, zero LLM calls.
+   */
+  private async pollUntilStateChanges(baselineState: string, timeoutMs = 5000): Promise<string> {
+    const interval = 500;
+    const attempts = Math.ceil(timeoutMs / interval);
+    for (let i = 0; i < attempts; i++) {
+      await new Promise(r => setTimeout(r, interval));
+      try {
+        const activeWindow = await this.a11y.getActiveWindow();
+        const newState = await this.a11y.getScreenContext(activeWindow?.processId).catch(() => '');
+        // Meaningful change = active window title changed OR element count differs significantly
+        const baselineLines = baselineState.split('\n').length;
+        const newLines = newState.split('\n').length;
+        const titleChanged = (activeWindow?.title || '') !== this.lastWindowTitle;
+        const elementCountChanged = Math.abs(newLines - baselineLines) > 3;
+        if (titleChanged || elementCountChanged) {
+          this.lastWindowTitle = activeWindow?.title || '';
+          return newState; // state changed — return new snapshot
+        }
+      } catch { /* continue polling */ }
+    }
+    return baselineState; // timed out — return original
   }
 }
