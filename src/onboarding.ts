@@ -40,28 +40,33 @@ export async function runOnboarding(): Promise<boolean> {
   }
 
   console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║                   DESKTOP CONTROL WARNING                    ║
-╚══════════════════════════════════════════════════════════════╝
+\x1b[33m
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                                                              ║
+  ║           ⚠   DESKTOP CONTROL WARNING   ⚠                   ║
+  ║                                                              ║
+  ╚══════════════════════════════════════════════════════════════╝
+\x1b[0m
+\x1b[90m  clawd-cursor gives AI models full control of your desktop:\x1b[0m
 
-clawd-cursor gives AI models full control of your desktop:
+\x1b[31m  ●\x1b[0m Mouse clicks and keyboard input anywhere on screen
+\x1b[31m  ●\x1b[0m Screenshot capture of your entire display
+\x1b[31m  ●\x1b[0m Read and write OS clipboard
+\x1b[31m  ●\x1b[0m Open, close, and switch between applications
+\x1b[31m  ●\x1b[0m Browser DOM interaction via Chrome DevTools Protocol
+\x1b[31m  ●\x1b[0m Read accessibility tree (window contents, UI elements)
 
-  - Mouse clicks and keyboard input anywhere on screen
-  - Screenshot capture of your entire display
-  - Read and write OS clipboard
-  - Open, close, and switch between applications
-  - Browser DOM interaction via Chrome DevTools Protocol
-  - Read accessibility tree (window contents, UI elements)
+\x1b[90m  This is an OS-level automation server. Any AI model that\x1b[0m
+\x1b[90m  connects to it can perform these actions on your machine.\x1b[0m
 
-This is an OS-level automation server. Any AI model that connects
-to it can perform these actions on your machine.
+\x1b[32m  SAFETY NOTES:\x1b[0m
+\x1b[90m  ●  Only run on a machine you control\x1b[0m
+\x1b[90m  ●  Only connect AI models you trust\x1b[0m
+\x1b[90m  ●  Server binds to localhost only (127.0.0.1)\x1b[0m
+\x1b[90m  ●  Dangerous key combos (Alt+F4, Ctrl+Alt+Del) are blocked\x1b[0m
+\x1b[90m  ●  Run \x1b[0m\x1b[36mclawdcursor stop\x1b[0m\x1b[90m to shut down when not in use\x1b[0m
 
-SAFETY RECOMMENDATIONS:
-  - Only run on a machine you control
-  - Only connect AI models you trust
-  - The server binds to localhost only (127.0.0.1)
-  - Dangerous key combos (Alt+F4, Ctrl+Alt+Del) are blocked
-  - Use clawd-cursor stop to shut down when not in use
+\x1b[90m  ──────────────────────────────────────────────────────────\x1b[0m
 `);
 
   const rl = readline.createInterface({

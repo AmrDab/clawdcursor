@@ -128,10 +128,38 @@ program
     };
 
     console.log(`
-🐾 ╔═══════════════════════════════════════╗
-   ║       CLAWD CURSOR v${VERSION}             ║
-   ║   AI Desktop Agent — Smart Pipeline   ║
-   ╚═══════════════════════════════════════╝
+\x1b[32m
+   /\\___/\\
+  ( >^.^< )   claw
+   )     (    claw
+  (_)_(_)_)
+\x1b[0m
+\x1b[1m\x1b[32m
+  ██████╗██╗      █████╗ ██╗    ██╗██████╗
+ ██╔════╝██║     ██╔══██╗██║    ██║██╔══██╗
+ ██║     ██║     ███████║██║ █╗ ██║██║  ██║
+ ██║     ██║     ██╔══██║██║███╗██║██║  ██║
+ ╚██████╗███████╗██║  ██║╚███╔███╔╝██████╔╝
+  ╚═════╝╚══════╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═════╝
+\x1b[0m\x1b[32m
+  ██████╗██╗   ██╗██████╗ ███████╗ ██████╗ ██████╗
+ ██╔════╝██║   ██║██╔══██╗██╔════╝██╔═══██╗██╔══██╗
+ ██║     ██║   ██║██████╔╝███████╗██║   ██║██████╔╝
+ ██║     ██║   ██║██╔══██╗╚════██║██║   ██║██╔══██╗
+ ╚██████╗╚██████╔╝██║  ██║███████║╚██████╔╝██║  ██║
+  ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝
+\x1b[0m
+\x1b[90m  v${VERSION} · OS-level Desktop Automation Server\x1b[0m
+\x1b[90m  ─────────────────────────────────────────────\x1b[0m
+
+\x1b[33m  ⚠  DESKTOP CONTROL ACTIVE\x1b[0m
+\x1b[90m  This agent can move your mouse, type keystrokes,\x1b[0m
+\x1b[90m  take screenshots, and interact with any app on\x1b[0m
+\x1b[90m  your screen. Only connect AI models you trust.\x1b[0m
+\x1b[90m  Server binds to localhost only — not exposed to\x1b[0m
+\x1b[90m  the network. Run \x1b[0m\x1b[36mclawdcursor stop\x1b[0m\x1b[90m when done.\x1b[0m
+
+\x1b[90m  ─────────────────────────────────────────────\x1b[0m
 `);
 
     if (resolvedApi.source === 'external') {
