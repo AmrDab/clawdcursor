@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clawd Cursor v0.7.0 · The Glove for Any AI Hand</title>
+  <meta name="description" content="Clawd Cursor v0.7.0 — model-agnostic desktop control. 33 tools, 3 transport modes, MCP support. Works with Claude Code, Cursor, Windsurf, or any AI that can call tools.">
+  <meta property="og:title" content="Clawd Cursor v0.7.0 · The Glove for Any AI Hand">
+  <meta property="og:description" content="33 desktop control tools. REST, MCP stdio, or direct agent. Works with any AI model.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://clawdcursor.com/v0.7.0">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <meta name="theme-color" content="#09090b">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!--
+    AGENT-READABLE SUMMARY
+    ======================
+    clawd-cursor v0.7.0 is a desktop automation tool server.
+    It exposes 33 tools for controlling a desktop via REST API or MCP stdio.
+
+    Install:  npm install -g clawd-cursor
+    Consent:  clawdcursor consent
+    Start:    clawdcursor start          (REST agent mode, port 3847)
+    MCP:      clawdcursor mcp            (stdio MCP server for Claude Code / Cursor)
+    Doctor:   clawdcursor doctor         (auto-detect AI providers)
+
+    Transport modes:
+      - clawdcursor start  → AI agent + REST API on localhost:3847
+      - clawdcursor mcp    → MCP stdio server (no internal AI, client drives)
+      - REST /execute/{tool} → raw tool calls over HTTP
+
+    Tool categories:
+      Desktop (11): desktop_screenshot, desktop_screenshot_region, get_screen_size,
+                    mouse_click, mouse_double_click, mouse_right_click, mouse_hover,
+                    mouse_scroll, mouse_drag, type_text, key_press
+      A11y    (8):  read_screen, get_windows, get_active_window, get_focused_element,
+                    focus_window, find_element, read_clipboard, write_clipboard
+      CDP     (9):  cdp_connect, cdp_page_context, cdp_read_text, cdp_click,
+                    cdp_type, cdp_select_option, cdp_evaluate, cdp_wait_for_selector,
+                    cdp_list_tabs, cdp_switch_tab
+      Orchestration (5): delegate_to_agent, open_app, navigate_browser, wait, get_task_status
+
+    Architecture (6 layers):
+      L0  Browser (Playwright) — browser-specific tasks
+      L1  Action Router        — zero-LLM pattern matching
+      L1.5 Deterministic Flows — hardcoded verified workflows
+      L2  A11y + CDP Reasoner  — accessibility tree + Chrome DevTools Protocol
+      L2.5 Vision Hint         — coordinate spotter fallback
+      L3  Computer Use         — vision model full fallback
+
+    Supported AI providers: Anthropic, OpenAI, Groq, Together AI, DeepSeek, Kimi, Ollama (local)
+    Models can come from different providers (e.g. Groq for text/L2, Anthropic for vision/L3)
+
+    Consent required before first use. Run: clawdcursor consent
+    Data dir: ~/.clawd-cursor/
+    Localhost only — not exposed to network.
+  -->
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #09090b;
+      --bg2: #111113;
+      --surface: #18181b;
+      --text: #fafafa;
+      --text2: #a1a1aa;
+      --text3: #52525b;
+      --accent: #22c55e;
+      --accent2: #4ade80;
+      --blue: #3b82f6;
+      --purple: #a855f7;
+      --red: #ef4444;
+      --orange: #f97316;
+      --yellow: #eab308;
+      --border: rgba(255,255,255,0.06);
+      --border2: rgba(255,255,255,0.12);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent2); }
+
+    .wrap { max-width: 1000px; margin: 0 auto; padding: 0 24px; }
+    code, .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* ── Top bar ── */
+    .topbar {
+      border-bottom: 1px solid var(--border);
+      padding: 12px 0;
+    }
+    .topbar-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 12px; }
+    .topbar-logo { font-weight: 800; font-size: 0.9rem; color: var(--text); }
+    .topbar-logo span { color: var(--accent); }
+    .version-chip {
+      background: rgba(34,197,94,0.1);
+      border: 1px solid rgba(34,197,94,0.2);
+      color: var(--accent2);
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 100px;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .topbar-right { display: flex; align-items: center; gap: 16px; }
+    .topbar-link {
+      color: var(--text2);
+      font-size: 0.8rem;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+    .topbar-link:hover { color: var(--text); }
+    .topbar-link.active { color: var(--accent); }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 72px 0 52px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(34,197,94,0.08);
+      border: 1px solid rgba(34,197,94,0.2);
+      color: var(--accent2);
+      padding: 5px 14px;
+      border-radius: 100px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+    }
+    .hero-badge .pulse {
+      width: 6px; height: 6px;
+      background: var(--accent);
+      border-radius: 50%;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 5.5vw, 3.8rem);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -0.035em;
+      margin-bottom: 18px;
+    }
+    .hero h1 .gr {
+      background: linear-gradient(135deg, var(--accent), #06b6d4, var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-size: 200% auto;
+      animation: grad 4s ease-in-out infinite;
+    }
+    @keyframes grad { 0%,100% { background-position: 0% center; } 50% { background-position: 100% center; } }
+
+    .hero-sub {
+      font-size: 1.05rem;
+      color: var(--text2);
+      max-width: 520px;
+      margin: 0 auto 32px;
+      line-height: 1.65;
+    }
+
+    .install-box {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      color: var(--accent2);
+      margin-bottom: 28px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .install-box:hover { border-color: var(--accent); }
+    .install-box .prefix { color: var(--text3); }
+    .copy-btn { color: var(--text3); font-size: 0.7rem; cursor: pointer; transition: color 0.15s; }
+    .copy-btn:hover { color: var(--text2); }
+
+    .hero-btns {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-p {
+      background: var(--accent);
+      color: #000;
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.82rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.2s;
+    }
+    .btn-p:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(34,197,94,0.3); color: #000; }
+    .btn-s {
+      background: var(--surface);
+      color: var(--text);
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.82rem;
+      border: 1px solid var(--border2);
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.2s;
+    }
+    .btn-s:hover { border-color: var(--accent); color: var(--text); }
+
+    /* ── Stats ── */
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      margin: 48px 0;
+    }
+    .stat {
+      text-align: center;
+      padding: 22px 12px;
+      background: var(--bg2);
+      border-right: 1px solid var(--border);
+    }
+    .stat:last-child { border-right: none; }
+    .stat-val {
+      font-size: 1.7rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .stat-lbl { font-size: 0.68rem; color: var(--text3); margin-top: 3px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* ── Sections ── */
+    .sect {
+      padding: 52px 0;
+      border-top: 1px solid var(--border);
+    }
+    .sect-label {
+      color: var(--accent);
+      font-size: 0.68rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 8px;
+    }
+    .sect h2 {
+      font-size: 1.55rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .sect .sub {
+      color: var(--text2);
+      font-size: 0.88rem;
+      margin-bottom: 28px;
+      max-width: 580px;
+      line-height: 1.65;
+    }
+
+    /* ── Who section ── */
+    .who-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .who-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 28px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s;
+    }
+    .who-card:hover { border-color: var(--border2); }
+    .who-card.human { border-top: 2px solid var(--accent); }
+    .who-card.agent { border-top: 2px solid var(--blue); }
+    .who-icon { font-size: 1.6rem; margin-bottom: 14px; }
+    .who-card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 6px; }
+    .who-card p { font-size: 0.82rem; color: var(--text2); line-height: 1.6; margin-bottom: 16px; }
+    .who-tag {
+      display: inline-block;
+      background: var(--surface);
+      border: 1px solid var(--border2);
+      color: var(--text2);
+      font-size: 0.7rem;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin: 2px 2px 2px 0;
+    }
+    .who-tag.g { color: var(--accent); border-color: rgba(34,197,94,0.2); background: rgba(34,197,94,0.05); }
+    .who-tag.b { color: var(--blue); border-color: rgba(59,130,246,0.2); background: rgba(59,130,246,0.05); }
+
+    /* ── Connect modes ── */
+    .modes-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+    .mode-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .mode-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+    }
+    .mode-card.mcp::before { background: var(--purple); }
+    .mode-card.rest::before { background: var(--blue); }
+    .mode-card.cli::before { background: var(--accent); }
+    .mode-icon { font-size: 1.3rem; margin-bottom: 12px; }
+    .mode-card h3 { font-size: 0.9rem; font-weight: 700; margin-bottom: 6px; }
+    .mode-card .mode-desc { font-size: 0.78rem; color: var(--text2); line-height: 1.6; margin-bottom: 16px; }
+    .mode-who { font-size: 0.68rem; color: var(--text3); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+    .code-block {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      line-height: 1.7;
+      overflow-x: auto;
+    }
+    .code-block .c { color: var(--text3); }
+    .code-block .cmd { color: var(--accent2); }
+    .code-block .kw { color: var(--purple); }
+    .code-block .str { color: var(--yellow); }
+    .code-block .note { color: var(--blue); }
+    .mode-warn {
+      margin-top: 12px;
+      padding: 8px 12px;
+      background: rgba(234,179,8,0.06);
+      border: 1px solid rgba(234,179,8,0.15);
+      border-radius: 6px;
+      font-size: 0.72rem;
+      color: var(--yellow);
+      line-height: 1.5;
+    }
+
+    /* ── Pipeline ── */
+    .pipeline {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .layer {
+      display: grid;
+      grid-template-columns: 80px 1fr auto;
+      align-items: center;
+      gap: 16px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 18px;
+      transition: border-color 0.15s;
+    }
+    .layer:hover { border-color: var(--border2); }
+    .layer-id {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      text-align: center;
+      white-space: nowrap;
+    }
+    .layer-id.l0 { background: rgba(59,130,246,0.1); color: var(--blue); }
+    .layer-id.l1 { background: rgba(34,197,94,0.1); color: var(--accent); }
+    .layer-id.l15 { background: rgba(34,197,94,0.07); color: var(--accent2); }
+    .layer-id.l2 { background: rgba(168,85,247,0.1); color: var(--purple); }
+    .layer-id.l25 { background: rgba(168,85,247,0.07); color: #c084fc; }
+    .layer-id.l3 { background: rgba(249,115,22,0.1); color: var(--orange); }
+    .layer-info h4 { font-size: 0.85rem; font-weight: 700; margin-bottom: 2px; }
+    .layer-info p { font-size: 0.75rem; color: var(--text2); }
+    .layer-cost {
+      font-size: 0.68rem;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text3);
+      white-space: nowrap;
+      text-align: right;
+    }
+    .layer-cost.free { color: var(--accent); }
+    .layer-cost.cheap { color: var(--yellow); }
+    .layer-cost.costly { color: var(--orange); }
+    .pipeline-arrow {
+      text-align: center;
+      color: var(--text3);
+      font-size: 0.7rem;
+      padding: 2px 0;
+    }
+
+    /* ── Tools ── */
+    .tool-cats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+    .tool-cat {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    .tool-cat-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .tool-cat-icon { font-size: 1.1rem; }
+    .tool-cat h4 { font-size: 0.85rem; font-weight: 700; }
+    .tool-cat-count {
+      margin-left: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--text3);
+    }
+    .tool-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .tool-pill {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 3px 8px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.68rem;
+      color: var(--text2);
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .tool-pill:hover { border-color: var(--accent); color: var(--accent2); }
+
+    /* ── Comparison table ── */
+    .compare-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    .compare-table th {
+      text-align: left;
+      padding: 10px 14px;
+      background: var(--bg2);
+      color: var(--text3);
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      border-bottom: 1px solid var(--border);
+    }
+    .compare-table th:first-child { border-radius: 10px 0 0 0; width: 30%; }
+    .compare-table th:last-child { border-radius: 0 10px 0 0; }
+    .compare-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text2);
+      vertical-align: top;
+    }
+    .compare-table td:first-child { font-weight: 600; color: var(--text); }
+    .compare-table tr:last-child td { border-bottom: none; }
+    .compare-table tr:hover td { background: var(--bg2); }
+    .good { color: var(--accent); }
+    .bad { color: var(--red); }
+    .neutral { color: var(--text3); }
+
+    /* ── Providers ── */
+    .providers-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+    .provider-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .provider-name { font-size: 0.82rem; font-weight: 700; margin-bottom: 4px; }
+    .provider-models { font-size: 0.7rem; color: var(--text3); font-family: 'JetBrains Mono', monospace; }
+
+    /* ── Consent banner ── */
+    .consent-banner {
+      background: rgba(234,179,8,0.05);
+      border: 1px solid rgba(234,179,8,0.2);
+      border-radius: 12px;
+      padding: 24px 28px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    .consent-icon { font-size: 1.8rem; }
+    .consent-banner h3 { font-size: 0.95rem; font-weight: 700; color: var(--yellow); margin-bottom: 6px; }
+    .consent-banner p { font-size: 0.82rem; color: var(--text2); line-height: 1.6; margin-bottom: 12px; }
+    .consent-cmds { display: flex; flex-direction: column; gap: 6px; }
+    .consent-cmd {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+    }
+    .consent-cmd .label { color: var(--text3); min-width: 80px; }
+    .consent-cmd .cmd { color: var(--accent2); }
+
+    /* ── Footer ── */
+    .footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0;
+      margin-top: 32px;
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .footer-left { font-size: 0.78rem; color: var(--text3); }
+    .footer-right { display: flex; gap: 20px; }
+    .footer-link { font-size: 0.78rem; color: var(--text3); transition: color 0.15s; }
+    .footer-link:hover { color: var(--text2); }
+
+    /* ── Responsive ── */
+    @media (max-width: 700px) {
+      .who-grid, .modes-grid, .tool-cats, .providers-grid { grid-template-columns: 1fr; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .stats .stat:nth-child(2) { border-right: none; }
+      .topbar-right { display: none; }
+      .layer { grid-template-columns: 70px 1fr; }
+      .layer-cost { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Top bar -->
+<nav class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="topbar-left">
+      <span class="topbar-logo">clawd<span>cursor</span></span>
+      <span class="version-chip">v0.7.0</span>
+    </div>
+    <div class="topbar-right">
+      <a href="https://clawdcursor.com" class="topbar-link">← v0.6.3</a>
+      <a href="https://github.com/AmrDab/clawd-cursor" class="topbar-link">GitHub</a>
+      <a href="#connect" class="topbar-link">Connect</a>
+      <a href="#tools" class="topbar-link">Tools</a>
+      <a href="#pipeline" class="topbar-link">Pipeline</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="wrap">
+    <div class="hero-badge">
+      <span class="pulse"></span>
+      v0.7.0 — Architecture Overhaul
+    </div>
+    <h1>The <span class="gr">glove</span> for<br>any AI hand</h1>
+    <p class="hero-sub">
+      33 desktop control tools. 3 transport modes.<br>
+      Works with any AI model — Claude, GPT, Gemini, Llama, or your own.
+    </p>
+    <div class="install-box" onclick="copyInstall(this)">
+      <span class="prefix">$</span>
+      <span class="mono">npm install -g clawd-cursor</span>
+      <span class="copy-btn" title="Copy">⎘ copy</span>
+    </div>
+    <div class="hero-btns">
+      <a href="#connect" class="btn-p">↓ Get started</a>
+      <a href="https://github.com/AmrDab/clawd-cursor" class="btn-s">★ GitHub</a>
+      <a href="https://clawdcursor.com" class="btn-s">← v0.6.3 site</a>
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<div class="wrap">
+  <div class="stats">
+    <div class="stat">
+      <div class="stat-val">33</div>
+      <div class="stat-lbl">Tools</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">6</div>
+      <div class="stat-lbl">Pipeline Layers</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">3</div>
+      <div class="stat-lbl">Transport Modes</div>
+    </div>
+    <div class="stat">
+      <div class="stat-val">any</div>
+      <div class="stat-lbl">AI Model</div>
+    </div>
+  </div>
+</div>
+
+<!-- Who is using it -->
+<section class="sect" id="who">
+  <div class="wrap">
+    <div class="sect-label">Start here</div>
+    <h2>Where is the AI coming from?</h2>
+    <p class="sub">The setup path depends on whether you're bringing your own AI model, or connecting an agent that already has one.</p>
+    <div class="who-grid">
+      <div class="who-card human">
+        <div class="who-icon">🧑‍💻</div>
+        <h3>I want to give tasks in plain English</h3>
+        <p>Configure an API key. clawd-cursor runs its own 6-layer AI agent, reasons about your task, and executes it end-to-end. You type what you want — it figures out how.</p>
+        <div>
+          <span class="who-tag g">clawdcursor doctor</span>
+          <span class="who-tag g">clawdcursor start</span>
+          <span class="who-tag">REST /task</span>
+        </div>
+      </div>
+      <div class="who-card agent">
+        <div class="who-icon">🤖</div>
+        <h3>I'm connecting an agent that already reasons</h3>
+        <p>No API key needed inside clawd-cursor. Your agent (Claude Code, Cursor, Windsurf, or your own code) calls the 33 tools directly. clawd-cursor is the body — your agent is the brain.</p>
+        <div>
+          <span class="who-tag b">clawdcursor mcp</span>
+          <span class="who-tag b">REST /execute/{tool}</span>
+          <span class="who-tag">Claude Code</span>
+          <span class="who-tag">Cursor</span>
+          <span class="who-tag">Windsurf</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Connect modes -->
+<section class="sect" id="connect">
+  <div class="wrap">
+    <div class="sect-label">Transport modes</div>
+    <h2>Three ways to connect</h2>
+    <p class="sub">Same 33 tools, same desktop access. Different entry points depending on who's driving.</p>
+    <div class="modes-grid">
+
+      <!-- MCP -->
+      <div class="mode-card mcp">
+        <div class="mode-icon">🔌</div>
+        <div class="mode-who">For agents</div>
+        <h3>MCP stdio</h3>
+        <p class="mode-desc">Native MCP server for Claude Code, Cursor, Windsurf, and Zed. Your AI client discovers all 33 tools automatically — no HTTP plumbing needed.</p>
+        <div class="code-block">
+<span class="c"># 1. One-time consent (required first)</span>
+<span class="cmd">clawdcursor consent</span>
+
+<span class="c"># 2. Add to Claude Code (~/.claude.json)</span>
+<span class="kw">{</span>
+  <span class="str">"mcpServers"</span>: <span class="kw">{</span>
+    <span class="str">"clawd-cursor"</span>: <span class="kw">{</span>
+      <span class="str">"command"</span>: <span class="str">"clawdcursor"</span><span class="kw">,</span>
+      <span class="str">"args"</span>: [<span class="str">"mcp"</span>]
+    <span class="kw">}</span>
+  <span class="kw">}</span>
+<span class="kw">}</span></div>
+        <div class="mode-warn">⚠ Run <code>clawdcursor consent</code> first. MCP mode won't start without it.</div>
+      </div>
+
+      <!-- REST -->
+      <div class="mode-card rest">
+        <div class="mode-icon">🌐</div>
+        <div class="mode-who">For developers / custom agents</div>
+        <h3>REST API</h3>
+        <p class="mode-desc">HTTP tool calls from any code. Start the server, then call individual tools or send full tasks. Works with any HTTP client.</p>
+        <div class="code-block">
+<span class="c"># Start the server</span>
+<span class="cmd">clawdcursor start</span>
+
+<span class="c"># Call a raw tool</span>
+<span class="note">POST</span> /execute/desktop_screenshot
+<span class="note">POST</span> /execute/mouse_click
+  <span class="kw">{</span> <span class="str">"x"</span>: 450, <span class="str">"y"</span>: 300 <span class="kw">}</span>
+
+<span class="c"># OR send a plain-English task</span>
+<span class="note">POST</span> /task
+  <span class="kw">{</span> <span class="str">"task"</span>: <span class="str">"open Chrome"</span> <span class="kw">}</span>
+
+<span class="c"># List all tools + schemas</span>
+<span class="note">GET</span>  /tools</div>
+      </div>
+
+      <!-- CLI Agent -->
+      <div class="mode-card cli">
+        <div class="mode-icon">🧠</div>
+        <div class="mode-who">For humans with an API key</div>
+        <h3>CLI Agent</h3>
+        <p class="mode-desc">clawd-cursor is the agent. Configure your AI provider — it reasons, plans, and executes tasks end-to-end using the 6-layer pipeline.</p>
+        <div class="code-block">
+<span class="c"># Auto-detect your AI providers</span>
+<span class="cmd">clawdcursor doctor</span>
+
+<span class="c"># Start the agent</span>
+<span class="cmd">clawdcursor start</span>
+
+<span class="c"># Send a task</span>
+<span class="cmd">clawdcursor task</span> <span class="str">"Open Gmail and send
+a draft to team@co.com"</span>
+
+<span class="c"># Or interactive task console</span>
+<span class="cmd">clawdcursor task</span></div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- Consent -->
+<section class="sect" id="consent">
+  <div class="wrap">
+    <div class="sect-label">Safety</div>
+    <h2>One-time consent</h2>
+    <p class="sub">clawd-cursor gives AI models full desktop access. You must explicitly authorize this before any mode will start.</p>
+    <div class="consent-banner">
+      <div class="consent-icon">⚠️</div>
+      <div>
+        <h3>Desktop Control Warning</h3>
+        <p>This tool grants AI models: mouse + keyboard control, screenshot capture, clipboard access, app switching, browser DOM via CDP, and accessibility tree reads. Server binds to localhost only. Dangerous key combos are blocked.</p>
+        <div class="consent-cmds">
+          <div class="consent-cmd">
+            <span class="label">Interactive</span>
+            <span class="cmd">clawdcursor consent</span>
+          </div>
+          <div class="consent-cmd">
+            <span class="label">Non-interactive</span>
+            <span class="cmd">clawdcursor consent --accept</span>
+          </div>
+          <div class="consent-cmd">
+            <span class="label">Check status</span>
+            <span class="cmd">clawdcursor consent --status</span>
+          </div>
+          <div class="consent-cmd">
+            <span class="label">Revoke</span>
+            <span class="cmd">clawdcursor consent --revoke</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pipeline -->
+<section class="sect" id="pipeline">
+  <div class="wrap">
+    <div class="sect-label">Architecture</div>
+    <h2>6-layer pipeline</h2>
+    <p class="sub">Each layer tries to handle the task before escalating to the next. Cheaper layers run first — vision is the last resort, not the first call.</p>
+    <div class="pipeline">
+      <div class="layer">
+        <span class="layer-id l0">L0</span>
+        <div class="layer-info">
+          <h4>Browser · Playwright</h4>
+          <p>Handles browser-specific tasks via Playwright automation</p>
+        </div>
+        <div class="layer-cost cheap">text model</div>
+      </div>
+      <div class="pipeline-arrow">↓ falls through if not handled</div>
+      <div class="layer">
+        <span class="layer-id l1">L1</span>
+        <div class="layer-info">
+          <h4>Action Router</h4>
+          <p>Pattern-matched tasks: open apps, type text, shortcuts, navigate URLs — zero LLM calls</p>
+        </div>
+        <div class="layer-cost free">$0</div>
+      </div>
+      <div class="pipeline-arrow">↓</div>
+      <div class="layer">
+        <span class="layer-id l15">L1.5</span>
+        <div class="layer-info">
+          <h4>Deterministic Flows</h4>
+          <p>Hardcoded step-by-step scripts for known task patterns with ground-truth verification</p>
+        </div>
+        <div class="layer-cost free">$0</div>
+      </div>
+      <div class="pipeline-arrow">↓</div>
+      <div class="layer">
+        <span class="layer-id l2">L2</span>
+        <div class="layer-info">
+          <h4>A11y + CDP Reasoner</h4>
+          <p>Reads accessibility tree and Chrome DevTools Protocol. Text model reasons about what to click. Bounds-based click resolver — no vision needed</p>
+        </div>
+        <div class="layer-cost cheap">text model</div>
+      </div>
+      <div class="pipeline-arrow">↓ if element not found in a11y tree</div>
+      <div class="layer">
+        <span class="layer-id l25">L2.5</span>
+        <div class="layer-info">
+          <h4>Vision Coordinate Spotter</h4>
+          <p>Asks vision model "where is [element]?" Returns coordinates. Cheaper than full computer use</p>
+        </div>
+        <div class="layer-cost cheap">vision (coords only)</div>
+      </div>
+      <div class="pipeline-arrow">↓ last resort</div>
+      <div class="layer">
+        <span class="layer-id l3">L3</span>
+        <div class="layer-info">
+          <h4>Computer Use</h4>
+          <p>Full vision model with screenshot + action loop. Handles anything — native apps, legacy software, anything on screen</p>
+        </div>
+        <div class="layer-cost costly">vision model</div>
+      </div>
+    </div>
+    <p style="font-size: 0.78rem; color: var(--text3); margin-top: 16px;">
+      In <strong style="color: var(--text2)">MCP / REST mode</strong>, there is no pipeline — your agent calls tools directly. The pipeline only runs in <strong style="color: var(--text2)">CLI agent mode</strong> (<code style="color: var(--accent2); font-size: 0.72rem;">clawdcursor start</code>).
+    </p>
+  </div>
+</section>
+
+<!-- Tools -->
+<section class="sect" id="tools">
+  <div class="wrap">
+    <div class="sect-label">33 Tools</div>
+    <h2>One tool registry, three transports</h2>
+    <p class="sub">Every tool is defined once and served over REST, MCP stdio, and used internally by the agent pipeline. OpenAI function-calling format.</p>
+    <div class="tool-cats">
+      <div class="tool-cat">
+        <div class="tool-cat-header">
+          <span class="tool-cat-icon">🖥️</span>
+          <h4>Desktop</h4>
+          <span class="tool-cat-count">11 tools</span>
+        </div>
+        <div class="tool-list">
+          <span class="tool-pill">desktop_screenshot</span>
+          <span class="tool-pill">desktop_screenshot_region</span>
+          <span class="tool-pill">get_screen_size</span>
+          <span class="tool-pill">mouse_click</span>
+          <span class="tool-pill">mouse_double_click</span>
+          <span class="tool-pill">mouse_right_click</span>
+          <span class="tool-pill">mouse_hover</span>
+          <span class="tool-pill">mouse_scroll</span>
+          <span class="tool-pill">mouse_drag</span>
+          <span class="tool-pill">type_text</span>
+          <span class="tool-pill">key_press</span>
+        </div>
+      </div>
+      <div class="tool-cat">
+        <div class="tool-cat-header">
+          <span class="tool-cat-icon">♿</span>
+          <h4>Accessibility</h4>
+          <span class="tool-cat-count">8 tools</span>
+        </div>
+        <div class="tool-list">
+          <span class="tool-pill">read_screen</span>
+          <span class="tool-pill">get_windows</span>
+          <span class="tool-pill">get_active_window</span>
+          <span class="tool-pill">get_focused_element</span>
+          <span class="tool-pill">focus_window</span>
+          <span class="tool-pill">find_element</span>
+          <span class="tool-pill">read_clipboard</span>
+          <span class="tool-pill">write_clipboard</span>
+        </div>
+      </div>
+      <div class="tool-cat">
+        <div class="tool-cat-header">
+          <span class="tool-cat-icon">🌐</span>
+          <h4>CDP · Browser DOM</h4>
+          <span class="tool-cat-count">10 tools</span>
+        </div>
+        <div class="tool-list">
+          <span class="tool-pill">cdp_connect</span>
+          <span class="tool-pill">cdp_page_context</span>
+          <span class="tool-pill">cdp_read_text</span>
+          <span class="tool-pill">cdp_click</span>
+          <span class="tool-pill">cdp_type</span>
+          <span class="tool-pill">cdp_select_option</span>
+          <span class="tool-pill">cdp_evaluate</span>
+          <span class="tool-pill">cdp_wait_for_selector</span>
+          <span class="tool-pill">cdp_list_tabs</span>
+          <span class="tool-pill">cdp_switch_tab</span>
+        </div>
+      </div>
+      <div class="tool-cat">
+        <div class="tool-cat-header">
+          <span class="tool-cat-icon">🎯</span>
+          <h4>Orchestration</h4>
+          <span class="tool-cat-count">4 tools</span>
+        </div>
+        <div class="tool-list">
+          <span class="tool-pill">open_app</span>
+          <span class="tool-pill">navigate_browser</span>
+          <span class="tool-pill">wait</span>
+          <span class="tool-pill">delegate_to_agent</span>
+        </div>
+      </div>
+    </div>
+    <p style="font-size: 0.78rem; color: var(--text3); margin-top: 16px;">
+      Full schemas at <code style="color: var(--accent2); font-size: 0.72rem;">GET /tools</code> (OpenAI function format) or <code style="color: var(--accent2); font-size: 0.72rem;">GET /docs</code> when <code style="color: var(--accent2); font-size: 0.72rem;">clawdcursor start</code> is running.
+    </p>
+  </div>
+</section>
+
+<!-- Providers -->
+<section class="sect" id="providers">
+  <div class="wrap">
+    <div class="sect-label">Model-agnostic</div>
+    <h2>Your AI, not ours</h2>
+    <p class="sub">Text (L2) and vision (L3) models can come from different providers. <code style="font-size: 0.85em;">clawdcursor doctor</code> auto-detects your available keys and builds the optimal mixed pipeline.</p>
+    <div class="providers-grid">
+      <div class="provider-card">
+        <div class="provider-name">Anthropic</div>
+        <div class="provider-models">haiku → L2<br>sonnet → L3 ✦</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">OpenAI</div>
+        <div class="provider-models">gpt-4o-mini → L2<br>gpt-4o → L3</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">Groq</div>
+        <div class="provider-models">llama-3.3-70b → L2<br>llama-3.2-90b → L3</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">Ollama</div>
+        <div class="provider-models">local text → L2<br>local vision → L3</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">Together AI</div>
+        <div class="provider-models">llama-3.1-70b → L2<br>llama-3.2-90b → L3</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">DeepSeek</div>
+        <div class="provider-models">deepseek-chat → L2</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">Kimi</div>
+        <div class="provider-models">moonshot-v1-8k → L2</div>
+      </div>
+      <div class="provider-card">
+        <div class="provider-name">Any OpenAI-compat</div>
+        <div class="provider-models">custom base URL<br>+ your models</div>
+      </div>
+    </div>
+    <p style="font-size: 0.75rem; color: var(--text3); margin-top: 12px;">✦ Anthropic is the only provider supporting Computer Use (L3 native action tool). Others use vision-based fallback.</p>
+  </div>
+</section>
+
+<!-- What's new -->
+<section class="sect" id="changelog">
+  <div class="wrap">
+    <div class="sect-label">v0.6.3 → v0.7.0</div>
+    <h2>What changed</h2>
+    <p class="sub">Not a feature release — a reliability and openness overhaul.</p>
+    <table class="compare-table">
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>v0.6.3</th>
+          <th>v0.7.0</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Architecture</td>
+          <td class="neutral">4-layer pipeline</td>
+          <td class="good">6-layer pipeline</td>
+        </tr>
+        <tr>
+          <td>Transport</td>
+          <td class="neutral">REST only</td>
+          <td class="good">REST + MCP stdio + tools-only server</td>
+        </tr>
+        <tr>
+          <td>Tools</td>
+          <td class="neutral">Monolithic — no tool exposure</td>
+          <td class="good">33 discrete tools, OpenAI format</td>
+        </tr>
+        <tr>
+          <td>Success verification</td>
+          <td class="bad">LLM self-reports (often wrong)</td>
+          <td class="good">Ground-truth action verifier</td>
+        </tr>
+        <tr>
+          <td>Loop protection</td>
+          <td class="bad">Agent can repeat failed action forever</td>
+          <td class="good">No-progress detector + premature-done blocker</td>
+        </tr>
+        <tr>
+          <td>Click resolution</td>
+          <td class="neutral">Vision model guesses coordinates</td>
+          <td class="good">A11y bounds-based — zero LLM cost</td>
+        </tr>
+        <tr>
+          <td>Browser interaction</td>
+          <td class="neutral">Playwright only</td>
+          <td class="good">CDP — click by selector, read DOM</td>
+        </tr>
+        <tr>
+          <td>AI model support</td>
+          <td class="neutral">Anthropic-favored</td>
+          <td class="good">Truly model-agnostic, mixed providers</td>
+        </tr>
+        <tr>
+          <td>Platform dependency</td>
+          <td class="bad">Tied to OpenClaw</td>
+          <td class="good">Fully standalone, auto-migrates data</td>
+        </tr>
+        <tr>
+          <td>Onboarding</td>
+          <td class="neutral">None — starts immediately</td>
+          <td class="good">First-run consent flow</td>
+        </tr>
+        <tr>
+          <td>Task logging</td>
+          <td class="neutral">Console output only</td>
+          <td class="good">Structured JSONL — verified vs unverified</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="wrap">
+    <div class="footer-inner">
+      <div class="footer-left">
+        clawd<strong>cursor</strong> v0.7.0 · localhost only · MIT license
+      </div>
+      <div class="footer-right">
+        <a href="https://clawdcursor.com" class="footer-link">← v0.6.3</a>
+        <a href="https://github.com/AmrDab/clawd-cursor" class="footer-link">GitHub</a>
+        <a href="https://github.com/AmrDab/clawd-cursor/blob/v0.7.0/docs/agent-guide.md" class="footer-link">Agent guide</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script>
+  function copyInstall(el) {
+    navigator.clipboard.writeText('npm install -g clawd-cursor').then(() => {
+      const btn = el.querySelector('.copy-btn');
+      const orig = btn.textContent;
+      btn.textContent = '✓ copied';
+      btn.style.color = 'var(--accent)';
+      setTimeout(() => {
+        btn.textContent = orig;
+        btn.style.color = '';
+      }, 1800);
+    });
+  }
+</script>
+
+</body>
+</html>
