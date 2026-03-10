@@ -48,6 +48,50 @@
 | GitHub repo count | PASS | 16s | Layer 0 (CDP) |
 | Google Flights search | PASS | 140s | Layer 2 (CDP) |
 
+### v0.6.3 vs v0.7.0
+
+| | v0.6.3 | v0.7.0 |
+|---|---|---|
+| **Architecture** | 4-layer pipeline (L0-L3) | 6-layer pipeline (L0, L1, L1.5, L2, L2.5, L3) |
+| **Transport** | REST API only | REST + MCP stdio + tools-only server |
+| **Tools** | Monolithic agent, no tool exposure | 33 discrete tools, OpenAI function-calling format |
+| **Browser** | Playwright-only, no DOM access | CDP integration — click by selector, read text, type by label |
+| **Verification** | LLM self-reports success (often wrong) | Ground-truth action verifier — reads actual content back |
+| **False positives** | Common — agent says "done" prematurely | Premature-done blocker + evidence-based completion |
+| **Loops** | Agent can repeat same failed action forever | No-progress detector blocks after 3 repeats in 8 steps |
+| **Click resolution** | Vision model guesses coordinates | A11y bounds-based resolver (zero LLM cost), vision as fallback |
+| **Common tasks** | Every task goes through LLM | Deterministic flows for email, app-switch — zero LLM calls |
+| **Task logging** | Console output only | Structured JSONL per-task, verified vs unverified success |
+| **Data directory** | `~/.openclaw/clawd-cursor/` (coupled) | `~/.clawd-cursor/` (standalone, auto-migrates) |
+| **Dependencies** | Tied to OpenClaw platform | Fully standalone — works with any AI, any client |
+| **Onboarding** | None — starts immediately | First-run consent flow for desktop control |
+| **MCP support** | None | Native MCP stdio for Claude Code, Cursor, Windsurf, Zed |
+| **Error reporting** | None | Opt-in redacted task log submission |
+| **Model coupling** | Anthropic-favored defaults | Truly model-agnostic — Claude, GPT, Gemini, Llama, Ollama, anything |
+
+---
+
+## The Glove for Any AI Hand
+
+Think of your AI as the **hand** and Clawd Cursor as the **glove**.
+
+The hand has the intelligence — it reasons, plans, and decides what to do. The glove gives it grip on the physical world. Clawd Cursor wraps your entire desktop — every window, every button, every text field, every pixel — and exposes it as simple tool calls that any AI model can use.
+
+**Your AI is the brain. Clawd Cursor is the body.**
+
+If it's visible on your screen, Clawd Cursor can interact with it. Native apps, web apps, legacy software, internal tools, desktop games — anything with a GUI. No app-specific integrations needed. No APIs to configure per-service. One universal interface that turns any AI into a desktop operator.
+
+This is what makes v0.7.0 different from every other automation tool: **it doesn't care which AI drives it.** Claude, GPT, Gemini, Llama running locally, a custom model you trained yourself, or a simple Python script making function calls. If it can call tools, it can control your computer.
+
+```
+Your AI (any model)          Clawd Cursor (the glove)
+  "Click the Send button"  ->  find_element + mouse_click
+  "What's on screen?"      ->  desktop_screenshot + read_screen
+  "Type my email"          ->  type_text
+  "Open Chrome to gmail"   ->  open_app + navigate_browser
+  "Read that table"        ->  cdp_read_text
+```
+
 ---
 
 ## Three Ways to Connect
