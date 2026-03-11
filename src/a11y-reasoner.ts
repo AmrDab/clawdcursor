@@ -98,6 +98,8 @@ ACTIONS — return exactly ONE as JSON
 {"action":"cdp_type","by_label":"Field Label","text":"value","description":"why"}
 {"action":"cdp_type","selector":"[aria-label='X']","text":"value","description":"why"}
 {"action":"cdp_read_text","selector":"body","description":"read visible text from page or element (for info retrieval)"}
+{"action":"cdp_scroll","direction":"down","amount":600,"description":"scroll page down 600px — use to reveal more content or posts"}
+{"action":"cdp_scroll","direction":"up","amount":400,"selector":"#feed","description":"scroll a specific element"}
 {"action":"checkpoint","description":"verify current page state"}
 {"action":"switch_app","app":"notepad|excel|edge|outlook|...","description":"why you need to switch"}
 {"action":"done","evidence":"concrete proof task is complete"}
@@ -788,6 +790,44 @@ export class A11yReasoner {
             console.log(`   ❌ CDP ${parsed.action} failed: ${String(cdpErr).substring(0, 150)}`);
             actionHistory.push({ action: 'error', description: `CDP action failed: ${cdpErr} — try keyboard instead` });
             await this.delay(SETTLE_MS);
+            continue;
+          }
+        }
+
+        // CDP scroll — scroll the page or a specific element
+        if (parsed.action === 'cdp_scroll') {
+          try {
+            await this.ensureCdp();
+            const pg = this.cdpDriver!.getPage();
+            if (pg) {
+              const direction = (parsed.direction || 'down').toLowerCase();
+              const amount = Math.min(Math.max(parsed.amount ?? 400, 50), 2000);
+              const deltaY = (direction === 'up') ? -amount : (direction === 'down') ? amount : 0;
+              const deltaX = (direction === 'left') ? -amount : (direction === 'right') ? amount : 0;
+              const selector = parsed.selector || null;
+              if (selector) {
+                await pg.evaluate(
+                  ({ sel, dy, dx }: { sel: string; dy: number; dx: number }) => {
+                    const el = document.querySelector(sel);
+                    if (el) { el.scrollBy(dx, dy); }
+                  },
+                  { sel: selector, dy: deltaY, dx: deltaX },
+                );
+              } else {
+                await pg.evaluate(
+                  ({ dy, dx }: { dy: number; dx: number }) => window.scrollBy(dx, dy),
+                  { dy: deltaY, dx: deltaX },
+                );
+              }
+              stepsTotal++;
+              const desc = `Scrolled ${direction} ${amount}px${selector ? ` on "${selector}"` : ''}`;
+              console.log(`   ✅ CDP scroll: ${desc}`);
+              actionHistory.push({ action: 'cdp_scroll', description: desc });
+              await this.delay(SETTLE_MS);
+            }
+            continue;
+          } catch (scrollErr) {
+            actionHistory.push({ action: 'error', description: `cdp_scroll failed: ${scrollErr} — use key_press ArrowDown or Page_Down instead` });
             continue;
           }
         }
