@@ -18,16 +18,47 @@
  */
 
 import express from 'express';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
+import { randomBytes } from 'crypto';
 import { z } from 'zod';
 import type { ClawdConfig } from './types';
 import { Agent } from './agent';
 import { mountDashboard } from './dashboard';
 import { VERSION } from './version';
+import { DATA_DIR } from './paths';
 
-// Favorites persistence
-const FAVORITES_PATH = join(process.cwd(), '.clawd-favorites.json');
+// Favorites persistence — stored in ~/.clawd-cursor/ so it persists across cwd changes
+const FAVORITES_PATH = join(DATA_DIR, '.clawd-favorites.json');
+
+// ── Bearer token auth ─────────────────────────────────────────────────────────
+// Generated once at startup, persisted to ~/.clawd-cursor/token so the
+// dashboard and external callers can read it. Rotates on every fresh start.
+const TOKEN_PATH = join(DATA_DIR, 'token');
+
+function generateToken(): string {
+  const token = randomBytes(32).toString('hex');
+  try {
+    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
+    writeFileSync(TOKEN_PATH, token, { encoding: 'utf-8', mode: 0o600 });
+  } catch (e) {
+    console.warn('⚠ Could not write auth token file:', (e as Error).message);
+  }
+  return token;
+}
+
+export let SERVER_TOKEN = generateToken();
+
+/** Middleware: require Authorization: Bearer <token> on mutating endpoints. */
+function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const authHeader = req.headers['authorization'] || '';
+  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  if (!token || token !== SERVER_TOKEN) {
+    res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawd-cursor/token' });
+    return;
+  }
+  next();
+}
 
 function loadFavorites(): string[] {
   try {
@@ -124,6 +155,34 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   const app = express();
   app.use(express.json());
 
+  // ── CORS: block browser-origin requests to prevent SSRF/localhost-bypass attacks ──
+  // The dashboard at GET / is exempt (browser tab). All API routes require:
+  //   1. Non-browser origin (no Origin header), OR same origin, OR explicit allowlist
+  //   2. Bearer token (on mutating endpoints)
+  app.use((req, res, next) => {
+    const origin = req.headers['origin'];
+    // Allow: no origin (curl, CLI, direct), or localhost origins
+    const allowedOrigins = [
+      'http://localhost:3847',
+      'http://127.0.0.1:3847',
+    ];
+    if (origin) {
+      if (allowedOrigins.includes(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        res.setHeader('Vary', 'Origin');
+      } else {
+        // Cross-origin browser request — block it
+        if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+        res.status(403).json({ error: 'Cross-origin requests not allowed' });
+        return;
+      }
+    }
+    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+    next();
+  });
+
   // Handle malformed JSON gracefully (e.g. control characters from terminal)
   app.use((err: any, _req: any, res: any, next: any) => {
     if (err.type === 'entity.parse.failed') {
@@ -143,7 +202,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Add a favorite
-  app.post('/favorites', (req, res) => {
+  app.post('/favorites', requireAuth, (req, res) => {
     const parsed = taskSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "task" string in body' });
@@ -158,7 +217,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Remove a favorite
-  app.delete('/favorites', (req, res) => {
+  app.delete('/favorites', requireAuth, (req, res) => {
     const parsed = taskSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "task" string in body' });
@@ -175,7 +234,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Submit a task
-  app.post('/task', async (req, res) => {
+  app.post('/task', requireAuth, async (req, res) => {
     const parsed = taskSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "task" in body' });
@@ -230,7 +289,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Approve or reject a pending confirmation
-  app.post('/confirm', (req, res) => {
+  app.post('/confirm', requireAuth, (req, res) => {
     const parsed = confirmSchema.safeParse(req.body);
     if (!parsed.success) {
       return res.status(400).json({ error: 'Missing "approved" boolean in body' });
@@ -252,7 +311,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Abort current task
-  app.post('/abort', (req, res) => {
+  app.post('/abort', requireAuth, (req, res) => {
     agent.abort();
     res.json({ aborted: true });
   });
@@ -263,7 +322,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Screenshot — returns PNG image of current screen
-  app.get('/screenshot', async (_req, res) => {
+  app.get('/screenshot', requireAuth, async (_req, res) => {
     try {
       const desktop = agent.getDesktop();
       const frame = await desktop.captureForLLM();
@@ -279,7 +338,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
 
   // Direct action execution — lets an external brain (e.g. Claude Code) drive the agent
   // Coordinates are in LLM-space (1280px wide) — auto-scaled to real screen
-  app.post('/action', async (req, res) => {
+  app.post('/action', requireAuth, async (req, res) => {
     try {
       const { action, x, y, text, key, button, scrollDelta } = req.body;
       if (!action) return res.status(400).json({ error: 'Missing "action" field' });
@@ -332,7 +391,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Error report — opt-in submission of redacted task logs
-  app.post('/report', async (req, res) => {
+  app.post('/report', requireAuth, async (req, res) => {
     try {
       const { apiSubmitReport } = await import('./report');
       const { userNote, logIndex } = req.body || {};
@@ -361,7 +420,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Graceful shutdown (localhost only)
-  app.post('/stop', (req, res) => {
+  app.post('/stop', requireAuth, (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || '';
     const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
     if (!isLocal) {

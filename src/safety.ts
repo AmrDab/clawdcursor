@@ -38,9 +38,15 @@ export class SafetyLayer {
       }
     }
 
-    // Typing is preview tier (user can see what's being typed)
+    // Typing in a terminal context is Confirm tier — keystrokes could execute
+    // shell commands. Typing in other contexts is Preview (user can see output).
     if ('text' in action && action.kind === 'type') {
-      return SafetyTier.Preview;
+      const terminalProcesses = ['cmd', 'powershell', 'pwsh', 'bash', 'zsh', 'sh',
+        'wt', 'windowsterminal', 'terminal', 'iterm2', 'alacritty', 'hyper', 'conhost',
+        'mintty', 'git bash', 'wsl'];
+      const descLower = description.toLowerCase();
+      const isTerminalContext = terminalProcesses.some(t => descLower.includes(t));
+      return isTerminalContext ? SafetyTier.Confirm : SafetyTier.Preview;
     }
 
     // Everything else is auto

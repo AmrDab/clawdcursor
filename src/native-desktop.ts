@@ -64,11 +64,22 @@ const KEY_MAP: Record<string, Key> = {
 // At 2560 screen: 1280 → scale 2x (was 1024 → 2.5x). Icons go from ~12px to ~20px.
 const LLM_TARGET_WIDTH = 1280;
 
+export interface MonitorInfo {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  primary: boolean;
+  name: string;
+}
+
 export class NativeDesktop extends EventEmitter {
   private config: ClawdConfig;
   private screenWidth = 0;
   private screenHeight = 0;
   private connected = false;
+  private monitors: MonitorInfo[] = [];
 
   /** Scale factor: LLM coordinates × scaleFactor = real screen coordinates */
   private scaleFactor = 1;
@@ -76,6 +87,90 @@ export class NativeDesktop extends EventEmitter {
   constructor(config: ClawdConfig) {
     super();
     this.config = config;
+  }
+
+  /**
+   * Enumerate all connected monitors with their positions and sizes.
+   * Returns best-effort results — falls back to primary only on errors.
+   */
+  async getMonitors(): Promise<MonitorInfo[]> {
+    if (this.monitors.length > 0) return this.monitors;
+
+    try {
+      if (process.platform === 'win32') {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { "$($_.Bounds.X),$($_.Bounds.Y),$($_.Bounds.Width),$($_.Bounds.Height),$($_.Primary),$($_.DeviceName)" }`;
+        const { stdout } = await execAsync(`powershell -NoProfile -Command "${ps}"`);
+        const lines = stdout.trim().split('\n').filter(Boolean);
+        this.monitors = lines.map((line, i) => {
+          const [x, y, w, h, primary, name] = line.trim().split(',');
+          return {
+            index: i,
+            x: parseInt(x), y: parseInt(y),
+            width: parseInt(w), height: parseInt(h),
+            primary: primary.trim().toLowerCase() === 'true',
+            name: name?.trim() || `Monitor ${i + 1}`,
+          };
+        });
+      } else if (process.platform === 'darwin') {
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        // system_profiler gives display info; for bounds we use osascript
+        const { stdout } = await execAsync(`osascript -e 'tell application "System Events" to get bounds of every desktop'`).catch(() => ({ stdout: '' }));
+        if (stdout.trim()) {
+          // fallback: just return primary
+          this.monitors = [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
+        } else {
+          this.monitors = [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
+        }
+      } else {
+        // Linux: use xrandr
+        const { exec } = await import('child_process');
+        const { promisify } = await import('util');
+        const execAsync = promisify(exec);
+        const { stdout } = await execAsync('xrandr --query 2>/dev/null').catch(() => ({ stdout: '' }));
+        const re = /(\S+) connected(?: primary)? (\d+)x(\d+)\+(\d+)\+(\d+)/g;
+        let m; let i = 0; const results: MonitorInfo[] = [];
+        while ((m = re.exec(stdout)) !== null) {
+          results.push({ index: i++, x: parseInt(m[4]), y: parseInt(m[5]), width: parseInt(m[2]), height: parseInt(m[3]), primary: stdout.includes(m[1] + ' connected primary'), name: m[1] });
+        }
+        this.monitors = results.length > 0 ? results : [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
+      }
+    } catch {
+      this.monitors = [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
+    }
+
+    return this.monitors;
+  }
+
+  /**
+   * Capture a specific monitor by index.
+   * Falls back to primary grab if region capture fails.
+   */
+  async captureMonitor(monitorIndex = 0): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number }> {
+    const monitors = await this.getMonitors();
+    const mon = monitors[monitorIndex] ?? monitors.find(m => m.primary) ?? monitors[0];
+    if (!mon) return this.captureForLLM();
+
+    try {
+      const { Region } = await import('@nut-tree-fork/nut-js');
+      const region = new Region(mon.x, mon.y, mon.width, mon.height);
+      const img = await screen.grabRegion(region);
+      const scaleFactor = mon.width > LLM_TARGET_WIDTH ? mon.width / LLM_TARGET_WIDTH : 1;
+      const llmW = Math.round(mon.width / scaleFactor);
+      const llmH = Math.round(mon.height / scaleFactor);
+      const processed = await sharp(img.data, { raw: { width: img.width, height: img.height, channels: 4 } })
+        .resize(llmW, llmH)
+        .png()
+        .toBuffer();
+      return { width: mon.width, height: mon.height, buffer: processed, timestamp: Date.now(), format: 'png', scaleFactor, llmWidth: llmW, llmHeight: llmH };
+    } catch {
+      // Fallback: full primary grab
+      return this.captureForLLM();
+    }
   }
 
   /**

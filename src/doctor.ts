@@ -287,6 +287,64 @@ export async function runDoctor(opts: {
     desktop.disconnect();
   }
 
+  // ─── 1b. macOS Permissions (Screen Recording + Accessibility) ───
+  if (process.platform === 'darwin') {
+    console.log('🍎 macOS permissions...');
+    // Screen Recording: try to capture — if it fails with "not permitted" TCC denied it
+    try {
+      const { execFileAsync } = await import('child_process').then(m => ({
+        execFileAsync: require('util').promisify(m.execFile) as (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>,
+      }));
+      // osascript can query Accessibility permission
+      const { stdout: axOut } = await execFileAsync('osascript', [
+        '-e', 'tell application "System Events" to return (UI elements enabled as string)',
+      ]).catch(() => ({ stdout: 'false', stderr: '' }));
+      const axOk = axOut.trim() === 'true';
+      results.push({
+        name: 'macOS Accessibility permission',
+        ok: axOk,
+        detail: axOk
+          ? 'Granted — clawd-cursor can read UI elements'
+          : 'DENIED — open System Settings → Privacy & Security → Accessibility → enable Terminal/Node',
+      });
+      if (axOk) {
+        console.log('   ✅ Accessibility permission granted');
+      } else {
+        console.log('   ❌ Accessibility permission DENIED');
+        console.log('   → System Settings → Privacy & Security → Accessibility → enable your terminal');
+      }
+    } catch {
+      results.push({ name: 'macOS Accessibility permission', ok: false, detail: 'Could not query — run manually in a terminal' });
+    }
+
+    // Screen Recording: attempt a screencapture dry run
+    try {
+      const { execFileAsync } = await import('child_process').then(m => ({
+        execFileAsync: require('util').promisify(m.execFile) as (cmd: string, args: string[]) => Promise<{ stdout: string; stderr: string }>,
+      }));
+      const tmpFile = `/tmp/.clawdcursor-scrtest-${Date.now()}.png`;
+      const { stderr } = await execFileAsync('screencapture', ['-x', '-t', 'png', tmpFile])
+        .catch(e => ({ stdout: '', stderr: String(e) }));
+      const denied = stderr.toLowerCase().includes('not permitted') || stderr.toLowerCase().includes('permission');
+      try { require('fs').unlinkSync(tmpFile); } catch { /* cleanup */ }
+      results.push({
+        name: 'macOS Screen Recording permission',
+        ok: !denied,
+        detail: denied
+          ? 'DENIED — open System Settings → Privacy & Security → Screen Recording → enable Terminal/Node'
+          : 'Granted — clawd-cursor can capture the screen',
+      });
+      if (denied) {
+        console.log('   ❌ Screen Recording permission DENIED');
+        console.log('   → System Settings → Privacy & Security → Screen Recording → enable your terminal');
+      } else {
+        console.log('   ✅ Screen Recording permission granted');
+      }
+    } catch {
+      results.push({ name: 'macOS Screen Recording permission', ok: false, detail: 'Could not verify — check manually' });
+    }
+  }
+
   // ─── 2. Accessibility Bridge ─────────────────────────────────────
   console.log('♿ Accessibility bridge...');
   const a11y = new AccessibilityBridge();

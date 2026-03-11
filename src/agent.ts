@@ -246,6 +246,9 @@ public class WinAPI {
     this.brain.setScreenSize(size.width, size.height);
   }
 
+  /** Maximum wall-clock time for a single task (10 minutes) */
+  private static readonly TASK_TIMEOUT_MS = 10 * 60 * 1000;
+
   async executeTask(task: string): Promise<TaskResult> {
     // Atomic concurrency guard — prevent TOCTOU race on simultaneous /task requests
     if (this.state.status !== 'idle') {
@@ -258,6 +261,26 @@ public class WinAPI {
 
     this.aborted = false;
     const startTime = Date.now();
+
+    // Wrap the entire task pipeline with a global wall-clock timeout.
+    // Individual layers have their own iteration limits, but a deadlocked
+    // LLM call or runaway Computer Use loop could still exceed 10 min.
+    const timeoutPromise = new Promise<TaskResult>((resolve) => {
+      setTimeout(() => {
+        this.aborted = true;
+        console.warn(`\n⏱ Task timed out after ${Agent.TASK_TIMEOUT_MS / 60000} minutes`);
+        resolve({
+          success: false,
+          steps: [{ action: 'error', description: `Task timed out after ${Agent.TASK_TIMEOUT_MS / 60000} minutes`, success: false, timestamp: Date.now() }],
+          duration: Date.now() - startTime,
+        });
+      }, Agent.TASK_TIMEOUT_MS);
+    });
+
+    return Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
+  }
+
+  private async _executeTaskInternal(task: string, startTime: number): Promise<TaskResult> {
 
     console.log(`\n🐾 Starting task: ${task}`);
     this.logger.startTask(task);

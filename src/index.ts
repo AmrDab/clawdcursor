@@ -174,8 +174,12 @@ program
       console.warn('Tool server not loaded:', (err as Error).message);
     }
 
-    app.listen(config.server.port, config.server.host, () => {
-      console.log(`\n🌐 API server: http://${config.server.host}:${config.server.port}`);
+    app.listen(config.server.port, config.server.host, async () => {
+      const { SERVER_TOKEN } = await import('./server');
+      const tokenPath = require('path').join(require('os').homedir(), '.clawd-cursor', 'token');
+      console.log(`\n\x1b[32m🌐 API server:\x1b[0m http://${config.server.host}:${config.server.port}`);
+      console.log(`\x1b[33m🔑 Auth token:\x1b[0m ${SERVER_TOKEN}`);
+      console.log(`\x1b[90m   (also saved to ${tokenPath})\x1b[0m`);
       console.log(`\nAgent endpoints:`);
       console.log(`  POST /task     — {"task": "Open Chrome and go to github.com"}`);
       console.log(`  GET  /status   — Agent state`);
@@ -184,6 +188,7 @@ program
       console.log(`  GET  /tools    — Tool schemas (OpenAI function format)`);
       console.log(`  POST /execute/{name} — Execute any tool`);
       console.log(`  GET  /docs     — Tool documentation`);
+      console.log(`\nAll mutating endpoints require: \x1b[36mAuthorization: Bearer <token>\x1b[0m`);
       console.log(`\nReady. 🐾`);
     });
 

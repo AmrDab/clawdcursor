@@ -22,6 +22,10 @@ export const TASK_LOGS_DIR = path.join(DATA_DIR, 'task-logs');
 export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
 export const UI_KNOWLEDGE_DIR = path.join(DATA_DIR, 'ui-knowledge');
 
+/** Persistent files */
+export const FAVORITES_PATH = path.join(DATA_DIR, '.clawd-favorites.json');
+export const TOKEN_PATH = path.join(DATA_DIR, 'token');
+
 /**
  * Migrate data from legacy ~/.openclaw/clawd-cursor/ to ~/.clawd-cursor/.
  * Only runs once — if the new dir already has content, skips.
