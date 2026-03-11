@@ -134,20 +134,29 @@ export class CDPDriver {
       this.ownsBrowser = true;
 
       // Get the most relevant tab — search ALL browser contexts (not just the first)
+      // Priority: user-navigated pages > pinned/system widgets > browser internal pages
+      const BLOCKED_URL_PATTERNS = [
+        'edge://', 'chrome://', 'about:',
+        // Known OEM/vendor widget pages that embed browsers as system components
+        'vantage.csw.lenovo.com', 'lenovo.com/widget',
+        'msn.com/spartan', 'bing.com/widget',
+        'ntp.msn.com',
+      ];
+      const isUserPage = (url: string) =>
+        url.startsWith('http') &&
+        !BLOCKED_URL_PATTERNS.some(blocked => url.includes(blocked));
+
       const contexts = this.browser.contexts();
-      let bestPage: Page | null = null;
-      let fallbackPage: Page | null = null;
-      for (const ctx of contexts) {
-        for (const p of ctx.pages()) {
-          const url = p.url();
-          if (!url.startsWith('edge://') && !url.startsWith('chrome://') && !url.startsWith('about:')) {
-            bestPage = p; // Keep overwriting — last real page wins
-          } else if (!fallbackPage) {
-            fallbackPage = p;
-          }
-        }
-      }
-      this.activePage = bestPage || fallbackPage;
+      const allPages: Page[] = contexts.flatMap(ctx => ctx.pages());
+      const userPages = allPages.filter(p => isUserPage(p.url()));
+      const fallbackPage = allPages.find(p =>
+        !p.url().startsWith('edge://') && !p.url().startsWith('chrome://') && !p.url().startsWith('about:')
+      ) ?? allPages[0] ?? null;
+
+      // Among user pages, prefer the last one (most recently opened/navigated)
+      this.activePage = userPages.length > 0
+        ? userPages[userPages.length - 1]
+        : fallbackPage;
 
       if (!this.activePage) {
         console.warn('   ⚠️ CDPDriver: connected but no pages found');

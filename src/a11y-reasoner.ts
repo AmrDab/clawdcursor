@@ -384,13 +384,19 @@ export class A11yReasoner {
                           // Still wrong — try switchToTabByUrl again with fresh connection
                           const switched2 = await cdp.switchToTabByUrl(navPath);
                           if (!switched2) {
-                            // Last resort: navigate the current CDP page directly
-                            console.log(`   🔄 Still wrong tab after reconnect, navigating to https://${navPath}`);
-                            const pg = cdp.getPage();
-                            if (pg) {
-                              await pg.evaluate((url: string) => { window.location.href = url; }, `https://${navPath}`);
-                              await pg.waitForLoadState('domcontentloaded', { timeout: 8000 }).catch(() => {});
-                            }
+                            // Last resort: open a fresh tab and navigate there
+                            // Don't navigate the current page — it may be a system widget with JS disabled
+                            console.log(`   🔄 Still wrong tab after reconnect, opening new tab to https://${navPath}`);
+                            try {
+                              const pg = cdp.getPage();
+                              if (pg) {
+                                const ctx = pg.context();
+                                const newTab = await ctx.newPage();
+                                await newTab.goto(`https://${navPath}`, { timeout: 15000, waitUntil: 'domcontentloaded' }).catch(() => {});
+                                await newTab.bringToFront().catch(() => {});
+                                cdp.attachToPage(newTab);
+                              }
+                            } catch { /* non-critical */ }
                           }
                         }
                       }
