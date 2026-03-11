@@ -37,6 +37,36 @@ export function writeConsentFile(): void {
   saveConsent();
 }
 
+/** Print the big ASCII banner — only called during first-run onboarding */
+function printBanner(): void {
+  const G = '\x1b[32m', B = '\x1b[1m\x1b[32m', R = '\x1b[0m', D = '\x1b[90m';
+  process.stdout.write(
+    `\n${G}\n` +
+    `   /\\___/\\\n` +
+    `  ( >^.^< )   claw\n` +
+    `   )     (    claw\n` +
+    `  (_)_(_)_)\n` +
+    `${R}\n` +
+    `${B}\n` +
+    `  \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557      \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557    \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557\n` +
+    ` \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551    \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\n` +
+    ` \u2588\u2588\u2551     \u2588\u2588\u2551     \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551 \u2588\u2557 \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\n` +
+    ` \u2588\u2588\u2551     \u2588\u2588\u2551     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2551\u2588\u2588\u2588\u2557\u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\n` +
+    ` \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551  \u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2554\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\n` +
+    `  \u255a\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d \u255a\u2550\u2550\u255d\u255a\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d\n` +
+    `${R}${G}\n` +
+    `  \u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557   \u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2557\n` +
+    ` \u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\n` +
+    ` \u2588\u2588\u2551     \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\n` +
+    ` \u2588\u2588\u2551     \u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u255a\u2550\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\n` +
+    ` \u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2551  \u2588\u2588\u2551\n` +
+    `  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u255d  \u255a\u2550\u255d\n` +
+    `${R}\n` +
+    `${D}  OS-level Desktop Automation Server${R}\n` +
+    `${D}  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500${R}\n\n`
+  );
+}
+
 /** Run the onboarding consent flow (interactive terminal) */
 export async function runOnboarding(context: 'start' | 'consent' = 'start'): Promise<boolean> {
   // Non-interactive mode (piped stdin, CI, MCP stdio) — skip consent
@@ -44,22 +74,25 @@ export async function runOnboarding(context: 'start' | 'consent' = 'start'): Pro
     return true;
   }
 
+  // Show the big banner — this is the one moment every user sees it
+  printBanner();
+
   const contextNote = context === 'start'
     ? `\x1b[90m  You are starting:\x1b[0m\n` +
-      `\x1b[90m  → AI Agent + REST API on \x1b[0m\x1b[36mlocalhost:3847\x1b[0m\n` +
-      `\x1b[90m  → Any local process can call tool endpoints on that port\x1b[0m\n`
+      `\x1b[90m  \u2192 AI Agent + REST API on \x1b[0m\x1b[36mlocalhost:3847\x1b[0m\n` +
+      `\x1b[90m  \u2192 Any local process can call tool endpoints on that port\x1b[0m\n`
     : `\x1b[90m  This one-time consent covers all transport modes:\x1b[0m\n` +
-      `\x1b[90m  → MCP server (Claude Code, Cursor, Windsurf, Zed)\x1b[0m\n` +
-      `\x1b[90m  → REST API (clawdcursor start)\x1b[0m\n` +
-      `\x1b[90m  → Direct agent tasks\x1b[0m\n`;
+      `\x1b[90m  \u2192 MCP server (Claude Code, Cursor, Windsurf, Zed)\x1b[0m\n` +
+      `\x1b[90m  \u2192 REST API (clawdcursor start)\x1b[0m\n` +
+      `\x1b[90m  \u2192 Direct agent tasks\x1b[0m\n`;
 
   console.log(`
 \x1b[33m
-  ╔══════════════════════════════════════════════════════════════╗
-  ║                                                              ║
-  ║           ⚠   DESKTOP CONTROL WARNING   ⚠                   ║
-  ║                                                              ║
-  ╚══════════════════════════════════════════════════════════════╝
+  \u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557
+  \u2551                                                              \u2551
+  \u2551           \u26a0   DESKTOP CONTROL WARNING   \u26a0                   \u2551
+  \u2551                                                              \u2551
+  \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d
 \x1b[0m
 \x1b[90m  clawd-cursor gives AI models full control of your desktop:\x1b[0m
 
