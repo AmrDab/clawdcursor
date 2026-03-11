@@ -90,6 +90,33 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     openaiCompat: true,
     computerUse: false,
   },
+  gemini: {
+    name: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'gemini-2.0-flash',
+    visionModel: 'gemini-2.0-flash',
+    openaiCompat: true,
+    computerUse: false,
+  },
+  mistral: {
+    name: 'Mistral AI',
+    baseUrl: 'https://api.mistral.ai/v1',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'mistral-small-latest',
+    visionModel: 'pixtral-large-latest',
+    openaiCompat: true,
+    computerUse: false,
+  },
+  xai: {
+    name: 'xAI (Grok)',
+    baseUrl: 'https://api.x.ai/v1',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'grok-3-mini',
+    visionModel: 'grok-2-vision-1212',
+    openaiCompat: true,
+    computerUse: false,
+  },
   generic: {
     name: 'OpenAI-Compatible',
     baseUrl: '', // set from config
@@ -113,6 +140,8 @@ export function detectProvider(apiKey: string, explicitProvider?: string): strin
 
   if (!apiKey) return 'ollama'; // No key = local mode
   if (apiKey.startsWith('sk-ant-')) return 'anthropic';
+  if (apiKey.startsWith('AIza')) return 'gemini';           // Google Gemini API keys start with AIza
+  if (apiKey.startsWith('xai-')) return 'xai';             // xAI Grok
   if (apiKey.startsWith('sk-') && apiKey.length > 60) return 'kimi'; // Kimi keys are longer than OpenAI
   if (apiKey.startsWith('sk-')) return 'openai';
   if (apiKey.startsWith('gsk_')) return 'groq';

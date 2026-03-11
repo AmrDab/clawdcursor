@@ -36,6 +36,7 @@ import { AccessibilityBridge } from './accessibility';
 import { ActionRouter } from './action-router';
 import { SafetyTier } from './types';
 import { ComputerUseBrain } from './computer-use';
+import { GenericComputerUse, isGenericComputerUseSupported } from './generic-computer-use';
 import { A11yReasoner } from './a11y-reasoner';
 import { TaskLogger, CompletionStatus } from './task-logger';
 import { WorkspaceState } from './workspace-state';
@@ -58,6 +59,7 @@ export class Agent {
   private a11y: AccessibilityBridge;
   private router: ActionRouter;
   private computerUse: ComputerUseBrain | null = null;
+  private genericComputerUse: GenericComputerUse | null = null;
   private reasoner: A11yReasoner | null = null;
   private deterministicFlows: DeterministicFlows;
   private browserLayer: BrowserLayer | null = null;
@@ -240,6 +242,12 @@ public class WinAPI {
       this.computerUse = new ComputerUseBrain(this.config, this.desktop, this.a11y, this.safety, computerUseOverrides);
       this.computerUse.setVerifier(this.verifier);
       console.log(`🖥️  Computer Use API enabled (Anthropic native tool + accessibility)`);
+    } else if (isGenericComputerUseSupported(this.config, pipelineConfig)) {
+      // Non-Anthropic provider with a vision model — use the universal OpenAI-compat loop
+      this.genericComputerUse = new GenericComputerUse(this.config, this.desktop, this.a11y, this.safety, pipelineConfig);
+      this.genericComputerUse.setVerifier(this.verifier);
+      const visionModel = pipelineConfig?.layer3?.model || this.config.ai.visionModel || 'unknown';
+      console.log(`🌐 Generic Computer Use enabled (${visionModel})`);
     }
 
     const size = this.desktop.getScreenSize();
@@ -940,10 +948,11 @@ Examples:
         );
       }
 
-      if (this.computerUse || this.hasApiKey) {
+      if (this.computerUse || this.genericComputerUse || this.hasApiKey) {
         const remainingTask = subtasks.slice(i).join(', then ');
         if (this.computerUse) {
-          console.log(`   🖥️  Layer 3: "${remainingTask}"`);
+          // Anthropic native Computer Use
+          console.log(`   🖥️  Layer 3 (Anthropic): "${remainingTask}"`);
           try {
             const cuResult = await this.computerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger);
             steps.push(...cuResult.steps);
@@ -951,18 +960,29 @@ Examples:
           } catch (err) {
             steps.push({ action: 'error', description: `Computer Use failed: ${err}`, success: false, timestamp: Date.now() });
           }
+        } else if (this.genericComputerUse) {
+          // Generic OpenAI-compat vision loop (GPT-4o, Gemini, Groq, Llama-vision, etc.)
+          console.log(`   🌐 Layer 3 (Generic): "${remainingTask}"`);
+          try {
+            const cuResult = await this.genericComputerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger);
+            steps.push(...cuResult.steps);
+            llmCallCount += cuResult.llmCalls;
+          } catch (err) {
+            steps.push({ action: 'error', description: `Generic Computer Use failed: ${err}`, success: false, timestamp: Date.now() });
+          }
         } else {
+          // Legacy fallback — vision LLM without structured tool schema
           await this.delay(150);
-          console.log(`   🧠 LLM vision fallback: "${remainingTask}"`);
+          console.log(`   🧠 Layer 3 (legacy fallback): "${remainingTask}"`);
           const fallbackResult = await this.executeLLMFallback(remainingTask, steps, debugDir, i);
           llmCallCount += fallbackResult.llmCalls;
           if (!fallbackResult.success) {
-            console.log(`   ❌ LLM fallback failed: "${subtask}"`);
+            console.log(`   ❌ Legacy fallback failed: "${subtask}"`);
           }
         }
         break;
       } else {
-        steps.push({ action: 'skipped', description: `Skipped "${subtask}" — no API key`, success: false, timestamp: Date.now() });
+        steps.push({ action: 'skipped', description: `Skipped "${subtask}" — no API key or vision model configured`, success: false, timestamp: Date.now() });
       }
     }
 
