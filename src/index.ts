@@ -103,6 +103,12 @@ program
       baseUrl: opts.baseUrl,
     });
 
+    // Read saved pipeline config for model name fallbacks
+    const { loadPipelineConfig } = await import('./doctor');
+    const savedPipeline = loadPipelineConfig();
+    const pipelineTextModel = savedPipeline?.layer2?.model || '';
+    const pipelineVisionModel = savedPipeline?.layer3?.model || '';
+
     const config: ClawdConfig = {
       ...DEFAULT_CONFIG,
       server: {
@@ -117,8 +123,8 @@ program
         textApiKey: resolvedApi.textApiKey,
         visionBaseUrl: resolvedApi.visionBaseUrl,
         visionApiKey: resolvedApi.visionApiKey,
-        model: opts.textModel || resolvedApi.textModel || opts.model || DEFAULT_CONFIG.ai.model,
-        visionModel: opts.visionModel || resolvedApi.visionModel || opts.model || DEFAULT_CONFIG.ai.visionModel,
+        model: opts.textModel || resolvedApi.textModel || opts.model || pipelineTextModel || DEFAULT_CONFIG.ai.model,
+        visionModel: opts.visionModel || resolvedApi.visionModel || opts.model || pipelineVisionModel || DEFAULT_CONFIG.ai.visionModel,
       },
       debug: opts.debug || false,
     };

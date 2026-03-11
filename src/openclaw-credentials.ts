@@ -78,6 +78,7 @@ function inferProviderFromBaseUrl(baseUrl?: string): string | undefined {
   if (url.includes('groq')) return 'groq';
   if (url.includes('together')) return 'together';
   if (url.includes('deepseek')) return 'deepseek';
+  if (url.includes('generativelanguage') || url.includes('gemini')) return 'gemini';
   if (url.includes('nvidia') || url.includes('integrate.api')) return 'nvidia';
   if (url.includes('mistral')) return 'mistral';
   if (url.includes('fireworks')) return 'fireworks';
@@ -484,7 +485,7 @@ export function resolveApiConfig(opts?: {
   if (localApiKey || localBaseUrl || localTextModel || localVisionModel || opts?.provider) {
     return {
       apiKey: localApiKey,
-      provider: normalizeProvider(opts?.provider) || inferProviderFromBaseUrl(localBaseUrl),
+      provider: normalizeProvider(opts?.provider) || inferProviderFromBaseUrl(localBaseUrl) || localProvider,
       baseUrl: localBaseUrl,
       textModel: localTextModel,
       visionModel: localVisionModel,
@@ -498,7 +499,7 @@ export function resolveApiConfig(opts?: {
 
   return {
     apiKey: localApiKey,
-    provider: inferProviderFromBaseUrl(localBaseUrl),
+    provider: inferProviderFromBaseUrl(localBaseUrl) || localProvider,
     baseUrl: localBaseUrl,
     textModel: localTextModel,
     visionModel: localVisionModel,
