@@ -96,7 +96,15 @@ export function toOpenAiFunctions(tools: ToolDefinition[]): object[] {
   }));
 }
 
-/** Convert a11y/physical pixel coordinate to logical (mouse) coordinate */
+/**
+ * Convert a11y coordinate to mouseClick coordinate.
+ *
+ * NOTE: Empirical testing shows a11y bounds and nut-js mouseClick share the
+ * same coordinate system on most Windows configs (both use screen coords from
+ * the same DPI-awareness level). This function may divide unnecessarily on
+ * some setups. The smart tools (smart_click, invoke_element) pass coords
+ * directly for this reason. Only focus_window uses this helper as a fallback.
+ */
 export function a11yToMouse(physicalCoord: number, ctx: ToolContext): number {
   const dpiRatio = ctx.getScreenshotScaleFactor() / ctx.getMouseScaleFactor();
   return Math.round(physicalCoord / dpiRatio);
