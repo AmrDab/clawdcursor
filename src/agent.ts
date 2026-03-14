@@ -38,6 +38,9 @@ import { SafetyTier } from './types';
 import { ComputerUseBrain } from './computer-use';
 import { GenericComputerUse, isGenericComputerUseSupported } from './generic-computer-use';
 import { A11yReasoner } from './a11y-reasoner';
+import { OcrEngine } from './ocr-engine';
+import { OcrReasoner } from './ocr-reasoner';
+import { SkillCache } from './skill-cache';
 import { TaskLogger, CompletionStatus } from './task-logger';
 import { WorkspaceState } from './workspace-state';
 import { TaskVerifier } from './verifiers';
@@ -61,6 +64,9 @@ export class Agent {
   private computerUse: ComputerUseBrain | null = null;
   private genericComputerUse: GenericComputerUse | null = null;
   private reasoner: A11yReasoner | null = null;
+  private ocrEngine: OcrEngine;
+  private ocrReasoner: OcrReasoner | null = null;
+  private skillCache: SkillCache;
   private deterministicFlows: DeterministicFlows;
   private browserLayer: BrowserLayer | null = null;
   private logger: TaskLogger;
@@ -93,6 +99,20 @@ export class Agent {
     if (pipelineConfig && pipelineConfig.layer2.enabled) {
       this.reasoner = new A11yReasoner(this.a11y, this.desktop, pipelineConfig);
       console.log(`🧠 Layer 2 (Accessibility Reasoner): ${pipelineConfig.layer2.model}`);
+    }
+
+    // v0.8.0: OCR-first pipeline with skill cache
+    this.ocrEngine = new OcrEngine();
+    this.skillCache = new SkillCache();
+    this.skillCache.load();
+
+    if (this.ocrEngine.isAvailable() && pipelineConfig && pipelineConfig.layer2.enabled) {
+      this.ocrReasoner = new OcrReasoner(this.ocrEngine, this.desktop, this.a11y, pipelineConfig);
+      console.log(`👁️ Layer 2.5 (OCR Reasoner): enabled — OCR-first pipeline active`);
+    }
+    const skillStats = this.skillCache.getStats();
+    if (skillStats.total > 0) {
+      console.log(`📚 Layer 2 (Skill Cache): ${skillStats.total} cached skills`);
     }
 
     // hasApiKey gates LLM decomposition — true if cloud key OR local LLM (Ollama) is available
@@ -892,18 +912,66 @@ Examples:
         } catch { /* non-critical */ }
       }
 
-      // router can't handle — pass to Layer 2 (text LLM via accessibility tree)
+      // ── Layer 2: Skill Cache — replay learned paths ─────────────
       let activeWin = await this.a11y?.getActiveWindow().catch(() => null);
       if (!activeWin) {
         await this.delay(400);
         activeWin = await this.a11y?.getActiveWindow().catch(() => null);
       }
-      // For browser tasks, use the known browser process even if focus didn't switch
+      const activeProcessForSkill = browserProcessName || activeWin?.processName || '';
+
+      const cachedSkill = this.skillCache.findSkill(subtask, activeProcessForSkill);
+      if (cachedSkill) {
+        const skillResult = await this.skillCache.executeSkill(cachedSkill, this.desktop, this.a11y);
+        if (skillResult === 'success') {
+          steps.push({ action: 'done', description: `Skill cache: "${cachedSkill.taskPattern}" replayed`, success: true, timestamp: Date.now() });
+          continue;
+        }
+        // miss → fall through to OCR or A11y
+        console.log(`   🔄 Skill cache miss — falling through`);
+      }
+
+      // ── Layer 2.5: OCR Reasoner — primary universal read layer ──
+      if (this.ocrReasoner) {
+        console.log(`\n👁️ Layer 2.5 (OCR Reasoner): "${subtask}"`);
+        const ocrStart = Date.now();
+        const ocrResult = await this.ocrReasoner.run(subtask, priorContext);
+        const ocrDuration = Date.now() - ocrStart;
+
+        if (ocrResult.handled && ocrResult.success) {
+          steps.push({
+            action: 'done',
+            description: ocrResult.description,
+            success: true,
+            timestamp: Date.now(),
+          });
+          // Record for skill promotion
+          const ocrSteps = ocrResult.actionLog
+            .filter(a => a.action !== 'done' && a.action !== 'parse_error' && a.action !== 'error')
+            .map(a => ({ type: a.action as any, description: a.description }));
+          this.skillCache.recordSuccess(subtask, activeProcessForSkill, ocrSteps);
+          console.log(`   ✅ OCR Reasoner done (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s)`);
+          continue;
+        }
+
+        if (ocrResult.fallbackReason === 'cannot_read') {
+          console.log(`   🤷 OCR cannot read UI — skipping A11y, falling to Layer 3 (vision LLM)`);
+        } else if (!ocrResult.success) {
+          console.log(`   🤷 OCR Reasoner did not complete (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s) — skipping A11y, falling to vision`);
+        }
+        // OCR already includes a11y tree in its snapshot — if OCR+A11y combined
+        // couldn't handle it, A11y alone won't either. Skip straight to vision.
+      }
+
+      // When OCR Reasoner is NOT available, fall back to A11y Reasoner (v0.7.0 path)
+      // Re-read active window (may have changed during skill/OCR steps)
+      activeWin = await this.a11y?.getActiveWindow().catch(() => null);
       const activeProcessName = browserProcessName || activeWin?.processName;
       let a11yActionHistory: { action: string; description: string }[] | undefined;
 
-      if (this.reasoner?.isAvailable(activeProcessName)) {
-        console.log(`\n🧠 Layer 2 (A11y Reasoner): "${subtask}"`);
+      if (!this.ocrReasoner && this.reasoner?.isAvailable(activeProcessName)) {
+        // A11y Reasoner only runs when OCR is unavailable (v0.7.0 compat path)
+        console.log(`\n🧠 Layer 2 (A11y Reasoner — OCR unavailable): "${subtask}"`);
         const reasonStart = Date.now();
         const reasonResult = await this.reasoner.reason(subtask, activeProcessName, priorContext, this.logger, this.verifier);
         const reasonDuration = Date.now() - reasonStart;
@@ -934,7 +1002,7 @@ Examples:
         const duration = (reasonDuration / 1000).toFixed(1);
         console.log(`   🤷 Layer 2 → Layer 3 (${stepCount} steps, ${duration}s): ${reasonResult.description.substring(0, 100)}`);
         this.reasoner.recordVisionFallback();
-      } else if (this.reasoner) {
+      } else if (!this.ocrReasoner && this.reasoner) {
         console.log(`   ⚠️ Layer 2 circuit breaker (${activeProcessName ?? 'unknown'}) — falling to Layer 3`);
         this.reasoner.recordVisionFallback();
       }
