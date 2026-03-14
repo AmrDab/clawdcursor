@@ -1,7 +1,7 @@
 /**
  * Tool Registry — central registry of all clawd-cursor tools.
  *
- * Import this to get all 33 tools in a transport-agnostic format.
+ * Import this to get all 35 tools in a transport-agnostic format.
  * Adapters (HTTP, MCP) consume this registry.
  */
 
@@ -9,6 +9,7 @@ import { getDesktopTools } from './desktop';
 import { getA11yTools } from './a11y';
 import { getCdpTools } from './cdp';
 import { getOrchestrationTools } from './orchestration';
+import { getShortcutTools } from './shortcuts';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { toOpenAiFunctions, toJsonSchema } from './types';
 
@@ -22,6 +23,7 @@ export function getAllTools(): ToolDefinition[] {
     ...getA11yTools(),
     ...getCdpTools(),
     ...getOrchestrationTools(),
+    ...getShortcutTools(),
   ];
 }
 
