@@ -65,7 +65,7 @@ try {
         foreach ($word in $line.Words) {
             $r = $word.BoundingRect
             $elements += [PSCustomObject]@{
-                text       = $word.Text
+                text       = ($word.Text -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')
                 x          = [math]::Round($r.X)
                 y          = [math]::Round($r.Y)
                 width      = [math]::Round($r.Width)

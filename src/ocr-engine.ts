@@ -212,7 +212,11 @@ export class OcrEngine {
       throw new Error('PowerShell OCR script returned empty output');
     }
 
-    const data = JSON.parse(trimmed);
+    // Sanitize control characters that PowerShell's ConvertTo-Json may leave unescaped
+    // (e.g. bell \x07 from OCR'd icons). Keep \t, \n, \r which are valid in JSON.
+    const sanitized = trimmed.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+
+    const data = JSON.parse(sanitized);
     if (data.error) {
       throw new Error(data.error);
     }
