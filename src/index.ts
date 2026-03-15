@@ -592,6 +592,55 @@ program
     console.log(`   ${clawdRoot}\n`);
   });
 
+// ── Shared subsystem initialization (used by mcp + serve) ──
+
+async function createToolContext() {
+  const { NativeDesktop } = await import('./native-desktop');
+  const { AccessibilityBridge } = await import('./accessibility');
+  const { CDPDriver } = await import('./cdp-driver');
+  const { DEFAULT_CONFIG } = await import('./types');
+
+  const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
+  const a11y = new AccessibilityBridge();
+  const cdp = new CDPDriver(9223);
+
+  let initialized = false;
+  let initPromise: Promise<void> | null = null;
+  let mouseScaleFactor = 1;
+  let screenshotScaleFactor = 1;
+
+  const ensureInitialized = async (): Promise<void> => {
+    if (initialized) return;
+    if (initPromise) return initPromise;
+    initPromise = (async () => {
+      await desktop.connect();
+      screenshotScaleFactor = desktop.getScaleFactor();
+      try {
+        const { execFileSync } = await import('child_process');
+        const result = execFileSync('powershell.exe', [
+          '-NoProfile', '-Command',
+          "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
+        ], { timeout: 10000, encoding: 'utf-8' }).trim();
+        const [logicalW] = result.split(',').map(Number);
+        if (logicalW > 0) mouseScaleFactor = logicalW / 1280;
+      } catch {
+        mouseScaleFactor = screenshotScaleFactor;
+      }
+      await a11y.warmup();
+      initialized = true;
+      console.log('Subsystems initialized');
+    })();
+    return initPromise;
+  };
+
+  return {
+    desktop, a11y, cdp,
+    getMouseScaleFactor: () => mouseScaleFactor,
+    getScreenshotScaleFactor: () => screenshotScaleFactor,
+    ensureInitialized,
+  };
+}
+
 // ── MCP Mode (for Claude Code, Cursor, Windsurf, Zed, etc.) ──
 
 program
@@ -621,51 +670,8 @@ program
 
     console.log('clawd-cursor MCP mode starting...');
 
-    const { NativeDesktop } = await import('./native-desktop');
-    const { AccessibilityBridge } = await import('./accessibility');
-    const { CDPDriver } = await import('./cdp-driver');
-    const { DEFAULT_CONFIG } = await import('./types');
     const { getAllTools } = await import('./tools');
-
-    const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
-    const a11y = new AccessibilityBridge();
-    const cdp = new CDPDriver(9223);
-
-    let initialized = false;
-    let initPromise: Promise<void> | null = null;
-    let mouseScaleFactor = 1;
-    let screenshotScaleFactor = 1;
-
-    const ensureInitialized = async (): Promise<void> => {
-      if (initialized) return;
-      if (initPromise) return initPromise;
-      initPromise = (async () => {
-        await desktop.connect();
-        screenshotScaleFactor = desktop.getScaleFactor();
-        try {
-          const { execFileSync } = await import('child_process');
-          const result = execFileSync('powershell.exe', [
-            '-NoProfile', '-Command',
-            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
-          ], { timeout: 10000, encoding: 'utf-8' }).trim();
-          const [logicalW] = result.split(',').map(Number);
-          if (logicalW > 0) mouseScaleFactor = logicalW / 1280;
-        } catch {
-          mouseScaleFactor = screenshotScaleFactor;
-        }
-        await a11y.warmup();
-        initialized = true;
-        console.log('Subsystems initialized');
-      })();
-      return initPromise;
-    };
-
-    const ctx = {
-      desktop, a11y, cdp,
-      getMouseScaleFactor: () => mouseScaleFactor,
-      getScreenshotScaleFactor: () => screenshotScaleFactor,
-      ensureInitialized,
-    };
+    const ctx = await createToolContext();
 
     // Dynamic import MCP SDK (ESM package from CJS)
     const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js' as any);
@@ -710,7 +716,7 @@ program
     await server.connect(transport);
     console.log(`clawd-cursor MCP ready — ${tools.length} tools registered`);
 
-    ensureInitialized().catch(err => {
+    ctx.ensureInitialized().catch((err: any) => {
       console.error('Subsystem init failed:', err?.message);
     });
   });
@@ -733,55 +739,13 @@ program
 
     const port = parseInt(opts.port);
     const express = (await import('express')).default;
-    const { NativeDesktop } = await import('./native-desktop');
-    const { AccessibilityBridge } = await import('./accessibility');
-    const { CDPDriver } = await import('./cdp-driver');
-    const { DEFAULT_CONFIG } = await import('./types');
     const { createToolServer } = await import('./tool-server');
     const { VERSION } = await import('./version');
 
     console.log(`\n🐾 clawd-cursor v${VERSION} — Tool Server mode`);
     console.log('   No LLM. No autonomous agent. Just OS primitives over HTTP.\n');
 
-    // Initialize subsystems
-    const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
-    const a11y = new AccessibilityBridge();
-    const cdp = new CDPDriver(9223);
-
-    let initialized = false;
-    let initPromise: Promise<void> | null = null;
-    let mouseScaleFactor = 1;
-    let screenshotScaleFactor = 1;
-
-    const ensureInitialized = async (): Promise<void> => {
-      if (initialized) return;
-      if (initPromise) return initPromise;
-      initPromise = (async () => {
-        await desktop.connect();
-        screenshotScaleFactor = desktop.getScaleFactor();
-        try {
-          const { execFileSync } = await import('child_process');
-          const result = execFileSync('powershell.exe', [
-            '-NoProfile', '-Command',
-            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
-          ], { timeout: 10000, encoding: 'utf-8' }).trim();
-          const [logicalW] = result.split(',').map(Number);
-          if (logicalW > 0) mouseScaleFactor = logicalW / 1280;
-        } catch {
-          mouseScaleFactor = screenshotScaleFactor;
-        }
-        await a11y.warmup();
-        initialized = true;
-      })();
-      return initPromise;
-    };
-
-    const ctx = {
-      desktop, a11y, cdp,
-      getMouseScaleFactor: () => mouseScaleFactor,
-      getScreenshotScaleFactor: () => screenshotScaleFactor,
-      ensureInitialized,
-    };
+    const ctx = await createToolContext();
 
     // Create HTTP server with tool routes
     const app = express();
@@ -797,7 +761,7 @@ program
     });
 
     // Background init
-    ensureInitialized().catch(err => {
+    ctx.ensureInitialized().catch((err: any) => {
       console.error('Subsystem init failed:', err?.message);
     });
 

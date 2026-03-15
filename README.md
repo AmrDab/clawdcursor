@@ -24,7 +24,7 @@
 **Architecture overhaul. Universal tool server. True independence.**
 
 - **6-layer smart pipeline** — L0 (Browser) -> L1 (Action Router) -> L1.5 (Deterministic Flows) -> L2 (A11y Reasoner + CDP) -> L2.5 (Vision Hints) -> L3 (Computer Use). Most tasks never reach L3.
-- **33 universal tools** — served via REST (`GET /tools`, `POST /execute/:name`) and MCP stdio from a single definition. Any model that can call functions can control your desktop.
+- **40 universal tools** — served via REST (`GET /tools`, `POST /execute/:name`) and MCP stdio from a single definition. Any model that can call functions can control your desktop.
 - **3 transport modes** — `start` (full agent + tools), `serve` (tools only, bring your own brain), `mcp` (MCP stdio for Claude Code, Cursor, Windsurf, Zed)
 - **CDP browser integration** — Chrome DevTools Protocol for DOM interaction, text extraction, click-by-selector. Auto-connects to Edge/Chrome.
 - **Action verifier** — ground-truth checking after every action. Blocks false success reports.
@@ -37,24 +37,13 @@
 - **Standalone data directory** — all data in `~/.clawd-cursor/` (migrates from legacy paths automatically)
 - **Error reporting** (opt-in) — `clawdcursor report` lets users send redacted task logs to help improve the agent
 
-### Test Results
-
-| Task | Result | Time | Method |
-|------|--------|------|--------|
-| Notepad haiku | PASS | 77s | Layer 2 (A11y) |
-| Wikipedia lookup | PASS | 58s | Layer 2 (CDP) |
-| Wikipedia -> Notepad (multi-app) | PASS | 17s | Layer 2 |
-| Creative story in Notepad | PASS | 15s | Layer 2 |
-| GitHub repo count | PASS | 16s | Layer 0 (CDP) |
-| Google Flights search | PASS | 140s | Layer 2 (CDP) |
-
 ### v0.6.3 vs v0.7.0
 
 | | v0.6.3 | v0.7.0 |
 |---|---|---|
 | **Architecture** | 4-layer pipeline (L0-L3) | 6-layer pipeline (L0, L1, L1.5, L2, L2.5, L3) |
 | **Transport** | REST API only | REST + MCP stdio + tools-only server |
-| **Tools** | Monolithic agent, no tool exposure | 33 discrete tools, OpenAI function-calling format |
+| **Tools** | Monolithic agent, no tool exposure | 40 discrete tools, OpenAI function-calling format |
 | **Browser** | Playwright-only, no DOM access | CDP integration — click by selector, read text, type by label |
 | **Verification** | LLM self-reports success (often wrong) | Ground-truth action verifier — reads actual content back |
 | **False positives** | Common — agent says "done" prematurely | Premature-done blocker + evidence-based completion |
@@ -110,7 +99,7 @@ curl http://localhost:3847/task -H "Content-Type: application/json" \
 
 ### 2. Tools-Only Server (`serve`)
 
-Exposes 33 desktop tools via REST API. **You** bring the brain — Claude, GPT, Gemini, Llama, a script, anything.
+Exposes 40 desktop tools via REST API. **You** bring the brain — Claude, GPT, Gemini, Llama, a script, anything.
 
 ```bash
 clawdcursor serve
@@ -140,16 +129,16 @@ Runs as an MCP tool server over stdio. Works with Claude Code, Cursor, Windsurf,
 }
 ```
 
-### Tool Categories (33 tools)
+### Tool Categories (40 tools)
 
 | Category | Tools | Examples |
 |----------|-------|---------|
-| Perception | 7 | `desktop_screenshot`, `read_screen`, `get_active_window`, `get_focused_element` |
+| Perception | 9 | `desktop_screenshot`, `read_screen`, `get_active_window`, `get_focused_element`, `smart_read`, `ocr_read_screen` |
 | Mouse | 6 | `mouse_click`, `mouse_double_click`, `mouse_drag`, `mouse_scroll` |
-| Keyboard | 2 | `key_press`, `type_text` |
-| Window/App | 5 | `focus_window`, `open_app`, `get_windows` |
-| Browser CDP | 11 | `cdp_connect`, `cdp_click`, `cdp_type`, `cdp_read_text`, `navigate_browser` |
-| Orchestration | 2 | `delegate_to_agent`, `wait` |
+| Keyboard | 5 | `key_press`, `type_text`, `smart_type`, `shortcuts_list`, `shortcuts_execute` |
+| Window/App | 6 | `focus_window`, `open_app`, `get_windows`, `invoke_element` |
+| Browser CDP | 10 | `cdp_connect`, `cdp_click`, `cdp_type`, `cdp_read_text` |
+| Orchestration | 4 | `delegate_to_agent`, `smart_click`, `navigate_browser`, `wait` |
 
 ---
 
@@ -305,7 +294,7 @@ If the LLM repeats the same action 3+ times in an 8-step window, it's blocked an
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/` | GET | Web dashboard UI |
-| `/tools` | GET | List all 33 tools (OpenAI function-calling format) |
+| `/tools` | GET | List all 40 tools (OpenAI function-calling format) |
 | `/execute/:name` | POST | Execute a tool by name |
 | `/task` | POST | Submit a task: `{"task": "Open Chrome"}` |
 | `/status` | GET | Agent state and current task |
@@ -337,7 +326,7 @@ If the LLM repeats the same action 3+ times in an 8-step window, it's blocked an
             +-------------+-------------+
                           |
                Clawd Cursor Tool Server
-               33 tools, single definition
+               40 tools, single definition
                           |
         +---------+-------+-------+---------+
         |         |       |       |         |
