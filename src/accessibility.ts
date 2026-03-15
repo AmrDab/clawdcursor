@@ -350,7 +350,29 @@ export class AccessibilityBridge {
         return null;
       }
     }
-    // macOS: not yet implemented
+    if (PLATFORM === 'darwin') {
+      try {
+        const script = path.join(MAC_SCRIPTS_DIR, 'get-focused-element.jxa');
+        const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', script], {
+          timeout: MAC_SCRIPT_TIMEOUT,
+        });
+        const result = JSON.parse(stdout.trim());
+        if (!result) return null;
+        return {
+          name: result.name ?? '',
+          automationId: result.automationId ?? '',
+          controlType: result.controlType ?? '',
+          className: result.className ?? '',
+          processId: result.processId ?? 0,
+          isEnabled: result.isEnabled ?? true,
+          bounds: result.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+          value: result.value ?? '',
+        };
+      } catch {
+        return null;
+      }
+    }
+    // Linux: not yet implemented (AT-SPI planned)
     return null;
   }
 

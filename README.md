@@ -379,17 +379,18 @@ Options:
 
 ## Platform Support
 
-| Platform | UI Automation | Browser (CDP) | Status |
-|----------|---------------|---------------|--------|
-| **Windows** | PowerShell + .NET UI Automation | Chrome/Edge | Full support |
-| **macOS** | JXA + System Events | Chrome/Edge | Full support |
-| **Linux** | - | Chrome/Edge (CDP only) | Browser only |
+| Platform | UI Automation | OCR | Browser (CDP) | Status |
+|----------|---------------|-----|---------------|--------|
+| **Windows** (x64/ARM64) | PowerShell + .NET UI Automation | Windows.Media.Ocr | Chrome/Edge | Full support |
+| **macOS** (Intel/Apple Silicon) | JXA + System Events | Apple Vision framework | Chrome/Edge | Full support |
+| **Linux** (x64/ARM64) | AT-SPI (planned) | Tesseract OCR | Chrome/Edge | Browser + OCR |
 
 ## Prerequisites
 
-- **Node.js 20+**
+- **Node.js 20+** (x64 or ARM64)
 - **Windows**: PowerShell (included)
-- **macOS 13+**: Accessibility permissions granted
+- **macOS 10.15+**: Accessibility permissions granted, Xcode CLI tools (`xcode-select --install`)
+- **Linux**: `tesseract-ocr` and `python3` for OCR (`sudo apt install tesseract-ocr`)
 - **AI API Key** — optional. Works offline with Ollama or tools-only mode.
 
 ## Tech Stack

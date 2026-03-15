@@ -1,0 +1,102 @@
+#!/usr/bin/env osascript -l JavaScript
+/**
+ * get-focused-element.jxa — returns the currently focused UI element on macOS.
+ *
+ * Output: JSON with name, role, value, bounds, processId.
+ * Matches the FocusedElementInfo shape from accessibility.ts.
+ */
+
+function run() {
+  const se = Application('System Events');
+  se.includeStandardAdditions = true;
+
+  try {
+    const procs = se.applicationProcesses.whose({ frontmost: true });
+    if (procs.length === 0) {
+      return JSON.stringify(null);
+    }
+
+    const proc = procs[0];
+    const pid = proc.unixId();
+    const procName = proc.name();
+
+    // Get the focused UI element
+    let focused;
+    try {
+      focused = proc.focusedUIElement();
+    } catch (e) {
+      // Some apps don't expose focused element — return window info instead
+      try {
+        const wins = proc.windows();
+        if (wins.length > 0) {
+          const win = wins[0];
+          const pos = win.position();
+          const sz = win.size();
+          return JSON.stringify({
+            name: win.name() || procName,
+            automationId: '',
+            controlType: 'Window',
+            className: procName,
+            processId: pid,
+            isEnabled: true,
+            bounds: { x: pos[0], y: pos[1], width: sz[0], height: sz[1] },
+            value: ''
+          });
+        }
+      } catch (_) {}
+      return JSON.stringify(null);
+    }
+
+    // Extract properties safely
+    let name = '', role = '', value = '';
+    let bounds = { x: 0, y: 0, width: 0, height: 0 };
+
+    try { name = focused.name() || ''; } catch (_) {}
+    try { role = focused.role() || ''; } catch (_) {}
+    try { value = String(focused.value() || ''); } catch (_) {}
+
+    try {
+      const pos = focused.position();
+      const sz = focused.size();
+      bounds = { x: pos[0], y: pos[1], width: sz[0], height: sz[1] };
+    } catch (_) {}
+
+    // Map AX roles to Windows ControlType names for compatibility
+    const roleMap = {
+      'AXTextField': 'Edit',
+      'AXTextArea': 'Edit',
+      'AXButton': 'Button',
+      'AXCheckBox': 'CheckBox',
+      'AXRadioButton': 'RadioButton',
+      'AXComboBox': 'ComboBox',
+      'AXList': 'List',
+      'AXTable': 'Table',
+      'AXMenu': 'Menu',
+      'AXMenuItem': 'MenuItem',
+      'AXStaticText': 'Text',
+      'AXImage': 'Image',
+      'AXLink': 'Hyperlink',
+      'AXGroup': 'Group',
+      'AXWindow': 'Window',
+      'AXWebArea': 'Document',
+      'AXScrollArea': 'ScrollBar',
+      'AXTab': 'Tab',
+      'AXSlider': 'Slider',
+    };
+
+    const controlType = roleMap[role] || role.replace('AX', '') || 'Unknown';
+
+    return JSON.stringify({
+      name: name,
+      automationId: '',
+      controlType: controlType,
+      className: procName,
+      processId: pid,
+      isEnabled: true,
+      bounds: bounds,
+      value: value
+    });
+  } catch (e) {
+    return JSON.stringify(null);
+  }
+}

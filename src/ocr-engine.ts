@@ -5,7 +5,8 @@
  * Coordinates are in REAL screen pixels — no scaleFactor conversion needed.
  *
  * Windows: Windows.Media.Ocr via PowerShell one-shot (scripts/ocr-recognize.ps1).
- * macOS:   Stub (isAvailable() returns false) — implemented in Step 1b.
+ * macOS:   Apple Vision framework via Swift script (scripts/mac/ocr-recognize.swift).
+ * Linux:   Tesseract OCR via Python script (scripts/linux/ocr-recognize.py).
  *
  * Caching: last result is kept for 300ms. Invalidated on any action execution.
  */
@@ -22,8 +23,12 @@ const execFileAsync = promisify(execFile);
 
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
 const OCR_SCRIPT = path.join(SCRIPTS_DIR, 'ocr-recognize.ps1');
+const MAC_OCR_SCRIPT = path.join(SCRIPTS_DIR, 'mac', 'ocr-recognize.swift');
+const LINUX_OCR_SCRIPT = path.join(SCRIPTS_DIR, 'linux', 'ocr-recognize.py');
 const CACHE_TTL_MS = 300;
 const OCR_TIMEOUT = 15000;   // 15s — WinRT assembly load + recognition
+const MAC_OCR_TIMEOUT = 20000; // 20s — Swift compilation on first run
+const LINUX_OCR_TIMEOUT = 30000; // 30s — Tesseract can be slow on large images
 const MAX_BUFFER = 4 * 1024 * 1024; // 4MB — large screens with dense text
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -67,8 +72,40 @@ export class OcrEngine {
       return true;
     }
 
-    // macOS: stub — will be implemented in Step 1b via Vision framework
-    // Linux: no OS-level OCR without external deps
+    if (process.platform === 'darwin') {
+      // macOS: Apple Vision framework via Swift script.
+      // Available on macOS 10.15+ (Catalina and later).
+      // swift is always present on macOS with Xcode CLI tools.
+      try {
+        const { execFileSync } = require('child_process');
+        execFileSync('which', ['swift'], { timeout: 3000, stdio: 'pipe' });
+        this.available = fs.existsSync(MAC_OCR_SCRIPT);
+        if (this.available) {
+          console.log('[OCR] macOS Vision framework available via Swift');
+        }
+      } catch {
+        this.available = false;
+      }
+      return this.available;
+    }
+
+    if (process.platform === 'linux') {
+      // Linux: Tesseract OCR via Python script.
+      // Requires: sudo apt install tesseract-ocr && python3
+      try {
+        const { execFileSync } = require('child_process');
+        execFileSync('which', ['tesseract'], { timeout: 3000, stdio: 'pipe' });
+        execFileSync('which', ['python3'], { timeout: 3000, stdio: 'pipe' });
+        this.available = fs.existsSync(LINUX_OCR_SCRIPT);
+        if (this.available) {
+          console.log('[OCR] Linux Tesseract OCR available');
+        }
+      } catch {
+        this.available = false;
+      }
+      return this.available;
+    }
+
     this.available = false;
     return false;
   }
@@ -186,7 +223,12 @@ export class OcrEngine {
     if (process.platform === 'win32') {
       return this.runWindowsOcr(imagePath);
     }
-    // macOS / Linux — unreachable (isAvailable guards), but satisfy TS
+    if (process.platform === 'darwin') {
+      return this.runMacOcr(imagePath);
+    }
+    if (process.platform === 'linux') {
+      return this.runLinuxOcr(imagePath);
+    }
     return { ...EMPTY_RESULT };
   }
 
@@ -221,6 +263,83 @@ export class OcrEngine {
       throw new Error(data.error);
     }
 
+    const rawElements = Array.isArray(data.elements) ? data.elements : [];
+    const elements: OcrElement[] = rawElements.map((el: Record<string, unknown>) => ({
+      text:       String(el.text ?? ''),
+      x:          Number(el.x) || 0,
+      y:          Number(el.y) || 0,
+      width:      Number(el.width) || 0,
+      height:     Number(el.height) || 0,
+      confidence: Number(el.confidence) || 0,
+      line:       Number(el.line) || 0,
+    }));
+
+    return {
+      elements,
+      fullText: String(data.fullText ?? ''),
+      durationMs: 0, // filled by caller
+    };
+  }
+
+  /**
+   * macOS: run Swift script that uses Apple Vision framework (VNRecognizeTextRequest).
+   * Requires macOS 10.15+ and Xcode command-line tools (swift).
+   * The script outputs a single JSON line with { elements, fullText }.
+   */
+  private async runMacOcr(imagePath: string): Promise<OcrResult> {
+    const { stdout } = await execFileAsync('swift', [
+      MAC_OCR_SCRIPT,
+      imagePath,
+    ], {
+      timeout: MAC_OCR_TIMEOUT,
+      maxBuffer: MAX_BUFFER,
+    });
+
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+      throw new Error('Swift OCR script returned empty output');
+    }
+
+    const data = JSON.parse(trimmed);
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return this.parseOcrJson(data);
+  }
+
+  /**
+   * Linux: run Python script that uses Tesseract OCR.
+   * Requires: tesseract-ocr package + python3.
+   * The script outputs a single JSON line with { elements, fullText }.
+   */
+  private async runLinuxOcr(imagePath: string): Promise<OcrResult> {
+    const { stdout } = await execFileAsync('python3', [
+      LINUX_OCR_SCRIPT,
+      imagePath,
+    ], {
+      timeout: LINUX_OCR_TIMEOUT,
+      maxBuffer: MAX_BUFFER,
+    });
+
+    const trimmed = stdout.trim();
+    if (!trimmed) {
+      throw new Error('Python OCR script returned empty output');
+    }
+
+    const data = JSON.parse(trimmed);
+    if (data.error) {
+      throw new Error(data.error);
+    }
+
+    return this.parseOcrJson(data);
+  }
+
+  /**
+   * Shared JSON parser for macOS/Linux OCR output.
+   * Both scripts emit the same { elements, fullText } format.
+   */
+  private parseOcrJson(data: Record<string, unknown>): OcrResult {
     const rawElements = Array.isArray(data.elements) ? data.elements : [];
     const elements: OcrElement[] = rawElements.map((el: Record<string, unknown>) => ({
       text:       String(el.text ?? ''),

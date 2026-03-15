@@ -518,13 +518,16 @@ automatically. You do not need to worry about logical vs physical pixels.
 
 ## Section 9: Platform Support
 
-| Platform | UI Automation | Browser (CDP) | Status |
-|----------|---------------|---------------|--------|
-| **Windows** | PowerShell + .NET UI Automation | Chrome/Edge | Full support |
-| **macOS** | JXA + System Events | Chrome/Edge | Full support |
-| **Linux** | Not yet | Chrome/Edge (CDP only) | Browser only |
+| Platform | UI Automation | OCR | Browser (CDP) | Status |
+|----------|---------------|-----|---------------|--------|
+| **Windows** (x64/ARM64) | PowerShell + .NET UI Automation | Windows.Media.Ocr | Chrome/Edge | Full support |
+| **macOS** (Intel/Apple Silicon) | JXA + System Events | Apple Vision framework | Chrome/Edge | Full support |
+| **Linux** (x64/ARM64) | AT-SPI (planned) | Tesseract OCR | Chrome/Edge | Browser + OCR |
 
-**macOS:** Grant Accessibility permission: System Settings > Privacy > Accessibility
+**macOS:** Grant Accessibility permission: System Settings > Privacy > Accessibility.
+Install Xcode CLI tools if not present: `xcode-select --install`
+
+**Linux:** Install Tesseract for OCR: `sudo apt install tesseract-ocr`
 
 ---
 
