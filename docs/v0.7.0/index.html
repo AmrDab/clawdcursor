@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clawd Cursor v0.7.0 · The Glove for Any AI Hand</title>
-  <meta name="description" content="Clawd Cursor v0.7.0 — model-agnostic desktop control. 33 tools, 3 transport modes, MCP support. Works with any AI.">
+  <meta name="description" content="Clawd Cursor v0.7.0 — model-agnostic desktop control. 40 tools, 3 transport modes, MCP support. Works with any AI.">
   <meta property="og:title" content="Clawd Cursor v0.7.0 · The Glove for Any AI Hand">
-  <meta property="og:description" content="33 desktop control tools. REST, MCP stdio, or direct agent. Works with any AI model.">
+  <meta property="og:description" content="40 desktop control tools. REST, MCP stdio, or direct agent. Works with any AI model.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://clawdcursor.com/v0.7.0">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -30,7 +30,7 @@
       clawdcursor mcp   → MCP stdio (Claude Code, Cursor, Windsurf, Zed)
       REST /execute/{tool} → raw tool calls over HTTP
 
-    33 Tools (Desktop, A11y, CDP, Orchestration):
+    40 Tools (Desktop, A11y, CDP, Smart, OCR, Shortcuts, Orchestration):
       desktop_screenshot, desktop_screenshot_region, get_screen_size,
       mouse_click, mouse_double_click, mouse_right_click, mouse_hover,
       mouse_scroll, mouse_drag, type_text, key_press,
@@ -39,14 +39,16 @@
       cdp_connect, cdp_page_context, cdp_read_text, cdp_click, cdp_type,
       cdp_select_option, cdp_evaluate, cdp_wait_for_selector,
       cdp_list_tabs, cdp_switch_tab,
+      smart_read, smart_click, smart_type, invoke_element,
+      ocr_read_screen, shortcuts_list, shortcuts_execute,
       open_app, navigate_browser, wait, delegate_to_agent
 
     Pipeline (CLI agent mode only):
       L0  Browser/Playwright — browser tasks
       L1  Action Router      — zero LLM, pattern matching
-      L1.5 Deterministic    — zero LLM, hardcoded flows
-      L2  A11y + CDP        — text model, accessibility tree
-      L2.5 Vision Hint      — coordinate spotter fallback
+      L1.5 Smart Interaction — CDPDriver + UIDriver, one text LLM call
+      L2  Skill Cache        — cached action patterns, zero LLM
+      L2.5 OCR Reasoner     — OCR-first + a11y supplement, text LLM
       L3  Computer Use      — vision model, last resort
 
     Providers: Anthropic, OpenAI, Groq, Together, DeepSeek, Kimi, Ollama
@@ -287,7 +289,7 @@
 
   <!-- Stats -->
   <div class="stats">
-    <div class="stat"><div class="stat-val">33</div><div class="stat-lbl">Tools</div></div>
+    <div class="stat"><div class="stat-val">40</div><div class="stat-lbl">Tools</div></div>
     <div class="stat"><div class="stat-val">6</div><div class="stat-lbl">Pipeline Layers</div></div>
     <div class="stat"><div class="stat-val">3</div><div class="stat-lbl">Transport Modes</div></div>
     <div class="stat"><div class="stat-val">any</div><div class="stat-lbl">AI Model</div></div>
@@ -336,7 +338,7 @@
           <li>Your AI decides what to do — clawd-cursor does it</li>
         </ol>
         <div class="mode-stats">
-          <div><div class="mode-stat-val">33</div><div class="mode-stat-lbl">Tools available</div></div>
+          <div><div class="mode-stat-val">40</div><div class="mode-stat-lbl">Tools available</div></div>
           <div><div class="mode-stat-val">$0</div><div class="mode-stat-lbl">Extra cost</div></div>
         </div>
       </div>
@@ -358,7 +360,7 @@
         <h3>Build with it</h3>
         <ol>
           <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor start</code></li>
-          <li>33 tools available over HTTP on localhost</li>
+          <li>40 tools available over HTTP on localhost (smart tools included)</li>
           <li>OpenAI function-calling format</li>
           <li>Call individual tools or send full tasks</li>
           <li>Browse all schemas at <code style="font-size:0.75rem;color:var(--accent2)">GET /tools</code></li>
@@ -374,18 +376,28 @@
   <!-- Pipeline -->
   <section class="sect" id="pipeline">
     <div class="sect-label">Six Layers</div>
-    <h2>Cheap layers first, vision last</h2>
-    <p class="sub">Each task falls to the cheapest layer that can handle it. Vision is the last resort — not the first call. Only active in CLI agent mode.</p>
-    <div class="feat-grid" style="grid-template-columns: repeat(2, 1fr);">
+    <h2>OCR first, vision last</h2>
+    <p class="sub">Each task falls to the cheapest layer that can handle it. OCR reads the screen as text. Vision is the absolute last resort. Only active in CLI agent mode.</p>
+    <div class="feat-grid" style="grid-template-columns: repeat(3, 1fr);">
       <div class="feat-card">
         <div class="feat-icon">⚡</div>
         <h4>L1 · Action Router — $0</h4>
         <p>Pattern-matched tasks: open apps, type text, press shortcuts, navigate URLs. Zero LLM calls. Instant execution.</p>
       </div>
       <div class="feat-card">
-        <div class="feat-icon">🔍</div>
-        <h4>L2 · A11y + CDP Reasoner — text model</h4>
-        <p>Reads the accessibility tree and Chrome DevTools Protocol. Text model reasons about what to interact with. Bounds-based click — no vision needed.</p>
+        <div class="feat-icon">🧠</div>
+        <h4>L1.5 · Smart Interaction — text model</h4>
+        <p>CDPDriver + UIDriver combo. One cheap text LLM call plans a multi-step action sequence. No screenshots needed.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🗂️</div>
+        <h4>L2 · Skill Cache — $0</h4>
+        <p>Remembers known action patterns (ctrl+t = new tab). Skips perception entirely for previously-solved interactions.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">👁️</div>
+        <h4>L2.5 · OCR Reasoner — text model</h4>
+        <p>OCR reads screen text + bounding boxes. A11y tree supplements in parallel. Text model reasons and clicks by coordinate. Zero screenshots.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🌐</div>
@@ -395,7 +407,7 @@
       <div class="feat-card">
         <div class="feat-icon">🎯</div>
         <h4>L3 · Computer Use — vision model</h4>
-        <p>Full vision model with screenshot + action loop. Last resort for anything L1 and L2 can't handle. Supports any visible UI.</p>
+        <p>Full vision model with screenshot + action loop. Last resort for anything the text layers can't handle. Supports any visible UI.</p>
       </div>
     </div>
   </section>
@@ -403,23 +415,28 @@
   <!-- What's new -->
   <section class="sect">
     <div class="sect-label">What's New</div>
-    <h2>Built for reliability, not just features</h2>
-    <p class="sub">v0.7.0 fixes the core failure modes that made v0.6.3 frustrating in practice.</p>
+    <h2>OCR-first. Blind agent ready.</h2>
+    <p class="sub">v0.7.0 makes clawd-cursor usable by low-cost agents that can't afford screenshots. OCR reads the screen as text — vision is the last resort.</p>
     <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">👁️</div>
+        <h4>OCR-First Pipeline</h4>
+        <p>Windows.Media.Ocr reads every pixel on screen as text with bounding boxes. A11y tree runs in parallel as a supplement. Zero screenshots for most tasks.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🖱️</div>
+        <h4>Smart Tools (Blind Agent)</h4>
+        <p>4 new MCP tools: <code style="font-size:0.82em">smart_read</code>, <code style="font-size:0.82em">smart_click</code>, <code style="font-size:0.82em">smart_type</code>, <code style="font-size:0.82em">invoke_element</code>. Click buttons by name, not coordinates. No vision needed.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">⌨️</div>
+        <h4>Shortcuts Engine</h4>
+        <p>Built-in keyboard shortcut database. <code style="font-size:0.82em">shortcuts_list</code> discovers available shortcuts. <code style="font-size:0.82em">shortcuts_execute</code> fires them instantly.</p>
+      </div>
       <div class="feat-card">
         <div class="feat-icon">✅</div>
         <h4>Ground-Truth Verifier</h4>
         <p>Reads actual screen state after every action. Blocks false "done" reports — the agent can't lie about success anymore.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🔁</div>
-        <h4>Anti-Loop Detectors</h4>
-        <p>No-progress detector blocks after 3 identical failed actions. Premature-done blocker requires evidence before accepting task completion.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🌐</div>
-        <h4>CDP Browser Control</h4>
-        <p>Chrome DevTools Protocol lets clawd-cursor click by CSS selector, read DOM text, and type into labeled fields — no vision model needed for web tasks.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🔌</div>
@@ -427,14 +444,9 @@
         <p>Plug directly into Claude Code, Cursor, Windsurf, or Zed as an MCP server. No REST plumbing — tools show up natively in your AI's registry.</p>
       </div>
       <div class="feat-card">
-        <div class="feat-icon">🤖</div>
-        <h4>Truly Model-Agnostic</h4>
-        <p>Text and vision models can come from different providers. Groq for L2 speed, Anthropic for L3 vision. Auto-detected by <code style="font-size:0.82em">clawdcursor doctor</code>.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🏠</div>
-        <h4>Standalone — No Platform Lock</h4>
-        <p>Decoupled from OpenClaw. Data lives in <code style="font-size:0.82em">~/.clawd-cursor/</code>. Auto-migrates from legacy paths. Works with any client.</p>
+        <div class="feat-icon">🗂️</div>
+        <h4>Skill Cache</h4>
+        <p>Learns action patterns over time. Once it knows "new tab = ctrl+t", it skips all perception layers and executes instantly. Zero cost.</p>
       </div>
     </div>
   </section>
@@ -496,7 +508,7 @@
 <span class="c-cmd">npm install -g clawd-cursor</span>
 <span class="c-cmd">clawdcursor start</span>   <span class="c-comment"># consent fires on first run</span>
 
-<span class="c-comment"># 2. List all 33 tools + schemas</span>
+<span class="c-comment"># 2. List all tools + schemas</span>
 <span class="c-cmd">GET</span>  http://localhost:3847/tools
 
 <span class="c-comment"># 3. Call a tool directly</span>

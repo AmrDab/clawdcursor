@@ -68,7 +68,7 @@ function printBanner(): void {
 }
 
 /** Run the onboarding consent flow (interactive terminal) */
-export async function runOnboarding(context: 'start' | 'consent' = 'start'): Promise<boolean> {
+export async function runOnboarding(context: 'start' | 'consent' = 'start', startPort: number = 3847): Promise<boolean> {
   // Non-interactive mode (piped stdin, CI, MCP stdio) — skip consent
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     return true;
@@ -79,7 +79,7 @@ export async function runOnboarding(context: 'start' | 'consent' = 'start'): Pro
 
   const contextNote = context === 'start'
     ? `\x1b[90m  You are starting:\x1b[0m\n` +
-      `\x1b[90m  \u2192 AI Agent + REST API on \x1b[0m\x1b[36mlocalhost:3847\x1b[0m\n` +
+      `\x1b[90m  \u2192 AI Agent + REST API on \x1b[0m\x1b[36mlocalhost:${startPort}\x1b[0m\n` +
       `\x1b[90m  \u2192 Any local process can call tool endpoints on that port\x1b[0m\n`
     : `\x1b[90m  This one-time consent covers all transport modes:\x1b[0m\n` +
       `\x1b[90m  \u2192 MCP server (Claude Code, Cursor, Windsurf, Zed)\x1b[0m\n` +

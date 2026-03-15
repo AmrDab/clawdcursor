@@ -94,7 +94,7 @@ program
       writeConsentFile();
       console.log('  Consent recorded.\n');
     } else if (!hasConsent()) {
-      const accepted = await runOnboarding('start');
+      const accepted = await runOnboarding('start', parseInt(opts.port, 10) || 3847);
       if (!accepted) process.exit(1);
     }
 
@@ -138,7 +138,7 @@ program
       debug: opts.debug || false,
     };
 
-    console.log(`\x1b[32m\u2713\x1b[0m \x1b[1mclawd-cursor\x1b[0m \x1b[90mv${VERSION}\x1b[0m \x1b[90m\u2014 desktop control active on localhost:3847\x1b[0m`);
+    console.log(`\x1b[32m\u2713\x1b[0m \x1b[1mclawd-cursor\x1b[0m \x1b[90mv${VERSION}\x1b[0m \x1b[90m\u2014 desktop control active on ${config.server.host}:${config.server.port}\x1b[0m`);
 
     if (resolvedApi.source === 'external') {
       console.log('🔗 External credentials detected — pipeline config (.clawd-config.json) takes priority');

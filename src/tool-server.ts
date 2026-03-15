@@ -15,7 +15,33 @@
 import express from 'express';
 import { getAllTools, toOpenAiFunctions, getTool, toJsonSchema } from './tools';
 import type { ToolContext } from './tools';
+import type { ToolDefinition } from './tools/types';
 import { VERSION } from './version';
+
+/** Validate request body against a tool's parameter schema. Returns error string or null. */
+function validateParams(body: Record<string, unknown>, tool: ToolDefinition): string | null {
+  const params = tool.parameters;
+  for (const [name, def] of Object.entries(params)) {
+    const value = body[name];
+    if (def.required !== false && value === undefined) {
+      return `Missing required parameter: "${name}"`;
+    }
+    if (value !== undefined) {
+      const expected = def.type;
+      const actual = typeof value;
+      if (expected === 'number' && actual !== 'number') return `Parameter "${name}" must be a number, got ${actual}`;
+      if (expected === 'string' && actual !== 'string') return `Parameter "${name}" must be a string, got ${actual}`;
+      if (expected === 'boolean' && actual !== 'boolean') return `Parameter "${name}" must be a boolean, got ${actual}`;
+    }
+  }
+  // Reject unknown parameters to catch typos
+  for (const key of Object.keys(body)) {
+    if (!(key in params)) {
+      return `Unknown parameter: "${key}". Valid: ${Object.keys(params).join(', ') || '(none)'}`;
+    }
+  }
+  return null;
+}
 
 export function createToolServer(ctx: ToolContext): express.Router {
   const router = express.Router();
@@ -54,7 +80,12 @@ export function createToolServer(ctx: ToolContext): express.Router {
     }
 
     try {
-      const result = await tool.handler(req.body || {}, ctx);
+      const body = req.body || {};
+      const validationError = validateParams(body, tool);
+      if (validationError) {
+        return res.status(400).json({ tool: name, text: validationError, isError: true });
+      }
+      const result = await tool.handler(body, ctx);
 
       // Build response
       const response: any = {

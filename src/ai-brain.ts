@@ -11,6 +11,7 @@
 
 import * as crypto from 'crypto';
 import type { ClawdConfig, InputAction, ActionSequence, ScreenFrame } from './types';
+import { extractJsonObject, extractJsonArray } from './safe-json';
 
 const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on {OS_NAME}.
 Screen: {REAL_WIDTH}x{REAL_HEIGHT}. Screenshot: {LLM_WIDTH}x{LLM_HEIGHT} (scale {SCALE}x).
@@ -113,12 +114,9 @@ export class AIBrain {
   async decomposeTask(task: string): Promise<string[]> {
     try {
       const response = await this.callLLMText(DECOMPOSE_SYSTEM_PROMPT, `Task: "${task}"`);
-      const match = response.match(/\[[\s\S]*\]/);
-      if (match) {
-        const parsed = JSON.parse(match[0]);
-        if (Array.isArray(parsed) && parsed.length > 0 && parsed.every((s: any) => typeof s === 'string')) {
-          return parsed;
-        }
+      const parsed = extractJsonArray(response);
+      if (parsed && parsed.length > 0 && parsed.every((s: any) => typeof s === 'string')) {
+        return parsed as string[];
       }
       // If parsing failed, return the whole task as a single subtask
       console.warn(`⚠️ Failed to parse decomposition, using task as-is`);
@@ -247,12 +245,10 @@ export class AIBrain {
     waitMs?: number;
   } {
     try {
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
+      const parsed = extractJsonObject(response) as any;
+      if (!parsed) {
         return { action: null, sequence: null, description: 'Failed to parse AI response', done: false, error: response };
       }
-
-      const parsed = JSON.parse(jsonMatch[0]);
 
       if (parsed.kind === 'done') {
         return { action: null, sequence: null, description: parsed.description || 'Task complete', done: true };
@@ -458,9 +454,8 @@ export class AIBrain {
             // Early return: if we have a complete JSON object, stop waiting
             if (result.includes('}') && !result.includes('"steps"')) {
               try {
-                const match = result.match(/\{[\s\S]*\}/);
-                if (match) {
-                  JSON.parse(match[0]); // validates it's complete JSON
+                const earlyParsed = extractJsonObject(result);
+                if (earlyParsed) {
                   reader.cancel();
                   return result;
                 }

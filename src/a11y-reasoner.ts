@@ -160,7 +160,8 @@ export class A11yReasoner {
     try {
       const kbPath = path.join(__dirname, '..', 'docs', 'app-knowledge.md');
       this.appKnowledge = fs.readFileSync(kbPath, 'utf-8');
-    } catch {
+    } catch (err) {
+      console.debug(`[A11yReasoner] App knowledge not loaded: ${err}`);
       this.appKnowledge = '';
     }
   }
@@ -929,7 +930,8 @@ export class A11yReasoner {
             const info = url ? `URL: ${url} | Title: "${title}"` : 'CDP not connected this session — proceed with Tab/keyboard navigation. Do NOT call checkpoint again.';
             actionHistory.push({ action: 'checkpoint', description: `CHECKPOINT — ${info}` });
             console.log(`   📍 Checkpoint: ${info}`);
-          } catch {
+          } catch (err) {
+            console.debug(`[A11yReasoner] Checkpoint CDP error: ${err}`);
             actionHistory.push({ action: 'checkpoint', description: 'CHECKPOINT — CDP unavailable this session. Proceed with Tab/keyboard navigation.' });
           }
           continue;

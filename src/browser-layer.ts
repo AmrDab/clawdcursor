@@ -502,7 +502,9 @@ export class BrowserLayer {
       if (this.browser && !(this.browser as any)._initializer?.wsEndpoint?.includes('127.0.0.1')) {
         await this.browser.close();
       }
-    } catch {}
+    } catch (err) {
+      console.debug(`[BrowserLayer] cleanup error (non-critical): ${err}`);
+    }
     this.browser = null;
     this.context = null;
     this.page = null;

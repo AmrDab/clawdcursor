@@ -206,7 +206,8 @@ export class CDPDriver {
         }
       }
       return false;
-    } catch {
+    } catch (err) {
+      console.debug(`[CDPDriver] switchToTabByUrl failed: ${err}`);
       return false;
     }
   }
@@ -243,7 +244,8 @@ export class CDPDriver {
             console.log(`   🔌 CDPDriver: switched to tab "${await page.title()}"`);
             return true;
           }
-        } catch {
+        } catch (err) {
+          console.debug(`[CDPDriver] Tab switch attempt failed: ${err}`);
           continue;
         }
       }
@@ -1040,8 +1042,8 @@ export class CDPDriver {
         document.body.appendChild(label);
       });
       this.cursorInjected = true;
-    } catch {
-      // Ignore overlay failures
+    } catch (err) {
+      console.debug(`[CDPDriver] Cursor overlay injection failed: ${err}`);
     }
   }
 
@@ -1061,8 +1063,8 @@ export class CDPDriver {
           label.style.top = `${y}px`;
         }
       }, { x, y });
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug(`[CDPDriver] moveVirtualCursor failed: ${err}`);
     }
   }
 
@@ -1073,8 +1075,8 @@ export class CDPDriver {
       if (box) {
         await this.moveVirtualCursor(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug(`[CDPDriver] moveCursorToSelector failed: ${err}`);
     }
   }
 

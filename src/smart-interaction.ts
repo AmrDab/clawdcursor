@@ -30,6 +30,7 @@ import { UIDriver } from './ui-driver';
 import { AccessibilityBridge } from './accessibility';
 import { BrowserLayer } from './browser-layer';
 import { NativeDesktop } from './native-desktop';
+import { extractJsonObject } from './safe-json';
 import { PROVIDERS } from './providers';
 import { uiKnowledge } from './ui-knowledge';
 import type { PipelineConfig, ProviderProfile } from './providers';
@@ -550,19 +551,10 @@ export class SmartInteractionLayer {
       }
 
       // 4. Parse LLM response
-      const jsonMatch = response.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.log(`   ⚠️ ReAct step ${step + 1}: no JSON in LLM response`);
-        actionHistory.push({ action: 'parse_error', success: false, error: 'LLM returned no JSON' });
-        continue; // Retry with error in history
-      }
-
-      let decision: any;
-      try {
-        decision = JSON.parse(jsonMatch[0]);
-      } catch {
-        console.log(`   ⚠️ ReAct step ${step + 1}: invalid JSON from LLM`);
-        actionHistory.push({ action: 'parse_error', success: false, error: 'Invalid JSON from LLM' });
+      const decision = extractJsonObject(response) as any;
+      if (!decision) {
+        console.log(`   ⚠️ ReAct step ${step + 1}: no valid JSON in LLM response`);
+        actionHistory.push({ action: 'parse_error', success: false, error: 'LLM returned no valid JSON' });
         continue;
       }
 
