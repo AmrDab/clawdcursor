@@ -133,10 +133,12 @@ describe('Smart Tools', () => {
       expect(mockInvalidateCache).toHaveBeenCalled();
     });
 
-    it('uses coordinate fallback when UIA invoke fails but bounds available', async () => {
+    it('uses a11y coordinate fallback when OCR has no match but a11y has bounds', async () => {
+      // Use a target that OCR won't find — only a11y can locate it
       mockInvokeElement.mockResolvedValue({ success: false, clickPoint: { x: 500, y: 300 } });
       const ctx = createCtx();
-      const result = await smartClick.handler({ target: 'Submit' }, ctx);
+      const result = await smartClick.handler({ target: 'UniqueA11yButton' }, ctx);
+      expect(result.text).toContain('a11y bounds');
       expect(result.text).toContain('coordinate fallback');
       // Coordinates should be passed directly — no a11yToMouse conversion
       expect(mockMouseClick).toHaveBeenCalledWith(500, 300);
@@ -190,11 +192,15 @@ describe('Smart Tools', () => {
   // ── smart_read ──
 
   describe('smart_read', () => {
-    it('reads via a11y tree for window scope', async () => {
+    it('reads via OCR primary with a11y supplement for window scope', async () => {
       mockGetScreenContext.mockResolvedValue('Full a11y tree here...\nWith multiple lines\nAnd buttons');
       const ctx = createCtx();
       const result = await smartRead.handler({ scope: 'window' }, ctx);
-      expect(result.text).toContain('[via UI Automation active window]');
+      // OCR is primary — should appear first
+      expect(result.text).toContain('[via OCR');
+      // a11y tree should be appended as supplement
+      expect(result.text).toContain('=== A11Y TREE (supplement) ===');
+      expect(result.text).toContain('Full a11y tree here...');
     });
 
     it('reads focused element for focused scope', async () => {

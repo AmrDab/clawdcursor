@@ -2,11 +2,14 @@
  * Smart tools — high-level name-based interaction for blind agents.
  *
  * These tools let MCP clients interact with the desktop WITHOUT needing
- * screenshots or coordinate math. They use a11y → CDP → OCR fallback chains.
+ * screenshots or coordinate math.
+ *
+ * Perception order: OCR first (primary), a11y tree in parallel (supplement).
+ * If combined OCR+a11y can't handle it → CDP fallback → fail.
+ * Vision is never called from here — that's the caller's last resort.
  *
  * Key design: NO coordinate conversion needed by the caller.
- * The tools handle clicking internally — a11y invoke for the primary path,
- * direct coordinate click for fallbacks (a11y/OCR coords match nut-js coords).
+ * OCR coords and a11y coords both match nut-js mouseClick coords directly.
  */
 
 import type { ToolDefinition, ToolContext } from './types';
@@ -20,7 +23,7 @@ function getOcr(): OcrEngine {
 }
 
 // ── Known apps with empty accessibility trees ──
-// These apps expose no useful UIA nodes — skip a11y, go straight to CDP or OCR.
+// These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
 const EMPTY_A11Y_APPS = new Set([
   'windowsterminal', 'terminal', 'wt', 'alacritty', 'wezterm',
   'hyper', 'mintty', 'conhost',
@@ -32,7 +35,8 @@ export function getSmartTools(): ToolDefinition[] {
     {
       name: 'smart_read',
       description:
-        'Read text from the screen with automatic fallback. Tries accessibility tree → CDP → OCR. ' +
+        'Read text from the screen with automatic fallback. ' +
+        'OCR-first pipeline: runs OCR (primary) and a11y tree (supplement) in parallel. ' +
         'Returns structured text without needing a screenshot. Use this as your primary perception tool.',
       parameters: {
         scope: {
@@ -59,7 +63,7 @@ export function getSmartTools(): ToolDefinition[] {
         const target = params.target as string | undefined;
         const processId = params.processId as number | undefined;
 
-        // ── Focused element read ──
+        // ── Focused element read (shortcut — no OCR needed) ──
         if (scope === 'focused') {
           try {
             const el = await ctx.a11y.getFocusedElement();
@@ -71,7 +75,7 @@ export function getSmartTools(): ToolDefinition[] {
           } catch { /* fall through */ }
         }
 
-        // ── Target-specific read ──
+        // ── Target-specific read (a11y search — precise) ──
         if (target) {
           try {
             const elements = await ctx.a11y.findElement({ name: target, processId });
@@ -87,24 +91,62 @@ export function getSmartTools(): ToolDefinition[] {
           } catch { /* fall through */ }
         }
 
-        // ── Window-level read (a11y tree) ──
-        if (scope === 'window' || scope === 'focused') {
-          try {
-            const active = processId ?? (await ctx.a11y.getActiveWindow())?.processId;
-            const activeWin = await ctx.a11y.getActiveWindow();
-            const appName = activeWin?.processName?.toLowerCase() || '';
+        // ── OCR + a11y in parallel (OCR is primary, a11y supplements) ──
+        const activeWin = await ctx.a11y.getActiveWindow().catch(() => null);
+        const appName = activeWin?.processName?.toLowerCase() || '';
+        const hasA11y = !EMPTY_A11Y_APPS.has(appName);
 
-            // Skip a11y for known-empty apps
-            if (!EMPTY_A11Y_APPS.has(appName)) {
-              const context = await ctx.a11y.getScreenContext(active);
-              if (context && context.length > 50) {
-                return { text: `[via UI Automation active window]\n${context}` };
-              }
+        // Launch both in parallel
+        const ocrPromise = (async () => {
+          try {
+            const engine = getOcr();
+            if (!engine.isAvailable()) return null;
+            const result = await engine.recognizeScreen();
+            if (result.elements.length === 0) return null;
+
+            // Group by line for readability
+            const lines = new Map<number, typeof result.elements>();
+            for (const el of result.elements) {
+              const lineEls = lines.get(el.line) ?? [];
+              lineEls.push(el);
+              lines.set(el.line, lineEls);
             }
-          } catch { /* fall through */ }
+            const ocrLines: string[] = [];
+            for (const [, lineEls] of [...lines.entries()].sort((a, b) => a[0] - b[0])) {
+              ocrLines.push(lineEls.sort((a, b) => a.x - b.x).map(el => el.text).join(' '));
+            }
+            return { text: ocrLines.join('\n'), count: result.elements.length, ms: result.durationMs };
+          } catch { return null; }
+        })();
+
+        const a11yPromise = (async () => {
+          if (!hasA11y || scope === 'screen') return null;
+          try {
+            const active = processId ?? activeWin?.processId;
+            const context = await ctx.a11y.getScreenContext(active);
+            if (context && context.length > 50) return context;
+          } catch { /* */ }
+          return null;
+        })();
+
+        const [ocrResult, a11yResult] = await Promise.all([ocrPromise, a11yPromise]);
+
+        // OCR succeeded — return OCR text, attach a11y tree if available
+        if (ocrResult) {
+          const a11ySuffix = a11yResult
+            ? `\n\n=== A11Y TREE (supplement) ===\n${a11yResult}`
+            : '';
+          return {
+            text: `[via OCR — ${ocrResult.count} lines, ${ocrResult.ms}ms]\n${ocrResult.text}${a11ySuffix}`,
+          };
         }
 
-        // ── CDP fallback (for browser content) ──
+        // OCR failed but a11y succeeded — return a11y alone
+        if (a11yResult) {
+          return { text: `[via UI Automation active window]\n${a11yResult}` };
+        }
+
+        // ── CDP fallback (browser content) ──
         try {
           if (await ctx.cdp.isConnected()) {
             const page = ctx.cdp.getPage();
@@ -118,30 +160,6 @@ export function getSmartTools(): ToolDefinition[] {
           }
         } catch { /* fall through */ }
 
-        // ── OCR fallback ──
-        try {
-          const engine = getOcr();
-          if (engine.isAvailable()) {
-            const result = await engine.recognizeScreen();
-            if (result.elements.length > 0) {
-              // Group by line for readability
-              const lines = new Map<number, typeof result.elements>();
-              for (const el of result.elements) {
-                const lineEls = lines.get(el.line) ?? [];
-                lineEls.push(el);
-                lines.set(el.line, lineEls);
-              }
-              const ocrLines: string[] = [];
-              for (const [, lineEls] of [...lines.entries()].sort((a, b) => a[0] - b[0])) {
-                ocrLines.push(lineEls.sort((a, b) => a.x - b.x).map(el => el.text).join(' '));
-              }
-              return {
-                text: `[via OCR — ${result.elements.length} lines, ${result.durationMs}ms]\n${ocrLines.join('\n')}`,
-              };
-            }
-          }
-        } catch { /* fall through */ }
-
         return { text: '(could not read screen via any method)', isError: true };
       },
     },
@@ -151,7 +169,8 @@ export function getSmartTools(): ToolDefinition[] {
       name: 'smart_click',
       description:
         'Click a UI element by name with automatic fallback. ' +
-        'Tries accessibility → CDP → coordinate click. ' +
+        'OCR-first: scans screen text and clicks by coordinates. ' +
+        'Also tries a11y invoke (in parallel) and CDP as fallbacks. ' +
         'No screenshot or coordinate math needed — just provide the element text.',
       parameters: {
         target: {
@@ -183,44 +202,94 @@ export function getSmartTools(): ToolDefinition[] {
         const isBrowser = ['msedge', 'chrome', 'firefox', 'brave', 'arc', 'safari'].includes(appName);
         const emptyA11y = EMPTY_A11Y_APPS.has(appName);
 
-        // ── Step 1: UIA invoke (native apps with a11y support) ──
-        if (!emptyA11y) {
+        // ── Step 1: OCR + a11y in parallel ──
+        // OCR finds text coordinates, a11y tries invoke — whoever succeeds first wins.
+
+        // Start OCR scan
+        const ocrPromise = (async (): Promise<{ x: number; y: number; text: string } | null> => {
+          try {
+            const engine = getOcr();
+            if (!engine.isAvailable()) return null;
+            const result = await engine.recognizeScreen();
+            const targetLower = target.toLowerCase();
+
+            let bestMatch: any = null;
+            let bestScore = 0;
+
+            for (const el of result.elements) {
+              const elText = el.text.toLowerCase();
+              if (elText === targetLower) {
+                bestMatch = el; bestScore = 1; break;
+              }
+              if (elText.includes(targetLower) || targetLower.includes(elText)) {
+                const score = Math.min(elText.length, targetLower.length) / Math.max(elText.length, targetLower.length);
+                if (score > bestScore) { bestMatch = el; bestScore = score; }
+              }
+            }
+
+            if (bestMatch && bestScore > 0.3) {
+              return {
+                x: bestMatch.x + Math.round(bestMatch.width / 2),
+                y: bestMatch.y + Math.round(bestMatch.height / 2),
+                text: bestMatch.text,
+              };
+            }
+            return null;
+          } catch { return null; }
+        })();
+
+        // Start a11y invoke in parallel
+        const a11yPromise = (async (): Promise<{ method: string; clickPoint?: { x: number; y: number } } | null> => {
+          if (emptyA11y) return null;
           try {
             const result = await ctx.a11y.invokeElement({
               name: target,
               processId: processId || activeWin?.processId,
               action: 'click',
             });
+            if (result.success) return { method: 'invoke' };
+            if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
+            return null;
+          } catch { return null; }
+        })();
 
-            if (result.success) {
-              ctx.a11y.invalidateCache();
-              return { text: `Clicked "${target}" via UI Automation (invoke_element)` };
-            }
+        const [ocrMatch, a11yResult] = await Promise.all([ocrPromise, a11yPromise]);
 
-            // UIA found element but couldn't invoke — use coordinate fallback
-            // a11y coordinates and nut-js mouseClick share the same coordinate system
-            if (result.clickPoint) {
-              await ctx.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
-              ctx.a11y.invalidateCache();
-              return { text: `Clicked "${target}" via UI Automation (coordinate fallback at ${result.clickPoint.x},${result.clickPoint.y})` };
-            }
-
-            attempted.push(`UIA(invoke): element not found or not invocable`);
-          } catch (err: any) {
-            attempted.push(`UIA: ${err.message?.substring(0, 80)}`);
-          }
-        } else {
-          attempted.push(`UIA(skipped): app "${appName}" has known traits: emptyAxTree`);
+        // a11y invoke succeeded — best outcome (OS-level click, most reliable)
+        if (a11yResult?.method === 'invoke') {
+          ctx.a11y.invalidateCache();
+          return { text: `Clicked "${target}" via UI Automation (invoke_element)` };
         }
 
-        // ── Step 2: CDP click (for browser content) ──
+        // OCR found the element — coordinate click
+        if (ocrMatch) {
+          await ctx.desktop.mouseClick(ocrMatch.x, ocrMatch.y);
+          ctx.a11y.invalidateCache();
+          return { text: `Clicked "${target}" via OCR (matched "${ocrMatch.text}" at ${ocrMatch.x},${ocrMatch.y})` };
+        }
+
+        // a11y had bounds but couldn't invoke — coordinate fallback
+        if (a11yResult?.clickPoint) {
+          await ctx.desktop.mouseClick(a11yResult.clickPoint.x, a11yResult.clickPoint.y);
+          ctx.a11y.invalidateCache();
+          return { text: `Clicked "${target}" via a11y bounds (coordinate fallback at ${a11yResult.clickPoint.x},${a11yResult.clickPoint.y})` };
+        }
+
+        // Track what was attempted for diagnostics
+        if (emptyA11y) {
+          attempted.push(`UIA(skipped): app "${appName}" has known traits: emptyAxTree`);
+        } else {
+          attempted.push('UIA(invoke): element not found or not invocable');
+        }
+        attempted.push(ocrMatch === null ? 'ocr: no text match found' : 'ocr: unavailable');
+
+        // ── Step 2: CDP click (browser content) ──
         if (isBrowser || await ctx.cdp.isConnected().catch(() => false)) {
           try {
             const connected = await ctx.cdp.isConnected();
             if (connected) {
               const page = ctx.cdp.getPage();
               if (page) {
-                // Try JS-based click by text
                 const clicked = await page.evaluate((text: string) => {
                   const selectors = 'button, a, [role="button"], [role="link"], [role="menuitem"], input[type="submit"], input[type="button"], [onclick]';
                   const elements = document.querySelectorAll(selectors);
@@ -247,48 +316,6 @@ export function getSmartTools(): ToolDefinition[] {
           }
         } else {
           attempted.push(`CDP(skipped): foreground app "${appName}" is not a browser`);
-        }
-
-        // ── Step 3: OCR text match + coordinate click ──
-        try {
-          const engine = getOcr();
-          if (engine.isAvailable()) {
-            const result = await engine.recognizeScreen();
-            const targetLower = target.toLowerCase();
-
-            // Find best matching OCR element
-            let bestMatch: any = null;
-            let bestScore = 0;
-
-            for (const el of result.elements) {
-              const elText = el.text.toLowerCase();
-              if (elText === targetLower) {
-                bestMatch = el;
-                bestScore = 1;
-                break; // exact match
-              }
-              if (elText.includes(targetLower) || targetLower.includes(elText)) {
-                const score = Math.min(elText.length, targetLower.length) / Math.max(elText.length, targetLower.length);
-                if (score > bestScore) {
-                  bestMatch = el;
-                  bestScore = score;
-                }
-              }
-            }
-
-            if (bestMatch && bestScore > 0.3) {
-              // OCR coordinates from screenshot match nut-js mouse coordinate system
-              // Click center of the matched element directly
-              const centerX = bestMatch.x + Math.round(bestMatch.width / 2);
-              const centerY = bestMatch.y + Math.round(bestMatch.height / 2);
-              await ctx.desktop.mouseClick(centerX, centerY);
-              ctx.a11y.invalidateCache();
-              return { text: `Clicked "${target}" via OCR (matched "${bestMatch.text}" at ${centerX},${centerY})` };
-            }
-            attempted.push('ocr: no text match found');
-          }
-        } catch (err: any) {
-          attempted.push(`ocr: ${err.message?.substring(0, 80)}`);
         }
 
         // All methods failed
@@ -363,7 +390,6 @@ export function getSmartTools(): ToolDefinition[] {
                 const page = ctx.cdp.getPage();
                 if (page) {
                   const found = await page.evaluate((label: string) => {
-                    // Try label-based search
                     const inputs = document.querySelectorAll('input, textarea, [contenteditable]');
                     for (const el of inputs) {
                       const htmlEl = el as HTMLElement;
