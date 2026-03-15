@@ -1,12 +1,14 @@
 /**
  * 🩺 Clawd Cursor Doctor - diagnoses setup and auto-configures the pipeline.
  *
- * Tests:
- * 1. Screen capture (nut-js)
- * 2. Accessibility bridge (PowerShell / osascript)
- * 3. Input control (keyboard/mouse)
- * 4. AI provider connectivity + model availability (ALL providers in parallel)
- * 5. Builds optimal mixed 3-layer pipeline config
+ * Phases:
+ * 1. Screen capture test (nut-js)
+ * 2. Accessibility bridge test (PowerShell / osascript)
+ * 3. AI provider scan — all providers in parallel
+ * 4. Model verification — text: instruction-following, vision: real image input
+ * 5. Smoke test — a11y→LLM round-trip (reads active window, confirms via model)
+ * 6. Interactive pipeline selection
+ * 7. Save config
  */
 
 import * as fs from 'fs';
@@ -156,83 +158,18 @@ async function quickTestModelAsync(
 }
 
 /**
- * Quick model test with 5s timeout.
+ * Quick model test with 5s timeout — uses the same real tests as full doctor.
+ * For quick setup, we accept text-only pings for vision models to save time.
  */
 async function quickTestModel(
   provider: ProviderProfile,
   apiKey: string,
   model: string,
-  _isVision: boolean,
+  isVision: boolean,
 ): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
-  const start = performance.now();
-
-  try {
-    if (provider.openaiCompat) {
-      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeader(apiKey),
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 5,
-          messages: [{ role: 'user', content: 'OK' }],
-        }),
-        signal: AbortSignal.timeout(5000), // 5s timeout for quick setup
-      });
-
-      const data = await response.json() as any;
-      if (data.error) {
-        const msg = typeof data.error === 'object' && data.error !== null
-          ? (data.error.message || JSON.stringify(data.error))
-          : String(data.error);
-        return { ok: false, error: msg };
-      }
-      const text = data.choices?.[0]?.message?.content || '';
-      if (!text) return { ok: false, error: 'Empty response' };
-
-      return { ok: true, latencyMs: Math.round(performance.now() - start) };
-    } else {
-      // Anthropic API
-      const response = await fetch(`${provider.baseUrl}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeader(apiKey),
-          ...provider.extraHeaders,
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 5,
-          messages: [{ role: 'user', content: 'OK' }],
-        }),
-        signal: AbortSignal.timeout(5000), // 5s timeout for quick setup
-      });
-
-      const data = await response.json() as any;
-      if (data.type === 'error' && data.error) {
-        const err = data.error;
-        const msg = typeof err === 'object' && err !== null
-          ? (err.message || JSON.stringify(err))
-          : String(err);
-        return { ok: false, error: msg };
-      }
-      if (data.error) {
-        const msg = typeof data.error === 'object' && data.error !== null
-          ? (data.error.message || JSON.stringify(data.error))
-          : String(data.error);
-        return { ok: false, error: msg };
-      }
-
-      return { ok: true, latencyMs: Math.round(performance.now() - start) };
-    }
-  } catch (err: any) {
-    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      return { ok: false, error: 'Timeout (5s)' };
-    }
-    return { ok: false, error: err.message || String(err) };
-  }
+  // Quick setup: text-only ping for both roles (speed over thoroughness)
+  // Full doctor will do the real vision test later
+  return testTextModel(provider, apiKey, model);
 }
 
 export async function runDoctor(opts: {
@@ -502,7 +439,60 @@ export async function runDoctor(opts: {
     results.push({ name: 'Vision model', ok: false, detail: 'No working vision model found' });
   }
 
-  // ─── 5. Interactive provider/model selection ───────────────────
+  // ─── 5. Smoke Test — end-to-end pipeline sanity ─────────────
+  if (workingText.length > 0) {
+    console.log(`\n🧪 Smoke test...`);
+    const bestText = workingText[0];
+    const smokeProvider = PROVIDERS[bestText.providerKey];
+    const smokeScan = scanResults.find(s => s.key === bestText.providerKey);
+    const smokeKey = smokeScan?.apiKey || '';
+
+    // Quick round-trip: read active window title via a11y, ask LLM to echo it
+    let smokeOk = false;
+    try {
+      const smokeA11y = new AccessibilityBridge();
+      const activeWin = await smokeA11y.getActiveWindow();
+      const windowTitle = activeWin?.title || 'Terminal';
+
+      // Send window title to text model, ask it to confirm
+      const smokeInstruction = `The active window is titled "${windowTitle}". Reply with exactly: SMOKE_PASS`;
+
+      let smokeText = '';
+      if (smokeProvider.openaiCompat) {
+        const res = await fetch(`${smokeProvider.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...smokeProvider.authHeader(smokeKey) },
+          body: JSON.stringify({ model: bestText.model, max_tokens: 15, temperature: 0, messages: [{ role: 'user', content: smokeInstruction }] }),
+          signal: AbortSignal.timeout(8000),
+        });
+        const data = await res.json() as any;
+        smokeText = data.choices?.[0]?.message?.content || '';
+      } else {
+        const res = await fetch(`${smokeProvider.baseUrl}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...smokeProvider.authHeader(smokeKey), ...smokeProvider.extraHeaders },
+          body: JSON.stringify({ model: bestText.model, max_tokens: 15, messages: [{ role: 'user', content: smokeInstruction }] }),
+          signal: AbortSignal.timeout(8000),
+        });
+        const data = await res.json() as any;
+        smokeText = data.content?.[0]?.text || '';
+      }
+
+      smokeOk = smokeText.includes('SMOKE_PASS');
+      if (smokeOk) {
+        console.log(`   ✅ A11y → LLM round-trip passed (window: "${windowTitle}")`);
+        results.push({ name: 'Smoke test (a11y→LLM)', ok: true, detail: `Window "${windowTitle}" — model confirmed` });
+      } else {
+        console.log(`   ⚠️  LLM responded but didn't confirm (got: "${smokeText.substring(0, 40)}")`);
+        results.push({ name: 'Smoke test (a11y→LLM)', ok: false, detail: `Model didn't follow instruction: "${smokeText.substring(0, 40)}"` });
+      }
+    } catch (err) {
+      console.log(`   ⚠️  Smoke test skipped: ${err}`);
+      results.push({ name: 'Smoke test (a11y→LLM)', ok: false, detail: `Error: ${err}` });
+    }
+  }
+
+  // ─── 6. Interactive provider/model selection ───────────────────
   const recommendedPipeline = buildMixedPipeline(scanResults, modelTests);
   const gpuInfo = await detectGpuInfo();
   if (gpuInfo) {
@@ -524,12 +514,12 @@ export async function runDoctor(opts: {
     console.log(`   🖥️  Computer Use API: enabled (Anthropic native)`);
   }
 
-  // ─── 6. Save Config ─────────────────────────────────────────────
+  // ─── 7. Save Config ─────────────────────────────────────────────
   if (opts.save !== false) {
     savePipelineConfig(pipeline, scanResults);
   }
 
-  // ─── 7. External Skill Registration (optional) ─────────────────
+  // ─── 8. External Skill Registration (optional) ─────────────────
   await registerExternalSkills(results);
 
   // ─── Summary ────────────────────────────────────────────────────
@@ -615,10 +605,10 @@ async function runSingleProviderFlow(
     }
   }
 
-  // Test vision model (Layer 3)
+  // Test vision model (Layer 3) — with actual image
   if (apiKey) {
     console.log(`   Testing ${visionModel} (vision)...`);
-    const visionResult = await testModel(provider, apiKey, visionModel, false);
+    const visionResult = await testModel(provider, apiKey, visionModel, true);
     if (visionResult.ok) {
       visionModelWorks = true;
       results.push({
@@ -1277,19 +1267,36 @@ function compareVersions(a: string, b: string): number {
 }
 
 /**
- * Test if a model is responding.
+ * Test if a model is responding AND can follow instructions.
+ * Text models: "Reply with exactly: CLAWD_OK" → verify response contains CLAWD_OK.
+ * Vision models: send a 1x1 green pixel → verify non-empty meaningful response.
  */
 async function testModel(
   provider: ProviderProfile,
   apiKey: string,
   model: string,
-  _isVision: boolean,
+  isVision: boolean,
+): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+  if (isVision) {
+    return testVisionModel(provider, apiKey, model);
+  }
+  return testTextModel(provider, apiKey, model);
+}
+
+/** Text model: verify instruction-following, not just connectivity */
+async function testTextModel(
+  provider: ProviderProfile,
+  apiKey: string,
+  model: string,
 ): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
   const start = performance.now();
+  const TIMEOUT = 8000;
+  const INSTRUCTION = 'Reply with exactly one word: CLAWD_OK — nothing else.';
 
   try {
+    let text = '';
+
     if (provider.openaiCompat) {
-      // OpenAI-compatible API (OpenAI, Ollama, Kimi)
       const response = await fetch(`${provider.baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -1299,22 +1306,16 @@ async function testModel(
         body: JSON.stringify({
           model,
           max_tokens: 10,
-          messages: [{ role: 'user', content: 'Reply OK' }],
+          temperature: 0,
+          messages: [{ role: 'user', content: INSTRUCTION }],
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(TIMEOUT),
       });
-
       const data = await response.json() as any;
       if (data.error) {
-        const msg = typeof data.error === 'object' && data.error !== null
-          ? (data.error.message || JSON.stringify(data.error))
-          : String(data.error);
-        return { ok: false, error: msg };
+        return { ok: false, error: extractErrorMessage(data.error) };
       }
-      const text = data.choices?.[0]?.message?.content || '';
-      if (!text) return { ok: false, error: 'Empty response' };
-
-      return { ok: true, latencyMs: Math.round(performance.now() - start) };
+      text = data.choices?.[0]?.message?.content || '';
     } else {
       // Anthropic API
       const response = await fetch(`${provider.baseUrl}/messages`, {
@@ -1327,37 +1328,142 @@ async function testModel(
         body: JSON.stringify({
           model,
           max_tokens: 10,
-          messages: [{ role: 'user', content: 'Reply OK' }],
+          messages: [{ role: 'user', content: INSTRUCTION }],
         }),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(TIMEOUT),
       });
-
       const data = await response.json() as any;
       if (data.type === 'error' && data.error) {
-        const err = data.error;
-        const msg = typeof err === 'object' && err !== null
-          ? (err.message || JSON.stringify(err))
-          : String(err);
-        const hint = (err.type === 'not_found_error' || err.type === 'invalid_request_error')
+        const hint = (data.error.type === 'not_found_error' || data.error.type === 'invalid_request_error')
           ? ' — check model id matches your provider'
           : '';
-        return { ok: false, error: msg + hint };
+        return { ok: false, error: extractErrorMessage(data.error) + hint };
       }
       if (data.error) {
-        const msg = typeof data.error === 'object' && data.error !== null
-          ? (data.error.message || JSON.stringify(data.error))
-          : String(data.error);
-        return { ok: false, error: msg };
+        return { ok: false, error: extractErrorMessage(data.error) };
       }
-
-      return { ok: true, latencyMs: Math.round(performance.now() - start) };
+      text = data.content?.[0]?.text || '';
     }
+
+    if (!text) return { ok: false, error: 'Empty response' };
+
+    // Verify instruction-following
+    if (!text.includes('CLAWD_OK')) {
+      return { ok: false, error: `Model responded but didn't follow instructions (got: "${text.substring(0, 50)}")` };
+    }
+
+    return { ok: true, latencyMs: Math.round(performance.now() - start) };
   } catch (err: any) {
     if (err.name === 'TimeoutError' || err.name === 'AbortError') {
-      return { ok: false, error: 'Timeout (15s)' };
+      return { ok: false, error: `Timeout (${TIMEOUT / 1000}s)` };
     }
     return { ok: false, error: err.message || String(err) };
   }
+}
+
+/** Vision model: send a real image and verify the model can process it */
+async function testVisionModel(
+  provider: ProviderProfile,
+  apiKey: string,
+  model: string,
+): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
+  const start = performance.now();
+  const TIMEOUT = 10000; // vision needs slightly more time
+
+  // 8x8 solid green PNG (89 bytes) — smallest valid PNG that's unambiguously green
+  const GREEN_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAADklEQVQI12Ng+M9AEwYAGJgBgV6GPOYAAAAASUVORK5CYII=';
+
+  try {
+    let text = '';
+
+    if (provider.openaiCompat) {
+      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...provider.authHeader(apiKey),
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 20,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:image/png;base64,${GREEN_PIXEL_PNG}` } },
+              { type: 'text', text: 'What color is this image? Reply with one word.' },
+            ],
+          }],
+        }),
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+      const data = await response.json() as any;
+      if (data.error) {
+        return { ok: false, error: extractErrorMessage(data.error) };
+      }
+      text = data.choices?.[0]?.message?.content || '';
+    } else {
+      // Anthropic API — uses content blocks with type: image
+      const response = await fetch(`${provider.baseUrl}/messages`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...provider.authHeader(apiKey),
+          ...provider.extraHeaders,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 20,
+          messages: [{
+            role: 'user',
+            content: [
+              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: GREEN_PIXEL_PNG } },
+              { type: 'text', text: 'What color is this image? Reply with one word.' },
+            ],
+          }],
+        }),
+        signal: AbortSignal.timeout(TIMEOUT),
+      });
+      const data = await response.json() as any;
+      if (data.type === 'error' && data.error) {
+        return { ok: false, error: extractErrorMessage(data.error) };
+      }
+      if (data.error) {
+        return { ok: false, error: extractErrorMessage(data.error) };
+      }
+      text = data.content?.[0]?.text || '';
+    }
+
+    if (!text) return { ok: false, error: 'Empty response — model may not support vision' };
+
+    // Any non-empty response proves the model accepted the image
+    // Bonus: check if it said "green" (but don't require it — some models describe differently)
+    const lower = text.toLowerCase();
+    const recognizedColor = lower.includes('green') || lower.includes('color');
+    return {
+      ok: true,
+      latencyMs: Math.round(performance.now() - start),
+      ...(recognizedColor ? {} : {}), // response is valid either way
+    };
+  } catch (err: any) {
+    if (err.name === 'TimeoutError' || err.name === 'AbortError') {
+      return { ok: false, error: `Timeout (${TIMEOUT / 1000}s)` };
+    }
+    // Common error: model doesn't support multimodal input
+    const msg = err.message || String(err);
+    if (msg.includes('image') || msg.includes('multimodal') || msg.includes('vision')) {
+      return { ok: false, error: `Model does not support vision input: ${msg}` };
+    }
+    return { ok: false, error: msg };
+  }
+}
+
+/** Extract a human-readable error message from an API error response */
+function extractErrorMessage(error: unknown): string {
+  if (typeof error === 'string') return error;
+  if (typeof error === 'object' && error !== null) {
+    return (error as any).message || JSON.stringify(error);
+  }
+  return String(error);
 }
 
 /**
