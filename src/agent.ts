@@ -225,7 +225,7 @@ public class WinAPI {
 
     // Initialize Browser Layer (Layer 0) — Playwright for browser tasks
     const pipelineConfig = loadPipelineConfig();
-    // Pipeline config (from .clawd-config.json) takes priority for actual model selection
+    // Pipeline config (from .clawdcursor-config.json) takes priority for actual model selection
     const textModel = pipelineConfig?.layer2?.model || this.config.ai.model || 'unavailable';
     const visionModel = pipelineConfig?.layer3?.model || this.config.ai.visionModel || 'unavailable';
 

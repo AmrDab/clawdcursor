@@ -106,7 +106,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           } catch { /* fall through */ }
         }
         try {
-          const userDataDir = path.join(process.env.TEMP || process.env.TMPDIR || '/tmp', 'clawd-edge');
+          const userDataDir = path.join(process.env.TEMP || process.env.TMPDIR || '/tmp', 'clawdcursor-edge');
           if (process.platform === 'win32') {
             await execFileAsync('powershell.exe', ['-NoProfile', '-Command',
               `Start-Process "msedge" -ArgumentList @("--remote-debugging-port=${CDP_PORT}","--user-data-dir=${userDataDir}","--no-first-run","--disable-default-apps","${url}")`

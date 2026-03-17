@@ -800,7 +800,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     // When starring, check for credentials
     if (!isFav && looksLikeCredential(item.task)) {
       var msg = '🔒 This task may contain sensitive info (API key, password, or token).\\n\\n' +
-        'Starred commands are saved locally in .clawd-favorites.json on your machine — ' +
+        'Starred commands are saved locally in .clawdcursor-favorites.json on your machine — ' +
         'never sent over the network. Your credentials stay secure on your device.\\n\\n' +
         'Star this command anyway?';
       if (!confirm(msg)) return;

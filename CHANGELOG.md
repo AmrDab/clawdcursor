@@ -17,7 +17,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Fixed
 - **Checkpoint system overhaul** — removed auto-termination (completionRatio ≥ 0.90 early exit and isComplete() mid-loop kill), strict detection: content_pasted requires Ctrl+V, content_copied requires Ctrl+C, second_app_opened detects any window switch universally
 - **Pipeline context passing** — `priorContext[]` accumulator flows from pre-processing through to Computer Use (no more amnesia between layers)
-- **Credential resolution order** — .clawd-config → auth-profiles.json → openclaw.json (with template expansion) → env vars
+- **Credential resolution order** — .clawdcursor-config → auth-profiles.json → openclaw.json (with template expansion) → env vars
 - **`loadPipelineConfig()` path resolution** — checks package dir first, then cwd (fixes global npm installs)
 - **Smart Interaction model lookup** — uses `PROVIDERS` registry instead of hardcoded model/baseUrl maps; fixes stale `claude-haiku-3-5-20241022` fallback
 - **Scroll behavior** — system prompts instruct PageDown/Space instead of tiny mouse scrolls; default scroll delta 3 → 15
@@ -130,7 +130,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **Case-preserving action router** — all regex matches against raw (unmodified) task text. Typed text and URLs no longer get lowercased.
 - **Flexible click matching** — `click Blank document` works without quotes (was requiring `click "Blank document"`). Single unified regex for quoted and unquoted element names.
 - **PowerShell encoding** — replaced emoji (🐾) and em dash (—) in task console title that broke on Windows PowerShell due to encoding.
-- **Stale config** — `.clawd-config.json` now correctly reflects Ollama when doctor detects it (was stuck on Anthropic).
+- **Stale config** — `.clawdcursor-config.json` now correctly reflects Ollama when doctor detects it (was stuck on Anthropic).
 - **Brain provider mismatch** — decomposition no longer calls Anthropic API when only Ollama is available.
 
 ### Changed

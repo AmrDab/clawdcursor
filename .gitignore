@@ -5,6 +5,7 @@ dist/
 .DS_Store
 Thumbs.db
 debug/
+.clawdcursor-config.json
 .clawd-config.json
 qa-tests/
 .claude/

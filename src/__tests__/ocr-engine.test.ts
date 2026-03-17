@@ -196,9 +196,9 @@ describe('OcrEngine', () => {
 
       expect(mockWriteFileSync).toHaveBeenCalledTimes(1);
       expect(mockUnlinkSync).toHaveBeenCalledTimes(1);
-      // Temp path should contain "clawd-ocr"
+      // Temp path should contain "clawdcursor-ocr"
       const writtenPath = mockWriteFileSync.mock.calls[0][0] as string;
-      expect(writtenPath).toContain('clawd-ocr');
+      expect(writtenPath).toContain('clawdcursor-ocr');
     });
 
     it('cleans up temp file even on OCR error', async () => {

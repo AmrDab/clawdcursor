@@ -117,7 +117,7 @@ program
     }
 
     // Auto-setup on first run
-    const configPath = path.join(__dirname, '..', '.clawd-config.json');
+    const configPath = path.join(__dirname, '..', '.clawdcursor-config.json');
     if (!fs.existsSync(configPath)) {
       console.log(`${e('🔍', '*')} First run — auto-detecting AI providers...\n`);
       const { quickSetup } = await import('./doctor');
@@ -159,7 +159,7 @@ program
     console.log(`\x1b[32m\u2713\x1b[0m \x1b[1mclawdcursor\x1b[0m \x1b[90mv${VERSION}\x1b[0m \x1b[90m\u2014 desktop control active on ${config.server.host}:${config.server.port}\x1b[0m`);
 
     if (resolvedApi.source === 'external') {
-      console.log(`${e('🔗', '--')} External credentials detected — pipeline config (.clawd-config.json) takes priority`);
+      console.log(`${e('🔗', '--')} External credentials detected — pipeline config (.clawdcursor-config.json) takes priority`);
     }
 
     const agent = new Agent(config);
@@ -233,7 +233,7 @@ program
     });
 
     if (opts.reset) {
-      const configPath = path.join(__dirname, '..', '.clawd-config.json');
+      const configPath = path.join(__dirname, '..', '.clawdcursor-config.json');
       if (fs.existsSync(configPath)) {
         fs.unlinkSync(configPath);
         console.log(`${e('🗑️', '[DEL]')}  Cleared saved config — re-detecting from scratch\n`);
@@ -395,7 +395,7 @@ done
         // Write temp PS1 and open in new Windows Terminal / PowerShell window
         const fs = await import('fs');
         const path = await import('path');
-        const tmpScript = path.join(os.tmpdir(), `clawd-task-${Date.now()}.ps1`);
+        const tmpScript = path.join(os.tmpdir(), `clawdcursor-task-${Date.now()}.ps1`);
         fs.writeFileSync(tmpScript, scriptContent);
         spawnExec('powershell.exe', [
           '-Command', `Start-Process powershell -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','${tmpScript}'`
@@ -403,14 +403,14 @@ done
       } else if (platform === 'darwin') {
         const fs = await import('fs');
         const path = await import('path');
-        const tmpScript = path.join(os.tmpdir(), `clawd-task-${Date.now()}.sh`);
+        const tmpScript = path.join(os.tmpdir(), `clawdcursor-task-${Date.now()}.sh`);
         fs.writeFileSync(tmpScript, scriptContent, { mode: 0o755 });
         spawnExec('open', ['-a', 'Terminal', tmpScript], { detached: true, stdio: 'ignore' } as any);
       } else {
         // Linux fallback
         const fs = await import('fs');
         const path = await import('path');
-        const tmpScript = path.join(os.tmpdir(), `clawd-task-${Date.now()}.sh`);
+        const tmpScript = path.join(os.tmpdir(), `clawdcursor-task-${Date.now()}.sh`);
         fs.writeFileSync(tmpScript, scriptContent, { mode: 0o755 });
         spawnExec('x-terminal-emulator', ['-e', tmpScript], { detached: true, stdio: 'ignore' } as any);
       }
@@ -556,8 +556,8 @@ program
 
     // 1. Remove config files
     const configFiles = [
-      path.join(clawdRoot, '.clawd-config.json'),
-      path.join(clawdRoot, '.clawd-favorites.json'),
+      path.join(clawdRoot, '.clawdcursor-config.json'),
+      path.join(clawdRoot, '.clawdcursor-favorites.json'),
       path.join(clawdRoot, '.env'),
     ];
     for (const f of configFiles) {

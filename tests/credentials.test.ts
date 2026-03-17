@@ -18,7 +18,7 @@ describe.sequential('credential resolution', () => {
   let tempCwd: string;
 
   beforeEach(() => {
-    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-credentials-'));
+    tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-credentials-'));
     tempHome = path.join(tempRoot, 'home');
     tempCwd = path.join(tempRoot, 'project');
     fs.mkdirSync(tempHome, { recursive: true });
@@ -64,7 +64,7 @@ describe.sequential('credential resolution', () => {
     expect(resolved.visionBaseUrl).toBe('https://api.moonshot.ai/v1');
   });
 
-  it('prefers doctor-configured provider from .clawd-config.json', () => {
+  it('prefers doctor-configured provider from .clawdcursor-config.json', () => {
     writeJson(path.join(tempHome, '.openclaw', 'agents', 'main', 'agent', 'auth-profiles.json'), {
       anthropic: {
         apiKey: 'anthropic-auth-profile-key',
@@ -93,7 +93,7 @@ describe.sequential('credential resolution', () => {
       },
     });
 
-    writeJson(path.join(tempCwd, '.clawd-config.json'), {
+    writeJson(path.join(tempCwd, '.clawdcursor-config.json'), {
       provider: 'anthropic',
     });
 
@@ -160,7 +160,7 @@ describe.sequential('credential resolution', () => {
   it('supports provider-scoped env keys for arbitrary providers', () => {
     process.env.MY_CUSTOM_PROVIDER_API_KEY = 'custom-provider-key';
 
-    writeJson(path.join(tempCwd, '.clawd-config.json'), {
+    writeJson(path.join(tempCwd, '.clawdcursor-config.json'), {
       provider: 'my-custom-provider',
     });
 

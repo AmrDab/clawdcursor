@@ -34,7 +34,7 @@ import type {
 import { DEFAULT_CONFIG } from './types';
 import { resolveApiConfig } from './credentials';
 
-const CONFIG_FILE = '.clawd-config.json';
+const CONFIG_FILE = '.clawdcursor-config.json';
 const execFileAsync = promisify(execFile);
 
 interface DiagResult {
@@ -76,7 +76,7 @@ export async function quickSetup(): Promise<PipelineConfig | null> {
   // 3. Build best pipeline automatically
   const pipeline = buildMixedPipeline(scanResults, modelTests);
 
-  // 4. Save to .clawd-config.json
+  // 4. Save to .clawdcursor-config.json
   savePipelineConfig(pipeline, scanResults);
 
   // 5. Return pipeline

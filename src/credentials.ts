@@ -9,7 +9,7 @@ import * as path from 'path';
  *   1. Explicit CLI flags (--api-key, --provider, --base-url)
  *   2. External config files (e.g. OpenClaw auth-profiles, if installed)
  *   3. Environment variables (AI_API_KEY, ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
- *   4. Local .clawd-config.json
+ *   4. Local .clawdcursor-config.json
  *
  * External integrations (OpenClaw, etc.) are optional — Clawd Cursor works
  * fully standalone with just env vars or CLI flags.
@@ -191,8 +191,8 @@ function getOpenClawRoots(): string[] {
 
 function readConfiguredProvider(): string | undefined {
   // Check both the package directory (where the code lives) and cwd
-  const pkgConfigPath = path.join(__dirname, '..', '.clawd-config.json');
-  const cwdConfigPath = path.join(process.cwd(), '.clawd-config.json');
+  const pkgConfigPath = path.join(__dirname, '..', '.clawdcursor-config.json');
+  const cwdConfigPath = path.join(process.cwd(), '.clawdcursor-config.json');
   const cfg = safeReadJson(pkgConfigPath) || safeReadJson(cwdConfigPath);
   if (!cfg || !isObject(cfg)) return undefined;
 
