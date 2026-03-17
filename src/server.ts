@@ -48,10 +48,19 @@ function generateToken(): string {
   return token;
 }
 
-export let SERVER_TOKEN = generateToken();
+// Token is generated lazily (only when createServer is first called, i.e. `start`).
+// This prevents CLI commands like `stop`, `task`, `consent` from overwriting the
+// running server's token file on import.
+export let SERVER_TOKEN = '';
+
+/** Initialize the auth token. Called once from createServer(). */
+export function initServerToken(): string {
+  SERVER_TOKEN = generateToken();
+  return SERVER_TOKEN;
+}
 
 /** Middleware: require Authorization: Bearer <token> on mutating endpoints. */
-function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
+export function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   if (!token || token !== SERVER_TOKEN) {
@@ -150,6 +159,9 @@ const confirmSchema = z.object({
 });
 
 export function createServer(agent: Agent, config: ClawdConfig): express.Express {
+  // Generate auth token (only on actual server start, not on module import)
+  initServerToken();
+
   // Hook console to capture logs
   hookConsole();
 

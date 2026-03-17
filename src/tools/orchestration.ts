@@ -5,9 +5,27 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import type { ToolDefinition } from './types';
 
 const execFileAsync = promisify(execFile);
+
+/** Read auth token from ~/.clawdcursor/token for agent API calls. */
+function loadAgentToken(): string {
+  try {
+    return fs.readFileSync(path.join(os.homedir(), '.clawdcursor', 'token'), 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+function agentHeaders(): Record<string, string> {
+  const token = loadAgentToken();
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+  };
+}
 const CDP_PORT = 9223;
 
 export function getOrchestrationTools(): ToolDefinition[] {
@@ -26,7 +44,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
         try {
           const resp = await fetch('http://127.0.0.1:3847/task', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: agentHeaders(),
             body: JSON.stringify({ task }),
           });
           if (!resp.ok) {
@@ -52,7 +70,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
               }
             } catch { /* keep polling */ }
           }
-          await fetch('http://127.0.0.1:3847/abort', { method: 'POST' }).catch(() => {});
+          await fetch('http://127.0.0.1:3847/abort', { method: 'POST', headers: agentHeaders() }).catch(() => {});
           return { text: `Agent timed out after ${timeout ?? 300}s. Task aborted.`, isError: true };
         } catch (err: any) {
           return { text: `Agent unavailable: ${err.message}. Is clawdcursor running on port 3847?`, isError: true };

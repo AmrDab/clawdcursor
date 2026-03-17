@@ -177,8 +177,10 @@ program
     const app = createServer(agent, config);
 
     // Mount model-agnostic tool server alongside agent API
+    // POST /execute/* requires auth; GET /tools and GET /docs are public
     try {
       const { createToolServer } = await import('./tool-server');
+      const { requireAuth } = await import('./server');
       const toolCtx = {
         desktop: agent.getDesktop(),
         a11y: (agent as any).a11y,
@@ -187,6 +189,7 @@ program
         getScreenshotScaleFactor: () => agent.getDesktop().getScaleFactor(),
         ensureInitialized: async () => {},  // agent already initialized
       };
+      app.use('/execute', requireAuth);  // auth gate on all tool execution
       app.use(createToolServer(toolCtx));
     } catch (err) {
       console.warn('Tool server not loaded:', (err as Error).message);
