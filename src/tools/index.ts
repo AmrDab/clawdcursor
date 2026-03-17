@@ -1,5 +1,5 @@
 /**
- * Tool Registry — central registry of all clawd-cursor tools.
+ * Tool Registry — central registry of all clawdcursor tools.
  *
  * Import this to get all 40 tools in a transport-agnostic format.
  * Adapters (HTTP, MCP) consume this registry.

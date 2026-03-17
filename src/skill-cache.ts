@@ -8,7 +8,7 @@
  * This is the "growing a11y tree" — each successful interaction teaches
  * the system a faster path for next time.
  *
- * Storage: ~/.clawd-cursor/skills.json
+ * Storage: ~/.clawdcursor/skills.json
  * Matching: token overlap ratio (no new npm deps)
  * Promotion: auto after 2 successes for the same task+app pair
  */

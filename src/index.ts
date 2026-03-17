@@ -20,14 +20,14 @@ import { migrateFromLegacyDir } from './paths';
 
 dotenv.config();
 
-// Migrate data from legacy ~/.openclaw/clawd-cursor/ to ~/.clawd-cursor/
+// Migrate data from legacy ~/.openclaw/clawdcursor/ to ~/.clawdcursor/
 migrateFromLegacyDir();
 
 // ── Auth helper ──────────────────────────────────────────────────────────────
-// Reads the saved Bearer token from ~/.clawd-cursor/token (written by start/serve).
+// Reads the saved Bearer token from ~/.clawdcursor/token (written by start/serve).
 function loadAuthToken(): string {
   try {
-    const tokenPath = path.join(require('os').homedir(), '.clawd-cursor', 'token');
+    const tokenPath = path.join(require('os').homedir(), '.clawdcursor', 'token');
     return fs.readFileSync(tokenPath, 'utf-8').trim();
   } catch {
     return '';
@@ -89,7 +89,7 @@ async function forceKillPort(port: number): Promise<boolean> {
 }
 
 program
-  .name('clawd-cursor')
+  .name('clawdcursor')
   .description('🐾 AI Desktop Agent — native screen control')
   .version(VERSION);
 
@@ -156,7 +156,7 @@ program
       debug: opts.debug || false,
     };
 
-    console.log(`\x1b[32m\u2713\x1b[0m \x1b[1mclawd-cursor\x1b[0m \x1b[90mv${VERSION}\x1b[0m \x1b[90m\u2014 desktop control active on ${config.server.host}:${config.server.port}\x1b[0m`);
+    console.log(`\x1b[32m\u2713\x1b[0m \x1b[1mclawdcursor\x1b[0m \x1b[90mv${VERSION}\x1b[0m \x1b[90m\u2014 desktop control active on ${config.server.host}:${config.server.port}\x1b[0m`);
 
     if (resolvedApi.source === 'external') {
       console.log(`${e('🔗', '--')} External credentials detected — pipeline config (.clawd-config.json) takes priority`);
@@ -194,7 +194,7 @@ program
 
     app.listen(config.server.port, config.server.host, async () => {
       const { SERVER_TOKEN } = await import('./server');
-      const tokenPath = require('path').join(require('os').homedir(), '.clawd-cursor', 'token');
+      const tokenPath = require('path').join(require('os').homedir(), '.clawdcursor', 'token');
       console.log(`\n\x1b[32m${e('🌐', '[NET]')} API server:\x1b[0m http://${config.server.host}:${config.server.port}`);
       console.log(`\x1b[33m${e('🔑', '[KEY]')} Auth token:\x1b[0m ${SERVER_TOKEN}`);
       console.log(`\x1b[90m   (also saved to ${tokenPath})\x1b[0m`);
@@ -582,7 +582,7 @@ program
       path.join(homeDir, '.openclaw', 'workspace', 'skills', 'clawdcursor'),
       path.join(homeDir, '.openclaw-dev', 'workspace', 'skills', 'clawdcursor'),
       path.join(homeDir, '.openclaw', 'skills', 'clawdcursor'),
-      path.join(homeDir, '.codex', 'skills', 'clawd-cursor'),
+      path.join(homeDir, '.codex', 'skills', 'clawdcursor'),
     ];
     for (const sp of skillPaths) {
       if (fs.existsSync(sp)) {
@@ -609,7 +609,7 @@ program
       console.log('   Nothing to clean up.');
     }
 
-    console.log(`\n${e('🐾', '>')} Uninstalled. To fully remove, delete the clawd-cursor folder:`);
+    console.log(`\n${e('🐾', '>')} Uninstalled. To fully remove, delete the clawdcursor folder:`);
     console.log(`   ${clawdRoot}\n`);
   });
 
@@ -679,7 +679,7 @@ program
     const { hasConsent } = await import('./onboarding');
     if (!hasConsent()) {
       process.stderr.write(
-        `\nERROR: clawd-cursor requires one-time consent before use.\n` +
+        `\nERROR: clawdcursor requires one-time consent before use.\n` +
         `This tool gives AI models full control of your desktop.\n\n` +
         `Run one of the following, then retry:\n` +
         `  clawdcursor consent          # interactive consent prompt\n` +
@@ -689,7 +689,7 @@ program
       process.exit(1);
     }
 
-    console.log('clawd-cursor MCP mode starting...');
+    console.log('clawdcursor MCP mode starting...');
 
     const { getAllTools } = await import('./tools');
     const ctx = await createToolContext();
@@ -699,7 +699,7 @@ program
     const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js' as any);
     const { z } = await import('zod');
 
-    const server = new McpServer({ name: 'clawd-cursor', version: '0.7.0' });
+    const server = new McpServer({ name: 'clawdcursor', version: '0.7.0' });
 
     // Register all tools from the unified registry
     const tools = getAllTools();
@@ -735,7 +735,7 @@ program
 
     const transport = new StdioServerTransport();
     await server.connect(transport);
-    console.log(`clawd-cursor MCP ready — ${tools.length} tools registered`);
+    console.log(`clawdcursor MCP ready — ${tools.length} tools registered`);
 
     ctx.ensureInitialized().catch((err: any) => {
       console.error('Subsystem init failed:', err?.message);
@@ -767,12 +767,12 @@ program
     const os = await import('os');
 
     // Generate auth token (same pattern as start mode)
-    const tokenDir = path.join(os.homedir(), '.clawd-cursor');
+    const tokenDir = path.join(os.homedir(), '.clawdcursor');
     if (!fs.existsSync(tokenDir)) fs.mkdirSync(tokenDir, { recursive: true });
     const serveToken = randomBytes(32).toString('hex');
     fs.writeFileSync(path.join(tokenDir, 'token'), serveToken, { encoding: 'utf-8', mode: 0o600 });
 
-    console.log(`\n${e('🐾', '>')} clawd-cursor v${VERSION} — Tool Server mode`);
+    console.log(`\n${e('🐾', '>')} clawdcursor v${VERSION} — Tool Server mode`);
     console.log('   No LLM. No autonomous agent. Just OS primitives over HTTP.\n');
 
     const ctx = await createToolContext();
@@ -787,7 +787,7 @@ program
       const authHeader = req.headers['authorization'] || '';
       const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
       if (!bearer || bearer !== serveToken) {
-        return res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawd-cursor/token' });
+        return res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawdcursor/token' });
       }
       next();
     });
@@ -800,7 +800,7 @@ program
       console.log(`   Documentation: http://127.0.0.1:${port}/docs`);
       console.log(`   Execute: POST http://127.0.0.1:${port}/execute/{tool_name}`);
       console.log(`\n   ${e('🔑', '[KEY]')} Auth token: ${serveToken}`);
-      console.log(`   (saved to ~/.clawd-cursor/token)`);
+      console.log(`   (saved to ~/.clawdcursor/token)`);
       console.log(`   All POST endpoints require: Authorization: Bearer <token>`);
       console.log(`\n   Ready. Connect your AI model.\n`);
     });
@@ -818,7 +818,7 @@ program
 
 program
   .command('report')
-  .description('Send an error report to help improve clawd-cursor. Shows a preview before sending.')
+  .description('Send an error report to help improve clawdcursor. Shows a preview before sending.')
   .option('--log <path>', 'Path to a specific task log file')
   .option('--note <text>', 'Add a note describing what went wrong')
   .option('--save-only', 'Save report locally without sending')
@@ -859,7 +859,7 @@ program
 
     if (opts.status) {
       if (hasConsent()) {
-        console.log(`${e('✅', '[OK]')}  Consent: accepted — clawd-cursor is authorized to control this desktop.`);
+        console.log(`${e('✅', '[OK]')}  Consent: accepted — clawdcursor is authorized to control this desktop.`);
       } else {
         console.log(`${e('❌', '[ERR]')}  Consent: not given — run \`clawdcursor consent\` to authorize.`);
       }
@@ -868,13 +868,13 @@ program
 
     if (opts.revoke) {
       revokeConsent();
-      console.log('  Consent revoked. clawd-cursor will require re-authorization before next use.');
+      console.log('  Consent revoked. clawdcursor will require re-authorization before next use.');
       return;
     }
 
     if (opts.accept) {
       writeConsentFile();
-      console.log('  Consent accepted. clawd-cursor can now control your desktop.');
+      console.log('  Consent accepted. clawdcursor can now control your desktop.');
       console.log('  Run `clawdcursor start` or `clawdcursor mcp` to begin.\n');
       return;
     }

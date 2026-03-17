@@ -1,10 +1,9 @@
 {
-  "name": "clawd-cursor",
+  "name": "clawdcursor",
   "version": "0.7.0",
   "description": "OS-level desktop automation server. Gives any AI model eyes, hands, and ears on a real computer. Model-agnostic — works with Claude, GPT, Gemini, Llama, or any tool-calling model.",
   "main": "dist/index.js",
   "bin": {
-    "clawd-cursor": "dist/index.js",
     "clawdcursor": "dist/index.js"
   },
   "scripts": {

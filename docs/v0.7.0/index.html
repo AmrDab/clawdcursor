@@ -16,9 +16,9 @@
   <!--
     AGENT-READABLE SUMMARY
     ======================
-    clawd-cursor v0.7.0 — OS-level desktop automation tool server.
+    clawdcursor v0.7.0 — OS-level desktop automation tool server.
 
-    Install:  npm install -g clawd-cursor
+    Install:  npm install -g clawdcursor
     Consent:  clawdcursor consent
     Doctor:   clawdcursor doctor         (auto-detect AI providers)
     Start:    clawdcursor start          (AI agent + REST on localhost:3847)
@@ -53,7 +53,7 @@
 
     Providers: Anthropic, OpenAI, Groq, Together, DeepSeek, Kimi, Ollama
     Consent required: clawdcursor consent (or --accept for non-interactive)
-    Data: ~/.clawd-cursor/ — localhost only, not network-exposed.
+    Data: ~/.clawdcursor/ — localhost only, not network-exposed.
   -->
 
   <style>
@@ -278,7 +278,7 @@
     <h1>Give your AI<br><span class="gr">eyes and hands</span></h1>
     <p>Connect any AI to your desktop. It sees your screen, moves the mouse, types, clicks — anything you can do, it can do. Works with Claude, GPT, Gemini, Llama, or any AI.</p>
     <div class="hero-btns">
-      <a href="https://github.com/AmrDab/clawd-cursor" class="btn-p">
+      <a href="https://github.com/AmrDab/clawdcursor" class="btn-p">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
       </a>
@@ -303,7 +303,7 @@
     <div class="who-grid">
       <div class="who-card human">
         <h3>🧑‍💻 Tell it what to do</h3>
-        <p>Bring an API key and just describe what you want. clawd-cursor figures out the steps, executes them, and verifies they worked. You stay in plain English.</p>
+        <p>Bring an API key and just describe what you want. clawdcursor figures out the steps, executes them, and verifies they worked. You stay in plain English.</p>
         <div class="tag-row">
           <span class="tag g">clawdcursor doctor</span>
           <span class="tag g">clawdcursor start</span>
@@ -311,7 +311,7 @@
       </div>
       <div class="who-card agent">
         <h3>🤖 Connect your AI directly</h3>
-        <p>Already using Claude Code, Cursor, or Windsurf? Add clawd-cursor and your AI gets full desktop control as a native tool — no extra setup, no extra API calls.</p>
+        <p>Already using Claude Code, Cursor, or Windsurf? Add clawdcursor and your AI gets full desktop control as a native tool — no extra setup, no extra API calls.</p>
         <div class="tag-row">
           <span class="tag b">Claude Code</span>
           <span class="tag b">Cursor</span>
@@ -335,7 +335,7 @@
           <li>Add to your AI client's config (one JSON block)</li>
           <li>Desktop tools appear natively in your AI</li>
           <li>No extra API key, no extra setup</li>
-          <li>Your AI decides what to do — clawd-cursor does it</li>
+          <li>Your AI decides what to do — clawdcursor does it</li>
         </ol>
         <div class="mode-stats">
           <div><div class="mode-stat-val">40</div><div class="mode-stat-lbl">Tools available</div></div>
@@ -348,7 +348,7 @@
           <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor doctor</code> to set up your AI</li>
           <li>Run <code style="font-size:0.75rem;color:var(--accent2)">clawdcursor start</code></li>
           <li>Type what you want in plain English</li>
-          <li>clawd-cursor figures out the steps and executes</li>
+          <li>clawdcursor figures out the steps and executes</li>
           <li>Works with Anthropic, OpenAI, Groq, Ollama, and more</li>
         </ol>
         <div class="mode-stats">
@@ -416,7 +416,7 @@
   <section class="sect">
     <div class="sect-label">What's New</div>
     <h2>OCR-first. Blind agent ready.</h2>
-    <p class="sub">v0.7.0 makes clawd-cursor usable by low-cost agents that can't afford screenshots. OCR reads the screen as text — vision is the last resort.</p>
+    <p class="sub">v0.7.0 makes clawdcursor usable by low-cost agents that can't afford screenshots. OCR reads the screen as text — vision is the last resort.</p>
     <div class="feat-grid">
       <div class="feat-card">
         <div class="feat-icon">👁️</div>
@@ -466,7 +466,7 @@
     <div class="code-box" id="os-mcp" style="display:block;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal + claude_desktop_config.json</span></div>
       <pre><code><span class="c-comment"># 1. Install</span>
-<span class="c-cmd">npm install -g clawd-cursor</span>
+<span class="c-cmd">npm install -g clawdcursor</span>
 
 <span class="c-comment"># 2. One-time consent (required — desktop control warning)</span>
 <span class="c-cmd">clawdcursor consent</span>
@@ -474,20 +474,20 @@
 <span class="c-comment"># 3. Add to your MCP client config</span>
 <span class="c-string">{
   "mcpServers": {
-    "clawd-cursor": {
+    "clawdcursor": {
       "command": "clawdcursor",
       "args": ["mcp"]
     }
   }
 }</span>
 
-<span class="c-comment"># clawd-cursor mcp will refuse to start without consent</span></code></pre>
+<span class="c-comment"># clawdcursor mcp will refuse to start without consent</span></code></pre>
     </div>
 
     <div class="code-box" id="os-agent" style="display:none;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal</span></div>
       <pre><code><span class="c-comment"># 1. Install</span>
-<span class="c-cmd">npm install -g clawd-cursor</span>
+<span class="c-cmd">npm install -g clawdcursor</span>
 
 <span class="c-comment"># 2. Auto-detect your AI providers (Anthropic, OpenAI, Ollama, etc.)</span>
 <span class="c-cmd">clawdcursor doctor</span>
@@ -505,7 +505,7 @@
     <div class="code-box" id="os-rest" style="display:none;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal + HTTP</span></div>
       <pre><code><span class="c-comment"># 1. Install and start</span>
-<span class="c-cmd">npm install -g clawd-cursor</span>
+<span class="c-cmd">npm install -g clawdcursor</span>
 <span class="c-cmd">clawdcursor start</span>   <span class="c-comment"># consent fires on first run</span>
 
 <span class="c-comment"># 2. List all tools + schemas</span>
@@ -524,7 +524,7 @@
 <span class="c-cmd">clawdcursor consent --accept</span></code></pre>
     </div>
 
-    <p style="color:var(--text3);font-size:0.78rem;margin-top:10px;">Requires Node.js 20+. Consent is one-time and stored in <code style="color:var(--text2)">~/.clawd-cursor/consent</code>. Server binds to localhost only.</p>
+    <p style="color:var(--text3);font-size:0.78rem;margin-top:10px;">Requires Node.js 20+. Consent is one-time and stored in <code style="color:var(--text2)">~/.clawdcursor/consent</code>. Server binds to localhost only.</p>
   </section>
 
 </div>
@@ -534,7 +534,7 @@
   <div class="cta">
     <h2>Give your AI a body.</h2>
     <p>Open source. Any model. Any client. Your desktop, controlled.</p>
-    <a href="https://github.com/AmrDab/clawd-cursor" class="btn-p">
+    <a href="https://github.com/AmrDab/clawdcursor" class="btn-p">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       Star on GitHub
     </a>
@@ -542,7 +542,7 @@
 </div>
 
 <footer>
-  <p>clawd<strong>cursor</strong> v0.7.0 · localhost only · MIT · <a href="https://clawdcursor.com">← v0.6.3</a> · <a href="https://github.com/AmrDab/clawd-cursor">GitHub</a></p>
+  <p>clawd<strong>cursor</strong> v0.7.0 · localhost only · MIT · <a href="https://clawdcursor.com">← v0.6.3</a> · <a href="https://github.com/AmrDab/clawdcursor">GitHub</a></p>
 </footer>
 
 <script>

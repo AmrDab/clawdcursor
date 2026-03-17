@@ -1,21 +1,23 @@
 /**
  * Paths — central data directory for Clawd Cursor.
  *
- * All persistent data lives under ~/.clawd-cursor/:
+ * All persistent data lives under ~/.clawdcursor/:
  *   task-logs/    — JSONL per-task execution logs
  *   reports/      — locally saved error reports
  *   consent       — first-run consent flag
  *   ui-knowledge/ — local app workflow instruction sets
  *
- * Migrates from legacy ~/.openclaw/clawd-cursor/ if found.
+ * Migrates from legacy paths if found:
+ *   ~/.openclaw/clawd-cursor/ (v0.5.x)
+ *   ~/.clawd-cursor/ (v0.6.x–v0.7.0 pre-rename)
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-/** Root data directory: ~/.clawd-cursor */
-export const DATA_DIR = path.join(os.homedir(), '.clawd-cursor');
+/** Root data directory: ~/.clawdcursor */
+export const DATA_DIR = path.join(os.homedir(), '.clawdcursor');
 
 /** Sub-directories */
 export const TASK_LOGS_DIR = path.join(DATA_DIR, 'task-logs');
@@ -23,17 +25,23 @@ export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
 export const UI_KNOWLEDGE_DIR = path.join(DATA_DIR, 'ui-knowledge');
 
 /** Persistent files */
-export const FAVORITES_PATH = path.join(DATA_DIR, '.clawd-favorites.json');
+export const FAVORITES_PATH = path.join(DATA_DIR, '.clawdcursor-favorites.json');
 export const TOKEN_PATH = path.join(DATA_DIR, 'token');
 
 /**
- * Migrate data from legacy ~/.openclaw/clawd-cursor/ to ~/.clawd-cursor/.
+ * Migrate data from legacy directories to ~/.clawdcursor/.
+ * Checks both ~/.openclaw/clawd-cursor/ (v0.5.x) and ~/.clawd-cursor/ (v0.6–v0.7 pre-rename).
  * Only runs once — if the new dir already has content, skips.
  * Safe: copies, doesn't delete originals.
  */
 export function migrateFromLegacyDir(): void {
-  const legacyDir = path.join(os.homedir(), '.openclaw', 'clawd-cursor');
-  if (!fs.existsSync(legacyDir)) return;
+  // Try most recent legacy path first, then oldest
+  const legacyCandidates = [
+    path.join(os.homedir(), '.clawd-cursor'),       // v0.6.x–v0.7.0 pre-rename
+    path.join(os.homedir(), '.openclaw', 'clawd-cursor'), // v0.5.x
+  ];
+  const legacyDir = legacyCandidates.find(d => fs.existsSync(d));
+  if (!legacyDir) return;
 
   // If new dir already has task-logs, skip migration (already migrated)
   if (fs.existsSync(TASK_LOGS_DIR) && fs.readdirSync(TASK_LOGS_DIR).length > 0) return;

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Test loop: send email task, 60s timeout, inspect logs after each
-RESULTS_DIR="$HOME/.clawd-cursor/test-results"
+RESULTS_DIR="$HOME/.clawdcursor/test-results"
 mkdir -p "$RESULTS_DIR"
 TASK='open outlook and send an email to test@hotmail.com saying hello'
 TIMEOUT=60

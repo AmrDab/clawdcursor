@@ -1,7 +1,7 @@
 # Windows UI Automation from Node.js — Research Report
 
 **Date:** 2026-02-19  
-**Context:** clawd-cursor desktop AI agent currently uses VNC + screenshot + vision for every action.  
+**Context:** clawdcursor desktop AI agent currently uses VNC + screenshot + vision for every action.  
 **Goal:** Add a Windows accessibility layer to enumerate UI elements, read properties, and interact by reference (not pixel coordinates).
 
 ---

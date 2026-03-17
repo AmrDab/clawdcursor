@@ -1,5 +1,5 @@
 # Apply Clawd Cursor performance optimizations
-# Usage: .\apply-optimizations.ps1 -ProjectRoot <path-to-clawd-cursor>
+# Usage: .\apply-optimizations.ps1 -ProjectRoot <path-to-clawdcursor>
 #
 # Creates .orig backups before modifying any file.
 # Run `npx tsc --noEmit` after to verify.

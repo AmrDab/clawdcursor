@@ -14,7 +14,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
   return [
     {
       name: 'delegate_to_agent',
-      description: "Delegate a task to clawd-cursor's autonomous pipeline (runs independently with its own LLM reasoning). Returns when the task completes or times out.",
+      description: "Delegate a task to clawdcursor's autonomous pipeline (runs independently with its own LLM reasoning). Returns when the task completes or times out.",
       parameters: {
         task: { type: 'string', description: 'Natural language task description', required: true },
         timeout: { type: 'number', description: 'Timeout in seconds (default: 300)', required: false },
@@ -55,7 +55,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           await fetch('http://127.0.0.1:3847/abort', { method: 'POST' }).catch(() => {});
           return { text: `Agent timed out after ${timeout ?? 300}s. Task aborted.`, isError: true };
         } catch (err: any) {
-          return { text: `Agent unavailable: ${err.message}. Is clawd-cursor running on port 3847?`, isError: true };
+          return { text: `Agent unavailable: ${err.message}. Is clawdcursor running on port 3847?`, isError: true };
         }
       },
     },

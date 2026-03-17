@@ -241,7 +241,7 @@ export async function runDoctor(opts: {
         name: 'macOS Accessibility permission',
         ok: axOk,
         detail: axOk
-          ? 'Granted — clawd-cursor can read UI elements'
+          ? 'Granted — clawdcursor can read UI elements'
           : 'DENIED — open System Settings → Privacy & Security → Accessibility → enable Terminal/Node',
       });
       if (axOk) {
@@ -269,7 +269,7 @@ export async function runDoctor(opts: {
         ok: !denied,
         detail: denied
           ? 'DENIED — open System Settings → Privacy & Security → Screen Recording → enable Terminal/Node'
-          : 'Granted — clawd-cursor can capture the screen',
+          : 'Granted — clawdcursor can capture the screen',
       });
       if (denied) {
         console.log('   ❌ Screen Recording permission DENIED');
@@ -1152,7 +1152,7 @@ async function registerExternalSkills(results: DiagResult[]): Promise<void> {
     ['OpenClaw', path.join(homeDir, '.openclaw', 'workspace', 'skills'), 'clawdcursor'],
     ['OpenClaw (dev)', path.join(homeDir, '.openclaw-dev', 'workspace', 'skills'), 'clawdcursor'],
     ['OpenClaw (flat)', path.join(homeDir, '.openclaw', 'skills'), 'clawdcursor'],
-    ['Codex', path.join(homeDir, '.codex', 'skills'), 'clawd-cursor'],
+    ['Codex', path.join(homeDir, '.codex', 'skills'), 'clawdcursor'],
   ];
 
   let registered = 0;
@@ -1185,7 +1185,7 @@ async function registerExternalSkills(results: DiagResult[]): Promise<void> {
   }
 
   if (registered === 0) {
-    // No external platforms found — that's fine, clawd-cursor works standalone
+    // No external platforms found — that's fine, clawdcursor works standalone
   }
 }
 
@@ -1203,9 +1203,9 @@ async function checkForUpdates(results: DiagResult[]): Promise<void> {
     const timeout = setTimeout(() => controller.abort(), 5000);
 
     const res = await fetch(
-      'https://api.github.com/repos/AmrDab/clawd-cursor/releases/latest',
+      'https://api.github.com/repos/AmrDab/clawdcursor/releases/latest',
       {
-        headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'clawd-cursor-doctor' },
+        headers: { 'Accept': 'application/vnd.github.v3+json', 'User-Agent': 'clawdcursor-doctor' },
         signal: controller.signal,
       },
     );

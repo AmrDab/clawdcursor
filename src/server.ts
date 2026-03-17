@@ -29,11 +29,11 @@ import { VERSION } from './version';
 import { DATA_DIR } from './paths';
 import { e } from './format';
 
-// Favorites persistence — stored in ~/.clawd-cursor/ so it persists across cwd changes
-const FAVORITES_PATH = join(DATA_DIR, '.clawd-favorites.json');
+// Favorites persistence — stored in ~/.clawdcursor/ so it persists across cwd changes
+const FAVORITES_PATH = join(DATA_DIR, '.clawdcursor-favorites.json');
 
 // ── Bearer token auth ─────────────────────────────────────────────────────────
-// Generated once at startup, persisted to ~/.clawd-cursor/token so the
+// Generated once at startup, persisted to ~/.clawdcursor/token so the
 // dashboard and external callers can read it. Rotates on every fresh start.
 const TOKEN_PATH = join(DATA_DIR, 'token');
 
@@ -55,7 +55,7 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   const authHeader = req.headers['authorization'] || '';
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
   if (!token || token !== SERVER_TOKEN) {
-    res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawd-cursor/token' });
+    res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawdcursor/token' });
     return;
   }
   next();

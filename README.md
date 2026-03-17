@@ -34,7 +34,7 @@
 - **Premature-done blocker** — evidence-based completion checking. Won't report success unless verified.
 - **Structured task logging** — JSONL per-task logs with `verified_success` vs `unverified_success` distinction
 - **First-run onboarding** — consent flow explains what desktop control means before tools activate
-- **Standalone data directory** — all data in `~/.clawd-cursor/` (migrates from legacy paths automatically)
+- **Standalone data directory** — all data in `~/.clawdcursor/` (migrates from legacy paths automatically)
 - **Error reporting** (opt-in) — `clawdcursor report` lets users send redacted task logs to help improve the agent
 
 ### v0.6.3 vs v0.7.0
@@ -51,7 +51,7 @@
 | **Click resolution** | Vision model guesses coordinates | A11y bounds-based resolver (zero LLM cost), vision as fallback |
 | **Common tasks** | Every task goes through LLM | Deterministic flows for email, app-switch — zero LLM calls |
 | **Task logging** | Console output only | Structured JSONL per-task, verified vs unverified success |
-| **Data directory** | `~/.openclaw/clawd-cursor/` (coupled) | `~/.clawd-cursor/` (standalone, auto-migrates) |
+| **Data directory** | `~/.openclaw/clawdcursor/` (coupled) | `~/.clawdcursor/` (standalone, auto-migrates) |
 | **Dependencies** | Tied to OpenClaw platform | Fully standalone — works with any AI, any client |
 | **Onboarding** | None — starts immediately | First-run consent flow for desktop control |
 | **MCP support** | None | Native MCP stdio for Claude Code, Cursor, Windsurf, Zed |
@@ -121,9 +121,9 @@ Runs as an MCP tool server over stdio. Works with Claude Code, Cursor, Windsurf,
 // Claude Code: ~/.claude/settings.json
 {
   "mcpServers": {
-    "clawd-cursor": {
+    "clawdcursor": {
       "command": "node",
-      "args": ["/path/to/clawd-cursor/dist/index.js", "mcp"]
+      "args": ["/path/to/clawdcursor/dist/index.js", "mcp"]
     }
   }
 }
@@ -147,8 +147,8 @@ Runs as an MCP tool server over stdio. Works with Claude Code, Cursor, Windsurf,
 ### Windows
 
 ```powershell
-git clone https://github.com/AmrDab/clawd-cursor.git
-cd clawd-cursor
+git clone https://github.com/AmrDab/clawdcursor.git
+cd clawdcursor
 npm install
 npm run setup      # builds + registers 'clawdcursor' command globally
 
@@ -165,8 +165,8 @@ clawdcursor mcp
 ### macOS
 
 ```bash
-git clone https://github.com/AmrDab/clawd-cursor.git
-cd clawd-cursor && npm install && npm run setup
+git clone https://github.com/AmrDab/clawdcursor.git
+cd clawdcursor && npm install && npm run setup
 
 # Grant Accessibility permissions to your terminal first!
 # System Settings -> Privacy & Security -> Accessibility -> Add Terminal/iTerm
@@ -178,8 +178,8 @@ clawdcursor start
 ### Linux
 
 ```bash
-git clone https://github.com/AmrDab/clawd-cursor.git
-cd clawd-cursor && npm install && npm run setup
+git clone https://github.com/AmrDab/clawdcursor.git
+cd clawdcursor && npm install && npm run setup
 
 # Linux: browser control via CDP only (no native desktop automation yet)
 clawdcursor start

@@ -121,7 +121,7 @@ export function createToolServer(ctx: ToolContext): express.Router {
       categories.set(t.category, cat);
     }
 
-    let md = `# clawd-cursor Tool API\n\n`;
+    let md = `# clawdcursor Tool API\n\n`;
     md += `**${tools.length} tools** for OS-level desktop automation.\n\n`;
     md += `## Endpoints\n\n`;
     md += `- \`GET /tools\` — Tool schemas (OpenAI function format)\n`;

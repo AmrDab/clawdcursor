@@ -81,8 +81,8 @@ If it works, you'll see something like: `{"name":"Terminal","pid":12345}`
 ## 2. Install & Build
 
 ```bash
-git clone https://github.com/AmrDab/clawd-cursor.git
-cd clawd-cursor && npm install && npm run build
+git clone https://github.com/AmrDab/clawdcursor.git
+cd clawdcursor && npm install && npm run build
 ```
 
 ### Make macOS scripts executable

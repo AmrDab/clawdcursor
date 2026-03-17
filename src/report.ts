@@ -338,7 +338,7 @@ export async function interactiveReport(): Promise<void> {
 
   if (result.success) {
     console.log(`  Report sent. ID: ${result.reportId}`);
-    console.log('  Thank you — this helps us make clawd-cursor better.\n');
+    console.log('  Thank you — this helps us make clawdcursor better.\n');
   } else {
     // Save locally on failure
     const savedPath = saveReportLocally(report);

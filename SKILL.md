@@ -7,7 +7,7 @@ description: >
   function calling (Claude, GPT, Gemini, Llama, Mistral, or plain cURL).
   No API keys needed. No config. Just install and start.
 homepage: https://clawdcursor.com
-source: https://github.com/AmrDab/clawd-cursor
+source: https://github.com/AmrDab/clawdcursor
 privacy: >
   All processing runs locally on the user's machine. The tool server binds to
   127.0.0.1 only — not network accessible. No telemetry, no analytics, no
@@ -17,14 +17,14 @@ metadata:
   openclaw:
     requires: {}
     install:
-      - npm install -g clawd-cursor
-      - clawd-cursor consent --accept
-      - clawd-cursor serve
+      - npm install -g clawdcursor
+      - clawdcursor consent --accept
+      - clawdcursor serve
     skill_dir: ~/.openclaw/workspace/skills/clawdcursor
 ---
 
 **If a human can do it on a screen, you can too.** No API? No integration? No problem.
-Every app already has a UI — clawd-cursor gives you eyes and hands to use all of them.
+Every app already has a UI — clawdcursor gives you eyes and hands to use all of them.
 
 > **IMPORTANT — READ THIS BEFORE ANYTHING ELSE**
 >
@@ -38,20 +38,20 @@ Every app already has a UI — clawd-cursor gives you eyes and hands to use all 
 > 5. You **MUST** never self-approve Confirm-tier safety actions
 > 6. You **SHOULD** prefer direct tools (API calls, CLI, file read) over desktop automation when available
 >
-> Think of clawd-cursor as **hands, eyes, and ears** on the user's computer —
+> Think of clawdcursor as **hands, eyes, and ears** on the user's computer —
 > used only with their permission.
 
 ---
 
-## Section 1: When to Use clawd-cursor
+## Section 1: When to Use clawdcursor
 
 Route tasks in this order — cheapest and most reliable first:
 
 1. **Native tools first** — API call, CLI command, filesystem read/write, or web fetch. Faster, cheaper, more reliable.
 2. **Browser-native next** — if the task is browser-only and you have direct browser tools (Playwright, Puppeteer), use those.
-3. **clawd-cursor last** — when no API, CLI, or browser tool can reach the target. Desktop apps, system dialogs, cross-app workflows, canvas UIs, or any GUI-only interaction.
+3. **clawdcursor last** — when no API, CLI, or browser tool can reach the target. Desktop apps, system dialogs, cross-app workflows, canvas UIs, or any GUI-only interaction.
 
-### Use clawd-cursor for
+### Use clawdcursor for
 
 - Desktop app interaction (Notepad, Word, Excel, Outlook, VS Code, Spotify, etc.)
 - Browser tasks when no other browser tool is available
@@ -61,7 +61,7 @@ Route tasks in this order — cheapest and most reliable first:
 - Visual verification ("did the page load?", "what does the UI show?")
 - Any GUI element visible on screen that no API can reach
 
-### Do NOT use clawd-cursor when
+### Do NOT use clawdcursor when
 
 - A direct API call or CLI command can do it (faster, more reliable)
 - The task is purely computational (math, text generation, code writing)
@@ -84,10 +84,10 @@ Never access these silently. Always confirm intent first.
 
 ## Section 2: Connecting
 
-### REST mode (`clawd-cursor serve`)
+### REST mode (`clawdcursor serve`)
 
 ```bash
-clawd-cursor serve   # starts on http://localhost:3847
+clawdcursor serve   # starts on http://localhost:3847
 ```
 
 Endpoints:
@@ -107,10 +107,10 @@ tools = requests.get("http://localhost:3847/tools").json()
 result = requests.post("http://localhost:3847/execute/read_screen").json()
 ```
 
-### MCP mode (`clawd-cursor mcp`)
+### MCP mode (`clawdcursor mcp`)
 
 ```bash
-clawd-cursor mcp   # stdio transport
+clawdcursor mcp   # stdio transport
 ```
 
 Register in your MCP client settings:
@@ -118,8 +118,8 @@ Register in your MCP client settings:
 ```json
 {
   "mcpServers": {
-    "clawd-cursor": {
-      "command": "clawd-cursor",
+    "clawdcursor": {
+      "command": "clawdcursor",
       "args": ["mcp"]
     }
   }
@@ -128,12 +128,12 @@ Register in your MCP client settings:
 
 Works with Claude Code, Cursor, Windsurf, Zed, or any MCP-compatible client.
 
-### Built-in agent (`clawd-cursor start`)
+### Built-in agent (`clawdcursor start`)
 
 Full autonomous agent with its own LLM pipeline. Send a task, get a result:
 
 ```bash
-clawd-cursor start
+clawdcursor start
 curl http://localhost:3847/task -H "Content-Type: application/json" \
   -d '{"task": "Open Notepad and write a haiku"}'
 ```
@@ -144,12 +144,12 @@ If the server is not running when you need it, **start it yourself — do not as
 
 ```bash
 # Any platform
-clawd-cursor serve
+clawdcursor serve
 ```
 
 ```powershell
 # Windows (background, no window)
-Start-Process -FilePath "clawd-cursor" -ArgumentList "serve" -WindowStyle Hidden
+Start-Process -FilePath "clawdcursor" -ArgumentList "serve" -WindowStyle Hidden
 ```
 
 Wait 2 seconds, then verify:
@@ -560,7 +560,7 @@ smart_read()                   Check — did "Message sent" appear?
 
 | Problem | What to do |
 |---------|-----------|
-| Server not running (connection refused on :3847) | Run `clawd-cursor serve` and wait 2 seconds |
+| Server not running (connection refused on :3847) | Run `clawdcursor serve` and wait 2 seconds |
 | Chrome CDP not available (:9222) | `Start-Process chrome -ArgumentList "--remote-debugging-port=9222"` |
 | CDP connects to wrong tab | Call `cdp_list_tabs()` then `cdp_switch_tab(target)` |
 | `focus_window` fails | Try `mouse_click` on the window's title bar area, then `read_screen` to confirm |
@@ -601,6 +601,6 @@ Install Xcode CLI tools if not present: `xcode-select --install`
 
 | Mode | Command | What it does | Who is the brain? | Cost |
 |------|---------|-------------|-------------------|------|
-| `serve` | `clawd-cursor serve` | 40 tools via REST API, no LLM | Your AI model | Your calls only |
-| `mcp` | `clawd-cursor mcp` | 40 tools via MCP stdio, no LLM | Your AI model | Your calls only |
-| `start` | `clawd-cursor start` | Full autonomous agent + 40 tools | Built-in LLM pipeline | Varies by provider |
+| `serve` | `clawdcursor serve` | 40 tools via REST API, no LLM | Your AI model | Your calls only |
+| `mcp` | `clawdcursor mcp` | 40 tools via MCP stdio, no LLM | Your AI model | Your calls only |
+| `start` | `clawdcursor start` | Full autonomous agent + 40 tools | Built-in LLM pipeline | Varies by provider |

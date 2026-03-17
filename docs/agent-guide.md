@@ -1,15 +1,15 @@
-# clawd-cursor Agent Guide
+# clawdcursor Agent Guide
 
-> This document teaches AI models how to use clawd-cursor tools effectively.
+> This document teaches AI models how to use clawdcursor tools effectively.
 > Include this in your system prompt or reference it when connecting to the tool server.
 
-## What is clawd-cursor?
+## What is clawdcursor?
 
-clawd-cursor is an OS-level desktop automation server. It gives you (the AI model)
+clawdcursor is an OS-level desktop automation server. It gives you (the AI model)
 eyes, hands, and ears on a real computer desktop. You can see the screen, click,
 type, read UI elements, interact with browsers, and control any application.
 
-**You are the brain. clawd-cursor is the body.**
+**You are the brain. clawdcursor is the body.**
 
 ## Quick Start
 
@@ -138,7 +138,7 @@ Keyboard shortcuts are faster and more reliable than clicking:
 ```
 1. navigate_browser("https://google.com")
 2. cdp_connect()
-3. cdp_type(selector: "textarea[name='q']", text: "clawd-cursor")
+3. cdp_type(selector: "textarea[name='q']", text: "clawdcursor")
 4. key_press("Return")
 5. wait(2)
 6. cdp_read_text()  → extract search results

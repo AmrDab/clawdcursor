@@ -868,7 +868,7 @@ export class UIDriver {
   /**
    * Run a PowerShell script and parse its JSON output. (Windows only)
    *
-   * All PowerShell scripts in clawd-cursor follow the convention:
+   * All PowerShell scripts in clawdcursor follow the convention:
    * - Output JSON to stdout
    * - Include 'error' key on failure
    * - Include 'success' key for action scripts

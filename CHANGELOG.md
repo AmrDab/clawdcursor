@@ -235,7 +235,7 @@ Layer 3: Screenshot + Vision — full screenshot, Computer Use API
 ## [0.5.0] - 2026-02-23 — Smart Pipeline + Doctor + Batch Execution
 
 ### Added
-- **`clawd-cursor doctor`** — auto-diagnoses setup, tests models, configures optimal pipeline
+- **`clawdcursor doctor`** — auto-diagnoses setup, tests models, configures optimal pipeline
 - **3-layer pipeline** — Action Router → Accessibility Reasoner → Screenshot fallback
 - **Layer 2: Accessibility Reasoner** (`src/a11y-reasoner.ts`) — text-only LLM reads the UI tree, no screenshots needed. Uses cheap models (Haiku, Qwen, GPT-4o-mini).
 - **Batch action execution** — Claude returns multiple actions per response (3.6 avg), skipping screenshots between batched actions. Drawing tasks execute 10+ actions in a single API call.
