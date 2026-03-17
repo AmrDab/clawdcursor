@@ -101,7 +101,7 @@ export class Agent {
       console.log(`🧠 Layer 2 (Accessibility Reasoner): ${pipelineConfig.layer2.model}`);
     }
 
-    // v0.8.0: OCR-first pipeline with skill cache
+    // OCR-first pipeline with skill cache
     this.ocrEngine = new OcrEngine();
     this.skillCache = new SkillCache();
     this.skillCache.load();

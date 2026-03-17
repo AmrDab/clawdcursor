@@ -172,9 +172,9 @@ export interface PipelineConfig {
     computerUse: boolean;
     apiKey?: string;
   };
-  /** v0.8.0: OCR-first pipeline — enabled when OS OCR is available */
+  /** OCR-first pipeline — enabled when OS OCR is available */
   ocrEnabled?: boolean;
-  /** v0.8.0: Skill cache — learns from successful task completions */
+  /** Skill cache — learns from successful task completions */
   skillCacheEnabled?: boolean;
 }
 

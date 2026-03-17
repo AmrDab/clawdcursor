@@ -27,6 +27,7 @@ import { Agent } from './agent';
 import { mountDashboard } from './dashboard';
 import { VERSION } from './version';
 import { DATA_DIR } from './paths';
+import { e } from './format';
 
 // Favorites persistence — stored in ~/.clawd-cursor/ so it persists across cwd changes
 const FAVORITES_PATH = join(DATA_DIR, '.clawd-favorites.json');
@@ -41,8 +42,8 @@ function generateToken(): string {
   try {
     if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
     writeFileSync(TOKEN_PATH, token, { encoding: 'utf-8', mode: 0o600 });
-  } catch (e) {
-    console.warn('⚠ Could not write auth token file:', (e as Error).message);
+  } catch (tokenErr) {
+    console.warn(`${e('⚠', '[WARN]')} Could not write auth token file:`, (tokenErr as Error).message);
   }
   return token;
 }
@@ -67,8 +68,8 @@ function loadFavorites(): string[] {
       const parsed = JSON.parse(data);
       if (Array.isArray(parsed)) return parsed;
     }
-  } catch (e) {
-    console.warn('⚠ Failed to load favorites:', (e as Error).message);
+  } catch (favErr) {
+    console.warn(`${e('⚠', '[WARN]')} Failed to load favorites:`, (favErr as Error).message);
   }
   return [];
 }
@@ -76,8 +77,8 @@ function loadFavorites(): string[] {
 function saveFavorites(favorites: string[]): void {
   try {
     writeFileSync(FAVORITES_PATH, JSON.stringify(favorites, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('❌ Failed to save favorites:', (e as Error).message);
+  } catch (saveErr) {
+    console.error(`${e('❌', '[ERR]')} Failed to save favorites:`, (saveErr as Error).message);
   }
 }
 
@@ -249,13 +250,13 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
       });
     }
 
-    console.log(`\n📨 New task received: ${task}`);
+    console.log(`\n${e('📨', '>')} New task received: ${task}`);
 
     // Execute async — respond immediately
     agent.executeTask(task).then(result => {
-      console.log(`\n📋 Task result:`, JSON.stringify(result, null, 2));
+      console.log(`\n${e('📋', '>')} Task result:`, JSON.stringify(result, null, 2));
     }).catch(err => {
-      console.error(`\n❌ Task execution failed:`, err);
+      console.error(`\n${e('❌', '[ERR]')} Task execution failed:`, err);
     });
 
     res.json({ accepted: true, task });
@@ -432,7 +433,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
     res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
     res.end(body, () => {
       // Response fully flushed — now shut down
-      console.log('\n👋 Shutting down (stop command received)...');
+      console.log(`\n${e('👋', '--')} Shutting down (stop command received)...`);
       agent.disconnect();
       // Force exit after short delay (covers Windows edge cases)
       setTimeout(() => process.exit(0), 500);

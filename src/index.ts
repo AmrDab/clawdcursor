@@ -23,6 +23,24 @@ dotenv.config();
 // Migrate data from legacy ~/.openclaw/clawd-cursor/ to ~/.clawd-cursor/
 migrateFromLegacyDir();
 
+// ── Auth helper ──────────────────────────────────────────────────────────────
+// Reads the saved Bearer token from ~/.clawd-cursor/token (written by start/serve).
+function loadAuthToken(): string {
+  try {
+    const tokenPath = path.join(require('os').homedir(), '.clawd-cursor', 'token');
+    return fs.readFileSync(tokenPath, 'utf-8').trim();
+  } catch {
+    return '';
+  }
+}
+function authHeaders(): Record<string, string> {
+  const token = loadAuthToken();
+  return token ? { 'Authorization': `Bearer ${token}` } : {};
+}
+
+// ── Emoji gate (shared utility) ──────────────────────────────────────────────
+import { e } from './format';
+
 const program = new Command();
 
 async function isClawdInstance(port: number): Promise<boolean> {
@@ -54,7 +72,7 @@ async function forceKillPort(port: number): Promise<boolean> {
       if (pids.size === 0) return false;
       for (const pid of pids) {
         execSync(`taskkill /F /PID ${pid}`);
-        console.log(`🐾 Killed process ${pid}`);
+        console.log(`${e('🐾', '>')} Killed process ${pid}`);
       }
       return true;
     } catch {
@@ -101,13 +119,13 @@ program
     // Auto-setup on first run
     const configPath = path.join(__dirname, '..', '.clawd-config.json');
     if (!fs.existsSync(configPath)) {
-      console.log('🔍 First run — auto-detecting AI providers...\n');
+      console.log(`${e('🔍', '*')} First run — auto-detecting AI providers...\n`);
       const { quickSetup } = await import('./doctor');
       const pipeline = await quickSetup();
       if (pipeline) {
-        console.log('✅ Auto-configured! Run `clawdcursor doctor` to customize.\n');
+        console.log(`${e('✅', '[OK]')} Auto-configured! Run \`clawdcursor doctor\` to customize.\n`);
       } else {
-        console.log('⚠️  No AI providers found. Layer 1 (Action Router) will still work.');
+        console.log(`${e('⚠️', '[WARN]')}  No AI providers found. Layer 1 (Action Router) will still work.`);
         console.log('   Run `clawdcursor doctor` to set up AI providers.\n');
       }
     }
@@ -141,7 +159,7 @@ program
     console.log(`\x1b[32m\u2713\x1b[0m \x1b[1mclawd-cursor\x1b[0m \x1b[90mv${VERSION}\x1b[0m \x1b[90m\u2014 desktop control active on ${config.server.host}:${config.server.port}\x1b[0m`);
 
     if (resolvedApi.source === 'external') {
-      console.log('🔗 External credentials detected — pipeline config (.clawd-config.json) takes priority');
+      console.log(`${e('🔗', '--')} External credentials detected — pipeline config (.clawd-config.json) takes priority`);
     }
 
     const agent = new Agent(config);
@@ -149,7 +167,7 @@ program
     try {
       await agent.connect();
     } catch (err) {
-      console.error(`\n❌ Failed to initialize native desktop control: ${err}`);
+      console.error(`\n${e('❌', '[ERR]')} Failed to initialize native desktop control: ${err}`);
       console.error(`\nThis usually means @nut-tree-fork/nut-js couldn't access the screen.`);
       console.error(`Make sure you're running this on a desktop with a display.`);
       process.exit(1);
@@ -177,8 +195,8 @@ program
     app.listen(config.server.port, config.server.host, async () => {
       const { SERVER_TOKEN } = await import('./server');
       const tokenPath = require('path').join(require('os').homedir(), '.clawd-cursor', 'token');
-      console.log(`\n\x1b[32m🌐 API server:\x1b[0m http://${config.server.host}:${config.server.port}`);
-      console.log(`\x1b[33m🔑 Auth token:\x1b[0m ${SERVER_TOKEN}`);
+      console.log(`\n\x1b[32m${e('🌐', '[NET]')} API server:\x1b[0m http://${config.server.host}:${config.server.port}`);
+      console.log(`\x1b[33m${e('🔑', '[KEY]')} Auth token:\x1b[0m ${SERVER_TOKEN}`);
       console.log(`\x1b[90m   (also saved to ${tokenPath})\x1b[0m`);
       console.log(`\nAgent endpoints:`);
       console.log(`  POST /task     — {"task": "Open Chrome and go to github.com"}`);
@@ -189,12 +207,12 @@ program
       console.log(`  POST /execute/{name} — Execute any tool`);
       console.log(`  GET  /docs     — Tool documentation`);
       console.log(`\nAll mutating endpoints require: \x1b[36mAuthorization: Bearer <token>\x1b[0m`);
-      console.log(`\nReady. 🐾`);
+      console.log(`\nReady. ${e('🐾', '')}`);
     });
 
     // Graceful shutdown
     process.on('SIGINT', () => {
-      console.log('\n👋 Shutting down...');
+      console.log(`\n${e('👋', '--')} Shutting down...`);
       agent.disconnect();
       process.exit(0);
     });
@@ -218,7 +236,7 @@ program
       const configPath = path.join(__dirname, '..', '.clawd-config.json');
       if (fs.existsSync(configPath)) {
         fs.unlinkSync(configPath);
-        console.log('🗑️  Cleared saved config — re-detecting from scratch\n');
+        console.log(`${e('🗑️', '[DEL]')}  Cleared saved config — re-detecting from scratch\n`);
       }
     }
 
@@ -247,23 +265,23 @@ program
     }
     const isClawd = await isClawdInstance(port);
     if (!isClawd) {
-      console.log('🐾 No running instance found on port ' + port);
+      console.log(`${e('🐾', '>')} No running instance found on port ` + port);
       return;
     }
 
     // Abort first so any active task exits quickly before shutdown.
     try {
-      await fetch(`http://127.0.0.1:${port}/abort`, { method: 'POST', signal: AbortSignal.timeout(2000) });
+      await fetch(`http://127.0.0.1:${port}/abort`, { method: 'POST', headers: authHeaders(), signal: AbortSignal.timeout(2000) });
     } catch {
       // Best effort only.
     }
 
     const url = `http://127.0.0.1:${port}/stop`;
     try {
-      const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(5000) });
+      const res = await fetch(url, { method: 'POST', headers: authHeaders(), signal: AbortSignal.timeout(5000) });
       const data = await res.json() as any;
       if (data.stopped) {
-        console.log('🐾 Clawd Cursor stopped');
+        console.log(`${e('🐾', '>')} Clawd Cursor stopped`);
       } else {
         console.error('Unexpected response:', JSON.stringify(data));
       }
@@ -279,16 +297,16 @@ program
         // Still alive — keep waiting
       } catch {
         // Connection refused = dead = success
-        console.log('✅ Server confirmed stopped');
+        console.log(`${e('✅', '[OK]')} Server confirmed stopped`);
         return;
       }
     }
-    console.log('⚠️  Graceful stop did not complete — force killing...');
+    console.log(`${e('⚠️', '[WARN]')}  Graceful stop did not complete — force killing...`);
     const killed = await forceKillPort(port);
     if (killed) {
-      console.log('🐾 Clawd Cursor force stopped');
+      console.log(`${e('🐾', '>')} Clawd Cursor force stopped`);
     } else {
-      console.error('❌ Could not force stop process on port ' + port);
+      console.error(`${e('❌', '[ERR]')} Could not force stop process on port ` + port);
     }
   });
 
@@ -301,10 +319,10 @@ program
 
     const sendTask = async (taskText: string) => {
       try {
-        console.log(`\n🐾 Sending: ${taskText}`);
+        console.log(`\n${e('🐾', '>')} Sending: ${taskText}`);
         const res = await fetch(url, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ task: taskText }),
         });
         const data = await res.json();
@@ -324,6 +342,7 @@ program
       const { execFile: spawnExec } = await import('child_process');
       const platform = os.platform();
 
+      const token = loadAuthToken();
       const scriptContent = platform === 'win32'
         ? // Windows: PowerShell script
           `
@@ -331,20 +350,21 @@ $host.UI.RawUI.WindowTitle = "Clawd Cursor - Task Console"
 Write-Host "Clawd Cursor - Interactive Task Mode" -ForegroundColor Cyan
 Write-Host "   Type a task and press Enter. Type 'quit' to exit." -ForegroundColor Gray
 Write-Host ""
+$headers = @{ "Content-Type" = "application/json"${token ? `; "Authorization" = "Bearer ${token}"` : ''} }
 while ($true) {
     $task = Read-Host "Enter task"
     if (-not $task -or $task -eq "quit" -or $task -eq "exit") {
-        Write-Host "👋 Bye!"
+        Write-Host "Bye!"
         break
     }
     # Strip control characters (Ctrl+L, etc.) that break JSON
     $task = $task -replace '[\\x00-\\x1f]', ''
     $task = $task.Trim()
     if (-not $task) { continue }
-    Write-Host "🐾 Sending: $task" -ForegroundColor Yellow
+    Write-Host "> Sending: $task" -ForegroundColor Yellow
     try {
         $jsonBody = @{ task = $task } | ConvertTo-Json -Compress
-        $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/task -Method POST -ContentType "application/json" -Body $jsonBody
+        $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/task -Method POST -Headers $headers -Body $jsonBody
         $response | ConvertTo-Json -Depth 5
     } catch {
         Write-Host "Failed to connect. Is clawdcursor start running?" -ForegroundColor Red
@@ -354,18 +374,19 @@ while ($true) {
 `
         : // macOS/Linux: bash script
           `
-echo "🐾 Clawd Cursor — Interactive Task Mode"
+echo "Clawd Cursor - Interactive Task Mode"
 echo "   Type a task and press Enter. Type 'quit' to exit."
 echo ""
+AUTH_HEADER="${token ? `Authorization: Bearer ${token}` : ''}"
 while true; do
     printf "Enter task: "
     read task
     if [ -z "$task" ] || [ "$task" = "quit" ] || [ "$task" = "exit" ]; then
-        echo "👋 Bye!"
+        echo "Bye!"
         break
     fi
-    echo "🐾 Sending: $task"
-    curl -s -X POST http://127.0.0.1:${opts.port}/task -H "Content-Type: application/json" -d "{\\"task\\": \\"$task\\"}" | python3 -m json.tool 2>/dev/null || echo "Failed to connect. Is clawdcursor start running?"
+    echo "> Sending: $task"
+    curl -s -X POST http://127.0.0.1:${opts.port}/task -H "Content-Type: application/json"${token ? ' -H "$AUTH_HEADER"' : ''} -d "{\\"task\\": \\"$task\\"}" | python3 -m json.tool 2>/dev/null || echo "Failed to connect. Is clawdcursor start running?"
     echo ""
 done
 `;
@@ -394,7 +415,7 @@ done
         spawnExec('x-terminal-emulator', ['-e', tmpScript], { detached: true, stdio: 'ignore' } as any);
       }
 
-      console.log('🐾 Task console opened in a new terminal window.');
+      console.log(`${e('🐾', '>')} Task console opened in a new terminal window.`);
     }
   });
 
@@ -404,7 +425,7 @@ program
   .option('--port <port>', 'API server port', '3847')
   .action(async (opts) => {
     const url = `http://127.0.0.1:${opts.port}`;
-    console.log('🐾 Opening dashboard... Make sure clawdcursor start is running.');
+    console.log(`${e('🐾', '>')} Opening dashboard... Make sure clawdcursor start is running.`);
 
     const os = await import('os');
     const { exec: execCmd } = await import('child_process');
@@ -434,13 +455,13 @@ program
     // Verify it's actually a Clawd Cursor instance before killing
     const isClawd = await isClawdInstance(port);
     if (!isClawd) {
-      console.log('🐾 No running instance found on port ' + port);
+      console.log(`${e('🐾', '>')} No running instance found on port ` + port);
       return;
     }
 
     // Try graceful stop
     try {
-      await fetch(`http://127.0.0.1:${port}/stop`, { method: 'POST', signal: AbortSignal.timeout(3000) });
+      await fetch(`http://127.0.0.1:${port}/stop`, { method: 'POST', headers: authHeaders(), signal: AbortSignal.timeout(3000) });
     } catch {
       // May fail if server dies mid-response — that's OK
     }
@@ -451,16 +472,16 @@ program
     try {
       await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) });
       // Still alive — force kill
-      console.log('⚠️  Graceful stop failed — force killing...');
+      console.log(`${e('⚠️', '[WARN]')}  Graceful stop failed — force killing...`);
       const killed = await forceKillPort(port);
       if (killed) {
-        console.log('🐾 Clawd Cursor force killed');
+        console.log(`${e('🐾', '>')} Clawd Cursor force killed`);
       } else {
         console.error('Could not find process to kill');
       }
     } catch {
       // Connection refused = dead = success
-      console.log('🐾 Clawd Cursor killed');
+      console.log(`${e('🐾', '>')} Clawd Cursor killed`);
     }
   });
 
@@ -474,7 +495,7 @@ program
     const path = await import('path');
     const os = await import('os');
 
-    console.log('\n🐾 Installing Clawd Cursor...\n');
+    console.log(`\n${e('🐾', '>')} Installing Clawd Cursor...\n`);
 
     const clawdRoot = path.resolve(__dirname, '..');
 
@@ -483,7 +504,7 @@ program
       const envPath = path.join(clawdRoot, '.env');
       const envContent = `AI_API_KEY=${opts.apiKey}\n`;
       fs.writeFileSync(envPath, envContent);
-      console.log('   ✅ API key saved to .env');
+      console.log(`   ${e('✅', '[OK]')} API key saved to .env`);
     }
 
     // 2. Run doctor (auto-configures pipeline)
@@ -501,7 +522,7 @@ program
       save: true,
     });
 
-    console.log('\n🐾 Installation complete! Run: clawdcursor start');
+    console.log(`\n${e('🐾', '>')} Installation complete! Run: clawdcursor start`);
   });
 
 program
@@ -509,7 +530,7 @@ program
   .description('Remove all Clawd Cursor config, data, and skill registrations')
   .action(async () => {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
-      console.error('\n❌  clawdcursor uninstall requires an interactive terminal.\n');
+      console.error(`\n${e('❌', '[ERR]')}  clawdcursor uninstall requires an interactive terminal.\n`);
       process.exit(1);
     }
 
@@ -520,7 +541,7 @@ program
 
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     const answer = await new Promise<string>((resolve) => {
-      rl.question('\n⚠️  This will remove all Clawd Cursor config and data. Continue? (y/N) ', resolve);
+      rl.question(`\n${e('⚠️', '[WARN]')}  This will remove all Clawd Cursor config and data. Continue? (y/N) `, resolve);
     });
     rl.close();
 
@@ -529,7 +550,7 @@ program
       return;
     }
 
-    console.log('\n🗑️  Uninstalling Clawd Cursor...\n');
+    console.log(`\n${e('🗑️', '[DEL]')}  Uninstalling Clawd Cursor...\n`);
     const clawdRoot = path.resolve(__dirname, '..');
     let removed = 0;
 
@@ -542,7 +563,7 @@ program
     for (const f of configFiles) {
       if (fs.existsSync(f)) {
         fs.unlinkSync(f);
-        console.log(`   🗑️  Removed ${path.basename(f)}`);
+        console.log(`   ${e('🗑️', '[DEL]')}  Removed ${path.basename(f)}`);
         removed++;
       }
     }
@@ -551,7 +572,7 @@ program
     const debugDir = path.join(clawdRoot, 'debug');
     if (fs.existsSync(debugDir)) {
       fs.rmSync(debugDir, { recursive: true, force: true });
-      console.log('   🗑️  Removed debug/');
+      console.log(`   ${e('🗑️', '[DEL]')}  Removed debug/`);
       removed++;
     }
 
@@ -571,7 +592,7 @@ program
         } else {
           fs.rmSync(sp, { recursive: true, force: true });
         }
-        console.log(`   🗑️  Removed skill registration: ${sp}`);
+        console.log(`   ${e('🗑️', '[DEL]')}  Removed skill registration: ${sp}`);
         removed++;
       }
     }
@@ -580,7 +601,7 @@ program
     const distDir = path.join(clawdRoot, 'dist');
     if (fs.existsSync(distDir)) {
       fs.rmSync(distDir, { recursive: true, force: true });
-      console.log('   🗑️  Removed dist/');
+      console.log(`   ${e('🗑️', '[DEL]')}  Removed dist/`);
       removed++;
     }
 
@@ -588,7 +609,7 @@ program
       console.log('   Nothing to clean up.');
     }
 
-    console.log(`\n🐾 Uninstalled. To fully remove, delete the clawd-cursor folder:`);
+    console.log(`\n${e('🐾', '>')} Uninstalled. To fully remove, delete the clawd-cursor folder:`);
     console.log(`   ${clawdRoot}\n`);
   });
 
@@ -727,12 +748,13 @@ program
   .command('serve')
   .description('Start the tool server only (no autonomous agent, no LLM). Any AI model can connect via HTTP.')
   .option('--port <port>', 'HTTP server port', '3847')
-  .option('--skip-consent', 'Skip the first-run consent prompt')
+  .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
   .action(async (opts) => {
     const { runOnboarding, hasConsent } = await import('./onboarding');
 
-    // First-run consent
-    if (!opts.skipConsent && !hasConsent()) {
+    // First-run consent — --skip-consent only works in development mode
+    const canSkip = opts.skipConsent && process.env.NODE_ENV === 'development';
+    if (!canSkip && !hasConsent()) {
       const accepted = await runOnboarding();
       if (!accepted) process.exit(1);
     }
@@ -741,8 +763,16 @@ program
     const express = (await import('express')).default;
     const { createToolServer } = await import('./tool-server');
     const { VERSION } = await import('./version');
+    const { randomBytes } = await import('crypto');
+    const os = await import('os');
 
-    console.log(`\n🐾 clawd-cursor v${VERSION} — Tool Server mode`);
+    // Generate auth token (same pattern as start mode)
+    const tokenDir = path.join(os.homedir(), '.clawd-cursor');
+    if (!fs.existsSync(tokenDir)) fs.mkdirSync(tokenDir, { recursive: true });
+    const serveToken = randomBytes(32).toString('hex');
+    fs.writeFileSync(path.join(tokenDir, 'token'), serveToken, { encoding: 'utf-8', mode: 0o600 });
+
+    console.log(`\n${e('🐾', '>')} clawd-cursor v${VERSION} — Tool Server mode`);
     console.log('   No LLM. No autonomous agent. Just OS primitives over HTTP.\n');
 
     const ctx = await createToolContext();
@@ -750,6 +780,18 @@ program
     // Create HTTP server with tool routes
     const app = express();
     app.use(express.json());
+
+    // Auth middleware — require Bearer token on mutating (non-GET) endpoints
+    app.use((req: any, res: any, next: any) => {
+      if (req.method === 'GET') return next(); // GET /tools, /docs, /health are read-only
+      const authHeader = req.headers['authorization'] || '';
+      const bearer = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+      if (!bearer || bearer !== serveToken) {
+        return res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawd-cursor/token' });
+      }
+      next();
+    });
+
     app.use(createToolServer(ctx));
 
     app.listen(port, '127.0.0.1', () => {
@@ -757,6 +799,9 @@ program
       console.log(`   Tool schemas: http://127.0.0.1:${port}/tools`);
       console.log(`   Documentation: http://127.0.0.1:${port}/docs`);
       console.log(`   Execute: POST http://127.0.0.1:${port}/execute/{tool_name}`);
+      console.log(`\n   ${e('🔑', '[KEY]')} Auth token: ${serveToken}`);
+      console.log(`   (saved to ~/.clawd-cursor/token)`);
+      console.log(`   All POST endpoints require: Authorization: Bearer <token>`);
       console.log(`\n   Ready. Connect your AI model.\n`);
     });
 
@@ -814,9 +859,9 @@ program
 
     if (opts.status) {
       if (hasConsent()) {
-        console.log('✅  Consent: accepted — clawd-cursor is authorized to control this desktop.');
+        console.log(`${e('✅', '[OK]')}  Consent: accepted — clawd-cursor is authorized to control this desktop.`);
       } else {
-        console.log('❌  Consent: not given — run `clawdcursor consent` to authorize.');
+        console.log(`${e('❌', '[ERR]')}  Consent: not given — run \`clawdcursor consent\` to authorize.`);
       }
       return;
     }

@@ -7,3 +7,4 @@ Thumbs.db
 debug/
 .clawd-config.json
 qa-tests/
+.claude/
