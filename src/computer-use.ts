@@ -974,19 +974,30 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
               });
             }
           } else {
-            // Not last in batch: lightweight response, skip screenshot
+            // Not last in batch: skip screenshot but include focused element info
+            // so the LLM knows if the click/type landed correctly
             const isAppLaunch = action === 'key' && toolUse.input.text?.toLowerCase().includes('super');
             const isDrag = action === 'drag';
             const isClick = action.includes('click');
-            // Minimal delays for batched actions — UI is predictable
-            const delayMs = isAppLaunch ? 600 : isDrag ? 20 : isClick ? 30 : 80;
+            const delayMs = isAppLaunch ? 600 : isDrag ? 20 : isClick ? 100 : 80;
             await this.delay(delayMs);
 
-            // batch action — skip screenshot
+            // Lightweight verification: read focused element for click/type actions
+            let focusInfo = '';
+            if (isClick || action === 'type') {
+              try {
+                const focused = await this.a11y.getFocusedElement();
+                if (focused) {
+                  focusInfo = ` Focus is now on: [${focused.controlType}] "${focused.name}" at (${focused.bounds.x},${focused.bounds.y})`;
+                  if (focused.value) focusInfo += ` value="${focused.value.substring(0, 60)}"`;
+                }
+              } catch { /* non-fatal */ }
+            }
+
             toolResults.push({
               type: 'tool_result',
               tool_use_id: toolUse.id,
-              content: [{ type: 'text', text: `OK — action executed successfully.` }],
+              content: [{ type: 'text', text: `OK — action executed.${focusInfo}` }],
             });
           }
         }

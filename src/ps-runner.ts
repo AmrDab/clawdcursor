@@ -18,7 +18,7 @@ import * as path from 'path';
 
 const BRIDGE_SCRIPT = path.join(__dirname, '..', 'scripts', 'ps-bridge.ps1');
 const READY_TIMEOUT = 12000; // initial PS startup + assembly load
-const CALL_TIMEOUT  = 45000; // per command (complex web pages need more time)
+const CALL_TIMEOUT  = 20000; // per command (reduced from 45s — PSRunner is fast enough)
 const MAX_QUEUE_SIZE = 100;  // backpressure — reject if queue exceeds this
 
 interface PendingCall {

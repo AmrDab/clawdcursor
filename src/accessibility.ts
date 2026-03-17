@@ -529,7 +529,7 @@ export class AccessibilityBridge {
     'ControlType.Text',
   ]);
 
-  private static readonly MAX_CONTEXT_CHARS = 6000; // raised for deeper Electron/WebView2 trees
+  private static readonly MAX_CONTEXT_CHARS = 12000; // raised for deep Electron/WebView2/Office trees — LLM needs full field visibility
 
   private formatTree(elements: UIElement[], indent: string): string {
     let result = '';

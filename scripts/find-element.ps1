@@ -115,12 +115,10 @@ try {
         }
     }
 
-    if ($Name -ne "") {
-        $conditions += New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::NameProperty,
-            $Name
-        )
-    }
+    # NOTE: Name matching is done AFTER FindAll via fuzzy match (case-insensitive
+    # contains). We do NOT add a PropertyCondition for Name — that would be exact-only
+    # and miss elements like "To recipients" when searching for "To".
+    # This matches the behavior of ps-bridge.ps1's Cmd-FindElement.
 
     # Combine conditions
     if ($conditions.Count -eq 0) {
@@ -144,10 +142,22 @@ try {
 
     $results = @()
     $count = 0
+    $nameLower = if ($Name -ne "") { $Name.ToLower() } else { "" }
+
     foreach ($el in $elements) {
         if ($count -ge $MaxResults) { break }
         try {
             $c = $el.Current
+
+            # Fuzzy name matching (case-insensitive contains, strip keyboard shortcut suffix)
+            # e.g. searching "To" matches "To", "To recipients", "To:"
+            # e.g. searching "Save" matches "Save", "Save As...", "Save	Ctrl+S"
+            if ($nameLower -ne "") {
+                $elName = ($c.Name -replace '\t.*$', '').Trim().ToLower()
+                if ($elName.Length -eq 0) { continue }
+                if (-not $elName.Contains($nameLower) -and -not $nameLower.Contains($elName)) { continue }
+            }
+
             $rect = $c.BoundingRectangle
             if ([double]::IsInfinity($rect.X) -or [double]::IsInfinity($rect.Y)) {
                 $bounds = @{ x = 0; y = 0; width = 0; height = 0 }

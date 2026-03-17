@@ -393,7 +393,7 @@ export class UIDriver {
         return { success: true, method: 'SendKeys', action: 'type' };
       }
 
-      // Fall back: focus the element so caller can type
+      // Fall back: focus the element and type via SendKeys at focus
       const focusResult = await this.invokeAction({
         name: nameOrId,
         action: 'focus',
@@ -402,11 +402,18 @@ export class UIDriver {
       });
 
       if (focusResult.success) {
+        // Element focused — now actually type the text via SendKeys at current focus
+        // (Previously this returned success without typing, causing text to be lost)
+        const typeResult = await this.typeAtCurrentFocus(text);
+        if (typeResult.success) {
+          return { success: true, method: 'Focus+SendKeys', action: 'type' };
+        }
+        // SendKeys also failed — report failure so caller can try alternative approach
         return {
-          success: true,
+          success: false,
           method: 'Focus+CallerTypes',
           action: 'focus',
-          error: 'Element focused — caller should use keyboard.type() to input text',
+          error: `Element focused but SendKeys failed: ${typeResult.error}`,
         };
       }
 

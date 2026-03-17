@@ -662,11 +662,35 @@ export class SmartInteractionLayer {
       await this.delay(postActionDelay);
 
       let stateAfter: string | undefined;
+      let focusVerification = '';
       try {
+        // Always check focused element after action — this is the KEY checkpoint
+        const focused = await this.a11y.getFocusedElement();
+        if (focused) {
+          focusVerification = `Focus: [${focused.controlType}] "${focused.name}"`;
+          if (focused.value) focusVerification += ` value="${focused.value.substring(0, 80)}"`;
+          focusVerification += ` @${focused.bounds.x},${focused.bounds.y}`;
+
+          // VERIFICATION: After type/typeAtFocus, confirm text was actually entered
+          if ((action === 'type' || action === 'typeAtFocus') && stepResult.success && plannedStep.text) {
+            const typedText = plannedStep.text.substring(0, 20);
+            if (focused.value && focused.value.includes(typedText)) {
+              focusVerification += ' ✓ TEXT CONFIRMED';
+            } else if (focused.value === '' || !focused.value) {
+              focusVerification += ' ⚠️ VALUE EMPTY — text may not have been entered';
+              // Mark as potentially failed so LLM can retry
+              stepResult = { ...stepResult, description: stepResult.description + ' (⚠️ verification: value empty)' };
+            }
+          }
+        }
+
         const postWindow = await this.a11y.getActiveWindow();
+        this.a11y.invalidateCache(); // force fresh context
         const postA11y = await this.a11y.getScreenContext(postWindow?.processId).catch(() => '');
         if (postA11y && !postA11y.includes('unavailable')) {
-          stateAfter = postA11y.substring(0, 500);
+          stateAfter = `${focusVerification}\n${postA11y.substring(0, 500)}`;
+        } else {
+          stateAfter = focusVerification;
         }
       } catch {
         // Non-fatal — state capture failed
@@ -711,43 +735,113 @@ export class SmartInteractionLayer {
     };
   }
 
+  /**
+   * Execute a native UI action.
+   *
+   * PRIMARY path: AccessibilityBridge → PSRunner (persistent PS, fuzzy matching, <50ms/call)
+   * FALLBACK path: UIDriver (spawns PS process, exact matching, 15s timeout)
+   *
+   * This is the key reliability fix: ps-bridge.ps1 has fuzzy name matching
+   * (case-insensitive contains) and is ~100x faster than per-call PS spawns.
+   */
   private async executeNativeStep(step: PlannedStep): Promise<StepResult> {
     const ui = this.uiDriver!;
     const ts = Date.now();
 
+    // Get current active window's processId for scoped element search
+    const activeWin = await this.a11y.getActiveWindow().catch(() => null);
+    const activePid = activeWin?.processId;
+
     try {
       switch (step.action) {
         case 'click': {
-          // Window titles look like "AppName - WindowTitle" or "Title - AppName".
-          // They are NOT clickable elements — the window is already focused.
-          // Detect and skip them to avoid cascading failures.
+          // Window titles are NOT clickable — skip them
           const isWindowTitle = /\s[-–]\s/.test(step.target) && step.target.length > 20;
           if (isWindowTitle) {
             console.log(`   ⏭️ Skipping window-title click target "${step.target}" — window already focused`);
             return { action: 'click', description: `Skipped window-title: "${step.target}"`, success: true, timestamp: ts };
           }
-          const result = await ui.clickElement(step.target, {
-            controlType: step.method === 'automationId' ? undefined : undefined,
+
+          // PRIMARY: Use AccessibilityBridge (PSRunner — fast, fuzzy matching)
+          const a11yResult = await this.a11y.invokeElement({
+            name: step.target,
+            action: 'click',
+            processId: activePid,
           });
-          return { action: 'click', description: `Click "${step.target}"`, success: result.success, error: result.error, timestamp: ts };
+
+          if (a11yResult.success) {
+            return { action: 'click', description: `Click "${step.target}" (PSRunner)`, success: true, timestamp: ts };
+          }
+
+          // If PSRunner returned a clickPoint (no InvokePattern), do coordinate click
+          if (a11yResult.clickPoint) {
+            await this.desktop.mouseClick(a11yResult.clickPoint.x, a11yResult.clickPoint.y);
+            return { action: 'click', description: `Click "${step.target}" at (${a11yResult.clickPoint.x},${a11yResult.clickPoint.y})`, success: true, timestamp: ts };
+          }
+
+          // FALLBACK: UIDriver (slower, but has more click strategies)
+          console.log(`   🔄 PSRunner click failed — trying UIDriver fallback`);
+          const uiResult = await ui.clickElement(step.target);
+          return { action: 'click', description: `Click "${step.target}"`, success: uiResult.success, error: uiResult.error || a11yResult.error, timestamp: ts };
         }
 
         case 'type': {
-          const result = await ui.typeInElement(step.target, step.text || '');
-          if (!result.success) {
-            // Fallback: type at current focus
-            console.log(`   🔄 Element type failed — falling back to typeAtFocus`);
+          // PRIMARY: Use AccessibilityBridge set-value (PSRunner — fast, fuzzy matching)
+          const a11yResult = await this.a11y.invokeElement({
+            name: step.target,
+            action: 'set-value',
+            value: step.text || '',
+            processId: activePid,
+          });
+
+          if (a11yResult.success) {
+            return { action: 'type', description: `Type "${step.text}" into "${step.target}" (PSRunner)`, success: true, timestamp: ts };
+          }
+
+          // FALLBACK 1: Focus element + type at focus
+          console.log(`   🔄 PSRunner set-value failed — trying focus + typeAtFocus`);
+          const focusResult = await this.a11y.invokeElement({
+            name: step.target,
+            action: 'focus',
+            processId: activePid,
+          });
+          if (focusResult.success) {
+            await this.delay(100); // brief settle after focus
+            const typeResult = await ui.typeAtCurrentFocus(step.text || '');
+            if (typeResult.success) {
+              return { action: 'type', description: `Type "${step.text}" into "${step.target}" (focus+type)`, success: true, timestamp: ts };
+            }
+          }
+
+          // FALLBACK 2: UIDriver typeInElement (spawns PS, has its own fallback chain)
+          console.log(`   🔄 Focus+type failed — trying UIDriver fallback`);
+          const uiResult = await ui.typeInElement(step.target, step.text || '');
+          if (!uiResult.success) {
+            // Last resort: type at current focus (assumes focus is already correct)
+            console.log(`   🔄 UIDriver type failed — last resort: typeAtFocus`);
             const fallback = await ui.typeAtCurrentFocus(step.text || '');
             return { action: 'type', description: `Type "${step.text}" (typeAtFocus fallback)`, success: fallback.success, error: fallback.error, timestamp: ts };
           }
-          return { action: 'type', description: `Type "${step.text}" into "${step.target}"`, success: result.success, error: result.error, timestamp: ts };
+          return { action: 'type', description: `Type "${step.text}" into "${step.target}"`, success: uiResult.success, error: uiResult.error, timestamp: ts };
         }
 
         case 'typeAtFocus': {
-          // Type directly at current focus — no element lookup
+          // Type directly at current focus — no element lookup needed
           const result = await ui.typeAtCurrentFocus(step.text || '');
+
+          // POST-ACTION VERIFICATION: Read focused element value to confirm text was entered
+          let verified = false;
+          if (result.success) {
+            try {
+              const focused = await this.a11y.getFocusedElement();
+              if (focused?.value && focused.value.includes((step.text || '').substring(0, 10))) {
+                verified = true;
+              }
+            } catch { /* verification non-fatal */ }
+          }
+
           const desc = result.success
-            ? `Typed at focus: '${step.text}' — ⚠️ UNVERIFIED`
+            ? `Typed at focus: '${step.text}'${verified ? ' ✓ verified' : ' — ⚠️ UNVERIFIED'}`
             : `Typed at focus: '${step.text}' — FAILED`;
           return { action: 'typeAtFocus', description: desc, success: result.success, error: result.error, timestamp: ts };
         }
@@ -763,6 +857,16 @@ export class SmartInteractionLayer {
         }
 
         case 'focus': {
+          // PRIMARY: PSRunner (fast)
+          const a11yResult = await this.a11y.invokeElement({
+            name: step.target,
+            action: 'focus',
+            processId: activePid,
+          });
+          if (a11yResult.success) {
+            return { action: 'focus', description: `Focus "${step.target}" (PSRunner)`, success: true, timestamp: ts };
+          }
+          // FALLBACK: UIDriver
           const result = await ui.focusElement(step.target);
           return { action: 'focus', description: `Focus "${step.target}"`, success: result.success, error: result.error, timestamp: ts };
         }
@@ -773,6 +877,15 @@ export class SmartInteractionLayer {
         }
 
         case 'expand': {
+          // PSRunner supports expand
+          const a11yResult = await this.a11y.invokeElement({
+            name: step.target,
+            action: 'expand',
+            processId: activePid,
+          });
+          if (a11yResult.success) {
+            return { action: 'expand', description: `Expand "${step.target}" (PSRunner)`, success: true, timestamp: ts };
+          }
           const result = await ui.expandElement(step.target);
           return { action: 'expand', description: `Expand "${step.target}"`, success: result.success, error: result.error, timestamp: ts };
         }
@@ -790,9 +903,30 @@ export class SmartInteractionLayer {
 
         case 'fillForm': {
           if (step.fields) {
-            const result = await ui.fillForm(step.fields);
-            const desc = Object.keys(step.fields).join(', ');
-            return { action: 'fillForm', description: `Fill form: ${desc}`, success: result.success, timestamp: ts };
+            // Fill each field via PSRunner with focus verification
+            let allSuccess = true;
+            const fieldNames: string[] = [];
+            for (const [fieldName, value] of Object.entries(step.fields)) {
+              fieldNames.push(fieldName);
+              const setResult = await this.a11y.invokeElement({
+                name: fieldName,
+                action: 'set-value',
+                value,
+                processId: activePid,
+              });
+              if (!setResult.success) {
+                // Fallback: focus + type
+                const focusR = await this.a11y.invokeElement({ name: fieldName, action: 'focus', processId: activePid });
+                if (focusR.success) {
+                  await this.delay(100);
+                  const typeR = await ui.typeAtCurrentFocus(value);
+                  if (!typeR.success) allSuccess = false;
+                } else {
+                  allSuccess = false;
+                }
+              }
+            }
+            return { action: 'fillForm', description: `Fill form: ${fieldNames.join(', ')}`, success: allSuccess, timestamp: ts };
           }
           return { action: 'fillForm', description: 'No fields provided', success: false, timestamp: ts };
         }
