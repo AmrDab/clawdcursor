@@ -67,6 +67,14 @@ export interface StepResult {
   screenshot?: string;
   error?: string;
   timestamp: number;
+  // Structured logging fields:
+  layer?: 'browser' | 'router' | 'smart' | 'ocr' | 'a11y' | 'computer-use';
+  method?: string;           // 'a11y_invoke' | 'ocr_click' | 'keyboard' | 'mouse' | 'cdp'
+  coordinates?: [number, number];
+  elementName?: string;
+  elementType?: string;      // 'Button', 'Edit', etc.
+  verified?: boolean;        // post-action verification result
+  latencyMs?: number;
 }
 
 export interface AgentState {

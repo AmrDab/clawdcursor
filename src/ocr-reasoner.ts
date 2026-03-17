@@ -14,7 +14,8 @@
 
 import { OcrEngine, type OcrResult, type OcrElement } from './ocr-engine';
 import { NativeDesktop } from './native-desktop';
-import { AccessibilityBridge } from './accessibility';
+import { AccessibilityBridge, type UIElement } from './accessibility';
+import { callTextLLM } from './llm-client';
 import type { PipelineConfig } from './providers';
 import type { StepResult } from './types';
 
@@ -50,6 +51,11 @@ const SYSTEM_PROMPT = `You are a desktop automation agent. You receive a UI snap
 
 COORDINATE SYSTEM: All coordinates are in REAL SCREEN PIXELS. Click coordinates should target the CENTER of the element you want to click.
 
+OCR ELEMENT FORMAT: Elements have [ID] prefixes — you can reference them by ID. Format:
+  [ID] (x,y,wxh) "text"             — standard element
+  [ID] (x,y,wxh,conf:0.85) "text"   — elements with conf:<value> show OCR confidence (lower = less certain)
+  [ID] (x,y,wxh,Button) "text"      — elements tagged with control types (Button, Edit, CheckBox, etc.) are interactive UI elements identified from the accessibility tree
+
 RESPONSE FORMAT — respond with ONLY valid JSON, no markdown:
 {"action":"click","x":150,"y":300,"description":"Click the Send button"}
 {"action":"type","text":"Hello world","description":"Type greeting into the text field"}
@@ -66,7 +72,8 @@ RULES:
 4. Say "done" ONLY when you have clear evidence the task is complete
 5. Say "cannot_read" ONLY when the screen content is genuinely unreadable (images, captchas)
 6. NEVER repeat the same failed action — try an alternative approach
-7. If an accessibility tree is provided, use it for semantic context (button roles, field labels)`;
+7. If an accessibility tree is provided, use it for semantic context (button roles, field labels)
+8. Elements with control type tags (Button, Edit, etc.) are clickable/interactive — prefer clicking these over plain text`;
 
 // ─── OcrReasoner class ──────────────────────────────────────────────────────
 
@@ -98,28 +105,40 @@ export class OcrReasoner {
       // 1. OCR the screen
       this.ocr.invalidateCache();
       const ocrResult = await this.ocr.recognizeScreen();
+      console.log(`   [OCR] Scan: ${ocrResult.elements.length} elements in ${ocrResult.durationMs}ms, top: "${ocrResult.elements[0]?.text || 'none'}"`);
 
       // 2. Optionally read a11y tree for semantic context
       let a11ySnippet = '';
+      let a11yElements: UIElement[] = [];
       try {
         const activeWin = await this.a11y.getActiveWindow().catch(() => null);
         if (activeWin) {
+          // Get text tree for LLM context
           const tree = await this.a11y.getScreenContext(activeWin.processId).catch(() => null);
           if (tree) {
             a11ySnippet = `\n=== A11Y TREE (${activeWin.processName}: ${activeWin.title}) ===\n${tree.substring(0, 2000)}`;
           }
+          // Get structured elements for OCR-a11y cross-reference
+          const elements = await this.a11y.findElement({ processId: activeWin.processId }).catch(() => []);
+          a11yElements = (Array.isArray(elements) ? elements : []).map(el => ({
+            name: el.name || '',
+            automationId: el.automationId || '',
+            controlType: el.controlType || '',
+            className: el.className || '',
+            bounds: el.bounds || { x: 0, y: 0, width: 0, height: 0 },
+          }));
         }
       } catch { /* non-fatal — OCR is the primary source */ }
 
       // 3. Build the UI snapshot string
-      const snapshot = this.buildSnapshot(ocrResult, a11ySnippet, actionLog, task, priorContext);
+      const snapshot = this.buildSnapshot(ocrResult, a11ySnippet, a11yElements, actionLog, task, priorContext);
 
       // 4. Ask the text LLM for the next action
       messages.push({ role: 'user', content: snapshot });
 
       let llmResponse: string;
       try {
-        llmResponse = await this.callTextLLM(messages);
+        llmResponse = await this.callOcrLLM(messages);
       } catch (err: any) {
         console.error(`   [OCR Reasoner] LLM call failed: ${err.message}`);
         return {
@@ -131,6 +150,7 @@ export class OcrReasoner {
         };
       }
 
+      console.log(`   [OCR] LLM response: ${llmResponse.substring(0, 200)}`);
       messages.push({ role: 'assistant', content: llmResponse });
 
       // 5. Parse the action
@@ -201,11 +221,13 @@ export class OcrReasoner {
   private buildSnapshot(
     ocrResult: OcrResult,
     a11ySnippet: string,
+    a11yElements: UIElement[],
     actionLog: Array<{ action: string; description: string }>,
     task: string,
     priorContext?: string[],
   ): string {
-    // Group OCR elements by line for readability
+    // Group OCR elements by line for readability, assign sequential element IDs
+    let elementId = 0;
     const lines = new Map<number, OcrElement[]>();
     for (const el of ocrResult.elements) {
       const lineEls = lines.get(el.line) ?? [];
@@ -217,7 +239,14 @@ export class OcrReasoner {
     for (const [_lineIdx, lineEls] of [...lines.entries()].sort((a, b) => a[0] - b[0])) {
       const parts = lineEls
         .sort((a, b) => a.x - b.x)
-        .map(el => `(${el.x},${el.y},${el.width}x${el.height}) "${el.text}"`);
+        .map(el => {
+          const id = elementId++;
+          const conf = el.confidence < 1.0 ? `,conf:${el.confidence.toFixed(2)}` : '';
+          // Find matching a11y element by bounding box overlap
+          const a11yMatch = this.findA11yMatch(el, a11yElements);
+          const typeTag = a11yMatch ? `,${a11yMatch}` : '';
+          return `[${id}] (${el.x},${el.y},${el.width}x${el.height}${conf}${typeTag}) "${el.text}"`;
+        });
       ocrLines.push(parts.join(' | '));
     }
 
@@ -247,62 +276,36 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
   }
 
   /**
-   * Call the text LLM (layer2 config — cheap model like Haiku/GPT-4o-mini).
+   * Find an a11y element whose bounding box overlaps with an OCR element's center.
+   * Returns a short control type name (e.g. "Button") or null if no match / not useful.
    */
-  private async callTextLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
-    const { model, baseUrl } = this.pipelineConfig.layer2;
-    const apiKey = this.pipelineConfig.apiKey || '';
+  private findA11yMatch(el: OcrElement, a11yElements: UIElement[]): string | null {
+    const elCx = el.x + el.width / 2;
+    const elCy = el.y + el.height / 2;
 
-    // Use OpenAI-compatible chat completions API
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    };
-
-    if (this.pipelineConfig.provider.openaiCompat) {
-      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-    } else {
-      // Anthropic — use their auth format
-      const authHeaders = this.pipelineConfig.provider.authHeader(apiKey);
-      Object.assign(headers, authHeaders);
+    for (const a11y of a11yElements) {
+      const b = a11y.bounds;
+      if (elCx >= b.x && elCx <= b.x + b.width && elCy >= b.y && elCy <= b.y + b.height) {
+        // Extract short type name: "ControlType.Button" -> "Button"
+        const shortType = a11y.controlType.replace('ControlType.', '');
+        // Skip generic types that don't add useful info
+        if (shortType !== 'Text' && shortType !== 'Pane' && shortType !== 'Custom') {
+          return shortType;
+        }
+      }
     }
+    return null;
+  }
 
-    // For Anthropic, use the Messages API format
-    if (!this.pipelineConfig.provider.openaiCompat) {
-      const response = await fetch(`${baseUrl}/messages`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          model,
-          max_tokens: 500,
-          system: messages[0].content,
-          messages: messages.slice(1).map(m => ({
-            role: m.role === 'system' ? 'user' : m.role,
-            content: m.content,
-          })),
-          temperature: 0,
-        }),
-      });
-
-      const data: any = await response.json();
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      return data.content?.[0]?.text || '';
-    }
-
-    // OpenAI-compatible
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model,
-        messages,
-        temperature: 0,
-        max_tokens: 500,
-      }),
+  /**
+   * Call the text LLM (layer2 config — cheap model like Haiku/GPT-4o-mini).
+   * Uses shared llm-client with multi-turn message support.
+   */
+  private async callOcrLLM(messages: Array<{ role: string; content: string }>): Promise<string> {
+    return callTextLLM(this.pipelineConfig, {
+      messages,
+      timeoutMs: 15000,
     });
-
-    const data: any = await response.json();
-    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-    return data.choices?.[0]?.message?.content || '';
   }
 
   /**

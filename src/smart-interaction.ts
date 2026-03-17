@@ -32,8 +32,9 @@ import { BrowserLayer } from './browser-layer';
 import { NativeDesktop } from './native-desktop';
 import { extractJsonObject } from './safe-json';
 import { PROVIDERS } from './providers';
+import { callTextLLM, callTextLLMDirect } from './llm-client';
 import { uiKnowledge } from './ui-knowledge';
-import type { PipelineConfig, ProviderProfile } from './providers';
+import type { PipelineConfig } from './providers';
 import type { ClawdConfig, StepResult } from './types';
 
 // ── Types ──
@@ -551,6 +552,7 @@ export class SmartInteractionLayer {
       }
 
       // 4. Parse LLM response
+      console.log(`[SMART] ReAct LLM response: ${response.substring(0, 200)}`);
       const decision = extractJsonObject(response) as any;
       if (!decision) {
         console.log(`   ⚠️ ReAct step ${step + 1}: no valid JSON in LLM response`);
@@ -560,6 +562,7 @@ export class SmartInteractionLayer {
 
       const action = decision.action;
       const reasoning = decision.reasoning || '';
+      console.log(`[SMART] ReAct step ${step + 1} decision: ${JSON.stringify(decision).substring(0, 200)}`);
 
       // Handle "wait" action — make it free (no step counter increment)
       if (action === 'wait') {
@@ -1001,6 +1004,7 @@ export class SmartInteractionLayer {
 
     const userMessage = `TASK: ${task}\n\nACCESSIBILITY CONTEXT:\n${a11yContext}`;
     const description = await this.callTextModel(userMessage, DESCRIBE_SYSTEM_PROMPT).catch(() => null);
+    console.log(`[SMART] Describe LLM response: ${(description || '(null)').substring(0, 200)}`);
 
     if (!description) {
       return { handled: false, success: false, steps: [], llmCalls: 1, description: 'Description LLM call failed' };
@@ -1036,6 +1040,7 @@ export class SmartInteractionLayer {
 
     try {
       const response = await this.callTextModel(userMessage);
+      console.log(`[SMART] LLM plan response: ${response.substring(0, 200)}`);
 
       // Parse JSON from response
       const jsonMatch = response.match(/\{[\s\S]*\}/);
@@ -1045,12 +1050,15 @@ export class SmartInteractionLayer {
       }
 
       const parsed = JSON.parse(jsonMatch[0]);
+      console.log(`[SMART] LLM plan: ${JSON.stringify(parsed).substring(0, 200)}`);
 
       if (parsed.canHandle === false) {
+        console.log(`[SMART] LLM says canHandle=false: ${parsed.reasoning || 'no reason'}`);
         return { canHandle: false, steps: [], reasoning: parsed.reasoning };
       }
 
       if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+        console.log(`[SMART] LLM returned empty steps`);
         return { canHandle: false, steps: [], reasoning: 'No steps in plan' };
       }
 
@@ -1065,6 +1073,7 @@ export class SmartInteractionLayer {
         fields: s.fields,
       }));
 
+      console.log(`[SMART] LLM planned ${steps.length} steps (${mode}): ${steps.map(s => `${s.action} "${s.target}"`).join(', ').substring(0, 200)}`);
       return { canHandle: true, steps, reasoning: parsed.reasoning };
     } catch (err) {
       console.log(`   ⚠️ Smart Interaction: LLM planning failed: ${err}`);
@@ -1080,11 +1089,11 @@ export class SmartInteractionLayer {
   private async callTextModel(userMessage: string, systemPrompt = PLANNING_SYSTEM_PROMPT): Promise<string> {
     // Use pipeline config if available
     if (this.pipelineConfig?.layer2.enabled) {
-      const { model, baseUrl } = this.pipelineConfig.layer2;
-      const apiKey = this.pipelineConfig.apiKey;
-      const provider = this.pipelineConfig.provider;
-
-      return this.callLLM(baseUrl, model, apiKey, provider, userMessage, systemPrompt);
+      return callTextLLM(this.pipelineConfig, {
+        system: systemPrompt,
+        user: userMessage,
+        timeoutMs: 15000,
+      });
     }
 
     // Fallback: use the main config's provider
@@ -1096,79 +1105,17 @@ export class SmartInteractionLayer {
     const model = providerProfile.textModel || this.config.ai.model || 'gpt-4o-mini';
     const baseUrl = providerProfile.baseUrl || this.config.ai.baseUrl || 'https://api.openai.com/v1';
 
-    // Build a minimal provider profile for the call
     const isAnthropic = providerKey === 'anthropic';
-    const provider: ProviderProfile = {
-      name: providerKey,
+
+    return callTextLLMDirect({
       baseUrl,
-      authHeader: isAnthropic
-        ? (key: string): Record<string, string> => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' })
-        : (key: string): Record<string, string> => {
-            const headers: Record<string, string> = {};
-            if (key) headers['Authorization'] = `Bearer ${key}`;
-            return headers;
-          },
-      textModel: model,
-      visionModel: model,
-      openaiCompat: !isAnthropic,
-      computerUse: false,
-    };
-
-    return this.callLLM(baseUrl, model, apiKey, provider, userMessage, systemPrompt);
-  }
-
-  private async callLLM(
-    baseUrl: string,
-    model: string,
-    apiKey: string,
-    provider: ProviderProfile,
-    userMessage: string,
-    systemPrompt = PLANNING_SYSTEM_PROMPT,
-  ): Promise<string> {
-    if (provider.openaiCompat || baseUrl.includes('localhost') || baseUrl.includes('11434')) {
-      // OpenAI-compatible (Ollama, OpenAI, Kimi)
-      const response = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeader(apiKey),
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 500,
-          temperature: 0,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage },
-          ],
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-
-      const data = await response.json() as any;
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      return data.choices?.[0]?.message?.content || '';
-    } else {
-      // Anthropic Messages API
-      const response = await fetch(`${baseUrl}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeader(apiKey),
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 500,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userMessage }],
-        }),
-        signal: AbortSignal.timeout(15000),
-      });
-
-      const data = await response.json() as any;
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      return data.content?.[0]?.text || '';
-    }
+      model,
+      apiKey,
+      isAnthropic,
+      system: systemPrompt,
+      user: userMessage,
+      timeoutMs: 15000,
+    });
   }
 
   // ════════════════════════════════════════════════════════════════════

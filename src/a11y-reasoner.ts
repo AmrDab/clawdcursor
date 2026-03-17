@@ -18,6 +18,7 @@ import { AccessibilityBridge } from './accessibility';
 import { A11yClickResolver } from './a11y-click-resolver';
 import { NativeDesktop } from './native-desktop';
 import type { PipelineConfig } from './providers';
+import { callTextLLM } from './llm-client';
 import type { InputAction, A11yAction } from './types';
 import { CDPDriver } from './cdp-driver';
 
@@ -1325,51 +1326,13 @@ export class A11yReasoner {
   }
 
   private async callTextModel(userMessage: string): Promise<string> {
-    const { model, baseUrl } = this.pipelineConfig.layer2;
-    const apiKey  = this.pipelineConfig.apiKey;
-    const provider = this.pipelineConfig.provider;
-
-    if (provider.openaiCompat || baseUrl.includes('localhost') || baseUrl.includes('11434')) {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...provider.authHeader(apiKey) },
-        body: JSON.stringify({
-          model,
-          max_tokens: 500,
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user',   content: userMessage },
-          ],
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      const data = await res.json() as any;
-      if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error));
-      return data.choices?.[0]?.message?.content ?? '';
-    } else {
-      // Anthropic — prefill '{' forces the model to continue with valid JSON
-      const res = await fetch(`${baseUrl}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...provider.authHeader(apiKey) },
-        body: JSON.stringify({
-          model,
-          max_tokens: 500,
-          system: SYSTEM_PROMPT,
-          messages: [
-            { role: 'user',      content: userMessage },
-            { role: 'assistant', content: '{' },
-          ],
-        }),
-        signal: AbortSignal.timeout(12000),
-      });
-      const data = await res.json() as any;
-      if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error));
-      // Prepend the prefilled '{' back since the API only returns the continuation
-      const text = data.content?.[0]?.text ?? '';
-      return text.startsWith('{') ? text : '{' + text;
-    }
+    return callTextLLM(this.pipelineConfig, {
+      system: SYSTEM_PROMPT,
+      user: userMessage,
+      forceJson: true,
+      maxTokens: 500,
+      timeoutMs: 12000,
+    });
   }
 
   private delay(ms: number): Promise<void> {

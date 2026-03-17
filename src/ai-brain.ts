@@ -12,6 +12,7 @@
 import * as crypto from 'crypto';
 import type { ClawdConfig, InputAction, ActionSequence, ScreenFrame } from './types';
 import { extractJsonObject, extractJsonArray } from './safe-json';
+import { callTextLLMDirect } from './llm-client';
 
 const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on {OS_NAME}.
 Screen: {REAL_WIDTH}x{REAL_HEIGHT}. Screenshot: {LLM_WIDTH}x{LLM_HEIGHT} (scale {SCALE}x).
@@ -322,70 +323,20 @@ export class AIBrain {
 
   /**
    * Text-only LLM call (no images). Used for task decomposition.
+   * Uses shared llm-client to avoid duplicating fetch+auth logic.
    */
   private async callLLMText(systemPrompt: string, userMessage: string): Promise<string> {
     const { provider, apiKey, model, baseUrl, textApiKey, textBaseUrl } = this.config.ai;
-    const effectiveTextKey = textApiKey || apiKey || '';
-    const effectiveTextBaseUrl = textBaseUrl || baseUrl;
-
-    const MAX_RETRIES = 2;
-
-    if (provider === 'anthropic' && !effectiveTextBaseUrl) {
-      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-        try {
-          console.log(`   🔗 LLM text call (attempt ${attempt + 1}): model=${model}`);
-          const response = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': effectiveTextKey,
-              'anthropic-version': '2023-06-01',
-            },
-            body: JSON.stringify({
-              model,
-              max_tokens: 512,
-              system: systemPrompt,
-              messages: [{ role: 'user', content: userMessage }],
-            }),
-          });
-
-          const data = await response.json() as any;
-          if (data.error) throw new Error(data.error.message || `Anthropic API error (${response.status})`);
-          return data.content?.[0]?.text || '';
-        } catch (err) {
-          console.warn(`   ⚠️ LLM text call attempt ${attempt + 1} failed: ${err}`);
-          if (attempt < MAX_RETRIES) {
-            const backoff = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.random() * 1000;
-            console.log(`   ⏳ Retrying in ${Math.round(backoff)}ms...`);
-            await new Promise(r => setTimeout(r, backoff));
-          } else {
-            throw err;
-          }
-        }
-      }
-      throw new Error('LLM text call failed after retries');
-    } else {
-      const resolvedBaseUrl = effectiveTextBaseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
-      const response = await fetch(`${resolvedBaseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(effectiveTextKey ? { 'Authorization': `Bearer ${effectiveTextKey}` } : {}),
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 512,
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: userMessage },
-          ],
-        }),
-      });
-
-      const data = await response.json() as any;
-      if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-      return data.choices?.[0]?.message?.content || '';
-    }
+    return callTextLLMDirect({
+      baseUrl: textBaseUrl || baseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'],
+      model,
+      apiKey: textApiKey || apiKey || '',
+      isAnthropic: provider === 'anthropic' && !textBaseUrl && !baseUrl,
+      system: systemPrompt,
+      user: userMessage,
+      maxTokens: 512,
+      retries: 2,
+    });
   }
 
   private async callAnthropic(

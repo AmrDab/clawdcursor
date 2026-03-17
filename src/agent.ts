@@ -490,12 +490,24 @@ public class WinAPI {
       const telemetry = this.router.getTelemetry();
       // Telemetry logged silently
       if (routeResult.handled) {
+        const routeLatency = Date.now() - startTime;
         const step: StepResult = {
           action: 'action-router',
           description: routeResult.description,
           success: !routeResult.error,
           timestamp: Date.now(),
+          layer: 'router',
+          method: 'a11y_invoke',
+          latencyMs: routeLatency,
         };
+        console.log(`[ROUTER] Step 1: route "${task}" a11y_invoke → ${step.success ? 'SUCCESS' : 'FAILED'} (${routeLatency}ms)`);
+        this.logger.logStep({
+          layer: 1,
+          actionType: 'route',
+          result: step.success ? 'success' : 'fail',
+          actionParams: { task },
+          durationMs: routeLatency,
+        });
         const result: TaskResult = {
           success: !routeResult.error,
           steps: [step],
@@ -872,8 +884,15 @@ Examples:
         : await this.router.route(subtask);
 
       if (routeResult.handled) {
+        console.log(`[ROUTER] Step ${i + 1}: route "${subtask}" a11y_invoke → SUCCESS`);
+        this.logger.logStep({
+          layer: 1,
+          actionType: 'route',
+          result: 'success',
+          actionParams: { subtask },
+        });
         console.log(`   ✅ Router: ${routeResult.description}`);
-        steps.push({ action: 'routed', description: routeResult.description, success: true, timestamp: Date.now() });
+        steps.push({ action: 'routed', description: routeResult.description, success: true, timestamp: Date.now(), layer: 'router', method: 'a11y_invoke' });
         const isLaunch = routeResult.description.toLowerCase().includes('launch');
         const isTimeout = routeResult.description.toLowerCase().includes('timeout');
         await this.delay(isLaunch ? 150 : 50);
@@ -944,6 +963,21 @@ Examples:
             description: ocrResult.description,
             success: true,
             timestamp: Date.now(),
+            layer: 'ocr',
+            method: 'ocr_click',
+            latencyMs: ocrDuration,
+          });
+          // Structured log for each OCR action
+          console.log(`[OCR] Step ${i + 1}: ${ocrResult.steps} steps for "${subtask}" → SUCCESS (${(ocrDuration / 1000).toFixed(1)}s)`);
+          for (const entry of ocrResult.actionLog) {
+            console.log(`  [OCR] ${entry.action}: ${entry.description}`);
+          }
+          this.logger.logStep({
+            layer: 2.5,
+            actionType: 'ocr_reason',
+            result: 'success',
+            actionParams: { subtask, steps: ocrResult.steps },
+            durationMs: ocrDuration,
           });
           // Record for skill promotion
           const ocrSteps = ocrResult.actionLog
@@ -955,9 +989,30 @@ Examples:
         }
 
         if (ocrResult.fallbackReason === 'cannot_read') {
+          console.log(`[OCR] Step ${i + 1}: "${subtask}" → FAILED: cannot_read (${(ocrDuration / 1000).toFixed(1)}s)`);
           console.log(`   🤷 OCR cannot read UI — skipping A11y, falling to Layer 3 (vision LLM)`);
+          this.logger.logStep({
+            layer: 2.5,
+            actionType: 'ocr_reason',
+            result: 'fail',
+            actionParams: { subtask, fallbackReason: 'cannot_read' },
+            durationMs: ocrDuration,
+            error: 'cannot_read',
+          });
         } else if (!ocrResult.success) {
+          console.log(`[OCR] Step ${i + 1}: "${subtask}" → FAILED (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s)`);
+          for (const entry of ocrResult.actionLog) {
+            console.log(`  [OCR] ${entry.action}: ${entry.description}`);
+          }
           console.log(`   🤷 OCR Reasoner did not complete (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s) — skipping A11y, falling to vision`);
+          this.logger.logStep({
+            layer: 2.5,
+            actionType: 'ocr_reason',
+            result: 'fail',
+            actionParams: { subtask, steps: ocrResult.steps },
+            durationMs: ocrDuration,
+            error: ocrResult.description?.substring(0, 200),
+          });
         }
         // OCR already includes a11y tree in its snapshot — if OCR+A11y combined
         // couldn't handle it, A11y alone won't either. Skip straight to vision.
@@ -976,23 +1031,49 @@ Examples:
         const reasonResult = await this.reasoner.reason(subtask, activeProcessName, priorContext, this.logger, this.verifier);
         const reasonDuration = Date.now() - reasonStart;
         if (reasonResult.handled) {
+          console.log(`[A11Y] Step ${i + 1}: "${subtask}" a11y_invoke → SUCCESS (${reasonResult.steps ?? 0} steps, ${(reasonDuration / 1000).toFixed(1)}s)`);
+          if (reasonResult.actionHistory) {
+            for (const ah of reasonResult.actionHistory) {
+              console.log(`  [A11Y] ${ah.action}: ${ah.description}`);
+            }
+          }
+          this.logger.logStep({
+            layer: 2,
+            actionType: 'a11y_reason',
+            result: 'success',
+            actionParams: { subtask, processName: activeProcessName, steps: reasonResult.steps ?? 0 },
+            durationMs: reasonDuration,
+          });
           steps.push({
             action: 'done',
             description: reasonResult.description,
             success: true,
             timestamp: Date.now(),
+            layer: 'a11y',
+            method: 'a11y_invoke',
+            latencyMs: reasonDuration,
           });
           console.log(`   ✅ Layer 2 done (${reasonResult.steps ?? 0} steps, ${(reasonDuration / 1000).toFixed(1)}s)`);
           continue;
         }
         // Check if needs human intervention (payment, captcha, 2FA, etc.)
         if (reasonResult.needsHuman) {
+          console.log(`[A11Y] Step ${i + 1}: "${subtask}" → NEEDS_HUMAN: ${reasonResult.description.substring(0, 100)}`);
+          this.logger.logStep({
+            layer: 2,
+            actionType: 'a11y_reason',
+            result: 'blocked',
+            actionParams: { subtask },
+            durationMs: reasonDuration,
+            error: 'needs_human: ' + reasonResult.description.substring(0, 200),
+          });
           console.log(`\n🙋 NEEDS HUMAN INTERVENTION: ${reasonResult.description}`);
           steps.push({
             action: 'needs-human',
             description: reasonResult.description,
             success: false,
             timestamp: Date.now(),
+            layer: 'a11y',
           });
           break; // Stop processing — do NOT fall through to Layer 3
         }
@@ -1000,6 +1081,20 @@ Examples:
         a11yActionHistory = reasonResult.actionHistory;
         const stepCount = reasonResult.steps ?? 0;
         const duration = (reasonDuration / 1000).toFixed(1);
+        console.log(`[A11Y] Step ${i + 1}: "${subtask}" → FALLBACK (${stepCount} steps, ${duration}s)`);
+        if (reasonResult.actionHistory) {
+          for (const ah of reasonResult.actionHistory) {
+            console.log(`  [A11Y] ${ah.action}: ${ah.description}`);
+          }
+        }
+        this.logger.logStep({
+          layer: 2,
+          actionType: 'a11y_reason',
+          result: 'fail',
+          actionParams: { subtask, processName: activeProcessName, steps: stepCount },
+          durationMs: reasonDuration,
+          error: reasonResult.description?.substring(0, 200),
+        });
         console.log(`   🤷 Layer 2 → Layer 3 (${stepCount} steps, ${duration}s): ${reasonResult.description.substring(0, 100)}`);
         this.reasoner.recordVisionFallback();
       } else if (!this.ocrReasoner && this.reasoner) {
@@ -1020,29 +1115,92 @@ Examples:
         const remainingTask = subtasks.slice(i).join(', then ');
         if (this.computerUse) {
           // Anthropic native Computer Use
+          console.log(`[CU] Step ${i + 1}: Anthropic Computer Use "${remainingTask.substring(0, 80)}"`);
           console.log(`   🖥️  Layer 3 (Anthropic): "${remainingTask}"`);
+          const cuStart = Date.now();
           try {
             const cuResult = await this.computerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger);
+            const cuDuration = Date.now() - cuStart;
+            const cuSuccess = cuResult.steps.some(s => s.success);
+            console.log(`[CU] Step ${i + 1}: → ${cuSuccess ? 'SUCCESS' : 'FAILED'} (${cuResult.steps.length} steps, ${cuResult.llmCalls} LLM calls, ${(cuDuration / 1000).toFixed(1)}s)`);
+            this.logger.logStep({
+              layer: 3,
+              actionType: 'computer_use_anthropic',
+              result: cuSuccess ? 'success' : 'fail',
+              actionParams: { task: remainingTask.substring(0, 200), steps: cuResult.steps.length, llmCalls: cuResult.llmCalls },
+              durationMs: cuDuration,
+            });
+            for (const s of cuResult.steps) {
+              s.layer = 'computer-use';
+              s.method = 'mouse';
+            }
             steps.push(...cuResult.steps);
             llmCallCount += cuResult.llmCalls;
           } catch (err) {
-            steps.push({ action: 'error', description: `Computer Use failed: ${err}`, success: false, timestamp: Date.now() });
+            const cuDuration = Date.now() - cuStart;
+            console.log(`[CU] Step ${i + 1}: → CRASHED: ${err}`);
+            this.logger.logStep({
+              layer: 3,
+              actionType: 'computer_use_anthropic',
+              result: 'fail',
+              actionParams: { task: remainingTask.substring(0, 200) },
+              durationMs: cuDuration,
+              error: String(err).substring(0, 200),
+            });
+            steps.push({ action: 'error', description: `Computer Use failed: ${err}`, success: false, timestamp: Date.now(), layer: 'computer-use' });
           }
         } else if (this.genericComputerUse) {
           // Generic OpenAI-compat vision loop (GPT-4o, Gemini, Groq, Llama-vision, etc.)
+          console.log(`[CU] Step ${i + 1}: Generic Computer Use "${remainingTask.substring(0, 80)}"`);
           console.log(`   🌐 Layer 3 (Generic): "${remainingTask}"`);
+          const cuStart = Date.now();
           try {
             const cuResult = await this.genericComputerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger);
+            const cuDuration = Date.now() - cuStart;
+            const cuSuccess = cuResult.steps.some(s => s.success);
+            console.log(`[CU] Step ${i + 1}: → ${cuSuccess ? 'SUCCESS' : 'FAILED'} (${cuResult.steps.length} steps, ${cuResult.llmCalls} LLM calls, ${(cuDuration / 1000).toFixed(1)}s)`);
+            this.logger.logStep({
+              layer: 3,
+              actionType: 'computer_use_generic',
+              result: cuSuccess ? 'success' : 'fail',
+              actionParams: { task: remainingTask.substring(0, 200), steps: cuResult.steps.length, llmCalls: cuResult.llmCalls },
+              durationMs: cuDuration,
+            });
+            for (const s of cuResult.steps) {
+              s.layer = 'computer-use';
+              s.method = 'mouse';
+            }
             steps.push(...cuResult.steps);
             llmCallCount += cuResult.llmCalls;
           } catch (err) {
-            steps.push({ action: 'error', description: `Generic Computer Use failed: ${err}`, success: false, timestamp: Date.now() });
+            const cuDuration = Date.now() - cuStart;
+            console.log(`[CU] Step ${i + 1}: → CRASHED: ${err}`);
+            this.logger.logStep({
+              layer: 3,
+              actionType: 'computer_use_generic',
+              result: 'fail',
+              actionParams: { task: remainingTask.substring(0, 200) },
+              durationMs: cuDuration,
+              error: String(err).substring(0, 200),
+            });
+            steps.push({ action: 'error', description: `Generic Computer Use failed: ${err}`, success: false, timestamp: Date.now(), layer: 'computer-use' });
           }
         } else {
           // Legacy fallback — vision LLM without structured tool schema
           await this.delay(150);
+          console.log(`[CU] Step ${i + 1}: Legacy vision fallback "${remainingTask.substring(0, 80)}"`);
           console.log(`   🧠 Layer 3 (legacy fallback): "${remainingTask}"`);
+          const legacyStart = Date.now();
           const fallbackResult = await this.executeLLMFallback(remainingTask, steps, debugDir, i);
+          const legacyDuration = Date.now() - legacyStart;
+          console.log(`[CU] Step ${i + 1}: legacy → ${fallbackResult.success ? 'SUCCESS' : 'FAILED'} (${fallbackResult.llmCalls} LLM calls, ${(legacyDuration / 1000).toFixed(1)}s)`);
+          this.logger.logStep({
+            layer: 3,
+            actionType: 'vision_legacy',
+            result: fallbackResult.success ? 'success' : 'fail',
+            actionParams: { task: remainingTask.substring(0, 200), llmCalls: fallbackResult.llmCalls },
+            durationMs: legacyDuration,
+          });
           llmCallCount += fallbackResult.llmCalls;
           if (!fallbackResult.success) {
             console.log(`   ❌ Legacy fallback failed: "${subtask}"`);
