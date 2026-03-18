@@ -83,6 +83,12 @@ export class NativeDesktop extends EventEmitter {
 
   /** Scale factor: LLM coordinates × scaleFactor = real screen coordinates */
   private scaleFactor = 1;
+  /**
+   * DPI ratio: physical pixels / logical (mouse) pixels.
+   * OCR coordinates (physical) / dpiRatio = mouse coordinates (logical).
+   * Detected at connect() time via System.Windows.Forms.
+   */
+  private dpiRatio = 1;
 
   constructor(config: ClawdConfig) {
     super();
@@ -196,11 +202,31 @@ export class NativeDesktop extends EventEmitter {
         this.scaleFactor = 1;
       }
 
+      // Detect DPI ratio (physical / logical) for OCR coordinate conversion.
+      // On Windows, System.Windows.Forms.Screen returns logical (DPI-scaled) dimensions,
+      // while screen.grab() returns physical pixels. Mouse API uses logical coords.
+      if (process.platform === 'win32') {
+        try {
+          const { execFileSync } = await import('child_process');
+          const result = execFileSync('powershell.exe', [
+            '-NoProfile', '-Command',
+            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
+          ], { timeout: 10000, encoding: 'utf-8' }).trim();
+          const [logicalW] = result.split(',').map(Number);
+          if (logicalW > 0 && logicalW < this.screenWidth) {
+            this.dpiRatio = this.screenWidth / logicalW;
+          }
+        } catch { /* non-fatal — dpiRatio stays 1 */ }
+      }
+
       this.connected = true;
 
       console.log(`🐾 Native desktop connected`);
       console.log(`   Screen: ${this.screenWidth}x${this.screenHeight}`);
       console.log(`   LLM scale factor: ${this.scaleFactor.toFixed(2)}x`);
+      if (this.dpiRatio > 1) {
+        console.log(`   DPI ratio: ${this.dpiRatio.toFixed(2)}x (physical/logical)`);
+      }
     } catch (err: any) {
       console.error('Native desktop init error:', err?.message);
       this.connected = false;
@@ -346,6 +372,27 @@ export class NativeDesktop extends EventEmitter {
   }
 
   /**
+   * Get the DPI ratio (physical pixels / logical mouse pixels).
+   * Returns 1 on non-HiDPI screens or non-Windows platforms.
+   */
+  getDpiRatio(): number {
+    return this.dpiRatio;
+  }
+
+  /**
+   * Convert physical pixel coordinates (from OCR/screenshot) to mouse coordinates.
+   * On Windows with DPI scaling, nut-js mouse API uses logical (DPI-scaled) coords,
+   * while screen.grab() returns physical pixels. This method bridges the gap.
+   */
+  physicalToMouse(x: number, y: number): { x: number; y: number } {
+    if (this.dpiRatio <= 1) return { x, y };
+    return {
+      x: Math.round(x / this.dpiRatio),
+      y: Math.round(y / this.dpiRatio),
+    };
+  }
+
+  /**
    * Process a raw RGBA buffer into the configured output format.
    * nut-js screen.grab() returns RGBA data directly — no BGRA swap needed.
    */
@@ -437,21 +484,40 @@ export class NativeDesktop extends EventEmitter {
   async keyPress(keyCombo: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
 
-    const parts = keyCombo.split('+').map(k => k.trim());
+    // Special case: literal "+" character (can't split on "+" since it IS the separator)
+    if (keyCombo === '+') {
+      await keyboard.type('+');
+      await this.delay(30);
+      console.log(`   ⌨️  Key press: +`);
+      return;
+    }
+
+    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
     const keys = parts.map(k => this.mapKey(k));
 
-    if (keys.length === 1) {
-      await keyboard.pressKey(keys[0]);
+    // If the only key is a TYPE_CHAR (single printable char like *, +, ., etc.),
+    // use keyboard.type() which handles shift combos automatically
+    if (keys.length === 1 && keys[0] === 'TYPE_CHAR') {
+      await keyboard.type(parts[0]);
       await this.delay(30);
-      await keyboard.releaseKey(keys[0]);
+    } else if (keys.length === 1) {
+      await keyboard.pressKey(keys[0] as Key);
+      await this.delay(30);
+      await keyboard.releaseKey(keys[0] as Key);
     } else {
       // Press all modifier keys down, then the final key, then release in reverse
       for (const key of keys) {
-        await keyboard.pressKey(key);
+        if (key === 'TYPE_CHAR') {
+          await keyboard.type(parts[keys.indexOf(key)]);
+        } else {
+          await keyboard.pressKey(key as Key);
+        }
         await this.delay(30);
       }
       for (const key of [...keys].reverse()) {
-        await keyboard.releaseKey(key);
+        if (key !== 'TYPE_CHAR') {
+          await keyboard.releaseKey(key as Key);
+        }
         await this.delay(30);
       }
     }
@@ -501,10 +567,15 @@ export class NativeDesktop extends EventEmitter {
   async keyDown(keyCombo: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
     console.log(`   ⌨️  Key down: ${keyCombo}`);
-    const parts = keyCombo.split('+').map(k => k.trim());
+    if (keyCombo === '+') { await keyboard.type('+'); return; }
+    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
     for (const k of parts) {
       const key = this.mapKey(k);
-      await keyboard.pressKey(key);
+      if (key === 'TYPE_CHAR') {
+        await keyboard.type(k);
+      } else {
+        await keyboard.pressKey(key);
+      }
       await this.delay(20);
     }
   }
@@ -512,10 +583,13 @@ export class NativeDesktop extends EventEmitter {
   async keyUp(keyCombo: string): Promise<void> {
     if (!this.connected) throw new Error('Not connected');
     console.log(`   ⌨️  Key up: ${keyCombo}`);
-    const parts = keyCombo.split('+').map(k => k.trim());
+    if (keyCombo === '+') return; // type() already released
+    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
     for (const k of [...parts].reverse()) {
       const key = this.mapKey(k);
-      await keyboard.releaseKey(key);
+      if (key !== 'TYPE_CHAR') {
+        await keyboard.releaseKey(key);
+      }
       await this.delay(20);
     }
   }
@@ -591,7 +665,7 @@ export class NativeDesktop extends EventEmitter {
    * Map a string key name to nut-js Key enum value.
    * Falls back to character-based lookup for single characters.
    */
-  private mapKey(keyName: string): Key {
+  private mapKey(keyName: string): Key | 'TYPE_CHAR' {
     // Normalize via canonical key names first
     const normalized = normalizeKey(keyName);
 
@@ -612,6 +686,11 @@ export class NativeDesktop extends EventEmitter {
         const numKey = `Num${upper}` as keyof typeof Key;
         const keyEntry = Key[numKey];
         if (keyEntry !== undefined) return keyEntry;
+      }
+      // Single printable character (symbols like *, +, -, ., etc.)
+      // Use keyboard.type() for these — it handles shift combos automatically
+      if (keyName.charCodeAt(0) >= 32 && keyName.charCodeAt(0) <= 126) {
+        return 'TYPE_CHAR';
       }
     }
 

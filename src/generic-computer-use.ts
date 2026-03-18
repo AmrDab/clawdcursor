@@ -111,7 +111,7 @@ export function isGenericComputerUseSupported(
   if (!visionModel) return false;
 
   // Need an API key
-  const visionKey = pipelineConfig?.layer3?.apiKey || config.ai.visionApiKey || config.ai.apiKey;
+  const visionKey = pipelineConfig?.layer3?.apiKey || pipelineConfig?.apiKey || config.ai.visionApiKey || config.ai.apiKey;
   if (!visionKey) return false;
 
   return true;
@@ -306,7 +306,7 @@ export class GenericComputerUse {
 
     try {
       const visionModel = this.pipelineConfig?.layer3?.model || this.config.ai.visionModel;
-      const visionKey = this.pipelineConfig?.layer3?.apiKey || this.config.ai.visionApiKey || this.config.ai.apiKey;
+      const visionKey = this.pipelineConfig?.layer3?.apiKey || this.pipelineConfig?.apiKey || this.config.ai.visionApiKey || this.config.ai.apiKey;
       const visionBaseUrl = (
         this.pipelineConfig?.layer3?.baseUrl ||
         this.config.ai.visionBaseUrl ||
@@ -355,16 +355,23 @@ export class GenericComputerUse {
     a11yTree: string,
   ): any {
     const base64 = screenshot.buffer.toString('base64');
+    // Use low detail for models with small context windows (≤32K) to reduce image tokens
+    const visionModel = this.pipelineConfig?.layer3?.model || this.config.ai.visionModel;
+    const isSmallContext = visionModel.includes('32k') || visionModel.includes('8k');
     const content: any[] = [
       {
         type: 'image_url',
-        image_url: { url: `data:image/png;base64,${base64}` },
+        image_url: {
+          url: `data:image/png;base64,${base64}`,
+          ...(isSmallContext ? { detail: 'low' } : {}),
+        },
       },
     ];
     if (a11yTree && a11yTree.trim()) {
+      const treeLimit = isSmallContext ? 500 : 2000;
       content.push({
         type: 'text',
-        text: `Screen: ${screenshot.llmWidth}×${screenshot.llmHeight} (scale ${screenshot.scaleFactor.toFixed(2)}x)\nAccessibility tree:\n${a11yTree.substring(0, 2000)}`,
+        text: `Screen: ${screenshot.llmWidth}×${screenshot.llmHeight} (scale ${screenshot.scaleFactor.toFixed(2)}x)\nAccessibility tree:\n${a11yTree.substring(0, treeLimit)}`,
       });
     } else {
       content.push({

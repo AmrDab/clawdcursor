@@ -1492,8 +1492,22 @@ export function loadPipelineConfig(): PipelineConfig | null {
     const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
     const providerKey = raw.provider || 'ollama';
     const provider = PROVIDERS[providerKey] || PROVIDERS['ollama'];
+    // Resolve API key: check provider-scoped env vars FIRST, then fall back to
+    // generic resolution. This prevents OpenClaw auth-profiles (e.g. a stale
+    // Anthropic key) from overriding the correct provider-specific key.
+    const providerEnvVars: Record<string, string[]> = {
+      anthropic: ['ANTHROPIC_API_KEY'],
+      openai: ['OPENAI_API_KEY'],
+      kimi: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
+      groq: ['GROQ_API_KEY'],
+      together: ['TOGETHER_API_KEY'],
+      deepseek: ['DEEPSEEK_API_KEY'],
+    };
+    const scopedEnvKey = (providerEnvVars[providerKey] || [])
+      .map(k => process.env[k])
+      .find(v => v && v.length > 0) || '';
     const resolvedDefault = resolveApiConfig();
-    const defaultApiKey = resolvedDefault.apiKey;
+    const defaultApiKey = scopedEnvKey || resolvedDefault.apiKey;
 
     // Support mixed-provider configs saved by the new doctor
     const layer2BaseUrl = raw.pipeline?.layer2?.baseUrl ?? provider.baseUrl;

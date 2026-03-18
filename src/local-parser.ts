@@ -259,6 +259,19 @@ export class LocalTaskParser {
       return `search for ${searchMatch[1].trim()}`;
     }
 
+    // 16. "save [the] file as [filename] [on the desktop / in folder]"
+    const saveAsMatch = task.match(/^save\s+(?:the\s+)?(?:file|document|it)\s+as\s+(.+)$/i);
+    if (saveAsMatch) {
+      return `save as ${saveAsMatch[1].trim()}`;
+    }
+
+    // 17. "type the sentence X" / "type the text X" / "type the word X"
+    // Handles "type the sentence The quick brown fox..." which the basic type pattern misses
+    const typeSentenceMatch = task.match(/^type\s+(?:the\s+)?(?:sentence|text|phrase|word|message|string)\s+(.+)$/i);
+    if (typeSentenceMatch) {
+      return `type ${typeSentenceMatch[1].trim()}`;
+    }
+
     // If no pattern matched, return null (trigger LLM fallback)
     return null;
   }

@@ -23,7 +23,7 @@ import { normalizeKeyCombo } from './keys';
 import type { ClawdConfig, StepResult } from './types';
 
 const BETA_HEADER = 'computer-use-2025-01-24';
-const MAX_ITERATIONS = 30;
+const MAX_ITERATIONS = 20;
 const IS_MAC = os.platform() === 'darwin';
 
 const SYSTEM_PROMPT_MAC = `You are Clawd Cursor, an AI desktop agent on macOS. Complete tasks fast and reliably.
@@ -605,6 +605,7 @@ export class ComputerUseBrain {
     const MAX_CONSECUTIVE_ERRORS = 5;
     let lastActionSignature = '';
     let repeatedActionStreak = 0;
+    const recentScreenshotHashes: number[] = [];
 
     let verificationFailures = 0;
     const MAX_VERIFICATION_RETRIES = 3;
@@ -1017,6 +1018,21 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
         tracker.update(action, stepDesc, claudeText);
       }
 
+      // Stagnation detection: track action signatures and abort if stuck
+      for (const toolUse of toolUseBlocks) {
+        const sig = this.actionSignature(toolUse);
+        if (sig) recentScreenshotHashes.push(sig.length);  // lightweight hash proxy
+      }
+      if (recentScreenshotHashes.length >= 8) {
+        const last8 = recentScreenshotHashes.slice(-8);
+        const unique = new Set(last8).size;
+        if (unique <= 2) {
+          console.warn(`   [CU] ⚠️ Stagnation detected: ${last8.length} iterations with only ${unique} distinct action patterns. Aborting.`);
+          logger?.logStep({ layer: 3, actionType: 'stagnation_abort', result: 'fail', error: 'Stagnation detected — stuck in loop' });
+          return { success: false, steps, llmCalls };
+        }
+      }
+
       // Send tool results back
       messages.push({
         role: 'user',
@@ -1162,6 +1178,12 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
       switch (action) {
         case 'left_click': {
           const [x, y] = this.scale(coordinate!);
+          // Block clicks in the taskbar zone (bottom 60px)
+          const screenSize = this.desktop.getScreenSize();
+          if (y > screenSize.height - 60) {
+            console.warn(`   [CU] ⚠️ BLOCKED: click at y=${y} is in taskbar zone`);
+            return { description: `BLOCKED: click in taskbar zone at (${x},${y}). Use keyboard shortcuts to switch apps.` };
+          }
           await this.desktop.mouseClick(x, y);
           this.lastMouseX = x; this.lastMouseY = y;
           return { description: `Click at (${x}, ${y})` };
@@ -1233,14 +1255,20 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
 
         case 'key': {
           if (!text) return { description: 'Key press: empty', error: 'No key provided' };
-          // Block Alt+Tab — it breaks window focus and the agent loses context
           const keyNorm = text.toLowerCase().replace(/\s/g, '');
+          // Block Alt+Tab — breaks window focus, agent loses context
           if (keyNorm.includes('alt+tab') || keyNorm.includes('alt+shift+tab')) {
-            return { description: `Key press: ${text} — BLOCKED (Alt+Tab disabled, use focusWindow instead)` };
+            console.warn(`   [CU] BLOCKED key: ${text} (Alt+Tab escapes target app)`);
+            return { description: `BLOCKED: ${text} — Alt+Tab disabled. Stay in the current app.`, error: 'alt+tab blocked' };
           }
-          // Block Win/Super key — opens Start menu chaos
-          if (keyNorm === 'super' || keyNorm === 'win' || keyNorm === 'meta') {
-            return { description: `Key press: ${text} — BLOCKED (Win key disabled)` };
+          // Block ALL Win/Super combos EXCEPT super+up (maximize) — prevents Start menu, Run dialog, etc.
+          if (keyNorm.includes('super') || keyNorm.includes('win') || keyNorm.includes('meta')) {
+            if (keyNorm === 'super+up') {
+              // Allow super+up for window maximize
+            } else {
+              console.warn(`   [CU] BLOCKED key: ${text} (Super/Win key escapes target app)`);
+              return { description: `BLOCKED: ${text} — Win/Super key disabled. Use app controls instead.`, error: 'super key blocked' };
+            }
           }
           // Map Anthropic key names to nut-js key names
           const mappedKey = this.mapKeyName(text);

@@ -20,7 +20,7 @@
  */
 
 import * as fs from 'fs';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { writeFile } from 'fs/promises';
 import * as os from 'os';
@@ -48,6 +48,7 @@ import { DeterministicFlows } from './deterministic-flows';
 import { BrowserLayer } from './browser-layer';
 import { loadPipelineConfig } from './doctor';
 import { detectProvider, type PipelineConfig } from './providers';
+import { callTextLLM } from './llm-client';
 import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction, A11yAction } from './types';
 
 const MAX_STEPS = 15;
@@ -175,6 +176,29 @@ export class Agent {
     return null;
   }
 
+  /** Maximize a window via Win32 ShowWindow API. If pid is provided, finds the window by process ID. */
+  private async maximizeForegroundWindow(pid?: number): Promise<void> {
+    if (process.platform !== 'win32') {
+      await this.desktop.keyPress(process.platform === 'darwin' ? 'ctrl+cmd+f' : 'Super+Up');
+      return;
+    }
+    try {
+      // Win11 snap layouts are persistent — use SetWindowPos to forcefully resize, then maximize.
+      const typeDef = `'using System; using System.Runtime.InteropServices; public class WinMax { [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f); [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i); [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow(); }'`;
+      const cmd = pid
+        ? `$p = Get-Process -Id ${pid} -ErrorAction Stop; $h = $p.MainWindowHandle; if ($h -ne [IntPtr]::Zero) { Add-Type -TypeDefinition ${typeDef}; $w=[WinMax]::GetSystemMetrics(0); $ht=[WinMax]::GetSystemMetrics(1); [WinMax]::ShowWindow($h,1)|Out-Null; Start-Sleep -m 100; [WinMax]::SetWindowPos($h,[IntPtr]::Zero,0,0,$w,$ht,0x0040)|Out-Null; Start-Sleep -m 100; [WinMax]::SetForegroundWindow($h)|Out-Null; [WinMax]::ShowWindow($h,3)|Out-Null; Write-Host "pid=${pid} hwnd=$h OK" } else { Write-Host "pid=${pid} no-main-window" }`
+        : `Add-Type -TypeDefinition ${typeDef}; $h = [WinMax]::GetForegroundWindow(); [WinMax]::ShowWindow($h,3)|Out-Null; Write-Host "hwnd=$h OK"`;
+      console.log(`   📐 Maximizing window${pid ? ` (pid ${pid})` : ''}...`);
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', cmd], { timeout: 5000, windowsHide: true });
+      console.log(`   📐 ${stdout.trim()}`);
+    } catch (e: any) {
+      console.warn(`   ⚠️ PowerShell maximize failed: ${e?.message} — falling back to Alt+Space`);
+      await this.desktop.keyPress('alt+space');
+      await new Promise(r => setTimeout(r, 150));
+      await this.desktop.keyPress('x');
+    }
+  }
+
   private async getDefaultBrowser(): Promise<string> {
     // Detect system default browser dynamically
     if (IS_MAC) {
@@ -199,6 +223,73 @@ export class Agent {
         if (progId.includes('arc')) return 'Arc';
       } catch { /* fall through */ }
       return 'Microsoft Edge'; // Windows fallback
+    }
+  }
+
+  /**
+   * Launch a browser directly with a URL as a command-line argument.
+   * Far more reliable than Ctrl+L navigation because:
+   * - Bypasses Edge session restore interference
+   * - Bypasses Win11 focus-stealing prevention
+   * - URL loads in a new window even if old tabs are restored
+   */
+  private async launchBrowserWithUrl(browser: string, url: string): Promise<boolean> {
+    if (process.platform !== 'win32') return false;
+    const isChrome = /chrome/i.test(browser);
+    const exePaths = isChrome
+      ? ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe']
+      : ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'];
+    const { existsSync } = await import('fs');
+    for (const exePath of exePaths) {
+      if (!existsSync(exePath)) continue;
+      try {
+        console.log(`   🚀 ${isChrome ? 'Chrome' : 'Edge'} → ${url}`);
+        const child = spawn(exePath, [
+          '--profile-directory=Default',
+          '--disable-session-crashed-bubble',
+          '--no-first-run',
+          '--new-window',
+          url,
+        ], { detached: true, stdio: 'ignore' });
+        child.unref();
+        // Wait for window to appear, force to front, and maximize
+        await new Promise(r => setTimeout(r, 3000));
+        // Use HWND_TOPMOST trick to bypass Win11 focus-stealing prevention
+        try {
+          const forceCmd = `Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public class WF { [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h,IntPtr a,int x,int y,int w,int ht,uint f); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h); [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h,int c); [DllImport("user32.dll")] public static extern int GetSystemMetrics(int i); }'; $p = Get-Process ${isChrome ? 'chrome' : 'msedge'} -ErrorAction Stop | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero } | Select-Object -First 1; if ($p) { $h=$p.MainWindowHandle; $w=[WF]::GetSystemMetrics(0); $ht=[WF]::GetSystemMetrics(1); [WF]::SetWindowPos($h,[IntPtr](-1),0,0,0,0,0x0001 -bor 0x0002)|Out-Null; Start-Sleep -m 50; [WF]::SetWindowPos($h,[IntPtr](-2),0,0,$w,$ht,0x0040)|Out-Null; Start-Sleep -m 100; [WF]::SetForegroundWindow($h)|Out-Null; [WF]::ShowWindow($h,3)|Out-Null; Write-Host "forced-front pid=$($p.Id)" }`;
+          const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', forceCmd], { timeout: 5000, windowsHide: true });
+          console.log(`   📐 ${stdout.trim()}`);
+        } catch (e: any) {
+          console.warn(`   ⚠️ Force-front failed: ${e?.message}`);
+        }
+        await new Promise(r => setTimeout(r, 500));
+        return true;
+      } catch { continue; }
+    }
+    return false;
+  }
+
+  /**
+   * Navigate the current browser tab to a URL via Ctrl+L (fallback method).
+   */
+  private async navigateBrowserToUrl(url: string): Promise<void> {
+    const windows = await this.a11y.getWindows().catch(() => []);
+    const browserWin = windows.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
+    if (browserWin) {
+      await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => null);
+      await new Promise(r => setTimeout(r, 400));
+    }
+    await this.desktop.keyPress('Escape');
+    await new Promise(r => setTimeout(r, 200));
+    await this.desktop.keyPress('Control+l');
+    await new Promise(r => setTimeout(r, 300));
+    await this.desktop.typeText(url);
+    await new Promise(r => setTimeout(r, 200));
+    await this.desktop.keyPress('Return');
+    await new Promise(r => setTimeout(r, 3000));
+    if (browserWin) {
+      await this.maximizeForegroundWindow(browserWin.processId);
+      await new Promise(r => setTimeout(r, 300));
     }
   }
 
@@ -258,7 +349,10 @@ public class WinAPI {
         }
       : undefined;
 
-    if (ComputerUseBrain.isSupported(this.config, computerUseOverrides)) {
+    // Only enable Anthropic Computer Use if the pipeline provider IS Anthropic.
+    // Otherwise, a stale Anthropic key from OpenClaw auth-profiles causes false positives.
+    const pipelineIsAnthropic = pipelineConfig?.providerKey === 'anthropic';
+    if (pipelineIsAnthropic && ComputerUseBrain.isSupported(this.config, computerUseOverrides)) {
       this.computerUse = new ComputerUseBrain(this.config, this.desktop, this.a11y, this.safety, computerUseOverrides);
       this.computerUse.setVerifier(this.verifier);
       console.log(`🖥️  Computer Use API enabled (Anthropic native tool + accessibility)`);
@@ -275,7 +369,7 @@ public class WinAPI {
   }
 
   /** Maximum wall-clock time for a single task (10 minutes) */
-  private static readonly TASK_TIMEOUT_MS = 10 * 60 * 1000;
+  private static readonly TASK_TIMEOUT_MS = 60 * 1000; // 60s — fast fail, diagnose, iterate
 
   async executeTask(task: string): Promise<TaskResult> {
     // Atomic concurrency guard — prevent TOCTOU race on simultaneous /task requests
@@ -292,9 +386,12 @@ public class WinAPI {
 
     // Wrap the entire task pipeline with a global wall-clock timeout.
     // Individual layers have their own iteration limits, but a deadlocked
-    // LLM call or runaway Computer Use loop could still exceed 10 min.
+    // LLM call or runaway Computer Use loop could still exceed the limit.
+    // IMPORTANT: Clear the timer when the task completes to prevent stale
+    // timeouts from aborting future tasks (the aborted flag is shared).
+    let timeoutHandle: ReturnType<typeof setTimeout>;
     const timeoutPromise = new Promise<TaskResult>((resolve) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         this.aborted = true;
         console.warn(`\n⏱ Task timed out after ${Agent.TASK_TIMEOUT_MS / 60000} minutes`);
         resolve({
@@ -305,7 +402,11 @@ public class WinAPI {
       }, Agent.TASK_TIMEOUT_MS);
     });
 
-    return Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
+    try {
+      return await Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
+    } finally {
+      clearTimeout(timeoutHandle!);
+    }
   }
 
   private async _executeTaskInternal(task: string, startTime: number): Promise<TaskResult> {
@@ -313,6 +414,8 @@ public class WinAPI {
     console.log(`\n🐾 Starting task: ${task}`);
     this.logger.startTask(task);
     this.workspace.reset();
+    // Reset all stateful components between tasks — prevents contamination
+    this.brain.resetConversation();
     // Reset Layer 2 state between tasks — clears circuit breaker, disabledApps, CDP cache
     if (this.reasoner) this.reasoner.reset();
 
@@ -347,86 +450,93 @@ public class WinAPI {
     // Replaces brittle regex patterns ("open X and Y", "open X on Y") with universal parsing.
     const preprocessed = await this.preprocessTask(task);
     if (preprocessed) {
-      // Open app/browser if LLM identified one
-      if (preprocessed.app) {
+      const isBrowser = /^(edge|microsoft edge|chrome|google chrome|firefox|brave)$/i.test(preprocessed.app || '');
+
+      // ── Browser + URL: launch browser directly with URL as argument ──
+      // This is far more reliable than launching blank then navigating via Ctrl+L
+      // because Win11 focus-stealing prevention + Edge session restore make Ctrl+L unreliable.
+      if (isBrowser && preprocessed.navigate) {
+        // Normalize common URLs: ensure English locale for Wikipedia
+        let navTarget = preprocessed.navigate;
+        if (/^(https?:\/\/)?(www\.)?wikipedia\.org/i.test(navTarget)) {
+          navTarget = navTarget.replace(/wikipedia\.org/i, 'en.wikipedia.org');
+        }
+        console.log(`   🌐 Launching ${preprocessed.app} directly with ${navTarget}...`);
+        try {
+          const url = /^https?:\/\//i.test(navTarget) ? navTarget : `https://${navTarget}`;
+          const launched = await this.launchBrowserWithUrl(preprocessed.app!, url);
+          if (launched) {
+            priorContext.push(`Opened "${preprocessed.app}" and navigated to ${preprocessed.navigate} — page is loading. Browser is focused and maximized.`);
+            console.log(`   ✅ ${preprocessed.app} launched with ${preprocessed.navigate}`);
+          } else {
+            // Fallback: open browser then navigate via Ctrl+L
+            console.log(`   ⚠️ Direct launch failed — trying router + Ctrl+L fallback`);
+            await this.router.route(`open ${preprocessed.app}`).catch(() => null);
+            await new Promise(r => setTimeout(r, 1000));
+            await this.navigateBrowserToUrl(preprocessed.navigate);
+            priorContext.push(`Navigated to ${preprocessed.navigate} — page is loading. Browser is focused.`);
+          }
+        } catch (err) {
+          console.log(`   ⚠️ Browser+URL launch failed: ${err}`);
+          priorContext.push(`Navigate to: ${preprocessed.navigate} (attempted but may need retry)`);
+        }
+      }
+      // ── Non-browser app: open via router ──
+      else if (preprocessed.app) {
         console.log(`   Opening "${preprocessed.app}"...`);
         try {
           const openResult = await this.router.route(`open ${preprocessed.app}`);
           if (openResult.handled) {
-            // app opened
             priorContext.push(`Opened "${preprocessed.app}" — it is ALREADY the active, focused, maximized window. Do NOT reopen it. Do NOT press Windows key. Start interacting with it IMMEDIATELY.`);
-            // Wait for app to render its UI tree
             const heavyApps = /outlook|word|excel|teams|powerpoint/i;
             const settleMs = heavyApps.test(preprocessed.app!) ? 2000 : 500;
             await new Promise(r => setTimeout(r, settleMs));
-
-            // Bring the app window to focus — the text LLM handles all further interaction
             try {
               const appWin = await this.a11y.findWindow(preprocessed.app!);
               if (appWin) {
                 await this.a11y.focusWindow(undefined, appWin.processId);
+                await new Promise(r => setTimeout(r, 200));
+                await this.maximizeForegroundWindow(appWin.processId);
                 await new Promise(r => setTimeout(r, 300));
-                console.log(`   ✅ ${preprocessed.app} focused (pid ${appWin.processId})`);
+                console.log(`   ✅ ${preprocessed.app} focused & maximized (pid ${appWin.processId})`);
               }
-            } catch { /* non-critical — app may self-focus */ }
+            } catch { /* non-critical */ }
           }
         } catch (err) {
           console.log(`   ⚠️ Pre-open failed: ${err} — proceeding with full task`);
         }
       }
 
-      // Navigate to URL if identified — do it now via keyboard shortcut
-      // The preprocessor LLM already outputs smart URLs (e.g. docs.google.com/document/create)
-      if (preprocessed.navigate) {
-        // If no app specified but navigation requested, open default browser first
+      // ── URL navigation without explicit browser app (use default browser) ──
+      if (preprocessed.navigate && !isBrowser) {
         if (!preprocessed.app) {
           const defaultBrowser = await this.getDefaultBrowser();
-          console.log(`   🌐 Opening default browser (${defaultBrowser}) for navigation...`);
+          console.log(`   🌐 Launching ${defaultBrowser} with ${preprocessed.navigate}...`);
           try {
-            const openResult = await this.router.route(`open ${defaultBrowser}`);
-            if (openResult.handled) {
-              console.log(`   ✅ "${defaultBrowser}" opened via Action Router`);
-              priorContext.push(`Opened "${defaultBrowser}" — it is now the active, focused window, maximized to full screen`);
-              // Dismiss Snap Assist if it appeared (Win11 quirk with Super+Up)
-              try {
-                await execFileAsync('powershell.exe', ['-Command',
-                  'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.SendKeys]::SendWait("{ESC}")'
-                ]);
-              } catch { /* non-critical */ }
-              await new Promise(r => setTimeout(r, 300));
+            const url = /^https?:\/\//i.test(preprocessed.navigate) ? preprocessed.navigate : `https://${preprocessed.navigate}`;
+            const launched = await this.launchBrowserWithUrl(defaultBrowser, url);
+            if (launched) {
+              priorContext.push(`Opened "${defaultBrowser}" and navigated to ${preprocessed.navigate} — page is loading. Browser is focused and maximized.`);
+            } else {
+              await this.router.route(`open ${defaultBrowser}`).catch(() => null);
+              await new Promise(r => setTimeout(r, 1000));
+              await this.navigateBrowserToUrl(preprocessed.navigate);
+              priorContext.push(`Navigated to ${preprocessed.navigate} — page is loading. Browser is focused.`);
             }
           } catch (err) {
-            console.log(`   ⚠️ Default browser open failed: ${err} — proceeding with navigation attempt`);
+            console.log(`   ⚠️ Default browser launch failed: ${err}`);
+            priorContext.push(`Navigate to: ${preprocessed.navigate} (attempted but may need retry)`);
           }
-        }
-
-        console.log(`   🌐 Navigating to ${preprocessed.navigate}...`);
-        try {
-          // Ensure browser window has focus before typing URL
-          const windows = await this.a11y.getWindows().catch(() => []);
-          const browserWin = windows.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
-          if (browserWin) {
-            await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => null);
-            await new Promise(r => setTimeout(r, 400));
+        } else {
+          // Non-browser app already opened above, but also has a navigate URL — use Ctrl+L
+          console.log(`   🌐 Navigating to ${preprocessed.navigate}...`);
+          try {
+            await this.navigateBrowserToUrl(preprocessed.navigate);
+            priorContext.push(`Navigated to ${preprocessed.navigate} — page is loading.`);
+          } catch (err) {
+            console.log(`   ⚠️ Navigation failed: ${err}`);
+            priorContext.push(`Navigate to: ${preprocessed.navigate} (attempted but may need retry)`);
           }
-          // Open a NEW tab to avoid conflicts with existing tab content/CDP state
-          await this.desktop.keyPress('Control+t');
-          await new Promise(r => setTimeout(r, 500));
-          // Address bar is already focused in a new tab — type URL directly
-          await this.desktop.typeText(preprocessed.navigate);
-          await new Promise(r => setTimeout(r, 200));
-          await this.desktop.keyPress('Return');
-          await new Promise(r => setTimeout(r, 3500)); // wait for page load + possible redirects
-          // Re-focus browser after navigation (terminal may have stolen focus)
-          if (browserWin) {
-            await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => null);
-            await new Promise(r => setTimeout(r, 400));
-          }
-          priorContext.push(`Navigated to ${preprocessed.navigate} — page is loading in new tab. Browser is focused.`);
-          console.log(`   ✅ Navigated to ${preprocessed.navigate} (new tab)`);
-        } catch (err) {
-          console.log(`   ⚠️ Navigation failed: ${err} — Computer Use will handle it`);
-          priorContext.push(`Navigate to: ${preprocessed.navigate} (attempted but may need retry)`);
         }
       }
 
@@ -480,13 +590,20 @@ public class WinAPI {
     }
 
     // ── Layer 1: Action Router + Shortcuts (regex + a11y, zero LLM calls) ──
-    // ALWAYS runs — no isBrowserTask gate. Catches shortcuts even for browser-context tasks.
-    // Pattern-matched tasks: refresh, go back, zoom, find, open app, shortcuts, etc.
-    // Instant execution — no screenshots, no API calls.
+    // Only runs when the preprocessor did NOT already act (priorContext empty).
+    // When the preprocessor opened an app and refined the task, the remaining work
+    // needs OCR/vision reasoning — the router would claim success on "type X" without typing.
+    const skipTopRouter = priorContext.length > 0;
     {
       this.state.status = 'acting';
+      if (skipTopRouter) {
+        console.log(`\n⚡ Action Router: SKIPPED — preprocessor already handled app launch, task needs OCR reasoning`);
+      } else {
       console.log(`\n⚡ Action Router: attempting "${task}"`);
-      const routeResult = await this.router.route(task);
+      }
+      const routeResult = skipTopRouter
+        ? { handled: false, description: 'Skipped — preprocessed task needs OCR reasoning' }
+        : await this.router.route(task);
       const telemetry = this.router.getTelemetry();
       // Telemetry logged silently
       if (routeResult.handled) {
@@ -702,37 +819,23 @@ Examples:
 - "compare prices between amazon and ebay for laptops" → {"app": null, "navigate": "amazon.com", "task": "search for laptops and note prices, then open ebay in new tab and compare laptop prices", "contextHints": ["amazon", "ebay"]}
 - "drag an image from browser to desktop" → {"app": null, "navigate": null, "task": "drag an image from browser window to desktop", "contextHints": ["browser", "desktop"]}`;
 
+    const startTime = Date.now();
     try {
       console.log(`\n🧠 Pre-processing task with LLM...`);
-      const startTime = Date.now();
 
       let response: string;
 
       if (this.reasoner) {
-        // Use reasoner's provider config via fetch
+        // Use shared LLM client — correctly handles Anthropic (/messages) and OpenAI (/chat/completions)
         const pipelineConfig = loadPipelineConfig();
         if (!pipelineConfig) return null;
-        const { model, baseUrl } = pipelineConfig.layer2;
-        const apiKey = pipelineConfig.apiKey || '';
 
-        const fetchResponse = await fetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: `Parse this command: "${task}"` },
-            ],
-            temperature: 0,
-          }),
+        response = await callTextLLM(pipelineConfig, {
+          system: systemPrompt,
+          user: `Parse this command: "${task}"`,
+          maxTokens: 300,
+          timeoutMs: 10000,
         });
-
-        const data: any = await fetchResponse.json();
-        response = data.choices?.[0]?.message?.content || '';
       } else {
         return null;
       }
@@ -759,7 +862,9 @@ Examples:
         contextHints: parsed.contextHints || [],
       };
     } catch (err) {
+      const elapsed = Date.now() - startTime;
       console.log(`   ⚠️ Pre-processor failed: ${err} — proceeding with raw task`);
+      this.logger.logStep({ layer: 'preprocess', actionType: 'llm_preprocess', result: 'fail', durationMs: elapsed, error: String(err).substring(0, 200) });
       return null;
     }
   }
@@ -827,11 +932,14 @@ Examples:
     const decompositionStart = Date.now();
     let subtasks: string[];
 
-    // If pre-processing already ran (priorContext exists), the task has been refined
-    // by the LLM. Skip the local parser — it misinterprets creative/contextual tasks
-    // as literal commands (e.g., "write a sentence on dogs" → "type a sentence on dogs").
-    // The task goes straight to Layer 2 (A11y Reasoner) which can see the screen and reason.
-    if (priorContext && priorContext.length > 0) {
+    // If pre-processing ran (priorContext array exists), go straight to Layer 2.
+    // Even if app open failed (empty priorContext), OCR Reasoner can handle app state.
+    // Only decompose compound tasks that explicitly contain "then"/"and then".
+    const wasPreprocessed = priorContext !== undefined && priorContext.length > 0; // preprocessing actually did something
+    if (wasPreprocessed) {
+      // Preprocessor handled app launch — send the refined task directly to OCR/Layer 2.
+      // OCR Reasoner handles compound tasks internally (system prompt rule 16).
+      // No LLM decomposition needed — it's slow, unreliable, and can hang.
       subtasks = [task];
       console.log(`   ⚡ Pre-processed task — straight to Layer 2 (${Date.now() - decompositionStart}ms)`);
     } else {
@@ -950,11 +1058,38 @@ Examples:
         console.log(`   🔄 Skill cache miss — falling through`);
       }
 
+      // ── Layer 1.5: Deterministic Flows — zero-LLM verified workflows ──
+      const activeForFlow = await this.a11y?.getActiveWindow().catch(() => null);
+      const flowApp = activeForFlow?.processName || activeForFlow?.title || '';
+      const flowResult = await this.deterministicFlows.tryFlow(subtask, flowApp);
+      if (flowResult?.handled) {
+        console.log(`   ⚡ Deterministic flow completed: ${flowResult.description} (${flowResult.stepsCompleted} steps)`);
+        steps.push({
+          action: 'done',
+          description: flowResult.description,
+          success: true,
+          timestamp: Date.now(),
+          layer: 'deterministic',
+          method: 'deterministic_flow',
+        });
+        this.logger.logStep({
+          layer: 1.5,
+          actionType: 'deterministic_flow',
+          result: 'success',
+          actionParams: { subtask, steps: flowResult.stepsCompleted },
+          durationMs: 0,
+        });
+        continue;
+      }
+      if (flowResult && !flowResult.handled) {
+        console.log(`   🔄 Deterministic flow failed at step ${flowResult.failedAtStep}: ${flowResult.description} — falling through to OCR`);
+      }
+
       // ── Layer 2.5: OCR Reasoner — primary universal read layer ──
       if (this.ocrReasoner) {
         console.log(`\n👁️ Layer 2.5 (OCR Reasoner): "${subtask}"`);
         const ocrStart = Date.now();
-        const ocrResult = await this.ocrReasoner.run(subtask, priorContext);
+        const ocrResult = await this.ocrReasoner.run(subtask, priorContext, () => this.aborted);
         const ocrDuration = Date.now() - ocrStart;
 
         if (ocrResult.handled && ocrResult.success) {
@@ -1009,7 +1144,7 @@ Examples:
             layer: 2.5,
             actionType: 'ocr_reason',
             result: 'fail',
-            actionParams: { subtask, steps: ocrResult.steps },
+            actionParams: { subtask, steps: ocrResult.steps, actions: ocrResult.actionLog.map(a => `${a.action}:${a.description.substring(0,80)}`).join(' | ') },
             durationMs: ocrDuration,
             error: ocrResult.description?.substring(0, 200),
           });
@@ -1222,8 +1357,10 @@ Examples:
       if (clip) this.workspace.updateClipboard(clip, 'post-task');
     } catch { /* non-critical */ }
 
-    // Only report success when an explicit 'done' step was recorded by a layer
+    // Determine success: either an explicit 'done' step from OCR/CU, or ALL router steps succeeded
     const hasDoneStep = steps.some(s => s.action === 'done' && s.success);
+    const allRouterStepsSucceeded = steps.length > 0 && steps.every(s => s.success);
+    const isSuccess = hasDoneStep || allRouterStepsSucceeded;
     // Distinguish verified vs unverified success
     const hasVerifiedDone = steps.some(s => s.action === 'done' && s.success && s.description?.includes('verified'));
     const hasNeedsHuman = steps.some(s => s.action === 'needs-human' || s.description?.includes('needs_human'));
@@ -1232,10 +1369,11 @@ Examples:
     if (hasNeedsHuman) finalStatus = 'needs_human';
     else if (hasVerifiedDone) finalStatus = 'verified_success';
     else if (hasDoneStep) finalStatus = 'unverified_success';
+    else if (allRouterStepsSucceeded) finalStatus = 'unverified_success';
     else finalStatus = 'failed';
 
     const result: TaskResult = {
-      success: hasDoneStep,
+      success: isSuccess,
       steps,
       duration: Date.now() - startTime,
     };

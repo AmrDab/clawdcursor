@@ -159,9 +159,12 @@ async function _callOpenAI(p: {
   const body: Record<string, unknown> = {
     model: p.model,
     messages,
-    temperature: 0,
     max_tokens: p.maxTokens,
   };
+  // kimi-k2.5 and similar reasoning models only accept temperature=1 or omitted
+  if (!p.model.startsWith('kimi-k2')) {
+    body.temperature = 0;
+  }
   if (p.forceJson) {
     body.response_format = { type: 'json_object' };
   }
@@ -178,7 +181,10 @@ async function _callOpenAI(p: {
   const response = await fetch(`${p.baseUrl}/chat/completions`, fetchOpts);
   const data = await response.json() as any;
   if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-  return data.choices?.[0]?.message?.content || '';
+  const msg = data.choices?.[0]?.message;
+  // kimi-k2.5 and other reasoning models may return empty content with reasoning_content.
+  // Fall back to reasoning_content when content is empty.
+  return msg?.content || msg?.reasoning_content || '';
 }
 
 // ─── Anthropic Messages API path ──────────────────────────────────────────────

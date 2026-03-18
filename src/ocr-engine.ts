@@ -136,6 +136,10 @@ export class OcrEngine {
     try {
       // Capture full-resolution screenshot via nut-js
       const img = await screen.grab();
+      if (!this.cachedResult) {
+        // Log image dimensions on first capture to diagnose coordinate space issues
+        console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
+      }
       const pngBuffer = await sharp(img.data, {
         raw: { width: img.width, height: img.height, channels: 4 },
       }).png().toBuffer();
