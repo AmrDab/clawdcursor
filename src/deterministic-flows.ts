@@ -154,7 +154,9 @@ export class DeterministicFlows {
         });
         if (invokeResult.success || invokeResult.clickPoint) {
           if (invokeResult.clickPoint) {
-            await this.desktop.mouseClick(invokeResult.clickPoint.x, invokeResult.clickPoint.y);
+            // UIAutomation returns physical coords — convert to mouse/logical coords
+            const cp = this.desktop.physicalToMouse(invokeResult.clickPoint.x, invokeResult.clickPoint.y);
+            await this.desktop.mouseClick(cp.x, cp.y);
           }
           console.log(`   📧 Step 1: Invoked "New mail" via UIAutomation`);
           await new Promise(r => setTimeout(r, 2000));
@@ -169,7 +171,12 @@ export class DeterministicFlows {
         await new Promise(r => setTimeout(r, 300));
         const b = outlookWin.bounds;
         if (b && b.x > -100 && b.y > -100 && b.width > 100 && b.height > 100) {
-          await this.desktop.mouseClick(b.x + Math.floor(b.width / 2), b.y + Math.floor(b.height / 2));
+          // UIAutomation bounds are physical — convert to mouse/logical coords
+          const center = this.desktop.physicalToMouse(
+            b.x + Math.floor(b.width / 2),
+            b.y + Math.floor(b.height / 2)
+          );
+          await this.desktop.mouseClick(center.x, center.y);
           await new Promise(r => setTimeout(r, 300));
         }
         await this.desktop.keyPress('Control+n');
