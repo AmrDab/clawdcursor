@@ -41,6 +41,60 @@ function authHeaders(): Record<string, string> {
 // ── Emoji gate (shared utility) ──────────────────────────────────────────────
 import { e } from './format';
 
+// ── Single-instance pidfile lock ─────────────────────────────────────────────
+// Prevents duplicate start/mcp/serve processes from accumulating (a common
+// source of stale processes when Cursor/editors restart the MCP server).
+
+const PID_DIR = path.join(require('os').homedir(), '.clawdcursor');
+
+function pidFilePath(mode: 'start' | 'mcp' | 'serve'): string {
+  return path.join(PID_DIR, `${mode}.pid`);
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    // Signal 0 checks existence without sending a real signal.
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check if another instance is already running for this mode.
+ * Returns the stale pid if a live duplicate is found, otherwise null.
+ * Writes the current pid to the lockfile on success.
+ */
+function claimPidFile(mode: 'start' | 'mcp' | 'serve'): number | null {
+  try {
+    if (!fs.existsSync(PID_DIR)) fs.mkdirSync(PID_DIR, { recursive: true });
+    const pidFile = pidFilePath(mode);
+    if (fs.existsSync(pidFile)) {
+      const existing = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      if (!isNaN(existing) && existing !== process.pid && isProcessAlive(existing)) {
+        return existing; // live duplicate found
+      }
+    }
+    fs.writeFileSync(pidFile, String(process.pid), { encoding: 'utf-8', mode: 0o600 });
+    return null;
+  } catch {
+    return null; // non-fatal — lock is best-effort
+  }
+}
+
+function releasePidFile(mode: 'start' | 'mcp' | 'serve'): void {
+  try {
+    const pidFile = pidFilePath(mode);
+    if (fs.existsSync(pidFile)) {
+      const stored = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      if (stored === process.pid) fs.unlinkSync(pidFile);
+    }
+  } catch {
+    // non-fatal
+  }
+}
+
 const program = new Command();
 
 async function isClawdInstance(port: number): Promise<boolean> {
@@ -106,6 +160,13 @@ program
   .option('--debug', 'Save screenshots to debug/ folder (off by default)')
   .option('--accept', 'Accept desktop control consent non-interactively and start')
   .action(async (opts) => {
+    // Single-instance guard
+    const existingPid = claimPidFile('start');
+    if (existingPid !== null) {
+      console.error(`${e('❌', '[ERR]')} clawdcursor start is already running (pid ${existingPid}). Run \`clawdcursor stop\` first.`);
+      process.exit(1);
+    }
+
     // Handle consent before anything else
     const { hasConsent, writeConsentFile, runOnboarding } = await import('./onboarding');
     if (opts.accept) {
@@ -216,6 +277,12 @@ program
     // Graceful shutdown
     process.on('SIGINT', () => {
       console.log(`\n${e('👋', '--')} Shutting down...`);
+      releasePidFile('start');
+      agent.disconnect();
+      process.exit(0);
+    });
+    process.on('SIGTERM', () => {
+      releasePidFile('start');
       agent.disconnect();
       process.exit(0);
     });
@@ -671,6 +738,13 @@ program
   .command('mcp')
   .description('Run as MCP tool server over stdio (for Claude Code, Cursor, Windsurf, Zed)')
   .action(async () => {
+    // Single-instance guard (MCP servers can accumulate when editors restart them)
+    const existingMcpPid = claimPidFile('mcp');
+    if (existingMcpPid !== null) {
+      process.stderr.write(`[ERROR] clawdcursor mcp is already running (pid ${existingMcpPid}). Kill it first.\n`);
+      process.exit(1);
+    }
+
     // MCP mode: stdout is protocol, logs go to stderr
     const stderrWrite = (prefix: string, args: any[]) =>
       process.stderr.write(`${prefix}${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`);
@@ -744,6 +818,11 @@ program
     ctx.ensureInitialized().catch((err: any) => {
       console.error('Subsystem init failed:', err?.message);
     });
+
+    // Release pidfile on exit so a fresh restart can claim it immediately
+    const releaseMcp = () => { releasePidFile('mcp'); process.exit(0); };
+    process.on('SIGINT', releaseMcp);
+    process.on('SIGTERM', releaseMcp);
   });
 
 // ── Tool Server (model-agnostic, no LLM needed) ──
@@ -754,6 +833,13 @@ program
   .option('--port <port>', 'HTTP server port', '3847')
   .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
   .action(async (opts) => {
+    // Single-instance guard
+    const existingServePid = claimPidFile('serve');
+    if (existingServePid !== null) {
+      console.error(`${e('❌', '[ERR]')} clawdcursor serve is already running (pid ${existingServePid}). Run \`clawdcursor stop\` first.`);
+      process.exit(1);
+    }
+
     const { runOnboarding, hasConsent } = await import('./onboarding');
 
     // First-run consent — --skip-consent only works in development mode
@@ -816,6 +902,11 @@ program
 
     process.on('SIGINT', () => {
       console.log('\n   Shutting down...');
+      releasePidFile('serve');
+      process.exit(0);
+    });
+    process.on('SIGTERM', () => {
+      releasePidFile('serve');
       process.exit(0);
     });
   });
