@@ -159,8 +159,9 @@ const confirmSchema = z.object({
 });
 
 export function createServer(agent: Agent, config: ClawdConfig): express.Express {
-  // Generate auth token (only on actual server start, not on module import)
-  initServerToken();
+  // NOTE: initServerToken() is NOT called here — it's called from the listen
+  // callback in index.ts AFTER the port binds successfully. This prevents
+  // overwriting a valid token when start fails (e.g. EADDRINUSE).
 
   // Hook console to capture logs
   hookConsole();

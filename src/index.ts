@@ -195,11 +195,29 @@ program
       console.warn('Tool server not loaded:', (err as Error).message);
     }
 
+    // Pre-check: is the port already in use?
+    const net = await import('net');
+    const portFree = await new Promise<boolean>((resolve) => {
+      const tester = net.createServer()
+        .once('error', () => resolve(false))
+        .once('listening', () => { tester.close(); resolve(true); });
+      tester.listen(config.server.port, config.server.host);
+    });
+    if (!portFree) {
+      console.error(`\n${e('❌', '[ERR]')} Port ${config.server.port} is already in use.`);
+      console.error(`Another clawdcursor instance may be running.`);
+      console.error(`Run 'clawdcursor stop' first, or use --port <other_port>`);
+      process.exit(1);
+    }
+
     app.listen(config.server.port, config.server.host, async () => {
-      const { SERVER_TOKEN } = await import('./server');
+      // Generate auth token ONLY after port binds successfully
+      // This prevents overwriting a valid token when start fails (e.g. EADDRINUSE)
+      const { initServerToken } = await import('./server');
+      const serverToken = initServerToken();
       const tokenPath = require('path').join(require('os').homedir(), '.clawdcursor', 'token');
       console.log(`\n\x1b[32m${e('🌐', '[NET]')} API server:\x1b[0m http://${config.server.host}:${config.server.port}`);
-      console.log(`\x1b[33m${e('🔑', '[KEY]')} Auth token:\x1b[0m ${SERVER_TOKEN}`);
+      console.log(`\x1b[33m${e('🔑', '[KEY]')} Auth token:\x1b[0m ${serverToken}`);
       console.log(`\x1b[90m   (also saved to ${tokenPath})\x1b[0m`);
       console.log(`\nAgent endpoints:`);
       console.log(`  POST /task     — {"task": "Open Chrome and go to github.com"}`);
@@ -328,6 +346,14 @@ program
           headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ task: taskText }),
         });
+        if (res.status === 401) {
+          console.error('Auth failed (401). Token mismatch — run: clawdcursor stop && clawdcursor start');
+          return;
+        }
+        if (!res.ok) {
+          console.error(`Server error (${res.status}). Check server logs.`);
+          return;
+        }
         const data = await res.json();
         console.log(JSON.stringify(data, null, 2));
       } catch {
@@ -370,7 +396,16 @@ while ($true) {
         $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/task -Method POST -Headers $headers -Body $jsonBody
         $response | ConvertTo-Json -Depth 5
     } catch {
-        Write-Host "Failed to connect. Is clawdcursor start running?" -ForegroundColor Red
+        if ($_.Exception.Response) {
+            $code = [int]$_.Exception.Response.StatusCode
+            if ($code -eq 401) {
+                Write-Host 'Auth failed (401). Token mismatch. Run: clawdcursor stop then clawdcursor start' -ForegroundColor Red
+            } else {
+                Write-Host "Server error ($code). Check server logs." -ForegroundColor Red
+            }
+        } else {
+            Write-Host 'Failed to connect. Is clawdcursor start running?' -ForegroundColor Red
+        }
     }
     Write-Host ""
 }
