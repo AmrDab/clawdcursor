@@ -711,8 +711,8 @@ program
       const zodParams: Record<string, any> = {};
       for (const [key, def] of Object.entries(tool.parameters)) {
         let schema: any;
-        if (def.type === 'number') schema = z.number();
-        else if (def.type === 'boolean') schema = z.boolean();
+        if (def.type === 'number') schema = z.coerce.number();
+        else if (def.type === 'boolean') schema = z.coerce.boolean();
         else schema = z.string();
         if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
         schema = schema.describe(def.description);
@@ -720,20 +720,21 @@ program
         zodParams[key] = schema;
       }
 
-      server.tool(
-        tool.name,
-        tool.description,
-        Object.keys(zodParams).length > 0 ? zodParams : undefined as any,
-        async (params: any) => {
-          const result = await tool.handler(params, ctx);
-          const content: any[] = [];
-          if (result.image) {
-            content.push({ type: 'image', data: result.image.data, mimeType: result.image.mimeType });
-          }
-          content.push({ type: 'text', text: result.text });
-          return { content, isError: result.isError };
-        },
-      );
+      const handler = async (params: any) => {
+        const result = await tool.handler(params, ctx);
+        const content: any[] = [];
+        if (result.image) {
+          content.push({ type: 'image', data: result.image.data, mimeType: result.image.mimeType });
+        }
+        content.push({ type: 'text', text: result.text });
+        return { content, isError: result.isError };
+      };
+
+      if (Object.keys(zodParams).length > 0) {
+        server.tool(tool.name, tool.description, zodParams, handler);
+      } else {
+        server.tool(tool.name, tool.description, handler);
+      }
     }
 
     const transport = new StdioServerTransport();
