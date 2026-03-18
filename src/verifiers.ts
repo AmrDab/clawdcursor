@@ -20,6 +20,7 @@
 
 import { AccessibilityBridge } from './accessibility';
 import type { PipelineConfig } from './providers';
+import { callTextLLM } from './llm-client';
 
 export interface VerifyResult {
   pass: boolean;
@@ -397,47 +398,12 @@ STRICT RULES:
 
   private async callTextModel(prompt: string): Promise<string> {
     if (!this.pipelineConfig) throw new Error('No pipeline config');
-
-    const { model, baseUrl } = this.pipelineConfig.layer2;
-    const apiKey = this.pipelineConfig.apiKey;
-    const provider = this.pipelineConfig.provider;
-
-    if (provider.openaiCompat || baseUrl.includes('localhost') || baseUrl.includes('11434')) {
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...provider.authHeader(apiKey) },
-        body: JSON.stringify({
-          model,
-          max_tokens: 300,
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages: [{ role: 'user', content: prompt }],
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await res.json() as any;
-      if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error));
-      return data.choices?.[0]?.message?.content ?? '';
-    } else {
-      // Anthropic
-      const res = await fetch(`${baseUrl}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...provider.authHeader(apiKey) },
-        body: JSON.stringify({
-          model,
-          max_tokens: 300,
-          messages: [
-            { role: 'user', content: prompt },
-            { role: 'assistant', content: '{' },
-          ],
-        }),
-        signal: AbortSignal.timeout(10000),
-      });
-      const data = await res.json() as any;
-      if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error));
-      const text = data.content?.[0]?.text ?? '';
-      return text.startsWith('{') ? text : '{' + text;
-    }
+    return callTextLLM(this.pipelineConfig, {
+      user: prompt,
+      forceJson: true,
+      maxTokens: 300,
+      timeoutMs: 10000,
+    });
   }
 
   // ── Timing wrapper ───────────────────────────────────────────────────────────
