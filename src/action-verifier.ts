@@ -172,8 +172,9 @@ export class ActionVerifier {
 
     const cx = b.x + Math.floor(b.width / 2);
     const cy = b.y + Math.floor(b.height / 2);
+    const mc = this.desktop.physicalToMouse(cx, cy);
 
-    await this.desktop.mouseClick(cx, cy);
+    await this.desktop.mouseClick(mc.x, mc.y);
     this.a11y.invalidateCache();
 
     // Brief settle, then check if focus moved to the clicked element

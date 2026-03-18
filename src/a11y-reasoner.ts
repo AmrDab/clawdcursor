@@ -607,8 +607,9 @@ export class A11yReasoner {
           // Try a11y bounds first (0ms, 0 LLM cost)
           const boundsCoord = await this.clickResolver.resolve(parsed.target);
           if (boundsCoord) {
-            console.log(`   📐 Bounds click: "${parsed.target}" at (${boundsCoord.x}, ${boundsCoord.y})`);
-            await this.desktop.mouseClick(boundsCoord.x, boundsCoord.y);
+            const mc = this.desktop.physicalToMouse(boundsCoord.x, boundsCoord.y);
+            console.log(`   📐 Bounds click: "${parsed.target}" at (${mc.x}, ${mc.y})`);
+            await this.desktop.mouseClick(mc.x, mc.y);
             stepsTotal++;
             actionHistory.push({ action: 'need_visual', description: `Clicked "${parsed.target}" at (${boundsCoord.x}, ${boundsCoord.y}) via bounds — SUCCEEDED. Move to next step.` });
             this.a11y.invalidateCache();
@@ -1165,7 +1166,8 @@ export class A11yReasoner {
     }
 
     if (result.clickPoint) {
-      await this.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
+      const mc = this.desktop.physicalToMouse(result.clickPoint.x, result.clickPoint.y);
+      await this.desktop.mouseClick(mc.x, mc.y);
     }
   }
 

@@ -778,8 +778,9 @@ export class SmartInteractionLayer {
 
           // If PSRunner returned a clickPoint (no InvokePattern), do coordinate click
           if (a11yResult.clickPoint) {
-            await this.desktop.mouseClick(a11yResult.clickPoint.x, a11yResult.clickPoint.y);
-            return { action: 'click', description: `Click "${step.target}" at (${a11yResult.clickPoint.x},${a11yResult.clickPoint.y})`, success: true, timestamp: ts };
+            const mc = this.desktop.physicalToMouse(a11yResult.clickPoint.x, a11yResult.clickPoint.y);
+            await this.desktop.mouseClick(mc.x, mc.y);
+            return { action: 'click', description: `Click "${step.target}" at (${mc.x},${mc.y})`, success: true, timestamp: ts };
           }
 
           // FALLBACK: UIDriver (slower, but has more click strategies)

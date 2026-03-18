@@ -784,10 +784,11 @@ export class ActionRouter {
           // If a11y click failed but we have coordinates, click there
           if ((result as any).clickPoint) {
             const pt = (result as any).clickPoint;
-            await this.desktop.mouseClick(pt.x, pt.y);
+            const mc = this.desktop.physicalToMouse(pt.x, pt.y);
+            await this.desktop.mouseClick(mc.x, mc.y);
             return {
               handled: true,
-              description: `Clicked "${elementName}" at (${pt.x}, ${pt.y})`,
+              description: `Clicked "${elementName}" at (${mc.x}, ${mc.y})`,
             };
           }
         }
@@ -796,10 +797,11 @@ export class ActionRouter {
         if (el.bounds && el.bounds.width > 0) {
           const cx = el.bounds.x + Math.floor(el.bounds.width / 2);
           const cy = el.bounds.y + Math.floor(el.bounds.height / 2);
-          await this.desktop.mouseClick(cx, cy);
+          const mc = this.desktop.physicalToMouse(cx, cy);
+          await this.desktop.mouseClick(mc.x, mc.y);
           return {
             handled: true,
-            description: `Clicked "${elementName}" at center (${cx}, ${cy})`,
+            description: `Clicked "${elementName}" at center (${mc.x}, ${mc.y})`,
           };
         }
       }

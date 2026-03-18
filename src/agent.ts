@@ -1617,7 +1617,8 @@ Examples:
 
     // Coordinate fallback: bridge couldn't invoke but gave us bounds
     if (result.clickPoint) {
-      await this.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
+      const mc = this.desktop.physicalToMouse(result.clickPoint.x, result.clickPoint.y);
+      await this.desktop.mouseClick(mc.x, mc.y);
       this.a11y.invalidateCache();
     }
   }
