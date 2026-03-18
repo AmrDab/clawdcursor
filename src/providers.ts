@@ -117,6 +117,42 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     openaiCompat: true,
     computerUse: false,
   },
+  alibaba: {
+    name: 'Alibaba (Qwen/DashScope)',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'qwen-turbo',
+    visionModel: 'qwen-vl-max',
+    openaiCompat: true,
+    computerUse: false,
+  },
+  fireworks: {
+    name: 'Fireworks AI',
+    baseUrl: 'https://api.fireworks.ai/inference/v1',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'accounts/fireworks/models/llama-v3p1-70b-instruct',
+    visionModel: 'accounts/fireworks/models/llama-v3p2-90b-vision-instruct',
+    openaiCompat: true,
+    computerUse: false,
+  },
+  cohere: {
+    name: 'Cohere',
+    baseUrl: 'https://api.cohere.com/v2',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'command-r',
+    visionModel: 'command-r-plus',
+    openaiCompat: true,
+    computerUse: false,
+  },
+  perplexity: {
+    name: 'Perplexity',
+    baseUrl: 'https://api.perplexity.ai',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'llama-3.1-sonar-small-128k-online',
+    visionModel: 'llama-3.1-sonar-large-128k-online',
+    openaiCompat: true,
+    computerUse: false,
+  },
   generic: {
     name: 'OpenAI-Compatible',
     baseUrl: '', // set from config
@@ -142,6 +178,8 @@ export function detectProvider(apiKey: string, explicitProvider?: string): strin
   if (apiKey.startsWith('sk-ant-')) return 'anthropic';
   if (apiKey.startsWith('AIza')) return 'gemini';           // Google Gemini API keys start with AIza
   if (apiKey.startsWith('xai-')) return 'xai';             // xAI Grok
+  if (apiKey.startsWith('pplx-')) return 'perplexity';     // Perplexity
+  if (apiKey.startsWith('fw_')) return 'fireworks';         // Fireworks AI
   if (apiKey.startsWith('sk-') && apiKey.length > 60) return 'kimi'; // Kimi keys are longer than OpenAI
   if (apiKey.startsWith('sk-')) return 'openai';
   if (apiKey.startsWith('gsk_')) return 'groq';
@@ -270,13 +308,20 @@ function isOllamaVisionModel(modelId: string): boolean {
  * AI_API_KEY is a generic fallback; external config provider hints are preferred.
  */
 
-const PROVIDER_ENV_VARS: Record<string, string[]> = {
+export const PROVIDER_ENV_VARS: Record<string, string[]> = {
   anthropic: ['ANTHROPIC_API_KEY'],
   openai: ['OPENAI_API_KEY'],
   kimi: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
   groq: ['GROQ_API_KEY'],
   together: ['TOGETHER_API_KEY'],
   deepseek: ['DEEPSEEK_API_KEY'],
+  gemini: ['GEMINI_API_KEY', 'GOOGLE_API_KEY'],
+  mistral: ['MISTRAL_API_KEY'],
+  xai: ['XAI_API_KEY', 'GROK_API_KEY'],
+  alibaba: ['DASHSCOPE_API_KEY', 'ALIBABA_API_KEY', 'QWEN_API_KEY'],
+  fireworks: ['FIREWORKS_API_KEY'],
+  cohere: ['COHERE_API_KEY', 'CO_API_KEY'],
+  perplexity: ['PERPLEXITY_API_KEY', 'PPLX_API_KEY'],
 };
 
 /**
@@ -335,8 +380,20 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
                 'groq': 'groq',
                 'together': 'together',
                 'deepseek': 'deepseek',
+                'gemini': 'gemini',
+                'google': 'gemini',
+                'mistral': 'mistral',
+                'xai': 'xai',
+                'grok': 'xai',
+                'alibaba': 'alibaba',
+                'qwen': 'alibaba',
+                'dashscope': 'alibaba',
+                'fireworks': 'fireworks',
+                'cohere': 'cohere',
+                'perplexity': 'perplexity',
+                'pplx': 'perplexity',
               };
-              
+
               const clawdKey = providerMap[providerName];
               if (clawdKey && !externalProviderKeys[clawdKey]) {
                 externalProviderKeys[clawdKey] = { apiKey };
@@ -370,8 +427,20 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
                 'deepseek': 'deepseek',
                 'nvidia': 'nvidia',
                 'ollama': 'ollama',
+                'gemini': 'gemini',
+                'google': 'gemini',
+                'mistral': 'mistral',
+                'xai': 'xai',
+                'grok': 'xai',
+                'alibaba': 'alibaba',
+                'qwen': 'alibaba',
+                'dashscope': 'alibaba',
+                'fireworks': 'fireworks',
+                'cohere': 'cohere',
+                'perplexity': 'perplexity',
+                'pplx': 'perplexity',
               };
-              
+
               const clawdKey = providerMap[provName.toLowerCase()];
               if (clawdKey && externalProviderKeys[clawdKey] && baseUrl) {
                 externalProviderKeys[clawdKey].baseUrl = baseUrl;
@@ -606,10 +675,10 @@ export async function scanProviders(): Promise<ProviderScanResult[]> {
 }
 
 /** Text model preference: fastest/most-reliable first */
-const TEXT_MODEL_PREFERENCE: string[] = ['ollama', 'groq', 'together', 'deepseek', 'anthropic', 'openai', 'kimi'];
+const TEXT_MODEL_PREFERENCE: string[] = ['ollama', 'groq', 'fireworks', 'together', 'deepseek', 'alibaba', 'cohere', 'perplexity', 'anthropic', 'openai', 'kimi', 'gemini', 'mistral', 'xai'];
 
 /** Vision model preference: best vision capability first */
-const VISION_MODEL_PREFERENCE: string[] = ['anthropic', 'openai', 'groq', 'together', 'kimi', 'deepseek', 'ollama'];
+const VISION_MODEL_PREFERENCE: string[] = ['anthropic', 'openai', 'gemini', 'mistral', 'groq', 'fireworks', 'together', 'alibaba', 'cohere', 'perplexity', 'kimi', 'xai', 'deepseek', 'ollama'];
 
 /**
  * Given scan results and model test results, build the optimal mixed pipeline.

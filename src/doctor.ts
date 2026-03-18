@@ -20,6 +20,7 @@ import { NativeDesktop } from './native-desktop';
 import { AccessibilityBridge } from './accessibility';
 import {
   PROVIDERS,
+  PROVIDER_ENV_VARS,
   detectProvider,
   buildPipeline,
   scanProviders,
@@ -346,6 +347,13 @@ export async function runDoctor(opts: {
       groq: 'GROQ_API_KEY — https://console.groq.com (fast inference)',
       together: 'TOGETHER_API_KEY — https://api.together.xyz (open models)',
       deepseek: 'DEEPSEEK_API_KEY — https://platform.deepseek.com (reasoning)',
+      gemini: 'GEMINI_API_KEY — https://aistudio.google.com (Gemini Flash/Pro)',
+      mistral: 'MISTRAL_API_KEY — https://console.mistral.ai (Pixtral vision)',
+      xai: 'XAI_API_KEY — https://console.x.ai (Grok vision)',
+      alibaba: 'DASHSCOPE_API_KEY — https://dashscope.console.aliyun.com (Qwen)',
+      fireworks: 'FIREWORKS_API_KEY — https://fireworks.ai (fast open models)',
+      cohere: 'COHERE_API_KEY — https://dashboard.cohere.com (Command R)',
+      perplexity: 'PERPLEXITY_API_KEY — https://www.perplexity.ai (online search)',
     };
     for (const scan of unavailableCloud) {
       if (keyInfo[scan.key]) {
@@ -379,6 +387,10 @@ export async function runDoctor(opts: {
               anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY',
               kimi: 'MOONSHOT_API_KEY', groq: 'GROQ_API_KEY',
               together: 'TOGETHER_API_KEY', deepseek: 'DEEPSEEK_API_KEY',
+              gemini: 'GEMINI_API_KEY', mistral: 'MISTRAL_API_KEY',
+              xai: 'XAI_API_KEY', alibaba: 'DASHSCOPE_API_KEY',
+              fireworks: 'FIREWORKS_API_KEY', cohere: 'COHERE_API_KEY',
+              perplexity: 'PERPLEXITY_API_KEY',
             };
             const envVarName = envVarNames[detectedKey] || 'AI_API_KEY';
             const envLine = `${envVarName}=${trimmedKey}\n`;
@@ -1495,15 +1507,7 @@ export function loadPipelineConfig(): PipelineConfig | null {
     // Resolve API key: check provider-scoped env vars FIRST, then fall back to
     // generic resolution. This prevents OpenClaw auth-profiles (e.g. a stale
     // Anthropic key) from overriding the correct provider-specific key.
-    const providerEnvVars: Record<string, string[]> = {
-      anthropic: ['ANTHROPIC_API_KEY'],
-      openai: ['OPENAI_API_KEY'],
-      kimi: ['KIMI_API_KEY', 'MOONSHOT_API_KEY'],
-      groq: ['GROQ_API_KEY'],
-      together: ['TOGETHER_API_KEY'],
-      deepseek: ['DEEPSEEK_API_KEY'],
-    };
-    const scopedEnvKey = (providerEnvVars[providerKey] || [])
+    const scopedEnvKey = (PROVIDER_ENV_VARS[providerKey] || [])
       .map(k => process.env[k])
       .find(v => v && v.length > 0) || '';
     const resolvedDefault = resolveApiConfig();

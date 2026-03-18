@@ -87,6 +87,9 @@ function inferProviderFromBaseUrl(baseUrl?: string): string | undefined {
   if (url.includes('nvidia') || url.includes('integrate.api')) return 'nvidia';
   if (url.includes('mistral')) return 'mistral';
   if (url.includes('fireworks')) return 'fireworks';
+  if (url.includes('dashscope') || url.includes('alibaba') || url.includes('qwen')) return 'alibaba';
+  if (url.includes('cohere')) return 'cohere';
+  if (url.includes('perplexity') || url.includes('pplx')) return 'perplexity';
   // Unknown endpoint — still works, just no provider label
   return undefined;
 }
