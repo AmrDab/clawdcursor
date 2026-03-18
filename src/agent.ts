@@ -293,8 +293,9 @@ public class WinAPI {
     // Wrap the entire task pipeline with a global wall-clock timeout.
     // Individual layers have their own iteration limits, but a deadlocked
     // LLM call or runaway Computer Use loop could still exceed 10 min.
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<TaskResult>((resolve) => {
-      setTimeout(() => {
+      timeoutHandle = setTimeout(() => {
         this.aborted = true;
         console.warn(`\n⏱ Task timed out after ${Agent.TASK_TIMEOUT_MS / 60000} minutes`);
         resolve({
@@ -305,7 +306,13 @@ public class WinAPI {
       }, Agent.TASK_TIMEOUT_MS);
     });
 
-    return Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
+    try {
+      return await Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
+    } finally {
+      // Always clear the 10-minute timer so it doesn't keep the process alive
+      // and hold a closure reference to this Agent instance after the task ends.
+      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+    }
   }
 
   private async _executeTaskInternal(task: string, startTime: number): Promise<TaskResult> {
