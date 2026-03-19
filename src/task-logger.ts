@@ -13,6 +13,32 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TASK_LOGS_DIR } from './paths';
 
+// ─── Log Sanitization ────────────────────────────────────────
+// Redact API keys, Bearer tokens, and secret-like patterns from log text.
+// Gated behind CLAWD_DEBUG_RAW_LOGS=1 for debugging.
+
+const RAW_LOGS = process.env.CLAWD_DEBUG_RAW_LOGS === '1';
+
+const SENSITIVE_PATTERNS: [RegExp, string][] = [
+  [/sk-ant-[a-zA-Z0-9_-]{20,}/g, 'sk-ant-***REDACTED***'],
+  [/sk-[a-zA-Z0-9]{20,}/g, 'sk-***REDACTED***'],
+  [/Bearer\s+[a-zA-Z0-9._-]{20,}/g, 'Bearer ***REDACTED***'],
+  [/api[_-]?key\s*[:=]\s*\S{8,}/gi, 'api_key=***REDACTED***'],
+  [/xai-[a-zA-Z0-9]{20,}/g, 'xai-***REDACTED***'],
+  [/gsk_[a-zA-Z0-9]{20,}/g, 'gsk_***REDACTED***'],
+  [/fw_[a-zA-Z0-9]{20,}/g, 'fw_***REDACTED***'],
+  [/pplx-[a-zA-Z0-9]{20,}/g, 'pplx-***REDACTED***'],
+];
+
+function sanitizeLogText(text: string): string {
+  if (RAW_LOGS) return text;
+  let result = text;
+  for (const [pattern, replacement] of SENSITIVE_PATTERNS) {
+    result = result.replace(pattern, replacement);
+  }
+  return result;
+}
+
 // ─── Types ───────────────────────────────────────────────────
 
 export type PipelineLayer = 0 | 1 | 1.5 | 2 | 2.5 | 3 | 'preprocess' | 'decompose';
@@ -126,10 +152,10 @@ export class TaskLogger {
       actionType: entry.actionType,
       result: entry.result,
       ...(entry.actionParams && { actionParams: entry.actionParams }),
-      ...(entry.llmReasoning && { llmReasoning: entry.llmReasoning.substring(0, 500) }),
-      ...(entry.uiStateSummary && { uiStateSummary: entry.uiStateSummary.substring(0, 300) }),
+      ...(entry.llmReasoning && { llmReasoning: sanitizeLogText(entry.llmReasoning.substring(0, 500)) }),
+      ...(entry.uiStateSummary && { uiStateSummary: sanitizeLogText(entry.uiStateSummary.substring(0, 300)) }),
       ...(entry.verification && { verification: entry.verification }),
-      ...(entry.error && { error: entry.error.substring(0, 300) }),
+      ...(entry.error && { error: sanitizeLogText(entry.error.substring(0, 300)) }),
       ...(entry.durationMs !== undefined && { durationMs: entry.durationMs }),
     };
 

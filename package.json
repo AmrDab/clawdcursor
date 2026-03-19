@@ -7,15 +7,18 @@
     "clawdcursor": "dist/index.js"
   },
   "scripts": {
+    "postinstall": "node scripts/verify-install.js || true",
     "build": "tsc && node dist/postbuild.js",
-    "setup": "npm run build && npm link",
+    "setup": "node scripts/verify-install.js && npm run build && npm link",
     "postbuild:msg": "handled by postbuild.js",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js start",
     "stop": "node dist/index.js stop",
     "doctor": "node dist/index.js doctor",
     "lint": "eslint src/",
-    "test": "vitest"
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

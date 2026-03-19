@@ -6,14 +6,13 @@
  */
 
 import type { ToolDefinition } from './types';
-
-const CDP_PORT = 9223;
+import { DEFAULT_CDP_PORT } from '../browser-config';
 
 export function getCdpTools(): ToolDefinition[] {
   return [
     {
       name: 'cdp_connect',
-      description: `Connect to Edge/Chrome browser via Chrome DevTools Protocol (port ${CDP_PORT}). Must be called before other cdp_* tools. Use navigate_browser to launch Edge with CDP enabled.`,
+      description: `Connect to Edge/Chrome browser via Chrome DevTools Protocol (port ${DEFAULT_CDP_PORT}). Must be called before other cdp_* tools. Use navigate_browser to launch Edge with CDP enabled.`,
       parameters: {},
       category: 'browser',
       handler: async (_params, ctx) => {
@@ -24,7 +23,7 @@ export function getCdpTools(): ToolDefinition[] {
           const title = await ctx.cdp.getTitle();
           return { text: `Connected to: "${title}" at ${url}` };
         }
-        return { text: `Failed to connect to CDP on port ${CDP_PORT}. Use navigate_browser to launch Edge with CDP.`, isError: true };
+        return { text: `Failed to connect to CDP on port ${DEFAULT_CDP_PORT}. Use navigate_browser to launch Edge with CDP.`, isError: true };
       },
     },
 
@@ -150,14 +149,14 @@ export function getCdpTools(): ToolDefinition[] {
       category: 'browser',
       handler: async () => {
         try {
-          const resp = await fetch(`http://127.0.0.1:${CDP_PORT}/json`);
+          const resp = await fetch(`http://127.0.0.1:${DEFAULT_CDP_PORT}/json`);
           const tabs: any[] = await resp.json();
           const pages = tabs.filter((t: any) => t.type === 'page' && !t.url.startsWith('edge://') && !t.url.startsWith('chrome://'));
           if (!pages.length) return { text: '(no tabs found)' };
           const lines = pages.map((t: any, i: number) => `${i + 1}. "${t.title}" — ${t.url}`);
           return { text: lines.join('\n') };
         } catch {
-          return { text: `Cannot list tabs. Use navigate_browser first to launch Edge with CDP on port ${CDP_PORT}.`, isError: true };
+          return { text: `Cannot list tabs. Use navigate_browser first to launch Edge with CDP on port ${DEFAULT_CDP_PORT}.`, isError: true };
         }
       },
     },

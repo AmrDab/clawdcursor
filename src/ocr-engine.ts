@@ -14,6 +14,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { screen } from '@nut-tree-fork/nut-js';
@@ -145,7 +146,7 @@ export class OcrEngine {
       }).png().toBuffer();
 
       // Save to temp file — OS OCR reads from disk
-      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}.png`);
+      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
       fs.writeFileSync(tmpPath, pngBuffer);
 
       try {
@@ -195,7 +196,7 @@ export class OcrEngine {
         .png()
         .toBuffer();
 
-      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}.png`);
+      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
       fs.writeFileSync(tmpPath, pngBuffer);
 
       try {

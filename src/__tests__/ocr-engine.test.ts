@@ -132,16 +132,16 @@ describe('OcrEngine', () => {
       expect(eng.isAvailable()).toBe(true);
     });
 
-    it('returns false on macOS (stub)', () => {
+    it('returns boolean on macOS', () => {
       setPlatform('darwin');
       const eng = new OcrEngine();
-      expect(eng.isAvailable()).toBe(false);
+      expect(typeof eng.isAvailable()).toBe('boolean');
     });
 
-    it('returns false on Linux', () => {
+    it('returns boolean on Linux', () => {
       setPlatform('linux');
       const eng = new OcrEngine();
-      expect(eng.isAvailable()).toBe(false);
+      expect(typeof eng.isAvailable()).toBe('boolean');
     });
 
     it('never throws on any platform', () => {

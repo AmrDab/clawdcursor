@@ -278,8 +278,8 @@ program
       const serverToken = initServerToken();
       const tokenPath = require('path').join(require('os').homedir(), '.clawdcursor', 'token');
       console.log(`\n\x1b[32m${e('🌐', '[NET]')} API server:\x1b[0m http://${config.server.host}:${config.server.port}`);
-      console.log(`\x1b[33m${e('🔑', '[KEY]')} Auth token:\x1b[0m ${serverToken}`);
-      console.log(`\x1b[90m   (also saved to ${tokenPath})\x1b[0m`);
+      console.log(`\x1b[33m${e('🔑', '[KEY]')} Auth token:\x1b[0m ${serverToken.slice(0, 8)}...`);
+      console.log(`\x1b[90m   (full token saved to ${tokenPath})\x1b[0m`);
       console.log(`\nAgent endpoints:`);
       console.log(`  POST /task     — {"task": "Open Chrome and go to github.com"}`);
       console.log(`  GET  /status   — Agent state`);
@@ -758,10 +758,11 @@ async function createToolContext() {
   const { AccessibilityBridge } = await import('./accessibility');
   const { CDPDriver } = await import('./cdp-driver');
   const { DEFAULT_CONFIG } = await import('./types');
+  const { DEFAULT_CDP_PORT } = await import('./browser-config');
 
   const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
   const a11y = new AccessibilityBridge();
-  const cdp = new CDPDriver(9223);
+  const cdp = new CDPDriver(DEFAULT_CDP_PORT);
 
   let initialized = false;
   let initPromise: Promise<void> | null = null;
@@ -956,8 +957,8 @@ program
       console.log(`   Tool schemas: http://127.0.0.1:${port}/tools`);
       console.log(`   Documentation: http://127.0.0.1:${port}/docs`);
       console.log(`   Execute: POST http://127.0.0.1:${port}/execute/{tool_name}`);
-      console.log(`\n   ${e('🔑', '[KEY]')} Auth token: ${serveToken}`);
-      console.log(`   (saved to ~/.clawdcursor/token)`);
+      console.log(`\n   ${e('🔑', '[KEY]')} Auth token: ${serveToken.slice(0, 8)}...`);
+      console.log(`   (full token saved to ~/.clawdcursor/token)`);
       console.log(`   All POST endpoints require: Authorization: Bearer <token>`);
       console.log(`\n   Ready. Connect your AI model.\n`);
     });

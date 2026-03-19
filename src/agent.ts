@@ -82,6 +82,7 @@ export class Agent {
     stepsTotal: 0,
   };
   private aborted = false;
+  private taskExecutionLocked = false;
 
   constructor(config: ClawdConfig) {
     this.config = config;
@@ -377,14 +378,16 @@ public class WinAPI {
   private static readonly TASK_TIMEOUT_MS = 60 * 1000; // 60s — fast fail, diagnose, iterate
 
   async executeTask(task: string): Promise<TaskResult> {
-    // Atomic concurrency guard — prevent TOCTOU race on simultaneous /task requests
-    if (this.state.status !== 'idle') {
+    // Atomic concurrency guard — boolean lock prevents TOCTOU race
+    // where two simultaneous /task requests both see status === 'idle'
+    if (this.taskExecutionLocked || this.state.status !== 'idle') {
       return {
         success: false,
         steps: [{ action: 'error', description: 'Agent is busy', success: false, timestamp: Date.now() }],
         duration: 0,
       };
     }
+    this.taskExecutionLocked = true;
 
     this.aborted = false;
     const startTime = Date.now();
@@ -413,6 +416,7 @@ public class WinAPI {
       // Always clear the 10-minute timer so it doesn't keep the process alive
       // and hold a closure reference to this Agent instance after the task ends.
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
+      this.taskExecutionLocked = false;
     }
   }
 

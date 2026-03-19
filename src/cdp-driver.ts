@@ -23,12 +23,12 @@
  *   └─────────────────────────────┘
  *
  * Connection:
- *   Edge/Chrome must be launched with --remote-debugging-port=9222
+ *   Edge/Chrome must be launched with --remote-debugging-port=9223
  *   Or connect to an existing Playwright-managed browser's CDP endpoint.
  *
  * Usage:
  *   const cdp = new CDPDriver();
- *   await cdp.connect();  // connects to Edge/Chrome on port 9222
+ *   await cdp.connect();  // connects to Edge/Chrome on port 9223
  *
  *   // Click a button by text
  *   await cdp.clickByText('Compose');
@@ -45,8 +45,8 @@
 
 import { chromium, type Browser, type Page } from 'playwright';
 
-// ── Default CDP port (same as browser-layer.ts) ──
-const DEFAULT_CDP_PORT = 9222;
+// ── Default CDP port — matches browser-config.ts and tool launch flags ──
+const DEFAULT_CDP_PORT = 9223;
 
 // ── Types ──
 
@@ -106,7 +106,7 @@ export class CDPDriver {
   private cursorInjected = false;
 
   /**
-   * @param cdpPort CDP debugging port (default 9222)
+   * @param cdpPort CDP debugging port (default 9223)
    */
   constructor(cdpPort = DEFAULT_CDP_PORT) {
     this.cdpPort = cdpPort;
@@ -120,8 +120,8 @@ export class CDPDriver {
    * Connect to an existing Chrome/Edge instance via CDP.
    *
    * The browser must be launched with:
-   *   msedge.exe --remote-debugging-port=9222
-   *   chrome.exe --remote-debugging-port=9222
+   *   msedge.exe --remote-debugging-port=9223
+   *   chrome.exe --remote-debugging-port=9223
    *
    * @returns true if connected successfully
    */

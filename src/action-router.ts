@@ -670,11 +670,17 @@ export class ActionRouter {
   private async handleType(text: string): Promise<RouteResult> {
     try {
       // Use clipboard paste for longer text — avoids autocomplete interference in Notepad
-      if (text.length > 10) {
-        await this.a11y.writeClipboard(text);
-        await this.delay(50);
-        await this.desktop.keyPress(PLATFORM === 'darwin' ? 'Super+v' : 'Control+v');
-        await this.delay(200);
+      // Guard: writeClipboard may not exist if a11y bridge is unavailable
+      if (text.length > 10 && typeof this.a11y.writeClipboard === 'function') {
+        try {
+          await this.a11y.writeClipboard(text);
+          await this.delay(50);
+          await this.desktop.keyPress(PLATFORM === 'darwin' ? 'Super+v' : 'Control+v');
+          await this.delay(200);
+        } catch {
+          // Clipboard bridge failed — fall back to direct typing
+          await this.desktop.typeText(text);
+        }
       } else {
         await this.desktop.typeText(text);
       }

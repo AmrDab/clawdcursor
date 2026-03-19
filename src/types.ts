@@ -120,7 +120,7 @@ export interface ClawdConfig {
     executablePath?: string;
     /** Process name for accessibility matching (e.g. 'comet', 'brave') */
     processName?: string;
-    /** CDP debugging port (default: 9222) */
+    /** CDP debugging port (default: 9223) */
     cdpPort?: number;
     /** Additional command-line args for browser launch */
     extraArgs?: string[];
