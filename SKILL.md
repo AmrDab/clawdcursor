@@ -56,9 +56,68 @@ Every app already has a UI — clawdcursor gives you eyes and hands to use all o
 
 ---
 
-## Section 1: When to Use clawdcursor
+## Section 1: Task Routing — How to Pick the Right Approach
 
-Route tasks in this order — cheapest and most reliable first:
+### Decision flowchart: Which tool strategy to use?
+
+```
+Is this a multi-step GUI task (3+ interactions)?
+  YES → Is `clawdcursor start` running?
+    YES → Use delegate_to_agent (full autonomous pipeline)
+    NO  → Use smart_click / smart_type with processId (see below)
+  NO  → Is this a single click, type, or read?
+    YES → Use smart_click / smart_type / smart_read
+    NO  → Use open_app + key_press + type_text (basic tools)
+```
+
+### Strategy 1: delegate_to_agent (PREFERRED for complex tasks)
+
+**When:** Multi-step GUI workflows like "open Outlook, compose email, fill To/Subject/Body, send"
+
+**Why:** The agent has its own LLM (OCR Reasoner) that sees the screen, plans steps, recovers from errors, and handles popups. You describe the goal, it figures out the clicks.
+
+**Prerequisite:** `clawdcursor start` must be running on port 3847. If you get a connection error, tell the user to run `clawdcursor start` in a terminal first.
+
+```
+delegate_to_agent("open Outlook, send email to john@example.com saying hello")
+```
+
+The agent handles: app launch, window focus, button clicks, form filling, error recovery — all autonomously.
+
+### Strategy 2: smart_click / smart_type / smart_read (for targeted interactions)
+
+**When:** You know exactly which element to interact with, or delegate_to_agent isn't available.
+
+**CRITICAL:** Always pass `processId` to target the correct window. Without it, tools scan the foreground window (which is usually your IDE, not the target app).
+
+```
+# Step 1: Find the right window
+get_windows()  →  find the target app's PID
+
+# Step 2: Interact by element name (not coordinates!)
+smart_click("New event", processId=12345)
+smart_type("Add title", "Meeting notes", processId=12345)
+smart_click("Save", processId=12345)
+```
+
+**Fallback chain:** accessibility tree → OCR text match → coordinate click. You don't need to know which one works — it tries all three automatically.
+
+### Strategy 3: Manual tool orchestration (last resort)
+
+**When:** smart tools can't find elements, or you need precise coordinate control.
+
+```
+# Read the screen to understand layout
+desktop_screenshot()  →  see what's visible
+read_screen()         →  get accessibility tree with coordinates
+
+# Interact with coordinates from screenshot
+mouse_click(x, y)    →  click at specific position
+type_text("hello")   →  type into focused element
+key_press("ctrl+s")  →  keyboard shortcut
+```
+
+### General routing — cheapest first
 
 1. **Native tools first** — API call, CLI command, filesystem read/write, or web fetch. Faster, cheaper, more reliable.
 2. **Browser-native next** — if the task is browser-only and you have direct browser tools (Playwright, Puppeteer), use those.
