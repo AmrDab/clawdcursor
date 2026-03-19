@@ -1,6 +1,6 @@
 {
   "name": "clawdcursor",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "OS-level desktop automation server. Gives any AI model eyes, hands, and ears on a real computer. Model-agnostic — works with Claude, GPT, Gemini, Llama, or any tool-calling model.",
   "main": "dist/index.js",
   "bin": {
@@ -9,7 +9,7 @@
   "scripts": {
     "postinstall": "node scripts/verify-install.js || true",
     "build": "tsc && node dist/postbuild.js",
-    "setup": "node scripts/verify-install.js && npm run build && npm link",
+    "setup": "node scripts/verify-install.js && npm run build && npm link --force",
     "postbuild:msg": "handled by postbuild.js",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js start",

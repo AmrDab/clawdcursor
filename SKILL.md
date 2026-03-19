@@ -1,6 +1,6 @@
 ---
 name: clawdcursor
-version: 0.7.1
+version: 0.7.2
 description: >
   OS-level desktop automation server. 40 tools for controlling any application
   on Windows/macOS/Linux. Model-agnostic — works with any AI that can do
@@ -257,7 +257,7 @@ Wait 2 seconds, then verify:
 curl http://localhost:3847/health
 ```
 
-Expected: `{"status":"ok","version":"0.7.1"}`
+Expected: `{"status":"ok","version":"0.7.2"}`
 
 If Chrome CDP is not available on port 9222, launch Chrome yourself:
 
