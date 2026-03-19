@@ -115,6 +115,16 @@ export interface ClawdConfig {
   };
   /** Save screenshots to debug/ folder. Off by default for security. */
   debug?: boolean;
+  browser?: {
+    /** Custom browser executable path (overrides auto-detection) */
+    executablePath?: string;
+    /** Process name for accessibility matching (e.g. 'comet', 'brave') */
+    processName?: string;
+    /** CDP debugging port (default: 9222) */
+    cdpPort?: number;
+    /** Additional command-line args for browser launch */
+    extraArgs?: string[];
+  };
 }
 
 export const DEFAULT_CONFIG: ClawdConfig = {

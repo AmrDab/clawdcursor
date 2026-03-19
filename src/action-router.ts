@@ -14,6 +14,7 @@ import { NativeDesktop } from './native-desktop';
 import { normalizeKey } from './keys';
 import { findShortcut } from './shortcuts';
 import type { WindowInfo } from './accessibility';
+import { getBrowserProcessNames, getCDPPort, getBrowserExePath } from './browser-config';
 
 const execFileAsync = promisify(execFile);
 
@@ -81,7 +82,7 @@ const APP_ALIASES: Record<string, { processNames: string[]; searchTerm: string; 
 };
 
 /** Browser process names for URL navigation */
-const BROWSER_PROCESSES = ['chrome', 'msedge', 'firefox', 'brave', 'opera'];
+const BROWSER_PROCESSES = getBrowserProcessNames();
 
 /** Readiness polling config */
 const READY_POLL_INTERVAL = 300;  // ms between polls
@@ -343,16 +344,19 @@ export class ActionRouter {
    * Returns null if direct launch fails (caller falls back to Start Menu).
    */
   private async launchBrowserDirect(normalized: string, windowsBefore: WindowInfo[]): Promise<RouteResult | null> {
+    const customExe = getBrowserExePath();
     const isChrome = /chrome/i.test(normalized);
-    const exePaths = isChrome
-      ? [
-          'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-          'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-        ]
-      : [
-          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        ];
+    const exePaths = customExe
+      ? [customExe]
+      : isChrome
+        ? [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+          ]
+        : [
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+          ];
 
     const searchTerm = isChrome ? 'Chrome' : 'Edge';
 
@@ -562,24 +566,28 @@ export class ActionRouter {
   // ─── Helper: Launch Edge with CDP port ─────────────────────────────
 
   /**
-   * Try to launch Edge with --remote-debugging-port=9222 so CDPDriver can connect.
-   * Tries common installation paths. Returns true if launched successfully.
+   * Try to launch a browser with --remote-debugging-port so CDPDriver can connect.
+   * Uses configured exe path if set, otherwise tries common Edge installation paths.
    */
   private async launchEdgeWithCDP(url: string): Promise<boolean> {
-    const edgePaths = [
-      'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-      'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-    ];
-    for (const edgePath of edgePaths) {
+    const cdpPort = getCDPPort();
+    const customExe = getBrowserExePath();
+    const browserPaths = customExe
+      ? [customExe]
+      : [
+          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+        ];
+    for (const browserPath of browserPaths) {
       try {
-        spawn(edgePath, [
-          '--remote-debugging-port=9222',
+        spawn(browserPath, [
+          `--remote-debugging-port=${cdpPort}`,
           '--no-first-run',
           '--no-default-browser-check',
           '--disable-session-crashed-bubble',
           url,
         ], { detached: true, stdio: 'ignore' }).unref();
-        console.log(`   🔌 Launched Edge with CDP port 9222 — ${url}`);
+        console.log(`   🔌 Launched browser with CDP port ${cdpPort} — ${url}`);
         return true;
       } catch {
         continue;
@@ -720,7 +728,7 @@ export class ActionRouter {
           await this.delay(2500);
           return {
             handled: true,
-            description: `Opened ${fullUrl} in Edge (CDP port 9222 enabled for DOM interaction)`,
+            description: `Opened ${fullUrl} in browser (CDP port ${getCDPPort()} enabled for DOM interaction)`,
           };
         }
         // Fall back to OS default browser

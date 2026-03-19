@@ -21,6 +21,7 @@
 import { AccessibilityBridge } from './accessibility';
 import type { PipelineConfig } from './providers';
 import { callTextLLM } from './llm-client';
+import { getBrowserProcessRegex } from './browser-config';
 
 export interface VerifyResult {
   pass: boolean;
@@ -355,7 +356,7 @@ STRICT RULES:
       const title = (activeWin?.title || '').toLowerCase();
       const pn = (activeWin?.processName || '').toLowerCase();
 
-      if (!/msedge|chrome|firefox/i.test(pn)) {
+      if (!getBrowserProcessRegex().test(pn)) {
         return {
           pass: false,
           method: 'navigation_check',

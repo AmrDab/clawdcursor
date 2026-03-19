@@ -21,6 +21,7 @@ import { AccessibilityBridge } from './accessibility';
 import { SafetyLayer } from './safety';
 import { normalizeKeyCombo } from './keys';
 import type { ClawdConfig, StepResult } from './types';
+import { getBrowserProcessNames } from './browser-config';
 
 const BETA_HEADER = 'computer-use-2025-01-24';
 const MAX_ITERATIONS = 20;
@@ -1432,7 +1433,7 @@ Fix the specific missed step. Do NOT repeat steps that already succeeded.`,
       let header = '';
       if (activeWindow) {
         header = `FOCUSED: [${activeWindow.processName}] "${activeWindow.title}" (pid:${activeWindow.processId})\n`;
-        const browserProcesses = ['chrome', 'msedge', 'firefox', 'brave', 'opera'];
+        const browserProcesses = getBrowserProcessNames();
         if (browserProcesses.some(b => activeWindow.processName.toLowerCase().includes(b))) {
           header += `BROWSER DETECTED — use ctrl+l to navigate, ctrl+t for new tab\n`;
         }

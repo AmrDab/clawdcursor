@@ -21,10 +21,11 @@ import type { PipelineConfig } from './providers';
 import { callTextLLM } from './llm-client';
 import type { InputAction, A11yAction } from './types';
 import { CDPDriver } from './cdp-driver';
+import { getBrowserProcessRegex, getCDPPort } from './browser-config';
 
 const MAX_LOOP_STEPS = 50;  // text LLM stays in control — vision is its coordinate tool
 const SETTLE_MS      = 300; // wait after action before re-reading tree
-const BROWSER_PROCESS_RE = /msedge|chrome|chromium/i; // shared regex — avoids duplicating in 4+ places
+const BROWSER_PROCESS_RE = getBrowserProcessRegex(); // shared regex — avoids duplicating in 4+ places
 const MAX_ACTION_HISTORY = 40; // cap action history to prevent unbounded growth
 
 const SYSTEM_PROMPT = `You control a Windows desktop via the accessibility tree and keyboard. You are an AUTONOMOUS REASONING AGENT. At EVERY step you must:
@@ -346,7 +347,7 @@ export class A11yReasoner {
         // Pre-flight: On step 0, connect CDP and find the right tab
         if (step === 0 && processName && BROWSER_PROCESS_RE.test(processName)) {
           try {
-            const cdp = this.cdpDriver ?? new CDPDriver(9222);
+            const cdp = this.cdpDriver ?? new CDPDriver(getCDPPort());
             if (!this.cdpDriver) this.cdpDriver = cdp;
             const connected = await cdp.isConnected().catch(() => false) || await cdp.connect().catch(() => false);
             if (connected) {
@@ -1260,7 +1261,7 @@ export class A11yReasoner {
     if (this.cdpAvailable === false) return null;
     try {
       if (!this.cdpDriver) {
-        this.cdpDriver = new CDPDriver(9222);
+        this.cdpDriver = new CDPDriver(getCDPPort());
       }
       const connected = await this.cdpDriver.isConnected();
       if (!connected) {
@@ -1315,12 +1316,12 @@ export class A11yReasoner {
   /** Ensure CDPDriver is connected; throws if unavailable */
   private async ensureCdp(): Promise<CDPDriver> {
     if (!this.cdpDriver || !(await this.cdpDriver.isConnected())) {
-      this.cdpDriver = new CDPDriver(9222);
+      this.cdpDriver = new CDPDriver(getCDPPort());
       const ok = await this.cdpDriver.connect();
       if (!ok) {
         this.cdpAvailable = false;
         this.cdpDriver = null;
-        throw new Error('CDPDriver: cannot connect to Edge/Chrome on port 9222');
+        throw new Error(`CDPDriver: cannot connect to browser on port ${getCDPPort()}`);
       }
       this.cdpAvailable = true;
     }

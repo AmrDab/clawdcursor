@@ -14,6 +14,7 @@
 
 import type { ToolDefinition, ToolContext } from './types';
 import { OcrEngine } from '../ocr-engine';
+import { getBrowserProcessNames } from '../browser-config';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -199,7 +200,7 @@ export function getSmartTools(): ToolDefinition[] {
         // Detect active window and check traits
         const activeWin = await ctx.a11y.getActiveWindow().catch(() => null);
         const appName = activeWin?.processName?.toLowerCase() || '';
-        const isBrowser = ['msedge', 'chrome', 'firefox', 'brave', 'arc', 'safari'].includes(appName);
+        const isBrowser = getBrowserProcessNames().includes(appName);
         const emptyA11y = EMPTY_A11Y_APPS.has(appName);
 
         // ── Step 1: OCR + a11y in parallel ──

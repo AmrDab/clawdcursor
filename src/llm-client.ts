@@ -15,6 +15,27 @@
 
 import type { PipelineConfig } from './providers';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// LLM Error Classes
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export class LLMError extends Error { constructor(msg: string) { super(msg); this.name = 'LLMError'; } }
+export class LLMAuthError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMAuthError'; } }
+export class LLMBillingError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMBillingError'; } }
+export class LLMRateLimitError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMRateLimitError'; } }
+export class LLMModelNotFoundError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMModelNotFoundError'; } }
+export class LLMServerError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMServerError'; } }
+
+/** Check HTTP status and throw typed LLM errors. */
+function throwOnHttpError(status: number, model: string, errBody: string): void {
+  if (status === 401) throw new LLMAuthError(`Authentication failed (401). Check your API key for ${model}.`);
+  if (status === 402) throw new LLMBillingError(`Payment required (402). Your API credits may be exhausted for ${model}.`);
+  if (status === 429) throw new LLMRateLimitError(`Rate limited (429). Try again shortly or switch providers.`);
+  if (status === 404) throw new LLMModelNotFoundError(`Model not found (404). Check model name: ${model}.`);
+  if (status >= 500) throw new LLMServerError(`Server error (${status}). Provider may be experiencing issues.`);
+  throw new LLMError(`API error (${status}): ${errBody.substring(0, 200)}`);
+}
+
 // ─── Public option types ──────────────────────────────────────────────────────
 
 export interface TextLLMOptions {
@@ -121,6 +142,8 @@ async function _callText(opts: InternalCallOptions): Promise<string> {
 
       return result;
     } catch (err) {
+      // Don't retry auth/billing errors — they won't resolve on retry
+      if (err instanceof LLMAuthError || err instanceof LLMBillingError) throw err;
       if (attempt < retries) {
         console.warn(`   ⚠️ LLM text call attempt ${attempt + 1} failed: ${err}`);
         const backoff = Math.min(1000 * Math.pow(2, attempt), 8000) + Math.random() * 1000;
@@ -183,8 +206,12 @@ async function _callOpenAI(p: {
   }
 
   const response = await fetch(`${p.baseUrl}/chat/completions`, fetchOpts);
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    throwOnHttpError(response.status, p.model, errBody);
+  }
   const data = await response.json() as any;
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  if (data.error) throw new LLMError(data.error.message || JSON.stringify(data.error));
   const msg = data.choices?.[0]?.message;
   // kimi-k2.5 and other reasoning models may return empty content with reasoning_content.
   // Fall back to reasoning_content when content is empty.
@@ -250,8 +277,12 @@ async function _callAnthropic(p: {
   }
 
   const response = await fetch(`${p.baseUrl}/messages`, fetchOpts);
+  if (!response.ok) {
+    const errBody = await response.text().catch(() => '');
+    throwOnHttpError(response.status, p.model, errBody);
+  }
   const data = await response.json() as any;
-  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  if (data.error) throw new LLMError(data.error.message || JSON.stringify(data.error));
   const text = data.content?.[0]?.text || '';
 
   // When forceJson, prepend the '{' back since the API only returns the continuation
@@ -259,28 +290,6 @@ async function _callAnthropic(p: {
     return text.startsWith('{') ? text : '{' + text;
   }
   return text;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// LLM Error Classes
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export class LLMError extends Error { constructor(msg: string) { super(msg); this.name = 'LLMError'; } }
-export class LLMAuthError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMAuthError'; } }
-export class LLMBillingError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMBillingError'; } }
-export class LLMRateLimitError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMRateLimitError'; } }
-export class LLMModelNotFoundError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMModelNotFoundError'; } }
-export class LLMServerError extends LLMError { constructor(msg: string) { super(msg); this.name = 'LLMServerError'; } }
-
-/** Check HTTP status and throw typed errors. */
-function checkHttpStatus(status: number, body: string): void {
-  if (status >= 200 && status < 300) return;
-  if (status === 401) throw new LLMAuthError(`Auth failed (401) — check API key. ${body.substring(0, 100)}`);
-  if (status === 402) throw new LLMBillingError(`Credits exhausted (402). ${body.substring(0, 100)}`);
-  if (status === 429) throw new LLMRateLimitError(`Rate limited (429). ${body.substring(0, 100)}`);
-  if (status === 404) throw new LLMModelNotFoundError(`Model not found (404). ${body.substring(0, 100)}`);
-  if (status >= 500) throw new LLMServerError(`Server error (${status}). ${body.substring(0, 100)}`);
-  throw new LLMError(`API error (${status}): ${body.substring(0, 200)}`);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -434,7 +443,7 @@ async function _callVisionOpenAI(p: DirectVisionLLMOptions & { authHeaders: Reco
   const response = await fetch(`${p.baseUrl}/chat/completions`, fetchOpts);
   if (!response.ok) {
     const errBody = await response.text().catch(() => '');
-    checkHttpStatus(response.status, errBody);
+    throwOnHttpError(response.status, p.model, errBody);
   }
   const data = await response.json() as any;
   if (data.error) throw new LLMError(data.error.message || JSON.stringify(data.error));
@@ -490,7 +499,7 @@ async function _callVisionAnthropic(p: DirectVisionLLMOptions & { authHeaders: R
   const response = await fetch(`${p.baseUrl}/messages`, fetchOpts);
   if (!response.ok) {
     const errBody = await response.text().catch(() => '');
-    checkHttpStatus(response.status, errBody);
+    throwOnHttpError(response.status, p.model, errBody);
   }
 
   // Streaming path: read SSE events, return when complete JSON detected

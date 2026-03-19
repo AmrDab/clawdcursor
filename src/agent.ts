@@ -48,7 +48,8 @@ import { DeterministicFlows } from './deterministic-flows';
 import { BrowserLayer } from './browser-layer';
 import { loadPipelineConfig } from './doctor';
 import { detectProvider, type PipelineConfig } from './providers';
-import { callTextLLM } from './llm-client';
+import { getBrowserExePath, getBrowserProcessRegex } from './browser-config';
+import { callTextLLM, LLMBillingError, LLMAuthError } from './llm-client';
 import type { ClawdConfig, AgentState, TaskResult, StepResult, InputAction, A11yAction } from './types';
 
 const MAX_STEPS = 15;
@@ -235,10 +236,13 @@ export class Agent {
    */
   private async launchBrowserWithUrl(browser: string, url: string): Promise<boolean> {
     if (process.platform !== 'win32') return false;
+    const customExe = getBrowserExePath(this.config);
     const isChrome = /chrome/i.test(browser);
-    const exePaths = isChrome
-      ? ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe']
-      : ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'];
+    const exePaths = customExe
+      ? [customExe]
+      : isChrome
+        ? ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe']
+        : ['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'];
     const { existsSync } = await import('fs');
     for (const exePath of exePaths) {
       if (!existsSync(exePath)) continue;
@@ -274,7 +278,8 @@ export class Agent {
    */
   private async navigateBrowserToUrl(url: string): Promise<void> {
     const windows = await this.a11y.getWindows().catch(() => []);
-    const browserWin = windows.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
+    const browserRe = getBrowserProcessRegex(this.config);
+    const browserWin = windows.find(w => browserRe.test(w.processName) && !w.isMinimized);
     if (browserWin) {
       await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => null);
       await new Promise(r => setTimeout(r, 400));
@@ -862,6 +867,8 @@ Examples:
         contextHints: parsed.contextHints || [],
       };
     } catch (err) {
+      // Propagate auth/billing errors so the task fails immediately with a clear message
+      if (err instanceof LLMBillingError || err instanceof LLMAuthError) throw err;
       const elapsed = Date.now() - startTime;
       console.log(`   ⚠️ Pre-processor failed: ${err} — proceeding with raw task`);
       this.logger.logStep({ layer: 'preprocess', actionType: 'llm_preprocess', result: 'fail', durationMs: elapsed, error: String(err).substring(0, 200) });
@@ -897,6 +904,22 @@ Examples:
       console.log(`\n⏱️  Task took ${(result.duration / 1000).toFixed(1)}s with ${cuResult.steps.length} steps (${cuResult.llmCalls} LLM call(s))`);
       return result;
     } catch (err) {
+      if (err instanceof LLMBillingError) {
+        console.error(`\n❌ API credits exhausted — task cannot proceed.`);
+        return {
+          success: false,
+          steps: [{ action: 'error', description: `API credits exhausted: ${err.message}`, success: false, timestamp: Date.now() }],
+          duration: Date.now() - startTime,
+        };
+      }
+      if (err instanceof LLMAuthError) {
+        console.error(`\n❌ API authentication failed — check your API key.`);
+        return {
+          success: false,
+          steps: [{ action: 'error', description: `API auth failed: ${err.message}`, success: false, timestamp: Date.now() }],
+          duration: Date.now() - startTime,
+        };
+      }
       console.error(`\n❌ Computer Use crashed:`, err);
       return {
         success: false,
@@ -1018,14 +1041,15 @@ Examples:
         continue;
       }
 
-      // If this is a browser task, ensure Edge has focus before Layer 2 reads the active window.
+      // If this is a browser task, ensure the browser has focus before Layer 2 reads the active window.
       // The preprocessor navigates but may leave the terminal with focus.
-      const isBrowserTask = priorContext?.some(c => /navigated to|opened.*edge|opened.*chrome/i.test(c));
+      const browserProcessRe = getBrowserProcessRegex(this.config);
+      const isBrowserTask = priorContext?.some(c => /navigated to|opened.*(?:edge|chrome|browser)/i.test(c));
       let browserProcessName: string | undefined;
       if (isBrowserTask) {
         try {
           const windows = await this.a11y?.getWindows().catch(() => []) ?? [];
-          const edgeWin = windows.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
+          const edgeWin = windows.find(w => browserProcessRe.test(w.processName) && !w.isMinimized);
           if (edgeWin) {
             browserProcessName = edgeWin.processName; // remember target process
             // Try focus up to 3 times with increasing delay
@@ -1033,7 +1057,7 @@ Examples:
               await this.a11y?.focusWindow(undefined, edgeWin.processId).catch(() => null);
               await this.delay(500 + attempt * 300);
               const checkWin = await this.a11y?.getActiveWindow().catch(() => null);
-              if (checkWin && /msedge|chrome/i.test(checkWin.processName)) break;
+              if (checkWin && browserProcessRe.test(checkWin.processName)) break;
             }
           }
         } catch { /* non-critical */ }
@@ -1272,6 +1296,8 @@ Examples:
             steps.push(...cuResult.steps);
             llmCallCount += cuResult.llmCalls;
           } catch (err) {
+            // Propagate auth/billing errors to the outer catch for clear messaging
+            if (err instanceof LLMBillingError || err instanceof LLMAuthError) throw err;
             const cuDuration = Date.now() - cuStart;
             console.log(`[CU] Step ${i + 1}: → CRASHED: ${err}`);
             this.logger.logStep({
@@ -1308,6 +1334,8 @@ Examples:
             steps.push(...cuResult.steps);
             llmCallCount += cuResult.llmCalls;
           } catch (err) {
+            // Propagate auth/billing errors to the outer catch for clear messaging
+            if (err instanceof LLMBillingError || err instanceof LLMAuthError) throw err;
             const cuDuration = Date.now() - cuStart;
             console.log(`[CU] Step ${i + 1}: → CRASHED: ${err}`);
             this.logger.logStep({
@@ -1385,6 +1413,25 @@ Examples:
     return result;
 
     } catch (err) {
+      // Auth/billing errors: fail immediately with a clear, actionable message
+      if (err instanceof LLMBillingError) {
+        console.error(`\n❌ API credits exhausted — task cannot proceed. Top up your account or switch providers.`);
+        this.logger.endTask('failed');
+        return {
+          success: false,
+          steps: [...steps, { action: 'error', description: `API credits exhausted: ${err.message}`, success: false, timestamp: Date.now() }],
+          duration: Date.now() - startTime,
+        };
+      }
+      if (err instanceof LLMAuthError) {
+        console.error(`\n❌ API authentication failed — check your API key.`);
+        this.logger.endTask('failed');
+        return {
+          success: false,
+          steps: [...steps, { action: 'error', description: `API auth failed: ${err.message}`, success: false, timestamp: Date.now() }],
+          duration: Date.now() - startTime,
+        };
+      }
       console.error(`\n❌ Decompose+Route crashed:`, err);
       this.logger.endTask('failed');
       return {

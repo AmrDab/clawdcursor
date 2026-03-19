@@ -15,9 +15,10 @@
 import { OcrEngine, type OcrResult, type OcrElement } from './ocr-engine';
 import { NativeDesktop } from './native-desktop';
 import { AccessibilityBridge, type UIElement } from './accessibility';
-import { callTextLLMDirect } from './llm-client';
+import { callTextLLMDirect, LLMBillingError, LLMAuthError } from './llm-client';
 import type { PipelineConfig } from './providers';
 import type { StepResult } from './types';
+import { getBrowserProcessRegex } from './browser-config';
 
 const MAX_OCR_STEPS = 20;     // max actions before giving up
 const MAX_OCR_TIME_MS = 55000; // 55s wall-clock — leave 5s margin within 60s task timeout
@@ -135,17 +136,18 @@ export class OcrReasoner {
     // Pre-focus: if priorContext says a browser/app was opened, find and focus it BEFORE
     // we start the OCR loop. Set targetWindow directly to avoid getActiveWindow() latching
     // onto whatever random window has focus (File Explorer, Settings, etc.).
-    if (priorContext?.some(c => /navigated to|opened.*edge|opened.*chrome|browser.*focused/i.test(c))) {
+    const browserRe = getBrowserProcessRegex();
+    if (priorContext?.some(c => /navigated to|opened.*(?:edge|chrome|browser)|browser.*focused/i.test(c))) {
       try {
         const wins = await this.a11y.getWindows().catch(() => []);
-        const browserWin = wins.find(w => /msedge|chrome/i.test(w.processName) && !w.isMinimized);
+        const browserWin = wins.find(w => browserRe.test(w.processName) && !w.isMinimized);
         if (browserWin) {
           // Try focus multiple times — Windows focus-stealing prevention can block single attempts
           for (let attempt = 0; attempt < 3; attempt++) {
             await this.a11y.focusWindow(undefined, browserWin.processId).catch(() => {});
             await new Promise(r => setTimeout(r, 300 + attempt * 200));
             const check = await this.a11y.getActiveWindow().catch(() => null);
-            if (check && /msedge|chrome/i.test(check.processName)) break;
+            if (check && browserRe.test(check.processName)) break;
           }
           // Set target window directly — don't rely on getActiveWindow() in step 0
           targetWindow = {
@@ -320,6 +322,14 @@ export class OcrReasoner {
       try {
         llmResponse = await this.callOcrLLM(contextMessages);
       } catch (err: any) {
+        if (err instanceof LLMBillingError) {
+          console.error(`   [OCR Reasoner] Credits exhausted — OCR Reasoner aborting`);
+          return { handled: false, success: false, description: 'Credits exhausted — OCR Reasoner aborting', steps: stepCount, actionLog };
+        }
+        if (err instanceof LLMAuthError) {
+          console.error(`   [OCR Reasoner] Auth failed — check API key`);
+          return { handled: false, success: false, description: 'Auth failed — check API key', steps: stepCount, actionLog };
+        }
         console.error(`   [OCR Reasoner] LLM call failed: ${err.message}`);
         return {
           handled: false,
