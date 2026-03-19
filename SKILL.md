@@ -439,18 +439,17 @@ Then poll for completion:
 
 ### Verifying actions succeeded
 
-After every action, verify it worked. Do not assume success:
+See **Section 1 → Verification** for the 5 verification methods ranked by cost. Quick reference:
 
 ```
-type_text("Hello")             Type something
-read_screen()                  Read back — is "Hello" in the focused element?
-
-smart_click("Send")            Click a button
-read_screen()                  Did the UI change? Is the button gone?
-
-navigate_browser(url)          Go to a page
-cdp_read_text()                Did the page actually load?
+1. Check tool return value     →  free, already in the response
+2. Window state check          →  get_active_window(), get_focused_element()
+3. Text presence check         →  read_screen(), ocr_read_screen(), smart_read()
+4. Visual verification         →  desktop_screenshot()
+5. Negative check              →  look for error dialogs, wrong window, unchanged screen
 ```
+
+**Always verify** after irreversible actions (send, save, delete, purchase). **Spot-check** after navigation. **Skip** for mid-sequence keystrokes.
 
 ---
 
@@ -624,14 +623,24 @@ mouse_click(500, 400)          Click into the document body
 type_text("Your text here")   Clipboard paste works on canvas
 ```
 
-### Verify an action succeeded
+### Verify an action succeeded (example flow)
 
 ```
-smart_click("Send")
+smart_click("Send", processId=PID)
 wait(1)
-smart_read()                   Check — did "Message sent" appear?
-                               Did the Send button disappear?
-                               Did the UI transition to the next state?
+
+# Method 1: Check return value — did smart_click find and click the element?
+# Method 2: Window state — did a new dialog or confirmation appear?
+get_windows()
+
+# Method 3: Text check — is "Message sent" visible? Is the "Send" button gone?
+read_screen(processId=PID)
+
+# Method 4: Visual — take a screenshot if text methods are inconclusive
+desktop_screenshot()
+
+# Method 5: Negative — any error dialog? Wrong window in foreground?
+get_active_window()
 ```
 
 ---
