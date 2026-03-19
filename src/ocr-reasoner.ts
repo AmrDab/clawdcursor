@@ -805,6 +805,7 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
       case 'wait': return `Wait ${action.ms}ms: ${action.reason}`;
       case 'done': return `Done: ${action.evidence}`;
       case 'cannot_read': return `Cannot read: ${action.reason}`;
+      default: return `${(action as any).action}: ${(action as any).description ?? 'unknown'}`;
     }
   }
 }

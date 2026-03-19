@@ -1174,7 +1174,7 @@ Examples:
             layer: 2.5,
             actionType: 'ocr_reason',
             result: 'fail',
-            actionParams: { subtask, steps: ocrResult.steps, actions: ocrResult.actionLog.map(a => `${a.action}:${a.description.substring(0,80)}`).join(' | ') },
+            actionParams: { subtask, steps: ocrResult.steps, actions: ocrResult.actionLog.map(a => `${a.action}:${(a.description ?? 'unknown').substring(0,80)}`).join(' | ') },
             durationMs: ocrDuration,
             error: ocrResult.description?.substring(0, 200),
           });

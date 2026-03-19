@@ -205,6 +205,9 @@ export class DeterministicFlows {
       step = 3;
       const tabToSubject = await this.verifier.verifiedKeyPress('Tab', { focusShouldChange: true });
       console.log(`   📧 Step 3: Tab to Subject — ${tabToSubject.success ? 'OK' : tabToSubject.error}`);
+      if (!tabToSubject.success) {
+        return { handled: false, description: `Tab to Subject failed: ${tabToSubject.error}`, failedAtStep: step, stepsCompleted: step - 1 };
+      }
 
       // Step 4: Type subject
       step = 4;
@@ -215,6 +218,9 @@ export class DeterministicFlows {
       step = 5;
       const tabToBody = await this.verifier.verifiedKeyPress('Tab', { focusShouldChange: true });
       console.log(`   📧 Step 5: Tab to Body — ${tabToBody.success ? 'OK' : tabToBody.error}`);
+      if (!tabToBody.success) {
+        return { handled: false, description: `Tab to Body failed: ${tabToBody.error}`, failedAtStep: step, stepsCompleted: step - 1 };
+      }
 
       // Step 6: Type body
       step = 6;
