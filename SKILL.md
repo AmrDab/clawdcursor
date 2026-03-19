@@ -67,9 +67,45 @@ Every GUI task follows the same pattern — observe, act, verify:
 ```
 1. SEE the screen    →  read_screen(), ocr_read_screen(), or desktop_screenshot()
 2. ACT on an element →  smart_click(), smart_type(), key_press(), or mouse_click()
-3. VERIFY it worked  →  read_screen() or desktop_screenshot() again
+3. VERIFY it worked  →  see below
 4. REPEAT until done
 ```
+
+### Verification (how you confirm actions worked)
+
+**Never assume an action succeeded.** Always verify after critical steps — clicks can miss, text can go to the wrong field, dialogs can block.
+
+**After clicking a button or menu item:**
+```
+read_screen(processId=PID)   →  check if a new dialog/window appeared
+get_active_window()          →  confirm the expected window is now focused
+get_windows()                →  check if a new window was created
+```
+
+**After typing text:**
+```
+get_focused_element()        →  confirm focus is on the right field
+smart_read(target="field", processId=PID)  →  read back the field value
+ocr_read_screen()            →  check if your text appears on screen
+```
+
+**After a multi-step workflow (delegate_to_agent):**
+```
+desktop_screenshot()         →  visual confirmation of final state
+read_screen()                →  check for success indicators (confirmation dialog, updated title, etc.)
+```
+
+**What to look for:**
+- Window title changed (e.g., "Untitled" → "Document1.docx" means save worked)
+- New element appeared (e.g., confirmation dialog, success toast)
+- Expected text visible on screen (e.g., the email address you typed is in the To field)
+- Active window is correct (wrong app in foreground = the action went to the wrong place)
+
+**Common failure patterns:**
+- Action went to wrong window → call `focus_window()` and retry
+- Text landed in wrong field → click the correct field explicitly, then retype
+- Dialog blocked the action → dismiss the dialog first, then retry
+- Element not found → try `ocr_read_screen()` — the a11y tree may be incomplete
 
 ### Perception tools (how you see)
 
