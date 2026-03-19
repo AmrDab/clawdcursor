@@ -8,6 +8,8 @@
   },
   "scripts": {
     "build": "tsc && node dist/postbuild.js",
+    "typecheck": "tsc --noEmit",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "setup": "npm run build && npm link",
     "postbuild:msg": "handled by postbuild.js",
     "dev": "tsx watch src/index.ts",

@@ -217,7 +217,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   // --- Favorites endpoints ---
 
   // Get all favorites
-  app.get('/favorites', (_req, res) => {
+  app.get('/favorites', requireAuth, (_req, res) => {
     res.json(loadFavorites());
   });
 
@@ -287,7 +287,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Task logs — structured JSONL logs for every task
-  app.get('/task-logs', (_req, res) => {
+  app.get('/task-logs', requireAuth, (_req, res) => {
     try {
       const logger = (agent as any).logger;
       if (!logger) return res.json([]);
@@ -295,7 +295,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
     } catch { res.json([]); }
   });
 
-  app.get('/task-logs/current', (_req, res) => {
+  app.get('/task-logs/current', requireAuth, (_req, res) => {
     try {
       const logger = (agent as any).logger;
       const logPath = logger?.getCurrentLogPath();
@@ -337,7 +337,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Get recent log entries
-  app.get('/logs', (req, res) => {
+  app.get('/logs', requireAuth, (req, res) => {
     res.json(logBuffer);
   });
 
