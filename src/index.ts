@@ -844,7 +844,7 @@ program
     const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js' as any);
     const { z } = await import('zod');
 
-    const server = new McpServer({ name: 'clawdcursor', version: '0.7.0' });
+    const server = new McpServer({ name: 'clawdcursor', version: '0.7.1' });
 
     // Register all tools from the unified registry
     const tools = getAllTools();

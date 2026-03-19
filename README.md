@@ -19,7 +19,7 @@
 
 ---
 
-## What's New in v0.7.0
+## What's New in v0.7.1
 
 **Architecture overhaul. Universal tool server. True independence.**
 
@@ -43,9 +43,9 @@
 - **13 providers auto-detected** — up from 6, plus any OpenAI-compatible endpoint
 - **OCR Reasoner** — screenshot + OS-level OCR + cheap text LLM, with stagnation detection and done-verification
 
-### v0.6.3 vs v0.7.0
+### v0.6.3 vs v0.7.1
 
-| | v0.6.3 | v0.7.0 |
+| | v0.6.3 | v0.7.1 |
 |---|---|---|
 | **Architecture** | 4-layer pipeline (L0-L3) | 8-layer pipeline (L0, L1, L1.5, L2, L2.5, L2.5b, L3) |
 | **Transport** | REST API only | REST + MCP stdio + tools-only server |
@@ -76,7 +76,7 @@ The hand has the intelligence — it reasons, plans, and decides what to do. The
 
 If it's visible on your screen, Clawd Cursor can interact with it. Native apps, web apps, legacy software, internal tools, desktop games — anything with a GUI. No app-specific integrations needed. No APIs to configure per-service. One universal interface that turns any AI into a desktop operator.
 
-This is what makes v0.7.0 different from every other automation tool: **it doesn't care which AI drives it.** Claude, GPT, Gemini, Llama running locally, a custom model you trained yourself, or a simple Python script making function calls. If it can call tools, it can control your computer.
+This is what makes v0.7.1 different from every other automation tool: **it doesn't care which AI drives it.** Claude, GPT, Gemini, Llama running locally, a custom model you trained yourself, or a simple Python script making function calls. If it can call tools, it can control your computer.
 
 ```
 Your AI (any model)          Clawd Cursor (the glove)

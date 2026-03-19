@@ -28,7 +28,7 @@ function saveConsent(): void {
     accepted: true,
     timestamp: new Date().toISOString(),
     platform: process.platform,
-    version: '0.7.0',
+    version: '0.7.1',
   }, null, 2));
 }
 

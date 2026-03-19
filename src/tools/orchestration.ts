@@ -42,7 +42,7 @@ function formatAgentError(err: any): string {
 function formatAgentHttpError(status: number, body: string, statusText: string): string {
   switch (status) {
     case 404:
-      return 'The /task endpoint was not found. Make sure you\'re running clawdcursor v0.7.0+ with: clawdcursor start';
+      return 'The /task endpoint was not found. Make sure you\'re running clawdcursor v0.7.1+ with: clawdcursor start';
     case 401:
       return 'Authentication failed. The server token may have changed. Try: clawdcursor stop && clawdcursor start';
     default:
