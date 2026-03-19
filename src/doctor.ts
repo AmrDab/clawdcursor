@@ -169,9 +169,9 @@ async function quickTestModel(
   model: string,
   isVision: boolean,
 ): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
-  // Quick setup: text-only ping for both roles (speed over thoroughness)
-  // Full doctor will do the real vision test later
-  return testTextModel(provider, apiKey, model);
+  return isVision
+    ? testVisionModel(provider, apiKey, model)
+    : testTextModel(provider, apiKey, model);
 }
 
 export async function runDoctor(opts: {

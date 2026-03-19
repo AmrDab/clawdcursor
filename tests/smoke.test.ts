@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
-import { createServer } from '../src/server';
+import { createServer, initServerToken, SERVER_TOKEN } from '../src/server';
 import { DEFAULT_CONFIG, SafetyTier } from '../src/types';
 import { SafetyLayer } from '../src/safety';
 import { VERSION } from '../src/version';
@@ -43,7 +43,11 @@ describe('server smoke tests', () => {
       getState: () => ({ status: 'acting', stepsCompleted: 1, stepsTotal: 2 }),
     });
     const app = createServer(agent, DEFAULT_CONFIG);
-    const res = await request(app).post('/task').send({ task: 'do something' });
+    initServerToken();
+    const res = await request(app)
+      .post('/task')
+      .set('Authorization', `Bearer ${SERVER_TOKEN}`)
+      .send({ task: 'do something' });
     expect(res.status).toBe(409);
     expect(res.body.error).toBe('Agent is busy');
   });
@@ -56,7 +60,11 @@ describe('server smoke tests', () => {
     );
 
     const app = createServer(agent, DEFAULT_CONFIG);
-    const res = await request(app).post('/confirm').send({ approved: true });
+    initServerToken();
+    const res = await request(app)
+      .post('/confirm')
+      .set('Authorization', `Bearer ${SERVER_TOKEN}`)
+      .send({ approved: true });
     expect(res.status).toBe(200);
     expect(res.body.confirmed).toBe(true);
     await expect(confirmPromise).resolves.toBe(true);
@@ -65,7 +73,31 @@ describe('server smoke tests', () => {
   it('returns 404 when no pending confirmation', async () => {
     const { agent } = makeAgent();
     const app = createServer(agent, DEFAULT_CONFIG);
-    const res = await request(app).post('/confirm').send({ approved: true });
+    initServerToken();
+    const res = await request(app)
+      .post('/confirm')
+      .set('Authorization', `Bearer ${SERVER_TOKEN}`)
+      .send({ approved: true });
     expect(res.status).toBe(404);
+  });
+
+  it('sets an HttpOnly dashboard auth cookie and accepts it for protected reads', async () => {
+    const { agent } = makeAgent();
+    const app = createServer(agent, DEFAULT_CONFIG);
+    initServerToken();
+
+    const dashboard = await request(app).get('/');
+    const cookie = dashboard.headers['set-cookie']?.[0];
+
+    expect(cookie).toContain('clawdcursor_token=');
+    expect(cookie).toContain('HttpOnly');
+    expect(cookie).toContain('SameSite=Strict');
+
+    const protectedRes = await request(app)
+      .get('/logs')
+      .set('Cookie', cookie);
+
+    expect(protectedRes.status).toBe(200);
+    expect(Array.isArray(protectedRes.body)).toBe(true);
   });
 });

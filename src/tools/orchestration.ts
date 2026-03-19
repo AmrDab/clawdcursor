@@ -8,6 +8,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import type { ToolDefinition } from './types';
+import { DEFAULT_CDP_PORT } from '../browser-config';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,8 +27,6 @@ function agentHeaders(): Record<string, string> {
     ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
   };
 }
-const CDP_PORT = 9223;
-
 /** Map common agent-server errors to actionable messages. */
 function formatAgentError(err: any): string {
   const code = err?.cause?.code ?? err?.code ?? '';
@@ -128,7 +127,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
 
     {
       name: 'navigate_browser',
-      description: `Open a URL in the browser. Launches with CDP enabled (port ${CDP_PORT}) for DOM interaction. Call cdp_connect after.`,
+      description: `Open a URL in the browser. Launches with CDP enabled (port ${DEFAULT_CDP_PORT}) for DOM interaction. Call cdp_connect after.`,
       parameters: {
         url: { type: 'string', description: 'URL to navigate to', required: true },
       },
@@ -149,20 +148,20 @@ export function getOrchestrationTools(): ToolDefinition[] {
           const userDataDir = path.join(process.env.TEMP || process.env.TMPDIR || '/tmp', 'clawdcursor-edge');
           if (process.platform === 'win32') {
             await execFileAsync('powershell.exe', ['-NoProfile', '-Command',
-              `Start-Process "msedge" -ArgumentList @("--remote-debugging-port=${CDP_PORT}","--user-data-dir=${userDataDir}","--no-first-run","--disable-default-apps","${url}")`
+              `Start-Process "msedge" -ArgumentList @("--remote-debugging-port=${DEFAULT_CDP_PORT}","--user-data-dir=${userDataDir}","--no-first-run","--disable-default-apps","${url}")`
             ], { timeout: 10000 });
           } else if (process.platform === 'darwin') {
             await execFileAsync('open', ['-a', 'Google Chrome', '--args',
-              `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
+              `--remote-debugging-port=${DEFAULT_CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
             ], { timeout: 10000 });
           } else {
             await execFileAsync('google-chrome', [
-              `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
+              `--remote-debugging-port=${DEFAULT_CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
             ], { timeout: 10000 });
           }
           await new Promise(r => setTimeout(r, 3000));
           ctx.a11y.invalidateCache();
-          return { text: `Opened: ${url} (CDP port ${CDP_PORT} enabled)` };
+          return { text: `Opened: ${url} (CDP port ${DEFAULT_CDP_PORT} enabled)` };
         } catch (err: any) {
           return { text: `Navigation failed: ${err.message}`, isError: true };
         }

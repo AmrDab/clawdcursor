@@ -82,6 +82,7 @@ export class Agent {
     stepsTotal: 0,
   };
   private aborted = false;
+  private taskExecutionLocked = false;
 
   constructor(config: ClawdConfig) {
     this.config = config;
@@ -377,8 +378,7 @@ public class WinAPI {
   private static readonly TASK_TIMEOUT_MS = 60 * 1000; // 60s — fast fail, diagnose, iterate
 
   async executeTask(task: string): Promise<TaskResult> {
-    // Atomic concurrency guard — prevent TOCTOU race on simultaneous /task requests
-    if (this.state.status !== 'idle') {
+    if (this.taskExecutionLocked || this.state.status !== 'idle') {
       return {
         success: false,
         steps: [{ action: 'error', description: 'Agent is busy', success: false, timestamp: Date.now() }],
@@ -386,6 +386,13 @@ public class WinAPI {
       };
     }
 
+    this.taskExecutionLocked = true;
+    this.state = {
+      status: 'thinking',
+      currentTask: task,
+      stepsCompleted: 0,
+      stepsTotal: 1,
+    };
     this.aborted = false;
     const startTime = Date.now();
 
@@ -410,6 +417,7 @@ public class WinAPI {
     try {
       return await Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
     } finally {
+      this.taskExecutionLocked = false;
       // Always clear the 10-minute timer so it doesn't keep the process alive
       // and hold a closure reference to this Agent instance after the task ends.
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
@@ -444,13 +452,6 @@ public class WinAPI {
 
     // Add a context accumulator to track what pre-processing already did
     const priorContext: string[] = [];
-
-    this.state = {
-      status: 'thinking',
-      currentTask: task,
-      stepsCompleted: 0,
-      stepsTotal: 1,
-    };
 
     // ── LLM-based task pre-processor ──
     // One cheap LLM call decomposes ANY natural language into structured intent.
@@ -1745,4 +1746,3 @@ function tierEmoji(tier: SafetyTier): string {
     case SafetyTier.Confirm: return '🔴';
   }
 }
-

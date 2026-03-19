@@ -36,6 +36,7 @@ const FAVORITES_PATH = join(DATA_DIR, '.clawdcursor-favorites.json');
 // Generated once at startup, persisted to ~/.clawdcursor/token so the
 // dashboard and external callers can read it. Rotates on every fresh start.
 const TOKEN_PATH = join(DATA_DIR, 'token');
+const DASHBOARD_AUTH_COOKIE = 'clawdcursor_token';
 
 function generateToken(): string {
   const token = randomBytes(32).toString('hex');
@@ -59,10 +60,21 @@ export function initServerToken(): string {
   return SERVER_TOKEN;
 }
 
+function parseCookieToken(cookieHeader: string | undefined): string {
+  if (!cookieHeader) return '';
+  for (const part of cookieHeader.split(';')) {
+    const [name, ...rest] = part.trim().split('=');
+    if (name === DASHBOARD_AUTH_COOKIE) return decodeURIComponent(rest.join('='));
+  }
+  return '';
+}
+
 /** Middleware: require Authorization: Bearer <token> on mutating endpoints. */
 export function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
   const authHeader = req.headers['authorization'] || '';
-  const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
+  const cookieToken = parseCookieToken(req.headers.cookie);
+  const token = bearerToken || cookieToken;
   if (!token || token !== SERVER_TOKEN) {
     res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawdcursor/token' });
     return;
@@ -212,12 +224,12 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Mount the web dashboard at GET /
-  mountDashboard(app);
+  mountDashboard(app, () => SERVER_TOKEN);
 
   // --- Favorites endpoints ---
 
   // Get all favorites
-  app.get('/favorites', (_req, res) => {
+  app.get('/favorites', requireAuth, (_req, res) => {
     res.json(loadFavorites());
   });
 
@@ -287,7 +299,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Task logs — structured JSONL logs for every task
-  app.get('/task-logs', (_req, res) => {
+  app.get('/task-logs', requireAuth, (_req, res) => {
     try {
       const logger = (agent as any).logger;
       if (!logger) return res.json([]);
@@ -295,7 +307,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
     } catch { res.json([]); }
   });
 
-  app.get('/task-logs/current', (_req, res) => {
+  app.get('/task-logs/current', requireAuth, (_req, res) => {
     try {
       const logger = (agent as any).logger;
       const logPath = logger?.getCurrentLogPath();
@@ -337,7 +349,7 @@ export function createServer(agent: Agent, config: ClawdConfig): express.Express
   });
 
   // Get recent log entries
-  app.get('/logs', (req, res) => {
+  app.get('/logs', requireAuth, (req, res) => {
     res.json(logBuffer);
   });
 

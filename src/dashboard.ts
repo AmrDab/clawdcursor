@@ -8,13 +8,18 @@
 import type { Express } from 'express';
 import { VERSION } from './version';
 
-export function mountDashboard(app: Express): void {
+export function mountDashboard(app: Express, getToken?: () => string): void {
   app.get('/', (_req, res) => {
-    res.type('html').send(DASHBOARD_HTML);
+    const token = getToken?.() || '';
+    if (token) {
+      res.setHeader('Set-Cookie', `clawdcursor_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict`);
+    }
+    res.type('html').send(renderDashboardHtml());
   });
 }
 
-const DASHBOARD_HTML = `<!DOCTYPE html>
+function renderDashboardHtml(): string {
+return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -912,3 +917,4 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 </script>
 </body>
 </html>`;
+}
