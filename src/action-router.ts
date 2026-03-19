@@ -671,10 +671,16 @@ export class ActionRouter {
     try {
       // Use clipboard paste for longer text — avoids autocomplete interference in Notepad
       if (text.length > 10) {
-        await this.a11y.writeClipboard(text);
-        await this.delay(50);
-        await this.desktop.keyPress(PLATFORM === 'darwin' ? 'Super+v' : 'Control+v');
-        await this.delay(200);
+        try {
+          await this.a11y.writeClipboard(text);
+          await this.delay(50);
+          await this.desktop.keyPress(PLATFORM === 'darwin' ? 'Super+v' : 'Control+v');
+          await this.delay(200);
+        } catch {
+          // Clipboard bridge can be unavailable in some environments/tests.
+          // Fall back to direct typing instead of failing the whole action.
+          await this.desktop.typeText(text);
+        }
       } else {
         await this.desktop.typeText(text);
       }
