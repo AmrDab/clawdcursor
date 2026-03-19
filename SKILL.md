@@ -58,91 +58,74 @@ Every app already has a UI — clawdcursor gives you eyes and hands to use all o
 
 ## Section 1: Task Routing — How to Pick the Right Approach
 
-### Decision flowchart: Which tool strategy to use?
+### Step 0: Should you use clawdcursor at all?
+
+Use clawdcursor **only** when no cheaper option exists:
+
+1. **API / CLI / file I/O first** — direct calls are faster and more reliable.
+2. **Browser-native tools next** — if Playwright/Puppeteer or the CDP tools can reach it, use those.
+3. **clawdcursor last** — for desktop apps, system dialogs, cross-app workflows, canvas UIs (Google Docs, Figma), or any GUI element no API can reach.
+
+**Do NOT use clawdcursor for:** pure computation, code generation, reading/writing files directly, or any task a CLI command can handle.
+
+### Step 1: Pick a strategy (in order of preference)
 
 ```
-Is this a multi-step GUI task (3+ interactions)?
-  YES → Is `clawdcursor start` running?
-    YES → Use delegate_to_agent (full autonomous pipeline)
-    NO  → Use smart_click / smart_type with processId (see below)
-  NO  → Is this a single click, type, or read?
-    YES → Use smart_click / smart_type / smart_read
-    NO  → Use open_app + key_press + type_text (basic tools)
+Task has 3+ GUI interactions?
+  YES → Is `clawdcursor start` running on port 3847?
+          YES → Strategy A: delegate_to_agent   ← ALWAYS prefer this
+          NO  → Strategy B: smart tools + processId
+  NO  → Strategy B: smart tools + processId
+
+smart tools keep failing to find the element?
+  → Strategy C: manual coordinates (last resort only — do not jump here early)
 ```
 
-### Strategy 1: delegate_to_agent (PREFERRED for complex tasks)
+### Strategy A: delegate_to_agent (preferred for multi-step tasks)
 
-**When:** Multi-step GUI workflows like "open Outlook, compose email, fill To/Subject/Body, send"
+Requires `clawdcursor start` running. If you get "connection refused", tell the user to run it first — other tools still work without it.
 
-**Why:** The agent has its own LLM (OCR Reasoner) that sees the screen, plans steps, recovers from errors, and handles popups. You describe the goal, it figures out the clicks.
-
-**Prerequisite:** `clawdcursor start` must be running on port 3847. If you get a connection error, tell the user to run `clawdcursor start` in a terminal first.
+Describe the goal; the agent plans and executes every click itself:
 
 ```
-delegate_to_agent("open Outlook, send email to john@example.com saying hello")
+delegate_to_agent("Open Outlook, compose email to john@example.com, subject: Hello, body: Just checking in, send it")
 ```
 
-The agent handles: app launch, window focus, button clicks, form filling, error recovery — all autonomously.
+The agent handles: app launch, window focus, form filling, popups, and error recovery autonomously. You do not need to plan individual steps.
 
-### Strategy 2: smart_click / smart_type / smart_read (for targeted interactions)
+### Strategy B: smart tools + processId (for targeted interactions)
 
-**When:** You know exactly which element to interact with, or delegate_to_agent isn't available.
-
-**CRITICAL:** Always pass `processId` to target the correct window. Without it, tools scan the foreground window (which is usually your IDE, not the target app).
+**Always pass `processId`.** Without it, smart tools scan the foreground window — which is usually your IDE, not the target app.
 
 ```
-# Step 1: Find the right window
-get_windows()  →  find the target app's PID
+# 1. Find the target app's process ID
+get_windows()   →  find the PID for your target app
 
-# Step 2: Interact by element name (not coordinates!)
-smart_click("New event", processId=12345)
+# 2. Interact by element name — no coordinates needed
+smart_click("New Event", processId=12345)
 smart_type("Add title", "Meeting notes", processId=12345)
 smart_click("Save", processId=12345)
 ```
 
-**Fallback chain:** accessibility tree → OCR text match → coordinate click. You don't need to know which one works — it tries all three automatically.
+smart_click and smart_type each try: accessibility tree → OCR text match → coordinate fallback. You don't need to know which one fires — it's automatic.
 
-### Strategy 3: Manual tool orchestration (last resort)
+**Do not skip processId and reach for mouse_click(x, y) — that is the wrong escalation.**
 
-**When:** smart tools can't find elements, or you need precise coordinate control.
+### Strategy C: manual coordinates (last resort)
+
+Only use this when smart_click / smart_type have already failed with the correct processId.
 
 ```
-# Read the screen to understand layout
-desktop_screenshot()  →  see what's visible
-read_screen()         →  get accessibility tree with coordinates
-
-# Interact with coordinates from screenshot
-mouse_click(x, y)    →  click at specific position
-type_text("hello")   →  type into focused element
-key_press("ctrl+s")  →  keyboard shortcut
+desktop_screenshot()   →  see layout, note the (x, y) of the target
+read_screen()          →  get accessibility tree with coordinates
+mouse_click(x, y)      →  click at that position
+type_text("hello")     →  type into the now-focused element
+key_press("ctrl+s")    →  send a keyboard shortcut
 ```
 
-### General routing — cheapest first
+### Sensitive app policy
 
-1. **Native tools first** — API call, CLI command, filesystem read/write, or web fetch. Faster, cheaper, more reliable.
-2. **Browser-native next** — if the task is browser-only and you have direct browser tools (Playwright, Puppeteer), use those.
-3. **clawdcursor last** — when no API, CLI, or browser tool can reach the target. Desktop apps, system dialogs, cross-app workflows, canvas UIs, or any GUI-only interaction.
-
-### Use clawdcursor for
-
-- Desktop app interaction (Notepad, Word, Excel, Outlook, VS Code, Spotify, etc.)
-- Browser tasks when no other browser tool is available
-- Cross-app workflows (copy from one app, paste in another)
-- System dialogs, file pickers, OS-level popups
-- Canvas UIs where DOM access fails (Google Docs, Figma, Notion)
-- Visual verification ("did the page load?", "what does the UI show?")
-- Any GUI element visible on screen that no API can reach
-
-### Do NOT use clawdcursor when
-
-- A direct API call or CLI command can do it (faster, more reliable)
-- The task is purely computational (math, text generation, code writing)
-- You can read/write the file directly
-- Another browser tool already handles it
-
-### Sensitive App Policy
-
-**Always ask the user before accessing:**
+Always ask the user before accessing:
 
 - Email clients (Gmail, Outlook, Thunderbird)
 - Banking or financial apps
@@ -150,7 +133,7 @@ key_press("ctrl+s")  →  keyboard shortcut
 - Password managers (1Password, Bitwarden, LastPass)
 - Admin panels, cloud consoles, or anything with credentials
 
-Never access these silently. Always confirm intent first.
+Never access these silently. Confirm intent first.
 
 ---
 
