@@ -56,84 +56,77 @@ Every app already has a UI — clawdcursor gives you eyes and hands to use all o
 
 ---
 
-## Section 1: Task Routing — How to Pick the Right Approach
+## Section 1: How to Drive Any GUI Task
 
-### Step 0: Should you use clawdcursor at all?
+clawdcursor gives you **eyes and hands** on the user's desktop. You can operate ANY application — if a human can see it and click it, you can too.
 
-Use clawdcursor **only** when no cheaper option exists:
+### The universal loop
 
-1. **API / CLI / file I/O first** — direct calls are faster and more reliable.
-2. **Browser-native tools next** — if Playwright/Puppeteer or the CDP tools can reach it, use those.
-3. **clawdcursor last** — for desktop apps, system dialogs, cross-app workflows, canvas UIs (Google Docs, Figma), or any GUI element no API can reach.
-
-**Do NOT use clawdcursor for:** pure computation, code generation, reading/writing files directly, or any task a CLI command can handle.
-
-### Step 1: Pick a strategy (in order of preference)
+Every GUI task follows the same pattern — observe, act, verify:
 
 ```
-Task has 3+ GUI interactions?
-  YES → Is `clawdcursor start` running on port 3847?
-          YES → Strategy A: delegate_to_agent   ← ALWAYS prefer this
-          NO  → Strategy B: smart tools + processId
-  NO  → Strategy B: smart tools + processId
-
-smart tools keep failing to find the element?
-  → Strategy C: manual coordinates (last resort only — do not jump here early)
+1. SEE the screen    →  read_screen(), ocr_read_screen(), or desktop_screenshot()
+2. ACT on an element →  smart_click(), smart_type(), key_press(), or mouse_click()
+3. VERIFY it worked  →  read_screen() or desktop_screenshot() again
+4. REPEAT until done
 ```
 
-### Strategy A: delegate_to_agent (preferred for multi-step tasks)
+### Perception tools (how you see)
 
-Requires `clawdcursor start` running. If you get "connection refused", tell the user to run it first — other tools still work without it.
+| Tool | What it returns | When to use |
+|------|----------------|-------------|
+| `read_screen()` | Accessibility tree — buttons, inputs, text, with coordinates | **Default.** Structured, fast, works on native apps |
+| `ocr_read_screen()` | All visible text with bounding boxes (OS-level OCR) | When a11y tree is empty or incomplete (canvas UIs, custom controls) |
+| `desktop_screenshot()` | Visual screenshot image | When you need to see layout, colors, or images — or both above return nothing |
+| `smart_read()` | Text content from focused element or window | Quick read of what's on screen without full tree |
 
-Describe the goal; the agent plans and executes every click itself:
+**Start with `read_screen()`. If it returns nothing useful, try `ocr_read_screen()`. Screenshot is last resort — it costs the most tokens.**
 
-```
-delegate_to_agent("Open Outlook, compose email to john@example.com, subject: Hello, body: Just checking in, send it")
-```
+### Action tools (how you interact)
 
-The agent handles: app launch, window focus, form filling, popups, and error recovery autonomously. You do not need to plan individual steps.
-
-### Strategy B: smart tools + processId (for targeted interactions)
-
-**Always pass `processId`.** Without it, smart tools scan the foreground window — which is usually your IDE, not the target app.
-
-```
-# 1. Find the target app's process ID
-get_windows()   →  find the PID for your target app
-
-# 2. Interact by element name — no coordinates needed
-smart_click("New Event", processId=12345)
-smart_type("Add title", "Meeting notes", processId=12345)
-smart_click("Save", processId=12345)
-```
-
-smart_click and smart_type each try: accessibility tree → OCR text match → coordinate fallback. You don't need to know which one fires — it's automatic.
-
-**Do not skip processId and reach for mouse_click(x, y) — that is the wrong escalation.**
-
-### Strategy C: manual coordinates (last resort)
-
-Only use this when smart_click / smart_type have already failed with the correct processId.
+**Tier 1 — Smart tools (preferred).** They find elements by name automatically. **Always pass `processId`** to target the right window — without it, they scan your IDE instead of the target app.
 
 ```
-desktop_screenshot()   →  see layout, note the (x, y) of the target
-read_screen()          →  get accessibility tree with coordinates
-mouse_click(x, y)      →  click at that position
-type_text("hello")     →  type into the now-focused element
-key_press("ctrl+s")    →  send a keyboard shortcut
+get_windows()                                    →  find the target app's PID
+smart_click("Save", processId=PID)               →  finds & clicks "Save" button
+smart_type("Search", "query text", processId=PID) →  finds "Search" field & types
 ```
+
+Each smart tool tries: accessibility → OCR text match → coordinate click. Automatic fallback.
+
+**Tier 2 — Direct tools.** When you know exactly what to do:
+
+```
+open_app("Notepad")       →  launch an app
+focus_window(title="...")  →  bring a window to front
+key_press("ctrl+n")       →  keyboard shortcut
+type_text("hello world")  →  type into the focused element
+```
+
+**Tier 3 — Coordinate clicks (last resort).** Only after smart tools fail with the correct processId:
+
+```
+desktop_screenshot()   →  see the screen, note target (x, y)
+mouse_click(x, y)     →  click that position
+```
+
+**Do not jump to coordinate clicks before trying smart tools with processId.**
+
+### delegate_to_agent — autonomous multi-step execution
+
+For complex tasks (3+ GUI steps), you can delegate the entire task to clawdcursor's autonomous agent. It has its own OCR + LLM pipeline that sees the screen, plans steps, and recovers from errors.
+
+**Requires:** `clawdcursor start` running on port 3847. If connection fails, tell the user to run it first.
+
+```
+delegate_to_agent("Open Outlook, compose email to john@example.com, subject Hello, body Just checking in, then send")
+```
+
+The agent handles everything — app launch, window management, form filling, popups, error recovery. You describe the goal, it figures out the clicks. Use this when the task is too complex to drive step-by-step.
 
 ### Sensitive app policy
 
-Always ask the user before accessing:
-
-- Email clients (Gmail, Outlook, Thunderbird)
-- Banking or financial apps
-- Private messaging (WhatsApp, Signal, Telegram, Slack DMs)
-- Password managers (1Password, Bitwarden, LastPass)
-- Admin panels, cloud consoles, or anything with credentials
-
-Never access these silently. Confirm intent first.
+Always ask the user before accessing: email clients, banking/financial apps, private messaging, password managers, admin panels, or anything with credentials. Never access these silently.
 
 ---
 
