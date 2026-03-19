@@ -228,6 +228,39 @@ program
       console.log(`  POST /execute/{name} — Execute any tool`);
       console.log(`  GET  /docs     — Tool documentation`);
       console.log(`\nAll mutating endpoints require: \x1b[36mAuthorization: Bearer <token>\x1b[0m`);
+
+      // Validate API key on startup
+      const { loadPipelineConfig } = await import('./doctor');
+      const pipelineConfig = loadPipelineConfig();
+      if (pipelineConfig && pipelineConfig.layer2.enabled) {
+        try {
+          const { callTextLLMDirect } = await import('./llm-client');
+          await callTextLLMDirect({
+            baseUrl: pipelineConfig.layer2.baseUrl,
+            model: pipelineConfig.layer2.model,
+            apiKey: pipelineConfig.apiKey,
+            isAnthropic: !pipelineConfig.provider.openaiCompat,
+            messages: [{ role: 'user', content: 'Reply with just the word "ok"' }],
+            maxTokens: 5,
+            timeoutMs: 10000,
+            retries: 0,
+          });
+          console.log(`${e('✅', '[OK]')} API key validated for ${pipelineConfig.provider.name}`);
+        } catch (err: any) {
+          if (err.name === 'LLMAuthError') {
+            console.error(`${e('❌', '[ERR]')} API key INVALID for ${pipelineConfig.provider.name} (${pipelineConfig.layer2.model})`);
+            console.error(`   Get a new key and update your .env or run: clawdcursor doctor`);
+            console.error(`   Server will continue running but tasks will fail until the key is fixed.`);
+          } else if (err.name === 'LLMBillingError') {
+            console.error(`${e('⚠️', '[WARN]')} API credits exhausted for ${pipelineConfig.provider.name}`);
+            console.error(`   Add credits or switch providers. Run: clawdcursor doctor`);
+          } else {
+            console.warn(`${e('⚠️', '[WARN]')} Could not validate API key: ${err.message?.substring(0, 100)}`);
+          }
+          // Don't exit — let the server run in case user fixes the key
+        }
+      }
+
       console.log(`\nReady. ${e('🐾', '')}`);
     });
 
