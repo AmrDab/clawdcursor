@@ -73,39 +73,50 @@ Every GUI task follows the same pattern — observe, act, verify:
 
 ### Verification (how you confirm actions worked)
 
-**Never assume an action succeeded.** Always verify after critical steps — clicks can miss, text can go to the wrong field, dialogs can block.
+**Never assume an action succeeded.** GUI actions fail silently — clicks miss, text goes to the wrong field, dialogs block input. Always verify after critical steps.
 
-**After clicking a button or menu item:**
-```
-read_screen(processId=PID)   →  check if a new dialog/window appeared
-get_active_window()          →  confirm the expected window is now focused
-get_windows()                →  check if a new window was created
-```
+There are 5 verification methods, from cheapest to most thorough:
 
-**After typing text:**
-```
-get_focused_element()        →  confirm focus is on the right field
-smart_read(target="field", processId=PID)  →  read back the field value
-ocr_read_screen()            →  check if your text appears on screen
-```
+**Method 1: Tool return value** (free — already in the response)
+Every tool returns status. Check it before moving on:
+- `smart_click` → tells you *how* it clicked (a11y, OCR, or coordinates) and whether it found the element
+- `smart_type` → confirms how many chars were typed and which element received them
+- `open_app` / `focus_window` → confirms which window is now active
+- `delegate_to_agent` → returns `{ success: true/false, steps: [...] }` with a full execution log
 
-**After a multi-step workflow (delegate_to_agent):**
+**Method 2: Window state check** (fast — one call)
 ```
-desktop_screenshot()         →  visual confirmation of final state
-read_screen()                →  check for success indicators (confirmation dialog, updated title, etc.)
+get_active_window()   →  is the expected app in the foreground?
+get_windows()         →  did a new window appear? did a dialog open?
+get_focused_element() →  is keyboard focus on the right field?
 ```
+Window title changes are strong signals: "Untitled" → "report.docx" means save worked. A new window appearing after a button click means the action triggered.
 
-**What to look for:**
-- Window title changed (e.g., "Untitled" → "Document1.docx" means save worked)
-- New element appeared (e.g., confirmation dialog, success toast)
-- Expected text visible on screen (e.g., the email address you typed is in the To field)
-- Active window is correct (wrong app in foreground = the action went to the wrong place)
+**Method 3: Text presence check** (medium — reads the screen)
+```
+read_screen(processId=PID)  →  search the a11y tree for expected text/elements
+ocr_read_screen()           →  search ALL visible text on screen via OCR
+smart_read(processId=PID)   →  read text from the focused element or window
+```
+Use this to confirm: typed text appeared in the right field, a success message is visible, a new element was created, or an error dialog is showing.
 
-**Common failure patterns:**
-- Action went to wrong window → call `focus_window()` and retry
-- Text landed in wrong field → click the correct field explicitly, then retype
-- Dialog blocked the action → dismiss the dialog first, then retry
-- Element not found → try `ocr_read_screen()` — the a11y tree may be incomplete
+**Method 4: Visual verification** (expensive — uses a screenshot)
+```
+desktop_screenshot()  →  see the full screen state as an image
+```
+Use when text-based methods can't confirm the result — layout changes, color changes, image content, or when both a11y and OCR return empty. This costs the most tokens but gives you full visual context.
+
+**Method 5: Negative check** (catch failures proactively)
+After any action, watch for:
+- Error dialogs or popups blocking the UI → dismiss them first, then retry
+- Wrong window in foreground → `focus_window()` back to the target, retry
+- "Save failed" / "Connection error" messages → report to user
+- Screen unchanged after action → the click missed, try again or use a different method
+
+**When to verify:**
+- **Always verify** after: form submissions, sends, saves, deletes, purchases — anything irreversible
+- **Spot-check** after: navigation, opening apps, clicking tabs — verify if the next step depends on it
+- **Skip verification** for: keyboard shortcuts in sequence, typing mid-sentence, scrolling
 
 ### Perception tools (how you see)
 
