@@ -469,76 +469,94 @@
   <section id="install" class="sect">
     <div class="sect-label">Get Started</div>
     <h2>Up and running in 2 minutes</h2>
-    <p class="sub">Install, consent once, connect your AI.</p>
+    <p class="sub">Pick your OS, install, consent once, connect your AI.</p>
 
     <div class="os-tabs">
-      <button class="os-tab active" onclick="switchOS('mcp')">Claude Code / Cursor</button>
-      <button class="os-tab" onclick="switchOS('agent')">Give it tasks</button>
-      <button class="os-tab" onclick="switchOS('rest')">Build with it</button>
+      <button class="os-tab active" onclick="switchOS('windows')">Windows</button>
+      <button class="os-tab" onclick="switchOS('macos')">macOS</button>
+      <button class="os-tab" onclick="switchOS('linux')">Linux</button>
     </div>
 
-    <div class="code-box" id="os-mcp" style="display:block;">
-      <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal + claude_desktop_config.json</span></div>
+    <div class="code-box" id="os-windows" style="display:block;">
+      <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>PowerShell</span></div>
       <pre><code><span class="c-comment"># 1. Install</span>
 <span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span>
-<span class="c-cmd">cd</span> clawdcursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
+<span class="c-cmd">cd</span> clawdcursor
+<span class="c-cmd">npm install</span>; <span class="c-cmd">npm run setup</span>
 
-<span class="c-comment"># 2. One-time consent (required — desktop control warning)</span>
-<span class="c-cmd">clawdcursor consent</span>
-
-<span class="c-comment"># 3. Add to your MCP client config</span>
-<span class="c-string">{
-  "mcpServers": {
-    "clawdcursor": {
-      "command": "clawdcursor",
-      "args": ["mcp"]
-    }
-  }
-}</span>
-
-<span class="c-comment"># clawdcursor mcp will refuse to start without consent</span></code></pre>
-    </div>
-
-    <div class="code-box" id="os-agent" style="display:none;">
-      <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal</span></div>
-      <pre><code><span class="c-comment"># 1. Install</span>
-<span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span>
-<span class="c-cmd">cd</span> clawdcursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
-
-<span class="c-comment"># 2. Auto-detect your AI providers (Anthropic, OpenAI, Ollama, etc.)</span>
+<span class="c-comment"># 2. Auto-detect your AI providers</span>
 <span class="c-cmd">clawdcursor doctor</span>
 
-<span class="c-comment"># 3. Start the agent (consent prompt fires on first run)</span>
+<span class="c-comment"># 3. Start the agent (consent prompt on first run)</span>
 <span class="c-cmd">clawdcursor start</span>
 
 <span class="c-comment"># 4. Send a task</span>
 <span class="c-cmd">clawdcursor task</span> <span class="c-string">"Open Chrome and go to github.com"</span>
 
-<span class="c-comment"># Or open an interactive task console</span>
-<span class="c-cmd">clawdcursor task</span></code></pre>
+<span class="c-comment"># Or use as MCP server (add to Claude Code / Cursor config)</span>
+<span class="c-string">{
+  "mcpServers": {
+    "clawdcursor": { "command": "clawdcursor", "args": ["mcp"] }
+  }
+}</span></code></pre>
     </div>
 
-    <div class="code-box" id="os-rest" style="display:none;">
-      <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal + HTTP</span></div>
-      <pre><code><span class="c-comment"># 1. Install and start</span>
+    <div class="code-box" id="os-macos" style="display:none;">
+      <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal (zsh)</span></div>
+      <pre><code><span class="c-comment"># 0. Grant Accessibility permissions FIRST</span>
+<span class="c-comment">#    System Settings → Privacy &amp; Security → Accessibility</span>
+<span class="c-comment">#    → Add your Terminal app (Terminal, iTerm2, Warp, etc.)</span>
+
+<span class="c-comment"># 1. Install</span>
 <span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span>
 <span class="c-cmd">cd</span> clawdcursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
-<span class="c-cmd">clawdcursor start</span>   <span class="c-comment"># consent fires on first run</span>
 
-<span class="c-comment"># 2. List all tools + schemas</span>
-<span class="c-cmd">GET</span>  http://localhost:3847/tools
+<span class="c-comment"># 2. Auto-detect your AI providers</span>
+<span class="c-cmd">clawdcursor doctor</span>
 
-<span class="c-comment"># 3. Call a tool directly</span>
-<span class="c-cmd">POST</span> http://localhost:3847/execute/desktop_screenshot
-<span class="c-cmd">POST</span> http://localhost:3847/execute/mouse_click
-     <span class="c-string">{ "x": 450, "y": 300 }</span>
+<span class="c-comment"># 3. Start the agent (consent prompt on first run)</span>
+<span class="c-cmd">clawdcursor start</span>
 
-<span class="c-comment"># 4. Or send a plain-English task to the agent</span>
-<span class="c-cmd">POST</span> http://localhost:3847/task
-     <span class="c-string">{ "task": "Open Gmail and read latest email" }</span>
+<span class="c-comment"># 4. Send a task</span>
+<span class="c-cmd">clawdcursor task</span> <span class="c-string">"Open Safari and go to github.com"</span>
 
-<span class="c-comment"># Non-interactive consent for CI / scripted environments</span>
-<span class="c-cmd">clawdcursor consent --accept</span></code></pre>
+<span class="c-comment"># Or use as MCP server (add to Claude Code / Cursor config)</span>
+<span class="c-string">{
+  "mcpServers": {
+    "clawdcursor": { "command": "clawdcursor", "args": ["mcp"] }
+  }
+}</span>
+
+<span class="c-comment"># Troubleshooting: if clicks don't land, re-check Accessibility permissions</span>
+<span class="c-comment"># See docs/MACOS-SETUP.md for detailed setup guide</span></code></pre>
+    </div>
+
+    <div class="code-box" id="os-linux" style="display:none;">
+      <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal (bash)</span></div>
+      <pre><code><span class="c-comment"># NOTE: Linux supports browser automation via CDP only</span>
+<span class="c-comment"># Native desktop control (mouse, keyboard, a11y) is not yet supported</span>
+
+<span class="c-comment"># 1. Install</span>
+<span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span>
+<span class="c-cmd">cd</span> clawdcursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
+
+<span class="c-comment"># 2. Auto-detect your AI providers</span>
+<span class="c-cmd">clawdcursor doctor</span>
+
+<span class="c-comment"># 3. Start the agent (consent prompt on first run)</span>
+<span class="c-cmd">clawdcursor start</span>
+
+<span class="c-comment"># 4. Send a browser task</span>
+<span class="c-cmd">clawdcursor task</span> <span class="c-string">"Open Chrome and go to github.com"</span>
+
+<span class="c-comment"># Or use as MCP server</span>
+<span class="c-string">{
+  "mcpServers": {
+    "clawdcursor": { "command": "clawdcursor", "args": ["mcp"] }
+  }
+}</span>
+
+<span class="c-comment"># Linux roadmap: xdotool / AT-SPI support planned for future release</span></code></pre>
     </div>
 
     <p style="color:var(--text3);font-size:0.78rem;margin-top:10px;">Requires Node.js 20+. Consent is one-time and stored in <code style="color:var(--text2)">~/.clawdcursor/consent</code>. Server binds to localhost only.</p>
@@ -565,11 +583,11 @@
 <script>
   // OS tab switcher
   function switchOS(id) {
-    ['mcp','agent','rest'].forEach(k => {
+    ['windows','macos','linux'].forEach(k => {
       document.getElementById('os-' + k).style.display = k === id ? 'block' : 'none';
     });
     document.querySelectorAll('.os-tab').forEach((t, i) => {
-      t.classList.toggle('active', ['mcp','agent','rest'][i] === id);
+      t.classList.toggle('active', ['windows','macos','linux'][i] === id);
     });
   }
 
