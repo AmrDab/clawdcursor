@@ -394,7 +394,7 @@ public class WinAPI {
     // LLM call or runaway Computer Use loop could still exceed the limit.
     // IMPORTANT: Clear the timer when the task completes to prevent stale
     // timeouts from aborting future tasks (the aborted flag is shared).
-    let timeoutHandle: ReturnType<typeof setTimeout>;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<TaskResult>((resolve) => {
       timeoutHandle = setTimeout(() => {
         this.aborted = true;
@@ -410,7 +410,9 @@ public class WinAPI {
     try {
       return await Promise.race([this._executeTaskInternal(task, startTime), timeoutPromise]);
     } finally {
-      clearTimeout(timeoutHandle!);
+      // Always clear the 10-minute timer so it doesn't keep the process alive
+      // and hold a closure reference to this Agent instance after the task ends.
+      if (timeoutHandle !== null) clearTimeout(timeoutHandle);
     }
   }
 

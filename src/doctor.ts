@@ -34,6 +34,7 @@ import type {
 } from './providers';
 import { DEFAULT_CONFIG } from './types';
 import { resolveApiConfig } from './credentials';
+import { callVisionLLMDirect } from './llm-client';
 
 const CONFIG_FILE = '.clawdcursor-config.json';
 const execFileAsync = promisify(execFile);
@@ -1386,64 +1387,22 @@ async function testVisionModel(
   const GREEN_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAADklEQVQI12Ng+M9AEwYAGJgBgV6GPOYAAAAASUVORK5CYII=';
 
   try {
-    let text = '';
-
-    if (provider.openaiCompat) {
-      const response = await fetch(`${provider.baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeader(apiKey),
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 20,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image_url', image_url: { url: `data:image/png;base64,${GREEN_PIXEL_PNG}` } },
-              { type: 'text', text: 'What color is this image? Reply with one word.' },
-            ],
-          }],
-        }),
-        signal: AbortSignal.timeout(TIMEOUT),
-      });
-      const data = await response.json() as any;
-      if (data.error) {
-        return { ok: false, error: extractErrorMessage(data.error) };
-      }
-      text = data.choices?.[0]?.message?.content || '';
-    } else {
-      // Anthropic API — uses content blocks with type: image
-      const response = await fetch(`${provider.baseUrl}/messages`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...provider.authHeader(apiKey),
-          ...provider.extraHeaders,
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 20,
-          messages: [{
-            role: 'user',
-            content: [
-              { type: 'image', source: { type: 'base64', media_type: 'image/png', data: GREEN_PIXEL_PNG } },
-              { type: 'text', text: 'What color is this image? Reply with one word.' },
-            ],
-          }],
-        }),
-        signal: AbortSignal.timeout(TIMEOUT),
-      });
-      const data = await response.json() as any;
-      if (data.type === 'error' && data.error) {
-        return { ok: false, error: extractErrorMessage(data.error) };
-      }
-      if (data.error) {
-        return { ok: false, error: extractErrorMessage(data.error) };
-      }
-      text = data.content?.[0]?.text || '';
-    }
+    const text = await callVisionLLMDirect({
+      baseUrl: provider.baseUrl,
+      model,
+      apiKey,
+      isAnthropic: !provider.openaiCompat,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: GREEN_PIXEL_PNG } },
+          { type: 'text', text: 'What color is this image? Reply with one word.' },
+        ],
+      }],
+      maxTokens: 20,
+      timeoutMs: TIMEOUT,
+      retries: 0,
+    });
 
     if (!text) return { ok: false, error: 'Empty response — model may not support vision' };
 

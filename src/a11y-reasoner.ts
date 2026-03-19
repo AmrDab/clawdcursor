@@ -18,7 +18,7 @@ import { AccessibilityBridge } from './accessibility';
 import { A11yClickResolver } from './a11y-click-resolver';
 import { NativeDesktop } from './native-desktop';
 import type { PipelineConfig } from './providers';
-import { callTextLLM } from './llm-client';
+import { callTextLLM, callVisionLLMDirect } from './llm-client';
 import type { InputAction, A11yAction } from './types';
 import { CDPDriver } from './cdp-driver';
 import { getBrowserProcessRegex, getCDPPort } from './browser-config';
@@ -1191,52 +1191,28 @@ export class A11yReasoner {
       const { model, baseUrl } = this.pipelineConfig.layer3;
       const apiKey = this.pipelineConfig.layer3.apiKey || this.pipelineConfig.apiKey;
       const provider = this.pipelineConfig.provider;
-      let responseText: string;
+      const isAnthropic = !provider.openaiCompat
+        && !baseUrl.includes('localhost')
+        && !baseUrl.includes('11434');
 
-      if (provider.openaiCompat || baseUrl.includes('localhost') || baseUrl.includes('11434')) {
-        const res = await fetch(`${baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...provider.authHeader(apiKey) },
-          body: JSON.stringify({
-            model,
-            max_tokens: 60,
-            temperature: 0,
-            messages: [
-              { role: 'system', content: 'You find UI elements in screenshots. Return ONLY JSON coordinates, nothing else.' },
-              { role: 'user', content: [
-                { type: 'image_url', image_url: { url: `data:${mediaType};base64,${base64}` } },
-                { type: 'text', text: prompt },
-              ]},
-            ],
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-        const data = await res.json() as any;
-        if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error));
-        responseText = data.choices?.[0]?.message?.content ?? '';
-      } else {
-        // Anthropic vision API — use prefill to force JSON output
-        const res = await fetch(`${baseUrl}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...provider.authHeader(apiKey) },
-          body: JSON.stringify({
-            model,
-            max_tokens: 60,
-            messages: [
-              { role: 'user', content: [
-                { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-                { type: 'text', text: prompt },
-              ]},
-              { role: 'assistant', content: '{"x":' },
-            ],
-          }),
-          signal: AbortSignal.timeout(15000),
-        });
-        const data = await res.json() as any;
-        if (data.error) throw new Error(data.error.message ?? JSON.stringify(data.error));
-        const raw = data.content?.[0]?.text ?? '';
-        responseText = '{"x":' + raw;
-      }
+      const responseText = await callVisionLLMDirect({
+        baseUrl,
+        model,
+        apiKey,
+        isAnthropic,
+        system: 'You find UI elements in screenshots. Return ONLY JSON coordinates, nothing else.',
+        messages: [
+          { role: 'user', content: [
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+            { type: 'text', text: prompt },
+          ]},
+        ],
+        forceJson: true,
+        jsonPrefill: '{"x":',
+        maxTokens: 60,
+        timeoutMs: 15000,
+        retries: 0,
+      });
 
       const match = responseText.match(/\{\s*"x"\s*:\s*(-?\d+)\s*,\s*"y"\s*:\s*(-?\d+)\s*\}/);
       if (!match) return null;

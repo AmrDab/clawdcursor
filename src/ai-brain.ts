@@ -12,7 +12,7 @@
 import * as crypto from 'crypto';
 import type { ClawdConfig, InputAction, ActionSequence, ScreenFrame } from './types';
 import { extractJsonObject, extractJsonArray } from './safe-json';
-import { callTextLLMDirect } from './llm-client';
+import { callTextLLMDirect, callVisionLLMDirect } from './llm-client';
 
 const SYSTEM_PROMPT = `You are Clawd Cursor, an AI desktop agent on {OS_NAME}.
 Screen: {REAL_WIDTH}x{REAL_HEIGHT}. Screenshot: {LLM_WIDTH}x{LLM_HEIGHT} (scale {SCALE}x).
@@ -313,12 +313,36 @@ export class AIBrain {
       (effectiveVisionKey?.startsWith('sk-ant-') && !effectiveVisionBaseUrl) ||
       (visionModel?.includes('claude') && effectiveVisionKey?.startsWith('sk-ant-'));
 
-    if (isAnthropicVision) {
-      return this.callAnthropic(systemPrompt, effectiveVisionKey, visionModel);
-    }
+    const resolvedBaseUrl = isAnthropicVision
+      ? 'https://api.anthropic.com/v1'
+      : effectiveVisionBaseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
 
-    const resolvedBaseUrl = effectiveVisionBaseUrl || AIBrain.BASE_URLS[provider] || AIBrain.BASE_URLS['openai'];
-    return this.callOpenAICompat(systemPrompt, effectiveVisionKey, visionModel, resolvedBaseUrl);
+    // Build messages from conversation history.
+    // History stores images in Anthropic format — callVisionLLMDirect auto-normalizes.
+    const messages: Array<{ role: string; content: any }> = this.history.map(turn => {
+      if (turn.role === 'assistant' && Array.isArray(turn.content)) {
+        // Flatten assistant content blocks to plain text
+        return {
+          role: turn.role,
+          content: turn.content.map((c: any) => c.text || '').join(''),
+        };
+      }
+      return { role: turn.role, content: turn.content };
+    });
+
+    return callVisionLLMDirect({
+      baseUrl: resolvedBaseUrl,
+      model: visionModel,
+      apiKey: effectiveVisionKey,
+      isAnthropic: isAnthropicVision,
+      system: systemPrompt,
+      messages,
+      maxTokens: 1024,
+      timeoutMs: 60000,
+      retries: 0,
+      // Use streaming for Anthropic — enables early JSON return optimization
+      stream: isAnthropicVision,
+    });
   }
 
   /**
@@ -339,87 +363,6 @@ export class AIBrain {
     });
   }
 
-  private async callAnthropic(
-    systemPrompt: string,
-    apiKey: string,
-    model: string,
-  ): Promise<string> {
-    const messages = this.history.map(turn => ({
-      role: turn.role,
-      content: turn.content,
-    }));
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000); // 60s timeout
-
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        stream: true,
-        system: systemPrompt,
-        messages,
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      clearTimeout(timeout);
-      const data = await response.json() as any;
-      console.error('Anthropic API error:', data.error);
-      throw new Error(data.error?.message || `Anthropic API error (${response.status})`);
-    }
-
-    clearTimeout(timeout);
-
-    // Stream response — collect text as it arrives
-    let result = '';
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body');
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue;
-        const data = line.slice(6).trim();
-        if (data === '[DONE]') break;
-        try {
-          const event = JSON.parse(data);
-          if (event.type === 'content_block_delta' && event.delta?.text) {
-            result += event.delta.text;
-            // Early return: if we have a complete JSON object, stop waiting
-            if (result.includes('}') && !result.includes('"steps"')) {
-              try {
-                const earlyParsed = extractJsonObject(result);
-                if (earlyParsed) {
-                  reader.cancel();
-                  return result;
-                }
-              } catch { /* incomplete JSON, keep reading */ }
-            }
-          }
-        } catch { /* skip unparseable SSE lines */ }
-      }
-    }
-
-    return result;
-  }
-
  private getOSName(): string {
   switch (process.platform) {
     case 'win32':
@@ -432,60 +375,6 @@ export class AIBrain {
       return 'An Unknown OS';
   }
 }
-
-
-
-  private async callOpenAICompat(
-    systemPrompt: string,
-    apiKey: string,
-    model: string,
-    baseUrl: string = 'https://api.openai.com/v1',
-  ): Promise<string> {
-    const messages: any[] = [
-      { role: 'system', content: systemPrompt },
-    ];
-
-    for (const turn of this.history) {
-      if (turn.role === 'user' && Array.isArray(turn.content)) {
-        const content: any[] = [];
-        for (const part of turn.content) {
-          if (part.type === 'image') {
-            content.push({
-              type: 'image_url',
-              image_url: {
-                url: `data:${part.source.media_type};base64,${part.source.data}`,
-              },
-            });
-          } else {
-            content.push(part);
-          }
-        }
-        messages.push({ role: 'user', content });
-      } else if (turn.role === 'assistant') {
-        const text = Array.isArray(turn.content)
-          ? turn.content.map((c: any) => c.text || '').join('')
-          : turn.content;
-        messages.push({ role: 'assistant', content: text });
-      }
-    }
-
-    const response = await fetch(`${baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 1024,
-        messages,
-      }),
-    });
-
-    const data = await response.json() as any;
-    if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
-    return data.choices?.[0]?.message?.content || '';
-  }
 
   resetConversation(): void {
     this.history = [];

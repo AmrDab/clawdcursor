@@ -172,6 +172,8 @@ export class NativeDesktop extends EventEmitter {
         .resize(llmW, llmH)
         .png()
         .toBuffer();
+      // Release the raw RGBA buffer immediately after processing
+      (img as any).data = null;
       return { width: mon.width, height: mon.height, buffer: processed, timestamp: Date.now(), format: 'png', scaleFactor, llmWidth: llmW, llmHeight: llmH };
     } catch {
       // Fallback: full primary grab
@@ -255,6 +257,8 @@ export class NativeDesktop extends EventEmitter {
       this.screenWidth,
       this.screenHeight,
     );
+    // Release the raw RGBA buffer immediately after processing
+    (img as any).data = null;
 
     return {
       width: this.screenWidth,
@@ -299,6 +303,8 @@ export class NativeDesktop extends EventEmitter {
       llmWidth,
       llmHeight,
     );
+    // Release the raw RGBA buffer immediately after processing
+    (img as any).data = null;
 
     return {
       width: this.screenWidth,       // real screen width
@@ -349,6 +355,8 @@ export class NativeDesktop extends EventEmitter {
     const buffer = format === 'jpeg'
       ? await pipeline.jpeg({ quality }).toBuffer()
       : await pipeline.png().toBuffer();
+    // Release the raw RGBA buffer immediately after processing
+    (img as any).data = null;
 
     return {
       width: rw,
@@ -643,6 +651,9 @@ export class NativeDesktop extends EventEmitter {
     this.screenWidth = 0;
     this.screenHeight = 0;
     this.emit('disconnected');
+    // Remove all listeners so this instance can be GCd after disconnect.
+    // Must come after emit so 'disconnected' handlers still fire.
+    this.removeAllListeners();
     console.log('🐾 Native desktop disconnected');
   }
 

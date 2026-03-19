@@ -28,6 +28,28 @@ function agentHeaders(): Record<string, string> {
 }
 const CDP_PORT = 9223;
 
+/** Map common agent-server errors to actionable messages. */
+function formatAgentError(err: any): string {
+  const code = err?.cause?.code ?? err?.code ?? '';
+  const msg = err?.message ?? String(err);
+  if (code === 'ECONNREFUSED' || msg.includes('ECONNREFUSED')) {
+    return 'The clawdcursor agent server is not running. Start it first with: clawdcursor start';
+  }
+  return `Agent unavailable: ${msg}`;
+}
+
+/** Map HTTP status from agent API to an actionable message. */
+function formatAgentHttpError(status: number, body: string, statusText: string): string {
+  switch (status) {
+    case 404:
+      return 'The /task endpoint was not found. Make sure you\'re running clawdcursor v0.7.0+ with: clawdcursor start';
+    case 401:
+      return 'Authentication failed. The server token may have changed. Try: clawdcursor stop && clawdcursor start';
+    default:
+      return `Agent API error ${status}: ${body || statusText}`;
+  }
+}
+
 export function getOrchestrationTools(): ToolDefinition[] {
   return [
     {
@@ -49,7 +71,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           });
           if (!resp.ok) {
             const body = await resp.text().catch(() => '');
-            return { text: `Agent API error ${resp.status}: ${body || resp.statusText}`, isError: true };
+            return { text: formatAgentHttpError(resp.status, body, resp.statusText), isError: true };
           }
           while (Date.now() - start < timeoutMs) {
             await new Promise(r => setTimeout(r, 2000));
@@ -73,7 +95,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           await fetch('http://127.0.0.1:3847/abort', { method: 'POST', headers: agentHeaders() }).catch(() => {});
           return { text: `Agent timed out after ${timeout ?? 300}s. Task aborted.`, isError: true };
         } catch (err: any) {
-          return { text: `Agent unavailable: ${err.message}. Is clawdcursor running on port 3847?`, isError: true };
+          return { text: formatAgentError(err), isError: true };
         }
       },
     },

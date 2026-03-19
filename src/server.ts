@@ -101,8 +101,14 @@ interface LogEntry {
 const MAX_LOGS = 200;
 const logBuffer: LogEntry[] = [];
 
+const MAX_LOG_MSG_LEN = 500;
+
 function addLog(level: LogEntry['level'], message: string): void {
-  logBuffer.push({ timestamp: Date.now(), level, message });
+  // Truncate oversized messages (e.g. full LLM responses) to keep the buffer lean
+  const truncated = message.length > MAX_LOG_MSG_LEN
+    ? message.slice(0, MAX_LOG_MSG_LEN) + '\u2026'
+    : message;
+  logBuffer.push({ timestamp: Date.now(), level, message: truncated });
   if (logBuffer.length > MAX_LOGS) {
     logBuffer.splice(0, logBuffer.length - MAX_LOGS);
   }

@@ -43,6 +43,19 @@ Every app already has a UI — clawdcursor gives you eyes and hands to use all o
 
 ---
 
+## Quick Start
+
+### MCP Mode (tools only — no built-in LLM)
+1. Add clawdcursor as an MCP server in your IDE/CLI config
+2. All 40 tools are immediately available — no server needed
+
+### Agent Mode (autonomous task execution)
+1. Run `clawdcursor start` in a terminal (keeps running in background)
+2. Use `delegate_to_agent` tool to send complex multi-step tasks
+3. IMPORTANT: delegate_to_agent requires the agent server running on port 3847
+
+---
+
 ## Section 1: When to Use clawdcursor
 
 Route tasks in this order — cheapest and most reliable first:
@@ -308,7 +321,13 @@ To type in canvas apps:
 
 ### Delegate complex tasks to the built-in agent
 
-For multi-step tasks (5+ actions, uncertain path, or "just get it done"):
+> **PREREQUISITE:** `delegate_to_agent` requires `clawdcursor start` running in a
+> terminal. Without it, calls will fail with "connection refused". Other tools
+> (smart_click, type_text, read_screen, etc.) work without the server.
+
+Use `delegate_to_agent` for complex multi-step GUI tasks that can't be done with
+individual tool calls — it has **its own LLM reasoning loop**, so the calling
+agent doesn't need to plan each click and keystroke. Just describe the goal:
 
 ```
 delegate_to_agent("Open Gmail, find the latest email from Stripe, and forward it to billing@example.com")
@@ -462,7 +481,7 @@ Speed/cost tier: ⚡ Free+instant · 🔵 Cheap · 🟡 Moderate · 🔴 Expensi
 | `open_app` | Launch an application by name | ⚡ | First step for desktop app tasks |
 | `navigate_browser` | Open URL with CDP auto-enabled | ⚡ | First step for browser tasks |
 | `wait` | Pause for N seconds | ⚡ | After opening apps or navigating — let UI render |
-| `delegate_to_agent` | Send task to built-in autonomous agent | 🟡 | Complex multi-step tasks — agent handles all planning |
+| `delegate_to_agent` | Send task to built-in autonomous agent (requires `clawdcursor start`) | 🟡 | Complex multi-step GUI tasks — agent has its own LLM reasoning, no need to plan each step |
 
 ---
 
@@ -594,6 +613,33 @@ automatically. You do not need to worry about logical vs physical pixels.
 Install Xcode CLI tools if not present: `xcode-select --install`
 
 **Linux:** Install Tesseract for OCR: `sudo apt install tesseract-ocr`
+
+---
+
+## Platform Notes
+
+### macOS
+- OCR may return empty for some apps — use `smart_read` or `read_screen` as alternatives
+- CDP browser automation requires Chrome/Edge launched with --remote-debugging-port
+- Use `open_app` to launch apps (uses macOS `open -a` internally)
+- Coordinate scaling (Retina displays) is handled automatically by physicalToMouse()
+
+---
+
+## Troubleshooting
+
+### delegate_to_agent returns "connection refused" or 404
+The agent server is not running. Run `clawdcursor start` in a terminal first.
+delegate_to_agent needs the server — other tools (smart_click, type_text, etc.) work without it.
+
+### "Authentication failed (401)"
+The server token changed. Run `clawdcursor stop && clawdcursor start` to regenerate.
+
+### OCR returns empty on macOS
+macOS OCR support requires additional setup. Try using `smart_read` instead which combines multiple perception methods.
+
+### Coordinates seem off / clicks miss targets
+clawdcursor handles DPI scaling automatically. If using raw coordinates from screenshots, they're in image-space — clawdcursor converts them. Don't pre-scale coordinates.
 
 ---
 
