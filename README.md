@@ -23,7 +23,7 @@
 
 **Architecture overhaul. Universal tool server. True independence.**
 
-- **6-layer smart pipeline** — L0 (Browser) -> L1 (Action Router) -> L1.5 (Deterministic Flows) -> L2 (A11y Reasoner + CDP) -> L2.5 (Vision Hints) -> L3 (Computer Use). Most tasks never reach L3.
+- **8-layer smart pipeline** — L0 (Browser) -> L1 (Action Router) -> L1.5 (Deterministic Flows) -> L2 (Skill Cache) -> L2.5 (OCR Reasoner) -> L2.5b (A11y Reasoner) -> L3 (Computer Use). Most tasks never reach L3.
 - **40 universal tools** — served via REST (`GET /tools`, `POST /execute/:name`) and MCP stdio from a single definition. Any model that can call functions can control your desktop.
 - **3 transport modes** — `start` (full agent + tools), `serve` (tools only, bring your own brain), `mcp` (MCP stdio for Claude Code, Cursor, Windsurf, Zed)
 - **CDP browser integration** — Chrome DevTools Protocol for DOM interaction, text extraction, click-by-selector. Auto-connects to Edge/Chrome.
@@ -36,12 +36,18 @@
 - **First-run onboarding** — consent flow explains what desktop control means before tools activate
 - **Standalone data directory** — all data in `~/.clawdcursor/` (migrates from legacy paths automatically)
 - **Error reporting** (opt-in) — `clawdcursor report` lets users send redacted task logs to help improve the agent
+- **API key validation on startup** — clear checkmark/cross messages so you know immediately if your key works
+- **Graceful error handling** — 401/402/429 responses produce actionable messages instead of hanging
+- **Configurable browser** — custom exe path, process name, and CDP port via config
+- **DPI-safe coordinate conversion** — consistent across all 8 call sites
+- **13 providers auto-detected** — up from 6, plus any OpenAI-compatible endpoint
+- **OCR Reasoner** — screenshot + OS-level OCR + cheap text LLM, with stagnation detection and done-verification
 
 ### v0.6.3 vs v0.7.0
 
 | | v0.6.3 | v0.7.0 |
 |---|---|---|
-| **Architecture** | 4-layer pipeline (L0-L3) | 6-layer pipeline (L0, L1, L1.5, L2, L2.5, L3) |
+| **Architecture** | 4-layer pipeline (L0-L3) | 8-layer pipeline (L0, L1, L1.5, L2, L2.5, L2.5b, L3) |
 | **Transport** | REST API only | REST + MCP stdio + tools-only server |
 | **Tools** | Monolithic agent, no tool exposure | 40 discrete tools, OpenAI function-calling format |
 | **Browser** | Playwright-only, no DOM access | CDP integration — click by selector, read text, type by label |
@@ -56,7 +62,7 @@
 | **Onboarding** | None — starts immediately | First-run consent flow for desktop control |
 | **MCP support** | None | Native MCP stdio for Claude Code, Cursor, Windsurf, Zed |
 | **Error reporting** | None | Opt-in redacted task log submission |
-| **Model coupling** | Anthropic-favored defaults | Truly model-agnostic — Claude, GPT, Gemini, Llama, Ollama, anything |
+| **Model coupling** | Anthropic-favored defaults | Truly model-agnostic — 13 providers auto-detected + any OpenAI-compatible endpoint |
 
 ---
 
@@ -220,8 +226,15 @@ clawdcursor start --base-url https://api.example.com/v1 --api-key KEY
 | OpenAI | `sk-` | Yes | No |
 | Groq | `gsk_` | Yes | No |
 | Together AI | - | Yes | No |
-| DeepSeek | - | Yes | No |
+| DeepSeek | `sk-` | Yes | No |
 | Kimi/Moonshot | `sk-` (long) | No | No |
+| Gemini (Google) | `AI...` | Yes | No |
+| Mistral | - | Yes | No |
+| xAI (Grok) | `xai-` | Yes | No |
+| Alibaba/Qwen (DashScope) | `sk-` | Yes | No |
+| Fireworks | `fw_...` | Yes | No |
+| Cohere | - | Yes | No |
+| Perplexity | `pplx-` | Yes | No |
 | Ollama (local) | - | Auto-detected | No |
 | Any OpenAI-compatible | - | Varies | No |
 
@@ -229,45 +242,58 @@ clawdcursor start --base-url https://api.example.com/v1 --api-key KEY
 
 ## How It Works
 
-### The 6-Layer Pipeline
+### The 8-Layer Pipeline
 
-Every task flows through layers cheapest-first. Most tasks complete at Layer 1 or 2 — Layer 3 is the expensive fallback.
+Every task flows through layers cheapest-first. Most tasks complete before Layer 3 — the expensive vision fallback.
 
 ```
 User Task
-  |
-  v
+    |
+    v
 Pre-processor (1 cheap LLM call)
-  Decomposes "open gmail and send email to bob" into
-  structured intent: {app, url, action, contextHints}
-  |
-  v
+    Decomposes compound tasks into structured intent:
+    {app, navigate, action, contextHints}
+    Local parser runs first (regex, zero LLM cost)
+    |
+    v
 Layer 0: Browser (free, instant)
-  Direct CDP: page.goto(), DOM reads, click by selector
-  |
-  v
+    Direct CDP: page.goto(), DOM reads, click by selector
+    |
+    v
 Layer 1: Action Router + Shortcuts (free, instant)
-  Regex matching + keyboard shortcuts registry
-  "scroll down" -> Page Down, "copy" -> Ctrl+C
-  |
-  v
+    Regex matching + 30 keyboard shortcuts
+    "scroll down" -> Page Down, "save" -> Ctrl+S
+    |
+    v
 Layer 1.5: Deterministic Flows (free, instant)
-  Hardcoded sequences for known tasks (email compose, app switch)
-  |
-  v
-Layer 2: A11y Reasoner + CDP (cheap, 1 LLM call)
-  Reads accessibility tree or CDP DOM -> sends to cheap LLM
-  LLM decides: click, type, key_press, cdp_click, done
-  Action verifier confirms each step worked
-  |
-  v
-Layer 2.5: Vision Hints (1 screenshot)
-  Screenshot -> vision LLM for spatial hints when A11y is blind
-  |
-  v
-Layer 3: Computer Use / Vision (expensive, full)
-  Screenshot -> vision LLM with site-specific shortcuts
-  3 smart retries with step log analysis
+    Zero-LLM verified workflows for known patterns
+    Email compose, find & replace, app switching
+    |
+    v
+Layer 2: Skill Cache (free, instant)
+    Replays previously learned task sequences
+    Falls through on cache miss
+    |
+    v
+Layer 2.5: OCR Reasoner  [PRIMARY] (cheap, 1 text LLM call per step)
+    Screenshot -> OS-level OCR -> text snapshot -> cheap text LLM
+    LLM decides: click, type, key, scroll, drag, done
+    Stagnation detection (4 identical screens -> bail)
+    Done-verification (evidence matching before accepting completion)
+    System prompt rules for multi-field forms
+    |
+    v
+Layer 2.5b: A11y Reasoner (fallback, 1 text LLM call)
+    Only runs when OCR Reasoner is unavailable
+    Accessibility tree -> cheap LLM -> structured actions
+    Circuit breaker on repeated failures
+    |
+    v
+Layer 3: Computer Use / Vision (expensive)
+    PATH A: Anthropic native Computer Use (claude-sonnet)
+    PATH B: Generic Computer Use (any OpenAI-compatible vision model)
+    Screenshot -> vision LLM with function calling
+    20-step limit, taskbar click blocking, stagnation detection
 ```
 
 ### Action Verification
@@ -370,7 +396,7 @@ clawdcursor kill         Force stop
 
 Options:
   --port <port>          API port (default: 3847)
-  --provider <provider>  anthropic|openai|ollama|groq|together|deepseek|kimi|...
+  --provider <provider>  anthropic|openai|ollama|groq|together|deepseek|kimi|gemini|mistral|xai|qwen|fireworks|cohere|perplexity|...
   --model <model>        Override vision model
   --api-key <key>        AI provider API key
   --base-url <url>       Custom API endpoint
