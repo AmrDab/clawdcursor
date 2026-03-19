@@ -28,18 +28,22 @@ Every app already has a UI — clawdcursor gives you eyes and hands to use all o
 
 > **IMPORTANT — READ THIS BEFORE ANYTHING ELSE**
 >
-> You have access to a desktop automation server running on the user's machine.
-> This means:
+> clawdcursor is a **FALLBACK**, not your first choice. Before using ANY clawdcursor tool, ask yourself:
 >
-> 1. You **CAN** open apps, click buttons, type text, fill forms, read screen content
-> 2. You **CAN** see what's on screen via accessibility tree, OCR, CDP, or screenshots
-> 3. You **CAN** interact with any application — browsers, desktop apps, system dialogs
+> - **Do I have an API for this?** (Gmail API, GitHub API, Slack API, etc.) → Use the API. It's faster, more reliable, and doesn't need a screen.
+> - **Do I have a CLI tool?** (`git`, `npm`, `curl`, `gh`, etc.) → Use the CLI. Same result, no GUI needed.
+> - **Do I have a browser extension or MCP connector?** (Puppeteer, Playwright, a dedicated MCP server for the service) → Use that. Direct DOM access beats screen reading.
+> - **Can I read/write the file directly?** → Do that. Don't open an app to edit a file you can edit programmatically.
+> - **None of the above work?** → NOW use clawdcursor. This is what it's for: the last mile where no API, CLI, or integration exists.
+>
+> clawdcursor gives you **eyes and hands** on the user's desktop. You can:
+> 1. Open apps, click buttons, type text, fill forms, read screen content
+> 2. See what's on screen via accessibility tree, OCR, or screenshots
+> 3. Interact with ANY application — browsers, desktop apps, system dialogs
+>
+> **Rules:**
 > 4. You **MUST** ask the user before accessing sensitive apps (see list below)
 > 5. You **MUST** never self-approve Confirm-tier safety actions
-> 6. You **SHOULD** prefer direct tools (API calls, CLI, file read) over desktop automation when available
->
-> Think of clawdcursor as **hands, eyes, and ears** on the user's computer —
-> used only with their permission.
 
 ---
 
