@@ -18,6 +18,7 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { screen } from '@nut-tree-fork/nut-js';
 import sharp from 'sharp';
+import { randomUUID } from 'crypto';
 
 const execFileAsync = promisify(execFile);
 
@@ -145,7 +146,7 @@ export class OcrEngine {
       }).png().toBuffer();
 
       // Save to temp file — OS OCR reads from disk
-      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}.png`);
+      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}-${randomUUID()}.png`);
       fs.writeFileSync(tmpPath, pngBuffer);
 
       try {
@@ -195,7 +196,7 @@ export class OcrEngine {
         .png()
         .toBuffer();
 
-      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}.png`);
+      const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${randomUUID()}.png`);
       fs.writeFileSync(tmpPath, pngBuffer);
 
       try {

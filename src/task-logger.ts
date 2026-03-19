@@ -15,6 +15,8 @@ import { TASK_LOGS_DIR } from './paths';
 
 // ─── Types ───────────────────────────────────────────────────
 
+const INCLUDE_RAW_STEP_DETAILS = process.env.CLAWD_DEBUG_RAW_LOGS === '1';
+
 export type PipelineLayer = 0 | 1 | 1.5 | 2 | 2.5 | 3 | 'preprocess' | 'decompose';
 
 export type CompletionStatus =
@@ -125,11 +127,11 @@ export class TaskLogger {
       layer: entry.layer,
       actionType: entry.actionType,
       result: entry.result,
-      ...(entry.actionParams && { actionParams: entry.actionParams }),
-      ...(entry.llmReasoning && { llmReasoning: entry.llmReasoning.substring(0, 500) }),
-      ...(entry.uiStateSummary && { uiStateSummary: entry.uiStateSummary.substring(0, 300) }),
+      ...(INCLUDE_RAW_STEP_DETAILS && entry.actionParams && { actionParams: sanitizeLogValue(entry.actionParams) }),
+      ...(INCLUDE_RAW_STEP_DETAILS && entry.llmReasoning && { llmReasoning: sanitizeLogText(entry.llmReasoning, 500) }),
+      ...(INCLUDE_RAW_STEP_DETAILS && entry.uiStateSummary && { uiStateSummary: sanitizeLogText(entry.uiStateSummary, 300) }),
       ...(entry.verification && { verification: entry.verification }),
-      ...(entry.error && { error: entry.error.substring(0, 300) }),
+      ...(entry.error && { error: sanitizeLogText(entry.error, 300) }),
       ...(entry.durationMs !== undefined && { durationMs: entry.durationMs }),
     };
 
@@ -232,4 +234,29 @@ export class TaskLogger {
       return [];
     }
   }
+}
+
+function sanitizeLogText(text: string, maxLen: number): string {
+  return text
+    .replace(/sk-[a-zA-Z0-9_-]{20,}/g, '[REDACTED]')
+    .replace(/bearer\s+[a-zA-Z0-9_.-]{20,}/gi, 'Bearer [REDACTED]')
+    .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g, '[REDACTED_EMAIL]')
+    .slice(0, maxLen);
+}
+
+function sanitizeLogValue(value: unknown, depth = 0): unknown {
+  if (depth > 3) return '[TRUNCATED]';
+  if (typeof value === 'string') return sanitizeLogText(value, 200);
+  if (typeof value === 'number' || typeof value === 'boolean' || value == null) return value;
+  if (Array.isArray(value)) return value.slice(0, 20).map(item => sanitizeLogValue(item, depth + 1));
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>).slice(0, 20)) {
+      out[key] = /text|value|password|token|secret|prompt|content/i.test(key)
+        ? '[REDACTED]'
+        : sanitizeLogValue(val, depth + 1);
+    }
+    return out;
+  }
+  return String(value);
 }

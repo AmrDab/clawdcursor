@@ -671,10 +671,15 @@ export class ActionRouter {
     try {
       // Use clipboard paste for longer text — avoids autocomplete interference in Notepad
       if (text.length > 10) {
-        await this.a11y.writeClipboard(text);
-        await this.delay(50);
-        await this.desktop.keyPress(PLATFORM === 'darwin' ? 'Super+v' : 'Control+v');
-        await this.delay(200);
+        const writeClipboard = (this.a11y as any).writeClipboard;
+        if (typeof writeClipboard === 'function') {
+          await writeClipboard.call(this.a11y, text);
+          await this.delay(50);
+          await this.desktop.keyPress(PLATFORM === 'darwin' ? 'Super+v' : 'Control+v');
+          await this.delay(200);
+        } else {
+          await this.desktop.typeText(text);
+        }
       } else {
         await this.desktop.typeText(text);
       }

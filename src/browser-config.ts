@@ -8,7 +8,7 @@
 
 import type { ClawdConfig } from './types';
 
-const DEFAULT_CDP_PORT = 9222;
+export const DEFAULT_CDP_PORT = 9222;
 const DEFAULT_BROWSER_PROCESSES = ['msedge', 'chrome', 'chromium', 'firefox', 'brave', 'opera', 'arc', 'safari'];
 
 /** Get configured browser executable path, or null for auto-detection */
