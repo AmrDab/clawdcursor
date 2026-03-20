@@ -690,9 +690,10 @@ program
 
     console.log(`\n${e('🗑️', '[DEL]')}  Uninstalling Clawd Cursor...\n`);
     const clawdRoot = path.resolve(__dirname, '..');
+    const homeDir = os.homedir();
     let removed = 0;
 
-    // 1. Remove config files
+    // 1. Remove config files in project root
     const configFiles = [
       path.join(clawdRoot, '.clawdcursor-config.json'),
       path.join(clawdRoot, '.clawdcursor-favorites.json'),
@@ -706,7 +707,22 @@ program
       }
     }
 
-    // 2. Remove debug folder
+    // 2. Remove ~/.clawdcursor data directory (token, consent, task logs, pid)
+    const dataDir = path.join(homeDir, '.clawdcursor');
+    if (fs.existsSync(dataDir)) {
+      fs.rmSync(dataDir, { recursive: true, force: true });
+      console.log(`   ${e('🗑️', '[DEL]')}  Removed ${dataDir}`);
+      removed++;
+    }
+    // Also remove legacy data directory
+    const legacyDataDir = path.join(homeDir, '.clawd-cursor');
+    if (fs.existsSync(legacyDataDir)) {
+      fs.rmSync(legacyDataDir, { recursive: true, force: true });
+      console.log(`   ${e('🗑️', '[DEL]')}  Removed legacy ${legacyDataDir}`);
+      removed++;
+    }
+
+    // 3. Remove debug folder
     const debugDir = path.join(clawdRoot, 'debug');
     if (fs.existsSync(debugDir)) {
       fs.rmSync(debugDir, { recursive: true, force: true });
@@ -714,8 +730,7 @@ program
       removed++;
     }
 
-    // 3. Remove external skill registrations (OpenClaw, Codex, etc.)
-    const homeDir = os.homedir();
+    // 4. Remove external skill registrations (OpenClaw, Codex, etc.)
     const skillPaths = [
       path.join(homeDir, '.openclaw', 'workspace', 'skills', 'clawdcursor'),
       path.join(homeDir, '.openclaw-dev', 'workspace', 'skills', 'clawdcursor'),
@@ -735,7 +750,42 @@ program
       }
     }
 
-    // 4. Remove dist folder
+    // 5. Remove MCP server entries from known config files
+    const mcpConfigs = [
+      // Claude Code
+      path.join(homeDir, '.claude', 'settings.json'),
+      path.join(homeDir, '.claude', 'settings.local.json'),
+      // Cursor
+      path.join(homeDir, '.cursor', 'mcp.json'),
+      // Windsurf
+      path.join(homeDir, '.windsurf', 'mcp.json'),
+      path.join(homeDir, '.codeium', 'windsurf', 'mcp_config.json'),
+      // VS Code / Continue
+      path.join(homeDir, '.vscode', 'mcp.json'),
+    ];
+    for (const configPath of mcpConfigs) {
+      try {
+        if (!fs.existsSync(configPath)) continue;
+        const raw = fs.readFileSync(configPath, 'utf-8');
+        const json = JSON.parse(raw);
+        // Look for "clawdcursor" or "clawd-cursor" key in mcpServers
+        const servers = json.mcpServers || json.servers || {};
+        let found = false;
+        for (const key of Object.keys(servers)) {
+          if (key.toLowerCase().includes('clawdcursor') || key.toLowerCase().includes('clawd-cursor')) {
+            delete servers[key];
+            found = true;
+          }
+        }
+        if (found) {
+          fs.writeFileSync(configPath, JSON.stringify(json, null, 2) + '\n');
+          console.log(`   ${e('🗑️', '[DEL]')}  Removed MCP entry from ${configPath}`);
+          removed++;
+        }
+      } catch { /* skip unreadable configs */ }
+    }
+
+    // 6. Remove dist folder
     const distDir = path.join(clawdRoot, 'dist');
     if (fs.existsSync(distDir)) {
       fs.rmSync(distDir, { recursive: true, force: true });
@@ -743,11 +793,19 @@ program
       removed++;
     }
 
+    // 7. Unlink global npm command
+    try {
+      const { execSync } = await import('child_process');
+      execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000 });
+      console.log(`   ${e('🗑️', '[DEL]')}  Removed global clawdcursor command`);
+      removed++;
+    } catch { /* may not be linked globally */ }
+
     if (removed === 0) {
       console.log('   Nothing to clean up.');
     }
 
-    console.log(`\n${e('🐾', '>')} Uninstalled. To fully remove, delete the clawdcursor folder:`);
+    console.log(`\n${e('🐾', '>')} Fully uninstalled. To remove the source code, delete:`);
     console.log(`   ${clawdRoot}\n`);
   });
 
