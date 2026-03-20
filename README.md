@@ -42,6 +42,11 @@
 - **DPI-safe coordinate conversion** — consistent across all 8 call sites
 - **13 providers auto-detected** — up from 6, plus any OpenAI-compatible endpoint
 - **OCR Reasoner** — screenshot + OS-level OCR + cheap text LLM, with stagnation detection and done-verification
+- **Universal OS support** — platform-aware system prompts, DPI detection (Retina via NSScreen, Linux via xrandr/GDK_SCALE), and browser CDP paths for Windows, macOS, and Linux
+- **Security hardening** — log sanitization (API keys/tokens redacted), token fingerprinting on startup, auth required on sensitive GET endpoints (/favorites, /task-logs, /logs)
+- **Task execution lock** — prevents race conditions from concurrent /task requests
+- **Clipboard fallback** — catches a11y bridge failure, falls back to typeText
+- **Install verification** — `scripts/verify-install.js` checks Node version + native deps with platform-specific fix guidance
 
 ### v0.6.3 vs v0.7.2
 
@@ -63,6 +68,8 @@
 | **MCP support** | None | Native MCP stdio for Claude Code, Cursor, Windsurf, Zed |
 | **Error reporting** | None | Opt-in redacted task log submission |
 | **Model coupling** | Anthropic-favored defaults | Truly model-agnostic — 13 providers auto-detected + any OpenAI-compatible endpoint |
+| **OS support** | Windows only | Windows, macOS, Linux — platform-aware prompts, DPI, browser paths |
+| **Security** | Token in logs, no endpoint auth | Log sanitization, token fingerprint, auth on sensitive endpoints |
 
 ---
 
@@ -362,7 +369,7 @@ If the LLM repeats the same action 3+ times in an 8-step window, it's blocked an
     a11y_tree   scroll           switch  cdp_read
                           |
                Native Desktop Layer
-          nut-js + PowerShell/JXA + Playwright
+          nut-js + PowerShell/JXA/AT-SPI + Playwright
                           |
                     Your Desktop
 ```
