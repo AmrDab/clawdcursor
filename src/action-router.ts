@@ -574,10 +574,23 @@ export class ActionRouter {
     const customExe = getBrowserExePath();
     const browserPaths = customExe
       ? [customExe]
-      : [
-          'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
-          'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
-        ];
+      : PLATFORM === 'darwin'
+        ? [
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          ]
+        : PLATFORM === 'linux'
+          ? [
+              '/usr/bin/microsoft-edge',
+              '/usr/bin/google-chrome',
+              '/usr/bin/google-chrome-stable',
+              '/usr/bin/chromium',
+              '/usr/bin/chromium-browser',
+            ]
+          : [
+              'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+              'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            ];
     for (const browserPath of browserPaths) {
       try {
         spawn(browserPath, [
@@ -740,6 +753,8 @@ export class ActionRouter {
         // Fall back to OS default browser
         if (PLATFORM === 'darwin') {
           await execFileAsync('open', [fullUrl]);
+        } else if (PLATFORM === 'linux') {
+          await execFileAsync('xdg-open', [fullUrl]);
         } else {
           await execFileAsync('explorer', [fullUrl]);
         }

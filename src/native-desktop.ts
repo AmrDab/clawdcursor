@@ -219,6 +219,38 @@ export class NativeDesktop extends EventEmitter {
             this.dpiRatio = this.screenWidth / logicalW;
           }
         } catch { /* non-fatal — dpiRatio stays 1 */ }
+      } else if (process.platform === 'darwin') {
+        try {
+          const { execFileSync } = await import('child_process');
+          // NSScreen reports in logical (point) dimensions — compare with physical pixels from screen.grab()
+          const result = execFileSync('osascript', ['-e',
+            'use framework "AppKit"\nreturn (current application\'s NSScreen\'s mainScreen\'s frame()\'s size\'s width) as integer',
+          ], { timeout: 5000, encoding: 'utf-8' }).trim();
+          const logicalW = parseInt(result);
+          if (logicalW > 0 && logicalW < this.screenWidth) {
+            this.dpiRatio = this.screenWidth / logicalW;
+          }
+        } catch { /* non-fatal — dpiRatio stays 1 */ }
+      } else if (process.platform === 'linux') {
+        try {
+          // Check common DE scale environment variables first
+          const gdkScale = parseInt(process.env.GDK_SCALE || '1');
+          const qtScale = parseFloat(process.env.QT_SCALE_FACTOR || '1');
+          const envScale = Math.max(gdkScale, qtScale);
+          if (envScale > 1) {
+            this.dpiRatio = envScale;
+          } else {
+            const { execFileSync } = await import('child_process');
+            const output = execFileSync('xrandr', ['--query'], { timeout: 5000, encoding: 'utf-8' });
+            const match = output.match(/primary\s+(\d+)x(\d+)/);
+            if (match) {
+              const logicalW = parseInt(match[1]);
+              if (logicalW > 0 && logicalW < this.screenWidth) {
+                this.dpiRatio = this.screenWidth / logicalW;
+              }
+            }
+          }
+        } catch { /* non-fatal — dpiRatio stays 1 */ }
       }
 
       this.connected = true;

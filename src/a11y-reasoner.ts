@@ -13,6 +13,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { AccessibilityBridge } from './accessibility';
 import { A11yClickResolver } from './a11y-click-resolver';
@@ -28,7 +29,11 @@ const SETTLE_MS      = 300; // wait after action before re-reading tree
 const BROWSER_PROCESS_RE = getBrowserProcessRegex(); // shared regex — avoids duplicating in 4+ places
 const MAX_ACTION_HISTORY = 40; // cap action history to prevent unbounded growth
 
-const SYSTEM_PROMPT = `You control a Windows desktop via the accessibility tree and keyboard. You are an AUTONOMOUS REASONING AGENT. At EVERY step you must:
+const PLATFORM_DESC = os.platform() === 'darwin' ? 'a macOS desktop'
+  : os.platform() === 'win32' ? 'a Windows desktop'
+  : 'a Linux desktop';
+
+const SYSTEM_PROMPT = `You control ${PLATFORM_DESC} via the accessibility tree and keyboard. You are an AUTONOMOUS REASONING AGENT. At EVERY step you must:
 1. READ the current UI state carefully
 2. THINK about what you see vs what the task requires
 3. DECIDE what action brings you closer to completion

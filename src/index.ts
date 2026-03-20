@@ -777,11 +777,24 @@ async function createToolContext() {
       screenshotScaleFactor = desktop.getScaleFactor();
       try {
         const { execFileSync } = await import('child_process');
-        const result = execFileSync('powershell.exe', [
-          '-NoProfile', '-Command',
-          "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
-        ], { timeout: 10000, encoding: 'utf-8' }).trim();
-        const [logicalW] = result.split(',').map(Number);
+        let logicalW = 0;
+        if (process.platform === 'win32') {
+          const result = execFileSync('powershell.exe', [
+            '-NoProfile', '-Command',
+            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
+          ], { timeout: 10000, encoding: 'utf-8' }).trim();
+          logicalW = parseInt(result.split(',')[0]);
+        } else if (process.platform === 'darwin') {
+          const result = execFileSync('osascript', ['-e',
+            'use framework "AppKit"\nreturn (current application\'s NSScreen\'s mainScreen\'s frame()\'s size\'s width) as integer',
+          ], { timeout: 5000, encoding: 'utf-8' }).trim();
+          logicalW = parseInt(result);
+        } else {
+          // Linux: try xrandr primary resolution
+          const output = execFileSync('xrandr', ['--query'], { timeout: 5000, encoding: 'utf-8' });
+          const match = output.match(/primary\s+(\d+)x(\d+)/);
+          if (match) logicalW = parseInt(match[1]);
+        }
         if (logicalW > 0) mouseScaleFactor = logicalW / 1280;
       } catch {
         mouseScaleFactor = screenshotScaleFactor;
