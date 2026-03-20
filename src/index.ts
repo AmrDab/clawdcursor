@@ -177,6 +177,23 @@ program
       if (!accepted) process.exit(1);
     }
 
+    // Pre-check: is the port already in use? Do this BEFORE expensive init.
+    const requestedPort = parseInt(opts.port, 10) || 3847;
+    const requestedHost = '127.0.0.1';
+    const net = await import('net');
+    const portFree = await new Promise<boolean>((resolve) => {
+      const tester = net.createServer()
+        .once('error', () => resolve(false))
+        .once('listening', () => { tester.close(); resolve(true); });
+      tester.listen(requestedPort, requestedHost);
+    });
+    if (!portFree) {
+      console.error(`\n${e('❌', '[ERR]')} Port ${requestedPort} is already in use.`);
+      console.error(`Another clawdcursor instance may be running.`);
+      console.error(`Run 'clawdcursor stop' first, or use --port <other_port>`);
+      process.exit(1);
+    }
+
     // Auto-setup on first run
     const configPath = path.join(__dirname, '..', '.clawdcursor-config.json');
     if (!fs.existsSync(configPath)) {
@@ -254,21 +271,6 @@ program
       app.use(createToolServer(toolCtx));
     } catch (err) {
       console.warn('Tool server not loaded:', (err as Error).message);
-    }
-
-    // Pre-check: is the port already in use?
-    const net = await import('net');
-    const portFree = await new Promise<boolean>((resolve) => {
-      const tester = net.createServer()
-        .once('error', () => resolve(false))
-        .once('listening', () => { tester.close(); resolve(true); });
-      tester.listen(config.server.port, config.server.host);
-    });
-    if (!portFree) {
-      console.error(`\n${e('❌', '[ERR]')} Port ${config.server.port} is already in use.`);
-      console.error(`Another clawdcursor instance may be running.`);
-      console.error(`Run 'clawdcursor stop' first, or use --port <other_port>`);
-      process.exit(1);
     }
 
     app.listen(config.server.port, config.server.host, async () => {
@@ -692,6 +694,23 @@ program
     const clawdRoot = path.resolve(__dirname, '..');
     const homeDir = os.homedir();
     let removed = 0;
+
+    // 0. Stop any running server first (before deleting token)
+    try {
+      const tokenPath = path.join(homeDir, '.clawdcursor', 'token');
+      if (fs.existsSync(tokenPath)) {
+        const token = fs.readFileSync(tokenPath, 'utf-8').trim();
+        const resp = await fetch('http://127.0.0.1:3847/stop', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (resp.ok) {
+          console.log(`   ${e('🛑', '[STOP]')}  Stopped running server`);
+          // Give it a moment to shut down
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+    } catch { /* server not running — that's fine */ }
 
     // 1. Remove config files in project root
     const configFiles = [
