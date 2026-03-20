@@ -5,7 +5,17 @@ mkdir -p "$RESULTS_DIR"
 TASK='open outlook and send an email to test@hotmail.com saying hello'
 TIMEOUT=60
 TOTAL=10
-LOGFILE=$(ls -t /c/Users/amr_d/AppData/Local/Temp/claude/C--Users-amr-d/tasks/*.output 2>/dev/null | head -1)
+LOGFILE=$(ls -t "$LOCALAPPDATA/Temp/claude/"*/tasks/*.output "$TMPDIR/claude/"*/tasks/*.output /tmp/claude/*/tasks/*.output 2>/dev/null | head -1)
+
+# Read auth token
+TOKEN_FILE="$HOME/.clawdcursor/token"
+if [ -f "$TOKEN_FILE" ]; then
+  TOKEN=$(cat "$TOKEN_FILE")
+  AUTH_HEADER="Authorization: Bearer $TOKEN"
+else
+  echo "⚠️  No token found at $TOKEN_FILE — POST requests may fail"
+  AUTH_HEADER=""
+fi
 
 echo "=== Test Loop: $TOTAL iterations, ${TIMEOUT}s timeout ===" | tee "$RESULTS_DIR/summary.txt"
 echo "Agent log: $LOGFILE"
@@ -15,7 +25,7 @@ for i in $(seq 1 $TOTAL); do
   echo "──── TEST $i/$TOTAL — $(date +%H:%M:%S) ────"
 
   # Make sure agent is idle — abort + wait
-  curl -s -X POST http://127.0.0.1:3847/abort > /dev/null 2>&1
+  curl -s -X POST http://127.0.0.1:3847/abort -H "$AUTH_HEADER" > /dev/null 2>&1
   sleep 2
 
   # Verify idle
@@ -26,7 +36,7 @@ for i in $(seq 1 $TOTAL); do
       break
     fi
     echo "  Waiting for idle (attempt $retry)..."
-    curl -s -X POST http://127.0.0.1:3847/abort > /dev/null 2>&1
+    curl -s -X POST http://127.0.0.1:3847/abort -H "$AUTH_HEADER" > /dev/null 2>&1
     sleep 3
   done
 
@@ -45,6 +55,7 @@ for i in $(seq 1 $TOTAL); do
   # Send task
   RESPONSE=$(curl -s -X POST http://127.0.0.1:3847/task \
     -H "Content-Type: application/json" \
+    -H "$AUTH_HEADER" \
     -d "{\"task\": \"$TASK\"}")
 
   ACCEPTED=$(echo "$RESPONSE" | grep -o '"accepted":true')
@@ -72,7 +83,7 @@ for i in $(seq 1 $TOTAL); do
     fi
 
     if [ $ELAPSED -ge $TIMEOUT ]; then
-      curl -s -X POST http://127.0.0.1:3847/abort > /dev/null 2>&1
+      curl -s -X POST http://127.0.0.1:3847/abort -H "$AUTH_HEADER" > /dev/null 2>&1
       RESULT="TIMEOUT"
       sleep 3
       break
