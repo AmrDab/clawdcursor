@@ -468,8 +468,8 @@
   <!-- Install -->
   <section id="install" class="sect">
     <div class="sect-label">Get Started</div>
-    <h2>Up and running in 2 minutes</h2>
-    <p class="sub">Pick your OS, install, consent once, connect your AI.</p>
+    <h2>Two commands. That's it.</h2>
+    <p class="sub">Install, start. Providers are auto-detected on first run.</p>
 
     <div class="os-tabs">
       <button class="os-tab active" onclick="switchOS('windows')">Windows</button>
@@ -479,80 +479,31 @@
 
     <div class="code-box" id="os-windows" style="display:block;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>PowerShell</span></div>
-      <pre><code><span class="c-comment"># 1. One-line install (Node.js 20+ and git required)</span>
+      <pre><code><span class="c-comment"># Install</span>
 <span class="c-cmd">powershell -c</span> <span class="c-string">"iex (iwr -useb https://clawdcursor.com/install.ps1).Content"</span>
 
-<span class="c-comment"># 2. Auto-detect your AI providers</span>
-<span class="c-cmd">clawdcursor doctor</span>
-
-<span class="c-comment"># 3. Start the agent (consent prompt on first run)</span>
-<span class="c-cmd">clawdcursor start</span>
-
-<span class="c-comment"># 4. Send a task</span>
-<span class="c-cmd">clawdcursor task</span> <span class="c-string">"Open Chrome and go to github.com"</span>
-
-<span class="c-comment"># Or use as MCP server (add to Claude Code / Cursor config)</span>
-<span class="c-string">{
-  "mcpServers": {
-    "clawdcursor": { "command": "clawdcursor", "args": ["mcp"] }
-  }
-}</span></code></pre>
+<span class="c-comment"># Start (auto-detects your AI providers on first run)</span>
+<span class="c-cmd">clawdcursor start</span></code></pre>
     </div>
 
     <div class="code-box" id="os-macos" style="display:none;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal (zsh)</span></div>
-      <pre><code><span class="c-comment"># 0. Grant Accessibility permissions FIRST</span>
-<span class="c-comment">#    System Settings → Privacy &amp; Security → Accessibility</span>
-<span class="c-comment">#    → Add your Terminal app (Terminal, iTerm2, Warp, etc.)</span>
+      <pre><code><span class="c-comment"># Grant Accessibility: System Settings → Privacy → Accessibility → add Terminal</span>
 
-<span class="c-comment"># 1. One-line install (Node.js 20+ and git required)</span>
+<span class="c-comment"># Install</span>
 <span class="c-cmd">curl -fsSL</span> <span class="c-string">https://clawdcursor.com/install.sh</span> <span class="c-cmd">| bash</span>
 
-<span class="c-comment"># 2. Auto-detect your AI providers</span>
-<span class="c-cmd">clawdcursor doctor</span>
-
-<span class="c-comment"># 3. Start the agent (consent prompt on first run)</span>
-<span class="c-cmd">clawdcursor start</span>
-
-<span class="c-comment"># 4. Send a task</span>
-<span class="c-cmd">clawdcursor task</span> <span class="c-string">"Open Safari and go to github.com"</span>
-
-<span class="c-comment"># Or use as MCP server (add to Claude Code / Cursor config)</span>
-<span class="c-string">{
-  "mcpServers": {
-    "clawdcursor": { "command": "clawdcursor", "args": ["mcp"] }
-  }
-}</span>
-
-<span class="c-comment"># Troubleshooting: if clicks don't land, re-check Accessibility permissions</span>
-<span class="c-comment"># See docs/MACOS-SETUP.md for detailed setup guide</span></code></pre>
+<span class="c-comment"># Start (auto-detects your AI providers on first run)</span>
+<span class="c-cmd">clawdcursor start</span></code></pre>
     </div>
 
     <div class="code-box" id="os-linux" style="display:none;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>Terminal (bash)</span></div>
-      <pre><code><span class="c-comment"># NOTE: Linux supports browser automation via CDP only</span>
-<span class="c-comment"># Native desktop control (mouse, keyboard, a11y) is not yet supported</span>
-
-<span class="c-comment"># 1. One-line install (Node.js 20+ and git required)</span>
+      <pre><code><span class="c-comment"># Install</span>
 <span class="c-cmd">curl -fsSL</span> <span class="c-string">https://clawdcursor.com/install.sh</span> <span class="c-cmd">| bash</span>
 
-<span class="c-comment"># 2. Auto-detect your AI providers</span>
-<span class="c-cmd">clawdcursor doctor</span>
-
-<span class="c-comment"># 3. Start the agent (consent prompt on first run)</span>
-<span class="c-cmd">clawdcursor start</span>
-
-<span class="c-comment"># 4. Send a browser task</span>
-<span class="c-cmd">clawdcursor task</span> <span class="c-string">"Open Chrome and go to github.com"</span>
-
-<span class="c-comment"># Or use as MCP server</span>
-<span class="c-string">{
-  "mcpServers": {
-    "clawdcursor": { "command": "clawdcursor", "args": ["mcp"] }
-  }
-}</span>
-
-<span class="c-comment"># Linux roadmap: xdotool / AT-SPI support planned for future release</span></code></pre>
+<span class="c-comment"># Start (auto-detects your AI providers on first run)</span>
+<span class="c-cmd">clawdcursor start</span></code></pre>
     </div>
 
     <p style="color:var(--text3);font-size:0.78rem;margin-top:10px;">Requires Node.js 20+. Consent is one-time and stored in <code style="color:var(--text2)">~/.clawdcursor/consent</code>. Server binds to localhost only.</p>
