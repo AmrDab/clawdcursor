@@ -359,10 +359,14 @@ function resolveFromOpenClawFiles(): ResolvedApiConfig | null {
     || globalProviderWithKey;
   if (!selectedProvider) return null;
 
-  const visionModel = visionProvider?.models.find(m => m.input.includes('image') || m.input.includes('vision'))?.id
+  const rawVisionModel = visionProvider?.models.find(m => m.input.includes('image') || m.input.includes('vision'))?.id
     || textProvider?.models[0]?.id;
-  const textModel = textProvider?.models.find(m => !m.input.includes('image') && !m.input.includes('vision'))?.id
+  const rawTextModel = textProvider?.models.find(m => !m.input.includes('image') && !m.input.includes('vision'))?.id
     || textProvider?.models[0]?.id;
+
+  // Auto-upgrade small context models — 8K is too small for web automation.
+  const textModel = rawTextModel === 'moonshot-v1-8k' ? 'moonshot-v1-32k' : rawTextModel;
+  const visionModel = rawVisionModel;
 
   const resolvedApiKey = selectedProvider.apiKey || textProvider?.apiKey || visionProvider?.apiKey || globalProviderWithKey?.apiKey || '';
 
@@ -402,7 +406,17 @@ export function resolveApiConfig(opts?: {
 }): ResolvedApiConfig {
   // Explicit CLI flags always win over auto-detection
   if (opts?.apiKey || opts?.provider || opts?.baseUrl) {
-    const explicitApiKey = opts.apiKey || '';
+    // If provider is specified but no API key, check environment variables for that provider
+    let explicitApiKey = opts.apiKey || '';
+    if (!explicitApiKey && opts.provider) {
+      const { PROVIDER_ENV_VARS } = require('./providers');
+      const envVarNames = PROVIDER_ENV_VARS[normalizeProvider(opts.provider) || ''] || [];
+      for (const envVar of envVarNames) {
+        if (process.env[envVar]) { explicitApiKey = process.env[envVar]!; break; }
+      }
+      // Also check generic AI_API_KEY
+      if (!explicitApiKey && process.env.AI_API_KEY) explicitApiKey = process.env.AI_API_KEY;
+    }
     const explicitBaseUrl = normalizeBaseUrl(opts.baseUrl);
     const explicitTextModel = pick(opts.textModel);
     const explicitVisionModel = pick(opts.visionModel);

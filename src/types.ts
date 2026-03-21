@@ -68,7 +68,7 @@ export interface StepResult {
   error?: string;
   timestamp: number;
   // Structured logging fields:
-  layer?: 'browser' | 'router' | 'smart' | 'ocr' | 'a11y' | 'computer-use' | 'deterministic';
+  layer?: 'browser' | 'router' | 'smart' | 'ocr' | 'a11y' | 'unified' | 'computer-use' | 'deterministic';
   method?: string;           // 'a11y_invoke' | 'ocr_click' | 'keyboard' | 'mouse' | 'cdp'
   coordinates?: [number, number];
   elementName?: string;

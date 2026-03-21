@@ -68,7 +68,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     name: 'Kimi (Moonshot)',
     baseUrl: 'https://api.moonshot.ai/v1',
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
-    textModel: 'moonshot-v1-8k',
+    textModel: 'moonshot-v1-32k',
     visionModel: 'kimi-k2.5',
     openaiCompat: true,
     computerUse: false,

@@ -286,12 +286,14 @@ export class OcrReasoner {
             this.targetProcessId = activeWin.processId;
             this.currentAppProcess = (activeWin.title || activeWin.processName).toLowerCase();
             console.log(`   [OCR] Target window: ${activeWin.processName} "${activeWin.title}" (pid ${activeWin.processId})`);
-            // Click center of target window to guarantee keyboard focus (UWP apps like Calculator need this)
+            // Click title bar area to guarantee keyboard focus without triggering UI elements.
+            // Previously clicked window center, which could select text, change paint colors, etc.
             if (activeWin.bounds && activeWin.bounds.width > 0) {
               const cx = activeWin.bounds.x + Math.round(activeWin.bounds.width / 2);
-              const cy = activeWin.bounds.y + Math.round(activeWin.bounds.height / 2);
+              // Title bar is ~30px from top of window (below shadow offset)
+              const cy = activeWin.bounds.y + Math.max(30, Math.round(activeWin.bounds.height * 0.01));
               const mc = this.desktop.physicalToMouse(cx, cy);
-              console.log(`   [OCR] Focus click: center of window at (${mc.x},${mc.y})`);
+              console.log(`   [OCR] Focus click: title bar at (${mc.x},${mc.y})`);
               await this.desktop.mouseClick(mc.x, mc.y);
               await new Promise(r => setTimeout(r, 200));
             }
@@ -884,11 +886,36 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
             await new Promise(r => setTimeout(r, 60));
           }
         } else {
-          // Clipboard paste for reliability
-          await this.a11y.writeClipboard(action.text);
-          await new Promise(r => setTimeout(r, 50));
-          await this.desktop.keyPress('ctrl+v');
-          await new Promise(r => setTimeout(r, 300)); // 300ms to allow autocomplete resolution in email fields
+          // Clipboard paste for reliability — with verification
+          let clipboardReady = false;
+          for (let attempt = 0; attempt < 2; attempt++) {
+            await this.a11y.writeClipboard(action.text);
+            await new Promise(r => setTimeout(r, 50));
+            // Verify clipboard contents match what we wrote
+            try {
+              const clipContents = await this.a11y.readClipboard();
+              if (clipContents === action.text) {
+                clipboardReady = true;
+                break;
+              }
+              console.warn(`   [OCR] ⚠️ Clipboard verify attempt ${attempt + 1}: mismatch (got "${clipContents.substring(0, 30)}", expected "${action.text.substring(0, 30)}")`);
+            } catch {
+              console.warn(`   [OCR] ⚠️ Clipboard verify attempt ${attempt + 1}: read failed`);
+            }
+          }
+
+          if (clipboardReady) {
+            await this.desktop.keyPress('ctrl+v');
+            await new Promise(r => setTimeout(r, 300)); // 300ms to allow autocomplete resolution in email fields
+          } else {
+            // Clipboard failed twice — fall back to key-by-key typing
+            console.warn(`   [OCR] ⚠️ Clipboard write failed after 2 attempts — falling back to key-by-key typing`);
+            for (const char of action.text) {
+              await this.desktop.keyPress(char);
+              await new Promise(r => setTimeout(r, 30));
+            }
+            await new Promise(r => setTimeout(r, 150));
+          }
           // Post-type verification: check focused element contains typed text (best-effort)
           try {
             const focused = await this.a11y.getFocusedElement?.();

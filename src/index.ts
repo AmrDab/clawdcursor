@@ -336,16 +336,22 @@ program
           }
         }
       } else if (!pipelineConfig) {
-        console.error(`\n${e('❌', '[ERR]')} No AI providers configured.`);
-        console.error(`   clawdcursor needs at least one working LLM to execute tasks.\n`);
-        console.error(`   Option 1 (Free, local): Install Ollama → https://ollama.ai`);
-        console.error(`      Then: ollama pull qwen2.5:7b\n`);
-        console.error(`   Option 2 (API key): Set an environment variable:`);
-        console.error(`      ANTHROPIC_API_KEY, OPENAI_API_KEY, MOONSHOT_API_KEY, etc.\n`);
-        console.error(`   Then run: clawdcursor start\n`);
-        releasePidFile('start');
-        agent.disconnect();
-        process.exit(1);
+        // Only exit if there are also no external credentials (OpenClaw, env vars, etc.)
+        const hasExternalModels = !!(config.ai.model || config.ai.visionModel);
+        if (!hasExternalModels) {
+          console.error(`\n${e('❌', '[ERR]')} No AI providers configured.`);
+          console.error(`   clawdcursor needs at least one working LLM to execute tasks.\n`);
+          console.error(`   Option 1 (Free, local): Install Ollama → https://ollama.ai`);
+          console.error(`      Then: ollama pull qwen2.5:7b\n`);
+          console.error(`   Option 2 (API key): Set an environment variable:`);
+          console.error(`      ANTHROPIC_API_KEY, OPENAI_API_KEY, MOONSHOT_API_KEY, etc.\n`);
+          console.error(`   Then run: clawdcursor start\n`);
+          releasePidFile('start');
+          agent.disconnect();
+          process.exit(1);
+        } else {
+          console.log(`${e('✅', '[OK]')} Using externally configured models: text=${config.ai.model} | vision=${config.ai.visionModel}`);
+        }
       }
 
       console.log(`\nReady. ${e('🐾', '')}`);

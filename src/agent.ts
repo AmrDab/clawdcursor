@@ -376,8 +376,8 @@ public class WinAPI {
     this.brain.setScreenSize(size.width, size.height);
   }
 
-  /** Maximum wall-clock time for a single task (10 minutes) */
-  private static readonly TASK_TIMEOUT_MS = 60 * 1000; // 60s — fast fail, diagnose, iterate
+  /** Maximum wall-clock time for a single task */
+  private static readonly TASK_TIMEOUT_MS = 120 * 1000; // 120s — multi-step tasks need more time
 
   async executeTask(task: string): Promise<TaskResult> {
     // Atomic concurrency guard — boolean lock prevents TOCTOU race
@@ -1117,6 +1117,28 @@ Examples:
       }
       if (flowResult && !flowResult.handled) {
         console.log(`   🔄 Deterministic flow failed at step ${flowResult.failedAtStep}: ${flowResult.description} — falling through to OCR`);
+      }
+
+      // ── Layer 1.8: Action Router (retry for pre-processed tasks) ──
+      // When skipRouter was true at the top of the loop (priorContext exists), the router
+      // was skipped. But individual subtasks like "type [text]", "save as [filename]",
+      // "search for [query]" are mechanical and can be handled cheaply by the router
+      // before invoking the heavyweight Unified Reasoner.
+      if (skipRouter) {
+        const retryRouteResult = await this.router.route(subtask);
+        if (retryRouteResult.handled) {
+          console.log(`[ROUTER] Step ${i + 1}: route "${subtask}" (pre-processed retry) → SUCCESS`);
+          this.logger.logStep({
+            layer: 1,
+            actionType: 'route',
+            result: 'success',
+            actionParams: { subtask, retried: true },
+          });
+          console.log(`   ✅ Router (retry): ${retryRouteResult.description}`);
+          steps.push({ action: 'routed', description: retryRouteResult.description, success: true, timestamp: Date.now(), layer: 'router', method: 'a11y_invoke' });
+          await this.delay(50);
+          continue;
+        }
       }
 
       // ── Layer 2: Unified Reasoner — parallel OCR + A11y perception ──
