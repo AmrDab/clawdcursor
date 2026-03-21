@@ -37,6 +37,7 @@ import { ActionRouter } from './action-router';
 import { SafetyTier } from './types';
 import { ComputerUseBrain } from './computer-use';
 import { GenericComputerUse, isGenericComputerUseSupported } from './generic-computer-use';
+import { classifyTask } from './task-classifier';
 import { A11yReasoner } from './a11y-reasoner';
 import { OcrEngine } from './ocr-engine';
 import { OcrReasoner } from './ocr-reasoner';
@@ -1014,18 +1015,23 @@ Examples:
       }
 
       const subtask = subtasks[i];
+      const classification = classifyTask(subtask);
       console.log(`\n── Subtask ${i + 1}/${subtasks.length}: "${subtask}" ──`);
+      console.log(`   📊 ${classification.category} (${(classification.confidence * 100).toFixed(0)}%${classification.needsVision ? ', vision-required' : ''})`);
       this.state.currentStep = subtask;
       this.state.stepsCompleted = i;
 
-      // Try router first — but ONLY for mechanical subtasks.
-      // If the task came from LLM pre-processing (priorContext exists), it likely needs
-      // reasoning (e.g., "write a sentence on dogs" needs the LLM to compose content,
-      // see the screen, click Blank in Google Docs, etc.). Skip the router for those.
-      const skipRouter = !!(priorContext && priorContext.length > 0);
+      // ── SPATIAL TASKS: skip text-only layers, go straight to Vision ──
+      if (classification.needsVision) {
+        console.log(`   ⏩ Skipping Layers 1-2 — spatial task needs vision`);
+        // Jump directly to Layer 3 block below (skip router + unified)
+      }
+
+      // Try router — for mechanical/navigation tasks, or as retry for pre-processed tasks
+      const skipRouter = classification.needsVision || false; // Only skip for spatial
       this.state.status = 'acting';
       const routeResult = skipRouter
-        ? { handled: false, description: 'Skipped — pre-processed task needs LLM reasoning' }
+        ? { handled: false, description: 'Skipped — task needs vision/reasoning' }
         : await this.router.route(subtask);
 
       if (routeResult.handled) {
@@ -1124,14 +1130,12 @@ Examples:
       }
 
       // ── Layer 1.8: Action Router (retry for pre-processed tasks) ──
-      // When skipRouter was true at the top of the loop (priorContext exists), the router
-      // was skipped. But individual subtasks like "type [text]", "save as [filename]",
-      // "search for [query]" are mechanical and can be handled cheaply by the router
-      // before invoking the heavyweight Unified Reasoner.
-      if (skipRouter) {
+      // Even when the top-level router was skipped, individual subtasks like
+      // "type [text]", "save as [filename]" can be handled cheaply by the router.
+      if (!classification.needsVision && !routeResult.handled) {
         const retryRouteResult = await this.router.route(subtask);
         if (retryRouteResult.handled) {
-          console.log(`[ROUTER] Step ${i + 1}: route "${subtask}" (pre-processed retry) → SUCCESS`);
+          console.log(`[ROUTER] Step ${i + 1}: route "${subtask}" (retry) → SUCCESS`);
           this.logger.logStep({
             layer: 1,
             actionType: 'route',
@@ -1146,8 +1150,9 @@ Examples:
       }
 
       // ── Layer 2: Unified Reasoner — parallel OCR + A11y perception ──
+      // SKIP for spatial tasks (needsVision) — they go straight to Layer 3
       let unifiedResult: { handled: boolean; success: boolean; description: string; steps: number; fallbackReason?: string; needsHuman?: boolean; actionLog: Array<{ action: string; description: string }> } | null = null;
-      if (this.ocrReasoner) {
+      if (this.ocrReasoner && !classification.needsVision) {
         console.log(`\n👁️ Layer 2 (Unified): "${subtask}"`);
         const unifiedStart = Date.now();
         unifiedResult = await this.ocrReasoner.run(subtask, priorContext, () => this.aborted);
