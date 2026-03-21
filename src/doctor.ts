@@ -363,80 +363,69 @@ export async function runDoctor(opts: {
     }
     console.log(`      Set in .env file or as environment variable, then re-run: clawdcursor doctor`);
 
-    // Offer to input key right now if interactive
+    // Offer to add a provider interactively
     if (process.stdin.isTTY && process.stdout.isTTY) {
       const rlSetup = readline.createInterface({ input: process.stdin, output: process.stdout });
-      const keyInput = await new Promise<string>(resolve =>
-        rlSetup.question('\n   🔑 Paste an API key now to add a provider (or Enter to skip): ', resolve)
-      );
-      rlSetup.close();
+      const ask = (q: string) => new Promise<string>(resolve => rlSetup.question(q, resolve));
 
-      const trimmedKey = keyInput.trim();
-      if (trimmedKey) {
-        let detectedKey = detectProvider(trimmedKey);
+      // Step 1: Pick a provider
+      const providerList = [
+        { key: 'anthropic', label: 'Anthropic (Claude)', envVar: 'ANTHROPIC_API_KEY' },
+        { key: 'openai',    label: 'OpenAI (GPT-4o)',    envVar: 'OPENAI_API_KEY' },
+        { key: 'kimi',      label: 'Kimi / Moonshot',    envVar: 'MOONSHOT_API_KEY' },
+        { key: 'gemini',    label: 'Google Gemini',       envVar: 'GEMINI_API_KEY' },
+        { key: 'groq',      label: 'Groq',               envVar: 'GROQ_API_KEY' },
+        { key: 'deepseek',  label: 'DeepSeek',            envVar: 'DEEPSEEK_API_KEY' },
+        { key: 'together',  label: 'Together AI',         envVar: 'TOGETHER_API_KEY' },
+        { key: 'mistral',   label: 'Mistral AI',          envVar: 'MISTRAL_API_KEY' },
+        { key: 'xai',       label: 'xAI (Grok)',          envVar: 'XAI_API_KEY' },
+        { key: 'alibaba',   label: 'Alibaba (Qwen)',      envVar: 'DASHSCOPE_API_KEY' },
+        { key: 'fireworks', label: 'Fireworks AI',         envVar: 'FIREWORKS_API_KEY' },
+        { key: 'cohere',    label: 'Cohere',              envVar: 'COHERE_API_KEY' },
+        { key: 'perplexity',label: 'Perplexity',          envVar: 'PERPLEXITY_API_KEY' },
+      ];
 
-        // sk- keys are ambiguous (OpenAI, Kimi, DeepSeek all use sk- prefix).
-        // Quick-test the detected provider first; if auth fails, try alternatives.
-        if (detectedKey && trimmedKey.startsWith('sk-') && !trimmedKey.startsWith('sk-ant-')) {
-          const skProviders = ['openai', 'kimi', 'deepseek'];
-          // Move detected to front, try each until one works
-          const ordered = [detectedKey, ...skProviders.filter(p => p !== detectedKey)];
-          let found = false;
-          for (const candidate of ordered) {
-            const provider = PROVIDERS[candidate];
-            if (!provider) continue;
-            try {
-              const testUrl = `${provider.baseUrl}/chat/completions`;
-              const res = await fetch(testUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...provider.authHeader(trimmedKey) },
-                body: JSON.stringify({ model: provider.textModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }),
-                signal: AbortSignal.timeout(8000),
-              });
-              if (res.status !== 401 && res.status !== 403) {
-                detectedKey = candidate;
-                found = true;
-                break;
-              }
-            } catch { /* try next */ }
-          }
-          if (!found) {
-            // All failed auth — use original guess, user will see errors in test phase
-          }
-        }
+      console.log('\n   Select a provider to configure (or Enter to skip):\n');
+      for (let i = 0; i < providerList.length; i++) {
+        const p = providerList[i];
+        const existing = scanResults.find(s => s.key === p.key);
+        const status = existing?.available ? ' ✅ (key found)' : '';
+        console.log(`      ${String(i + 1).padStart(2)}. ${p.label}${status}`);
+      }
 
-        if (detectedKey && PROVIDERS[detectedKey]) {
-          const matchingScan = scanResults.find(s => s.key === detectedKey);
+      const choice = await ask('\n   Enter number (1-13) or press Enter to skip: ');
+      const choiceNum = parseInt(choice.trim());
+
+      if (choiceNum >= 1 && choiceNum <= providerList.length) {
+        const selected = providerList[choiceNum - 1];
+        console.log(`\n   Selected: ${selected.label}`);
+
+        // Step 2: Paste the key
+        const keyInput = await ask(`   🔑 Paste your ${selected.label} API key: `);
+        const trimmedKey = keyInput.trim();
+
+        if (trimmedKey) {
+          const matchingScan = scanResults.find(s => s.key === selected.key);
           if (matchingScan) {
             matchingScan.available = true;
             matchingScan.apiKey = trimmedKey;
             matchingScan.detail = `key added (${trimmedKey.substring(0, 8)}...)`;
-            console.log(`   ✅ Detected ${PROVIDERS[detectedKey].name} key! Testing...`);
-
-            // Save to .env for persistence
-            const envPath = path.join(process.cwd(), '.env');
-            const envVarNames: Record<string, string> = {
-              anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY',
-              kimi: 'MOONSHOT_API_KEY', groq: 'GROQ_API_KEY',
-              together: 'TOGETHER_API_KEY', deepseek: 'DEEPSEEK_API_KEY',
-              gemini: 'GEMINI_API_KEY', mistral: 'MISTRAL_API_KEY',
-              xai: 'XAI_API_KEY', alibaba: 'DASHSCOPE_API_KEY',
-              fireworks: 'FIREWORKS_API_KEY', cohere: 'COHERE_API_KEY',
-              perplexity: 'PERPLEXITY_API_KEY',
-            };
-            const envVarName = envVarNames[detectedKey] || 'AI_API_KEY';
-            const envLine = `${envVarName}=${trimmedKey}\n`;
-            try {
-              fs.appendFileSync(envPath, envLine);
-              console.log(`   💾 Saved to .env as ${envVarName}`);
-            } catch {
-              console.log(`   ⚠️ Could not save to .env — set ${envVarName} manually`);
-            }
           }
-        } else {
-          console.log(`   ⚠️ Could not detect provider for this key. Set it manually in .env`);
+
+          // Save to .env
+          const envPath = path.join(process.cwd(), '.env');
+          const envLine = `${selected.envVar}=${trimmedKey}\n`;
+          try {
+            fs.appendFileSync(envPath, envLine);
+            console.log(`   💾 Saved to .env as ${selected.envVar}`);
+          } catch {
+            console.log(`   ⚠️ Could not save to .env — set ${selected.envVar}=${trimmedKey} manually`);
+          }
+          console.log(`   ✅ ${selected.label} configured! Testing...`);
         }
       }
+
+      rlSetup.close();
     }
   }
 
