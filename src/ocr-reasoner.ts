@@ -286,7 +286,14 @@ export class OcrReasoner {
               && cy >= (wb.y - pad) && cy <= (wb.y + wb.height + pad);
         });
         console.log(`   [OCR] Window filter: ${ocrResult.elements.length} → ${filtered.length} elements (${windowTitle}, bounds: ${wb.x},${wb.y} ${wb.width}x${wb.height})`);
-        filteredOcr = { ...ocrResult, elements: filtered };
+        if (filtered.length > 0) {
+          filteredOcr = { ...ocrResult, elements: filtered };
+        } else {
+          // All elements filtered out — likely a loading screen with no OCR text
+          // in the target window, or a coordinate-space mismatch. Fall back to
+          // the full unfiltered set so the LLM can still see the screen context.
+          console.log(`   [OCR] Window filter returned 0 — using unfiltered elements as fallback`);
+        }
       }
 
       // 2c. Stagnation detection: use FILTERED OCR (window-only) so the fingerprint

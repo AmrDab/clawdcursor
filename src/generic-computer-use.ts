@@ -331,7 +331,9 @@ export class GenericComputerUse {
             ...messages,
           ],
           tools: [DESKTOP_ACTION_TOOL],
-          tool_choice: 'required',  // always call the tool — no prose-only responses
+          // Don't set tool_choice: 'required' — incompatible with providers
+          // that have thinking/reasoning enabled (Kimi, Claude, etc.).
+          // The system prompt instructs the model to always call the tool.
         }),
         signal: controller.signal,
       });
