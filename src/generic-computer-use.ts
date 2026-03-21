@@ -389,11 +389,18 @@ export class GenericComputerUse {
 
   private buildAssistantToolMessage(response: any, rawCall: any): any {
     const choice = response?.choices?.[0];
-    return {
+    const msg: any = {
       role: 'assistant',
       content: choice?.message?.content ?? null,
       tool_calls: [rawCall],
     };
+    // Preserve reasoning_content for providers with thinking mode (Kimi, etc.)
+    // Without this, the API rejects replayed messages with:
+    // "thinking is enabled but reasoning_content is missing"
+    if (choice?.message?.reasoning_content !== undefined) {
+      msg.reasoning_content = choice.message.reasoning_content;
+    }
+    return msg;
   }
 
   private buildToolResult(toolCallId: string, result: any): any {

@@ -78,7 +78,7 @@ RULES:
 2. Use the @(cx,cy) coordinates DIRECTLY for clicks — they are already the element centers
 3. Prefer keyboard shortcuts over mouse clicks when available (ctrl+s to save, ctrl+a to select all, etc.)
 4. Say "done" ONLY when you see VISIBLE PROOF on screen that the task is complete
-5. Say "cannot_read" ONLY when the screen is genuinely unreadable (images, captchas)
+5. Say "cannot_read" ONLY when OCR returned garbled/empty text (captchas, blank screens). NEVER use cannot_read because you think an app doesn't support something — instead, explore the toolbar and try (e.g., Paint has a Text tool "A", image editors have text layers, etc.)
 6. NEVER repeat a failed action — if clicking didn't work, try a different element or keyboard shortcut
 7. Elements tagged with control types (Button, Edit, etc.) are interactive — prefer these for clicks
 8. ALWAYS click an input field BEFORE typing. Never assume focus. Use SEPARATE click and type steps.
