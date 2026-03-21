@@ -1116,10 +1116,13 @@ Examples:
       }
 
       // ── Layer 2.5: OCR Reasoner — primary universal read layer ──
+      let ocrRan = false;
+      let ocrResult: { handled: boolean; success: boolean; description: string; steps: number; fallbackReason?: string; actionLog: Array<{ action: string; description: string }> } | null = null;
       if (this.ocrReasoner) {
+        ocrRan = true;
         console.log(`\n👁️ Layer 2.5 (OCR Reasoner): "${subtask}"`);
         const ocrStart = Date.now();
-        const ocrResult = await this.ocrReasoner.run(subtask, priorContext, () => this.aborted);
+        ocrResult = await this.ocrReasoner.run(subtask, priorContext, () => this.aborted);
         const ocrDuration = Date.now() - ocrStart;
 
         if (ocrResult.handled && ocrResult.success) {
@@ -1155,7 +1158,7 @@ Examples:
 
         if (ocrResult.fallbackReason === 'cannot_read') {
           console.log(`[OCR] Step ${i + 1}: "${subtask}" → FAILED: cannot_read (${(ocrDuration / 1000).toFixed(1)}s)`);
-          console.log(`   🤷 OCR cannot read UI — skipping A11y, falling to Layer 3 (vision LLM)`);
+          console.log(`   🤷 OCR cannot read UI — trying A11y Reasoner before vision`);
           this.logger.logStep({
             layer: 2.5,
             actionType: 'ocr_reason',
@@ -1169,7 +1172,7 @@ Examples:
           for (const entry of ocrResult.actionLog) {
             console.log(`  [OCR] ${entry.action}: ${entry.description}`);
           }
-          console.log(`   🤷 OCR Reasoner did not complete (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s) — skipping A11y, falling to vision`);
+          console.log(`   🤷 OCR Reasoner did not complete (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s) — trying A11y before vision`);
           this.logger.logStep({
             layer: 2.5,
             actionType: 'ocr_reason',
@@ -1179,19 +1182,21 @@ Examples:
             error: ocrResult.description?.substring(0, 200),
           });
         }
-        // OCR already includes a11y tree in its snapshot — if OCR+A11y combined
-        // couldn't handle it, A11y alone won't either. Skip straight to vision.
+        // OCR failed — but A11y Reasoner uses a different approach (UI Automation)
+        // and may succeed where OCR+LLM reasoning did not. Try it before vision.
       }
 
-      // When OCR Reasoner is NOT available, fall back to A11y Reasoner (v0.7.0 path)
+      // A11y Reasoner fallback: runs when OCR is unavailable OR when OCR failed
       // Re-read active window (may have changed during skill/OCR steps)
       activeWin = await this.a11y?.getActiveWindow().catch(() => null);
       const activeProcessName = browserProcessName || activeWin?.processName;
       let a11yActionHistory: { action: string; description: string }[] | undefined;
 
-      if (!this.ocrReasoner && this.reasoner?.isAvailable(activeProcessName)) {
-        // A11y Reasoner only runs when OCR is unavailable (v0.7.0 compat path)
-        console.log(`\n🧠 Layer 2 (A11y Reasoner — OCR unavailable): "${subtask}"`);
+      const ocrHandledThisSubtask = ocrRan && ocrResult?.handled;
+      if (!ocrHandledThisSubtask && this.reasoner?.isAvailable(activeProcessName)) {
+        // A11y Reasoner runs when: (1) OCR is unavailable, or (2) OCR failed
+        const a11yLabel = this.ocrReasoner ? 'A11y Reasoner — OCR fallback' : 'A11y Reasoner — OCR unavailable';
+        console.log(`\n🧠 Layer 2 (${a11yLabel}): "${subtask}"`);
         const reasonStart = Date.now();
         const reasonResult = await this.reasoner.reason(subtask, activeProcessName, priorContext, this.logger, this.verifier);
         const reasonDuration = Date.now() - reasonStart;
