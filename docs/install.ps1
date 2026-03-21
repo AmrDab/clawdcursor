@@ -45,6 +45,8 @@ if (Test-Path $INSTALL_DIR) {
     Write-Host ""
     Write-Host "  Existing installation found at $INSTALL_DIR" -ForegroundColor Yellow
     Write-Host "  Removing old version..." -ForegroundColor Yellow
+    # cd out first — Windows won't delete the folder you're standing in
+    Set-Location $HOME
     Remove-Item -Recurse -Force $INSTALL_DIR
 }
 
