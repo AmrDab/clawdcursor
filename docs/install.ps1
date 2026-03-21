@@ -1,7 +1,10 @@
 # Clawd Cursor Installer for Windows
 # Usage: powershell -c "iex (iwr -useb https://clawdcursor.com/install.ps1).Content"
 
-$ErrorActionPreference = "Stop"
+# Use Continue, not Stop — native commands (npm, git, node) write warnings
+# to stderr which PowerShell treats as terminating errors under Stop.
+# We check $LASTEXITCODE explicitly after each command instead.
+$ErrorActionPreference = "Continue"
 $VERSION = "v0.7.2"
 $INSTALL_DIR = "$HOME\clawdcursor"
 
@@ -53,7 +56,7 @@ if (Test-Path $INSTALL_DIR) {
 # 4. Clone
 Write-Host ""
 Write-Host "  Downloading Clawd Cursor $VERSION..." -ForegroundColor Cyan
-git clone https://github.com/AmrDab/clawdcursor.git --branch $VERSION $INSTALL_DIR --quiet
+git clone https://github.com/AmrDab/clawdcursor.git --branch $VERSION $INSTALL_DIR --quiet 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  Clone failed. Check your internet connection." -ForegroundColor Red
     exit 1
@@ -62,7 +65,9 @@ if ($LASTEXITCODE -ne 0) {
 # 5. Install dependencies
 Write-Host "  Installing dependencies..." -ForegroundColor Cyan
 Push-Location $INSTALL_DIR
-npm install --loglevel error 2>$null
+# Redirect ALL output streams — npm and postinstall scripts emit
+# deprecation warnings to stderr that would clutter the installer.
+npm install --loglevel error 2>&1 | Where-Object { $_ -notmatch 'DeprecationWarning|punycode' }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  npm install failed." -ForegroundColor Red
     Pop-Location
@@ -71,7 +76,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # 6. Build and link
 Write-Host "  Building..." -ForegroundColor Cyan
-npm run setup 2>$null
+npm run setup 2>&1 | Where-Object { $_ -notmatch 'DeprecationWarning|punycode' }
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  Build failed. Try running manually:" -ForegroundColor Red
     Write-Host "    cd $INSTALL_DIR; npm run build; npm link --force" -ForegroundColor Yellow
