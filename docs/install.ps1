@@ -1,5 +1,5 @@
 # Clawd Cursor Installer for Windows
-# Usage: powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
+# Usage: powershell -c "iex (iwr -useb https://clawdcursor.com/install.ps1).Content"
 
 $ErrorActionPreference = "Stop"
 $VERSION = "v0.7.2"

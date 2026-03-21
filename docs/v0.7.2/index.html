@@ -18,7 +18,8 @@
     ======================
     clawdcursor v0.7.2 — OS-level desktop automation tool server.
 
-    Install:  git clone https://github.com/AmrDab/clawdcursor.git --branch v0.7.2 && cd clawdcursor && npm install && npm run setup
+    Install (Windows):  powershell -c "iex (iwr -useb https://clawdcursor.com/install.ps1).Content"
+    Install (macOS/Linux):  curl -fsSL https://clawdcursor.com/install.sh | bash
     Consent:  clawdcursor consent
     Doctor:   clawdcursor doctor         (auto-detect AI providers)
     Start:    clawdcursor start          (AI agent + REST on localhost:3847)
@@ -478,8 +479,8 @@
 
     <div class="code-box" id="os-windows" style="display:block;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>PowerShell</span></div>
-      <pre><code><span class="c-comment"># 1. Clone and install (run ALL on one line)</span>
-<span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span>; <span class="c-cmd">cd</span> clawdcursor; <span class="c-cmd">npm install</span>; <span class="c-cmd">npm run setup</span>
+      <pre><code><span class="c-comment"># 1. One-line install (Node.js 20+ and git required)</span>
+<span class="c-cmd">powershell -c</span> <span class="c-string">"iex (iwr -useb https://clawdcursor.com/install.ps1).Content"</span>
 
 <span class="c-comment"># 2. Auto-detect your AI providers</span>
 <span class="c-cmd">clawdcursor doctor</span>
@@ -504,8 +505,8 @@
 <span class="c-comment">#    System Settings → Privacy &amp; Security → Accessibility</span>
 <span class="c-comment">#    → Add your Terminal app (Terminal, iTerm2, Warp, etc.)</span>
 
-<span class="c-comment"># 1. Clone and install (run ALL on one line)</span>
-<span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span> && <span class="c-cmd">cd</span> clawdcursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
+<span class="c-comment"># 1. One-line install (Node.js 20+ and git required)</span>
+<span class="c-cmd">curl -fsSL</span> <span class="c-string">https://clawdcursor.com/install.sh</span> <span class="c-cmd">| bash</span>
 
 <span class="c-comment"># 2. Auto-detect your AI providers</span>
 <span class="c-cmd">clawdcursor doctor</span>
@@ -532,8 +533,8 @@
       <pre><code><span class="c-comment"># NOTE: Linux supports browser automation via CDP only</span>
 <span class="c-comment"># Native desktop control (mouse, keyboard, a11y) is not yet supported</span>
 
-<span class="c-comment"># 1. Clone and install (run ALL on one line)</span>
-<span class="c-cmd">git clone</span> <span class="c-string">https://github.com/AmrDab/clawdcursor.git</span> <span class="c-flag">--branch v0.7.2</span> && <span class="c-cmd">cd</span> clawdcursor && <span class="c-cmd">npm install</span> && <span class="c-cmd">npm run setup</span>
+<span class="c-comment"># 1. One-line install (Node.js 20+ and git required)</span>
+<span class="c-cmd">curl -fsSL</span> <span class="c-string">https://clawdcursor.com/install.sh</span> <span class="c-cmd">| bash</span>
 
 <span class="c-comment"># 2. Auto-detect your AI providers</span>
 <span class="c-cmd">clawdcursor doctor</span>
