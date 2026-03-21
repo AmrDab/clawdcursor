@@ -965,16 +965,20 @@ Examples:
     const decompositionStart = Date.now();
     let subtasks: string[];
 
-    // If pre-processing ran (priorContext array exists), go straight to Layer 2.
-    // Even if app open failed (empty priorContext), OCR Reasoner can handle app state.
-    // Only decompose compound tasks that explicitly contain "then"/"and then".
-    const wasPreprocessed = priorContext !== undefined && priorContext.length > 0; // preprocessing actually did something
+    // If pre-processing ran (priorContext array exists), try local decomposition.
+    // Even after preprocessing, the remaining task may be compound ("type X. Then save as Y").
+    // The local parser is instant (no API call) so there's no cost to trying it.
+    const wasPreprocessed = priorContext !== undefined && priorContext.length > 0;
     if (wasPreprocessed) {
-      // Preprocessor handled app launch — send the refined task directly to OCR/Layer 2.
-      // OCR Reasoner handles compound tasks internally (system prompt rule 16).
-      // No LLM decomposition needed — it's slow, unreliable, and can hang.
-      subtasks = [task];
-      console.log(`   ⚡ Pre-processed task — straight to Layer 2 (${Date.now() - decompositionStart}ms)`);
+      // Try local parser first — splits on "then", "and then", comma+verb
+      const localSplit = this.parser.decomposeTask(task);
+      if (localSplit && localSplit.length > 1) {
+        subtasks = localSplit;
+        console.log(`   ⚡ Pre-processed task decomposed locally: ${localSplit.length} subtask(s) (${Date.now() - decompositionStart}ms)`);
+      } else {
+        subtasks = [task];
+        console.log(`   ⚡ Pre-processed task — straight to Layer 2 (${Date.now() - decompositionStart}ms)`);
+      }
     } else {
     // No pre-processing context — try local parser first (instant, no API call)
     const localResult = this.parser.decomposeTask(task);

@@ -26,19 +26,16 @@ export class LocalTaskParser {
     // First, try to split compound tasks on delimiters
     const parts = this.splitCompoundTask(trimmed);
 
-    // Parse each part individually
-    const subtasks: string[] = [];
-
-    for (const part of parts) {
-      const parsed = this.parseSingleTask(part.trim());
-      if (parsed === null) {
-        // If any part fails to parse, return null for LLM fallback
-        return null;
-      }
-      subtasks.push(parsed);
+    // If we got multiple parts from splitting, return them as subtasks.
+    // Don't require each part to be individually parseable — the OCR Reasoner
+    // and Action Router can handle free-form subtasks like "type hello" or "save as test.txt".
+    if (parts.length > 1) {
+      return parts.map(p => p.trim()).filter(p => p.length > 0);
     }
 
-    return subtasks.length > 0 ? subtasks : null;
+    // Single part — try to parse it
+    const parsed = this.parseSingleTask(parts[0]?.trim() || '');
+    return parsed ? [parsed] : null;
   }
 
   /**

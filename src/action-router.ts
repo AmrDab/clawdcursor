@@ -38,10 +38,10 @@ export interface RouterTelemetry {
 /**
  * Known app aliases → process names / Start Menu search terms
  */
-const APP_ALIASES: Record<string, { processNames: string[]; searchTerm: string; macOSAppName?: string }> = {
-  'paint':        { processNames: ['mspaint'],              searchTerm: 'Paint' },
-  'mspaint':      { processNames: ['mspaint'],              searchTerm: 'Paint' },
-  'notepad':      { processNames: ['notepad', 'Notepad'],   searchTerm: 'Notepad',            macOSAppName: 'TextEdit' },
+const APP_ALIASES: Record<string, { processNames: string[]; searchTerm: string; macOSAppName?: string; executable?: string; alwaysNewInstance?: boolean }> = {
+  'paint':        { processNames: ['mspaint'],              searchTerm: 'Paint',   executable: 'mspaint.exe', alwaysNewInstance: true },
+  'mspaint':      { processNames: ['mspaint'],              searchTerm: 'Paint',   executable: 'mspaint.exe', alwaysNewInstance: true },
+  'notepad':      { processNames: ['notepad', 'Notepad'],   searchTerm: 'Notepad', executable: 'notepad.exe', alwaysNewInstance: true, macOSAppName: 'TextEdit' },
   'calculator':   { processNames: ['CalculatorApp', 'Calculator', 'calc'], searchTerm: 'Calculator', macOSAppName: 'Calculator' },
   'calc':         { processNames: ['CalculatorApp', 'Calculator', 'calc'], searchTerm: 'Calculator', macOSAppName: 'Calculator' },
   'chrome':       { processNames: ['chrome', 'Google Chrome'], searchTerm: 'Chrome',          macOSAppName: 'Google Chrome' },
@@ -309,26 +309,42 @@ export class ActionRouter {
     const normalized = appName.toLowerCase().replace(/['"]/g, '');
     const alias = APP_ALIASES[normalized];
 
-    // Check if app is already running
+    // Document-creation apps (Notepad, Paint, etc.) always get a new instance.
+    // Other apps (browsers, Calculator, etc.) reuse existing windows.
     let windowsBefore: WindowInfo[] = [];
     try {
       windowsBefore = await this.a11y.getWindows(true);
-      const running = this.findWindowForApp(windowsBefore, normalized, alias);
 
-      if (running) {
-        // App is running — focus and maximize it
-        const result = await this.a11y.focusWindow(undefined, running.processId);
-        if (result.success) {
-          await this.maximizeWindow({ hwnd: running.handle });
-          await this.delay(200);
-          return {
-            handled: true,
-            description: `Focused existing "${running.title}" window`,
-          };
+      if (!alias?.alwaysNewInstance) {
+        const running = this.findWindowForApp(windowsBefore, normalized, alias);
+        if (running) {
+          const result = await this.a11y.focusWindow(undefined, running.processId);
+          if (result.success) {
+            await this.maximizeWindow({ hwnd: running.handle });
+            await this.delay(200);
+            return {
+              handled: true,
+              description: `Focused existing "${running.title}" window`,
+            };
+          }
         }
       }
     } catch {
       // a11y unavailable, proceed with launch
+    }
+
+    // For apps with known executables, spawn directly (always new instance, faster than Start Menu)
+    if (alias?.executable && PLATFORM === 'win32') {
+      try {
+        require('child_process').exec(`start "" "${alias.executable}"`);
+        const newWin = await this.waitForAppReady(alias.searchTerm || appName, windowsBefore);
+        if (newWin) {
+          await this.maximizeWindow({ hwnd: newWin.handle, pid: newWin.processId });
+          return { handled: true, description: `Opened new ${appName} window` };
+        }
+      } catch {
+        // Fall through to Start Menu
+      }
     }
 
     // For Chrome/Edge on Windows: launch directly with --profile-directory=Default
