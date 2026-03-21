@@ -89,6 +89,11 @@ const READY_POLL_INTERVAL = 300;  // ms between polls
 const READY_TIMEOUT = 8000;       // max ms to wait for app readiness
 const READY_SETTLE_MS = 500;      // extra ms after window appears (let UI render)
 
+// WebView2/Electron apps freeze if hit with UIA queries during startup.
+// These need longer settle times before any interaction.
+const WEBVIEW2_APPS = /\b(olk|outlook|teams|slack|discord|spotify|vscode|code)\b/i;
+const WEBVIEW2_SETTLE_MS = 4000;  // 4s settle for WebView2 apps
+
 export class ActionRouter {
   private a11y: AccessibilityBridge;
   private desktop: NativeDesktop;
@@ -548,9 +553,11 @@ export class ActionRouter {
             : false;
 
           if (matchesProcess || matchesTitle || matchesSearch) {
-            console.log(`   ✅ Window detected: "${w.title}" (pid:${w.processId}) — settling ${READY_SETTLE_MS}ms`);
-            // Give the window a moment to finish rendering its UI
-            await this.delay(READY_SETTLE_MS);
+            const isWebView2 = WEBVIEW2_APPS.test(w.processName) || WEBVIEW2_APPS.test(w.title);
+            const settleMs = isWebView2 ? WEBVIEW2_SETTLE_MS : READY_SETTLE_MS;
+            console.log(`   ✅ Window detected: "${w.title}" (pid:${w.processId}) — settling ${settleMs}ms${isWebView2 ? ' (WebView2)' : ''}`);
+            // Give the window time to finish rendering — WebView2 apps need longer
+            await this.delay(settleMs);
             return w;
           }
         }

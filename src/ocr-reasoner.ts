@@ -388,6 +388,12 @@ export class OcrReasoner {
         };
       }
 
+      // Re-check abort after LLM call (could have taken 10-20s with retries)
+      if (isAborted?.()) {
+        console.warn(`   [OCR] ⚠️ Task aborted after LLM call — stopping.`);
+        return { handled: false, success: false, description: 'Task aborted', steps: stepCount, actionLog };
+      }
+
       console.log(`   [OCR] LLM response: ${llmResponse.substring(0, 200)}`);
       messages.push({ role: 'assistant', content: llmResponse });
 
@@ -625,6 +631,30 @@ export class OcrReasoner {
         const enabledTag = a11y.isEnabled === false ? ', DISABLED' : '';
         ocrLines.push(`[${elementId++}] @(${cx},${cy},${shortType}) "${a11y.name}" [name:"${a11y.name}"${idTag}${enabledTag}, empty field]`);
       }
+    }
+
+    // Cap snapshot size to fit within LLM context window.
+    // Each line averages ~40 tokens. Reserve ~3K tokens for system prompt + history.
+    // moonshot-v1-8k = 8K → ~120 lines, moonshot-v1-32k = 32K → ~700 lines.
+    const MAX_SNAPSHOT_LINES = 120;
+    if (ocrLines.length > MAX_SNAPSHOT_LINES) {
+      // Prioritize interactive elements (buttons, inputs, links) over static text.
+      // Buttons and form fields are usually what the LLM needs to click.
+      const interactive: string[] = [];
+      const other: string[] = [];
+      for (const line of ocrLines) {
+        if (/,Button\)|,Edit\)|,ComboBox\)|,CheckBox\)|,RadioButton\)|,Link\)|empty field\]/.test(line)) {
+          interactive.push(line);
+        } else {
+          other.push(line);
+        }
+      }
+      const remaining = MAX_SNAPSHOT_LINES - interactive.length;
+      const kept = [...interactive, ...other.slice(0, Math.max(0, remaining))];
+      console.log(`   [OCR] Truncating snapshot: ${ocrLines.length} → ${kept.length} (${interactive.length} interactive + ${kept.length - interactive.length} text)`);
+      ocrLines.length = 0;
+      ocrLines.push(...kept);
+      ocrLines.push(`... (${ocrResult.elements.length - kept.length} more elements — scroll if needed)`);
     }
 
     const ocrText = ocrLines.length > 0
@@ -902,7 +932,9 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
           const invokePromise = this.a11y.invokeElement({
             name: action.name,
             automationId: action.automationId,
-            controlType: action.controlType ? `ControlType.${action.controlType}` : undefined,
+            // Don't prefix — PSBridge handles the ControlType enum mapping.
+            // LLM sends "Button", "Edit", etc. — pass as-is.
+            controlType: action.controlType || undefined,
             action: 'click',
           });
           const timeoutPromise = new Promise<never>((_, reject) =>
@@ -936,7 +968,7 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
         try {
           const svPromise = this.a11y.invokeElement({
             name: action.name,
-            controlType: action.controlType ? `ControlType.${action.controlType}` : undefined,
+            controlType: action.controlType || undefined,
             action: 'set-value',
             value: action.value,
           });

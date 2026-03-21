@@ -152,6 +152,7 @@ export class GenericComputerUse {
     subtaskIndex: number,
     priorSteps?: string[],
     logger?: TaskLogger,
+    isAborted?: () => boolean,
   ): Promise<GenericComputerUseResult> {
     const steps: StepResult[] = [];
     let llmCalls = 0;
@@ -172,7 +173,30 @@ export class GenericComputerUse {
     console.log(`   🌐 Generic L3: "${subtask.substring(0, 80)}${subtask.length > 80 ? '...' : ''}"`);
 
     for (let i = 0; i < MAX_ITERATIONS; i++) {
-      if ((this.config as any)._aborted) break;
+      if (isAborted?.()) {
+        console.warn(`   🌐 Generic L3: task aborted — stopping`);
+        break;
+      }
+
+      // ── Evict old screenshots to stay within context window ────────────
+      // Keep first user message + last 6 messages (3 turns).
+      // Each screenshot is ~200K tokens for 4K displays.
+      // When evicting, summarize action history and start fresh to avoid
+      // breaking providers that require reasoning_content continuity (Kimi).
+      const MAX_CONTEXT_MESSAGES = 8;
+      if (messages.length > MAX_CONTEXT_MESSAGES) {
+        const first = messages[0]; // original task
+        // Summarize what's been done so far
+        const historySummary = actionHistory.length > 0
+          ? `\n\nPREVIOUS ACTIONS (already completed):\n${actionHistory.map((a, idx) => `${idx + 1}. ${a}`).join('\n')}\n\nContinue from where you left off. Take a screenshot first to see the current state.`
+          : '';
+        const summaryMessage = {
+          role: 'user' as const,
+          content: (typeof first.content === 'string' ? first.content : subtask) + historySummary,
+        };
+        messages.length = 0;
+        messages.push(summaryMessage);
+      }
 
       // ── Call the vision LLM ───────────────────────────────────────────────
       llmCalls++;

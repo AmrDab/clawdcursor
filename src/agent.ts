@@ -99,19 +99,21 @@ export class Agent {
     const pipelineConfig = loadPipelineConfig();
     this.verifier = new TaskVerifier(this.a11y, pipelineConfig ?? undefined);
 
+    // A11y Reasoner kept for compatibility but no longer used in pipeline
+    // (unified reasoner handles both OCR + A11y perception)
     if (pipelineConfig && pipelineConfig.layer2.enabled) {
       this.reasoner = new A11yReasoner(this.a11y, this.desktop, pipelineConfig);
-      console.log(`🧠 Layer 2 (Accessibility Reasoner): ${pipelineConfig.layer2.model}`);
     }
 
-    // OCR-first pipeline with skill cache
+    // Unified Reasoner: parallel OCR + A11y perception → single LLM call
     this.ocrEngine = new OcrEngine();
     this.skillCache = new SkillCache();
     this.skillCache.load();
 
-    if (this.ocrEngine.isAvailable() && pipelineConfig && pipelineConfig.layer2.enabled) {
+    if (pipelineConfig && pipelineConfig.layer2.enabled) {
       this.ocrReasoner = new OcrReasoner(this.ocrEngine, this.desktop, this.a11y, pipelineConfig);
-      console.log(`👁️ Layer 2.5 (OCR Reasoner): enabled — OCR-first pipeline active`);
+      const ocrStatus = this.ocrEngine.isAvailable() ? 'OCR+A11y' : 'A11y-only';
+      console.log(`👁️ Layer 2 (Unified Reasoner): ${pipelineConfig.layer2.model} — ${ocrStatus} perception active`);
     }
     const skillStats = this.skillCache.getStats();
     if (skillStats.total > 0) {
@@ -499,8 +501,10 @@ public class WinAPI {
           const openResult = await this.router.route(`open ${preprocessed.app}`);
           if (openResult.handled) {
             priorContext.push(`Opened "${preprocessed.app}" — it is ALREADY the active, focused, maximized window. Do NOT reopen it. Do NOT press Windows key. Start interacting with it IMMEDIATELY.`);
-            const heavyApps = /outlook|word|excel|teams|powerpoint/i;
-            const settleMs = heavyApps.test(preprocessed.app!) ? 2000 : 500;
+            // WebView2 apps (Outlook, Teams, etc.) need extra time before UIA queries
+            const webview2Apps = /outlook|teams|slack|discord|spotify|vscode/i;
+            const heavyApps = /word|excel|powerpoint/i;
+            const settleMs = webview2Apps.test(preprocessed.app!) ? 4000 : heavyApps.test(preprocessed.app!) ? 2000 : 500;
             await new Promise(r => setTimeout(r, settleMs));
             try {
               const appWin = await this.a11y.findWindow(preprocessed.app!);
@@ -1115,169 +1119,88 @@ Examples:
         console.log(`   🔄 Deterministic flow failed at step ${flowResult.failedAtStep}: ${flowResult.description} — falling through to OCR`);
       }
 
-      // ── Layer 2.5: OCR Reasoner — primary universal read layer ──
-      let ocrRan = false;
-      let ocrResult: { handled: boolean; success: boolean; description: string; steps: number; fallbackReason?: string; actionLog: Array<{ action: string; description: string }> } | null = null;
+      // ── Layer 2: Unified Reasoner — parallel OCR + A11y perception ──
+      let unifiedResult: { handled: boolean; success: boolean; description: string; steps: number; fallbackReason?: string; needsHuman?: boolean; actionLog: Array<{ action: string; description: string }> } | null = null;
       if (this.ocrReasoner) {
-        ocrRan = true;
-        console.log(`\n👁️ Layer 2.5 (OCR Reasoner): "${subtask}"`);
-        const ocrStart = Date.now();
-        ocrResult = await this.ocrReasoner.run(subtask, priorContext, () => this.aborted);
-        const ocrDuration = Date.now() - ocrStart;
+        console.log(`\n👁️ Layer 2 (Unified): "${subtask}"`);
+        const unifiedStart = Date.now();
+        unifiedResult = await this.ocrReasoner.run(subtask, priorContext, () => this.aborted);
+        const unifiedDuration = Date.now() - unifiedStart;
 
-        if (ocrResult.handled && ocrResult.success) {
+        if (unifiedResult.handled && unifiedResult.success) {
           steps.push({
             action: 'done',
-            description: ocrResult.description,
+            description: unifiedResult.description,
             success: true,
             timestamp: Date.now(),
-            layer: 'ocr',
-            method: 'ocr_click',
-            latencyMs: ocrDuration,
+            layer: 'unified',
+            method: 'unified_perception',
+            latencyMs: unifiedDuration,
           });
-          // Structured log for each OCR action
-          console.log(`[OCR] Step ${i + 1}: ${ocrResult.steps} steps for "${subtask}" → SUCCESS (${(ocrDuration / 1000).toFixed(1)}s)`);
-          for (const entry of ocrResult.actionLog) {
-            console.log(`  [OCR] ${entry.action}: ${entry.description}`);
+          console.log(`[Unified] Step ${i + 1}: ${unifiedResult.steps} steps for "${subtask}" → SUCCESS (${(unifiedDuration / 1000).toFixed(1)}s)`);
+          for (const entry of unifiedResult.actionLog) {
+            console.log(`  [Unified] ${entry.action}: ${entry.description}`);
           }
           this.logger.logStep({
-            layer: 2.5,
-            actionType: 'ocr_reason',
+            layer: 2,
+            actionType: 'unified_reason',
             result: 'success',
-            actionParams: { subtask, steps: ocrResult.steps },
-            durationMs: ocrDuration,
+            actionParams: { subtask, steps: unifiedResult.steps },
+            durationMs: unifiedDuration,
           });
           // Record for skill promotion
-          const ocrSteps = ocrResult.actionLog
+          const uSteps = unifiedResult.actionLog
             .filter(a => a.action !== 'done' && a.action !== 'parse_error' && a.action !== 'error')
             .map(a => ({ type: a.action as any, description: a.description }));
-          this.skillCache.recordSuccess(subtask, activeProcessForSkill, ocrSteps);
-          console.log(`   ✅ OCR Reasoner done (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s)`);
+          this.skillCache.recordSuccess(subtask, activeProcessForSkill, uSteps);
+          console.log(`   ✅ Unified Reasoner done (${unifiedResult.steps} steps, ${(unifiedDuration / 1000).toFixed(1)}s)`);
           continue;
         }
 
-        if (ocrResult.fallbackReason === 'cannot_read') {
-          console.log(`[OCR] Step ${i + 1}: "${subtask}" → FAILED: cannot_read (${(ocrDuration / 1000).toFixed(1)}s)`);
-          console.log(`   🤷 OCR cannot read UI — trying A11y Reasoner before vision`);
-          this.logger.logStep({
-            layer: 2.5,
-            actionType: 'ocr_reason',
-            result: 'fail',
-            actionParams: { subtask, fallbackReason: 'cannot_read' },
-            durationMs: ocrDuration,
-            error: 'cannot_read',
-          });
-        } else if (!ocrResult.success) {
-          console.log(`[OCR] Step ${i + 1}: "${subtask}" → FAILED (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s)`);
-          for (const entry of ocrResult.actionLog) {
-            console.log(`  [OCR] ${entry.action}: ${entry.description}`);
-          }
-          console.log(`   🤷 OCR Reasoner did not complete (${ocrResult.steps} steps, ${(ocrDuration / 1000).toFixed(1)}s) — trying A11y before vision`);
-          this.logger.logStep({
-            layer: 2.5,
-            actionType: 'ocr_reason',
-            result: 'fail',
-            actionParams: { subtask, steps: ocrResult.steps, actions: ocrResult.actionLog.map(a => `${a.action}:${(a.description ?? 'unknown').substring(0,80)}`).join(' | ') },
-            durationMs: ocrDuration,
-            error: ocrResult.description?.substring(0, 200),
-          });
-        }
-        // OCR failed — but A11y Reasoner uses a different approach (UI Automation)
-        // and may succeed where OCR+LLM reasoning did not. Try it before vision.
-      }
-
-      // A11y Reasoner fallback: runs when OCR is unavailable OR when OCR failed
-      // Re-read active window (may have changed during skill/OCR steps)
-      activeWin = await this.a11y?.getActiveWindow().catch(() => null);
-      const activeProcessName = browserProcessName || activeWin?.processName;
-      let a11yActionHistory: { action: string; description: string }[] | undefined;
-
-      const ocrHandledThisSubtask = ocrRan && ocrResult?.handled;
-      if (!ocrHandledThisSubtask && this.reasoner?.isAvailable(activeProcessName)) {
-        // A11y Reasoner runs when: (1) OCR is unavailable, or (2) OCR failed
-        const a11yLabel = this.ocrReasoner ? 'A11y Reasoner — OCR fallback' : 'A11y Reasoner — OCR unavailable';
-        console.log(`\n🧠 Layer 2 (${a11yLabel}): "${subtask}"`);
-        const reasonStart = Date.now();
-        const reasonResult = await this.reasoner.reason(subtask, activeProcessName, priorContext, this.logger, this.verifier);
-        const reasonDuration = Date.now() - reasonStart;
-        if (reasonResult.handled) {
-          console.log(`[A11Y] Step ${i + 1}: "${subtask}" a11y_invoke → SUCCESS (${reasonResult.steps ?? 0} steps, ${(reasonDuration / 1000).toFixed(1)}s)`);
-          if (reasonResult.actionHistory) {
-            for (const ah of reasonResult.actionHistory) {
-              console.log(`  [A11Y] ${ah.action}: ${ah.description}`);
-            }
-          }
-          this.logger.logStep({
-            layer: 2,
-            actionType: 'a11y_reason',
-            result: 'success',
-            actionParams: { subtask, processName: activeProcessName, steps: reasonResult.steps ?? 0 },
-            durationMs: reasonDuration,
-          });
-          steps.push({
-            action: 'done',
-            description: reasonResult.description,
-            success: true,
-            timestamp: Date.now(),
-            layer: 'a11y',
-            method: 'a11y_invoke',
-            latencyMs: reasonDuration,
-          });
-          console.log(`   ✅ Layer 2 done (${reasonResult.steps ?? 0} steps, ${(reasonDuration / 1000).toFixed(1)}s)`);
-          continue;
-        }
         // Check if needs human intervention (payment, captcha, 2FA, etc.)
-        if (reasonResult.needsHuman) {
-          console.log(`[A11Y] Step ${i + 1}: "${subtask}" → NEEDS_HUMAN: ${(reasonResult.description ?? 'unknown').substring(0, 100)}`);
+        if (unifiedResult.needsHuman) {
+          console.log(`[Unified] Step ${i + 1}: "${subtask}" → NEEDS_HUMAN: ${(unifiedResult.description ?? 'unknown').substring(0, 100)}`);
           this.logger.logStep({
             layer: 2,
-            actionType: 'a11y_reason',
+            actionType: 'unified_reason',
             result: 'blocked',
             actionParams: { subtask },
-            durationMs: reasonDuration,
-            error: 'needs_human: ' + (reasonResult.description ?? 'unknown').substring(0, 200),
+            durationMs: unifiedDuration,
+            error: 'needs_human: ' + (unifiedResult.description ?? 'unknown').substring(0, 200),
           });
-          console.log(`\n🙋 NEEDS HUMAN INTERVENTION: ${reasonResult.description ?? 'unknown'}`);
+          console.log(`\n🙋 NEEDS HUMAN INTERVENTION: ${unifiedResult.description ?? 'unknown'}`);
           steps.push({
             action: 'needs-human',
-            description: reasonResult.description,
+            description: unifiedResult.description,
             success: false,
             timestamp: Date.now(),
-            layer: 'a11y',
+            layer: 'unified',
           });
           break; // Stop processing — do NOT fall through to Layer 3
         }
 
-        a11yActionHistory = reasonResult.actionHistory;
-        const stepCount = reasonResult.steps ?? 0;
-        const duration = (reasonDuration / 1000).toFixed(1);
-        console.log(`[A11Y] Step ${i + 1}: "${subtask}" → FALLBACK (${stepCount} steps, ${duration}s)`);
-        if (reasonResult.actionHistory) {
-          for (const ah of reasonResult.actionHistory) {
-            console.log(`  [A11Y] ${ah.action}: ${ah.description}`);
-          }
+        // Unified Reasoner failed — log and fall through to Layer 3
+        console.log(`[Unified] Step ${i + 1}: "${subtask}" → FAILED (${unifiedResult.steps} steps, ${(unifiedDuration / 1000).toFixed(1)}s)`);
+        for (const entry of unifiedResult.actionLog) {
+          console.log(`  [Unified] ${entry.action}: ${entry.description}`);
         }
         this.logger.logStep({
           layer: 2,
-          actionType: 'a11y_reason',
+          actionType: 'unified_reason',
           result: 'fail',
-          actionParams: { subtask, processName: activeProcessName, steps: stepCount },
-          durationMs: reasonDuration,
-          error: reasonResult.description?.substring(0, 200),
+          actionParams: { subtask, steps: unifiedResult.steps, actions: unifiedResult.actionLog.map(a => `${a.action}:${(a.description ?? 'unknown').substring(0,80)}`).join(' | ') },
+          durationMs: unifiedDuration,
+          error: unifiedResult.description?.substring(0, 200),
         });
-        console.log(`   🤷 Layer 2 → Layer 3 (${stepCount} steps, ${duration}s): ${(reasonResult.description ?? 'no description').substring(0, 100)}`);
-        this.reasoner.recordVisionFallback();
-      } else if (!this.ocrReasoner && this.reasoner) {
-        console.log(`   ⚠️ Layer 2 circuit breaker (${activeProcessName ?? 'unknown'}) — falling to Layer 3`);
-        this.reasoner.recordVisionFallback();
+        console.log(`   🤷 Unified → Layer 3 (${unifiedResult.steps} steps, ${(unifiedDuration / 1000).toFixed(1)}s): ${(unifiedResult.description ?? 'no description').substring(0, 100)}`);
       }
 
-      // Layer 3: Vision fallback — Computer Use takes over when text LLM cannot proceed
+      // Layer 3: Vision fallback — Computer Use takes over when Unified Reasoner cannot proceed
       const enrichedContext = [...(priorContext ?? [])];
-      if (a11yActionHistory && a11yActionHistory.length > 0) {
+      if (unifiedResult?.actionLog && unifiedResult.actionLog.length > 0) {
         enrichedContext.push(
-          `A11y Reasoner already tried these actions (do NOT repeat them):\n` +
-          a11yActionHistory.map((a, idx) => `  ${idx + 1}. ${a.action} — ${a.description}`).join('\n')
+          `Unified Reasoner already tried these actions (do NOT repeat them):\n` +
+          unifiedResult.actionLog.map((a, idx) => `  ${idx + 1}. ${a.action} — ${a.description}`).join('\n')
         );
       }
 
@@ -1327,7 +1250,7 @@ Examples:
           console.log(`   🌐 Layer 3 (Generic): "${remainingTask}"`);
           const cuStart = Date.now();
           try {
-            const cuResult = await this.genericComputerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger);
+            const cuResult = await this.genericComputerUse.executeSubtask(remainingTask, debugDir, i, enrichedContext, this.logger, () => this.aborted);
             const cuDuration = Date.now() - cuStart;
             const cuSuccess = cuResult.steps.some(s => s.success);
             console.log(`[CU] Step ${i + 1}: → ${cuSuccess ? 'SUCCESS' : 'FAILED'} (${cuResult.steps.length} steps, ${cuResult.llmCalls} LLM calls, ${(cuDuration / 1000).toFixed(1)}s)`);
