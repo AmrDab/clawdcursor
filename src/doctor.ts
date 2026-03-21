@@ -373,7 +373,38 @@ export async function runDoctor(opts: {
 
       const trimmedKey = keyInput.trim();
       if (trimmedKey) {
-        const detectedKey = detectProvider(trimmedKey);
+        let detectedKey = detectProvider(trimmedKey);
+
+        // sk- keys are ambiguous (OpenAI, Kimi, DeepSeek all use sk- prefix).
+        // Quick-test the detected provider first; if auth fails, try alternatives.
+        if (detectedKey && trimmedKey.startsWith('sk-') && !trimmedKey.startsWith('sk-ant-')) {
+          const skProviders = ['openai', 'kimi', 'deepseek'];
+          // Move detected to front, try each until one works
+          const ordered = [detectedKey, ...skProviders.filter(p => p !== detectedKey)];
+          let found = false;
+          for (const candidate of ordered) {
+            const provider = PROVIDERS[candidate];
+            if (!provider) continue;
+            try {
+              const testUrl = `${provider.baseUrl}/chat/completions`;
+              const res = await fetch(testUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...provider.authHeader(trimmedKey) },
+                body: JSON.stringify({ model: provider.textModel, messages: [{ role: 'user', content: 'hi' }], max_tokens: 1 }),
+                signal: AbortSignal.timeout(8000),
+              });
+              if (res.status !== 401 && res.status !== 403) {
+                detectedKey = candidate;
+                found = true;
+                break;
+              }
+            } catch { /* try next */ }
+          }
+          if (!found) {
+            // All failed auth — use original guess, user will see errors in test phase
+          }
+        }
+
         if (detectedKey && PROVIDERS[detectedKey]) {
           const matchingScan = scanResults.find(s => s.key === detectedKey);
           if (matchingScan) {
