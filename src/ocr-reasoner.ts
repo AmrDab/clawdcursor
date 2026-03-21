@@ -38,7 +38,9 @@ export type OcrAction =
   | { action: 'scroll';      x: number; y: number; direction: 'up' | 'down'; amount: number }
   | { action: 'wait';        ms: number; reason: string }
   | { action: 'done';        evidence: string }
-  | { action: 'cannot_read'; reason: string };
+  | { action: 'cannot_read'; reason: string }
+  | { action: 'a11y_click';  name: string; controlType?: string; automationId?: string; description: string }
+  | { action: 'a11y_set_value'; name: string; controlType?: string; value: string; description: string };
 
 // ─── Result from a single OcrReasoner run ────────────────────────────────────
 
@@ -48,7 +50,25 @@ export interface OcrReasonerResult {
   description: string;
   steps: number;
   fallbackReason?: string;  // set when cannot_read — tells agent.ts to try vision LLM
+  needsHuman?: boolean;     // set when task needs human intervention (payment, captcha, 2FA)
   actionLog: Array<{ action: string; description: string }>;
+}
+
+// ─── A11y metadata from spatial merge ────────────────────────────────────────
+
+interface A11yMetadata {
+  controlType: string;    // "Button", "Edit", etc.
+  name: string;           // UIA name (e.g., "Text", "Send")
+  automationId: string;   // UIA automation ID for reliable invoke
+  isEnabled: boolean;
+}
+
+// ─── Parallel A11y capture result ────────────────────────────────────────────
+
+interface A11yCaptureResult {
+  win: { processName: string; title: string; processId: number; bounds: { x: number; y: number; width: number; height: number }; isMinimized?: boolean } | null;
+  tree: string | null;
+  elements: UIElement[];
 }
 
 // ─── System prompt for the text LLM ─────────────────────────────────────────
@@ -72,6 +92,9 @@ RESPONSE FORMAT — respond with ONLY valid JSON, no markdown:
 {"action":"wait","ms":1000,"reason":"Waiting for page to load"}
 {"action":"done","evidence":"The email was sent — confirmation banner visible at top"}
 {"action":"cannot_read","reason":"Screen contains a captcha image that OCR cannot parse"}
+{"action":"a11y_click","name":"Text","controlType":"Button","description":"Click the Text tool in Paint toolbar"}
+{"action":"a11y_set_value","name":"Subject","controlType":"Edit","value":"Hello from ClawdCursor","description":"Set the Subject field"}
+{"action":"needs_human","reason":"Payment form requires credit card","description":"Human must enter payment details"}
 
 RULES:
 1. Return exactly ONE action per response — JSON only, no explanation
@@ -101,7 +124,11 @@ RULES:
 25. For SEARCH tasks: After typing a search query, you MUST press key "Return" or click the search button to EXECUTE the search. Seeing the query text in the search box does NOT mean the search is done — you need to see SEARCH RESULTS on screen. Only say "done" after results appear.
 26. NEVER say "done" right after a "type" action. ALWAYS take at least one more step after typing (press Enter, click a button, verify the result appeared) before declaring done.
 27. For FIND & REPLACE dialogs (Ctrl+H): The search/find field is auto-focused. Type the search term FIRST. Then you MUST CLICK the replace/replacement field (the SECOND text input, below the search field) before typing the replacement text. Then click "Replace All" or "Replace all" button. Do NOT type both terms without clicking between them — they will both go into the same field.
-28. For MULTI-FIELD FORMS: Each text field requires a separate CLICK before typing. Never assume Tab or Enter moved focus to the next field — ALWAYS click the target field explicitly, THEN type in the next step.`;
+28. For MULTI-FIELD FORMS: Each text field requires a separate CLICK before typing. Never assume Tab or Enter moved focus to the next field — ALWAYS click the target field explicitly, THEN type in the next step.
+29. When elements show [name:"X", id:Y] metadata from the accessibility tree, prefer a11y_click for MORE RELIABLE clicking: {"action":"a11y_click","name":"X","description":"..."}. The system invokes the element directly via UI Automation — no mouse coordinates needed. This is more reliable than coordinate-based clicks.
+30. For input fields with accessibility metadata, use a11y_set_value to type directly: {"action":"a11y_set_value","name":"Field Name","controlType":"Edit","value":"text to enter","description":"..."}. This bypasses clipboard and focus issues.
+31. ACTION PREFERENCE ORDER: a11y_click (if element has name/id metadata) > click by coordinates > keyboard shortcut. a11y_click uses the OS accessibility API and is the most reliable method for interacting with named UI elements.
+32. If a task requires human intervention (payment, captcha, 2FA, password entry), return: {"action":"needs_human","reason":"why","description":"what the human must do"}`;
 
 // ─── OcrReasoner class ──────────────────────────────────────────────────────
 
@@ -211,20 +238,47 @@ export class OcrReasoner {
         } catch { /* non-fatal */ }
       }
 
-      // 1. OCR the screen
+      // 1. PARALLEL CAPTURE — OCR screenshot + A11y tree simultaneously
+      //    Each source has its own timeout to prevent hangs from eating the task budget:
+      //    - OCR: 8s (OS-level OCR has its own 15s timeout, but we cap tighter here)
+      //    - A11y: 5s (PSBridge can hang on complex UI trees)
       this.ocr.invalidateCache();
-      const ocrResult = await this.ocr.recognizeScreen();
-      console.log(`   [OCR] Scan: ${ocrResult.elements.length} elements in ${ocrResult.durationMs}ms, top: "${ocrResult.elements[0]?.text || 'none'}"`);
+      this.a11y.invalidateCache();
+      const captureTargetPid = targetWindow?.processId ?? 0;
+      const CAPTURE_OCR_TIMEOUT = 8000;
+      const CAPTURE_A11Y_TIMEOUT = 5000;
+      const [ocrSettled, a11ySettled] = await Promise.allSettled([
+        Promise.race([
+          this.ocr.recognizeScreen(),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('OCR capture timeout')), CAPTURE_OCR_TIMEOUT)),
+        ]),
+        Promise.race([
+          this.captureA11y(captureTargetPid),
+          new Promise<never>((_, rej) => setTimeout(() => rej(new Error('A11y capture timeout')), CAPTURE_A11Y_TIMEOUT)),
+        ]),
+      ]);
+
+      const ocrResult = ocrSettled.status === 'fulfilled'
+        ? ocrSettled.value
+        : { elements: [], fullText: '', durationMs: 0 };
+      const a11yData: A11yCaptureResult = a11ySettled.status === 'fulfilled'
+        ? a11ySettled.value
+        : { win: null, tree: null, elements: [] };
+
+      if (ocrSettled.status === 'rejected') console.warn(`   [OCR] ⚠️ OCR capture failed: ${ocrSettled.reason?.message ?? 'unknown'}`);
+      if (a11ySettled.status === 'rejected') console.warn(`   [OCR] ⚠️ A11y capture failed: ${a11ySettled.reason?.message ?? 'unknown'}`);
+
+      console.log(`   [OCR] Scan: ${ocrResult.elements.length} elements in ${ocrResult.durationMs}ms, top: "${ocrResult.elements[0]?.text || 'none'}" | A11y: ${a11yData.elements.length} elements`);
 
       // Stagnation detection: fingerprint moved AFTER window filtering (see below)
 
-      // 2. Read a11y tree for semantic context + get active window bounds for OCR filtering
+      // 2. Process A11y capture result — set target window, bounds, snippet
       let a11ySnippet = '';
-      let a11yElements: UIElement[] = [];
+      let a11yElements: UIElement[] = a11yData.elements;
       let windowBounds: { x: number; y: number; width: number; height: number } | null = null;
       let windowTitle = '';
       try {
-        const activeWin = await this.a11y.getActiveWindow().catch(() => null);
+        const activeWin = a11yData.win;
         if (activeWin) {
           // Record the target window on first step (skip if pre-focus already set it)
           if (step === 0 && !targetWindow) {
@@ -242,12 +296,9 @@ export class OcrReasoner {
               await new Promise(r => setTimeout(r, 200));
             }
           }
-          // Use target window's PID for a11y (it may differ from activeWin when focus is wrong)
-          const contextPid = targetWindow ? targetWindow.processId : activeWin.processId;
           const contextName = targetWindow ? `${targetWindow.processName}: ${targetWindow.title}` : `${activeWin.processName}: ${activeWin.title}`;
           // For window bounds: prefer the target window if active window doesn't match
           if (targetWindow && activeWin.processId !== targetWindow.processId) {
-            // Active window is wrong — try to get bounds from target window via a11y
             const wins = await this.a11y.getWindows().catch(() => []);
             const targetWinInfo = wins.find(w => w.processId === targetWindow!.processId);
             windowBounds = targetWinInfo?.bounds ?? activeWin.bounds;
@@ -255,20 +306,10 @@ export class OcrReasoner {
             windowBounds = activeWin.bounds;
           }
           windowTitle = contextName;
-          // Get text tree for LLM context
-          const tree = await this.a11y.getScreenContext(contextPid).catch(() => null);
-          if (tree) {
-            a11ySnippet = `\n=== A11Y TREE (${contextName}) ===\n${tree.substring(0, 1000)}`;
+          // Use pre-captured tree from parallel a11y fetch
+          if (a11yData.tree) {
+            a11ySnippet = `\n=== A11Y TREE (${contextName}) ===\n${a11yData.tree.substring(0, 1000)}`;
           }
-          // Get structured elements for OCR-a11y cross-reference
-          const elements = await this.a11y.findElement({ processId: contextPid }).catch(() => []);
-          a11yElements = (Array.isArray(elements) ? elements : []).map(el => ({
-            name: el.name || '',
-            automationId: el.automationId || '',
-            controlType: el.controlType || '',
-            className: el.className || '',
-            bounds: el.bounds || { x: 0, y: 0, width: 0, height: 0 },
-          }));
         }
       } catch { /* non-fatal — OCR is the primary source */ }
 
@@ -423,13 +464,14 @@ export class OcrReasoner {
           continue;
         }
 
-        // Only reject once, and only if very low confidence
+        // Reject if task keywords aren't visible on screen.
+        // Allow up to 2 rejections to give the LLM a chance to fix, then accept anyway.
         const doneRejects = actionLog.filter(a => a.action === 'done_rejected').length;
-        if (taskMatch < 0.2 && taskWords.length > 2 && doneRejects < 1) {
+        if (taskMatch < 0.3 && taskWords.length >= 1 && doneRejects < 2) {
           const missing = taskWords.filter(w => !screenText.includes(w)).slice(0, 3);
           console.warn(`   [OCR] ⚠️ Done rejected (${(taskMatch * 100).toFixed(0)}% task match). Missing: ${missing.join(', ')}`);
-          actionLog.push({ action: 'done_rejected', description: `${(taskMatch * 100).toFixed(0)}% match` });
-          messages.push({ role: 'user', content: `Not done yet. Missing on screen: "${missing.join('", "')}". Complete the task.` });
+          actionLog.push({ action: 'done_rejected', description: `${(taskMatch * 100).toFixed(0)}% match — missing: ${missing.join(', ')}` });
+          messages.push({ role: 'user', content: `NOT DONE. The text "${missing.join('", "')}" is NOT visible on screen. You must actually complete the task — don't just say done. For Paint: after selecting the Text tool, you must CLICK ON THE WHITE CANVAS AREA (the large blank area in the center of the window) to create a text box, then type the text.` });
           continue;
         }
 
@@ -458,6 +500,21 @@ export class OcrReasoner {
         // Retry — maybe the screen changed
         await new Promise(r => setTimeout(r, SETTLE_MS));
         continue;
+      }
+
+      // Handle needs_human — task requires human intervention (payment, captcha, 2FA)
+      if ((action as any).action === 'needs_human') {
+        const reason = (action as any).reason || 'unknown';
+        const desc = (action as any).description || reason;
+        console.log(`   [OCR] 🙋 NEEDS HUMAN: ${desc}`);
+        return {
+          handled: false,
+          success: false,
+          description: desc,
+          steps: stepCount,
+          needsHuman: true,
+          actionLog,
+        };
       }
 
       // Ensure target window has keyboard focus before executing any action
@@ -528,10 +585,19 @@ export class OcrReasoner {
           const cx = Math.round(el.x + el.width / 2);
           const cy = Math.round(el.y + el.height / 2);
           const conf = el.confidence < 1.0 ? `,conf:${el.confidence.toFixed(2)}` : '';
-          // Find matching a11y element by bounding box overlap
-          const a11yMatch = this.findA11yMatch(el, a11yElements);
-          const typeTag = a11yMatch ? `,${a11yMatch}` : '';
-          return `[${id}] @(${cx},${cy}${conf}${typeTag}) "${el.text}"`;
+          // Find matching a11y element — now returns full metadata for unified perception
+          const a11yMeta = this.mergeA11yMetadata(el, a11yElements);
+          const typeTag = a11yMeta ? `,${a11yMeta.controlType}` : '';
+          // Build rich a11y annotation: [name:"Send", id:send-btn]
+          let a11yAnnotation = '';
+          if (a11yMeta) {
+            const parts: string[] = [];
+            if (a11yMeta.name) parts.push(`name:"${a11yMeta.name}"`);
+            if (a11yMeta.automationId) parts.push(`id:${a11yMeta.automationId}`);
+            if (a11yMeta.isEnabled === false) parts.push('DISABLED');
+            if (parts.length > 0) a11yAnnotation = ` [${parts.join(', ')}]`;
+          }
+          return `[${id}] @(${cx},${cy}${conf}${typeTag}) "${el.text}"${a11yAnnotation}`;
         });
       ocrLines.push(parts.join(' | '));
     }
@@ -555,7 +621,9 @@ export class OcrReasoner {
       if (!hasOcrOverlap && a11y.name) {
         const cx = b.x + Math.round(b.width / 2);
         const cy = b.y + Math.round(b.height / 2);
-        ocrLines.push(`[${elementId++}] @(${cx},${cy},${shortType}) "${a11y.name}" [empty field]`);
+        const idTag = a11y.automationId ? `, id:${a11y.automationId}` : '';
+        const enabledTag = a11y.isEnabled === false ? ', DISABLED' : '';
+        ocrLines.push(`[${elementId++}] @(${cx},${cy},${shortType}) "${a11y.name}" [name:"${a11y.name}"${idTag}${enabledTag}, empty field]`);
       }
     }
 
@@ -595,23 +663,59 @@ ${historyStr}
 What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`;
   }
 
+  // findA11yMatch has been replaced by mergeA11yMetadata() above — returns full metadata
+
   /**
-   * Find an a11y element whose bounding box overlaps with an OCR element's center.
-   * Returns a short control type name (e.g. "Button") or null if no match / not useful.
+   * Parallel A11y capture — bundles getActiveWindow + getScreenContext + findElement.
+   * Returns graceful empty on failure (Linux, a11y unavailable, etc.).
    */
-  private findA11yMatch(el: OcrElement, a11yElements: UIElement[]): string | null {
+  private async captureA11y(targetPid: number): Promise<A11yCaptureResult> {
+    try {
+      const win = await this.a11y.getActiveWindow().catch(() => null);
+      if (!win) return { win: null, tree: null, elements: [] };
+
+      const pid = targetPid || win.processId;
+      // Run tree and element fetch in parallel within the a11y capture
+      const [tree, rawElements] = await Promise.all([
+        this.a11y.getScreenContext(pid).catch(() => null),
+        this.a11y.findElement({ processId: pid }).catch(() => []),
+      ]);
+
+      const elements: UIElement[] = (Array.isArray(rawElements) ? rawElements : []).map(el => ({
+        name: el.name || '',
+        automationId: el.automationId || '',
+        controlType: el.controlType || '',
+        className: el.className || '',
+        isEnabled: el.isEnabled,
+        bounds: el.bounds || { x: 0, y: 0, width: 0, height: 0 },
+      }));
+
+      return { win, tree, elements };
+    } catch {
+      return { win: null, tree: null, elements: [] };
+    }
+  }
+
+  /**
+   * Enhanced A11y match — returns full metadata instead of just controlType string.
+   * Uses bounding-box overlap: A11y element bounds contain the OCR element center.
+   */
+  private mergeA11yMetadata(el: OcrElement, a11yElements: UIElement[]): A11yMetadata | null {
     const elCx = el.x + el.width / 2;
     const elCy = el.y + el.height / 2;
 
     for (const a11y of a11yElements) {
       const b = a11y.bounds;
       if (elCx >= b.x && elCx <= b.x + b.width && elCy >= b.y && elCy <= b.y + b.height) {
-        // Extract short type name: "ControlType.Button" -> "Button"
         const shortType = a11y.controlType.replace('ControlType.', '');
         // Skip generic types that don't add useful info
-        if (shortType !== 'Text' && shortType !== 'Pane' && shortType !== 'Custom') {
-          return shortType;
-        }
+        if (shortType === 'Text' || shortType === 'Pane' || shortType === 'Custom') continue;
+        return {
+          controlType: shortType,
+          name: a11y.name,
+          automationId: a11y.automationId,
+          isEnabled: a11y.isEnabled !== false,
+        };
       }
     }
     return null;
@@ -790,10 +894,81 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
         this.ocr.invalidateCache();
         break;
 
+      case 'a11y_click': {
+        // UIA InvokePattern — most reliable, no mouse coordinates needed
+        // 5s timeout to prevent PSBridge hangs from eating the entire task budget
+        const A11Y_TIMEOUT_MS = 5000;
+        try {
+          const invokePromise = this.a11y.invokeElement({
+            name: action.name,
+            automationId: action.automationId,
+            controlType: action.controlType ? `ControlType.${action.controlType}` : undefined,
+            action: 'click',
+          });
+          const timeoutPromise = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('a11y_click timeout')), A11Y_TIMEOUT_MS)
+          );
+          const invokeResult = await Promise.race([invokePromise, timeoutPromise]);
+          if (invokeResult.success) {
+            console.log(`   [A11Y] ✅ a11y_click "${action.name}" succeeded via UIA`);
+            this.a11y.invalidateCache();
+            this.ocr.invalidateCache();
+            break;
+          }
+          // Fallback: mouse click at element bounds center
+          if (invokeResult.clickPoint) {
+            const mc = this.desktop.physicalToMouse(invokeResult.clickPoint.x, invokeResult.clickPoint.y);
+            console.log(`   [A11Y] UIA invoke failed, falling back to mouse click at (${mc.x},${mc.y})`);
+            await this.desktop.mouseClick(mc.x, mc.y);
+            this.a11y.invalidateCache();
+            this.ocr.invalidateCache();
+            break;
+          }
+          return `a11y_click failed for "${action.name}" — try clicking by coordinates instead`;
+        } catch (e: any) {
+          console.warn(`   [A11Y] ⚠️ a11y_click "${action.name}" timed out (${A11Y_TIMEOUT_MS}ms) — try coordinates instead`);
+          return `a11y_click timed out for "${action.name}" after ${A11Y_TIMEOUT_MS}ms — use click with coordinates instead`;
+        }
+      }
+
+      case 'a11y_set_value': {
+        const A11Y_SV_TIMEOUT_MS = 5000;
+        try {
+          const svPromise = this.a11y.invokeElement({
+            name: action.name,
+            controlType: action.controlType ? `ControlType.${action.controlType}` : undefined,
+            action: 'set-value',
+            value: action.value,
+          });
+          const svTimeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('a11y_set_value timeout')), A11Y_SV_TIMEOUT_MS)
+          );
+          const setResult = await Promise.race([svPromise, svTimeout]);
+          if (setResult.success) {
+            console.log(`   [A11Y] ✅ a11y_set_value "${action.name}" = "${(action.value ?? '').substring(0, 30)}" succeeded`);
+            this.a11y.invalidateCache();
+            this.ocr.invalidateCache();
+            break;
+          }
+          return `a11y_set_value failed for "${action.name}" — try clicking the field and using type action instead`;
+        } catch (e: any) {
+          console.warn(`   [A11Y] ⚠️ a11y_set_value "${action.name}" timed out — try click + type instead`);
+          return `a11y_set_value timed out for "${action.name}" — click the field and use type action instead`;
+        }
+      }
+
       case 'done':
       case 'cannot_read':
         // No execution needed — handled by caller
         break;
+
+      default: {
+        // Handle needs_human and any unknown actions
+        const anyAction = action as any;
+        if (anyAction.action === 'needs_human') break; // handled by caller
+        console.warn(`   [OCR] Unknown action: ${anyAction.action}`);
+        break;
+      }
     }
     return null;
   }
@@ -812,6 +987,8 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
       case 'wait': return `Wait ${action.ms}ms: ${action.reason}`;
       case 'done': return `Done: ${action.evidence}`;
       case 'cannot_read': return `Cannot read: ${action.reason}`;
+      case 'a11y_click': return `a11y_click "${action.name}" (${action.controlType ?? 'unknown'}): ${action.description}`;
+      case 'a11y_set_value': return `a11y_set_value "${action.name}" = "${(action.value ?? '').substring(0, 30)}": ${action.description}`;
       default: return `${(action as any).action}: ${(action as any).description ?? 'unknown'}`;
     }
   }

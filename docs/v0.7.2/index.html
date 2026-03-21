@@ -18,7 +18,7 @@
     ======================
     clawdcursor v0.7.2 — OS-level desktop automation tool server.
 
-    Install (Windows):  powershell -c "iex (iwr -useb https://clawdcursor.com/install.ps1).Content"
+    Install (Windows):  powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
     Install (macOS/Linux):  curl -fsSL https://clawdcursor.com/install.sh | bash
     Consent:  clawdcursor consent
     Doctor:   clawdcursor doctor         (auto-detect AI providers)
@@ -480,7 +480,7 @@
     <div class="code-box" id="os-windows" style="display:block;">
       <div class="code-hd"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div><span>PowerShell</span></div>
       <pre><code><span class="c-comment"># Install</span>
-<span class="c-cmd">powershell -c</span> <span class="c-string">"iex (iwr -useb https://clawdcursor.com/install.ps1).Content"</span>
+<span class="c-cmd">powershell -c</span> <span class="c-string">"irm https://clawdcursor.com/install.ps1 | iex"</span>
 
 <span class="c-comment"># Start (auto-detects your AI providers on first run)</span>
 <span class="c-cmd">clawdcursor start</span></code></pre>
