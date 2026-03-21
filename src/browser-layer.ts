@@ -238,6 +238,8 @@ export class BrowserLayer {
         `], { timeout: 5000 });
       } else if (process.platform === 'darwin') {
         await execFileAsync('osascript', ['-e', 'tell application "Google Chrome" to activate'], { timeout: 5000 });
+      } else if (process.platform === 'linux') {
+        await execFileAsync('sh', ['-lc', `if command -v wmctrl >/dev/null 2>&1; then wmctrl -xa chrome || wmctrl -xa Chromium || wmctrl -xa firefox; elif command -v xdotool >/dev/null 2>&1; then xdotool search --onlyvisible --class 'chrome|chromium|firefox' windowactivate %@; else exit 1; fi`], { timeout: 5000 });
       }
       console.log(`   🪟 Brought browser to foreground`);
     } catch (e: any) {

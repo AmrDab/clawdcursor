@@ -1223,16 +1223,16 @@ Examples:
         }
         // Check if needs human intervention (payment, captcha, 2FA, etc.)
         if (reasonResult.needsHuman) {
-          console.log(`[A11Y] Step ${i + 1}: "${subtask}" → NEEDS_HUMAN: ${reasonResult.description.substring(0, 100)}`);
+          console.log(`[A11Y] Step ${i + 1}: "${subtask}" → NEEDS_HUMAN: ${(reasonResult.description ?? 'unknown').substring(0, 100)}`);
           this.logger.logStep({
             layer: 2,
             actionType: 'a11y_reason',
             result: 'blocked',
             actionParams: { subtask },
             durationMs: reasonDuration,
-            error: 'needs_human: ' + reasonResult.description.substring(0, 200),
+            error: 'needs_human: ' + (reasonResult.description ?? 'unknown').substring(0, 200),
           });
-          console.log(`\n🙋 NEEDS HUMAN INTERVENTION: ${reasonResult.description}`);
+          console.log(`\n🙋 NEEDS HUMAN INTERVENTION: ${reasonResult.description ?? 'unknown'}`);
           steps.push({
             action: 'needs-human',
             description: reasonResult.description,
@@ -1260,7 +1260,7 @@ Examples:
           durationMs: reasonDuration,
           error: reasonResult.description?.substring(0, 200),
         });
-        console.log(`   🤷 Layer 2 → Layer 3 (${stepCount} steps, ${duration}s): ${reasonResult.description.substring(0, 100)}`);
+        console.log(`   🤷 Layer 2 → Layer 3 (${stepCount} steps, ${duration}s): ${(reasonResult.description ?? 'no description').substring(0, 100)}`);
         this.reasoner.recordVisionFallback();
       } else if (!this.ocrReasoner && this.reasoner) {
         console.log(`   ⚠️ Layer 2 circuit breaker (${activeProcessName ?? 'unknown'}) — falling to Layer 3`);

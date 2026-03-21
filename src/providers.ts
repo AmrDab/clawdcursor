@@ -21,6 +21,10 @@ export interface ProviderProfile {
   extraHeaders?: Record<string, string>;
   /** Whether this provider supports Computer Use tool */
   computerUse: boolean;
+  /** Whether OpenAI-style JSON response_format is known to work reliably */
+  supportsJsonMode?: boolean;
+  /** Whether OpenAI-style tool calls are known to work reliably */
+  supportsToolCalls?: boolean;
 }
 
 export const PROVIDERS: Record<string, ProviderProfile> = {
@@ -35,6 +39,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'claude-sonnet-4-20250514',
     openaiCompat: false,
     computerUse: true,
+    supportsJsonMode: false,
+    supportsToolCalls: false,
   },
   openai: {
     name: 'OpenAI',
@@ -44,15 +50,19 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'gpt-4o',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   ollama: {
     name: 'Ollama (Local)',
     baseUrl: 'http://localhost:11434/v1',
     authHeader: () => ({}),
-    textModel: '',  // auto-detected from available models by doctor
-    visionModel: '', // auto-detected from available models by doctor
+    textModel: '',
+    visionModel: '',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   kimi: {
     name: 'Kimi (Moonshot)',
@@ -62,6 +72,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'kimi-k2.5',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   groq: {
     name: 'Groq',
@@ -71,6 +83,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'llama-3.2-90b-vision-preview',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   together: {
     name: 'Together AI',
@@ -80,6 +94,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   deepseek: {
     name: 'DeepSeek',
@@ -89,6 +105,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'deepseek-chat',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   gemini: {
     name: 'Google Gemini',
@@ -98,6 +116,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'gemini-2.0-flash',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   mistral: {
     name: 'Mistral AI',
@@ -107,6 +127,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'pixtral-large-latest',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   xai: {
     name: 'xAI (Grok)',
@@ -116,6 +138,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'grok-2-vision-1212',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   alibaba: {
     name: 'Alibaba (Qwen/DashScope)',
@@ -125,6 +149,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'qwen-vl-max',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   fireworks: {
     name: 'Fireworks AI',
@@ -134,6 +160,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'accounts/fireworks/models/llama-v3p2-90b-vision-instruct',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
   cohere: {
     name: 'Cohere',
@@ -143,6 +171,8 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'command-r-plus',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: false,
+    supportsToolCalls: false,
   },
   perplexity: {
     name: 'Perplexity',
@@ -152,15 +182,19 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     visionModel: 'llama-3.1-sonar-large-128k-online',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: false,
+    supportsToolCalls: false,
   },
   generic: {
     name: 'OpenAI-Compatible',
-    baseUrl: '', // set from config
+    baseUrl: '',
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
-    textModel: '', // set from config
-    visionModel: '', // set from config  
+    textModel: '',
+    visionModel: '',
     openaiCompat: true,
     computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
   },
 };
 
@@ -246,6 +280,15 @@ export function buildPipeline(
       computerUse: provider.computerUse,
     },
   };
+}
+
+
+export function supportsOpenAiJsonMode(provider: ProviderProfile | undefined): boolean {
+  return provider?.supportsJsonMode !== false;
+}
+
+export function supportsOpenAiToolCalls(provider: ProviderProfile | undefined): boolean {
+  return provider?.supportsToolCalls !== false;
 }
 
 // ─── Multi-Provider Scanning ──────────────────────────────────────

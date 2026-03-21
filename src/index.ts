@@ -712,6 +712,24 @@ program
       }
     } catch { /* server not running — that's fine */ }
 
+    // 0b. Fallback: if /stop didn't work, try killing via pidfile
+    for (const mode of ['start', 'mcp', 'serve'] as const) {
+      try {
+        const pidFile = path.join(homeDir, '.clawdcursor', `${mode}.pid`);
+        if (fs.existsSync(pidFile)) {
+          const pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+          if (!isNaN(pid) && pid !== process.pid) {
+            try {
+              process.kill(pid, 0); // check if alive
+              process.kill(pid, 'SIGTERM');
+              console.log(`   ${e('🛑', '[STOP]')}  Killed running ${mode} process (pid ${pid})`);
+              await new Promise(r => setTimeout(r, 500));
+            } catch { /* process already dead */ }
+          }
+        }
+      } catch { /* pidfile read failed — that's fine */ }
+    }
+
     // 1. Remove config files in project root
     const configFiles = [
       path.join(clawdRoot, '.clawdcursor-config.json'),

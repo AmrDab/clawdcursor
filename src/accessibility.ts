@@ -17,6 +17,9 @@ import { psRunner } from './ps-runner';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
+const IS_WIN = PLATFORM === 'win32';
+const IS_MAC = PLATFORM === 'darwin';
+const IS_LINUX = PLATFORM === 'linux';
 const SCRIPTS_DIR = path.join(__dirname, '..', 'scripts');
 const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
 
@@ -27,6 +30,11 @@ const MAX_DEPTH = 8; // raised to 8 — Electron/WebView2 apps (Outlook olk) nes
 
 /** Cached shell availability (macOS only — Windows uses psRunner) */
 let macShellAvailable: boolean | null = null;
+
+function unsupportedLinuxResult<T>(fallback: T, feature: string): T {
+  console.debug(`[A11y] Linux accessibility feature not yet implemented: ${feature}`);
+  return fallback;
+}
 
 export interface UIElement {
   name: string;
@@ -85,7 +93,8 @@ export class AccessibilityBridge {
    * macOS:   checks osascript + Accessibility permissions.
    */
   async isShellAvailable(): Promise<boolean> {
-    if (PLATFORM === 'win32') return true; // PSRunner handles availability
+    if (IS_WIN) return true; // PSRunner handles availability
+    if (IS_LINUX) return false; // AT-SPI bridge not yet implemented
 
     if (macShellAvailable !== null) return macShellAvailable;
 
@@ -115,7 +124,7 @@ export class AccessibilityBridge {
 
   /** Start the PSRunner bridge early so the 800ms assembly load happens in background. */
   async warmup(): Promise<void> {
-    if (PLATFORM === 'win32') {
+    if (IS_WIN) {
       psRunner.start().catch(() => {}); // fire-and-forget — errors surface on first actual call
     }
   }
@@ -171,13 +180,16 @@ export class AccessibilityBridge {
     }
 
     let windows: WindowInfo[];
-    if (PLATFORM === 'win32') {
+    if (IS_WIN) {
       const result = await this.winCmd({ cmd: 'get-screen-context', maxDepth: 0 }) as any;
       windows = result.windows ?? [];
       // Update screen context cache timestamp so we don't double-fetch
       this.windowCache = { windows, timestamp: Date.now() };
-    } else {
+    } else if (IS_MAC) {
       windows = await this.runMacScript('get-windows.jxa');
+      this.windowCache = { windows, timestamp: Date.now() };
+    } else {
+      windows = unsupportedLinuxResult([], 'getWindows');
       this.windowCache = { windows, timestamp: Date.now() };
     }
     return windows;
@@ -189,7 +201,7 @@ export class AccessibilityBridge {
     controlType?: string;
     processId?: number;
   }): Promise<UIElement[]> {
-    if (PLATFORM === 'win32') {
+    if (IS_WIN) {
       const result = await this.winCmd({
         cmd: 'find-element',
         ...(opts.name        && { name:        opts.name }),
@@ -198,7 +210,8 @@ export class AccessibilityBridge {
         ...(opts.processId    && { processId:    opts.processId }),
       }) as any;
       return Array.isArray(result) ? result : [];
-    } else {
+    }
+    if (IS_MAC) {
       const args: string[] = [];
       if (opts.name)         args.push('-Name', opts.name);
       if (opts.automationId) args.push('-AutomationId', opts.automationId);
@@ -206,6 +219,7 @@ export class AccessibilityBridge {
       if (opts.processId)    args.push('-ProcessId', String(opts.processId));
       return this.runMacScript('find-element.jxa', args);
     }
+    return unsupportedLinuxResult([], 'findElement');
   }
 
   async invokeElement(opts: {
@@ -240,7 +254,7 @@ export class AccessibilityBridge {
       }
     }
 
-    if (PLATFORM === 'win32') {
+    if (IS_WIN) {
       const result = await this.winCmd({
         cmd: 'invoke-element',
         processId,
@@ -251,7 +265,8 @@ export class AccessibilityBridge {
         ...(opts.value        && { value:        opts.value }),
       }) as any;
       return result;
-    } else {
+    }
+    if (IS_MAC) {
       const args: string[] = ['-Action', opts.action, '-ProcessId', String(processId)];
       if (opts.name)         args.push('-Name', opts.name);
       if (opts.automationId) args.push('-AutomationId', opts.automationId);
@@ -259,6 +274,7 @@ export class AccessibilityBridge {
       if (opts.value)        args.push('-Value', opts.value);
       return this.runMacScript('invoke-element.jxa', args);
     }
+    return unsupportedLinuxResult({ success: false, error: 'Linux accessibility bridge not implemented' }, 'invokeElement');
   }
 
   async focusWindow(
@@ -267,19 +283,21 @@ export class AccessibilityBridge {
   ): Promise<{ success: boolean; title?: string; processId?: number; error?: string }> {
     try {
       let result: any;
-      if (PLATFORM === 'win32') {
+      if (IS_WIN) {
         result = await this.winCmd({
           cmd:     'focus-window',
           restore: true,
           ...(title     && { title }),
           ...(processId && { processId }),
         });
-      } else {
+      } else if (IS_MAC) {
         const args: string[] = [];
         if (title)     args.push('-Title', title);
         if (processId) args.push('-ProcessId', String(processId));
         args.push('-Restore');
         result = await this.runMacScript('focus-window.jxa', args);
+      } else {
+        result = unsupportedLinuxResult({ success: false, error: 'Linux accessibility bridge not implemented' }, 'focusWindow');
       }
       this.invalidateCache();
       return result;
@@ -291,10 +309,12 @@ export class AccessibilityBridge {
   async getActiveWindow(): Promise<WindowInfo | null> {
     try {
       let fg: any;
-      if (PLATFORM === 'win32') {
+      if (IS_WIN) {
         fg = await this.winCmd({ cmd: 'get-foreground-window' });
-      } else {
+      } else if (IS_MAC) {
         fg = await this.runMacScript('get-foreground-window.jxa');
+      } else {
+        return null;
       }
       if (!fg?.success) return null;
 
@@ -332,7 +352,7 @@ export class AccessibilityBridge {
   }
 
   async getFocusedElement(): Promise<FocusedElementInfo | null> {
-    if (PLATFORM === 'win32') {
+    if (IS_WIN) {
       try {
         const result = await this.winCmd({ cmd: 'get-focused-element' }) as any;
         if (!result?.success) return null;
@@ -350,7 +370,7 @@ export class AccessibilityBridge {
         return null;
       }
     }
-    if (PLATFORM === 'darwin') {
+    if (IS_MAC) {
       try {
         const script = path.join(MAC_SCRIPTS_DIR, 'get-focused-element.jxa');
         const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', script], {
@@ -384,16 +404,21 @@ export class AccessibilityBridge {
    */
   async readClipboard(): Promise<string> {
     try {
-      if (PLATFORM === 'win32') {
+      if (IS_WIN) {
         const { stdout } = await execFileAsync('powershell.exe', [
           '-NoProfile', '-Command', 'Get-Clipboard',
         ], { timeout: 2000 });
         return stdout?.trim() ?? '';
-      } else {
-        // macOS: pbpaste
+      }
+      if (IS_MAC) {
         const { stdout } = await execFileAsync('pbpaste', [], { timeout: 2000 });
         return stdout?.trim() ?? '';
       }
+      if (IS_LINUX) {
+        const { stdout } = await execFileAsync('sh', ['-lc', 'if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline; elif command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -o; elif command -v xsel >/dev/null 2>&1; then xsel --clipboard --output; fi'], { timeout: 2000 });
+        return stdout?.trim() ?? '';
+      }
+      return '';
     } catch {
       return '';
     }
@@ -405,7 +430,7 @@ export class AccessibilityBridge {
    */
   async writeClipboard(text: string): Promise<void> {
     try {
-      if (PLATFORM === 'win32') {
+      if (IS_WIN) {
         // Use -EncodedCommand with Base64-encoded UTF-16LE to safely handle
         // all characters (quotes, newlines, special chars) without escaping issues.
         const utf16 = Buffer.from(
@@ -415,10 +440,18 @@ export class AccessibilityBridge {
         await execFileAsync('powershell.exe', [
           '-NoProfile', '-EncodedCommand', utf16.toString('base64'),
         ], { timeout: 2000 });
-      } else {
+      } else if (IS_MAC) {
         // macOS: pipe to pbcopy via shell
         await new Promise<void>((resolve, reject) => {
           const proc = execFile('pbcopy', [], { timeout: 2000 }, (err) => {
+            if (err) reject(err); else resolve();
+          });
+          proc.stdin?.write(text);
+          proc.stdin?.end();
+        });
+      } else if (IS_LINUX) {
+        await new Promise<void>((resolve, reject) => {
+          const proc = execFile('sh', ['-lc', 'if command -v wl-copy >/dev/null 2>&1; then wl-copy; elif command -v xclip >/dev/null 2>&1; then xclip -selection clipboard; elif command -v xsel >/dev/null 2>&1; then xsel --clipboard --input; else exit 1; fi'], { timeout: 2000 }, (err) => {
             if (err) reject(err); else resolve();
           });
           proc.stdin?.write(text);
@@ -443,10 +476,9 @@ export class AccessibilityBridge {
     }
 
     let context = '';
-    let treeError = false;
 
     try {
-      if (PLATFORM === 'win32') {
+      if (IS_WIN) {
         const combined = await this.winCmd({
           cmd:              'get-screen-context',
           maxDepth:         MAX_DEPTH,
@@ -470,7 +502,7 @@ export class AccessibilityBridge {
             '  ',
           );
         }
-      } else {
+      } else if (IS_MAC) {
         // macOS — separate script calls
         const windows = await this.getWindows();
         context += 'WINDOWS:\n';
@@ -490,14 +522,15 @@ export class AccessibilityBridge {
             context += this.formatTree(tree, '  ');
           } catch { /* skip */ }
         }
+      } else {
+        context += '(Accessibility unavailable on Linux — browser CDP and OCR remain available)';
       }
     } catch (err) {
       context += `\n[A11y tree unavailable: ${err}]\n`;
-      treeError = true;
     }
 
     // Always append focused element — even when the tree query failed, focus info is critical
-    if (PLATFORM === 'win32') {
+    if (IS_WIN) {
       try {
         const focused = await this.getFocusedElement();
         if (focused) {
