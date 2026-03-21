@@ -13,7 +13,7 @@
  * and the client auto-converts to the correct format for the target provider.
  */
 
-import type { PipelineConfig } from './providers';
+import { supportsOpenAiJsonMode, type PipelineConfig } from './providers';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // LLM Error Classes
@@ -76,7 +76,7 @@ export async function callTextLLM(
   const isAnthropic = !config.provider.openaiCompat
     && !baseUrl.includes('localhost')
     && !baseUrl.includes('11434');
-  const authHeaders = config.provider.authHeader(apiKey);
+  const authHeaders = { ...config.provider.authHeader(apiKey), ...(config.provider.extraHeaders || {}) };
 
   return _callText({
     baseUrl,
@@ -84,6 +84,7 @@ export async function callTextLLM(
     apiKey,
     isAnthropic,
     authHeaders,
+    providerProfile: config.provider,
     ...options,
   });
 }
@@ -112,6 +113,7 @@ interface InternalCallOptions extends TextLLMOptions {
   apiKey: string;
   isAnthropic: boolean;
   authHeaders: Record<string, string>;
+  providerProfile?: PipelineConfig['provider'];
 }
 
 async function _callText(opts: InternalCallOptions): Promise<string> {
@@ -136,9 +138,10 @@ async function _callText(opts: InternalCallOptions): Promise<string> {
         console.log(`   🔗 LLM text call (attempt ${attempt + 1}): model=${model}`);
       }
 
+      const canUseJsonMode = supportsOpenAiJsonMode(opts.providerProfile);
       const result = isAnthropic
         ? await _callAnthropic({ baseUrl, model, authHeaders, system, user, rawMessages, forceJson, maxTokens, timeoutMs })
-        : await _callOpenAI({ baseUrl, model, authHeaders, system, user, rawMessages, forceJson, maxTokens, timeoutMs });
+        : await _callOpenAI({ baseUrl, model, authHeaders, system, user, rawMessages, forceJson, maxTokens, timeoutMs, canUseJsonMode });
 
       return result;
     } catch (err) {
@@ -171,6 +174,7 @@ async function _callOpenAI(p: {
   forceJson: boolean;
   maxTokens: number;
   timeoutMs?: number;
+  canUseJsonMode?: boolean;
 }): Promise<string> {
   // Build messages: either from rawMessages or from system+user
   let messages: Array<{ role: string; content: string }>;
@@ -192,7 +196,7 @@ async function _callOpenAI(p: {
   if (!p.model.startsWith('kimi-k2')) {
     body.temperature = 0;
   }
-  if (p.forceJson) {
+  if (p.forceJson && p.canUseJsonMode !== false) {
     body.response_format = { type: 'json_object' };
   }
 
@@ -322,6 +326,7 @@ export interface DirectVisionLLMOptions extends VisionLLMOptions {
   model: string;
   apiKey: string;
   isAnthropic: boolean;
+  providerProfile?: PipelineConfig['provider'];
 }
 
 /**
@@ -381,7 +386,7 @@ export async function callVisionLLM(
     && !baseUrl.includes('localhost')
     && !baseUrl.includes('11434');
 
-  return callVisionLLMDirect({ ...options, baseUrl, model, apiKey, isAnthropic });
+  return callVisionLLMDirect({ ...options, baseUrl, model, apiKey, isAnthropic, providerProfile: config.provider });
 }
 
 /**
@@ -427,7 +432,7 @@ async function _callVisionOpenAI(p: DirectVisionLLMOptions & { authHeaders: Reco
   if (!p.model.startsWith('kimi-k2')) {
     body.temperature = 0;
   }
-  if (p.forceJson) {
+  if (p.forceJson && supportsOpenAiJsonMode(p.providerProfile)) {
     body.response_format = { type: 'json_object' };
   }
 

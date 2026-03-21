@@ -23,7 +23,7 @@ import { SafetyLayer, } from './safety';
 import { SafetyTier } from './types';
 import { normalizeKeyCombo } from './keys';
 import type { ClawdConfig, StepResult } from './types';
-import type { PipelineConfig } from './providers';
+import { supportsOpenAiToolCalls, type PipelineConfig } from './providers';
 import type { TaskLogger } from './task-logger';
 import type { TaskVerifier } from './verifiers';
 
@@ -105,6 +105,8 @@ export function isGenericComputerUseSupported(
 ): boolean {
   // Anthropic has its own native CU — don't use generic for it
   if (config.ai.provider === 'anthropic' && !config.ai.visionBaseUrl) return false;
+  if (pipelineConfig?.provider && !pipelineConfig.provider.openaiCompat) return false;
+  if (pipelineConfig?.provider && !supportsOpenAiToolCalls(pipelineConfig.provider)) return false;
 
   // Need a vision model
   const visionModel = pipelineConfig?.layer3?.model || config.ai.visionModel;
@@ -319,6 +321,7 @@ export class GenericComputerUse {
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${visionKey}`,
+          ...(this.pipelineConfig?.provider?.extraHeaders || {}),
         },
         body: JSON.stringify({
           model: visionModel,
