@@ -292,7 +292,7 @@ program
       console.log(`  GET  /docs     — Tool documentation`);
       console.log(`\nAll mutating endpoints require: \x1b[36mAuthorization: Bearer <token>\x1b[0m`);
 
-      // Validate API key on startup
+      // Validate API key on startup — refuse to serve tasks with a dead key
       const { loadPipelineConfig } = await import('./doctor');
       const pipelineConfig = loadPipelineConfig();
       if (pipelineConfig && pipelineConfig.layer2.enabled) {
@@ -311,17 +311,41 @@ program
           console.log(`${e('✅', '[OK]')} API key validated for ${pipelineConfig.provider.name}`);
         } catch (err: any) {
           if (err.name === 'LLMAuthError') {
-            console.error(`${e('❌', '[ERR]')} API key INVALID for ${pipelineConfig.provider.name} (${pipelineConfig.layer2.model})`);
-            console.error(`   Get a new key and update your .env or run: clawdcursor doctor`);
-            console.error(`   Server will continue running but tasks will fail until the key is fixed.`);
+            console.error(`\n${e('❌', '[ERR]')} API key INVALID for ${pipelineConfig.provider.name} (${pipelineConfig.layer2.model})`);
+            console.error(`   The saved config has an expired or revoked key.\n`);
+            // Delete stale config so next start re-detects
+            const staleConfig = require('path').join(require('path').resolve(__dirname, '..'), '.clawdcursor-config.json');
+            try { require('fs').unlinkSync(staleConfig); } catch { /* ok */ }
+            console.error(`   ${e('🗑️', '[DEL]')}  Removed stale config. Fix your key and restart:`);
+            console.error(`   1. Update your API key in .env or environment variables`);
+            console.error(`   2. Run: clawdcursor start   (will re-detect providers)`);
+            console.error(`   Or run: clawdcursor doctor   to reconfigure manually\n`);
+            releasePidFile('start');
+            agent.disconnect();
+            process.exit(1);
           } else if (err.name === 'LLMBillingError') {
-            console.error(`${e('⚠️', '[WARN]')} API credits exhausted for ${pipelineConfig.provider.name}`);
-            console.error(`   Add credits or switch providers. Run: clawdcursor doctor`);
+            console.error(`\n${e('❌', '[ERR]')} API credits exhausted for ${pipelineConfig.provider.name}`);
+            console.error(`   Add credits or switch providers, then restart.`);
+            console.error(`   Run: clawdcursor doctor   to reconfigure\n`);
+            releasePidFile('start');
+            agent.disconnect();
+            process.exit(1);
           } else {
             console.warn(`${e('⚠️', '[WARN]')} Could not validate API key: ${err.message?.substring(0, 100)}`);
+            // Network error or timeout — don't exit, might be transient
           }
-          // Don't exit — let the server run in case user fixes the key
         }
+      } else if (!pipelineConfig) {
+        console.error(`\n${e('❌', '[ERR]')} No AI providers configured.`);
+        console.error(`   clawdcursor needs at least one working LLM to execute tasks.\n`);
+        console.error(`   Option 1 (Free, local): Install Ollama → https://ollama.ai`);
+        console.error(`      Then: ollama pull qwen2.5:7b\n`);
+        console.error(`   Option 2 (API key): Set an environment variable:`);
+        console.error(`      ANTHROPIC_API_KEY, OPENAI_API_KEY, MOONSHOT_API_KEY, etc.\n`);
+        console.error(`   Then run: clawdcursor start\n`);
+        releasePidFile('start');
+        agent.disconnect();
+        process.exit(1);
       }
 
       console.log(`\nReady. ${e('🐾', '')}`);
