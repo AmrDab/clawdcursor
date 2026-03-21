@@ -160,8 +160,7 @@ async function quickTestModelAsync(
 }
 
 /**
- * Quick model test with 5s timeout — uses the same real tests as full doctor.
- * For quick setup, we accept text-only pings for vision models to save time.
+ * Quick model test with 5s timeout — uses real tests for both text and vision.
  */
 async function quickTestModel(
   provider: ProviderProfile,
@@ -169,8 +168,9 @@ async function quickTestModel(
   model: string,
   isVision: boolean,
 ): Promise<{ ok: boolean; latencyMs?: number; error?: string }> {
-  // Quick setup: text-only ping for both roles (speed over thoroughness)
-  // Full doctor will do the real vision test later
+  if (isVision) {
+    return testVisionModel(provider, apiKey, model);
+  }
   return testTextModel(provider, apiKey, model);
 }
 
