@@ -15,6 +15,10 @@ export interface ProviderProfile {
   textModel: string;
   /** Vision-capable model (Layer 3: screenshot fallback) */
   visionModel: string;
+  /** Approximate context window of the text model in tokens.
+   *  Used for dynamic element truncation in OCR Reasoner.
+   *  Minimum recommended: 16000 (16K). Models below this will show a warning. */
+  textContextWindow?: number;
   /** Whether the API is OpenAI-compatible */
   openaiCompat: boolean;
   /** Extra headers needed */
@@ -27,6 +31,10 @@ export interface ProviderProfile {
   supportsToolCalls?: boolean;
 }
 
+/** Minimum context window in tokens for reliable desktop automation.
+ *  Models below this cannot handle web pages (200+ elements). */
+export const MIN_RECOMMENDED_CONTEXT = 16000;
+
 export const PROVIDERS: Record<string, ProviderProfile> = {
   anthropic: {
     name: 'Anthropic',
@@ -37,6 +45,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     }),
     textModel: 'claude-haiku-4-5',
     visionModel: 'claude-sonnet-4-20250514',
+    textContextWindow: 200000,
     openaiCompat: false,
     computerUse: true,
     supportsJsonMode: false,
@@ -48,6 +57,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'gpt-4o-mini',
     visionModel: 'gpt-4o',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -59,6 +69,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: () => ({}),
     textModel: '',
     visionModel: '',
+    textContextWindow: 32000, // varies by model, conservative default
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -70,6 +81,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'moonshot-v1-32k',
     visionModel: 'kimi-k2.5',
+    textContextWindow: 32000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -81,6 +93,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'llama-3.3-70b-versatile',
     visionModel: 'llama-3.2-90b-vision-preview',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -92,6 +105,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo',
     visionModel: 'meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -103,6 +117,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'deepseek-chat',
     visionModel: 'deepseek-chat',
+    textContextWindow: 64000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -114,6 +129,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'gemini-2.0-flash',
     visionModel: 'gemini-2.0-flash',
+    textContextWindow: 1000000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -125,6 +141,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'mistral-small-latest',
     visionModel: 'pixtral-large-latest',
+    textContextWindow: 32000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -136,6 +153,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'grok-3-mini',
     visionModel: 'grok-2-vision-1212',
+    textContextWindow: 131072,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -147,6 +165,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'qwen-turbo',
     visionModel: 'qwen-vl-max',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -158,6 +177,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'accounts/fireworks/models/llama-v3p1-70b-instruct',
     visionModel: 'accounts/fireworks/models/llama-v3p2-90b-vision-instruct',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: true,
@@ -169,6 +189,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'command-r',
     visionModel: 'command-r-plus',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: false,
@@ -180,6 +201,7 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
     textModel: 'llama-3.1-sonar-small-128k-online',
     visionModel: 'llama-3.1-sonar-large-128k-online',
+    textContextWindow: 128000,
     openaiCompat: true,
     computerUse: false,
     supportsJsonMode: false,

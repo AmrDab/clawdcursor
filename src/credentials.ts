@@ -364,8 +364,7 @@ function resolveFromOpenClawFiles(): ResolvedApiConfig | null {
   const rawTextModel = textProvider?.models.find(m => !m.input.includes('image') && !m.input.includes('vision'))?.id
     || textProvider?.models[0]?.id;
 
-  // Auto-upgrade small context models — 8K is too small for web automation.
-  const textModel = rawTextModel === 'moonshot-v1-8k' ? 'moonshot-v1-32k' : rawTextModel;
+  const textModel = rawTextModel;
   const visionModel = rawVisionModel;
 
   const resolvedApiKey = selectedProvider.apiKey || textProvider?.apiKey || visionProvider?.apiKey || globalProviderWithKey?.apiKey || '';

@@ -354,6 +354,15 @@ program
         }
       }
 
+      // Warn if text model context window is below recommended minimum
+      const { MIN_RECOMMENDED_CONTEXT } = await import('./providers');
+      const ctxWindow = pipelineConfig?.provider?.textContextWindow;
+      if (ctxWindow && ctxWindow < MIN_RECOMMENDED_CONTEXT) {
+        console.warn(`${e('⚠️', '[WARN]')} Text model context window (${Math.round(ctxWindow / 1000)}K) is below the recommended minimum (${Math.round(MIN_RECOMMENDED_CONTEXT / 1000)}K).`);
+        console.warn(`   Web pages with many elements may overflow. Consider using a larger model.`);
+        console.warn(`   Run: clawdcursor doctor   to switch models\n`);
+      }
+
       console.log(`\nReady. ${e('🐾', '')}`);
     });
 

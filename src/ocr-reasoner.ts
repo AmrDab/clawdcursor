@@ -636,16 +636,16 @@ export class OcrReasoner {
     }
 
     // Cap snapshot size to fit within LLM context window.
-    // Reserve ~3K tokens for system prompt + history + response.
-    // Estimate: each OCR line ≈ 50 tokens (text + coordinates + a11y metadata).
+    // Use provider's declared context window, falling back to model name heuristics.
+    const providerContextWindow = this.pipelineConfig.provider?.textContextWindow;
     const modelName = (this.pipelineConfig.layer3?.enabled ? this.pipelineConfig.layer3.model : this.pipelineConfig.layer2.model) || '';
-    const contextWindow =
-      /128k/i.test(modelName) ? 128000 :
+    const contextWindow = providerContextWindow ||
+      (/128k/i.test(modelName) ? 128000 :
       /32k/i.test(modelName)  ? 32000 :
       /16k/i.test(modelName)  ? 16000 :
       /8k/i.test(modelName)   ? 8000 :
       /gpt-4o|claude|gemini|k2/i.test(modelName) ? 128000 :
-      32000; // default assumption
+      32000); // conservative default
     const reservedTokens = 3500; // system prompt + task + history + response
     const maxTokensForElements = contextWindow - reservedTokens;
     const tokensPerLine = 100; // web pages average ~95 tokens/line with rich metadata
