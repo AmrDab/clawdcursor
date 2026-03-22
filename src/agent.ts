@@ -377,8 +377,8 @@ public class WinAPI {
     this.brain.setScreenSize(size.width, size.height);
   }
 
-  /** Maximum wall-clock time for a single task */
-  private static readonly TASK_TIMEOUT_MS = 120 * 1000; // 120s — multi-step tasks need more time
+  /** Safety-net timeout — only fires if task is truly stuck (stagnation + abort didn't catch it) */
+  private static readonly TASK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — generous, real stop signals are stagnation + abort
 
   async executeTask(task: string): Promise<TaskResult> {
     // Atomic concurrency guard — boolean lock prevents TOCTOU race

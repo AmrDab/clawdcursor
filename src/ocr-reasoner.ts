@@ -20,12 +20,11 @@ import type { PipelineConfig } from './providers';
 import type { StepResult } from './types';
 import { getBrowserProcessRegex } from './browser-config';
 
-const MAX_OCR_STEPS = 30;      // max actions before giving up (was 20 — multi-step tasks need more)
-const MAX_OCR_TIME_MS = 100000; // 100s wall-clock — task timeout is 120s, leave 20s for vision fallback
+const MAX_OCR_STEPS = 50;      // max actions — generous limit, stagnation catches stuck tasks
 const SETTLE_MS     = 200;     // wait after action before re-OCR
 const CANNOT_READ_RETRIES = 2; // retries before signaling vision fallback
 const MAX_CONTEXT_TURNS = 3;   // sliding window: keep last N user/assistant turn pairs
-const STAGNATION_THRESHOLD = 6; // bail after N identical OCR screens (was 4 — more retry chances)
+const STAGNATION_THRESHOLD = 6; // bail after N identical OCR screens — the REAL "stuck" signal
 
 // ─── Action types returned by the LLM ────────────────────────────────────────
 
@@ -221,18 +220,10 @@ export class OcrReasoner {
         return { handled: false, success: false, description: 'Task aborted', steps: stepCount, actionLog };
       }
 
-      // Time-based bailout — no task should take >55s in OCR Reasoner
-      const elapsed = Date.now() - startTime;
-      if (elapsed > MAX_OCR_TIME_MS) {
-        console.warn(`   [OCR] ⚠️ Wall-clock timeout: ${(elapsed / 1000).toFixed(1)}s > ${MAX_OCR_TIME_MS / 1000}s limit. Bailing.`);
-        return {
-          handled: false,
-          success: false,
-          description: `OCR Reasoner timed out after ${(elapsed / 1000).toFixed(1)}s`,
-          steps: stepCount,
-          actionLog,
-        };
-      }
+      // No wall-clock timeout — let the task run as long as it's making progress.
+      // Stagnation detection (N identical screens) catches stuck tasks.
+      // Task-level timeout in agent.ts is the absolute safety net.
+      // User can abort anytime via /abort.
 
       // 0. Track focus shifts — update target when LLM actions open child windows
       // (e.g., Outlook compose opens in a different process than inbox)
