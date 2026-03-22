@@ -88,7 +88,7 @@ For orchestration best practices (how to avoid overlap and keep OpenClaw + Clawd
 
 ```bash
 # Install as OpenClaw skill
-openclaw skills install clawd-cursor
+clawhub install clawd-cursor
 ```
 
 ---
