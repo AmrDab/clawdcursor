@@ -18,8 +18,11 @@ export interface TaskClassification {
 
 // ── Patterns ────────────────────────────────────────────────────────────────
 
-const MECHANICAL_START = /^(open|close|press|click|tap|type|save as|minimize|maximize|focus|switch to)\b/i;
+const MECHANICAL_START = /^(open|close|press|click|tap|type|save\s+(the\s+file\s+)?as|minimize|maximize|focus|switch to)\b/i;
 const MECHANICAL_FULL  = /^(select all|undo|redo|copy|paste|cut|delete|scroll (up|down)|go back|go forward|refresh)\b/i;
+
+// "click in/on the middle/center/area" → needs LLM to calculate position from screen data
+const POSITIONAL_CLICK = /\b(click|tap)\s+(in|on|at)\s+(the\s+)?(middle|center|top|bottom|left|right|corner|area|canvas|screen|background|workspace)\b/i;
 
 const NAVIGATION = /\b(go to|navigate to|visit|open\s+https?:|browse to|search for|find on page)\b/i;
 const NAVIGATION_URL = /\b(https?:\/\/|www\.|\.com|\.org|\.io|\.dev|\.net)\b/i;
@@ -43,6 +46,19 @@ export function classifyTask(task: string): TaskClassification {
       suggestedLayers: [3],
       needsVision: true,
       timeoutMs: 90000,
+    };
+  }
+
+  // ── Positional clicks — "click in the middle/center of [area]" ──
+  // These need the Unified Reasoner to calculate coordinates from OCR/A11y data.
+  // Router can't handle spatial position references like "middle of canvas".
+  if (POSITIONAL_CLICK.test(t)) {
+    return {
+      category: 'reasoning',
+      confidence: 0.85,
+      suggestedLayers: [2, 3],
+      needsVision: false,
+      timeoutMs: 45000,
     };
   }
 
