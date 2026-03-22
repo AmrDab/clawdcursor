@@ -795,6 +795,41 @@ async function detectGpuInfo(): Promise<string | null> {
     }
   }
 
+  if (process.platform === 'linux') {
+    // Prefer nvidia-smi for NVIDIA cards, then fall back to lspci parsing for generic adapters.
+    try {
+      const { stdout } = await execFileAsync('nvidia-smi', [
+        '--query-gpu=name,memory.total',
+        '--format=csv,noheader,nounits',
+      ]);
+      const lines = stdout
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(Boolean);
+      if (lines.length > 0) {
+        return lines
+          .map(line => {
+            const parts = line.split(',').map(p => p.trim());
+            return parts.length >= 2 ? `${parts[0]} (${parts[1]} MB VRAM)` : line;
+          })
+          .join(' | ');
+      }
+    } catch { /* fallback to lspci */ }
+
+    try {
+      const { stdout } = await execFileAsync('lspci', []);
+      const lines = stdout
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(Boolean)
+        .filter(line => /vga|3d|display/i.test(line))
+        .map(line => line.replace(/^[0-9a-fA-F:.]+\s+/, ''));
+      return lines.length > 0 ? lines.join(' | ') : null;
+    } catch {
+      return null;
+    }
+  }
+
   return null;
 }
 
