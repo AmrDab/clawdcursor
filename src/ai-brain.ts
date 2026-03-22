@@ -303,6 +303,7 @@ export class AIBrain {
     ollama: 'http://localhost:11434/v1',
     kimi: 'https://api.moonshot.cn/v1',
     openai: 'https://api.openai.com/v1',
+    gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
   };
 
   private async callLLM(systemPrompt: string): Promise<string> {

@@ -90,6 +90,15 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     openaiCompat: true,
     computerUse: false,
   },
+  gemini: {
+    name: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'gemini-2.0-flash',
+    visionModel: 'gemini-2.0-flash',
+    openaiCompat: true,
+    computerUse: false,
+  },
   generic: {
     name: 'OpenAI-Compatible',
     baseUrl: '', // set from config
@@ -244,6 +253,7 @@ const PROVIDER_ENV_VARS: Record<string, string[]> = {
   groq: ['GROQ_API_KEY'],
   together: ['TOGETHER_API_KEY'],
   deepseek: ['DEEPSEEK_API_KEY'],
+  gemini: ['GEMINI_API_KEY'],
 };
 
 /**
