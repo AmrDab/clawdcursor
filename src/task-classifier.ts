@@ -38,13 +38,15 @@ const EMAIL = /\b(email|send\s+(an?\s+)?email|compose\s+mail|send\s+to\s+\S+@)\b
 export function classifyTask(task: string): TaskClassification {
   const t = task.trim();
 
-  // ── Spatial — needs vision, skip text layers ──
+  // ── Spatial — OCR Reasoner has drag support and is 2x faster than vision.
+  // Let Unified Reasoner (OCR+A11y) handle spatial tasks with its drag action.
+  // Vision is fallback only if OCR fails.
   if (SPATIAL.test(t)) {
     return {
       category: 'spatial',
       confidence: 0.9,
-      suggestedLayers: [3],
-      needsVision: true,
+      suggestedLayers: [2, 3],
+      needsVision: false,    // OCR Reasoner handles drags — no vision needed upfront
       timeoutMs: 90000,
     };
   }

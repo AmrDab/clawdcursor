@@ -328,7 +328,7 @@ export class GenericComputerUse {
 
   private async callVisionLLM(messages: any[]): Promise<any> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 120_000);
+    const timeout = setTimeout(() => controller.abort(), 30_000); // 30s max per vision call
 
     try {
       const visionModel = this.pipelineConfig?.layer3?.model || this.config.ai.visionModel;
@@ -384,20 +384,20 @@ export class GenericComputerUse {
     a11yTree: string,
   ): any {
     const base64 = screenshot.buffer.toString('base64');
-    // Use low detail for models with small context windows (≤32K) to reduce image tokens
-    const visionModel = this.pipelineConfig?.layer3?.model || this.config.ai.visionModel;
-    const isSmallContext = visionModel.includes('32k') || visionModel.includes('8k');
+    // Always use low detail to reduce image tokens and speed up vision calls.
+    // Full detail adds ~700 extra tokens per image with minimal accuracy gain.
+    // Low detail: ~85 tokens per image. Full detail: ~777 tokens per image.
     const content: any[] = [
       {
         type: 'image_url',
         image_url: {
           url: `data:image/png;base64,${base64}`,
-          ...(isSmallContext ? { detail: 'low' } : {}),
+          detail: 'low',
         },
       },
     ];
     if (a11yTree && a11yTree.trim()) {
-      const treeLimit = isSmallContext ? 500 : 2000;
+      const treeLimit = 500; // Vision models rely on images, not text — keep a11y tree small
       content.push({
         type: 'text',
         text: `Screen: ${screenshot.llmWidth}×${screenshot.llmHeight} (scale ${screenshot.scaleFactor.toFixed(2)}x)\nAccessibility tree:\n${a11yTree.substring(0, treeLimit)}`,
