@@ -20,12 +20,12 @@ import type { PipelineConfig } from './providers';
 import type { StepResult } from './types';
 import { getBrowserProcessRegex } from './browser-config';
 
-const MAX_OCR_STEPS = 20;     // max actions before giving up
-const MAX_OCR_TIME_MS = 55000; // 55s wall-clock — leave 5s margin within 60s task timeout
-const SETTLE_MS     = 200;    // wait after action before re-OCR (reduced from 400)
+const MAX_OCR_STEPS = 30;      // max actions before giving up (was 20 — multi-step tasks need more)
+const MAX_OCR_TIME_MS = 100000; // 100s wall-clock — task timeout is 120s, leave 20s for vision fallback
+const SETTLE_MS     = 200;     // wait after action before re-OCR
 const CANNOT_READ_RETRIES = 2; // retries before signaling vision fallback
-const MAX_CONTEXT_TURNS = 3;  // sliding window: keep last N user/assistant turn pairs
-const STAGNATION_THRESHOLD = 4; // bail after N identical OCR screens
+const MAX_CONTEXT_TURNS = 3;   // sliding window: keep last N user/assistant turn pairs
+const STAGNATION_THRESHOLD = 6; // bail after N identical OCR screens (was 4 — more retry chances)
 
 // ─── Action types returned by the LLM ────────────────────────────────────────
 
@@ -982,8 +982,8 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
 
       case 'a11y_click': {
         // UIA InvokePattern — most reliable, no mouse coordinates needed
-        // 5s timeout to prevent PSBridge hangs from eating the entire task budget
-        const A11Y_TIMEOUT_MS = 5000;
+        // 2s timeout — UIA either finds the element instantly or not at all
+        const A11Y_TIMEOUT_MS = 2000;
         try {
           const invokePromise = this.a11y.invokeElement({
             name: action.name,
@@ -1020,7 +1020,7 @@ What is the SINGLE NEXT ACTION to accomplish this task? Respond with JSON only.`
       }
 
       case 'a11y_set_value': {
-        const A11Y_SV_TIMEOUT_MS = 5000;
+        const A11Y_SV_TIMEOUT_MS = 2000;
         try {
           const svPromise = this.a11y.invokeElement({
             name: action.name,
