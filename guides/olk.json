@@ -1,0 +1,31 @@
+{
+  "app": "Microsoft Outlook (New)",
+  "processNames": ["olk", "OUTLOOK"],
+  "workflows": {
+    "compose_email": "Click 'New mail' button (top-left) or press Ctrl+N. Click the 'To' field and type the email address. Press Tab to move to Subject. Type the subject. Press Tab to move to the body. Type your message. Click the Send button (blue button, top-left of compose).",
+    "reply": "Open the email. Click Reply (or press Ctrl+R). Type your response in the body. Click Send.",
+    "search": "Click the search bar at the top (or press Ctrl+E). Type your search query. Press Enter.",
+    "attach_file": "In compose view, click the Attach button (paperclip icon) or press Ctrl+Shift+A. Browse and select the file."
+  },
+  "shortcuts": {
+    "new_email": "Ctrl+N",
+    "reply": "Ctrl+R",
+    "reply_all": "Ctrl+Shift+R",
+    "forward": "Ctrl+F",
+    "send": "Ctrl+Enter",
+    "search": "Ctrl+E",
+    "attach": "Ctrl+Shift+A"
+  },
+  "layout": {
+    "sidebar": "Left — folder list (Inbox, Sent, Drafts, etc.)",
+    "message_list": "Center — list of emails in the selected folder",
+    "reading_pane": "Right — preview of selected email",
+    "compose": "When composing: To field, Cc/Bcc, Subject, Body area, Send button at top-left"
+  },
+  "tips": [
+    "New Outlook (olk.exe) is a WebView2 app — it can be slow to load. Wait for it to fully render before interacting.",
+    "The Send button is BLUE and at the top-left of the compose area. Do NOT press Enter to send — Enter just adds a new line.",
+    "After typing the To address, press Tab (NOT Enter) to move to Subject.",
+    "If Outlook shows a loading screen, wait 3-5 seconds for it to fully load."
+  ]
+}

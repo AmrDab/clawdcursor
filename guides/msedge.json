@@ -1,0 +1,42 @@
+{
+  "app": "Microsoft Edge",
+  "processNames": ["msedge"],
+  "workflows": {
+    "navigate_to_url": "Click the address bar (or press Ctrl+L). Type the full URL. Press Enter.",
+    "search": "Click the address bar (Ctrl+L). Type your search query. Press Enter. Results appear on the page.",
+    "search_on_page": "Press Ctrl+F. Type search term. Use Enter to cycle through matches.",
+    "new_tab": "Press Ctrl+T for a new tab.",
+    "close_tab": "Press Ctrl+W to close the current tab.",
+    "scroll_down": "Press Space or Page Down. Or use mouse scroll.",
+    "click_link": "Find the link text on the page and click it.",
+    "go_back": "Press Alt+Left or click the back arrow.",
+    "refresh": "Press F5 or Ctrl+R."
+  },
+  "shortcuts": {
+    "address_bar": "Ctrl+L or F6",
+    "new_tab": "Ctrl+T",
+    "close_tab": "Ctrl+W",
+    "find_on_page": "Ctrl+F",
+    "refresh": "F5",
+    "back": "Alt+Left",
+    "forward": "Alt+Right",
+    "zoom_in": "Ctrl+Plus",
+    "zoom_out": "Ctrl+Minus",
+    "full_screen": "F11",
+    "dev_tools": "F12"
+  },
+  "layout": {
+    "title_bar": "Top — shows page title",
+    "tab_bar": "Below title — open tabs",
+    "address_bar": "Below tabs — URL/search input field",
+    "toolbar": "Navigation arrows (back/forward), refresh, home button",
+    "page_content": "The large area below the address bar — web page renders here",
+    "sidebar": "Optional left panel (favorites, history, reading list)"
+  },
+  "tips": [
+    "Use Ctrl+L to focus the address bar instantly — don't click on it.",
+    "For GitHub search: use the search bar ON THE GITHUB PAGE, not the browser address bar.",
+    "For site-specific search: navigate to the site first, then use its search feature.",
+    "If a cookie consent banner appears, click 'Reject All' or 'Accept' to dismiss it."
+  ]
+}

@@ -73,7 +73,13 @@ interface A11yCaptureResult {
 
 // ─── System prompt for the text LLM ─────────────────────────────────────────
 
-const SYSTEM_PROMPT = `You are a desktop automation agent. You receive a UI snapshot with OCR text elements and their PRE-COMPUTED click coordinates. Your job is to decide the SINGLE NEXT ACTION to accomplish the user's task.
+const SYSTEM_PROMPT = `You are ClawdCursor — an AI desktop automation agent with full control of the user's computer. You can see the screen through OCR and accessibility data, click any element, type text, drag to draw, press keyboard shortcuts, and interact with any application. You are the user's cursor and keyboard, acting on their behalf.
+
+Your capabilities: click, double-click, drag, type, press keys, scroll, read screen elements, invoke accessibility controls. You can operate ANY desktop application — browsers, office apps, creative tools, system utilities.
+
+Your goal: complete the user's task efficiently using the minimum number of actions. Prefer keyboard shortcuts over mouse clicks. Think about the most direct path to accomplish the task.
+
+You receive a UI snapshot with OCR text elements and their PRE-COMPUTED click coordinates. Decide the SINGLE NEXT ACTION to accomplish the user's task.
 
 COORDINATE SYSTEM: All coordinates are in REAL SCREEN PIXELS. Click coordinates are PRE-COMPUTED centers — use them directly, no math needed.
 
@@ -189,9 +195,21 @@ export class OcrReasoner {
       } catch { /* non-fatal */ }
     }
 
+    // Load app-specific guide if available for the target application
+    let guidePrompt = '';
+    if (this.currentAppProcess) {
+      try {
+        const { getGuidePrompt } = require('./guide-loader');
+        guidePrompt = getGuidePrompt(this.currentAppProcess.split(' ')[0]);
+        if (guidePrompt) {
+          console.log(`   [OCR] 📖 Loaded app guide for "${this.currentAppProcess}"`);
+        }
+      } catch { /* guide loader not available */ }
+    }
+
     // Build conversation history for context (sliding window applied before each LLM call)
     const messages: Array<{ role: string; content: string }> = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: SYSTEM_PROMPT + guidePrompt },
     ];
 
     for (let step = 0; step < MAX_OCR_STEPS; step++) {

@@ -1,0 +1,41 @@
+{
+  "app": "Microsoft Excel",
+  "processNames": ["EXCEL", "excel"],
+  "workflows": {
+    "create_table": "Click cell A1. Type the first header. Press Tab to move to the next column. Type the next header. Press Enter to go to the next row. Type data in each cell, pressing Tab between columns and Enter between rows. DO NOT use Insert > Table from the ribbon — just type directly into cells.",
+    "enter_formula": "Click the target cell. Type = followed by the formula (e.g., =SUM(A1:A10)). Press Enter to confirm.",
+    "save_as": "Press Ctrl+Shift+S. Type the filename. Select the save location. Click Save.",
+    "format_cells": "Select cells first (click and drag, or Shift+Arrow keys). Then use the Home ribbon tab for formatting (bold, font size, borders).",
+    "new_workbook": "Press Ctrl+N for a new blank workbook. If on the start screen, click 'Blank workbook'.",
+    "navigate_cells": "Use Arrow keys to move between cells. Ctrl+Arrow jumps to the edge of data. Ctrl+Home goes to A1."
+  },
+  "shortcuts": {
+    "new_workbook": "Ctrl+N",
+    "save": "Ctrl+S",
+    "save_as": "Ctrl+Shift+S",
+    "next_cell_right": "Tab",
+    "next_row": "Enter",
+    "select_all": "Ctrl+A",
+    "undo": "Ctrl+Z",
+    "copy": "Ctrl+C",
+    "paste": "Ctrl+V",
+    "bold": "Ctrl+B",
+    "find": "Ctrl+F",
+    "close": "Ctrl+W"
+  },
+  "layout": {
+    "title_bar": "Top of window — shows workbook name",
+    "ribbon": "Below title bar — tabs: File, Home, Insert, Page Layout, Formulas, Data, Review, View",
+    "formula_bar": "Below ribbon — shows contents of selected cell, has Name Box on the left",
+    "workspace": "The large grid of cells (A1, B1, C1...) — this is where ALL data entry happens",
+    "sheet_tabs": "Bottom of window — Sheet1, Sheet2, etc.",
+    "status_bar": "Very bottom — shows Ready, cell count, sum, average"
+  },
+  "tips": [
+    "For simple data tables, ALWAYS type directly into cells. Never use Insert > Table for basic data entry.",
+    "Tab moves to the next column. Enter moves to the next row. This is the fastest way to fill a table.",
+    "If Excel opens to the Start Screen, click 'Blank workbook' or press Ctrl+N first.",
+    "The workspace (cell grid) occupies most of the window — click anywhere in it to start typing.",
+    "When the Start Screen is showing, you must create or open a workbook before you can enter data."
+  ]
+}

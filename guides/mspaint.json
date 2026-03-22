@@ -1,0 +1,43 @@
+{
+  "app": "Microsoft Paint",
+  "processNames": ["mspaint"],
+  "workflows": {
+    "draw_freehand": "Select the Pencil tool from the Tools group (or press P). Click and drag on the canvas to draw lines.",
+    "draw_shape": "Click on a shape in the Shapes group (rectangle, ellipse, line, triangle, etc.). Click and drag on the canvas to place it. Drag handles to resize.",
+    "add_text": "Click the Text tool (A icon) in the Tools group. Click on the canvas where you want text. A text box appears — type your text. Use the formatting toolbar above to change font and size.",
+    "fill_color": "Click the Fill tool (paint bucket icon). Select a color from the Colors palette. Click on an enclosed area to fill it.",
+    "select_color": "Click a color in the Colors palette on the right side of the ribbon. Left-click sets foreground color, right-click sets background color.",
+    "erase": "Click the Eraser tool. Click and drag on the canvas to erase.",
+    "save_as": "Press Ctrl+Shift+S. Choose format (PNG, JPEG, BMP). Type filename. Click Save."
+  },
+  "shortcuts": {
+    "pencil": "P (or click Pencil in Tools)",
+    "eraser": "E (or click Eraser in Tools)",
+    "fill": "K (or click Fill in Tools)",
+    "text": "T (or click A icon in Tools)",
+    "select_all": "Ctrl+A",
+    "undo": "Ctrl+Z",
+    "save": "Ctrl+S",
+    "save_as": "Ctrl+Shift+S",
+    "new": "Ctrl+N",
+    "zoom_in": "Ctrl+Plus",
+    "zoom_out": "Ctrl+Minus"
+  },
+  "layout": {
+    "title_bar": "Top of window — shows filename",
+    "ribbon": "Below title bar — contains tool groups: Selection, Image, Tools, Brushes, Shapes, Size, Colors",
+    "tools_group": "Contains: Select, Pencil, Fill, Text (A), Eraser, Color Picker, Magnifier",
+    "shapes_group": "Contains: Line, Rectangle, Ellipse, Triangle, Arrow, Star, etc.",
+    "colors_palette": "Right side of ribbon — clickable color swatches",
+    "canvas": "The large WHITE area below the ribbon — this is where you draw",
+    "status_bar": "Bottom — shows cursor position and canvas size"
+  },
+  "tips": [
+    "The canvas is the large white rectangle below the toolbar. ALWAYS draw on the canvas, not the toolbar.",
+    "Before drawing, select the right tool FIRST (Pencil for freehand, a Shape for geometric drawing).",
+    "For drawing a house: use Rectangle shape for the body, Triangle for the roof, small Rectangle for door/windows.",
+    "For freehand drawing: press P for Pencil, then drag on the canvas.",
+    "The Text tool (A) requires two clicks: one on the tool, one on the canvas to place the text box.",
+    "Select a larger brush size from the Size dropdown for thicker lines."
+  ]
+}

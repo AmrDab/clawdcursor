@@ -1,0 +1,36 @@
+{
+  "app": "Notepad",
+  "processNames": ["notepad", "Notepad"],
+  "workflows": {
+    "type_text": "Click anywhere in the text area (the large white space). Start typing. Text appears at the cursor position.",
+    "save_as": "Press Ctrl+Shift+S. Type the filename in the 'File name' field. Navigate to the save location using the left sidebar or address bar. Click Save. If a 'Save as Markdown' dialog appears, click 'Save as text file'.",
+    "save": "Press Ctrl+S. If unsaved, a Save dialog opens — type filename and click Save.",
+    "find_replace": "Press Ctrl+H for Find and Replace. Type search text, type replacement, click Replace All.",
+    "select_all": "Press Ctrl+A to select all text.",
+    "new_file": "Press Ctrl+N for a new empty document."
+  },
+  "shortcuts": {
+    "new": "Ctrl+N",
+    "save": "Ctrl+S",
+    "save_as": "Ctrl+Shift+S",
+    "find": "Ctrl+F",
+    "replace": "Ctrl+H",
+    "select_all": "Ctrl+A",
+    "undo": "Ctrl+Z",
+    "cut": "Ctrl+X",
+    "copy": "Ctrl+C",
+    "paste": "Ctrl+V"
+  },
+  "layout": {
+    "title_bar": "Top — shows filename (or 'Untitled')",
+    "menu_bar": "File, Edit, View menus",
+    "text_area": "The large white space — this is where ALL typing happens",
+    "status_bar": "Bottom — shows line/column number"
+  },
+  "tips": [
+    "The text area is the entire large white space. Just click it and start typing.",
+    "Use Ctrl+Shift+S (NOT Ctrl+S) when you need to save with a specific filename.",
+    "If a 'Save as Markdown' dialog appears, click 'Save as text file' for .txt files.",
+    "Windows 11 Notepad supports tabs — each tab is a separate document."
+  ]
+}
