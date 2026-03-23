@@ -532,9 +532,11 @@ export async function runDoctor(opts: {
     console.log(`\n🎮 GPU detected: ${gpuInfo}`);
   }
 
+  const allVision = modelTests.filter(t => t.role === 'vision');
   const selected = await promptPipelineSelection(
     workingText,
     workingVision,
+    allVision,
     recommendedPipeline,
   );
   const pipeline = buildPipelineFromSelection(scanResults, selected);
@@ -894,6 +896,7 @@ async function detectGpuInfo(): Promise<string | null> {
 async function promptPipelineSelection(
   workingText: ModelTestResult[],
   workingVision: ModelTestResult[],
+  allVision: ModelTestResult[],
   recommended: PipelineConfig,
 ): Promise<PipelineSelection> {
   const recommendedText = recommended.layer2.enabled
@@ -924,11 +927,15 @@ async function promptPipelineSelection(
       workingText,
       recommendedText,
     );
+    // For vision: if no working models, show ALL tested models (including failed)
+    // so the user can still pick one — the test image might have been the issue, not the model.
+    const visionOptions = workingVision.length > 0 ? workingVision : allVision;
     const layer3 = await promptCategoryChoice(
       rl,
       'VISION LLM (Layer 3)',
-      workingVision,
+      visionOptions,
       recommendedVision,
+      workingVision.length === 0, // showFailedWarning
     );
     return { layer2, layer3 };
   } finally {
@@ -941,34 +948,26 @@ async function promptCategoryChoice(
   title: string,
   options: ModelTestResult[],
   recommendedChoice: ModelChoice | null,
+  showFailedWarning: boolean = false,
 ): Promise<ModelChoice | null> {
   console.log(`\n${title}:`);
 
   if (options.length === 0) {
-    console.log('   No working models detected automatically.');
-    console.log('   You can still enter a model manually if you know it supports vision.');
-    const manual = await askQuestion(rl, '   Enter model name (e.g. gpt-4o, claude-sonnet-4-20250514) or press Enter to skip: ');
-    if (manual.trim()) {
-      // Ask for provider
-      const providerInput = await askQuestion(rl, '   Provider (anthropic/openai/kimi/groq/etc.): ');
-      const providerKey = providerInput.trim().toLowerCase() || 'openai';
-      const provider = PROVIDERS[providerKey];
-      if (provider) {
-        return {
-          model: manual.trim(),
-          providerKey,
-        };
-      }
-    }
-    console.log('   This layer will be disabled.');
+    console.log('   No models found. This layer will be disabled.');
     return null;
+  }
+
+  if (showFailedWarning) {
+    console.log('   ⚠️  No models passed auto-test (test image may be the issue, not the model).');
+    console.log('   Pick one anyway — most vision models work fine:\n');
   }
 
   options.forEach((opt, idx) => {
     const providerName = PROVIDERS[opt.providerKey]?.name || opt.providerKey;
     const recommendedMark = (recommendedChoice && opt.providerKey === recommendedChoice.providerKey && opt.model === recommendedChoice.model) ? ' ★ recommended' : '';
     const latency = opt.latencyMs ? `, ${opt.latencyMs}ms` : '';
-    console.log(`   ${idx + 1}. ${opt.model} (${providerName}${latency})${recommendedMark}`);
+    const status = opt.ok ? '✅' : '⚠️';
+    console.log(`   ${idx + 1}. ${status} ${opt.model} (${providerName}${latency})${recommendedMark}`);
   });
 
   const recommendedIndex = recommendedChoice
