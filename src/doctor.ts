@@ -945,7 +945,22 @@ async function promptCategoryChoice(
   console.log(`\n${title}:`);
 
   if (options.length === 0) {
-    console.log('   No working models found. This layer will be disabled.');
+    console.log('   No working models detected automatically.');
+    console.log('   You can still enter a model manually if you know it supports vision.');
+    const manual = await askQuestion(rl, '   Enter model name (e.g. gpt-4o, claude-sonnet-4-20250514) or press Enter to skip: ');
+    if (manual.trim()) {
+      // Ask for provider
+      const providerInput = await askQuestion(rl, '   Provider (anthropic/openai/kimi/groq/etc.): ');
+      const providerKey = providerInput.trim().toLowerCase() || 'openai';
+      const provider = PROVIDERS[providerKey];
+      if (provider) {
+        return {
+          model: manual.trim(),
+          providerKey,
+        };
+      }
+    }
+    console.log('   This layer will be disabled.');
     return null;
   }
 
@@ -1403,8 +1418,8 @@ async function testVisionModel(
   const start = performance.now();
   const TIMEOUT = 10000; // vision needs slightly more time
 
-  // 8x8 solid green PNG (89 bytes) — smallest valid PNG that's unambiguously green
-  const GREEN_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAADklEQVQI12Ng+M9AEwYAGJgBgV6GPOYAAAAASUVORK5CYII=';
+  // 64x64 solid green PNG (212 bytes) — large enough for all vision APIs (some reject <16x16)
+  const GREEN_PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAhklEQVR4nO3PAQkAAAzDsPg3vcsYg0MEtMQ29YL8gGnqBfkB09QL8gOmqRfkB0xTL8gPmKZekB8wTb0gP2CaekF+wDT1gvyAaeoF+QHTFMvyA6apF+QHTFMvyA+Ypl6QHzBNvSA/YJp6QX7ANPWC/IBp6gX5AdPUC/IDpqkX5AdMUy/ID1h2uOzw4njZJI8AAAAASUVORK5CYII=';
 
   try {
     const text = await callVisionLLMDirect({
