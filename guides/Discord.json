@@ -1,0 +1,72 @@
+{
+  "app": "Discord",
+  "processNames": [
+    "Discord",
+    "discord"
+  ],
+  "source": "https://support.discordapp.com/hc/en-us/articles/225977308--Windows-Discord-Hotkeys",
+  "shortcuts": {
+    "navigate_between_servers": "Ctrl+Alt+Up/Down",
+    "navigate_between_channels": "Alt+Up/Down",
+    "navigate_between_unread_channels": "Alt+Shift+Up/Down",
+    "navigate_between_unread_channels_with_me": "Ctrl+Shift+Alt+Up/Down",
+    "mark_channel_as_read": "Esc",
+    "mark_server_read": "Shift+Esc",
+    "toggle_hotkeys": "Ctrl+/",
+    "return_to_previous_text_channel": "Alt+Right",
+    "return_to_active_audio_channel": "Ctrl+Alt+A",
+    "toggle_pins_popout": "Ctrl+P",
+    "toggle_mentions_popout": "Ctrl+Shift+2",
+    "toggle_channel_member_list": "Ctrl+U",
+    "toggle_emoji_picker": "Ctrl+E",
+    "scroll_chat_up_or_down": "PgUp/PgDn",
+    "jump_to_oldest_unread_message": "Shift+PgUp",
+    "create_or_join_a_server": "Ctrl+Shift+N",
+    "answer_incoming_call": "Ctrl+Enter",
+    "find_or_start_a_direct_message": "Ctrl+K",
+    "decline_incoming_call": "Esc",
+    "create_a_private_group": "Ctrl+Shift+T",
+    "start_call_in_private_message_or_group": "Ctrl+[",
+    "focus_text_area": "Tab",
+    "return_to_connected_audio_channel": "Alt+Left",
+    "toggle_mute": "Ctrl+Shift+M",
+    "toggle_deafen": "Ctrl+Shift+D",
+    "get_help": "Ctrl+Shift+H",
+    "upload_a_file": "Ctrl+Shift+U"
+  },
+  "sections": {
+    "General": {
+      "Navigate between servers": "Ctrl+Alt+Up/Down",
+      "Navigate between channels": "Alt+Up/Down",
+      "Navigate between unread channels": "Alt+Shift+Up/Down",
+      "Navigate between unread channels with mentions": "Ctrl+Shift+Alt+Up/Down",
+      "Mark channel as read": "Esc",
+      "Mark server read": "Shift+Esc",
+      "Toggle hotkeys": "Ctrl+/",
+      "Return to previous text channel": "Alt+Right",
+      "Return to active audio channel": "Ctrl+Alt+A",
+      "Toggle pins popout": "Ctrl+P",
+      "Toggle mentions popout": "Ctrl+Shift+2",
+      "Toggle channel member list": "Ctrl+U",
+      "Toggle emoji picker": "Ctrl+E",
+      "Scroll chat up or down": "PgUp/PgDn",
+      "Jump to oldest unread message": "Shift+PgUp",
+      "Create or join a server": "Ctrl+Shift+N",
+      "Answer incoming call": "Ctrl+Enter",
+      "Find or start a direct message": "Ctrl+K",
+      "Decline incoming call": "Esc",
+      "Create a private group": "Ctrl+Shift+T",
+      "Start call in private message or group": "Ctrl+[",
+      "Focus text area": "Tab",
+      "Return to connected audio channel": "Alt+Left",
+      "Toggle mute": "Ctrl+Shift+M",
+      "Toggle deafen": "Ctrl+Shift+D",
+      "Get help": "Ctrl+Shift+H",
+      "Upload a file": "Ctrl+Shift+U"
+    }
+  },
+  "tips": [
+    "Keyboard shortcuts reference for Discord.",
+    "Source: https://support.discordapp.com/hc/en-us/articles/225977308--Windows-Discord-Hotkeys"
+  ]
+}

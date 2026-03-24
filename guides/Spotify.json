@@ -1,0 +1,64 @@
+{
+  "app": "Spotify",
+  "processNames": [
+    "Spotify",
+    "spotify"
+  ],
+  "source": "https://support.spotify.com/is/using_spotify/system_settings/keyboard-shortcuts/",
+  "shortcuts": {
+    "create_new_playlist": "Ctrl+N",
+    "cut": "Ctrl+X",
+    "copy": "Ctrl+C",
+    "copy_alternative_link": "Ctrl+Alt+C",
+    "paste": "Ctrl+V",
+    "delete": "Del",
+    "select_all": "Ctrl+A",
+    "playpause": "Space",
+    "next_track": "Ctrl+Right",
+    "previous_track": "Ctrl+Left",
+    "volume_up": "Ctrl+Up",
+    "volume_down": "Ctrl+Down",
+    "mute": "Ctrl+Shift+Down",
+    "max_volume": "Ctrl+Shift+Up",
+    "show_help": "F1",
+    "filter_in_songs_and_playlists": "Ctrl+F",
+    "give_focus_to_search_field": "Ctrl+L",
+    "go_back": "Alt+Left",
+    "go_forward": "Alt+Right",
+    "play_selected_row": "Enter",
+    "preferences": "Ctrl+P",
+    "logout_active_user": "Ctrl+Shift+W",
+    "quit": "Alt+F4"
+  },
+  "sections": {
+    "General": {
+      "Create new playlist": "Ctrl+N",
+      "Cut": "Ctrl+X",
+      "Copy": "Ctrl+C",
+      "Copy (alternative link)": "Ctrl+Alt+C",
+      "Paste": "Ctrl+V",
+      "Delete": "Del",
+      "Select all": "Ctrl+A",
+      "Play/pause": "Space",
+      "Next track": "Ctrl+Right",
+      "Previous track": "Ctrl+Left",
+      "Volume up": "Ctrl+Up",
+      "Volume down": "Ctrl+Down",
+      "Mute": "Ctrl+Shift+Down",
+      "Max volume": "Ctrl+Shift+Up",
+      "Show help": "F1",
+      "Filter (in Songs and Playlists)": "Ctrl+F",
+      "Give focus to search field": "Ctrl+L",
+      "Go back": "Alt+Left",
+      "Go forward": "Alt+Right",
+      "Play selected row": "Enter",
+      "Preferences": "Ctrl+P",
+      "Logout active user": "Ctrl+Shift+W",
+      "Quit": "Alt+F4"
+    }
+  },
+  "tips": [
+    "Keyboard shortcuts reference for Spotify.",
+    "Source: https://support.spotify.com/is/using_spotify/system_settings/keyboard-shortcuts/"
+  ]
+}

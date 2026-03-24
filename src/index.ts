@@ -1092,4 +1092,13 @@ program
     }
   });
 
+program
+  .command('guides [subcommand] [args...]')
+  .description('Manage app guides — install keyboard shortcuts for 86+ apps')
+  .action(async (subcommand?: string, args?: string[]) => {
+    const { guidesCommand } = await import('./guide-registry');
+    const allArgs = [subcommand, ...(args || [])].filter(Boolean) as string[];
+    await guidesCommand(allArgs);
+  });
+
 program.parse();
