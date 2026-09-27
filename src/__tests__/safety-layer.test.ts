@@ -45,6 +45,66 @@ describe('SafetyLayer.evaluate', () => {
     });
   });
 
+  // GHSA-35pc-g74h-p476. Two independent bypasses of this same gate:
+  //   1. the gate keyed on four tool NAMES, and the autonomous agent loop
+  //      registers its keyboard tool as `key` — none of the four — so every
+  //      blocked combo fell through to the default allow on the agent path.
+  //   2. normalizeCombo collapses whitespace, so the documented sequence form
+  //      "esc win+l" became "escwin+l", matched nothing, and the executor then
+  //      split that same string and pressed win+l.
+  // These cases pin the tool name the agent loop actually uses; the pre-existing
+  // cases above only ever passed key_press, which is why neither was caught.
+  describe('keyboard gate is tool-name agnostic (GHSA-35pc-g74h-p476)', () => {
+    const COMBOS: Array<[string, 'block' | 'confirm']> = [
+      ['win+l', 'block'], ['cmd+ctrl+q', 'block'], ['cmd+shift+q', 'block'],
+      ['cmd+opt+esc', 'block'], ['ctrl+shift+esc', 'block'],
+      ['cmd+q', 'confirm'], ['cmd+w', 'confirm'],
+      ['win+r', 'confirm'], ['cmd+space', 'confirm'],
+    ];
+
+    it.each(COMBOS)('%s resolves to %s on the agent loop\'s tool name "key"', (combo, tier) => {
+      // agent.ts gates with `tool: call.name`, and tools.ts registers `name: 'key'`.
+      expect(evaluate({ tool: 'key', args: { combo } }).decision).toBe(tier);
+    });
+
+    it.each(COMBOS)('%s resolves identically on "key" and "key_press"', (combo) => {
+      expect(evaluate({ tool: 'key', args: { combo } }).decision)
+        .toBe(evaluate({ tool: 'key_press', args: { key: combo } }).decision);
+    });
+
+    it('gates an unknown/renamed keyboard tool by arg shape', () => {
+      expect(evaluate({ tool: 'some_future_key_tool', args: { combo: 'win+l' } }).decision).toBe('block');
+    });
+
+    it('does not over-block — a safe combo still passes under the bare name', () => {
+      expect(evaluate({ tool: 'key', args: { combo: 'Tab' } }).decision).toBe('allow');
+      expect(evaluate({ tool: 'key', args: { combo: 'mod+s' } }).decision).toBe('allow');
+    });
+
+    it('blocks a blocked combo hiding in a whitespace-separated SEQUENCE', () => {
+      // The executor splits on whitespace and presses each element, so the gate
+      // must classify each element too.
+      expect(evaluate({ tool: 'key_press', args: { key: 'esc win+l' } }).decision).toBe('block');
+      expect(evaluate({ tool: 'key', args: { combo: 'Down Down win+l' } }).decision).toBe('block');
+      expect(evaluate({ tool: 'key', args: { combo: 'a ctrl+w' } }).decision).toBe('confirm');
+    });
+
+    it('still matches a chord carrying a stray space ("alt +f4")', () => {
+      // The collapsed view is retained alongside the per-element view, so the
+      // sequence fix does not regress this documented case.
+      expect(evaluate({ tool: 'key_press', args: { key: 'alt +f4' } }).decision).toBe('confirm');
+    });
+
+    it('takes the STRONGEST tier when a sequence mixes tiers', () => {
+      expect(evaluate({ tool: 'key', args: { combo: 'ctrl+w win+l' } }).decision).toBe('block');
+    });
+
+    it('leaves an ordinary sequence alone', () => {
+      expect(evaluate({ tool: 'key', args: { combo: 'Down Down End' } }).decision).toBe('allow');
+      expect(evaluate({ tool: 'key', args: { combo: 'ctrl+a Delete' } }).decision).toBe('allow');
+    });
+  });
+
   describe('minimize tier parity (granular == compound)', () => {
     it('minimize is allowed (tier 1) on BOTH the granular tools and the window compound', () => {
       // Was a divergence: granular minimize_window declared tier 2 (confirm)

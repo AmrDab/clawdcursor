@@ -23,6 +23,7 @@ import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter } from './coord-scale';
 import { ensureTargetForeground } from './focus-guard';
+import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
 import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
@@ -789,14 +790,16 @@ export function buildUnifiedTools(): UnifiedTool[] {
           };
         }
         const input = String(raw).trim();
-        // Dangerous key combos that are blocked (mirrors System A BLOCKED_KEYS).
-        const BLOCKED = ['alt+f4', 'ctrl+alt+delete', 'ctrl+alt+del'];
         // (b) "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = input.split(/\s+/);
-        // (c) BLOCKED_KEYS guard — check every combo in the sequence.
+        // (c) Hard-block backstop. This carried its own 3-entry copy
+        //     (alt+f4, ctrl+alt+delete, ctrl+alt+del) that omitted win+l and
+        //     every other machine-locking combo, so it caught nothing once the
+        //     SafetyLayer gate was bypassed (GHSA-35pc-g74h-p476). Defer to the
+        //     single blocklist so the two can no longer drift.
+        //     HARD tier only — confirm-tier combos keep their allowConfirm path.
         for (const c of combos) {
-          const norm = c.toLowerCase().replace(/\s+/g, '');
-          if (BLOCKED.some(b => norm === b)) {
+          if (isBlockedKey(c)) {
             return { success: false, isError: true, text: `BLOCKED: "${c}" is a dangerous key combo.` };
           }
         }
