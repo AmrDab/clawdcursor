@@ -20,7 +20,7 @@
   "mcpServers": {
     "clawdcursor": {
       "command": "npx",
-      "args": ["-y", "clawdcursor", "mcp", "--compact"]
+      "args": ["-y", "clawdcursor@1.5.10", "mcp", "--compact"]
     }
   }
 }

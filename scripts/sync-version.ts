@@ -78,6 +78,21 @@ const TARGETS: SyncTarget[] = [
     desc: 'Claude Code plugin manifest version',
   },
 
+  // .claude-plugin/plugin.json — the npx launcher arg, pinned to an exact
+  // version. The Claude plugin directory BLOCKS submission on an unpinned
+  // launcher ("Unpinned npx launcher": pin to `npx <pkg>@1.2.3`, not a range
+  // or @latest), so this pin is load-bearing, not cosmetic — and it is a
+  // SECOND version literal in the same file, which the target above does not
+  // reach (that one only matches the `"version"` field). Without this target
+  // the pin silently rots and every release ships a plugin that installs the
+  // PREVIOUS version.
+  {
+    file: '.claude-plugin/plugin.json',
+    pattern: /("clawdcursor@)\d+\.\d+\.\d+(")/,
+    replacement: `$1${VERSION}$2`,
+    desc: 'Claude Code plugin npx launcher pin',
+  },
+
   // docs/index.html — marketing site. Several places, all distinct contexts.
   {
     file: 'docs/index.html',

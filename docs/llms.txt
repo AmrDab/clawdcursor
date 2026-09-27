@@ -38,9 +38,27 @@ Or, with no global install (npx fetches it on demand, uses a global install if p
 
     { "mcpServers": { "clawdcursor": { "command": "npx", "args": ["-y", "clawdcursor", "mcp", "--compact"] } } }
 
+Two hosts do NOT use the `mcpServers` shape above — copying it there will not work:
+
+Zed uses `context_servers`, and nests command/args under a `command` object, in
+`settings.json`:
+
+    { "context_servers": { "clawdcursor": { "command": { "path": "clawdcursor", "args": ["mcp", "--compact"] } } } }
+
+OpenAI Codex uses TOML in `~/.codex/config.toml`:
+
+    [mcp_servers.clawdcursor]
+    command = "clawdcursor"
+    args = ["mcp", "--compact"]
+
 Claude Code: install the plugin instead of editing config — it registers the MCP
-server (via npx) and bundles the usage skill in one step. Note: `clawdcursor doctor`
-is NOT needed for MCP use; it only configures the optional autonomous daemon.
+server (via npx) and bundles the usage skill in one step:
+
+    claude plugin marketplace add AmrDab/clawdcursor
+    claude plugin install clawdcursor@clawdcursor
+
+Note: `clawdcursor doctor` is NOT needed for MCP use; it only configures the
+optional autonomous daemon.
 
 ## Use as an autonomous daemon (clawdcursor brings the model)
 
