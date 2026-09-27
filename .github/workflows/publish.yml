@@ -1,0 +1,96 @@
+name: Publish release
+
+# Why this exists: the release ritual was half-automated. `npm version` synced
+# every version site, the tag and the GitHub Release got created — and then the
+# one step that actually reaches users was a manual `npm publish` that got
+# forgotten TWICE. v1.5.8 and v1.5.9 were both tagged and released on GitHub
+# but never published, so for ~3 months `npm i -g clawdcursor` installed 1.5.7,
+# still carrying the GHSA-3v3f-5rwv-whc9 allowConfirm bypass.
+#
+# Ordering here is deliberate: npm publish runs BEFORE the GitHub Release, so a
+# Release can never again exist for a version npm does not have.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (e.g. v1.5.10)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: npm publish + GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: npm-publish
+    permissions:
+      contents: write        # create the GitHub Release
+      id-token: write        # npm provenance
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      # Guard against the drift class that broke v1.5.8's release commit: a tag
+      # whose name disagrees with package.json would publish a version nobody
+      # asked for. Fail loudly instead.
+      - name: Tag must match package.json version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PKG="v$(node -p "require('./package.json').version")"
+          echo "tag=$TAG packageJson=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag $TAG does not match package.json $PKG. Refusing to publish."
+            exit 1
+          fi
+
+      - name: Refuse to republish an existing version
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          if npm view "clawdcursor@$VER" version >/dev/null 2>&1; then
+            echo "::error::clawdcursor@$VER is already on npm. Nothing to publish."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      # `prepare` (clean && tsc && postbuild) runs on publish anyway; running it
+      # here surfaces a build failure before we touch the registry.
+      - run: npm run build
+
+      - run: npm run test:ci
+
+      - name: npm publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Only now — npm has it, so the Release cannot outrun the registry.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — leaving it alone."
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
