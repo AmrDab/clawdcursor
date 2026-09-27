@@ -660,7 +660,16 @@ describe('runAgent — finder snapshot survives a non-screen-changing next turn 
     // Pre-fix §6b would always call storeUIMap → mint obs_N+1 → obs_N becomes
     // stale → the act turn (N+1) would reject {snapshot_id: obs_N} as 'stale'.
     const holder = new UIMapHolder();
-    llmTurnQueue.push(turnCall('compile_ui'));                 // turn 1: changesScreen:false, puts into holder
+    // max_cost:'cheap' is load-bearing for determinism, not incidental. The mock
+    // adapter has an EMPTY a11y tree, and SPARSE_A11Y_MAX=0 makes any empty tree
+    // "sparse", so the default max_cost:'ocr_ok' would send compileUIMap down the
+    // OCR path → ocrEngine().recognizeScreen() → a REAL OS-level OCR subprocess
+    // (macOS Swift Vision / Windows.Media.Ocr). That subprocess's wall-clock time
+    // is nondeterministic and on a loaded macOS runner can exceed the 15s
+    // testTimeout — the exact flake seen on macos-latest. 'cheap' forbids OCR
+    // (a11y+window only), matching the loop's own §6b storeUIMap perception cost,
+    // so this exercises the holder currency logic with zero external subprocesses.
+    llmTurnQueue.push(turnCall('compile_ui', { max_cost: 'cheap' })); // turn 1: changesScreen:false, puts into holder
     llmTurnQueue.push(turnCall('read_screen'));                // turn 2: read-only, must NOT clobber the map
     llmTurnQueue.push(turnCall('done', { evidence: 'the compiled snapshot remained current across the read turn' }));
     await runAgent({ task: 'cross-turn', maxTurns: 6 }, { adapter: makeAdapter(), llm: LLM_CONFIG, uiMaps: holder });

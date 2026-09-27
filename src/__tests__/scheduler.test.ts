@@ -222,44 +222,69 @@ describe('scheduler — boot lifecycle', () => {
 });
 
 describe('scheduler — fire behavior', () => {
+  // Both fire tests drive a real croner job on FAKE timers: we anchor the clock
+  // to a whole-second boundary, register the once-per-second cron, then advance
+  // exactly two second-boundaries and flush the async fireTask microtasks. The
+  // previous `await setTimeout(1300ms)` on REAL timers was the flake source — on a
+  // loaded runner (seen on windows-latest, v1.5.8) the 1300ms window could elapse
+  // before croner's next-second tick actually fired, so executeTask hadn't been
+  // called yet ("expected vi.fn() to be called at least once"). Advancing fake
+  // timers makes the tick deterministic and independent of wall-clock scheduling.
   it('busy agent → tick is skipped, skipCount increments, executeTask NOT called', async () => {
-    // Build an agent reporting busy, run a fast-firing cron.
-    const executeTask = vi.fn(async () => {});
-    const agent = {
-      getState: vi.fn(() => ({ status: 'running' })),
-      executeTask,
-    } as unknown as Agent;
-    const ctx = makeCtx(agent);
-    initScheduler(agent);
-    // 6-field cron with seconds — fires once per second.
-    const c = await findTool('scheduled_task_create').handler(
-      { task: 'noop', cron: '* * * * * *' },
-      ctx,
-    );
-    const id = JSON.parse(c.text).task.id;
-    await new Promise(r => setTimeout(r, 1300));
-    // After ~1.3s, at least one tick has fired but agent was busy each time.
-    expect(executeTask).not.toHaveBeenCalled();
-    const list = JSON.parse((await findTool('scheduled_task_list').handler({}, ctx)).text);
-    const found = list.tasks.find((t: any) => t.id === id);
-    expect(found.skipCount).toBeGreaterThanOrEqual(1);
-  }, 5000);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    try {
+      // Build an agent reporting busy, run a fast-firing cron.
+      const executeTask = vi.fn(async () => {});
+      const agent = {
+        getState: vi.fn(() => ({ status: 'running' })),
+        executeTask,
+      } as unknown as Agent;
+      const ctx = makeCtx(agent);
+      initScheduler(agent);
+      // 6-field cron with seconds — fires once per second.
+      const c = await findTool('scheduled_task_create').handler(
+        { task: 'noop', cron: '* * * * * *' },
+        ctx,
+      );
+      const id = JSON.parse(c.text).task.id;
+      // Cross two whole-second boundaries; each fires fireTask synchronously
+      // (fireTask calls getState()/skipCount++ before any await), so both ticks
+      // are fully applied when advanceTimersByTimeAsync resolves.
+      await vi.advanceTimersByTimeAsync(2000);
+      // Ticks fired but the agent was busy each time → skipped, never executed.
+      expect(executeTask).not.toHaveBeenCalled();
+      const list = JSON.parse((await findTool('scheduled_task_list').handler({}, ctx)).text);
+      const found = list.tasks.find((t: any) => t.id === id);
+      expect(found.skipCount).toBeGreaterThanOrEqual(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('idle agent → tick calls executeTask with the task string', async () => {
-    const executeTask = vi.fn(async (_task: string) => {});
-    const agent = {
-      getState: vi.fn(() => ({ status: 'idle' })),
-      executeTask,
-    } as unknown as Agent;
-    const ctx = makeCtx(agent);
-    initScheduler(agent);
-    await findTool('scheduled_task_create').handler(
-      { task: 'hello world', cron: '* * * * * *' },
-      ctx,
-    );
-    await new Promise(r => setTimeout(r, 1300));
-    expect(executeTask).toHaveBeenCalled();
-    const firstCall = executeTask.mock.calls[0];
-    expect(firstCall && firstCall[0]).toBe('hello world');
-  }, 5000);
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+    try {
+      const executeTask = vi.fn(async (_task: string) => {});
+      const agent = {
+        getState: vi.fn(() => ({ status: 'idle' })),
+        executeTask,
+      } as unknown as Agent;
+      const ctx = makeCtx(agent);
+      initScheduler(agent);
+      await findTool('scheduled_task_create').handler(
+        { task: 'hello world', cron: '* * * * * *' },
+        ctx,
+      );
+      // Advance two second-boundaries; fireTask invokes executeTask(task)
+      // synchronously inside the cron callback, so the call is recorded here.
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(executeTask).toHaveBeenCalled();
+      const firstCall = executeTask.mock.calls[0];
+      expect(firstCall && firstCall[0]).toBe('hello world');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
