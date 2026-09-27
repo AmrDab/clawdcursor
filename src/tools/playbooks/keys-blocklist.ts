@@ -60,12 +60,51 @@ const CONFIRM_BLOCK_SET: ReadonlySet<string> = new Set(CONFIRM_BLOCK.map(normali
 
 export type KeyBlockTier = 'block' | 'confirm' | null;
 
-/** Classify a combo: 'block' (hard, no path), 'confirm' (allowConfirm-able), or null (free). */
-export function keyBlockTier(combo: string): KeyBlockTier {
+/** Which element of a sequence matched, and at what tier. */
+export interface KeyBlockMatch {
+  tier: 'block' | 'confirm';
+  /** The offending element — the sequence member, not necessarily the whole input. */
+  combo: string;
+}
+
+/** Tier of a SINGLE chord — no sequence handling. */
+function chordTier(combo: string): KeyBlockTier {
   const n = normalizeCombo(combo);
   if (HARD_BLOCK_SET.has(n)) return 'block';
   if (CONFIRM_BLOCK_SET.has(n)) return 'confirm';
   return null;
+}
+
+/**
+ * Strongest blocklist match for a chord OR a whitespace-separated sequence.
+ *
+ * `normalizeCombo` collapses whitespace, so a lookup on the raw input only ever
+ * saw ONE chord: "esc win+l" became "escwin+l", matched nothing, and the
+ * executor then split that same string on whitespace and pressed win+l anyway
+ * (GHSA-35pc-g74h-p476, defect 2). Classification has to mirror what the
+ * executor actually does with the string.
+ *
+ * Both views are checked, strongest tier wins:
+ *   - per element — catches every member of a sequence ("esc win+l" -> win+l).
+ *   - collapsed whole — keeps the documented "alt +f4" match, a chord that
+ *     merely carries a stray space.
+ * Checking both cannot under-block relative to either view alone.
+ */
+export function keyBlockMatch(input: string): KeyBlockMatch | null {
+  const parts = input.trim().split(/\s+/).filter(Boolean);
+  const views = parts.length > 1 ? [...parts, input] : parts;
+  let confirm: KeyBlockMatch | null = null;
+  for (const view of views) {
+    const tier = chordTier(view);
+    if (tier === 'block') return { tier, combo: view }; // strongest possible, stop
+    if (tier === 'confirm' && confirm === null) confirm = { tier, combo: view };
+  }
+  return confirm;
+}
+
+/** Classify a chord or sequence: 'block' (hard, no path), 'confirm' (allowConfirm-able), or null (free). */
+export function keyBlockTier(combo: string): KeyBlockTier {
+  return keyBlockMatch(combo)?.tier ?? null;
 }
 
 /** Truthful reason for the given tier. */
@@ -78,9 +117,9 @@ export function keyBlockReason(combo: string, tier: 'block' | 'confirm'): string
 // ── Back-compat: the old names now mean HARD blocks only ──
 /** The read-only normalized HARD-block set. */
 export const BLOCKED_KEYS: ReadonlySet<string> = HARD_BLOCK_SET;
-/** True only for HARD-blocked combos (no confirm path). */
+/** True only for HARD-blocked combos (no confirm path). Sequence-aware. */
 export function isBlockedKey(combo: string): boolean {
-  return HARD_BLOCK_SET.has(normalizeCombo(combo));
+  return keyBlockMatch(combo)?.tier === 'block';
 }
 /** Reason string for a HARD block. */
 export function blockReason(combo: string): string {

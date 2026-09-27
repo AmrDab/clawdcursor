@@ -19,7 +19,7 @@
  * Model-agnostic: no LLM calls. Pure rule engine.
  */
 
-import { keyBlockTier, keyBlockReason } from '../tools/playbooks/keys-blocklist';
+import { keyBlockMatch, keyBlockReason } from '../tools/playbooks/keys-blocklist';
 import { logger } from './observability/logger';
 import { getCorrelationId } from './observability/correlation';
 import { SENSITIVE_APPS_PATTERN as SENSITIVE_APPS } from './app-categories';
@@ -467,26 +467,30 @@ export function evaluate(ctx: EvaluationContext): Decision {
   };
 
   // 1. Keyboard combos: if blocked, reject immediately.
-  //    Check the full set of keyboard-emitting surfaces: `key_press`,
-  //    `press` (pipeline-internal), and the compound `keyboard` tool
-  //    after unpacking (canonicalTool = 'key_press').
-  const isKeyboardSurface =
-    ctx.tool === 'key_press' || ctx.tool === 'press' ||
-    canonicalTool === 'key_press' || canonicalTool === 'key_down';
-  if (isKeyboardSurface) {
-    const combo = typeof ctx.args.combo === 'string' ? ctx.args.combo
-      : typeof ctx.args.key === 'string' ? ctx.args.key : undefined;
-    if (combo !== undefined) {
-      const tier = keyBlockTier(combo);
-      // HARD block (lock/force-quit/shutdown) has no path; consequential combos
-      // (close window/tab, show desktop, launchers) are confirm-able instead of
-      // dead-ended (v1.6.0 — the old list hard-blocked win+d/ctrl+w).
-      if (tier === 'block') {
-        return emit({ decision: 'block', tier: 'destructive', reason: keyBlockReason(combo, 'block') });
-      }
-      if (tier === 'confirm') {
-        return emit({ decision: 'confirm', tier: 'destructive', reason: keyBlockReason(combo, 'confirm') });
-      }
+  //
+  //    Detection is by ARG SHAPE, not tool name. The gate used to list four
+  //    names (key_press/press/key_press/key_down); the autonomous agent loop
+  //    registers its keyboard tool as `key` and gates on `tool: call.name`, so
+  //    every blocked combo fell through to the default allow on that path —
+  //    and `key` is not in TOOL_TIER either (GHSA-35pc-g74h-p476, defect 1).
+  //    Any call carrying a combo/key STRING is a keyboard call whatever the
+  //    surface named it, which also survives the next rename. Verified: every
+  //    `key`/`combo` arg in the tree belongs to a keyboard tool, so this
+  //    cannot capture a non-keyboard surface.
+  const combo = typeof ctx.args.combo === 'string' ? ctx.args.combo
+    : typeof ctx.args.key === 'string' ? ctx.args.key : undefined;
+  if (combo !== undefined) {
+    // Sequence-aware: keyBlockMatch checks each whitespace-separated element
+    // as well as the collapsed whole, and names the offending element.
+    const match = keyBlockMatch(combo);
+    // HARD block (lock/force-quit/shutdown) has no path; consequential combos
+    // (close window/tab, show desktop, launchers) are confirm-able instead of
+    // dead-ended (v1.6.0 — the old list hard-blocked win+d/ctrl+w).
+    if (match?.tier === 'block') {
+      return emit({ decision: 'block', tier: 'destructive', reason: keyBlockReason(match.combo, 'block') });
+    }
+    if (match?.tier === 'confirm') {
+      return emit({ decision: 'confirm', tier: 'destructive', reason: keyBlockReason(match.combo, 'confirm') });
     }
   }
 

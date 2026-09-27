@@ -2,6 +2,67 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [1.5.10] - 2026-09-27 — keyboard gate hardening (security)
+
+> **First npm release since 1.5.7.** v1.5.8 and v1.5.9 were tagged and released
+> on GitHub but never published to npm, so `npm i -g clawdcursor` and
+> `npx -y clawdcursor` both still resolved to 1.5.7. Installing this version
+> also delivers everything from those two releases — the HiDPI agent-path click
+> fix, the self/host foreground guard, the retired-vision-model-id heal,
+> deterministic MCP orphan reaping, `cursor_position`, and the
+> GHSA-3v3f-5rwv-whc9 `batch allowConfirm` fix.
+
+### Security
+
+- **Close two independent bypasses of the SafetyLayer keyboard gate
+  (GHSA-35pc-g74h-p476, medium).** `evaluate()` decided whether a combo was
+  blocked only after matching the call against four tool *names*. The
+  autonomous agent loop registers its keyboard tool as `key` and gates every
+  call with `safetyEvaluate({ tool: call.name })`, so `key` matched none of
+  them, is absent from `TOOL_TIER`, and fell through to the default allow:
+  measured, 9 of 9 block- and confirm-tier combos resolved to `allow` on the
+  agent path, `win+l` and `cmd+opt+esc` among them. Separately, `normalizeCombo`
+  collapses whitespace, but a space-separated sequence is a documented input, so
+  `esc win+l` became `escwin+l`, matched no entry, and the executor then split
+  that same string and pressed `win+l`. Neither backstop caught the result: both
+  carried their own three-entry copy (`alt+f4`, `ctrl+alt+delete`,
+  `ctrl+alt+del`) that omits every machine-locking combo, so on the agent-loop
+  path a lock or force-quit passed both layers and reached the OS.
+
+  Keyboard calls are now detected by argument shape rather than tool name, which
+  also survives the next rename; matching is sequence-aware and reports which
+  element offended; and both backstops defer to `keys-blocklist` at hard tier
+  only, so confirm-tier combos keep their `allowConfirm` path. Reachable by an
+  operator running `clawdcursor agent` against a task built from untrusted
+  content. All versions through 1.5.9 are affected. Reported by @kasparovabi.
+
+- **Clear every HIGH dependency advisory.** Four production advisories were
+  shipping, the most serious being `fast-uri` (SSRF and host confusion, six
+  advisories) reached through the MCP SDK's `ajv`; also `express-rate-limit`,
+  `ip-address`, and `sharp`. None were real version constraints — all were stale
+  lockfile resolutions the declared ranges already permitted. Both `overrides`
+  pins were removed rather than bumped, because each had rotted into the thing
+  it was added to prevent: `ip-address: 10.1.1` sits inside its own `<=10.3.0`
+  advisory range and was forcing a vulnerable version over
+  `express-rate-limit`'s safe `^10.2.0`. HIGH/CRITICAL count is now zero in both
+  production and dev.
+
+### Fixed
+
+- **CI is unstuck.** `cross-platform.yml` gates on
+  `npm audit --audit-level=high --omit=dev`. With four HIGH production
+  advisories outstanding, no single dependency PR could clear them all, so every
+  one of the 16 open dependency PRs failed all six jobs and none could merge —
+  a deadlock rather than 16 independent failures.
+
+### Added
+
+- Regression coverage for the keyboard gate under the tool name the agent loop
+  actually uses. `safety-layer.test.ts` only ever passed `key_press`, which is
+  why neither bypass was caught; the new cases pin `key`, the arg-shape path for
+  a renamed tool, sequence handling, strongest-tier selection, and
+  no-over-block controls.
+
 ## [1.5.9] - 2026-07-03 — batch confirm-tier hardening (security)
 
 ### Security

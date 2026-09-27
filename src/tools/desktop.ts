@@ -8,9 +8,8 @@
 
 import * as os from 'os';
 import type { ToolDefinition, ToolContext } from './types';
+import { isBlockedKey } from './playbooks/keys-blocklist';
 
-/** Dangerous key combos that are blocked */
-const BLOCKED_KEYS = ['alt+f4', 'ctrl+alt+delete', 'ctrl+alt+del'];
 const IS_MAC = os.platform() === 'darwin';
 
 /**
@@ -331,9 +330,12 @@ export function getDesktopTools(): ToolDefinition[] {
         }
         // "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = key.trim().split(/\s+/);
+        // Hard-block backstop. This carried its own 3-entry copy that omitted
+        // win+l and every other machine-locking combo (GHSA-35pc-g74h-p476);
+        // it now defers to the single blocklist so the two cannot drift.
+        // HARD tier only — confirm-tier combos keep their allowConfirm path.
         for (const combo of combos) {
-          const lower = combo.toLowerCase().replace(/\s+/g, '');
-          if (BLOCKED_KEYS.some(b => lower === b)) {
+          if (isBlockedKey(combo)) {
             return { text: `BLOCKED: "${combo}" is a dangerous key combo.`, isError: true };
           }
         }
