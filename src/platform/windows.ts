@@ -50,6 +50,38 @@ const execFileAsync = promisify(execFile);
 const PS_TIMEOUT_MS = 8_000;
 const CLIPBOARD_TIMEOUT_MS = 3_000;
 
+/**
+ * UIA control types the PowerShell bridge's $ctMap accepts (ps-bridge.ps1).
+ * Keep in sync with that table.
+ */
+const UIA_CONTROL_TYPES: ReadonlySet<string> = new Set([
+  'Button', 'CheckBox', 'ComboBox', 'Custom', 'DataGrid', 'DataItem', 'Document',
+  'Edit', 'Group', 'Hyperlink', 'Image', 'List', 'ListItem', 'Menu', 'MenuBar',
+  'MenuItem', 'Pane', 'RadioButton', 'ScrollBar', 'Slider', 'Spinner',
+  'SplitButton', 'Tab', 'TabItem', 'Text', 'ToolBar', 'Tree', 'TreeItem', 'Window',
+]);
+
+/**
+ * Normalize a caller-supplied control type to the bridge's vocabulary.
+ *
+ * The bridge keys $ctMap on BARE names ("CheckBox"), but everything the agent
+ * READS is normalized the other way — normalizeElement strips the prefix — and
+ * the tool schema's own example says to send the prefixed form
+ * ("ControlType.Button"). So the documented input was the one form the bridge
+ * could not match: `ContainsKey` failed, no role condition was added, and the
+ * search silently ran UNFILTERED. With no role filter the bridge falls back to
+ * bidirectional substring name matching, so asking for a CheckBox named
+ * "Allow npm publish" could return a Text element named "npm".
+ *
+ * Returns null for a type the bridge cannot honor, so callers can fail closed
+ * rather than silently searching without the filter they asked for.
+ */
+function normalizeControlType(raw: string | undefined): string | null | undefined {
+  if (raw === undefined) return undefined;          // no filter requested
+  const bare = raw.replace(/^ControlType\./, '');
+  return UIA_CONTROL_TYPES.has(bare) ? bare : null; // null = unhonorable
+}
+
 export class WindowsAdapter implements PlatformAdapter {
   readonly platform = 'win32' as const;
 
@@ -371,6 +403,19 @@ export class WindowsAdapter implements PlatformAdapter {
           if (typeof handle === 'number') hwnd = handle;
         }
       }
+
+      // FAIL CLOSED. A caller that named a window and whose name matched
+      // NOTHING used to fall through to GetForegroundWindow() below, so
+      // `close` on a window that isn't open posted WM_CLOSE to whatever
+      // happened to be in front — the user's unsaved document, or the
+      // agent's own host. Asking for a specific window and silently getting
+      // a different one is never the right answer; return false and let the
+      // caller see it failed.
+      const hadSelector =
+        query.processId !== undefined ||
+        (query.title !== undefined && query.title !== '') ||
+        (query.processName !== undefined && query.processName !== '');
+      if (hadSelector && pid === undefined && hwnd === undefined) return false;
     }
 
     const showCmd = state === 'maximize' ? 3       // SW_MAXIMIZE
@@ -559,6 +604,12 @@ export class WindowsAdapter implements PlatformAdapter {
     // windows and hits its 20-element cap before finding deep targets. The
     // foreground window is almost always the right scope for an unscoped
     // "find me X" query coming from the agent.
+    // Fail closed on a control type the bridge cannot honor: forwarding it
+    // would drop the filter and fuzzy-match names instead, returning a
+    // confidently wrong element.
+    const ct = normalizeControlType(query.controlType);
+    if (ct === null) return [];
+
     let processId = query.processId;
     if (processId === undefined) {
       const fg = await this.getActiveWindow();
@@ -568,7 +619,7 @@ export class WindowsAdapter implements PlatformAdapter {
       const result = await psRunner.run({
         cmd: 'find-element',
         ...(query.name !== undefined ? { name: query.name } : {}),
-        ...(query.controlType !== undefined ? { controlType: query.controlType } : {}),
+        ...(ct !== undefined ? { controlType: ct } : {}),
         ...(processId !== undefined ? { processId } : {}),
       }) as any;
       const raw = Array.isArray(result) ? result : [];

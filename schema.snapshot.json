@@ -610,6 +610,14 @@
           "height": {
             "type": "number",
             "description": "Height in image-space pixels"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -717,7 +725,7 @@
           },
           "controlType": {
             "type": "string",
-            "description": "UI Automation control type (e.g. \"ControlType.Button\")"
+            "description": "UI Automation control type. Either form works: \"Button\" or \"ControlType.Button\". An unrecognized type returns no results rather than silently searching unfiltered."
           },
           "automationId": {
             "type": "string",
@@ -1241,6 +1249,14 @@
           "y": {
             "type": "number",
             "description": "Y coordinate in image-space"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -1360,6 +1376,14 @@
           "path": {
             "type": "string",
             "description": "JSON array of {\"x\":n, \"y\":n} points in image-space, min 2 points"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -1382,6 +1406,14 @@
           "y": {
             "type": "number",
             "description": "Y coordinate in image-space"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -1405,6 +1437,14 @@
           "y": {
             "type": "number",
             "description": "Y coordinate in image-space"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -1451,6 +1491,14 @@
           "y": {
             "type": "number",
             "description": "Y coordinate in image-space"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -1529,6 +1577,14 @@
             "type": "number",
             "description": "Wheel ticks (default: 3)",
             "default": 3
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
@@ -1553,6 +1609,14 @@
           "y": {
             "type": "number",
             "description": "Y coordinate in image-space"
+          },
+          "space": {
+            "type": "string",
+            "description": "Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass \"screen\" → a11y-snapshot coords (already physical, not scaled).",
+            "enum": [
+              "screen",
+              "image"
+            ]
           }
         },
         "required": [
