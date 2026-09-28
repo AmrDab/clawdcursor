@@ -1,0 +1,115 @@
+name: Publish release
+
+# Why this exists: the release ritual was half-automated. `npm version` synced
+# every version site, the tag and the GitHub Release got created — and then the
+# one step that actually reaches users was a manual `npm publish` that got
+# forgotten TWICE. v1.5.8 and v1.5.9 were both tagged and Released on GitHub but
+# never published, so for ~3 months `npm i -g clawdcursor` installed 1.5.7,
+# still carrying the GHSA-3v3f-5rwv-whc9 allowConfirm bypass.
+#
+# Two things are deliberate here:
+#
+# 1. TRUSTED PUBLISHING (OIDC), not a long-lived token. There is no NPM_TOKEN
+#    secret to add, leak, rotate, or have expire mid-release. npm authenticates
+#    this workflow by its repo + filename over OIDC. This also avoids
+#    2FA-bypass tokens, which npm removes from direct publish in Jan 2027
+#    (https://gh.io/npm-gat-bypass2fa-deprecation).
+#
+# 2. `npm publish` runs BEFORE the GitHub Release, so a Release can never again
+#    exist for a version npm does not have.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to publish (e.g. v1.5.10)'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: npm publish + GitHub Release
+    runs-on: ubuntu-latest          # trusted publishing does NOT work on self-hosted runners
+    timeout-minutes: 20
+    permissions:
+      contents: write               # create the GitHub Release
+      id-token: write               # mint the OIDC token npm verifies
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      # Node 24, NOT 22: trusted publishing needs npm >= 11.5.1, and Node 22
+      # still ships npm 10.x. Pinning 22 here would fail the OIDC exchange in a
+      # way that looks like an auth problem rather than a version problem.
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: npm must be new enough for trusted publishing
+        run: |
+          NPM_V="$(npm -v)"
+          echo "npm $NPM_V / node $(node -v)"
+          # Dependency-free on purpose: this runs BEFORE `npm ci`, so
+          # node_modules (and semver) do not exist yet.
+          node -e 'const [a,b,c]=process.argv[1].split(".").map(Number); process.exit((a>11||(a===11&&(b>5||(b===5&&c>=1))))?0:1)' "$NPM_V" \
+            || { echo "::error::npm $NPM_V is older than 11.5.1, which trusted publishing requires."; exit 1; }
+
+      # Guard against the drift class that broke v1.5.8's release commit: a tag
+      # whose name disagrees with package.json would publish a version nobody
+      # asked for. Fail loudly instead.
+      - name: Tag must match package.json version
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          PKG="v$(node -p "require('./package.json').version")"
+          echo "tag=$TAG packageJson=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag $TAG does not match package.json $PKG. Refusing to publish."
+            exit 1
+          fi
+
+      - name: Refuse to republish an existing version
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          if npm view "clawdcursor@$VER" version >/dev/null 2>&1; then
+            echo "::error::clawdcursor@$VER is already on npm. Nothing to publish."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      # `prepare` (clean && tsc && postbuild) runs on publish anyway; running it
+      # here surfaces a build failure before we touch the registry.
+      - run: npm run build
+
+      - run: npm run test:ci
+
+      # No NODE_AUTH_TOKEN. Provenance is generated automatically under trusted
+      # publishing on a public repo, so --provenance is not passed.
+      - name: npm publish (trusted publishing, OIDC)
+        run: npm publish --access public
+
+      # Only now — npm has it, so the Release cannot outrun the registry.
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — leaving it alone."
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
