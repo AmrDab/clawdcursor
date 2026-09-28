@@ -2,6 +2,68 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [1.5.11] - 2026-09-28 — the compound surface stops lying about what it accepts (security)
+
+Every bug here was hit driving clawdcursor for real to configure npm trusted
+publishing during the v1.5.10 release — none are hypothetical.
+
+### Security
+
+- **The compound surface silently dropped arguments it advertised.**
+  `buildCompoundSchema` unions every route delegate's parameters into one flat
+  schema, so a parameter only ONE action implements is advertised on the WHOLE
+  tool — and an action that never declared it ignored it in silence. No error,
+  no warning, and the constraint the caller asked for was void. Same defect
+  class as GHSA-35pc-g74h-p476, dangerous for the same reason: the publishing is
+  what makes it bite, because the caller has positive evidence the control
+  exists. `dispatchCompound` now surfaces ignored arguments and names which
+  actions do accept them. A warning rather than an error, so a caller passing a
+  surplus argument keeps working instead of failing mid-task.
+
+- **`space` was dropped by every System A coordinate action.** `space: 'screen'`
+  means "already physical, do not scale", but it was implemented only on
+  click/drag/scroll. The other pointer tools advertised it and always
+  image-scaled, so accessibility coordinates were scaled a SECOND time and the
+  pointer landed on a different control than the agent had resolved. Now honored
+  by `desktop_screenshot_region`, `mouse_click`, `mouse_double_click`,
+  `mouse_right_click`, `mouse_hover`, `mouse_middle_click`, `mouse_triple_click`,
+  `mouse_scroll_horizontal` and `mouse_drag_stepped`.
+
+- **`setWindowState` fell through to the foreground window.** A selector that
+  matched nothing fell through to `GetForegroundWindow()`, so closing a window
+  that was not open posted `WM_CLOSE` to whatever happened to be in front — an
+  unsaved document, or the agent's own host. Windows was the only adapter with
+  this: Linux already failed closed and macOS fails closed through AppleScript.
+  Omitting the selector still targets the foreground window, which is an
+  explicit request; only a selector that resolved to nothing now fails.
+
+- **`controlType` was dropped, then the search fuzzy-matched names.** The bridge
+  keys its table on bare names, but everything the agent reads is normalized the
+  other way and the schema's own example told callers to send the prefixed form
+  — so the documented input was the one form that could not match, and the
+  search ran unfiltered. Asking for a CheckBox named "Allow npm publish" could
+  return a Text element named "npm". The same path backs invoke/toggle/select/
+  set_value, so a dropped role filter could ACT on the wrong control. Both forms
+  are now accepted, and an unhonorable type returns no results instead of
+  degrading to a fuzzy name search.
+
+### Added
+
+- Regression coverage on the compact surface (`dispatchCompound`), which is
+  exactly where the gap was — `max_cost` had been tested only on the agent-loop
+  path, never through the compound. Includes an invariant test that every
+  `computer` action taking x/y also declares `space`, so a new pointer tool
+  cannot reintroduce the scaling bug.
+
+### Known follow-ups
+
+- `ps-bridge.ps1` has the same control-type drop in `Cmd-InvokeElement` for
+  callers that bypass the adapter.
+- `smart_click`/`smart_type` do not honor `expect`, so they can report hollow
+  success on consequential actions.
+- `accessibility.find` output carries no provenance, so a hit from the wrong
+  application is invisible to the agent.
+
 ## [1.5.10] - 2026-09-27 — keyboard gate hardening (security)
 
 > **First npm release since 1.5.7.** v1.5.8 and v1.5.9 were tagged and released

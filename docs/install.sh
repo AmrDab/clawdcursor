@@ -1,7 +1,7 @@
 #!/bin/bash
 # Clawd Cursor Installer for macOS / Linux
 # Usage: curl -fsSL https://clawdcursor.com/install.sh | bash
-# Specify version: VERSION=v1.5.10 curl -fsSL https://clawdcursor.com/install.sh | bash
+# Specify version: VERSION=v1.5.11 curl -fsSL https://clawdcursor.com/install.sh | bash
 #
 # Installs the published npm package globally (npm i -g clawdcursor) — no git
 # clone, no local build toolchain. On macOS the package's postinstall builds
