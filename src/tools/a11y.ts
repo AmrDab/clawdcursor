@@ -426,7 +426,7 @@ export function getA11yTools(): ToolDefinition[] {
       description: 'Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached, falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a "via CDP DOM" header and use viewport-relative coords).',
       parameters: {
         name: { type: 'string', description: 'Element name to search for', required: false },
-        controlType: { type: 'string', description: 'UI Automation control type (e.g. "ControlType.Button")', required: false },
+        controlType: { type: 'string', description: 'UI Automation control type. Either form works: "Button" or "ControlType.Button". An unrecognized type returns no results rather than silently searching unfiltered.', required: false },
         automationId: { type: 'string', description: 'Automation ID', required: false },
         processId: { type: 'number', description: 'Process ID to search within', required: false },
       },

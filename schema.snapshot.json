@@ -725,7 +725,7 @@
           },
           "controlType": {
             "type": "string",
-            "description": "UI Automation control type (e.g. \"ControlType.Button\")"
+            "description": "UI Automation control type. Either form works: \"Button\" or \"ControlType.Button\". An unrecognized type returns no results rather than silently searching unfiltered."
           },
           "automationId": {
             "type": "string",
