@@ -371,6 +371,19 @@ export class WindowsAdapter implements PlatformAdapter {
           if (typeof handle === 'number') hwnd = handle;
         }
       }
+
+      // FAIL CLOSED. A caller that named a window and whose name matched
+      // NOTHING used to fall through to GetForegroundWindow() below, so
+      // `close` on a window that isn't open posted WM_CLOSE to whatever
+      // happened to be in front — the user's unsaved document, or the
+      // agent's own host. Asking for a specific window and silently getting
+      // a different one is never the right answer; return false and let the
+      // caller see it failed.
+      const hadSelector =
+        query.processId !== undefined ||
+        (query.title !== undefined && query.title !== '') ||
+        (query.processName !== undefined && query.processName !== '');
+      if (hadSelector && pid === undefined && hwnd === undefined) return false;
     }
 
     const showCmd = state === 'maximize' ? 3       // SW_MAXIMIZE
