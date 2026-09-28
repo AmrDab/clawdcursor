@@ -543,4 +543,103 @@ describe('12. compound surface agent-friction fixes', () => {
     expect(actions).toContain('open_app'); // intuitive `system open_app` is now valid over MCP
     expect(actions).toContain('open_url');
   });
+
+  // ── Regression: compound args the delegate does not accept ────────────────
+  // The compound schema unions every delegate's parameters, so a param only one
+  // action implements is published on the whole tool. Previously an action that
+  // never declared it ignored it in silence: `max_cost: 'cheap'` still ran OCR
+  // on smart_read, and `space: 'screen'` was dropped by pointer tools that
+  // always image-scaled. Same class as GHSA-35pc-g74h-p476.
+  describe('13. args the delegate does not declare are surfaced, not silently dropped', () => {
+    it('warns, and names which actions DO accept the ignored arg', async () => {
+      const acc = getCompactTools().find(t => t.name === 'accessibility')!;
+      const res = await acc.handler(
+        { action: 'smart_read', scope: 'window', max_cost: 'cheap' },
+        makeCtx(),
+      );
+      expect(res.text).toContain('ignored');
+      expect(res.text).toContain('max_cost');
+      // the hint must point at the actions that really honor it
+      expect(res.text).toMatch(/accepted by:.*compile_ui/);
+    });
+
+    it('does NOT warn when the delegate declares the arg', async () => {
+      const acc = getCompactTools().find(t => t.name === 'accessibility')!;
+      const res = await acc.handler(
+        { action: 'compile_ui', max_cost: 'cheap' },
+        makeCtx(),
+      );
+      expect(res.text ?? '').not.toContain('ignored an argument');
+    });
+
+    it('never warns about `expect` — projected System B tools honor it undeclared', async () => {
+      const acc = getCompactTools().find(t => t.name === 'accessibility')!;
+      const res = await acc.handler(
+        { action: 'read_tree', scope: 'window', expect: 'something' },
+        makeCtx(),
+      );
+      expect(res.text ?? '').not.toContain('expect (accepted by');
+      expect(res.text ?? '').not.toMatch(/ignored .*expect/);
+    });
+
+    it('is a warning, not an error — a surplus arg must not fail a running agent', async () => {
+      // read_tree succeeds under the mock platform and does NOT declare
+      // max_cost, so this isolates the warning path: a call that would have
+      // succeeded must still succeed, with the warning appended.
+      const acc = getCompactTools().find(t => t.name === 'accessibility')!;
+      const clean = await acc.handler({ action: 'read_tree', scope: 'window' }, makeCtx());
+      const warned = await acc.handler(
+        { action: 'read_tree', scope: 'window', max_cost: 'cheap' },
+        makeCtx(),
+      );
+      expect(clean.isError).not.toBe(true);
+      expect(warned.isError).toBe(clean.isError);   // surplus arg changed nothing
+      expect(warned.text).toContain('max_cost');
+    });
+  });
+
+  // ── Regression: `space` honored by every coordinate action ────────────────
+  // SAFETY. These System A tools published `space` via the union but always
+  // image-scaled, so a11y-snapshot (physical) coords were scaled a SECOND time
+  // and the pointer landed on a different control than the agent resolved.
+  describe('14. space:"screen" suppresses image-space scaling on every pointer action', () => {
+    it.each([
+      ['double_click', 'mouseDoubleClick'],
+      ['right_click', 'mouseRightClick'],
+      ['hover', 'mouseMove'],
+    ])('computer.%s honors space:"screen"', async (action, desktopFn) => {
+      const spy = vi.fn();
+      const ctx = makeCtx({
+        getMouseScaleFactor: () => 3,
+        desktop: { ...makeCtx().desktop, [desktopFn]: spy } as never,
+      });
+      const comp = getCompactTools().find(t => t.name === 'computer')!;
+      await comp.handler({ action, x: 100, y: 200, space: 'screen' }, ctx);
+      expect(spy).toHaveBeenCalledWith(100, 200);
+    });
+
+    it('computer.double_click still scales when space is omitted', async () => {
+      const spy = vi.fn();
+      const ctx = makeCtx({
+        getMouseScaleFactor: () => 3,
+        desktop: { ...makeCtx().desktop, mouseDoubleClick: spy } as never,
+      });
+      const comp = getCompactTools().find(t => t.name === 'computer')!;
+      await comp.handler({ action: 'double_click', x: 100, y: 200 }, ctx);
+      expect(spy).toHaveBeenCalledWith(300, 600);
+    });
+
+    it('every computer action that takes x/y also declares space', () => {
+      const routes = COMPOUND_ROUTE_INDEX.computer ?? [];
+      const coordActions = routes.filter(r => {
+        const d = getAllTools().find(t => t.name === r.delegate);
+        return !!d && 'x' in d.parameters && 'y' in d.parameters;
+      });
+      expect(coordActions.length).toBeGreaterThan(3);
+      for (const r of coordActions) {
+        const d = getAllTools().find(t => t.name === r.delegate)!;
+        expect(Object.keys(d.parameters), `${r.action} -> ${r.delegate}`).toContain('space');
+      }
+    });
+  });
 });

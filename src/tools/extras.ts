@@ -20,6 +20,7 @@
  */
 
 import type { ToolDefinition } from './types';
+import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
 import { windowTextIncludes } from './window-text';
 
@@ -69,14 +70,15 @@ export function getExtraTools(): ToolDefinition[] {
       parameters: {
         x: { type: 'number', description: 'X coordinate in image-space', required: true },
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y }, ctx) => {
+      handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_middle_click');
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         await ctx.platform.mouseClick(Math.round(x * sf), Math.round(y * sf), { button: 'middle' });
         return { text: `Middle-clicked at (${x}, ${y})` };
       },
@@ -88,14 +90,15 @@ export function getExtraTools(): ToolDefinition[] {
       parameters: {
         x: { type: 'number', description: 'X coordinate in image-space', required: true },
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y }, ctx) => {
+      handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_triple_click');
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         await ctx.platform.mouseClick(Math.round(x * sf), Math.round(y * sf), { button: 'left', count: 3 });
         // #121: Win11 dialog edit fields (Save As filename box) register the
         // triple-click but don't select-all — subsequent typing APPENDS at the
@@ -172,14 +175,15 @@ export function getExtraTools(): ToolDefinition[] {
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
         direction: { type: 'string', description: 'Scroll direction', required: true, enum: ['left', 'right'] },
         amount: { type: 'number', description: 'Wheel ticks (default: 3)', required: false, default: 3 },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y, direction, amount }, ctx) => {
+      handler: async ({ x, y, direction, amount, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_scroll_horizontal');
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         const ticks = amount ?? 3;
         await ctx.platform.mouseScroll(
           Math.round(x * sf), Math.round(y * sf),
@@ -201,11 +205,12 @@ export function getExtraTools(): ToolDefinition[] {
           type: 'string', required: true,
           description: 'JSON array of {"x":n, "y":n} points in image-space, min 2 points',
         },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ path }, ctx) => {
+      handler: async ({ path, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_drag_stepped');
         let points: Array<{ x: number; y: number }>;
@@ -214,7 +219,7 @@ export function getExtraTools(): ToolDefinition[] {
         if (!Array.isArray(points) || points.length < 2) {
           return { text: 'mouse_drag_stepped: need at least 2 points', isError: true };
         }
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         const scaled = points.map(p => ({ x: Math.round(p.x * sf), y: Math.round(p.y * sf) }));
 
         await ctx.platform.mouseMove(scaled[0].x, scaled[0].y);

@@ -356,7 +356,48 @@ async function dispatchCompound(
     };
   }
 
-  return granular.handler(forwarded, ctx);
+  // The compound schema is a UNION of every route delegate's parameters
+  // (buildCompoundSchema), all published `required: false`. So a parameter
+  // only ONE action implements appears on the WHOLE tool, and an action that
+  // never declared it silently ignores it: no error, no warning, and the
+  // constraint the caller asked for is void. That is how `max_cost` reached
+  // `smart_read` (which fires OCR unconditionally) and how `space` reached
+  // pointer tools that always image-scaled, landing the click elsewhere.
+  //
+  // Same defect class as GHSA-35pc-g74h-p476 — a control published uniformly
+  // across a surface but enforced non-uniformly. The publishing is what makes
+  // it dangerous: the caller has positive evidence the control exists.
+  //
+  // This is the mirror of the required-field check above: that one catches a
+  // declared param arriving MISSING, this one catches an undeclared param
+  // arriving IGNORED. Warn rather than error — callers passing a surplus arg
+  // work today, and failing them would break a running agent mid-task.
+  //
+  // `expect` is exempt: projected System B delegates honor it without
+  // declaring it (project-mcp.ts), so flagging it would be a false positive.
+  // Making System A actions honor `expect` is separate work.
+  const declared = new Set(Object.keys(granular.parameters));
+  const ignored = Object.keys(forwarded).filter(
+    k => k !== 'expect' && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
+  );
+
+  const result = await granular.handler(forwarded, ctx);
+
+  if (ignored.length) {
+    const hints = ignored.map(pname => {
+      const accepts = routes
+        .filter(r => {
+          const d = getTool(r.delegate);
+          return !!d && ((r.argRemap?.[pname] ?? pname) in d.parameters);
+        })
+        .map(r => r.action);
+      return accepts.length ? `${pname} (accepted by: ${accepts.join(', ')})` : pname;
+    });
+    result.text = `${result.text ?? ''}
+[!] ${compoundName} ${actionName} ignored ${ignored.length === 1 ? 'an argument' : 'arguments'} it does not accept: ${hints.join('; ')}`;
+  }
+
+  return result;
 }
 
 // ─── Tool definitions ──────────────────────────────────────────────

@@ -13,6 +13,24 @@ import { isBlockedKey } from './playbooks/keys-blocklist';
 const IS_MAC = os.platform() === 'darwin';
 
 /**
+ * Coordinate space for pointer/region tools. Mirrors COORD_SPACE_SCHEMA on the
+ * System B tools so the `computer` compound means the same thing on every
+ * action that takes coordinates.
+ *
+ * This existed only on click/drag/scroll. The System A pointer tools below
+ * published `space` through the compound's unioned schema but ignored it and
+ * ALWAYS image-scaled, so a caller passing a11y-snapshot (physical) coords got
+ * them scaled a second time and the pointer landed on a different control.
+ */
+export const SPACE_PARAM = {
+  type: 'string' as const,
+  enum: ['screen', 'image'],
+  required: false,
+  description: 'Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass "screen" → a11y-snapshot coords (already physical, not scaled).',
+};
+
+
+/**
  * Best-effort active-window label for a tool's result text.
  *
  * `getActiveWindow()` goes through the platform a11y bridge (the persistent
@@ -65,20 +83,21 @@ export function getDesktopTools(): ToolDefinition[] {
         y: { type: 'number', description: 'Top edge Y in image-space coordinates', required: true },
         width: { type: 'number', description: 'Width in image-space pixels', required: true },
         height: { type: 'number', description: 'Height in image-space pixels', required: true },
+        space: SPACE_PARAM,
       },
       category: 'perception',
       compactGroup: 'computer',
       safetyTier: 0,
-      handler: async ({ x, y, width, height }, ctx) => {
+      handler: async ({ x, y, width, height, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getScreenshotScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getScreenshotScaleFactor();
         const frame = await ctx.desktop.captureRegionForLLM(
           Math.round(x * sf), Math.round(y * sf),
           Math.round(width * sf), Math.round(height * sf),
         );
         const base64 = frame.buffer.toString('base64');
         return {
-          text: `Region: (${x},${y}) ${width}x${height} image-space → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.`,
+          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },
@@ -117,13 +136,14 @@ export function getDesktopTools(): ToolDefinition[] {
       parameters: {
         x: { type: 'number', description: 'X coordinate in image-space', required: true },
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y }, ctx) => {
+      handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         const rx = Math.round(x * sf), ry = Math.round(y * sf);
         await ctx.desktop.mouseClick(rx, ry);
         ctx.a11y.invalidateCache();
@@ -138,13 +158,14 @@ export function getDesktopTools(): ToolDefinition[] {
       parameters: {
         x: { type: 'number', description: 'X coordinate in image-space', required: true },
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y }, ctx) => {
+      handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         await ctx.desktop.mouseDoubleClick(Math.round(x * sf), Math.round(y * sf));
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
@@ -158,13 +179,14 @@ export function getDesktopTools(): ToolDefinition[] {
       parameters: {
         x: { type: 'number', description: 'X coordinate in image-space', required: true },
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y }, ctx) => {
+      handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         await ctx.desktop.mouseRightClick(Math.round(x * sf), Math.round(y * sf));
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
@@ -178,13 +200,14 @@ export function getDesktopTools(): ToolDefinition[] {
       parameters: {
         x: { type: 'number', description: 'X coordinate in image-space', required: true },
         y: { type: 'number', description: 'Y coordinate in image-space', required: true },
+        space: SPACE_PARAM,
       },
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      handler: async ({ x, y }, ctx) => {
+      handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getMouseScaleFactor();
+        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
         await ctx.desktop.mouseMove(Math.round(x * sf), Math.round(y * sf));
         return { text: `Mouse moved to (${x}, ${y})` };
       },
