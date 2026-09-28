@@ -103,6 +103,14 @@ clawdcursor grant               # macOS only — approve Accessibility + Screen 
 
 ### 2 — Add it to your agent (pick your host)
 
+**One click**, if your host supports it:
+
+[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-0ea5e9?logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=clawdcursor&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImNsYXdkY3Vyc29yIiwibWNwIiwiLS1jb21wYWN0Il19)
+[![Add to VS Code](https://img.shields.io/badge/Add%20to-VS%20Code-007ACC?logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%22clawdcursor%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22clawdcursor%22%2C%22mcp%22%2C%22--compact%22%5D%7D)
+
+These hand the host the `npx` config below, so they work with or without a global
+install. Everything that follows is the same thing done by hand, per host.
+
 **Claude Code**
 ```bash
 claude mcp add clawdcursor -s user -- clawdcursor mcp --compact
@@ -148,7 +156,7 @@ claude plugin install clawdcursor@clawdcursor
 ```
 
 <details>
-<summary>One-line installers (clone + build; handles the macOS native build)</summary>
+<summary>One-line installers (npm i -g, plus Node-version, PATH, and consent checks)</summary>
 
 ```powershell
 # Windows (PowerShell)
