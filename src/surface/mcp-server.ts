@@ -164,7 +164,25 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       // matching dual-accept handlers (e.g. batch.steps). Without this branch the
       // default below coerced arrays to z.string() and rejected the array form
       // the README/inputSchema advertise ("Expected string, received array").
-      else if (def.type === 'array') schema = z.union([z.array(z.any()), z.string()]);
+      //
+      // Published as a PLAIN `{type:"array", items:<real schema>}`, not as the
+      // `z.union` it used to be. The union serialized to
+      // `anyOf:[{type:"array",items:{}},{type:"string"}]`, which hits two
+      // documented provider rejections that stop a host registering the server:
+      //   - Gemini (verbatim-relay hosts): `anyOf` with a sibling `description`
+      //     is a 400 — "schema specified other fields alongside any_of".
+      //   - OpenAI `strict: true`: `items: {}` has no `type` — "schema must
+      //     have a 'type' key".
+      // Runtime acceptance is unchanged: z.any() + refine still takes a real
+      // array OR a JSON-encoded string, so dual-accept handlers see the same
+      // inputs, and anything else is still rejected as before.
+      else if (def.type === 'array') {
+        schema = z.any()
+          .refine(v => Array.isArray(v) || typeof v === 'string', {
+            message: 'Expected an array (or a JSON-encoded array string).',
+          })
+          .meta({ type: 'array', items: def.items ?? { type: 'object' } });
+      }
       else schema = z.string();
       if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
       schema = schema.describe(def.description);
@@ -235,7 +253,42 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     );
   }
 
+  stripRootSchemaDialect(server);
+
   return { server, toolCount: tools.length, tools };
+}
+
+/**
+ * Drop the root `$schema` keyword from every tool's inputSchema in tools/list.
+ *
+ * SDK 1.29's zod-to-JSON-Schema step always stamps
+ * `"$schema": "http://json-schema.org/draft-07/schema#"` on each inputSchema.
+ * Gemini's FunctionDeclaration schema has no `$schema` field, so hosts that
+ * relay MCP schemas into Gemini verbatim get a 400 —
+ * `Unknown name "$schema" at 'tools.function_declarations[0].parameters'` —
+ * and the WHOLE server fails to register, not just one tool. MCP does not need
+ * the keyword (inputSchema is JSON Schema by definition), and Claude, Codex and
+ * the OpenAI Agents SDK all ignore it, so removing it is safe everywhere.
+ *
+ * McpServer installs tools/list itself and exposes no hook to post-process it,
+ * so this wraps the handler in the low-level Server's handler map — an SDK
+ * internal. It FAILS SAFE: if a future SDK reshapes that map, this does nothing
+ * and nothing crashes. A wire-level test asserts `$schema` is absent, so such
+ * an upgrade is caught by CI rather than silently re-breaking Gemini.
+ */
+function stripRootSchemaDialect(server: McpServerLike): void {
+  const handlers = (server as unknown as {
+    server?: { _requestHandlers?: Map<string, (req: unknown, extra: unknown) => Promise<unknown>> };
+  }).server?._requestHandlers;
+  const original = handlers?.get('tools/list');
+  if (!handlers || !original) return;
+  handlers.set('tools/list', async (req, extra) => {
+    const res = (await original(req, extra)) as { tools?: Array<{ inputSchema?: Record<string, unknown> }> };
+    for (const t of res.tools ?? []) {
+      if (t.inputSchema && '$schema' in t.inputSchema) delete t.inputSchema.$schema;
+    }
+    return res;
+  });
 }
 
 /**
