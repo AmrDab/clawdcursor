@@ -790,7 +790,7 @@ export function getExtraTools(): ToolDefinition[] {
       name: 'switch_tab_os',
       description:
         'Cycle or jump to a browser tab using the OS-agnostic keyboard shortcut ' +
-        '(mod+Tab / mod+Shift+Tab / mod+{1..9}). Works in Chrome, Firefox, Edge, Safari. ' +
+        '(Ctrl+Tab / Ctrl+Shift+Tab on every OS; mod+{1..9} to jump). Works in Chrome, Firefox, Edge, Safari. ' +
         'For in-browser DOM-level control use cdp_switch_tab.',
       parameters: {
         index: {
@@ -815,7 +815,9 @@ export function getExtraTools(): ToolDefinition[] {
           return { text: `Switched to tab ${n}` };
         }
         const dir = direction === 'previous' ? 'previous' : 'next';
-        const combo = dir === 'next' ? 'mod+Tab' : 'mod+shift+Tab';
+        // ctrl, NOT mod — on macOS mod+Tab is Cmd+Tab, the app switcher.
+        // Browsers use Ctrl+Tab for tab cycling on every OS, Safari included.
+        const combo = dir === 'next' ? 'ctrl+Tab' : 'ctrl+shift+Tab';
         await ctx.platform.keyPress(combo);
         return { text: `Cycled to ${dir} tab` };
       },
