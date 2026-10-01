@@ -103,27 +103,21 @@ clawdcursor grant               # macOS only — approve Accessibility + Screen 
 
 ### 2 — Add it to your agent (pick your host)
 
-**One click**, if your host supports it:
+**One click** (Cursor, VS Code):
 
-[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-0ea5e9?logo=cursor&logoColor=white)](cursor://anysphere.cursor-deeplink/mcp/install?name=clawdcursor&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImNsYXdkY3Vyc29yIiwibWNwIiwiLS1jb21wYWN0Il19)
-[![Add to VS Code](https://img.shields.io/badge/Add%20to-VS%20Code-007ACC?logo=visualstudiocode&logoColor=white)](vscode:mcp/install?%7B%22name%22%3A%22clawdcursor%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22clawdcursor%22%2C%22mcp%22%2C%22--compact%22%5D%7D)
+[![Add to Cursor](https://img.shields.io/badge/Add%20to-Cursor-0ea5e9?logo=cursor&logoColor=white)](https://cursor.com/install-mcp?name=clawdcursor&config=eyJjb21tYW5kIjoibnB4IiwiYXJncyI6WyIteSIsImNsYXdkY3Vyc29yIiwibWNwIiwiLS1jb21wYWN0Il19)
+[![Add to VS Code](https://img.shields.io/badge/Add%20to-VS%20Code-007ACC?logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect/mcp/install?name=clawdcursor&config=%7B%22name%22%3A%22clawdcursor%22%2C%22command%22%3A%22npx%22%2C%22args%22%3A%5B%22-y%22%2C%22clawdcursor%22%2C%22mcp%22%2C%22--compact%22%5D%7D)
 
-These hand the host the `npx` config below, so they work with or without a global
-install. Everything that follows is the same thing done by hand, per host.
+Every host runs the same command — `clawdcursor mcp --compact`, or
+`npx -y clawdcursor mcp --compact` with no global install. Only the config shape
+differs between hosts:
 
 **Claude Code**
 ```bash
 claude mcp add clawdcursor -s user -- clawdcursor mcp --compact
 ```
 
-**OpenAI Codex** — add to `~/.codex/config.toml`:
-```toml
-[mcp_servers.clawdcursor]
-command = "clawdcursor"
-args = ["mcp", "--compact"]
-```
-
-**Cursor / Windsurf / Claude Desktop** — add to the host's MCP config:
+**Cursor · Windsurf · Claude Desktop · Cline · Gemini CLI** — the common `mcpServers` shape:
 ```json
 {
   "mcpServers": {
@@ -131,15 +125,53 @@ args = ["mcp", "--compact"]
   }
 }
 ```
+Claude Desktop reads `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or
+`~/Library/Application Support/Claude/claude_desktop_config.json` (macOS).
+Gemini CLI reads `~/.gemini/settings.json`.
 
-**Zed** — Zed uses `context_servers` (not `mcpServers`) in `settings.json`:
+**VS Code (Copilot)** — `.vscode/mcp.json` uses `servers`, **not** `mcpServers`:
 ```json
 {
-  "context_servers": {
-    "clawdcursor": { "command": { "path": "clawdcursor", "args": ["mcp", "--compact"] } }
+  "servers": {
+    "clawdcursor": { "command": "clawdcursor", "args": ["mcp", "--compact"] }
   }
 }
 ```
+
+**Zed** — `context_servers` in `settings.json`:
+```json
+{
+  "context_servers": {
+    "clawdcursor": { "command": "clawdcursor", "args": ["mcp", "--compact"] }
+  }
+}
+```
+
+**OpenAI Codex** — `~/.codex/config.toml`. The first launch can take a few seconds,
+so raise the 10 s default startup timeout:
+```toml
+[mcp_servers.clawdcursor]
+command = "clawdcursor"
+args = ["mcp", "--compact"]
+startup_timeout_sec = 30
+```
+
+**opencode** — `opencode.json` uses `mcp`, and `command` is an array:
+```json
+{
+  "mcp": {
+    "clawdcursor": { "type": "local", "command": ["clawdcursor", "mcp", "--compact"] }
+  }
+}
+```
+
+**Any other MCP host** (Goose, Continue, …) — register a **stdio** server with command
+`clawdcursor` and args `mcp --compact`.
+
+> **Windows:** some hosts start the server without a shell, and then can't find
+> `clawdcursor` or `npx` (both are `.cmd` shims). If the server won't start, wrap it in
+> `cmd /c` — e.g. `"command": "cmd", "args": ["/c", "clawdcursor", "mcp", "--compact"]`,
+> or `claude mcp add clawdcursor -s user -- cmd /c clawdcursor mcp --compact`.
 
 That's the whole setup. Ask your agent: *"open Outlook and reply to the latest email
 from Sarah."*
