@@ -916,14 +916,46 @@ async function callOpenAITools(
     for (const b of blocks) {
       if (b.type === 'tool_result') {
         // Emit a standalone `tool` role message BEFORE the rest of the user turn.
-        const resultText = Array.isArray(b.content)
-          ? b.content.map((c: any) => c.type === 'text' ? c.text : '').filter(Boolean).join('\n')
-          : '';
+        //
+        // Anthropic lets a tool_result carry images; the OpenAI wire format does
+        // not (a `tool` message is text-only for most providers). This used to
+        // keep only the text and DROP every image, so on every non-Anthropic
+        // provider (OpenAI, Gemini, Mistral, xAI, Groq, Ollama, any
+        // OpenAI-compatible endpoint) a screenshot reached the model as the bare
+        // words "Screenshot captured" — and the agent then clicked at
+        // coordinates the model had GUESSED. A silent wrong action.
+        //
+        // The images now ride in the user message emitted after this loop. That
+        // position is valid: OpenAI requires every `tool` reply to directly
+        // follow the assistant's tool_calls, and userContent only goes out once
+        // all of them are emitted.
+        //
+        // A plain-string `content` (also legal in Anthropic's format) was being
+        // dropped to '' as well; keep it.
+        const parts: any[] = Array.isArray(b.content)
+          ? b.content
+          : typeof b.content === 'string'
+            ? [{ type: 'text', text: b.content }]
+            : [];
+        const resultText = parts
+          .map((c: any) => c.type === 'text' ? c.text : '')
+          .filter(Boolean)
+          .join('\n');
+        const images = parts.filter((c: any) => c.type === 'image' && c.source?.data);
         openaiMessages.push({
           role: 'tool',
           tool_call_id: b.tool_use_id,
-          content: resultText,
+          content: resultText || (images.length ? '(image attached in the next message)' : ''),
         });
+        if (images.length) {
+          userContent.push({ type: 'text', text: `Image output of tool call ${b.tool_use_id}:` });
+          for (const img of images) {
+            userContent.push({
+              type: 'image_url',
+              image_url: { url: `data:${img.source.media_type};base64,${img.source.data}` },
+            });
+          }
+        }
       } else if (b.type === 'text') {
         userContent.push({ type: 'text', text: b.text });
       } else if (b.type === 'image') {
