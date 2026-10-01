@@ -214,6 +214,22 @@ export const PROVIDERS: Record<string, ProviderProfile> = {
     supportsJsonMode: false,
     supportsToolCalls: false,
   },
+  // One key, hundreds of models across every vendor — the shortest path to
+  // "works with any model". OpenAI-compatible. Default ids verified present
+  // (and image-capable) against https://openrouter.ai/api/v1/models on
+  // 2026-10-01; users override with --model / config.
+  openrouter: {
+    name: 'OpenRouter',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    authHeader: (key) => ({ 'Authorization': `Bearer ${key}` }),
+    textModel: 'openai/gpt-4o-mini',
+    visionModel: 'openai/gpt-4o',
+    textContextWindow: 128000,
+    openaiCompat: true,
+    computerUse: false,
+    supportsJsonMode: true,
+    supportsToolCalls: true,
+  },
   generic: {
     name: 'OpenAI-Compatible',
     baseUrl: '',
@@ -243,7 +259,14 @@ export function detectProvider(apiKey: string, explicitProvider?: string): strin
   if (apiKey.startsWith('xai-')) return 'xai';             // xAI Grok
   if (apiKey.startsWith('pplx-')) return 'perplexity';     // Perplexity
   if (apiKey.startsWith('fw_')) return 'fireworks';         // Fireworks AI
-  if (apiKey.startsWith('sk-') && apiKey.length > 60) return 'kimi'; // Kimi keys are longer than OpenAI
+  // Prefixed sk- keys MUST be matched before the length heuristic below.
+  // Modern OpenAI keys (sk-proj-…, sk-svcacct-…) run well past 100 chars and
+  // OpenRouter keys (sk-or-v1-…) are ~73, so all of them used to fall into the
+  // "long sk- key = Kimi" branch, get sent to Moonshot's endpoint, and fail
+  // with a 401 the user had no way to connect to the misdetection.
+  if (apiKey.startsWith('sk-or-')) return 'openrouter';
+  if (apiKey.startsWith('sk-proj-') || apiKey.startsWith('sk-svcacct-') || apiKey.startsWith('sk-admin-')) return 'openai';
+  if (apiKey.startsWith('sk-') && apiKey.length > 60) return 'kimi'; // Kimi keys are longer than legacy OpenAI keys
   if (apiKey.startsWith('sk-')) return 'openai';
   if (apiKey.startsWith('gsk_')) return 'groq';
 
