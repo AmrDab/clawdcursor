@@ -650,7 +650,6 @@ async function _callVisionAnthropic(p: DirectVisionLLMOptions & { authHeaders: R
         if (done) {
           pending += decoder.decode(); // flush any bytes the decoder still holds
           if (pending) handleLine(pending);
-          pending = '';
           break;
         }
         pending += decoder.decode(value, { stream: true });
