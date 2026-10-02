@@ -233,7 +233,7 @@ export interface UtilityServerOptions {
    * daemon has no agent to abort.
    */
   onAbort?: () => void;
-  /** Optional host — used only for the dashboard CORS warning. */
+  /** Bind host. A non-loopback host disables the dashboard, which embeds the control token. */
   host?: string;
 }
 
@@ -283,12 +283,18 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     next(err);
   });
 
-  // Mount the dashboard at GET /. SECURITY: token is injected into page JS;
-  // only safe when bound to localhost.
-  if (options.host && options.host !== '127.0.0.1' && options.host !== 'localhost') {
-    console.warn(`${e('⚠️', '[WARN]')} Dashboard token exposed in page JS — only safe on localhost (current host: ${options.host})`);
+  // Mount the dashboard at GET /. SECURITY: the bearer token is injected into
+  // the page's JS, and that token is full desktop control. On a non-loopback
+  // bind this used to log a warning and then serve it ANYWAY — so anyone who
+  // could reach the port and load `/` got the token. Remote binding is opt-in
+  // (--allow-remote), which makes that user the one who most needs this not to
+  // happen. The dashboard is now simply not mounted off-loopback; remote API
+  // clients authenticate with the bearer token directly and never need it.
+  if (options.host && !isLoopbackHost(options.host)) {
+    console.warn(`${e('⚠️', '[WARN]')} Dashboard disabled: bound to ${options.host}, and the dashboard embeds the control token. It is only served on localhost.`);
+  } else {
+    mountDashboard(app, () => SERVER_TOKEN);
   }
-  mountDashboard(app, () => SERVER_TOKEN);
 
   // GET /health — public readiness probe.
   app.get('/health', (_req, res) => {
