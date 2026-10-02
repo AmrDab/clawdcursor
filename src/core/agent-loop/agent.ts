@@ -449,6 +449,31 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           continue;
         }
 
+        // Malformed arguments: refuse, never execute. The provider sent
+        // something that was not valid JSON, so `call.args` is an empty
+        // placeholder. Running the tool with `{}` would perform a DIFFERENT
+        // action from the one the model asked for — e.g. `window close` with
+        // no selector targets the foreground window. Same shape as the
+        // unknown-tool branch above: report back so the model can re-issue.
+        if (call.parseError) {
+          log.warn('agent.malformed_tool_args', { turn, tool: call.name, error: call.parseError });
+          toolResults.push({
+            id: call.id,
+            text: `NOT EXECUTED: the arguments for "${call.name}" were not valid JSON (${call.parseError}). Re-issue the call with valid JSON arguments.`,
+            isError: true,
+          });
+          steps.push({
+            turn,
+            toolName: call.name,
+            toolArgs: call.args,
+            result: { success: false, text: 'malformed arguments, not executed' },
+            durationMs: Date.now() - turnStart,
+            fingerprintChanged: false,
+            thought: llmResult.text,
+          });
+          continue;
+        }
+
         let targetLabel = typeof call.args.name === 'string' ? call.args.name
           : typeof call.args.target === 'string' ? call.args.target
           : undefined;
