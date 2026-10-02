@@ -285,6 +285,11 @@ async function _callOpenAI(p: {
   if (p.forceJson && p.canUseJsonMode !== false) {
     body.response_format = { type: 'json_object' };
   }
+  // Every other request path applied model quirks; the two OpenAI ones (this
+  // and _callVisionOpenAI) did not — and those are exactly where the quirks
+  // matter, since they exist for OpenAI's reasoning models (o1/o3/gpt-5),
+  // which reject parameters like max_tokens and temperature with a 400.
+  applyModelQuirks(p.model, body);
 
   const fetchOpts: RequestInit = {
     method: 'POST',
@@ -468,13 +473,20 @@ export async function callVisionLLM(
   const layer = config.layer3.enabled ? config.layer3 : config.layer2;
   const baseUrl = layer.baseUrl;
   const model = layer.model;
-  // Use layer-specific API key if available (mixed pipelines use different keys per layer)
-  const apiKey = (config.layer3.enabled ? config.layer3.apiKey : undefined) || config.apiKey || '';
-  const isAnthropic = !config.provider.openaiCompat
+  // Everything below is resolved from the SELECTED layer, mirroring
+  // callTextLLM. This used to take the protocol and provider profile from the
+  // MAIN provider, so a mixed pipeline sent the wrong wire format: a Kimi or
+  // OpenAI primary with an Anthropic vision layer posted OpenAI-format JSON to
+  // Anthropic's endpoint, and the reverse. And with layer 3 disabled it fell
+  // back to the pipeline key instead of layer 2's own key.
+  const apiKey = layer.apiKey || config.apiKey || '';
+  const isAnthropic = baseUrl.includes('anthropic.com')
     && !baseUrl.includes('localhost')
     && !baseUrl.includes('11434');
+  const layerProviderKey = inferProviderFromBaseUrl(baseUrl) || config.providerKey;
+  const providerProfile = PROVIDERS[layerProviderKey] || config.provider;
 
-  return callVisionLLMDirect({ ...options, baseUrl, model, apiKey, isAnthropic, providerProfile: config.provider });
+  return callVisionLLMDirect({ ...options, baseUrl, model, apiKey, isAnthropic, providerProfile });
 }
 
 /**
@@ -524,6 +536,7 @@ async function _callVisionOpenAI(p: DirectVisionLLMOptions & { authHeaders: Reco
   if (p.forceJson && supportsOpenAiJsonMode(p.providerProfile)) {
     body.response_format = { type: 'json_object' };
   }
+  applyModelQuirks(p.model, body); // see _callOpenAI
 
   const fetchOpts: RequestInit = {
     method: 'POST',
@@ -604,32 +617,49 @@ async function _callVisionAnthropic(p: DirectVisionLLMOptions & { authHeaders: R
     let messageComplete = false;
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n')) {
-          // Track SSE event type from "event:" lines
-          if (line.startsWith('event:')) {
-            currentEventType = line.slice(6).trim();
-            continue;
-          }
-          if (!line.startsWith('data:')) continue;
-          const payload = line.slice(5).trim();
-          if (payload === '[DONE]') { messageComplete = true; break; }
-          try {
-            const event = JSON.parse(payload);
-            if (currentEventType === 'content_block_delta') {
-              const delta = event.delta?.text || '';
-              accumulated += delta;
-            } else if (currentEventType === 'content_block_stop' || currentEventType === 'message_stop') {
-              messageComplete = true;
-              break;
-            }
-          } catch { /* skip malformed SSE */ }
+    // Carry-over buffer. A network read is NOT a line: one `data:` line can
+    // arrive split across two reads. This used to split each read on '\n' by
+    // itself, so a split line became two fragments, both failed JSON.parse,
+    // and both were swallowed by the catch below — silently dropping tokens
+    // from the streamed text. Only COMPLETE lines are processed now; the
+    // trailing partial line waits for the next read and is flushed at the end.
+    let pending = '';
+    const handleLine = (rawLine: string): void => {
+      const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine; // SSE allows CRLF
+      // Track SSE event type from "event:" lines
+      if (line.startsWith('event:')) {
+        currentEventType = line.slice(6).trim();
+        return;
+      }
+      if (!line.startsWith('data:')) return;
+      const payload = line.slice(5).trim();
+      if (payload === '[DONE]') { messageComplete = true; return; }
+      try {
+        const event = JSON.parse(payload);
+        if (currentEventType === 'content_block_delta') {
+          const delta = event.delta?.text || '';
+          accumulated += delta;
+        } else if (currentEventType === 'content_block_stop' || currentEventType === 'message_stop') {
+          messageComplete = true;
         }
-        if (messageComplete) break;
+      } catch { /* a genuinely malformed line, not a split one */ }
+    };
+    try {
+      while (!messageComplete) {
+        const { done, value } = await reader.read();
+        if (done) {
+          pending += decoder.decode(); // flush any bytes the decoder still holds
+          if (pending) handleLine(pending);
+          pending = '';
+          break;
+        }
+        pending += decoder.decode(value, { stream: true });
+        const lines = pending.split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines) {
+          handleLine(line);
+          if (messageComplete) break;
+        }
       }
     } finally {
       reader.releaseLock();
@@ -680,6 +710,13 @@ export interface LLMToolCall {
   name: string;
   /** Already-parsed JSON args (never a JSON string). */
   args: Record<string, unknown>;
+  /**
+   * Set when the provider sent arguments that were not valid JSON. The call
+   * must NOT be executed: `args` is then `{}`, and running a tool with empty
+   * arguments is not the same action the model asked for. An empty window
+   * selector, for one, deliberately targets the FOREGROUND window.
+   */
+  parseError?: string;
 }
 
 /** Content blocks the agent's assistant turn can produce. */
@@ -1017,11 +1054,19 @@ async function callOpenAITools(
   const tcalls: any[] = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
   for (const tc of tcalls) {
     let args: Record<string, unknown> = {};
-    try { args = JSON.parse(tc.function?.arguments ?? '{}'); } catch { /* keep empty */ }
+    let parseError: string | undefined;
+    const rawArgs = tc.function?.arguments ?? '{}';
+    try {
+      args = typeof rawArgs === 'string' ? JSON.parse(rawArgs || '{}') : rawArgs;
+    } catch (e) {
+      // Used to be swallowed, leaving `{}` — and the call then EXECUTED with
+      // empty arguments, a different action from the one the model intended.
+      parseError = `${(e as Error).message}; received: ${String(rawArgs).slice(0, 200)}`;
+    }
     const id = String(tc.id || `call_${toolCalls.length}`);
     const name = String(tc.function?.name || '');
     if (!name) continue;
-    toolCalls.push({ id, name, args });
+    toolCalls.push(parseError ? { id, name, args, parseError } : { id, name, args });
     raw.push({ type: 'tool_use', id, name, input: args });
   }
 
