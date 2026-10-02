@@ -47,6 +47,18 @@ publishing during the v1.5.10 release — none are hypothetical.
   are now accepted, and an unhonorable type returns no results instead of
   degrading to a fuzzy name search.
 
+- **Tool calls with malformed arguments were executed with empty ones.** When
+  a provider sent arguments that were not valid JSON, they became `{}` and the
+  tool ran anyway — a different action from the one requested. For
+  `minimize_window`, which the safety gate does not stop, an empty selector
+  targets the foreground window, so a garbled call minimized whatever was in
+  front. Such calls are now refused and reported back to the model.
+
+- **The dashboard served the control token off-loopback.** With remote binding
+  enabled, the dashboard — which embeds the bearer token — was still served,
+  so anyone who could reach the port and load `/` got full desktop control. It
+  is now served on loopback only.
+
 ### Compatibility — any model, any host, any OS
 
 - **The autonomous agent was blind on every non-Anthropic provider.** Anthropic
@@ -84,6 +96,18 @@ publishing during the v1.5.10 release — none are hypothetical.
   The Zed snippet used an outdated format. Added verified configs for VS Code
   (which uses `servers`, not `mcpServers`), opencode, Gemini CLI and Cline, and a
   Windows `cmd /c` note for hosts that start servers without a shell.
+
+- **Mixed-provider pipelines sent vision requests in the wrong format.** With
+  a different provider for vision than for text (say, OpenAI text and Anthropic
+  vision), vision calls used the main provider's wire format and key. They now
+  use the vision layer's own.
+
+- **OpenAI reasoning models (o1, o3, GPT-5) were sent parameters they reject**
+  on the plain text and vision paths, which skipped the model-specific fixups
+  every other path applied.
+
+- **Streamed responses lost text** whenever a line was split across network
+  reads, and failed outright when a stream arrived in small pieces.
 
 ### Added
 
