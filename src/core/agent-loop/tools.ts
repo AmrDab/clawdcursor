@@ -1011,7 +1011,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'switch_tab_os',
-      description: 'Cycle next/previous browser tab (mod+Tab / mod+Shift+Tab) or jump to tab N (mod+1..9).',
+      description: 'Cycle next/previous browser tab (Ctrl+Tab / Ctrl+Shift+Tab on every OS) or jump to tab N (mod+1..9).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -1028,7 +1028,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return { success: true, text: `Switched to tab ${n}` };
         }
         const dir = args.direction === 'previous' ? 'previous' : 'next';
-        await ctx.platform.keyPress(dir === 'next' ? 'mod+Tab' : 'mod+shift+Tab');
+        // ctrl, NOT mod: browsers bind tab cycling to Ctrl+Tab on every OS,
+        // Safari included. `mod` resolves to Cmd on macOS, and Cmd+Tab is the
+        // OS app switcher — the agent asked for the next tab and got a
+        // different application. (Jump-to-tab-N correctly stays on mod: Cmd+1..9.)
+        await ctx.platform.keyPress(dir === 'next' ? 'ctrl+Tab' : 'ctrl+shift+Tab');
         return { success: true, text: `Cycled to ${dir} tab` };
       },
     },

@@ -1365,6 +1365,15 @@ program
     console.log = (...args: any[]) => stderrWrite('', args);
     console.warn = (...args: any[]) => stderrWrite('[WARN] ', args);
     console.error = (...args: any[]) => stderrWrite('[ERROR] ', args);
+    // debug / info / dir / table ALSO write to stdout in Node. Only the three
+    // above were redirected, so any of these on a reachable path — e.g. the
+    // console.debug on every Linux accessibility call, and on the CDP failure
+    // paths — wrote a non-JSON line into the protocol stream and corrupted it
+    // for every stdio host at once.
+    console.debug = (...args: any[]) => stderrWrite('[DEBUG] ', args);
+    console.info = (...args: any[]) => stderrWrite('', args);
+    console.dir = (obj: unknown) => stderrWrite('', [obj]);
+    console.table = (data: unknown) => stderrWrite('', [data]);
 
     // Consent gate — REQUIRED before any tool runs, but NON-FATAL to startup.
     // Exiting here made the host show an opaque "MCP server failed" with no

@@ -38,18 +38,37 @@ Or, with no global install (npx fetches it on demand, uses a global install if p
 
     { "mcpServers": { "clawdcursor": { "command": "npx", "args": ["-y", "clawdcursor", "mcp", "--compact"] } } }
 
-Two hosts do NOT use the `mcpServers` shape above — copying it there will not work:
+The `mcpServers` shape above works for Cursor, Windsurf, Claude Desktop, Cline and
+Gemini CLI (`~/.gemini/settings.json`). These hosts use a DIFFERENT shape —
+copying the one above into them will not work:
 
-Zed uses `context_servers`, and nests command/args under a `command` object, in
-`settings.json`:
+VS Code (Copilot) uses `servers`, not `mcpServers`, in `.vscode/mcp.json`:
 
-    { "context_servers": { "clawdcursor": { "command": { "path": "clawdcursor", "args": ["mcp", "--compact"] } } } }
+    { "servers": { "clawdcursor": { "command": "clawdcursor", "args": ["mcp", "--compact"] } } }
 
-OpenAI Codex uses TOML in `~/.codex/config.toml`:
+Zed uses `context_servers` in `settings.json`:
+
+    { "context_servers": { "clawdcursor": { "command": "clawdcursor", "args": ["mcp", "--compact"] } } }
+
+OpenAI Codex uses TOML in `~/.codex/config.toml`. First launch can take a few
+seconds, so raise the 10 s default startup timeout:
 
     [mcp_servers.clawdcursor]
     command = "clawdcursor"
     args = ["mcp", "--compact"]
+    startup_timeout_sec = 30
+
+opencode uses `mcp`, `type: "local"`, and an ARRAY `command`, in `opencode.json`:
+
+    { "mcp": { "clawdcursor": { "type": "local", "command": ["clawdcursor", "mcp", "--compact"] } } }
+
+Any other MCP host: register a stdio server, command `clawdcursor`, args `mcp --compact`.
+
+WINDOWS: some hosts start the server without a shell and then cannot find
+`clawdcursor` or `npx` (both are `.cmd` shims). If the server will not start, wrap
+it in `cmd /c`:
+
+    { "command": "cmd", "args": ["/c", "clawdcursor", "mcp", "--compact"] }
 
 Claude Code: install the plugin instead of editing config — it registers the MCP
 server (via npx) and bundles the usage skill in one step:

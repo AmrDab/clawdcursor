@@ -969,3 +969,46 @@ describe('runAgent — screenshot turns route to the vision model', () => {
     expect(capturedLlmCalls.every((c: any) => c.model === 'only-text')).toBe(true);
   });
 });
+
+
+// A tool call whose arguments were not valid JSON must be REFUSED, never run
+// with `{}`. minimize_window is the discriminating case: it is input-tier (the
+// safety gate does not stop it), and with an empty selector it minimizes the
+// FOREGROUND window — a real action the model never asked for.
+describe('runAgent — malformed tool arguments are refused, not executed', () => {
+  beforeEach(() => {
+    llmTurnQueue.length = 0;
+  });
+
+  it('does not run a tool whose arguments failed to parse', async () => {
+    const id = 'c_badjson';
+    llmTurnQueue.push({
+      text: '',
+      toolCalls: [{ id, name: 'minimize_window', args: {}, parseError: 'Unexpected end of JSON input; received: {"title":"Calc' }],
+      stopReason: 'tool_use',
+      raw: [{ type: 'tool_use', id, name: 'minimize_window', input: {} }],
+    });
+    llmTurnQueue.push(turnCall('done', { evidence: 'stopped after the refusal' }));
+
+    const setWindowState = vi.fn(async () => true);
+    const adapter = { ...makeAdapter(), setWindowState } as unknown as PlatformAdapter;
+
+    const result = await runAgent({ task: 'minimize calc', maxTurns: 6 }, { adapter, llm: LLM_CONFIG });
+
+    expect(setWindowState).not.toHaveBeenCalled();
+    expect(result.steps[0].toolName).toBe('minimize_window');
+    expect(result.steps[0].result.success).toBe(false);
+    expect(result.steps[0].result.text).toMatch(/not executed/i);
+  });
+
+  it('the same tool with valid arguments still runs (the refusal is targeted)', async () => {
+    llmTurnQueue.push(turnCall('minimize_window', { title: 'Calc' }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'minimized' }));
+
+    const setWindowState = vi.fn(async () => true);
+    const adapter = { ...makeAdapter(), setWindowState } as unknown as PlatformAdapter;
+
+    await runAgent({ task: 'minimize calc', maxTurns: 6 }, { adapter, llm: LLM_CONFIG });
+    expect(setWindowState).toHaveBeenCalledTimes(1);
+  });
+});

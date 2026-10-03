@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [1.5.11] - 2026-09-28 — the compound surface stops lying about what it accepts (security)
+## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 
 Every bug here was hit driving clawdcursor for real to configure npm trusted
 publishing during the v1.5.10 release — none are hypothetical.
@@ -46,6 +46,68 @@ publishing during the v1.5.10 release — none are hypothetical.
   set_value, so a dropped role filter could ACT on the wrong control. Both forms
   are now accepted, and an unhonorable type returns no results instead of
   degrading to a fuzzy name search.
+
+- **Tool calls with malformed arguments were executed with empty ones.** When
+  a provider sent arguments that were not valid JSON, they became `{}` and the
+  tool ran anyway — a different action from the one requested. For
+  `minimize_window`, which the safety gate does not stop, an empty selector
+  targets the foreground window, so a garbled call minimized whatever was in
+  front. Such calls are now refused and reported back to the model.
+
+- **The dashboard served the control token off-loopback.** With remote binding
+  enabled, the dashboard — which embeds the bearer token — was still served,
+  so anyone who could reach the port and load `/` got full desktop control. It
+  is now served on loopback only.
+
+### Compatibility — any model, any host, any OS
+
+- **The autonomous agent was blind on every non-Anthropic provider.** Anthropic
+  lets a tool result carry images; the OpenAI wire format does not, and the
+  translation dropped them. On OpenAI, Gemini, Mistral, xAI, Groq, Ollama and
+  every OpenAI-compatible endpoint, a screenshot reached the model as the words
+  "Screenshot captured", and the agent clicked at coordinates the model
+  guessed. Images now travel in the message after the tool replies, which is
+  where that format allows them.
+
+- **Tool schemas now load on every model provider.** Hosts forward the
+  server's schemas to whatever model the user picked, and three features on the
+  wire are documented to make a provider reject the entire server: `anyOf` with
+  a sibling description and a root `$schema` (Gemini), and `items: {}` with no
+  type (OpenAI strict mode). All three are gone; inputs are validated exactly as
+  before.
+
+- **Modern OpenAI and OpenRouter keys were detected as Kimi** and failed with a
+  401. Prefixed keys are now matched first. **OpenRouter is a supported
+  provider** — one key, hundreds of models.
+
+- **OCR clicks were converted twice on Windows/Linux HiDPI** (landing at ~1/5 of
+  the target on a 2.25x display). They are now converted exactly once on every
+  OS. The obvious fix would have broken every Retina Mac; the per-OS rule is now
+  pinned by tests on all three platforms.
+
+- **macOS:** switching browser tabs opened the OS app switcher (Cmd+Tab), and
+  set-field's select-all prepended text instead of replacing it.
+
+- **stdio hosts:** `console.debug`, `info`, `dir` and `table` still wrote to
+  stdout, which is the protocol channel, and could corrupt it.
+
+- **Install docs:** the one-click Cursor and VS Code badges did nothing on
+  GitHub — it strips custom URL schemes — so they now use HTTPS redirects.
+  The Zed snippet used an outdated format. Added verified configs for VS Code
+  (which uses `servers`, not `mcpServers`), opencode, Gemini CLI and Cline, and a
+  Windows `cmd /c` note for hosts that start servers without a shell.
+
+- **Mixed-provider pipelines sent vision requests in the wrong format.** With
+  a different provider for vision than for text (say, OpenAI text and Anthropic
+  vision), vision calls used the main provider's wire format and key. They now
+  use the vision layer's own.
+
+- **OpenAI reasoning models (o1, o3, GPT-5) were sent parameters they reject**
+  on the plain text and vision paths, which skipped the model-specific fixups
+  every other path applied.
+
+- **Streamed responses lost text** whenever a line was split across network
+  reads, and failed outright when a stream arrived in small pieces.
 
 ### Added
 

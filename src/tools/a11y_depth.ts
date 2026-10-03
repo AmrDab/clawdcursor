@@ -189,7 +189,10 @@ export function getA11yDepthTools(): ToolDefinition[] {
           }
 
           // Select all existing content, then type the replacement value.
-          await ctx.platform.keyPress('ctrl+a');
+          // mod, NOT ctrl: on macOS Ctrl+A moves the caret to line start, so
+          // the value used to be PREPENDED to the old text instead of
+          // replacing it. mod = Cmd on macOS, Ctrl elsewhere.
+          await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(safeValue);
           const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
           return { text: `Set "${safeNameStr}" = "${preview}" (via keyboard fallback).` };
