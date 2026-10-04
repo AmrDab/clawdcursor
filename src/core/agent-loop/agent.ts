@@ -30,6 +30,7 @@ import { captureSnapshot } from '../sense/snapshot';
 import { captureTaskBaseline } from '../verify/assertions';
 import { UIMapHolder } from '../sense/ui-map-holder';
 import { reactiveCheck } from '../sense/reactive-check';
+import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
 import { compileUIMap } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
@@ -683,12 +684,19 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           taskBaseline,
         };
 
+        // Validate `expect` BEFORE acting — a malformed one is refused with
+        // nothing executed, so a retry cannot double-act.
+        const expectError = validateExpect((call.args as Record<string, unknown>).expect);
         let result: Awaited<ReturnType<UnifiedTool['execute']>>;
-        try {
-          result = await tool.execute(call.args, ctx);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          result = { success: false, text: `tool threw: ${msg}` };
+        if (expectError) {
+          result = { success: false, text: `expect rejected (nothing executed): ${expectError}` };
+        } else {
+          try {
+            result = await tool.execute(call.args, ctx);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            result = { success: false, text: `tool threw: ${msg}` };
+          }
         }
 
         const toolMs = Date.now() - toolStart;
@@ -733,7 +741,7 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
         // Layer C: reactive step discipline — verify the agent-stated `expect`
         // (HARD → DEVIATION) or apply the tolerant soft net when omitted. Reuses
         // the verify engine + the fingerprintChanged signal already computed.
-        const reactive = await reactiveCheck({
+        const reactive = expectError ? null : await reactiveCheck({
           expect: (call.args as Record<string, unknown>).expect,
           toolText: result.text,
           toolSuccess: result.success,

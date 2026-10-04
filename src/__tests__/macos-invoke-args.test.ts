@@ -84,3 +84,21 @@ describe('macOS getUiTree — keeps -FocusedProcessId (the flag get-screen-conte
     expect(call.args).toContain('8');
   });
 });
+
+describe('macOS invokeElement — surfaces the found element on a pattern miss', () => {
+  it('maps the JXA failure clickPoint/bounds into res.bounds so callers can coordinate-fallback', async () => {
+    nextStdout = JSON.stringify({
+      success: false, action: 'click', error: 'Element does not support click(). Use coordinate click.',
+      clickPoint: { x: 125, y: 210 }, bounds: { x: 100, y: 200, width: 50, height: 20 },
+    });
+    const res = await mac.invokeElement({ name: 'Switch', processId: 9, action: 'click' });
+    expect(res.success).toBe(false);
+    expect(res.bounds).toEqual({ x: 100, y: 200, width: 50, height: 20 });
+  });
+
+  it('falls back to a point-sized rect when only clickPoint is reported', async () => {
+    nextStdout = JSON.stringify({ success: false, action: 'click', clickPoint: { x: 125, y: 210 } });
+    const res = await mac.invokeElement({ name: 'Switch', processId: 9, action: 'click' });
+    expect(res.bounds).toEqual({ x: 125, y: 210, width: 1, height: 1 });
+  });
+});

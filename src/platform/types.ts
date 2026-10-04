@@ -266,6 +266,9 @@ export interface PlatformAdapter {
   // ─── ACCESSIBILITY ──────────────────────────────────────────────
   getUiTree(processId?: number): Promise<UiElement[]>;
   findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]>;
+  /** Optional: the window scope(s) the last findElements searched, in order,
+   *  so a "(no elements found)" result can say where it looked. */
+  lastFindScope?: Array<{ processId?: number; processName?: string; title?: string }> | null;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Invoke an accessibility action on a named element. Action union

@@ -159,6 +159,17 @@ describe('agent batch — per-step parity with the single-call pipeline (audit 2
     expect(unified.type.execute).not.toHaveBeenCalled();
   });
 
+  it('rejects a malformed expect BEFORE running the step (no double-act on retry)', async () => {
+    unified.key = { ...uTool('key'), changesScreen: true };
+    const r = await buildBatchTool().execute(
+      { steps: [{ name: 'key', args: { combo: 'Escape', expect: 'window_title_contains:Identity' } }] },
+      ctx,
+    );
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/expect rejected \(nothing executed\)/);
+    expect(unified.key.execute).not.toHaveBeenCalled();
+  });
+
   it('blocks terminal tools inside a batch (done/give_up semantics would be discarded)', async () => {
     unified.done = { ...uTool('done'), terminal: true };
     const r = await run([{ name: 'done', args: { evidence: 'pretend finished' } }]);

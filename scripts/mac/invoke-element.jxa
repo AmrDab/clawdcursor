@@ -216,7 +216,8 @@ function run(argv) {
                             clickPoint: {
                                 x: bounds.x + Math.floor(bounds.width / 2),
                                 y: bounds.y + Math.floor(bounds.height / 2)
-                            }
+                            },
+                            bounds: bounds
                         };
                     } else {
                         result = {
