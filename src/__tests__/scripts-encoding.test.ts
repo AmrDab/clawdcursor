@@ -1,7 +1,9 @@
 /**
- * Every bridge script must be plain UTF-8 with LF endings. scripts/mac/
- * find-element.jxa was committed as UTF-16LE + CRLF (unlike every other .jxa),
- * which osascript / git text handling treat as binary.
+ * Every bridge script must be plain UTF-8. scripts/mac/find-element.jxa was
+ * committed as UTF-16LE + CRLF (unlike every other .jxa), which osascript /
+ * git text handling treat as binary. Line endings are not asserted here: they
+ * are enforced by .gitattributes (eol=lf), and a checkout made before that rule
+ * can still hold CRLF on disk while the committed blob is LF.
  */
 import { describe, it, expect } from 'vitest';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -27,11 +29,10 @@ describe('scripts/** encoding', () => {
     expect(files.length).toBeGreaterThan(10);
   });
 
-  it.each(files)('%s is valid UTF-8 without a UTF-16 BOM and uses LF endings', (file) => {
+  it.each(files)('%s is valid UTF-8 without a UTF-16 BOM', (file) => {
     const buf = readFileSync(file);
     const bom16 = (buf[0] === 0xff && buf[1] === 0xfe) || (buf[0] === 0xfe && buf[1] === 0xff);
     expect(bom16, 'UTF-16 BOM').toBe(false);
     expect(() => new TextDecoder('utf-8', { fatal: true }).decode(buf), 'valid UTF-8').not.toThrow();
-    expect(buf.includes('\r\n'), 'CRLF line endings').toBe(false);
   });
 });
