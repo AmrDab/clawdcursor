@@ -75,6 +75,62 @@ All notable changes to Clawd Cursor will be documented in this file.
   (scroll, drag, holding keys) reports an honest error instead of typing
   stray characters. On ydotool 1.x, scrolling now uses the real wheel
   (`mousemove -w`) instead of a non-existent `scroll` command.
+### Fixed (Linux)
+
+Found driving the MCP server on Ubuntu 24.04 (Xvfb + openbox, GTK3/GTK4
+apps, at-spi2, tesseract 5) and scored against the apps' own logs.
+
+- **OCR failed on current distros.** tesseract 5 prints float confidences
+  (`81.879456`); the Python parser used `int()` and the whole OCR call died
+  with `ValueError`. Worse, the engine latched "OCR is not available" after
+  that first failure, so every later call returned nothing in 1ms. The parser
+  accepts floats, and the engine now only marks itself unavailable when the
+  OCR binary / language pack is actually missing, not on a transient error.
+- **`type` took 6 s and `clipboard_write` 3 s.** xclip / wl-copy fork a child
+  that keeps serving the selection; with stdout/stderr piped it held the pipes
+  open, so the adapter waited for a `close` that never came until the 3 s
+  timeout (twice per `type`: paste + restore). The write now resolves on
+  process exit and inherits no pipes. The forked server is never killed.
+- **`window restore` left minimized windows minimized.** Clearing the
+  `hidden` hint doesn't un-iconify an X window; the adapter now activates it
+  (`wmctrl -i -a`) after clearing the states, the same path focus-by-title
+  already took.
+- **`list_windows` reported an empty process name for every window**, so
+  `window focus processName:"gnome-calculator"` and `app_running` assertions
+  never matched. Names come from `/proc/<pid>/cmdline` (argv[0] basename —
+  not the 15-char-truncated `comm`), falling back to `comm`.
+- **Unknown key names reported success.** `key combo:"notarealkey"` typed the
+  word and answered "Pressed notarealkey"; `"super"` was typed as text. The
+  Linux adapter now throws `Unknown key: "..."` like Windows and macOS, and
+  bare modifiers (`super`, `ctrl`, `alt`, …) press the modifier key.
+- **`GDK_SCALE` faked the DPI on X11.** With `GDK_SCALE=2` on a real
+  1920×1080 X server, `list_displays` claimed dpiRatio 2 / 3840×2160 and every
+  coordinate click landed at half the target. X11 input (xdotool, nut-js) is
+  physical pixels — the env scale is only consulted on Wayland now, in both
+  the platform adapter and the legacy desktop layer.
+- **`accessibility find` without a process id searched the wrong app** (the
+  bridge guessed by a focused-descendant heuristic, else took the first app on
+  the bus); `wait_for` timed out for the same reason. Find / invoke now scope
+  to the foreground window's pid by default, like Windows and macOS.
+- **AT-SPI actions were a stub**, so `accessibility invoke / set_value /
+  toggle / select / focus / get_value`, `smart_click`, `smart_type`,
+  `find_button`→invoke and the `a11y_*` depth tools all failed on Linux even
+  though `find` worked. `atspi-bridge.py --cmd invoke` drives the AT-SPI
+  Action / EditableText / Value / Selection / Component interfaces and always
+  returns the element's bounds so callers can fall back to a coordinate click;
+  the legacy accessibility bridge routes its Linux branches to the adapter
+  instead of answering "not implemented".
+- **AT-SPI roles and bounds.** `compile_ui` showed role `unknown` for almost
+  every element because raw AT-SPI role names (`push button`, `check box`,
+  `combo box`, `text`, `menu item`, …) weren't mapped to the shared
+  vocabulary, so `find_button` found no candidate. Roles are normalized
+  (raw name kept as `subrole`, password fields flagged `secure`), a
+  `controlType` filter now matches the normalized role, elements scrolled out
+  of view (INT_MIN extents) are reported offscreen instead of at
+  `-2147483648,-2147483648`, an empty or partial state set no longer marks a
+  widget disabled (GTK4), libatspi's client cache is bypassed so states are
+  read live, and window-relative extents (GTK4 on X11 answers zeros for screen
+  coordinates) are offset by the window origin when the bridge reports them.
 
 ## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 

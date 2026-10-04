@@ -15,6 +15,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { psRunner } from './ps-runner';
 import { getPackageRoot } from '../paths';
+import type { PlatformAdapter, UiElement } from './types';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -34,21 +35,43 @@ let macShellAvailable: boolean | null = null;
 let macShellCheckedAt = 0;
 const MAC_SHELL_TTL = 30000; // Re-check every 30s if previously denied (permission may be granted mid-session)
 
-// ── Linux AT-SPI backend ────────────────────────────────────────────────────
-// Linux AT-SPI backend is planned. Currently returns safe empty results for
-// tree-walking methods (findElement, invokeElement, getScreenContext, etc.).
-// Clipboard already works via wl-paste/wl-copy, xclip, or xsel.
-// getWindows() has a basic wmctrl fallback for window awareness.
-//
-// To contribute a full AT-SPI backend: implement via `dbus-next` (pure JS
-// D-Bus client) or `gi` (GObject introspection) bindings. The AT-SPI2 bus
-// lives at org.a]11y.Bus and exposes Accessible, Component, Action, Text,
-// and Value interfaces that map cleanly onto UIElement / WindowInfo.
+// ── Linux ───────────────────────────────────────────────────────────────────
+// This legacy bridge has no Linux code of its own: every Linux branch routes
+// to the LinuxAdapter (src/platform/linux.ts), which owns the AT-SPI Python
+// bridge (scripts/linux/atspi-bridge.py) and wmctrl/xdotool window handling.
+// That is what smart_click / find_button / smart_type / invoke_element use
+// on Linux. Clipboard stays local (wl-copy / xclip / xsel).
 // ─────────────────────────────────────────────────────────────────────────────
 
-function unsupportedLinuxResult<T>(fallback: T, feature: string): T {
-  console.debug(`[A11y] Linux accessibility feature not yet implemented: ${feature}`);
-  return fallback;
+let linuxAdapterPromise: Promise<PlatformAdapter> | null = null;
+function linuxAdapter(): Promise<PlatformAdapter> {
+  if (!linuxAdapterPromise) {
+    linuxAdapterPromise = import('./index').then(m => m.getPlatform());
+  }
+  return linuxAdapterPromise;
+}
+
+/** PlatformAdapter UiElement → this bridge's legacy UIElement shape. */
+function toLegacyElement(el: UiElement): UIElement {
+  return {
+    name: el.name ?? '',
+    automationId: el.automationId ?? '',
+    controlType: el.controlType ?? '',
+    className: '',
+    isEnabled: el.enabled,
+    bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+  };
+}
+
+function toLegacyWindow(w: import('./types').WindowInfo): WindowInfo {
+  return {
+    handle: typeof w.handle === 'number' ? w.handle : 0,
+    title: w.title,
+    processName: w.processName,
+    processId: w.processId,
+    bounds: w.bounds,
+    isMinimized: w.isMinimized,
+  };
 }
 
 export interface UIElement {
@@ -109,7 +132,14 @@ export class AccessibilityBridge {
    */
   async isShellAvailable(): Promise<boolean> {
     if (IS_WIN) return true; // PSRunner handles availability
-    if (IS_LINUX) return false; // AT-SPI bridge not yet implemented
+    if (IS_LINUX) {
+      // True when the AT-SPI bridge probe succeeded (python3 + gi + Atspi).
+      try {
+        return (await (await linuxAdapter()).checkPermissions()).accessibility;
+      } catch {
+        return false;
+      }
+    }
 
     // If previously granted, trust it. If denied, re-check periodically (user may grant mid-session).
     if (macShellAvailable === true) return true;
@@ -216,48 +246,15 @@ export class AccessibilityBridge {
       windows = await this.runMacScript('get-windows.jxa');
       this.windowCache = { windows, timestamp: Date.now() };
     } else {
-      // Linux: try wmctrl for basic window awareness before falling back to empty
-      windows = await this.linuxGetWindowsViaWmctrl();
+      // Linux: wmctrl listing (with /proc process names) via the adapter.
+      try {
+        windows = (await (await linuxAdapter()).listWindows()).map(toLegacyWindow);
+      } catch {
+        windows = [];
+      }
       this.windowCache = { windows, timestamp: Date.now() };
     }
     return windows;
-  }
-
-  /**
-   * Linux fallback: parse `wmctrl -l -p` output into WindowInfo[].
-   * Returns [] if wmctrl is not installed or fails.
-   */
-  private async linuxGetWindowsViaWmctrl(): Promise<WindowInfo[]> {
-    try {
-      const { execFileSync } = require('child_process');
-      const output: string = execFileSync('wmctrl', ['-l', '-p'], {
-        timeout: 3000,
-        encoding: 'utf-8',
-      });
-      const windows: WindowInfo[] = [];
-      for (const line of output.trim().split('\n')) {
-        if (!line.trim()) continue;
-        // Format: 0x03c00003  0 12345  hostname Window Title Here
-        const parts = line.trim().split(/\s+/);
-        if (parts.length < 5) continue;
-        const handle = parseInt(parts[0], 16) || 0;
-        const pid = parseInt(parts[2], 10) || 0;
-        const title = parts.slice(4).join(' ');
-        if (!title || title === 'Desktop') continue;
-        windows.push({
-          handle,
-          title,
-          processName: '', // wmctrl doesn't provide process names
-          processId: pid,
-          bounds: { x: 0, y: 0, width: 0, height: 0 }, // wmctrl -l doesn't include geometry
-          isMinimized: false,
-        });
-      }
-      return windows;
-    } catch {
-      // wmctrl not installed or failed — return empty
-      return unsupportedLinuxResult([], 'getWindows (wmctrl fallback)');
-    }
   }
 
   async findElement(opts: {
@@ -297,7 +294,17 @@ export class AccessibilityBridge {
       if (processId)         args.push('-ProcessId', String(processId));
       return this.runMacScript('find-element.jxa', args);
     }
-    return unsupportedLinuxResult([], 'findElement');
+    try {
+      const hits = await (await linuxAdapter()).findElements({
+        // AT-SPI has no separate automation id — the accessible name is the handle.
+        name: opts.name ?? opts.automationId,
+        controlType: opts.controlType,
+        processId,
+      });
+      return hits.map(toLegacyElement);
+    } catch {
+      return [];
+    }
   }
 
   async invokeElement(opts: {
@@ -362,7 +369,29 @@ export class AccessibilityBridge {
       if (opts.value)        args.push('-Value', opts.value);
       return this.runMacScript('invoke-element.jxa', args);
     }
-    return unsupportedLinuxResult({ success: false, error: 'Linux accessibility bridge not implemented' }, 'invokeElement');
+    try {
+      const res = await (await linuxAdapter()).invokeElement({
+        name: opts.name ?? opts.automationId,
+        controlType: opts.controlType,
+        processId,
+        action: opts.action,
+        value: opts.value,
+      });
+      const value = res.data && typeof (res.data as any).value === 'string' ? (res.data as any).value : undefined;
+      if (res.success) return { success: true, ...(value !== undefined ? { value } : {}) };
+      // Failed invoke with bounds → let the caller fall back to a coordinate click.
+      const b = res.bounds;
+      if (b && b.width > 0) {
+        return {
+          success: false,
+          error: `AT-SPI action failed for: ${opts.name ?? opts.automationId}`,
+          clickPoint: { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) },
+        };
+      }
+      return { success: false, error: `Element not found or not actionable: ${opts.name ?? opts.automationId}` };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
   }
 
   async focusWindow(
@@ -385,7 +414,15 @@ export class AccessibilityBridge {
         args.push('-Restore');
         result = await this.runMacScript('focus-window.jxa', args);
       } else {
-        result = unsupportedLinuxResult({ success: false, error: 'Linux accessibility bridge not implemented' }, 'focusWindow');
+        // wmctrl -i -a activates AND un-iconifies, so this is a restore too.
+        const adapter = await linuxAdapter();
+        const ok = await adapter.focusWindow({ title, processId });
+        if (ok) {
+          const active = await adapter.getActiveWindow().catch(() => null);
+          result = { success: true, title: active?.title ?? title, processId: active?.processId ?? processId };
+        } else {
+          result = { success: false, error: `No matching window for: ${title ?? processId}` };
+        }
       }
       this.invalidateCache();
       return result;
@@ -402,7 +439,8 @@ export class AccessibilityBridge {
       } else if (IS_MAC) {
         fg = await this.runMacScript('get-foreground-window.jxa');
       } else {
-        return null;
+        const active = await (await linuxAdapter()).getActiveWindow();
+        return active ? toLegacyWindow(active) : null;
       }
       if (!fg?.success) return null;
 
@@ -489,8 +527,22 @@ export class AccessibilityBridge {
         return null;
       }
     }
-    // Linux: not yet implemented (AT-SPI planned)
-    return null;
+    try {
+      const el = await (await linuxAdapter()).getFocusedElement();
+      if (!el) return null;
+      return {
+        name: el.name ?? '',
+        automationId: el.automationId ?? '',
+        controlType: el.controlType ?? '',
+        className: '',
+        processId: el.processId ?? 0,
+        isEnabled: el.enabled !== false,
+        bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+        value: el.value ?? '',
+      };
+    } catch {
+      return null;
+    }
   }
 
   // ── Clipboard ─────────────────────────────────────────────────────────────
