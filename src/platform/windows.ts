@@ -26,6 +26,7 @@ import {
 } from '@nut-tree-fork/nut-js';
 
 import { psRunner } from './ps-runner';
+import { sharpFromGrab } from './grab-image';
 import type {
   PlatformAdapter,
   ScreenSize,
@@ -246,7 +247,6 @@ export class WindowsAdapter implements PlatformAdapter {
     const img = await screen.grab();
     let srcWidth = img.width;
     let srcHeight = img.height;
-    let rgba = img.data as Buffer;
     // ReturnType<typeof sharp> instead of the `sharp.Sharp` namespace type:
     // sharp 0.35 reshaped its type exports and the default-import namespace
     // access (`sharp.Sharp`) stopped resolving. The instance type is exactly
@@ -264,15 +264,14 @@ export class WindowsAdapter implements PlatformAdapter {
         const top = Math.max(0, Math.round(target.bounds.y * r));
         const width = Math.max(1, Math.min(Math.round(target.bounds.width * r), img.width - left));
         const height = Math.max(1, Math.min(Math.round(target.bounds.height * r), img.height - top));
-        pipeline = sharp(rgba, { raw: { width: img.width, height: img.height, channels: 4 } })
-          .extract({ left, top, width, height });
+        pipeline = sharpFromGrab(img).extract({ left, top, width, height });
         srcWidth = width;
         srcHeight = height;
       } else {
-        pipeline = sharp(rgba, { raw: { width: srcWidth, height: srcHeight, channels: 4 } });
+        pipeline = sharpFromGrab(img);
       }
     } else {
-      pipeline = sharp(rgba, { raw: { width: srcWidth, height: srcHeight, channels: 4 } });
+      pipeline = sharpFromGrab(img);
     }
 
     let width = srcWidth;
@@ -300,9 +299,7 @@ export class WindowsAdapter implements PlatformAdapter {
     const rw = Math.min(w, img.width - rx);
     const rh = Math.min(h, img.height - ry);
 
-    const buffer = await sharp(img.data as Buffer, {
-      raw: { width: img.width, height: img.height, channels: 4 },
-    })
+    const buffer = await sharpFromGrab(img)
       .extract({ left: rx, top: ry, width: rw, height: rh })
       .png()
       .toBuffer();

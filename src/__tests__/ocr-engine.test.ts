@@ -21,11 +21,12 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn() },
   keyboard: { config: {}, type: vi.fn() },
   screen: {
-    grab: vi.fn().mockResolvedValue({
-      data: Buffer.alloc(4 * 100 * 100),   // 100×100 RGBA
+    // Fresh image per grab — the engine releases `data` after each capture.
+    grab: vi.fn(async () => ({
+      data: Buffer.alloc(4 * 100 * 100),   // 100×100 BGRA
       width: 100,
       height: 100,
-    }),
+    })),
   },
   Button: { LEFT: 0 },
   Key: new Proxy({}, { get: (_t, p) => p }),

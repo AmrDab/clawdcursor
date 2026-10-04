@@ -49,6 +49,32 @@ All notable changes to Clawd Cursor will be documented in this file.
   `cdp_connect`, and projected agent-loop tools say `navigate_browser` /
   `cdp_page_context` instead of `browser_navigate` / `browser_read` (this also
   corrects `read_screen`'s hint to `ocr_read_screen`).
+- **Screenshots had red and blue swapped on every OS that captures through
+  nut-js (Windows, Linux X11, macOS fallback).** nut-js returns BGR pixels and
+  every capture path handed them to the PNG encoder as RGB. A single shared
+  helper now reorders the channels, so screenshots, region captures, monitor
+  captures and the frames fed to OCR show true colours.
+
+- **Linux X11 screenshots were black, which also blinded OCR.** The 4th byte
+  of an X11 grab is 0, which the encoder read as "fully transparent". Screen
+  captures are now always opaque.
+
+- **The MCP server no longer crashes at startup on Wayland.** Without
+  XWayland it segfaulted ("Could not open main display"); with XWayland
+  (GNOME/KDE) it exited with an X11 BadMatch. Wayland sessions never touch
+  the X11 screen APIs any more: screenshots and OCR use `grim` when it is
+  installed (sway, Hyprland and other wlroots compositors) and otherwise
+  return a clear "needs grim" error, and screen size comes from
+  `swaymsg` / `wlr-randr` / `xrandr`.
+
+- **Wayland input on Ubuntu 24.04 / Debian (ydotool 0.1.8).** clawdcursor
+  spoke the ydotool 1.x syntax, which 0.1.8 either ignores while exiting 0
+  (mouse moves "succeeded" without moving) or misreads (key presses typed
+  digits, every click was a left click). The installed generation is now
+  detected once and 0.1.8 gets its own syntax; what 0.1.8 cannot do at all
+  (scroll, drag, holding keys) reports an honest error instead of typing
+  stray characters. On ydotool 1.x, scrolling now uses the real wheel
+  (`mousemove -w`) instead of a non-existent `scroll` command.
 
 ## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 
