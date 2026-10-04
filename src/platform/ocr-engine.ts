@@ -18,8 +18,9 @@ import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { screen } from '@nut-tree-fork/nut-js';
-import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
+import { sharpFromGrab, type GrabImage } from './grab-image';
+import { isWaylandSession, grimGrab } from './wayland-screen';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,15 +137,13 @@ export class OcrEngine {
 
     const start = Date.now();
     try {
-      // Capture full-resolution screenshot via nut-js
-      const img = await screen.grab();
+      // Capture full-resolution screenshot via nut-js (grim on Wayland)
+      const img = await this.grab();
       if (!this.cachedResult) {
         // Log image dimensions on first capture to diagnose coordinate space issues
         console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
       }
-      const pngBuffer = await sharp(img.data, {
-        raw: { width: img.width, height: img.height, channels: 4 },
-      }).png().toBuffer();
+      const pngBuffer = await sharpFromGrab(img).png().toBuffer();
       // Release the raw RGBA buffer immediately after processing
       (img as any).data = null;
 
@@ -184,7 +183,7 @@ export class OcrEngine {
 
     const start = Date.now();
     try {
-      const img = await screen.grab();
+      const img = await this.grab();
 
       // Clamp to screen bounds
       const rx = Math.max(0, Math.min(x, img.width - 1));
@@ -192,9 +191,7 @@ export class OcrEngine {
       const rw = Math.min(w, img.width - rx);
       const rh = Math.min(h, img.height - ry);
 
-      const pngBuffer = await sharp(img.data, {
-        raw: { width: img.width, height: img.height, channels: 4 },
-      })
+      const pngBuffer = await sharpFromGrab(img)
         .extract({ left: rx, top: ry, width: rw, height: rh })
         .png()
         .toBuffer();
@@ -225,6 +222,11 @@ export class OcrEngine {
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
+
+  /** Full-screen grab — grim on Wayland, where nut-js would crash the process (see wayland-screen.ts). */
+  private grab(): Promise<GrabImage> {
+    return isWaylandSession() ? grimGrab() : screen.grab();
+  }
 
   /**
    * Dispatch to the platform-specific OCR implementation.

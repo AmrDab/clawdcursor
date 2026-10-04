@@ -3,7 +3,7 @@
  *
  * Strategy:
  *   - Mouse + keyboard: nut-js directly (same approach as Windows).
- *   - Screenshot: nut-js screen.grab() → sharp for PNG encode / resize.
+ *   - Screenshot: nut-js screen.grab() (X11) or grim (Wayland) → sharp for PNG encode / resize.
  *   - Screen size: xrandr --query; HiDPI via GDK_SCALE / QT_SCALE_FACTOR env.
  *   - Windows: wmctrl -lG for listing; xdotool for active-window detection.
  *   - A11y: AT-SPI bridge not yet implemented — graceful empty returns.
@@ -17,7 +17,6 @@
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as path from 'path';
-import sharp from 'sharp';
 import {
   mouse,
   keyboard,
@@ -27,6 +26,8 @@ import {
   Key,
 } from '@nut-tree-fork/nut-js';
 import { WaylandBackend } from './wayland-backend';
+import { sharpFromGrab, type GrabImage } from './grab-image';
+import { detectLinuxEnvironment, waylandScreenSize, grimGrab } from './wayland-screen';
 import type {
   PlatformAdapter,
   ScreenSize,
@@ -189,15 +190,29 @@ export class LinuxAdapter implements PlatformAdapter {
     // Physical dimensions — nut-js screen.grab returns hardware pixels.
     let physicalWidth = logicalWidth;
     let physicalHeight = logicalHeight;
-    try {
-      const w = await nutScreen.width();
-      const h = await nutScreen.height();
-      if (w > 0 && h > 0) {
-        physicalWidth = w;
-        physicalHeight = h;
+    if (this.environment === 'wayland') {
+      // nut-js screen calls are fatal on Wayland (see wayland-screen.ts) —
+      // ask the compositor instead when XWayland's xrandr gave nothing.
+      if (!logicalWidth) {
+        const ws = await waylandScreenSize();
+        if (ws) {
+          logicalWidth = ws.logicalWidth;
+          logicalHeight = ws.logicalHeight;
+          physicalWidth = ws.physicalWidth;
+          physicalHeight = ws.physicalHeight;
+        }
       }
-    } catch {
-      /* nut-js unavailable — keep logical dims as physical */
+    } else {
+      try {
+        const w = await nutScreen.width();
+        const h = await nutScreen.height();
+        if (w > 0 && h > 0) {
+          physicalWidth = w;
+          physicalHeight = h;
+        }
+      } catch {
+        /* nut-js unavailable — keep logical dims as physical */
+      }
     }
 
     // If xrandr gave us nothing, assume physical == logical.
@@ -308,9 +323,7 @@ export class LinuxAdapter implements PlatformAdapter {
 
   async screenshot(opts?: { maxWidth?: number; displayIndex?: number }): Promise<ScreenshotResult> {
     const img = await this.grabScreen();
-    let pipeline = sharp(img.data, {
-      raw: { width: img.width, height: img.height, channels: 4 },
-    });
+    let pipeline = sharpFromGrab(img);
 
     let width = img.width;
     let height = img.height;
@@ -354,9 +367,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const top = Math.max(0, Math.min(y, img.height - 1));
       const width = Math.max(1, Math.min(w, img.width - left));
       const height = Math.max(1, Math.min(h, img.height - top));
-      const buffer = await sharp(img.data, {
-        raw: { width: img.width, height: img.height, channels: 4 },
-      })
+      const buffer = await sharpFromGrab(img)
         .extract({ left, top, width, height })
         .png()
         .toBuffer();
@@ -366,9 +377,13 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
-  private async grabScreen(): Promise<{ data: Buffer; width: number; height: number }> {
+  private async grabScreen(): Promise<GrabImage> {
+    // Wayland: nut-js would open X11 and die (see wayland-screen.ts); grim or an honest error.
+    if (this.environment === 'wayland') {
+      return await this.withTimeout(grimGrab(), SCREENSHOT_TIMEOUT_MS, 'grim');
+    }
     return await this.withTimeout(
-      nutScreen.grab() as unknown as Promise<{ data: Buffer; width: number; height: number }>,
+      nutScreen.grab() as unknown as Promise<GrabImage>,
       SCREENSHOT_TIMEOUT_MS,
       'nut-js screen.grab',
     );
@@ -1240,19 +1255,6 @@ export class LinuxAdapter implements PlatformAdapter {
   private delay(ms: number): Promise<void> {
     return new Promise(r => setTimeout(r, ms));
   }
-}
-
-/**
- * Detect Linux display server. Wayland reports itself via `XDG_SESSION_TYPE`
- * or `WAYLAND_DISPLAY`; everything else defaults to X11. `detect-once-at-init`
- * semantics — the compositor doesn't change mid-session.
- */
-function detectLinuxEnvironment(): 'wayland' | 'x11' {
-  const sessionType = (process.env.XDG_SESSION_TYPE || '').toLowerCase();
-  if (sessionType === 'wayland') return 'wayland';
-  if (sessionType === 'x11') return 'x11';
-  if (process.env.WAYLAND_DISPLAY) return 'wayland';
-  return 'x11';
 }
 
 // Named-key table — lowercase lookup, maps to nut-js Key enum.
