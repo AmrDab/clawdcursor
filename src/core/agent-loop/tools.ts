@@ -265,7 +265,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // fallback the el_NN path and smart_click already have). Live
         // regression 2026-10: `find` saw the Button, invoke reported "missed".
         if (!res.success && action === 'click') {
-          const fallback = await clickBoundsFallback(ctx, name, res.bounds);
+          const fallback = await clickBoundsFallback(ctx, name, res.bounds, processId);
           if (fallback) return fallback;
         }
         await sleep(150);
@@ -1958,6 +1958,7 @@ async function clickBoundsFallback(
   ctx: AgentToolContext,
   name: string,
   b: { x: number; y: number; width: number; height: number } | undefined,
+  processId?: number,
 ): Promise<{ success: true; text: string; targetLabel: string } | null> {
   if (!b) return null;
   const vals = [b.x, b.y, b.width, b.height];
@@ -1972,6 +1973,10 @@ async function clickBoundsFallback(
     : [{ x: 0, y: 0, w: ctx.screen.physicalWidth, h: ctx.screen.physicalHeight }];
   const onScreen = rects.some(r => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h);
   if (!onScreen) return null;
+  // A coordinate click hits whatever is on top. When the element was looked
+  // up in a named process (not the foreground window), raise that window
+  // first so the click can't land on a window covering it.
+  if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
   await ctx.platform.mouseClick(cx, cy);
   await sleep(150);
   return { success: true, text: `Clicked "${name}" via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };

@@ -152,6 +152,17 @@ describe('invoke_element — by-name bounds fallback when no pattern activates',
     expect(mouseClick).not.toHaveBeenCalled();
   });
 
+  it('raises the named process window before the coordinate click (never clicks a covering window)', async () => {
+    const { adapter, mouseClick } = makeBoundsAdapter({ x: 100, y: 200, width: 50, height: 20 });
+    const order: string[] = [];
+    (adapter as unknown as { focusWindow: unknown }).focusWindow = vi.fn(async () => { order.push('focus'); return true; });
+    mouseClick.mockImplementation(async () => { order.push('click'); });
+    const r = await findTool('invoke_element').execute({ name: 'Covered', processId: 4242 }, makeCtx(adapter));
+    expect(r.success).toBe(true);
+    expect(adapter.focusWindow).toHaveBeenCalledWith({ processId: 4242 });
+    expect(order).toEqual(['focus', 'click']);
+  });
+
   it('does not coordinate-click for an explicit non-activate verb (expand stays strict)', async () => {
     const { adapter, mouseClick } = makeBoundsAdapter({ x: 100, y: 200, width: 50, height: 20 });
     const r = await findTool('invoke_element').execute({ name: 'Node', action: 'expand' }, makeCtx(adapter));
