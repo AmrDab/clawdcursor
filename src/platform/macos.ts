@@ -529,7 +529,10 @@ export class MacOSAdapter implements PlatformAdapter {
       const result = JSON.parse(stdout);
       return {
         success: result?.success === true,
-        bounds: result?.bounds,
+        // A click() miss reports the element's rect / centre so the caller
+        // can coordinate-fallback (parity with the Windows adapter).
+        bounds: result?.bounds
+          ?? (result?.clickPoint ? { x: result.clickPoint.x, y: result.clickPoint.y, width: 1, height: 1 } : undefined),
         // get-value returns its payload at the TOP level ({success, action,
         // value, method}); consumers read res.data?.value — surface it
         // (review 2026-06-11; parity with the Windows adapter).

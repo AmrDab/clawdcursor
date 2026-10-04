@@ -26,6 +26,7 @@ import { buildUnifiedTools } from './tools';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
 import { captureSnapshot } from '../sense/snapshot';
 import { reactiveCheck } from '../sense/reactive-check';
+import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
 import { windowTextIncludes } from '../../tools/window-text';
 
@@ -195,6 +196,18 @@ export function buildBatchTool(): UnifiedTool {
           return halt(`batch halted at step ${i}: safety ${decision.decision} (${why}).`);
         }
 
+        // Layer C per step — the assertion-array `expect` lives in the step's
+        // args (same schema as the single-call tools); a step-level ARRAY
+        // `expect` is accepted as the same thing. Previously these were
+        // silently dropped inside a batch (audit finding B/H4). Validated
+        // BEFORE the step runs so a malformed one costs no action.
+        const assertionExpect = a.expect !== undefined ? a.expect : (Array.isArray(legacyExpect) ? legacyExpect : undefined);
+        const expectError = validateExpect(assertionExpect);
+        if (expectError) {
+          trace.push(`  ${i}. [error] ${label} — expect rejected (nothing executed)`);
+          return halt(`batch halted at step ${i} (${label}): expect rejected (nothing executed): ${expectError}`);
+        }
+
         let res: UnifiedToolResult;
         try { res = await tool.execute(a, { ...ctx, activeApp }); }
         catch (e) { res = { success: false, text: `threw: ${e instanceof Error ? e.message : String(e)}` }; }
@@ -213,11 +226,6 @@ export function buildBatchTool(): UnifiedTool {
           if (res.success || observedChange) ctx.uiMaps?.invalidate();
         }
 
-        // Layer C per step — the assertion-array `expect` lives in the step's
-        // args (same schema as the single-call tools); a step-level ARRAY
-        // `expect` is accepted as the same thing. Previously these were
-        // silently dropped inside a batch (audit finding B/H4).
-        const assertionExpect = a.expect !== undefined ? a.expect : (Array.isArray(legacyExpect) ? legacyExpect : undefined);
         const reactive = await reactiveCheck({
           expect: assertionExpect,
           toolText: res.text,

@@ -414,6 +414,37 @@ describe('runAgent — done(assertions) is a harness-executed completion gate', 
     expect(verifyStep.result.text).toContain('✓');
     expect(verifyStep.result.text).toContain('✗');
   });
+
+  it('a malformed `expect` is rejected BEFORE the tool runs (no double-act on retry)', async () => {
+    llmTurnQueue.push(turnCall('key', { combo: 'Escape', expect: 'window_title_contains:Identity' }));
+    llmTurnQueue.push(turnCall('give_up', { reason: 'stop' }));
+
+    const adapter = makeAdapter();
+    const result = await runAgent(
+      { task: 'bad expect', maxTurns: 10 },
+      { adapter, llm: LLM_CONFIG },
+    );
+
+    expect(result.steps[0].toolName).toBe('key');
+    expect(result.steps[0].result.success).toBe(false);
+    expect(result.steps[0].result.text).toMatch(/expect rejected \(nothing executed\)/);
+    expect(adapter.keyPress).not.toHaveBeenCalled();
+  });
+
+  it('a JSON-encoded array `expect` string is accepted and verified', async () => {
+    llmTurnQueue.push(turnCall('key', { combo: 'Escape', expect: '[{"type":"app_running","name":"notepad"}]' }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'pressed escape and verified notepad still runs' }));
+
+    const adapter = makeAdapter();
+    const result = await runAgent(
+      { task: 'string expect', maxTurns: 10 },
+      { adapter, llm: LLM_CONFIG },
+    );
+
+    expect(adapter.keyPress).toHaveBeenCalledTimes(1);
+    expect(result.steps[0].result.success).toBe(true);
+    expect(result.steps[0].result.text).toMatch(/verified 1 check/);
+  });
 });
 
 describe('runAgent — user abort (stop command) must be acknowledged', () => {

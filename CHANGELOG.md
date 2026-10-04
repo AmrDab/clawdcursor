@@ -2,6 +2,37 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`expect` is checked before the action runs, on every path.** A malformed
+  `expect` used to be rejected only AFTER the click/key had been sent, so a
+  retrying agent acted twice. The projected MCP handlers, the agent loop and
+  both batch executors now refuse with "expect rejected (nothing executed)"
+  and touch nothing. `expect` and `verify`/`done` `assertions` also accept the
+  JSON-encoded array string the compound schema already advertises for array
+  params (all OSes).
+- **`accessibility invoke` by name no longer misses an element `find` can see.**
+  When the element is found but exposes no invoke/toggle/select pattern, the
+  Windows and macOS bridges now surface its bounds and the by-name path falls
+  back to clicking the bounds centre — only when the rect is sane and on the
+  virtual screen (never INT_MIN, never offscreen) — reporting "via a11y bounds
+  (coordinate fallback)". Windows `invokeElement` also normalizes
+  `ControlType.Button` → `Button` like `findElements` does, instead of silently
+  dropping the role filter.
+- **Windows: unscoped `find` retries the window clawdcursor last focused.** An
+  unscoped search follows the live foreground window; when that is the MCP
+  host and the search is empty, it retries once against the window a prior
+  `window focus` targeted, and "(no elements found)" now says which window(s)
+  were searched.
+- **Windows: a PowerShell bridge command timeout restarts the bridge.** The
+  bridge protocol has no request ids; previously the next command was sent
+  while the bridge was still busy and the late reply resolved the WRONG call.
+- **macOS: `scripts/mac/find-element.jxa` is now UTF-8/LF** (it was committed
+  as UTF-16LE with CRLF). A test now asserts every bridge script is UTF-8
+  without a UTF-16 BOM and uses LF.
+
 ## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 
 Every bug here was hit driving clawdcursor for real to configure npm trusted

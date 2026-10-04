@@ -97,8 +97,15 @@ const FIELDS_BY_TYPE: Record<Assertion['type'], readonly string[]> = {
  * (never throws) so tool handlers can reject with a corrective message.
  */
 export function parseAssertions(raw: unknown): { assertions: Assertion[] } | { error: string } {
+  // The compound MCP surface publishes array params as JSON arrays, but hosts
+  // routinely deliver them as a JSON-encoded STRING (batch.steps already
+  // decodes that form). Accept it here too — rejecting a form the schema
+  // advertises made `expect` fail AFTER the action had run (live, 2026-10).
+  if (typeof raw === 'string' && raw.trimStart().startsWith('[')) {
+    try { raw = JSON.parse(raw); } catch { /* fall through to the array error */ }
+  }
   if (!Array.isArray(raw)) {
-    return { error: `assertions must be an array of {type, ...} objects (got ${typeof raw}). Valid types: ${Object.keys(FIELDS_BY_TYPE).join(', ')}.` };
+    return { error: `assertions must be an array of {type, ...} objects, or a JSON-encoded string of one (got ${typeof raw}). Valid types: ${Object.keys(FIELDS_BY_TYPE).join(', ')}.` };
   }
   if (raw.length === 0) {
     return { error: 'assertions array is empty — provide at least one machine-checkable proof.' };
@@ -125,6 +132,18 @@ export function parseAssertions(raw: unknown): { assertions: Assertion[] } | { e
     assertions.push(a as unknown as Assertion);
   }
   return { assertions };
+}
+
+/**
+ * Pre-flight for a tool call's `expect`: null when absent or well-formed,
+ * otherwise the parse error. Callers check this BEFORE acting so a malformed
+ * `expect` is refused with nothing executed — validating after the action
+ * meant a retrying agent double-clicked (live, 2026-10).
+ */
+export function validateExpect(expect: unknown): string | null {
+  if (expect === undefined || expect === null) return null;
+  const parsed = parseAssertions(expect);
+  return 'error' in parsed ? parsed.error : null;
 }
 
 // ─── Execution ───────────────────────────────────────────────────────────────

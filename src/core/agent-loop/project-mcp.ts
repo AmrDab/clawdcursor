@@ -29,6 +29,7 @@ import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../../tools/types';
 import { TOOL_META } from './tool-meta';
 import { reactiveCheck } from '../sense/reactive-check';
+import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
 
 // Lazy OCR singleton for ocr_contains assertions in MCP-route expect checks.
@@ -227,6 +228,10 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     params: Record<string, unknown>,
     ctx: ToolContext,
   ): Promise<ToolResult> => {
+    // Validate `expect` BEFORE acting: a malformed one must not cost a click
+    // (the agent would retry and double-act — live regression 2026-10).
+    const expectError = validateExpect(params.expect);
+    if (expectError) return { text: `expect rejected (nothing executed): ${expectError}`, isError: true };
     const agentCtx = await toolContextToAgent(ctx);
     let result = await t.execute(params, agentCtx);
     const executed = result.success;

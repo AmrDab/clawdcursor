@@ -50,6 +50,22 @@ function makeAdapter(succeedsFor: InvokeAction[]) {
   return { adapter, attempts, invokeElement };
 }
 
+/** Adapter whose invokeElement always MISSES the pattern but reports the found
+ *  element's bounds (what the Windows/macOS bridges return when an element is
+ *  found but exposes no invoke/toggle/select pattern). */
+function makeBoundsAdapter(bounds: { x: number; y: number; width: number; height: number } | undefined) {
+  const mouseClick = vi.fn(async () => {});
+  const invokeElement = vi.fn(async () => ({ success: false, bounds }));
+  const adapter = {
+    invokeElement, mouseClick,
+    getActiveWindow: vi.fn(async () => null),
+    listDisplays: vi.fn(async () => [
+      { index: 0, label: 'Display 1', primary: true, bounds: { x: 0, y: 0, width: 1920, height: 1080 }, physicalSize: { width: 1920, height: 1080 }, dpiRatio: 1 },
+    ]),
+  } as unknown as PlatformAdapter;
+  return { adapter, mouseClick, invokeElement };
+}
+
 function makeCtx(adapter: PlatformAdapter): AgentToolContext {
   return {
     platform: adapter,
@@ -101,5 +117,45 @@ describe('invoke_element — OS-agnostic activation cascade', () => {
     const { adapter, attempts } = makeAdapter([]);
     await findTool('invoke_element').execute({ name: 'Field', action: 'get-value' }, makeCtx(adapter));
     expect(attempts).toEqual(['get-value']);
+  });
+});
+
+/**
+ * Live regression (Windows 11 / Edge, 2026-10): `invoke name:"Switch client
+ * type, Organizations"` reported "missed — element not found or not
+ * actionable" while `find` returned that very Button and smart_click
+ * succeeded "via a11y bounds (coordinate fallback)". The bridge FOUND the
+ * element (no invoke/toggle/select pattern) and handed back its centre; the
+ * by-name path threw that away. It must fall back to clicking the bounds
+ * centre — but only when the bounds are sane and on-screen.
+ */
+describe('invoke_element — by-name bounds fallback when no pattern activates', () => {
+  it('clicks the bounds centre and reports the coordinate fallback', async () => {
+    const { adapter, mouseClick } = makeBoundsAdapter({ x: 100, y: 200, width: 50, height: 20 });
+    const r = await findTool('invoke_element').execute({ name: 'Switch client type, Organizations' }, makeCtx(adapter));
+    expect(r.success).toBe(true);
+    expect(mouseClick).toHaveBeenCalledWith(125, 210);
+    expect(r.text).toMatch(/via a11y bounds \(coordinate fallback/);
+  });
+
+  it('never clicks INT_MIN / degenerate bounds (UIA "no rectangle" sentinel)', async () => {
+    const { adapter, mouseClick } = makeBoundsAdapter({ x: -2147483648, y: -2147483648, width: 0, height: 0 });
+    const r = await findTool('invoke_element').execute({ name: 'Ghost' }, makeCtx(adapter));
+    expect(r.success).toBe(false);
+    expect(mouseClick).not.toHaveBeenCalled();
+  });
+
+  it('never clicks bounds whose centre is outside the virtual screen', async () => {
+    const { adapter, mouseClick } = makeBoundsAdapter({ x: 5000, y: 200, width: 50, height: 20 });
+    const r = await findTool('invoke_element').execute({ name: 'Offscreen' }, makeCtx(adapter));
+    expect(r.success).toBe(false);
+    expect(mouseClick).not.toHaveBeenCalled();
+  });
+
+  it('does not coordinate-click for an explicit non-activate verb (expand stays strict)', async () => {
+    const { adapter, mouseClick } = makeBoundsAdapter({ x: 100, y: 200, width: 50, height: 20 });
+    const r = await findTool('invoke_element').execute({ name: 'Node', action: 'expand' }, makeCtx(adapter));
+    expect(r.success).toBe(false);
+    expect(mouseClick).not.toHaveBeenCalled();
   });
 });

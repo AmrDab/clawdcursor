@@ -461,7 +461,13 @@ export function getA11yTools(): ToolDefinition[] {
           lines.push(...cdpHits.map(formatElement));
           return { text: lines.join('\n') };
         }
-        return { text: '(no elements found)' };
+        // Say which window(s) were searched — an unscoped query follows the
+        // live foreground window, which may not be the app the agent meant.
+        const scopes = ctx.platform?.lastFindScope ?? [];
+        const searched = scopes
+          .filter(s => s.processId !== undefined)
+          .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` "${s.title}"` : ''}`);
+        return { text: searched.length ? `(no elements found)\nsearched: ${searched.join(', ')} — pass processId to target another window` : '(no elements found)' };
       },
     },
 

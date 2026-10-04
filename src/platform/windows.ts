@@ -87,6 +87,11 @@ export class WindowsAdapter implements PlatformAdapter {
 
   private screenSize: ScreenSize | null = null;
 
+  /** Window clawdcursor most recently focused via focusWindow — the retry
+   *  scope for an unscoped findElements when the live foreground is empty. */
+  private lastFocused: { processId: number; processName?: string; title?: string } | null = null;
+  lastFindScope: PlatformAdapter['lastFindScope'] = null;
+
   // Cached physical/logical ratio, populated by getScreenSize(). nut-js mouse
   // input and the (DPI-unaware) WindowFromPoint bridge both live in LOGICAL
   // space on Windows, but callers hand us PHYSICAL coords (a11y/OCR/screenshot).
@@ -370,6 +375,10 @@ export class WindowsAdapter implements PlatformAdapter {
       // "a11y-focused" and "will receive global SendInput keystrokes".
       if (result?.success !== true) return false;
       if (result?.foreground === false) return false;
+      const focusedPid = typeof result.processId === 'number' ? result.processId : processId;
+      if (focusedPid !== undefined) {
+        this.lastFocused = { processId: focusedPid, processName: query.processName, title: typeof result.title === 'string' ? result.title : title };
+      }
       return true;
     } catch {
       return false;
@@ -610,23 +619,38 @@ export class WindowsAdapter implements PlatformAdapter {
     const ct = normalizeControlType(query.controlType);
     if (ct === null) return [];
 
-    let processId = query.processId;
-    if (processId === undefined) {
+    // Scopes tried, in order. An unscoped query searches the LIVE foreground
+    // window; if that is empty and clawdcursor itself focused a different
+    // window moments ago (the MCP host can be foreground at call time), retry
+    // once against that window. Recorded on `lastFindScope` so a miss can say
+    // where it looked (live 2026-10: "(no elements found)" right after a
+    // successful `window focus`, found fine with an explicit processId).
+    const scopes: NonNullable<PlatformAdapter['lastFindScope']> = [];
+    if (query.processId !== undefined) {
+      scopes.push({ processId: query.processId });
+    } else {
       const fg = await this.getActiveWindow();
-      if (fg?.processId) processId = fg.processId;
+      if (fg?.processId) scopes.push({ processId: fg.processId, processName: fg.processName, title: fg.title });
+      if (this.lastFocused && this.lastFocused.processId !== fg?.processId) scopes.push(this.lastFocused);
     }
-    try {
-      const result = await psRunner.run({
-        cmd: 'find-element',
-        ...(query.name !== undefined ? { name: query.name } : {}),
-        ...(ct !== undefined ? { controlType: ct } : {}),
-        ...(processId !== undefined ? { processId } : {}),
-      }) as any;
-      const raw = Array.isArray(result) ? result : [];
-      return raw.map(this.normalizeElement);
-    } catch {
-      return [];
+    if (scopes.length === 0) scopes.push({});
+    this.lastFindScope = scopes;
+
+    for (const scope of scopes) {
+      try {
+        const result = await psRunner.run({
+          cmd: 'find-element',
+          ...(query.name !== undefined ? { name: query.name } : {}),
+          ...(ct !== undefined ? { controlType: ct } : {}),
+          ...(scope.processId !== undefined ? { processId: scope.processId } : {}),
+        }) as any;
+        const raw = Array.isArray(result) ? result : [];
+        if (raw.length > 0) return raw.map(this.normalizeElement);
+      } catch {
+        return [];
+      }
     }
+    return [];
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
@@ -656,6 +680,12 @@ export class WindowsAdapter implements PlatformAdapter {
     //   2. Fall back to find-element scan if the foreground window has no match.
     // Without this, find-element ran from the desktop root and could miss
     // deeply-nested targets due to the PSBridge 20-result cap.
+    // Same controlType contract as findElements: bare name for the bridge,
+    // fail closed on one it cannot honor (a raw "ControlType.Button" silently
+    // dropped the role filter — live 2026-10).
+    const ct = normalizeControlType(query.controlType);
+    if (ct === null) return { success: false };
+
     let processId = query.processId;
     if (processId === undefined && query.name) {
       const fg = await this.getActiveWindow();
@@ -664,7 +694,7 @@ export class WindowsAdapter implements PlatformAdapter {
       } else {
         const candidates = await this.findElements({
           name: query.name,
-          controlType: query.controlType,
+          controlType: ct,
         });
         if (candidates.length === 0) return { success: false };
         processId = (candidates[0] as any).processId
@@ -687,12 +717,17 @@ export class WindowsAdapter implements PlatformAdapter {
         processId,
         action: query.action ?? 'click',
         ...(query.name !== undefined ? { name: query.name } : {}),
-        ...(query.controlType !== undefined ? { controlType: query.controlType } : {}),
+        ...(ct !== undefined ? { controlType: ct } : {}),
         ...(query.value !== undefined ? { value: query.value } : {}),
       }) as any;
       return {
         success: result?.success === true,
-        bounds: result?.bounds,
+        // On a "found but no invoke/toggle/select pattern" miss the bridge
+        // hands back the element's rect (and its centre as clickPoint) so the
+        // caller can coordinate-fallback; dropping it made invoke miss an
+        // element `find` could see (live 2026-10).
+        bounds: result?.bounds
+          ?? (result?.clickPoint ? { x: result.clickPoint.x, y: result.clickPoint.y, width: 1, height: 1 } : undefined),
         // The bridge returns get-value's payload at the TOP level
         // ({success, action, value, method}), not nested under .data — but
         // every consumer reads res.data?.value. Surface it so a11y_get_value /

@@ -211,6 +211,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
               refUsed = refLadder[i];
               refRes = await ctx.platform.invokeElement({ name: plan.name, action: refUsed });
             }
+            if (!refRes.success) {
+              const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
+              if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
+            }
             await sleep(150);
             return { success: refRes.success, text: refRes.success ? `Invoked "${plan.name}" via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
           }
@@ -256,6 +260,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
         for (let i = 1; i < ladder.length && !res.success; i++) {
           used = ladder[i];
           res = await ctx.platform.invokeElement({ name, controlType, processId, action: used, value });
+        }
+        // Found but no pattern took: click the surfaced bounds centre (same
+        // fallback the el_NN path and smart_click already have). Live
+        // regression 2026-10: `find` saw the Button, invoke reported "missed".
+        if (!res.success && action === 'click') {
+          const fallback = await clickBoundsFallback(ctx, name, res.bounds);
+          if (fallback) return fallback;
         }
         await sleep(150);
         return {
@@ -1930,6 +1941,39 @@ async function resolveAgentPid(
   } catch {
     return undefined;
   }
+}
+
+/** UIA's "no rectangle" sentinel (System.Windows.Rect.Empty → int). */
+const RECT_INT_MIN = -2147483648;
+
+/**
+ * Coordinate fallback for the activate intent when the element was FOUND
+ * but exposes no invoke/toggle/select pattern: click the centre of the
+ * bounds the adapter surfaced — but ONLY when they are sane (finite,
+ * non-degenerate, not INT_MIN) and the centre lies on the virtual screen.
+ * Never click an offscreen coordinate. Returns null when no safe click exists.
+ */
+async function clickBoundsFallback(
+  ctx: AgentToolContext,
+  name: string,
+  b: { x: number; y: number; width: number; height: number } | undefined,
+): Promise<{ success: true; text: string; targetLabel: string } | null> {
+  if (!b) return null;
+  const vals = [b.x, b.y, b.width, b.height];
+  if (!vals.every(Number.isFinite) || b.width <= 0 || b.height <= 0 || b.x === RECT_INT_MIN || b.y === RECT_INT_MIN) return null;
+  const cx = Math.round(b.x + b.width / 2);
+  const cy = Math.round(b.y + b.height / 2);
+  // Virtual screen = union of displays (logical, and scaled to physical since
+  // a11y rects are physical on Windows); fall back to the primary display.
+  const displays = await ctx.platform.listDisplays().catch(() => []);
+  const rects = displays.length
+    ? displays.flatMap(d => [1, d.dpiRatio || 1].map(r => ({ x: d.bounds.x * r, y: d.bounds.y * r, w: d.bounds.width * r, h: d.bounds.height * r })))
+    : [{ x: 0, y: 0, w: ctx.screen.physicalWidth, h: ctx.screen.physicalHeight }];
+  const onScreen = rects.some(r => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h);
+  if (!onScreen) return null;
+  await ctx.platform.mouseClick(cx, cy);
+  await sleep(150);
+  return { success: true, text: `Clicked "${name}" via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
 }
 
 function buildWinQuery(args: Record<string, unknown>): { processName?: string; processId?: number; title?: string } | undefined {
