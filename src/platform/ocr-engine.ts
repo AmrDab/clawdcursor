@@ -18,6 +18,7 @@ import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { screen } from '@nut-tree-fork/nut-js';
+import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, grimGrab } from './wayland-screen';
@@ -32,6 +33,7 @@ const CACHE_TTL_MS = 300;
 const OCR_TIMEOUT = 15000;   // 15s — WinRT assembly load + recognition
 const MAC_OCR_TIMEOUT = 20000; // 20s — Swift compilation on first run
 const LINUX_OCR_TIMEOUT = 30000; // 30s — Tesseract can be slow on large images
+const LINUX_OCR_UPSCALE = 2;      // Tesseract needs UI text larger than native size
 const MAX_BUFFER = 4 * 1024 * 1024; // 4MB — large screens with dense text
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -342,13 +344,24 @@ export class OcrEngine {
    * The script outputs a single JSON line with { elements, fullText }.
    */
   private async runLinuxOcr(imagePath: string): Promise<OcrResult> {
-    const { stdout } = await execFileAsync('python3', [
-      LINUX_OCR_SCRIPT,
-      imagePath,
-    ], {
-      timeout: LINUX_OCR_TIMEOUT,
-      maxBuffer: MAX_BUFFER,
-    });
+    // Tesseract misses small UI labels at native size (it found no text at
+    // all on a 1080p desktop). Upscale 2x; the script divides the boxes back.
+    const scaledPath = imagePath.replace(/\.png$/i, '') + '-2x.png';
+    let stdout: string;
+    try {
+      const meta = await sharp(imagePath).metadata();
+      await sharp(imagePath).resize((meta.width ?? 0) * LINUX_OCR_UPSCALE, null, { kernel: 'lanczos3' }).toFile(scaledPath);
+      ({ stdout } = await execFileAsync('python3', [
+        LINUX_OCR_SCRIPT,
+        scaledPath,
+        String(LINUX_OCR_UPSCALE),
+      ], {
+        timeout: LINUX_OCR_TIMEOUT,
+        maxBuffer: MAX_BUFFER,
+      }));
+    } finally {
+      try { fs.unlinkSync(scaledPath); } catch { /* non-fatal */ }
+    }
 
     const trimmed = stdout.trim();
     if (!trimmed) {

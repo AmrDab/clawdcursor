@@ -38,6 +38,16 @@ TSV = (
     "5\t1\t1\t1\t2\t2\t60\t50\t40\t15\t-1\t\n"
 )
 OUT['ocr'] = ocr.parse_tsv(TSV)
+# The caller OCRs a 2x-upscaled capture and passes the factor back.
+OUT['ocr_scaled'] = ocr.parse_tsv(TSV, 2.0)
+# Sparse mode: separate blocks each restart line_num at 1.
+SPARSE = (
+    "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+    "5\t1\t1\t1\t1\t1\t10\t20\t50\t15\t90\tSubmit\n"
+    "5\t1\t2\t1\t1\t1\t10\t80\t50\t15\t90\tCancel\n"
+)
+OUT['ocr_sparse'] = ocr.parse_tsv(SPARSE)
+OUT['ocr_psm'] = ocr.PSM
 
 
 # ── AT-SPI bridge with a fake Atspi ──────────────────────────────────────

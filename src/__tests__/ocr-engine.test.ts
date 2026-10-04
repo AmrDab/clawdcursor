@@ -41,6 +41,9 @@ vi.mock('sharp', () => ({
     png: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
     toBuffer: vi.fn().mockResolvedValue(Buffer.from('fake-png')),
+    // Linux OCR upscales the capture before tesseract.
+    metadata: vi.fn().mockResolvedValue({ width: 100, height: 100 }),
+    toFile: vi.fn().mockResolvedValue({}),
   })),
 }));
 

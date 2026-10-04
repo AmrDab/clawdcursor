@@ -53,6 +53,14 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(ocr.fullText).toBe('Hello World\nTest');
   });
 
+  // Live (Ubuntu 24.04 VM): default page segmentation found NO text on a 1080p
+  // desktop; sparse mode on a 2x upscale read every label.
+  it('OCR uses sparse-text mode and maps upscaled boxes back to screen pixels', () => {
+    expect(out.ocr_psm).toBe('11');
+    expect(out.ocr_scaled.elements[0]).toMatchObject({ x: 5, y: 10, width: 25, height: 8 });
+    expect(out.ocr_sparse.fullText).toBe('Submit\nCancel');
+  });
+
   // ── L7 (bridge side) ──
   it('find with --process-id searches only that application', () => {
     expect(out.find_scoped.elements.map((e: any) => e.processId)).toEqual([4242]);
