@@ -259,10 +259,15 @@ export class NativeDesktop extends EventEmitter {
         } catch { /* non-fatal — dpiRatio stays 1 */ }
       } else if (process.platform === 'linux') {
         try {
-          // Check common DE scale environment variables first
+          // Check common DE scale environment variables first — Wayland only.
+          // On X11 the pointer space IS physical pixels (xdotool / XTest /
+          // nut-js), so GDK_SCALE=2 on a 1920x1080 X server made
+          // physicalToMouse halve every click. Mirrors LinuxAdapter.
+          const onWayland = (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland'
+            || (!process.env.XDG_SESSION_TYPE && !!process.env.WAYLAND_DISPLAY);
           const gdkScale = parseInt(process.env.GDK_SCALE || '1');
           const qtScale = parseFloat(process.env.QT_SCALE_FACTOR || '1');
-          const envScale = Math.max(gdkScale, qtScale);
+          const envScale = onWayland ? Math.max(gdkScale, qtScale) : 1;
           if (envScale > 1) {
             this.dpiRatio = envScale;
           } else {

@@ -20,6 +20,59 @@ import sys
 import os
 import shutil
 
+def parse_conf(raw):
+    """Tesseract 4 prints integer confidences, tesseract 5 prints floats
+    ("81.879456"); -1 marks non-word rows. int() on a float string raised
+    ValueError and killed the whole OCR call on current distros."""
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return -1.0
+
+
+def parse_tsv(tsv_text):
+    """Parse `tesseract ... tsv` output into the shared {elements, fullText} shape."""
+    elements = []
+    lines_text = []
+    current_line = -1
+
+    for line in tsv_text.strip().split('\n')[1:]:  # skip header
+        parts = line.split('\t')
+        if len(parts) < 12:
+            continue
+
+        level, page, block, par, line_num, word_num = parts[:6]
+        left, top, width, height = parts[6:10]
+        conf = parse_conf(parts[10])
+        text = parts[11].strip() if len(parts) > 11 else ''
+
+        if not text or conf < 0:
+            continue
+
+        line_idx = int(line_num)
+        if line_idx != current_line:
+            current_line = line_idx
+            lines_text.append(text)
+        else:
+            if lines_text:
+                lines_text[-1] += ' ' + text
+
+        elements.append({
+            "text": text,
+            "x": int(left),
+            "y": int(top),
+            "width": int(width),
+            "height": int(height),
+            "confidence": round(conf / 100, 2),
+            "line": line_idx
+        })
+
+    return {
+        "elements": elements,
+        "fullText": '\n'.join(lines_text)
+    }
+
+
 def ocr_with_tesseract_cli(image_path):
     """Use tesseract CLI with TSV output for bounding boxes."""
     try:
@@ -30,48 +83,7 @@ def ocr_with_tesseract_cli(image_path):
         if result.returncode != 0:
             return {"error": f"tesseract failed: {result.stderr.strip()}"}
 
-        elements = []
-        lines_text = []
-        current_line = -1
-
-        for line in result.stdout.strip().split('\n')[1:]:  # skip header
-            parts = line.split('\t')
-            if len(parts) < 12:
-                continue
-
-            level, page, block, par, line_num, word_num = parts[:6]
-            left, top, width, height = parts[6:10]
-            conf = parts[10]
-            text = parts[11].strip() if len(parts) > 11 else ''
-
-            if not text or conf == '-1':
-                continue
-
-            line_idx = int(line_num)
-            if line_idx != current_line:
-                current_line = line_idx
-                if text:
-                    lines_text.append(text)
-                else:
-                    lines_text.append('')
-            else:
-                if lines_text:
-                    lines_text[-1] += ' ' + text
-
-            elements.append({
-                "text": text,
-                "x": int(left),
-                "y": int(top),
-                "width": int(width),
-                "height": int(height),
-                "confidence": round(max(0, int(conf)) / 100, 2),
-                "line": line_idx
-            })
-
-        return {
-            "elements": elements,
-            "fullText": '\n'.join(lines_text)
-        }
+        return parse_tsv(result.stdout)
     except FileNotFoundError:
         return {"error": "tesseract not found. Install: sudo apt install tesseract-ocr"}
     except subprocess.TimeoutExpired:
@@ -95,7 +107,7 @@ def ocr_with_pytesseract(image_path):
 
         for i in range(len(data['text'])):
             text = data['text'][i].strip()
-            conf = int(data['conf'][i])
+            conf = parse_conf(data['conf'][i])
 
             if not text or conf < 0:
                 continue

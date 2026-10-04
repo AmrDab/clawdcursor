@@ -53,6 +53,17 @@ export interface OcrResult {
 
 const EMPTY_RESULT: OcrResult = Object.freeze({ elements: [], fullText: '', durationMs: 0 });
 
+/**
+ * True when the failure means the OCR engine itself is absent: the runner
+ * binary could not be spawned (ENOENT), or the script reported it could not
+ * find / load an engine ("tesseract not found", "Windows OCR engine not
+ * available - no recognized languages installed", "No OCR available").
+ */
+function isEngineMissing(err: any): boolean {
+  if (err?.code === 'ENOENT') return true;
+  return /\bnot (found|available|installed)\b/i.test(String(err?.message ?? ''));
+}
+
 // ─── OcrEngine ────────────────────────────────────────────────────────────────
 
 export class OcrEngine {
@@ -166,8 +177,12 @@ export class OcrEngine {
       }
     } catch (err: any) {
       console.error(`[OCR] recognizeScreen failed: ${err?.message}`);
-      // If first call ever fails, mark unavailable so pipeline degrades to vision LLM
-      if (this.cachedResult === null) {
+      // If the first call ever fails because the ENGINE is missing (no
+      // binary, no language pack), mark unavailable so the pipeline degrades
+      // to vision. A transient failure (script parse error, timeout, bad
+      // frame) must NOT latch — on Linux a one-off tesseract TSV parse error
+      // used to make every later call return "OCR is not available" forever.
+      if (this.cachedResult === null && isEngineMissing(err)) {
         this.available = false;
       }
       return { ...EMPTY_RESULT, durationMs: Date.now() - start };
