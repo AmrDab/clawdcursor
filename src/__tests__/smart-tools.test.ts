@@ -259,6 +259,31 @@ describe('Smart Tools', () => {
       }
     });
 
+    it('a repeated word cannot stand in for a missing one (live regression: "Row 50" clicked "Row Row")', async () => {
+      // Live Ubuntu VM run 2026-10: smart_click("Row 50") on a list scrolled
+      // to rows 01-17 matched two adjacent "Row" tokens. Token overlap counted
+      // the duplicate twice — 2/2 coverage, 0.85 — and clicked the wrong row.
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      (OcrEngine.prototype as any).recognizeScreen = async () => ({
+        elements: [
+          { text: 'Row', x: 444, y: 126, width: 26, height: 10, line: 1, confidence: 0.97 },
+          { text: 'Row', x: 474, y: 126, width: 26, height: 10, line: 1, confidence: 0.97 },
+        ],
+        fullText: 'Row Row',
+        durationMs: 100,
+      });
+      try {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const ctx = createCtx();
+        const result = await smartClick.handler({ target: 'Row 50' }, ctx);
+        expect(result.isError).toBe(true);
+        expect(mockMouseClick).not.toHaveBeenCalled();
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
+    });
+
     // ── Issue #101: structured failure payloads ──
 
     it('successful click still returns plain human-readable text (not JSON)', async () => {

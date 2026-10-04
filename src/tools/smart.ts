@@ -331,8 +331,13 @@ export function getSmartTools(): ToolDefinition[] {
                   // Token-overlap fallback (handles transposed / partial matches)
                   const phraseWords = phrase.split(' ').filter(Boolean);
                   if (!phraseWords.length) return 0;
-                  const overlap = phraseWords.filter(w => targetWordSet.has(w)).length;
-                  const cov = overlap / targetWords.length;
+                  // Coverage counts DISTINCT target words present. Counting
+                  // phrase tokens let a repeat stand in for a missing word:
+                  // "Row Row" covered 2/2 of "Row 50" and the wrong row was
+                  // clicked (live, 2026-10).
+                  const phraseWordSet = new Set(phraseWords);
+                  const overlap = [...targetWordSet].filter(w => phraseWordSet.has(w)).length;
+                  const cov = overlap / targetWordSet.size;
                   if (cov >= 1) raw = 0.85;
                   else if (cov >= 0.5) raw = 0.5 * cov;
                   else return 0;
