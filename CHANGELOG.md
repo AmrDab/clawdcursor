@@ -9,6 +9,14 @@ publishing during the v1.5.10 release — none are hypothetical.
 
 ### Security
 
+- **macOS: unknown key and modifier names are refused.** `keyPress` builds an
+  AppleScript program from the key combo, and a key name outside the known
+  table (or an unknown modifier) was inserted without escaping. They now throw
+  `Unknown key` / `Unknown modifier` before osascript runs, matching the Windows
+  adapter, and the numbers interpolated into window scripts (process id,
+  position, size) are coerced to integers. Valid combos emit exactly the same
+  AppleScript as before.
+
 - **The compound surface silently dropped arguments it advertised.**
   `buildCompoundSchema` unions every route delegate's parameters into one flat
   schema, so a parameter only ONE action implements is advertised on the WHOLE
