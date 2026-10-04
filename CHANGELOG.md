@@ -128,9 +128,28 @@ apps, at-spi2, tesseract 5) and scored against the apps' own logs.
   `controlType` filter now matches the normalized role, elements scrolled out
   of view (INT_MIN extents) are reported offscreen instead of at
   `-2147483648,-2147483648`, an empty or partial state set no longer marks a
-  widget disabled (GTK4), libatspi's client cache is bypassed so states are
-  read live, and window-relative extents (GTK4 on X11 answers zeros for screen
-  coordinates) are offset by the window origin when the bridge reports them.
+  widget disabled (GTK4), and window-relative extents (GTK4 on X11 answers
+  zeros for screen coordinates) are offset by the window origin when the
+  bridge reports them. (libatspi's client cache stays on: disabling it made a
+  single `find` on a real GTK3 app run past 30 s.)
+- **OCR found no text on a Linux desktop.** Tesseract's default page mode is
+  built for prose and read nothing from a 1080p screen of small UI labels.
+  Linux OCR now runs sparse-text mode on a 2x-upscaled capture and maps the
+  boxes back to screen pixels — every button label in the test app was read.
+
+### Fixed (all platforms)
+
+- **Hint rewriting corrupted JSON results.** Rewriting tool names in results
+  to the caller's surface inserted raw double quotes into JSON, so every
+  `system ocr` response failed to parse; it would also have edited tool names
+  appearing in page text, files or the clipboard. JSON results and
+  `<untrusted-screen-content>` blocks are now never rewritten.
+- **`smart_click` could click the wrong item on a repeated OCR word.** Token
+  coverage counted repeats, so "Row Row" matched "Row 50" and the wrong list
+  row was clicked. Coverage now counts distinct target words.
+- **The invoke-by-name coordinate fallback raises the target window first**
+  when the lookup was scoped to a process, so the click can't land on a
+  window covering the element.
 
 ## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 
