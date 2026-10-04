@@ -193,6 +193,7 @@ const ACTION_MAP: ActionRoute[] = [
   { compound: 'browser', action: 'list_tabs',      delegate: 'cdp_list_tabs' },
   { compound: 'browser', action: 'switch_tab',     delegate: 'cdp_switch_tab' },
   { compound: 'browser', action: 'scroll',         delegate: 'cdp_scroll' },
+  { compound: 'browser', action: 'navigate',       delegate: 'navigate_browser' },
   // task — special: instruction→task remap, single pseudo-action
   { compound: 'task', action: '__task__', delegate: 'delegate_to_agent', argRemap: { instruction: 'task' } },
 ];

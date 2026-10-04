@@ -4,11 +4,8 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import * as path from 'path';
-import * as fs from 'fs';
-import * as os from 'os';
 import type { ToolDefinition } from './types';
-import { DEFAULT_CDP_PORT } from '../llm/browser-config';
+import { agentBrowserConnectOptions } from '../llm/browser-config';
 import { resolveAlias } from '../core/router/aliases';
 
 const execFileAsync = promisify(execFile);
@@ -275,7 +272,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
 
     {
       name: 'navigate_browser',
-      description: `Open a URL in the browser. Launches with CDP enabled (port ${DEFAULT_CDP_PORT}) for DOM interaction. Call cdp_connect after. Tier 2 (mutation): triggers network egress to an arbitrary destination + spawns/attaches to a browser process.`,
+      description: 'Open a URL in the agent\'s CDP browser for DOM interaction — attaches to the browser already on the debug port or launches a dedicated agent-owned instance, then navigates. cdp_page_context / cdp_click / cdp_type work on that page directly. Tier 2 (mutation): triggers network egress to an arbitrary destination + spawns/attaches to a browser process.',
       parameters: {
         url: { type: 'string', description: 'URL to navigate to', required: true },
       },
@@ -284,67 +281,23 @@ export function getOrchestrationTools(): ToolDefinition[] {
       safetyTier: 2,
       handler: async ({ url }, ctx) => {
         await ctx.ensureInitialized();
-        if (await ctx.cdp.isConnected()) {
-          try {
-            const page = ctx.cdp.getPage();
-            if (page) {
-              await page.goto(url, { timeout: 30000, waitUntil: 'domcontentloaded' });
-              const title = await page.title().catch(() => '(loading)');
-              return { text: `Navigated to: "${title}" at ${url}` };
-            }
-          } catch { /* fall through */ }
-        }
-        try {
-          const userDataDir = path.join(os.tmpdir(), 'clawdcursor-edge');
-          if (process.platform === 'win32') {
-            // Direct exec instead of `powershell -Command "Start-Process …"`:
-            // the previous form interpolated `url` into a PowerShell string,
-            // letting a crafted URL (`")` / `$()` / backtick) escape the
-            // quoting and run arbitrary code. execFile with argv is safe.
-            // Edge installs in well-known locations; fall back to the one
-            // that exists. `where.exe msedge` would also work but adds an
-            // extra spawn for the common case.
-            const edgeCandidates = [
-              path.join(process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-              path.join(process.env['ProgramFiles'] || 'C:\\Program Files', 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-            ];
-            const edgeExe = edgeCandidates.find(p => { try { return fs.existsSync(p); } catch { return false; } });
-            if (!edgeExe) {
-              throw new Error('msedge.exe not found in standard install locations');
-            }
-            await execFileAsync(edgeExe, [
-              `--remote-debugging-port=${DEFAULT_CDP_PORT}`,
-              `--user-data-dir=${userDataDir}`,
-              '--no-first-run',
-              '--disable-default-apps',
-              url,
-            ], { timeout: 10000 });
-          } else if (process.platform === 'darwin') {
-            await execFileAsync('open', ['-a', 'Google Chrome', '--args',
-              `--remote-debugging-port=${DEFAULT_CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url
-            ], { timeout: 10000 });
-          } else {
-            // Linux: try common browser binaries in order.
-            const browserCandidates = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'microsoft-edge'];
-            let launched = false;
-            for (const browserCmd of browserCandidates) {
-              if (!(await commandExists(browserCmd))) continue;
-              await execFileAsync(browserCmd, [
-                `--remote-debugging-port=${DEFAULT_CDP_PORT}`, `--user-data-dir=${userDataDir}`, '--no-first-run', url,
-              ], { timeout: 10000 });
-              launched = true;
-              break;
-            }
-            if (!launched) {
-              throw new Error('No supported browser binary found (tried: google-chrome, chromium, microsoft-edge)');
-            }
-          }
-          await new Promise(r => setTimeout(r, 3000));
-          ctx.a11y.invalidateCache();
-          return { text: `Opened: ${url} (CDP port ${DEFAULT_CDP_PORT} enabled)` };
-        } catch (err: any) {
-          return { text: `Navigation failed: ${err.message}`, isError: true };
-        }
+        // Go through the ONE driver with the SAME attach/launch policy as
+        // cdp_connect. Launching a second browser on the user port here (and
+        // never telling the driver) left cdp_connect attached to a different
+        // instance and cdp_list_tabs blind to this page (1.5.11 live repro).
+        // driver.navigate() keeps attached-mode tab discipline: an existing
+        // browser gets the agent's own tab, the user's tabs are never driven.
+        const ok = await ctx.cdp.ensureConnected(agentBrowserConnectOptions()).catch(() => false);
+        if (!ok) return { text: 'Navigation failed: could not launch or attach to a CDP browser.', isError: true };
+        const r = await ctx.cdp.navigate(url);
+        if (!r.success) return { text: `Navigation failed: ${r.error}`, isError: true };
+        ctx.a11y.invalidateCache();
+        const title = await ctx.cdp.getTitle().catch(() => '(loading)');
+        const mode = ctx.cdp.getConnectionMode?.();
+        const where = mode === 'attached'
+          ? ' — in the agent\'s own tab of the EXISTING browser (likely the user\'s session; their tabs were not touched)'
+          : mode === 'dedicated' ? ' — dedicated agent-owned browser' : '';
+        return { text: `Navigated to: "${title}" at ${r.value ?? url}${where}. Next: cdp_page_context to see the page, cdp_click / cdp_type to interact.` };
       },
     },
 

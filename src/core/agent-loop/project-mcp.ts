@@ -39,6 +39,25 @@ function mcpOcr(): OcrEngine { return (_mcpOcr ??= new OcrEngine()); }
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
+ * Rewrite System B tool names in free text (descriptions, "call X first"
+ * hints) to their MCP names, so a projected tool never points the caller at
+ * a name that only exists inside the agent loop (`browser_navigate` →
+ * `navigate_browser`). Only renamed multi-word names are touched — `click`,
+ * `type`, `key` are plain English and stay as-is.
+ */
+let _renames: Array<[RegExp, string]> | null = null;
+export function toMcpNames(text: string): string {
+  if (!_renames) {
+    _renames = Object.entries(TOOL_META)
+      .filter(([name, meta]) => meta.mcpName && meta.mcpName !== name && name.includes('_'))
+      .sort(([a], [b]) => b.length - a.length)
+      .map(([name, meta]) => [new RegExp(`\\b${name}\\b`, 'g'), meta.mcpName!]);
+  }
+  for (const [re, mcpName] of _renames) text = text.replace(re, mcpName);
+  return text;
+}
+
+/**
  * Convert a UnifiedTool JSON-Schema inputSchema into the
  * Record<string, ParameterDef> shape that ToolDefinition.parameters expects.
  *
@@ -259,12 +278,14 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     // and must not stale a still-valid map (parity with the agent loop's
     // outcome-gated invalidation; audit finding E/A1).
     if (t.changesScreen && executed) ctx.uiMaps?.invalidate();
-    return unifiedToToolResult(result);
+    const out = unifiedToToolResult(result);
+    out.text = toMcpNames(out.text);
+    return out;
   };
 
   return {
     name,
-    description: t.description,
+    description: toMcpNames(t.description),
     parameters,
     category: meta.category,
     compactGroup: meta.compactGroup,

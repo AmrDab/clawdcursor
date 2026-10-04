@@ -28,7 +28,7 @@ import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
-import { getEdgePaths, getChromePaths } from '../../llm/browser-config';
+import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
@@ -1649,15 +1649,16 @@ export function buildUnifiedTools(): UnifiedTool[] {
     // decides; no vision model needed.
     {
       name: 'browser_connect',
-      description: 'Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use browser_navigate/read/click/type. If it fails, fall back to read_text/smart_click.',
+      description: 'Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use browser_navigate, browser_read, browser_click, browser_type. If it fails, fall back to read_text/smart_click.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       changesScreen: true,
       async execute(_args, ctx) {
         if (!ctx.cdp) return { success: false, text: 'browser_connect: CDP not available in this build — use read_text/smart_click for the page instead.' };
-        // CLAWD_AGENT_CDP_OFF=1 → attach-only (never launch a new instance).
-        const allowLaunch = !/^(1|true)$/i.test(process.env.CLAWD_AGENT_CDP_OFF ?? '');
-        const ok = await ctx.cdp.ensureConnected({ launch: allowLaunch, exePaths: [...getEdgePaths(), ...getChromePaths()] }).catch(() => false);
-        if (!ok) return { success: false, text: `browser_connect: could not ${allowLaunch ? 'launch or attach to' : 'attach to'} a CDP browser — fall back to read_text/smart_click.` };
+        // Same policy as navigate_browser (CLAWD_AGENT_CDP_OFF=1 → attach-only),
+        // so both land on the one driver instance.
+        const connectOpts = agentBrowserConnectOptions();
+        const ok = await ctx.cdp.ensureConnected(connectOpts).catch(() => false);
+        if (!ok) return { success: false, text: `browser_connect: could not ${connectOpts.launch ? 'launch or attach to' : 'attach to'} a CDP browser — fall back to read_text/smart_click.` };
         const url = await ctx.cdp.getUrl().catch(() => null);
         const title = await ctx.cdp.getTitle().catch(() => null);
         // Disclose provenance honestly: 'attached' means we connected to a

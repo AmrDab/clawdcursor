@@ -376,6 +376,7 @@ function unpackCompoundTool(tool: string, args: Record<string, unknown>): string
       click: 'cdp_click', type: 'cdp_type', select_option: 'cdp_select_option',
       evaluate: 'cdp_evaluate', wait_for: 'cdp_wait_for_selector',
       list_tabs: 'cdp_list_tabs', switch_tab: 'cdp_switch_tab', scroll: 'cdp_scroll',
+      navigate: 'navigate_browser',
     },
   };
   const actionArg = typeof args.action === 'string' ? args.action : '';
