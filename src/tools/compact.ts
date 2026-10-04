@@ -34,6 +34,7 @@
 
 import { getTool } from './registry';
 import { getBatchTools } from './batch';
+import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 
 // ─── Action → granular-tool delegation table ────────────────────────
@@ -421,7 +422,7 @@ async function dispatchCompound(
   // Granular hints ("Call cdp_connect first") name tools that do not exist
   // here — a compact caller cannot act on them. Rename to this surface's
   // vocabulary; the compound being called wins when an action is aliased.
-  if (typeof result.text === 'string') result.text = toCompactNames(result.text, compoundName);
+  if (typeof result.text === 'string') result.text = rewriteOutsideData(result.text, prose => toCompactNames(prose, compoundName));
 
   if (ignored.length) {
     const hints = ignored.map(pname => {

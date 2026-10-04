@@ -31,6 +31,7 @@ import { TOOL_META } from './tool-meta';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
+import { rewriteOutsideData } from '../../tools/hint-rewrite';
 
 // Lazy OCR singleton for ocr_contains assertions in MCP-route expect checks.
 let _mcpOcr: OcrEngine | null = null;
@@ -279,7 +280,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     // outcome-gated invalidation; audit finding E/A1).
     if (t.changesScreen && executed) ctx.uiMaps?.invalidate();
     const out = unifiedToToolResult(result);
-    out.text = toMcpNames(out.text);
+    out.text = rewriteOutsideData(out.text, toMcpNames);
     return out;
   };
 
