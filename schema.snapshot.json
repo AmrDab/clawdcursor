@@ -2188,7 +2188,7 @@
     },
     {
       "name": "switch_tab_os",
-      "description": "Cycle or jump to a browser tab using the OS-agnostic keyboard shortcut (mod+Tab / mod+Shift+Tab / mod+{1..9}). Works in Chrome, Firefox, Edge, Safari. For in-browser DOM-level control use cdp_switch_tab.",
+      "description": "Cycle or jump to a browser tab using the OS-agnostic keyboard shortcut (Ctrl+Tab / Ctrl+Shift+Tab on every OS; mod+{1..9} to jump). Works in Chrome, Firefox, Edge, Safari. For in-browser DOM-level control use cdp_switch_tab.",
       "category": "window",
       "parameters": {
         "type": "object",

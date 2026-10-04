@@ -410,8 +410,8 @@ export class MacOSAdapter implements PlatformAdapter {
       const h = bounds.height ?? ch;
       const setScript =
         `tell application "System Events" to tell ${targetClause}\n` +
-        `  set position to {${x}, ${y}}\n` +
-        `  set size to {${w}, ${h}}\n` +
+        `  set position to {${Math.round(Number(x))}, ${Math.round(Number(y))}}\n` +
+        `  set size to {${Math.round(Number(w))}, ${Math.round(Number(h))}}\n` +
         `end tell`;
       await execFileAsync('osascript', ['-e', setScript], { timeout: OSASCRIPT_TIMEOUT_MS });
       return true;
@@ -431,11 +431,12 @@ export class MacOSAdapter implements PlatformAdapter {
       return `window 1 of application process "${safe}"`;
     }
     if (query.processId !== undefined) {
+      const pid = Math.trunc(Number(query.processId));
       if (query.title) {
         const t = query.title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        return `window "${t}" of (first application process whose unix id is ${query.processId})`;
+        return `window "${t}" of (first application process whose unix id is ${pid})`;
       }
-      return `window 1 of (first application process whose unix id is ${query.processId})`;
+      return `window 1 of (first application process whose unix id is ${pid})`;
     }
     if (query.title) {
       const t = query.title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -678,7 +679,15 @@ export class MacOSAdapter implements PlatformAdapter {
 
     const parts = combo.split('+').map(s => s.trim()).filter(Boolean);
     const key = parts[parts.length - 1];
-    const mods = parts.slice(0, -1).map(this.normalizeMod);
+    // Every token is interpolated into an AppleScript program, so anything
+    // that isn't a known modifier/key is refused (like the Windows adapter)
+    // rather than spliced in raw — a raw token can close the string literal
+    // and run arbitrary AppleScript, including `do shell script`.
+    const mods = parts.slice(0, -1).map(m => {
+      const n = this.normalizeMod(m);
+      if (!['command', 'shift', 'option', 'control'].includes(n)) throw new Error(`Unknown modifier: "${m}"`);
+      return n;
+    });
 
     const usingClause = mods.length ? ` using {${mods.map(m => `${m} down`).join(', ')}}` : '';
 
@@ -691,8 +700,7 @@ export class MacOSAdapter implements PlatformAdapter {
       const escaped = key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       script = `tell application "System Events" to keystroke "${escaped}"${usingClause}`;
     } else {
-      // Unknown multi-char key — try as keystroke (covers things like word chars).
-      script = `tell application "System Events" to keystroke "${key}"${usingClause}`;
+      throw new Error(`Unknown key: "${key}"`);
     }
 
     await execFileAsync('osascript', ['-e', script], { timeout: 6_000 });

@@ -30,6 +30,28 @@ const EMPTY_A11Y_APPS = new Set([
   'hyper', 'mintty', 'conhost',
 ]);
 
+
+/**
+ * Convert an OCR hit (PHYSICAL pixels, on every OS) into the coordinate space
+ * NativeDesktop.mouseClick expects — which differs by OS (see physicalToMouse):
+ *
+ *   Windows / Linux — mouseClick takes PHYSICAL and divides by dpiRatio itself.
+ *     Dividing here too double-converted: on a 2.25x display an OCR click
+ *     landed at ~1/5 of the target.
+ *   macOS — mouseClick takes LOGICAL; physicalToMouse is a no-op there. This
+ *     division is the ONLY one, mapping Retina-physical OCR coords to logical
+ *     points. Removing it re-introduces #154 (every click ~2x off on Retina).
+ *
+ * Exported so the per-OS rule is pinned by a test: a plausible-looking fix
+ * ("just remove the division") fixes Windows and silently breaks every Mac.
+ */
+export function ocrPointToClickPoint(
+  x: number, y: number, dpiRatio: number, platform: NodeJS.Platform,
+): { x: number; y: number } {
+  const div = platform === 'darwin' ? (dpiRatio || 1) : 1;
+  return { x: Math.round(x / div), y: Math.round(y / div) };
+}
+
 export function getSmartTools(): ToolDefinition[] {
   return [
     // ─── smart_read ──────────────────────────────────────────────────────
@@ -496,9 +518,9 @@ export function getSmartTools(): ToolDefinition[] {
             bounds: m.bounds,
             confidence: m.confidence,
           });
-          const dpi = ctx.desktop.getDpiRatio?.() || 1;
-          const cx = Math.round(m.x / dpi);
-          const cy = Math.round(m.y / dpi);
+          const { x: cx, y: cy } = ocrPointToClickPoint(
+            m.x, m.y, ctx.desktop.getDpiRatio?.() || 1, process.platform,
+          );
           try {
             await ctx.desktop.mouseClick(cx, cy);
           } catch (err: any) {
@@ -507,7 +529,7 @@ export function getSmartTools(): ToolDefinition[] {
           }
           ctx.a11y.invalidateCache();
           const warningSuffix = m.warning ? `  [WARNING: ${m.warning} — verify with read_screen]` : '';
-          return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}${dpi > 1 ? ` — DPI-corrected from physical ${m.x},${m.y}` : ''})${warningSuffix}` };
+          return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}${(cx !== m.x || cy !== m.y) ? ` — DPI-corrected from physical ${m.x},${m.y}` : ''})${warningSuffix}` };
         }
 
         // a11y had bounds but couldn't invoke — coordinate fallback
