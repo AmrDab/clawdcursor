@@ -249,7 +249,7 @@ def active_application(process_id: Optional[int] = None) -> Optional[Any]:
                 continue
             pid = safe(lambda app=app: app.get_process_id())
             if pid == process_id:
-                return live(app)
+                return app
         return None
 
     # Heuristic: find the app that has a FOCUSED descendant.
@@ -258,20 +258,10 @@ def active_application(process_id: Optional[int] = None) -> Optional[Any]:
         if app is None:
             continue
         if has_focused_descendant(app):
-            return live(app)
+            return app
 
     # Fallback: first app.
-    return live(safe(lambda: desktop.get_child_at_index(0)))
-
-
-def live(app: Any) -> Any:
-    """Disable libatspi's client-side cache for this application so state
-    sets and roles are fetched live over D-Bus. Apps that don't implement
-    the org.a11y.atspi.Cache interface (GTK4) otherwise answer from an
-    empty cache — every widget looked disabled."""
-    if app is not None:
-        safe(lambda: app.set_cache_mask(Atspi.Cache.NONE))
-    return app
+    return safe(lambda: desktop.get_child_at_index(0))
 
 
 def has_focused_descendant(acc: Any, depth: int = 0) -> bool:

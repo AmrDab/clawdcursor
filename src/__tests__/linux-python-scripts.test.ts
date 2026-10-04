@@ -71,7 +71,9 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.rel.bounds).toEqual({ x: 5, y: 6, width: 7, height: 8 });
     expect(out.rel.coordType).toBe('window');
     expect(out.seven.coordType).toBeUndefined();
-    expect(out.cache_mask).toBe(0); // Atspi.Cache.NONE — live state queries, not stale cache
+    // Never disable libatspi's cache: with Cache.NONE every property read is a
+    // D-Bus round trip and `find` on a real GTK3 app ran past 30 s (VM, 2026-10).
+    expect(out.cache_mask).toBeNull();
   });
 
   // ── L8 ──
