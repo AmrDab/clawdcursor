@@ -169,7 +169,15 @@ export function getCdpTools(): ToolDefinition[] {
       category: 'browser',
       compactGroup: 'browser',
       safetyTier: 0,
-      handler: async () => {
+      handler: async (_params, ctx) => {
+        // Connected → the driver's own browser, whichever port/instance that is
+        // (the agent instance lives on AGENT_CDP_PORT, not the user port below).
+        if (await ctx.cdp.isConnected()) {
+          const tabs: Array<{ url: string; title: string; active: boolean }> = await ctx.cdp.listTabs();
+          const pages = tabs.filter(t => !t.url.startsWith('edge://') && !t.url.startsWith('chrome://'));
+          if (!pages.length) return { text: '(no tabs found)' };
+          return { text: pages.map((t, i) => `${i + 1}.${t.active ? ' *' : ''} "${t.title}" — ${t.url}`).join('\n') };
+        }
         try {
           const resp = await fetch(`http://127.0.0.1:${DEFAULT_CDP_PORT}/json`);
           const tabs: any[] = await resp.json();
@@ -178,7 +186,7 @@ export function getCdpTools(): ToolDefinition[] {
           const lines = pages.map((t: any, i: number) => `${i + 1}. "${t.title}" — ${t.url}`);
           return { text: lines.join('\n') };
         } catch {
-          return { text: `Cannot list tabs. Use navigate_browser first to launch Edge with CDP on port ${DEFAULT_CDP_PORT}.`, isError: true };
+          return { text: `Cannot list tabs: not connected and no browser on port ${DEFAULT_CDP_PORT}. Use navigate_browser (opens a URL in the agent's browser) or cdp_connect first.`, isError: true };
         }
       },
     },

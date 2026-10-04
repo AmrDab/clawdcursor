@@ -380,6 +380,19 @@ export class CDPDriver {
     }
   }
 
+  /** Tabs of the CONNECTED browser (whichever port/instance that is), active one flagged. */
+  async listTabs(): Promise<Array<{ url: string; title: string; active: boolean }>> {
+    if (!this.browser) return [];
+    const tabs: Array<{ url: string; title: string; active: boolean }> = [];
+    for (const context of this.browser.contexts()) {
+      for (const page of context.pages()) {
+        const title = await page.title().catch(() => '(unknown)');
+        tabs.push({ url: page.url(), title, active: page === this.activePage });
+      }
+    }
+    return tabs;
+  }
+
   /**
    * Switch to a different tab by URL substring or title substring.
    */

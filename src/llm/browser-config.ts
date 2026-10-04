@@ -72,6 +72,17 @@ export function getEdgePaths(): string[] {
   ];
 }
 
+/**
+ * Attach/launch policy for the agent's browser, shared by EVERY tool that brings
+ * one up (browser_connect / cdp_connect and navigate_browser). One policy means
+ * one instance: navigate and connect land on the same driver, port and page.
+ * CLAWD_AGENT_CDP_OFF=1 → attach-only (never launch a new instance).
+ */
+export function agentBrowserConnectOptions(): { launch: boolean; exePaths: string[] } {
+  const launch = !/^(1|true)$/i.test(process.env.CLAWD_AGENT_CDP_OFF ?? '');
+  return { launch, exePaths: [...getEdgePaths(), ...getChromePaths()] };
+}
+
 /** Get browser executable paths, respecting config overrides. Tries custom path first, then defaults. */
 export function getBrowserPaths(browser: 'chrome' | 'edge', config?: ClawdConfig): string[] {
   const customExe = getBrowserExePath(config);

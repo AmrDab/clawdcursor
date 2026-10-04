@@ -2,6 +2,28 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The compact surface could not drive a web page.** `window navigate`
+  launched its own browser on the user debug port and never told the CDP
+  driver, so the next `browser connect` attached to a *different* instance (the
+  dedicated agent browser at `about:blank`), `page_context` saw an empty page,
+  `type`/`select_option` failed, and `list_tabs` — which probed the user port
+  directly — reported no browser at all. `navigate_browser` now goes through
+  the one driver with the same attach-or-launch policy as `cdp_connect`
+  (including `CLAWD_AGENT_CDP_OFF=1` attach-only), and `cdp_list_tabs` lists the
+  connected browser's tabs. Attaching to a browser the user already has on the
+  debug port keeps its tab discipline: the page opens in the agent's own tab
+  and the result says so.
+- **`browser` compound gains a `navigate` action** (`window navigate` still
+  works). Every hint now names tools and actions that exist on the surface the
+  caller is using: compact results say `browser {action:"connect"}` instead of
+  `cdp_connect`, and projected agent-loop tools say `navigate_browser` /
+  `cdp_page_context` instead of `browser_navigate` / `browser_read` (this also
+  corrects `read_screen`'s hint to `ocr_read_screen`).
+
 ## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 
 Every bug here was hit driving clawdcursor for real to configure npm trusted
