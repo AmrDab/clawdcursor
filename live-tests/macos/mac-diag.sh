@@ -18,3 +18,25 @@ run "AX names of the text fields"       osascript -e "tell application \"System 
 run "window clause (fixed form)"        osascript -e 'tell application "System Events" to tell (first window of (first application process whose (count of (windows whose title contains "CC Target")) > 0) whose title contains "CC Target") to get {position, size}'
 run "window clause (old form)"          osascript -e 'tell application "System Events" to tell first window whose title contains "CC Target" of (first application process whose frontmost is true) to get position'
 echo "--- row events in target log"; grep '"row"' /tmp/cc-target.log | head -5
+echo "--- get-screen-context (what compile_ui reads): button/field entries"
+osascript -l JavaScript $J/get-screen-context.jxa -- -FocusedProcessId $PID -MaxDepth 8 2>&1 | python3 -c "
+import json,sys
+raw=sys.stdin.read()
+try: d=json.loads(raw)
+except Exception as e: print('PARSE FAIL', e, raw[:300]); sys.exit()
+def walk(n,depth=0,out=[]):
+    if isinstance(n,dict):
+        r=n.get('role') or n.get('controlType'); nm=n.get('name') or n.get('title') or n.get('description')
+        if r and ('Button' in str(r) or 'TextField' in str(r) or 'CheckBox' in str(r)): out.append((depth,r,nm))
+        for k in ('children','uiTree','elements'):
+            v=n.get(k)
+            if isinstance(v,list):
+                for c in v: walk(c,depth+1,out)
+            elif isinstance(v,dict): walk(v,depth+1,out)
+    elif isinstance(n,list):
+        for c in n: walk(c,depth,out)
+    return out
+res=walk(d)
+print('keys:', list(d.keys())[:10] if isinstance(d,dict) else type(d).__name__, '| controls found:', len(res))
+for x in res[:12]: print(x)
+"
