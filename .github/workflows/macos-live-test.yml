@@ -1,0 +1,68 @@
+name: macOS live test
+
+# Drives the real clawdcursor MCP server on a real macOS desktop and scores
+# every result against ground truth (live-tests/macos). Runs only on the
+# test/macos-live branch; never on main.
+on:
+  push:
+    branches: [test/macos-live]
+
+permissions:
+  contents: read
+
+jobs:
+  live:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install (builds the native helper)
+        run: npm ci --no-audit --no-fund
+      - name: Build
+        run: npm run build
+      - name: Environment
+        run: |
+          sw_vers; uname -m
+          ls -la native/ClawdCursor.app/Contents/MacOS || echo "native helper missing"
+          system_profiler SPDisplaysDataType | grep -E "Resolution|Retina|Main Display" || true
+      - name: Grant privacy permissions
+        run: bash live-tests/macos/grant-tcc.sh
+      - name: Permission check (clawdcursor's own view)
+        run: |
+          ./native/ClawdCursor.app/Contents/MacOS/permission-check || true
+          node dist/surface/cli.js consent --accept
+      - name: Start target app and web form server
+        run: |
+          swiftc -O live-tests/macos/cc_target.swift -o /tmp/cctarget
+          rm -f /tmp/cc-target.log
+          (/tmp/cctarget > /tmp/target.err 2>&1 &)
+          (cd live-tests/macos && python3 -m http.server 8765 > /dev/null 2>&1 &)
+          sleep 4
+          tail -c 600 /tmp/cc-target.log || cat /tmp/target.err
+      - name: Perception suite
+        continue-on-error: true
+        run: cp live-tests/macos/suite-mac.mjs . && node suite-mac.mjs perception mac-perception 2>&1 | tee /tmp/perception.log
+      - name: Task suite
+        continue-on-error: true
+        run: node suite-mac.mjs tasks mac-tasks 2>&1 | tee /tmp/tasks.log
+      - name: Summary
+        if: always()
+        run: |
+          echo "## macOS live results" >> "$GITHUB_STEP_SUMMARY"
+          grep -hE "^(PASS|FAIL|==)" /tmp/perception.log /tmp/tasks.log | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+          grep -hE "^(PASS|FAIL|==)" /tmp/perception.log /tmp/tasks.log || true
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-live
+          path: |
+            /tmp/suite
+            /tmp/perception.log
+            /tmp/tasks.log
+            /tmp/cc-target.log
+            /tmp/target.err
+            /tmp/ref-*.png
