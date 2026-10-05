@@ -440,7 +440,11 @@ export class MacOSAdapter implements PlatformAdapter {
     }
     if (query.title) {
       const t = query.title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      return `first window whose title contains "${t}" of (first application process whose frontmost is true)`;
+      // The container must precede `whose`: `first window whose title contains
+      // "X" of (process)` binds `of (process)` to "X" and never resolves (every
+      // title-only resize/minimize/restore failed on a live Mac). Any app's
+      // window may match, like a title search on Windows.
+      return `(first window of (first application process whose (count of (windows whose title contains "${t}")) > 0) whose title contains "${t}")`;
     }
     return 'window 1 of (first application process whose frontmost is true)';
   }
@@ -514,6 +518,13 @@ export class MacOSAdapter implements PlatformAdapter {
     data?: Record<string, unknown>;
   }> {
     try {
+      // invoke-element.jxa requires a process; scope an unscoped call to the
+      // foreground app like the Windows and Linux adapters (without this every
+      // invoke / set_value by name failed on a live Mac).
+      if (query.processId === undefined) {
+        const fg = await this.getActiveWindow().catch(() => null);
+        if (fg?.processId) query = { ...query, processId: fg.processId };
+      }
       const args = ['-l', 'JavaScript', path.join(SCRIPTS_DIR, 'invoke-element.jxa'), '--'];
       // invoke-element.jxa parses '-ProcessId' (NOT '-FocusedProcessId' — that
       // name belongs to get-screen-context.jxa). The wrong flag made the JXA
