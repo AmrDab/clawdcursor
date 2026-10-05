@@ -234,7 +234,7 @@ async function tasks() {
     const s = since(t, 'submit').pop();
     check('task', 'T5 copy in TextEdit, paste into another app', s?.first === 'Saved by clawdcursor', `${JSON.stringify(s || 'no submit')} clipboard=${JSON.stringify(sh('pbpaste').slice(0, 40))}`); }
   { await call('window', { action: 'resize', title: 'CC Target', x: 60, y: 80, width: 800, height: 600 }); await sleep(600);
-    check('window', 'resize/move applied', /1000, 700/.test(winState()) || /1000,\s*700/.test(winState()), winState());
+    check('window', 'resize/move applied', /^60, 80, 800, 600/.test(winState()), winState());
     await call('window', { action: 'minimize', title: 'CC Target' }); await sleep(800);
     check('window', 'minimize applied', /true$/.test(winState()), winState());
     await call('window', { action: 'restore', title: 'CC Target' }); await sleep(800);
