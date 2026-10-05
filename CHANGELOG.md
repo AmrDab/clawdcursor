@@ -4,6 +4,17 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Claude Desktop extension (`.mcpb`) — install with no terminal.** Every
+  release now attaches `clawdcursor-win32.mcpb`, `clawdcursor-darwin.mcpb` and
+  `clawdcursor-linux.mcpb` (stable links under `releases/latest/download/`).
+  Open one and Claude Desktop installs and runs clawdcursor with its own Node.
+  The install screen asks "Allow clawdcursor to control this computer", which
+  is the one-time desktop-control consent (passed as `CLAWDCURSOR_CONSENT`;
+  only `true`/`1` records it). Each bundle is built and smoke-tested natively
+  on its OS in CI (`npm run build:mcpb`, `scripts/smoke-mcpb.mjs`).
+
 ### Fixed
 
 - **`expect` is checked before the action runs, on every path.** A malformed

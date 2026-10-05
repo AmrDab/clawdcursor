@@ -71,7 +71,8 @@
     "sync-version": "tsx scripts/sync-version.ts",
     "version": "tsx scripts/sync-version.ts",
     "test:coverage": "vitest run --coverage",
-    "perf:smoke": "tsx scripts/perf-smoke.ts"
+    "perf:smoke": "tsx scripts/perf-smoke.ts",
+    "build:mcpb": "node scripts/build-mcpb.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.27.1",

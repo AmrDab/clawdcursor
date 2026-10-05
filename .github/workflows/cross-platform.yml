@@ -78,3 +78,35 @@ jobs:
       - name: Perf smoke (production paths)
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.x'
         run: npm run perf:smoke
+
+  # The Claude Desktop extension (.mcpb) is built per OS on that OS. Build and
+  # smoke-test all three on every PR so a break surfaces here, not at release.
+  extension:
+    name: extension bundle / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.x
+          cache: npm
+      - name: Install dependencies (builds the macOS native helper on macOS)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Build the .mcpb
+        run: npm run build:mcpb
+      - name: Smoke-test the bundle (Linux needs a display)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y -qq xvfb >/dev/null
+            xvfb-run -a node scripts/smoke-mcpb.mjs
+          else
+            node scripts/smoke-mcpb.mjs
+          fi

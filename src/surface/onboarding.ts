@@ -22,7 +22,7 @@ export function hasConsent(): boolean {
 }
 
 /** Save consent to disk */
-function saveConsent(): void {
+function saveConsent(source?: string): void {
   if (!fs.existsSync(CONSENT_DIR)) {
     fs.mkdirSync(CONSENT_DIR, { recursive: true });
   }
@@ -31,7 +31,24 @@ function saveConsent(): void {
     timestamp: new Date().toISOString(),
     platform: process.platform,
     version: VERSION,
+    ...(source ? { source } : {}),
   }, null, 2));
+}
+
+/**
+ * Accept consent from the environment — set by a host that collected it in
+ * its own UI. The Claude Desktop extension (.mcpb) asks the user to tick
+ * "Allow clawdcursor to control this computer" at install and passes it as
+ * CLAWDCURSOR_CONSENT=true; an extension user never opens a terminal to run
+ * `clawdcursor consent --accept`. Anything that can set this variable could
+ * already run that command, so it grants nothing new. Returns true when it
+ * recorded consent.
+ */
+export function acceptConsentFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  if (hasConsent()) return false;
+  if (!/^(true|1)$/i.test((env.CLAWDCURSOR_CONSENT ?? '').trim())) return false;
+  saveConsent('host-setting:CLAWDCURSOR_CONSENT');
+  return true;
 }
 
 /** Write consent file directly (for --accept flag / CI / scripted use) */

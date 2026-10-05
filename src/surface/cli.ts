@@ -1382,7 +1382,10 @@ program
     // VISIBLE consent prompt on every tool call (enforced in mcp-server.ts) —
     // and it takes effect the moment `clawdcursor consent --accept` runs, with
     // no restart needed.
-    const { hasConsent } = await import('./onboarding');
+    const { hasConsent, acceptConsentFromEnv } = await import('./onboarding');
+    // A host that collected consent in its own UI (the .mcpb install screen)
+    // passes it as CLAWDCURSOR_CONSENT=true.
+    if (acceptConsentFromEnv()) process.stderr.write('[clawdcursor] Consent accepted via the host\'s install setting.\n');
     if (!hasConsent()) {
       process.stderr.write(
         `\n[clawdcursor] One-time consent not yet accepted. The server will start, but\n` +

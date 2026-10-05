@@ -32,3 +32,6 @@ coverage/
 
 # Python bytecode (scripts/linux tests)
 __pycache__/
+
+# Claude Desktop extension build output (scripts/build-mcpb.mjs)
+build/
