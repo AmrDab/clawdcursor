@@ -69,6 +69,18 @@ describe('macOS setWindowState — correct AppleScript per state', () => {
     expect(lastScript()).toContain('set value of attribute "AXMinimized" to false');
   });
 
+  it('a title-only target puts the container before `whose` (AppleScript precedence)', async () => {
+    // Live macOS run (GitHub-hosted Mac, 2026-10): resize / minimize / restore
+    // by title all failed. `first window whose title contains "X" of (process)`
+    // binds `of (process)` to the string "X", so the program never resolves a
+    // window. The container must come first, and any app's window may match.
+    await mac.setWindowState('minimize', { title: 'CC Target' });
+    expect(lastScript()).toContain(
+      'tell (first window of (first application process whose (count of (windows whose title contains "CC Target")) > 0) whose title contains "CC Target")',
+    );
+    expect(lastScript()).not.toMatch(/whose title contains "CC Target" of/);
+  });
+
   it('maximize clicks the AXZoomButton', async () => {
     await mac.setWindowState('maximize', { title: 'Calculator' });
     expect(lastScript()).toContain('AXZoomButton');

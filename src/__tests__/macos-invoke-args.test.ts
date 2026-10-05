@@ -47,6 +47,19 @@ describe('macOS invokeElement — JXA argument contract', () => {
     expect(call.args).not.toContain('-FocusedProcessId');
   });
 
+  it('defaults to the foreground process when no processId is given (the JXA requires one)', async () => {
+    // Live macOS run (GitHub-hosted Mac, 2026-10): invoke / set_value by name
+    // without a processId always failed — invoke-element.jxa rejects a call
+    // with no -ProcessId, and the adapter only passed one when the caller did.
+    const spy = vi.spyOn(mac, 'getActiveWindow').mockResolvedValue({ processId: 4242 } as never);
+    try {
+      nextStdout = JSON.stringify({ success: true, action: 'click' });
+      await mac.invokeElement({ name: 'Charlie', action: 'click' });
+      const call = execFileCalls.find(c => c.args.some(a => String(a).includes('invoke-element.jxa')))!;
+      expect(call.args[call.args.indexOf('-ProcessId') + 1]).toBe('4242');
+    } finally { spy.mockRestore(); }
+  });
+
   it('surfaces the JXA top-level get-value `value` into res.data.value', async () => {
     nextStdout = JSON.stringify({ success: true, action: 'get-value', value: 'hello world', method: 'AXValue' });
     const res = await mac.invokeElement({ name: 'Text editor', processId: 9, action: 'get-value' });
