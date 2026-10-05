@@ -310,6 +310,28 @@ describe('Smart Tools', () => {
       expect(result.text).toMatch(/^Clicked "Submit"/);
     });
 
+    it('never reports failure for an a11y invoke that is still running — it waits for the outcome (no ghost click)', async () => {
+      // Live macOS run (2026-10): smart_click("Row 50") returned
+      // deadline_exceeded, then the still-running AXPress clicked Row 50 a
+      // moment later. The invoke IS the click, so its outcome must be awaited;
+      // only the read-only OCR search may be abandoned at the deadline.
+      const lateSuccess = vi.fn(() => new Promise(r => setTimeout(() => r({ success: true }), 600)));
+      const ctx = createCtx({
+        a11y: {
+          getActiveWindow: mockGetActiveWindow,
+          invokeElement: lateSuccess,
+          findElement: mockFindElement,
+          getFocusedElement: mockGetFocusedElement,
+          getScreenContext: mockGetScreenContext,
+          writeClipboard: mockWriteClipboard,
+          invalidateCache: mockInvalidateCache,
+        } as any,
+      });
+      const result = await smartClick.handler({ target: 'NeverGonnaMatchAnythingInOcr', timeout: 200 }, ctx);
+      expect(result.isError).toBeFalsy();
+      expect(result.text).toMatch(/Clicked "NeverGonnaMatchAnythingInOcr" via UI Automation/);
+    });
+
     it('returns structured JSON with error: "deadline_exceeded" when the deadline fires', async () => {
       // Force both OCR and a11y invoke to outlast the 50ms deadline.
       // The OLD bare-Promise.race would have thrown a bare timeout and

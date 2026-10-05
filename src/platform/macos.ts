@@ -365,7 +365,7 @@ export class MacOSAdapter implements PlatformAdapter {
   ): Promise<boolean> {
     // Resolve target window. When query is omitted, we target the frontmost
     // app's frontmost window via System Events.
-    const targetClause = this.buildMacWindowTargetClause(query);
+    const targetClause = this.buildMacWindowTargetClause(await this.resolveWindowQuery(query));
     try {
       let script: string;
       if (state === 'close') {
@@ -391,7 +391,7 @@ export class MacOSAdapter implements PlatformAdapter {
     bounds: { x?: number; y?: number; width?: number; height?: number },
     query?: { processName?: string; processId?: number; title?: string },
   ): Promise<boolean> {
-    const targetClause = this.buildMacWindowTargetClause(query);
+    const targetClause = this.buildMacWindowTargetClause(await this.resolveWindowQuery(query));
     try {
       // Read current bounds for fields not supplied, then assign AXPosition + AXSize.
       const readScript =
@@ -420,6 +420,20 @@ export class MacOSAdapter implements PlatformAdapter {
     }
   }
 
+  /**
+   * A title-only query names a window, not its app. Resolve the owning process
+   * from the window list so the AppleScript can address it directly — a nested
+   * `whose` over every process is not valid AppleScript ("Can't make 0 into
+   * type specifier" on a live Mac), and the frontmost app may not own it.
+   */
+  private async resolveWindowQuery(query?: { processName?: string; processId?: number; title?: string }) {
+    if (!query?.title || query.processName || query.processId !== undefined) return query;
+    const want = query.title.toLowerCase();
+    const hit = (await this.listWindows().catch(() => [] as WindowInfo[]))
+      .find(w => (w.title ?? '').toLowerCase().includes(want));
+    return hit ? { processId: hit.processId, title: hit.title } : query;
+  }
+
   private buildMacWindowTargetClause(query?: { processName?: string; processId?: number; title?: string }): string {
     if (!query) return 'window 1 of (first application process whose frontmost is true)';
     if (query.processName) {
@@ -440,11 +454,11 @@ export class MacOSAdapter implements PlatformAdapter {
     }
     if (query.title) {
       const t = query.title.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      // The container must precede `whose`: `first window whose title contains
-      // "X" of (process)` binds `of (process)` to "X" and never resolves (every
-      // title-only resize/minimize/restore failed on a live Mac). Any app's
-      // window may match, like a title search on Windows.
-      return `(first window of (first application process whose (count of (windows whose title contains "${t}")) > 0) whose title contains "${t}")`;
+      // Reached only when the window list had no match (resolveWindowQuery).
+      // The container must precede `whose` — `first window whose title
+      // contains "X" of (process)` binds `of (process)` to "X" and never
+      // resolves (every title-only resize/minimize/restore failed on a live Mac).
+      return `(first window of (first application process whose frontmost is true) whose title contains "${t}")`;
     }
     return 'window 1 of (first application process whose frontmost is true)';
   }

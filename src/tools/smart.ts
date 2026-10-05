@@ -482,15 +482,21 @@ export function getSmartTools(): ToolDefinition[] {
           a11y: null,
           timedOut: false,
         };
+        // The a11y invoke IS the click (it presses the element), so its outcome
+        // is always awaited — it carries its own bridge timeout. Abandoning it
+        // reported failure while the press still landed a moment later (live
+        // macOS 2026-10: deadline_exceeded, then "Row 50" got clicked). Only
+        // the read-only OCR search is cut off at the deadline.
         await new Promise<void>((resolve) => {
-          let settled = 0;
-          const finish = () => { if (++settled >= 2) resolve(); };
+          let a11yDone = false, ocrDone = false, expired = false;
+          const check = () => { if (a11yDone && (ocrDone || expired)) resolve(); };
           const timer = setTimeout(() => {
             parallelResult.timedOut = true;
-            resolve();
+            expired = true;
+            check();
           }, remaining());
-          ocrPromise.then(r => { parallelResult.ocr = r; finish(); }, () => finish());
-          a11yPromise.then(r => { parallelResult.a11y = r; finish(); }, () => finish());
+          ocrPromise.then(r => { parallelResult.ocr = r; }, () => {}).finally(() => { ocrDone = true; check(); });
+          a11yPromise.then(r => { parallelResult.a11y = r; }, () => {}).finally(() => { a11yDone = true; check(); });
           // Cancel the deadline timer once both settle so we don't keep the event loop alive
           Promise.allSettled([ocrPromise, a11yPromise]).then(() => clearTimeout(timer));
         });

@@ -79,25 +79,6 @@ function safeGet(obj, prop, def) {
     try { var v = obj[prop](); return (v !== undefined && v !== null) ? v : def; } catch (e) { return def; }
 }
 
-// Map macOS AX role ΓåÆ System Events typed-collection accessor (much faster than uiElements())
-var ROLE_TO_COLLECTION = {
-    'AXButton':      'buttons',
-    'AXTextField':   'textFields',
-    'AXTextArea':    'textAreas',
-    'AXComboBox':    'popUpButtons',
-    'AXCheckBox':    'checkboxes',
-    'AXRadioButton': 'radioButtons',
-    'AXScrollArea':  'scrollAreas',
-    'AXList':        'lists',
-    'AXTable':       'tables',
-    'AXOutline':     'outlines',
-    'AXGroup':       'groups',
-    'AXStaticText':  'staticTexts',
-    'AXImage':       'images',
-    'AXSlider':      'sliders',
-    'AXToolbar':     'toolbars',
-};
-
 function getBounds(el) {
     try {
         var pos = el.position();
@@ -108,73 +89,56 @@ function getBounds(el) {
     }
 }
 
-function matchElement(el, targetName, targetRole) {
-    var elName  = ''; try { elName  = el.name()  || ''; } catch (e) {}
-    var elRole  = ''; try { elRole  = el.role()  || ''; } catch (e) {}
-    var elValue = ''; try { elValue = el.value() || ''; } catch (e) {}
-
-    var nameMatch = !targetName ||
-        (elName && elName.toLowerCase().indexOf(targetName.toLowerCase()) !== -1);
-    var roleMatch = !targetRole ||
-        (elRole && elRole.toLowerCase().indexOf(targetRole.toLowerCase()) !== -1);
-
-    if (nameMatch && roleMatch && (elName || elRole)) {
-        return { name: elName, role: elRole, value: elValue, bounds: getBounds(el) };
-    }
-    return null;
-}
+// Normalise AX role spellings so 'AXTextField', 'text field' and 'TextField'
+// compare equal (the ControlType map speaks one, System Events the other).
+function normRole(r) { return String(r || '').toLowerCase().replace(/^ax/, '').replace(/\s+/g, ''); }
 
 /**
- * Search a window for matching elements.
- * Strategy:
- *   1. If a specific role is requested and maps to a typed collection, use that
- *      (fast ΓÇö single System Events call, no recursion).
- *   2. Otherwise fall back to shallow uiElements() scan (depth 2 max) to avoid hangs.
+ * Breadth-first search of a window. Each level's names, descriptions and
+ * roles come back in ONE Apple Event per container (batched collection
+ * reads), so controls nested in scroll areas, split views and toolbars are
+ * reachable without the per-element round trips that made deep searches time
+ * out. An element matches on its name (AXTitle) OR its description
+ * (AXDescription — how AppKit exposes accessibilityLabel, e.g. on text fields).
  */
-function searchWindow(win, targetName, targetRole, maxResults, results) {
-    var collection = targetRole ? ROLE_TO_COLLECTION[targetRole] : null;
-
-    if (collection) {
-        // Fast path: typed collection (AXButton ΓåÆ buttons, etc.)
-        try {
-            var els = win[collection]();
-            for (var i = 0; i < els.length && results.length < maxResults; i++) {
-                try {
-                    var m = matchElement(els[i], targetName, targetRole);
-                    if (m) results.push(m);
-                } catch (e) {}
-            }
-        } catch (e) {}
-        // Also check inside groups one level deep
-        try {
-            var groups = win.groups();
-            for (var g = 0; g < groups.length && results.length < maxResults; g++) {
-                try {
-                    var gels = groups[g][collection]();
-                    for (var gi = 0; gi < gels.length && results.length < maxResults; gi++) {
-                        try {
-                            var gm = matchElement(gels[gi], targetName, targetRole);
-                            if (gm) results.push(gm);
-                        } catch (e) {}
-                    }
-                } catch (e) {}
-            }
-        } catch (e) {}
-    } else {
-        // Slow path: shallow generic scan (depth 2)
-        var collectionsToSearch = ['buttons', 'textFields', 'textAreas', 'checkboxes',
-                                   'radioButtons', 'popUpButtons', 'staticTexts', 'groups'];
-        for (var ci = 0; ci < collectionsToSearch.length && results.length < maxResults; ci++) {
-            try {
-                var celems = win[collectionsToSearch[ci]]();
-                for (var ce = 0; ce < celems.length && results.length < maxResults; ce++) {
-                    try {
-                        var cm = matchElement(celems[ce], targetName, targetRole);
-                        if (cm) results.push(cm);
-                    } catch (e) {}
+function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
+    var want = targetName ? String(targetName).toLowerCase() : null;
+    var wantRole = targetRole ? normRole(targetRole) : null;
+    var out = [];
+    var level = [win];
+    for (var d = 0; d < maxDepth && level.length && Date.now() < deadline; d++) {
+        var next = [];
+        for (var i = 0; i < level.length && Date.now() < deadline; i++) {
+            var kids = level[i].uiElements;
+            var names, descs, roles;
+            try { names = kids.name(); } catch (e) { continue; }
+            try { descs = kids.description(); } catch (e) { descs = []; }
+            try { roles = kids.role(); } catch (e) { roles = []; }
+            for (var k = 0; k < names.length; k++) {
+                var el = kids[k];
+                var nm = names[k] || '', ds = descs[k] || '', rl = roles[k] || '';
+                var hay = [String(nm).toLowerCase(), String(ds).toLowerCase()];
+                var nameOk = !want || hay[0].indexOf(want) !== -1 || hay[1].indexOf(want) !== -1;
+                var roleOk = !wantRole || normRole(rl).indexOf(wantRole) !== -1;
+                if (nameOk && roleOk && (nm || ds || rl)) {
+                    out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want), depth: d });
                 }
-            } catch (e) {}
+                next.push(el);
+            }
         }
+        level = next;
+    }
+    return out;
+}
+
+// Matches in a window: exact names first, then shallower elements.
+function searchWindow(win, targetName, targetRole, maxResults, results, deadline) {
+    var matches = collectMatches(win, targetName, targetRole, 12, deadline);
+    matches.sort(function (x, y) { return (Number(y.exact) - Number(x.exact)) || (x.depth - y.depth); });
+    for (var i = 0; i < matches.length && results.length < maxResults; i++) {
+        var m = matches[i];
+        var val = ''; try { val = m.el.value(); if (val === null || val === undefined) val = ''; } catch (e) {}
+        results.push({ name: m.name, role: m.role, value: val, bounds: getBounds(m.el) });
     }
 }
 
@@ -186,6 +150,7 @@ try {
 
     var results = [];
     var maxResults = 20;
+    var deadline = Date.now() + 6000;
 
     // Require processId OR name to avoid searching every window in every app
     if (!params.processId && !params.name) {
@@ -213,7 +178,7 @@ try {
                 var windows = proc.windows;
                 for (var w = 0; w < windows.length && results.length < maxResults; w++) {
                     try {
-                        searchWindow(windows[w], params.name, params.role, maxResults, results);
+                        searchWindow(windows[w], params.name, params.role, maxResults, results, deadline);
                     } catch (e) {}
                 }
 
