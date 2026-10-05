@@ -34,6 +34,7 @@ function coll(arr: FakeEl[]): any {
   return c;
 }
 
+const reads = { n: 0 };
 function el(p: Props, kids: FakeEl[] = []): FakeEl {
   const o: FakeEl = {
     name: () => p.name ?? null,
@@ -44,8 +45,13 @@ function el(p: Props, kids: FakeEl[] = []): FakeEl {
     click: () => { o.clicked = true; },
     actions: { AXPress: { perform: () => { o.pressed = true; if (p.role === 'AXCheckBox') p.value = p.value ? 0 : 1; } } },
     attributes: { AXValue: { value: () => p.value } },
+    subrole: () => '',
+    miniaturized: () => false,
     uiElements: coll(kids),
   };
+  // Count child reads so a test can prove leaf controls are never descended.
+  const kidsColl = o.uiElements;
+  Object.defineProperty(o, 'uiElements', { get: () => { reads.n++; return kidsColl; } });
   // JXA: `el.value()` reads, `el.value = x` writes.
   const read = () => p.value;
   Object.defineProperty(o, 'value', { get: () => read, set: (v) => { p.value = v; o.written = v; } });
@@ -60,7 +66,7 @@ function fixture() {
   const rows = Array.from({ length: 60 }, (_, i) => el({ name: `Row ${String(i + 1).padStart(2, '0')}`, role: 'AXButton', y: i * 26 }));
   const scroll = el({ role: 'AXScrollArea' }, [el({ role: 'AXGroup' }, rows)]);
   const win = el({ name: 'CC Target', role: 'AXWindow' }, [label, field, sub, scroll]);
-  const proc = { windows: coll([win]), unixId: () => 4242 };
+  const proc = { windows: coll([win]), unixId: () => 4242, name: () => 'cctarget' };
   const app = { processes: { where: () => [proc] }, includeStandardAdditions: false };
   return { label, field, sub, rows, Application: () => app };
 }
@@ -124,5 +130,32 @@ describe('macOS find-element.jxa', () => {
   it('finds a text field by its description (AppKit accessibilityLabel)', () => {
     const out = runFind(fixture(), ['-Name', 'First name', '-ProcessId', '4242']);
     expect(out.map((e: any) => e.role)).toContain('AXTextField');
+  });
+});
+
+function runScreenContext(fx: ReturnType<typeof fixture>) {
+  const ctx = vm.createContext({
+    Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
+    ObjC: { unwrap: (x: unknown) => x, import: () => {} },
+    $: { NSProcessInfo: { processInfo: { arguments: ['osascript', '-l', 'JavaScript', 'get-screen-context.jxa', '-FocusedProcessId', '4242', '-MaxDepth', '8'] } }, exit: () => {} },
+  });
+  return JSON.parse(vm.runInContext(loadScript('get-screen-context.jxa'), ctx));
+}
+
+describe('macOS get-screen-context.jxa (what compile_ui reads)', () => {
+  it('includes controls nested in a scroll area and names text fields by their description', () => {
+    const out = runScreenContext(fixture());
+    const flat: any[] = [];
+    (function walk(n: any) { if (!n) return; flat.push(n); (n.children || []).forEach(walk); })(out.uiTree);
+    expect(flat.filter(n => n.controlType === 'AXButton').map(n => n.name)).toContain('Row 50');
+    expect(flat.find(n => n.controlType === 'AXTextField')?.name).toBe('First name');
+  });
+
+  it('never descends into leaf controls (keeps a large window inside the timeout)', () => {
+    const fx = fixture();
+    reads.n = 0;
+    runScreenContext(fx);
+    // window + scroll area + group + root reads; the 63 leaf controls add none.
+    expect(reads.n).toBeLessThan(10);
   });
 });

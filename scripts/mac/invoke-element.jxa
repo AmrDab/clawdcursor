@@ -33,6 +33,13 @@ function safeGet(obj, property, defaultValue) {
 // compare equal (the ControlType map speaks one, System Events the other).
 function normRole(r) { return String(r || '').toLowerCase().replace(/^ax/, '').replace(/\s+/g, ''); }
 
+// Leaf controls: never descended (their children are decoration or a closed
+// menu), so the walk only pays for real containers.
+var LEAF = { button: 1, statictext: 1, textfield: 1, textarea: 1, checkbox: 1, radiobutton: 1,
+             image: 1, slider: 1, valueindicator: 1, incrementor: 1, popupbutton: 1, menubutton: 1,
+             scrollbar: 1, busyindicator: 1, progressindicator: 1, colorwell: 1, splitter: 1,
+             disclosuretriangle: 1, searchfield: 1, combobox: 1 };
+
 // Roles each action should land on, best first. set-value must reach the
 // editable field, never the static label beside it that shares its name.
 var ACTION_ROLES = {
@@ -72,7 +79,7 @@ function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
                 if (nameOk && roleOk && (nm || ds || rl)) {
                     out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want), depth: d });
                 }
-                next.push(el);
+                if (!LEAF[normRole(rl)]) next.push(el);
             }
         }
         level = next;
