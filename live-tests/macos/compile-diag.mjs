@@ -1,0 +1,11 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+const t = new StdioClientTransport({ command: 'node', args: ['dist/surface/cli.js', 'mcp', '--compact'], env: { ...process.env }, stderr: 'pipe' });
+const c = new Client({ name: 'diag', version: '1' }); await c.connect(t);
+const text = async (n, a) => (await c.callTool({ name: n, arguments: a })).content.map(x => x.text || '').join('\n');
+const ui = await text('accessibility', { action: 'compile_ui' });
+console.log('--- compile_ui lines mentioning the buttons:');
+console.log(ui.split('\n').filter(l => /Alpha|Bravo|Charlie|Delta|Submit/i.test(l)).slice(0, 12).join('\n'));
+console.log('--- find_button Alpha:', await text('accessibility', { action: 'find_button', intent: 'Alpha' }));
+console.log('--- find_button submit:', await text('accessibility', { action: 'find_button', intent: 'submit' }));
+await c.close(); process.exit(0);

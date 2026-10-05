@@ -48,6 +48,12 @@ jobs:
       - name: Task suite
         continue-on-error: true
         run: node suite-mac.mjs tasks mac-tasks 2>&1 | tee /tmp/tasks.log
+      - name: Diagnostics (raw JXA / AppleScript results)
+        if: always()
+        continue-on-error: true
+        run: |
+          bash live-tests/macos/mac-diag.sh 2>&1 | tee /tmp/diag.log
+          cp live-tests/macos/compile-diag.mjs . && node compile-diag.mjs 2>&1 | tee -a /tmp/diag.log
       - name: Summary
         if: always()
         run: |
@@ -63,6 +69,7 @@ jobs:
             /tmp/suite
             /tmp/perception.log
             /tmp/tasks.log
+            /tmp/diag.log
             /tmp/cc-target.log
             /tmp/target.err
             /tmp/ref-*.png
