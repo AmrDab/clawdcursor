@@ -47,8 +47,10 @@ function lastScript(): string {
 }
 /** Every osascript call must pass exactly one program via a single -e arg. */
 function eachCallIsSingleProgram(): boolean {
+  // Only inline AppleScript programs (-e); a JXA script file (e.g. the window
+  // list a title lookup reads) carries no program text to mis-parse.
   return execFileCalls
-    .filter(c => c.cmd === 'osascript')
+    .filter(c => c.cmd === 'osascript' && c.args.includes('-e'))
     .every(c => c.args.filter(a => a === '-e').length === 1);
 }
 
@@ -67,6 +69,27 @@ describe('macOS setWindowState — correct AppleScript per state', () => {
     const ok = await mac.setWindowState('normal', { title: 'Calculator' });
     expect(ok).toBe(true);
     expect(lastScript()).toContain('set value of attribute "AXMinimized" to false');
+  });
+
+  it('a title-only target resolves its app from the window list and addresses that window', async () => {
+    // Live macOS run (GitHub-hosted Mac, 2026-10): resize / minimize / restore
+    // by title all failed — `first window whose title contains "X" of
+    // (process)` binds `of (process)` to "X", and a nested `whose` over every
+    // process is not valid AppleScript either. Resolve via the window list.
+    const spy = vi.spyOn(mac, 'listWindows').mockResolvedValue([{ processId: 77, title: 'CC Target', processName: 'cctarget' }] as never);
+    try {
+      await mac.setWindowState('minimize', { title: 'CC Target' });
+      expect(lastScript()).toContain('tell window "CC Target" of (first application process whose unix id is 77) to set value of attribute "AXMinimized" to true');
+    } finally { spy.mockRestore(); }
+  });
+
+  it('with no window-list match, the fallback clause is valid AppleScript (container before `whose`)', async () => {
+    const spy = vi.spyOn(mac, 'listWindows').mockResolvedValue([] as never);
+    try {
+      await mac.setWindowState('minimize', { title: 'CC Target' });
+      expect(lastScript()).toContain('tell (first window of (first application process whose frontmost is true) whose title contains "CC Target")');
+      expect(lastScript()).not.toMatch(/whose title contains "CC Target" of/);
+    } finally { spy.mockRestore(); }
   });
 
   it('maximize clicks the AXZoomButton', async () => {

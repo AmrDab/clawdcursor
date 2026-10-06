@@ -21,11 +21,12 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn() },
   keyboard: { config: {}, type: vi.fn() },
   screen: {
-    grab: vi.fn().mockResolvedValue({
-      data: Buffer.alloc(4 * 100 * 100),   // 100×100 RGBA
+    // Fresh image per grab — the engine releases `data` after each capture.
+    grab: vi.fn(async () => ({
+      data: Buffer.alloc(4 * 100 * 100),   // 100×100 BGRA
       width: 100,
       height: 100,
-    }),
+    })),
   },
   Button: { LEFT: 0 },
   Key: new Proxy({}, { get: (_t, p) => p }),
@@ -40,6 +41,9 @@ vi.mock('sharp', () => ({
     png: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
     toBuffer: vi.fn().mockResolvedValue(Buffer.from('fake-png')),
+    // Linux OCR upscales the capture before tesseract.
+    metadata: vi.fn().mockResolvedValue({ width: 100, height: 100 }),
+    toFile: vi.fn().mockResolvedValue({}),
   })),
 }));
 
@@ -233,6 +237,40 @@ describe('OcrEngine', () => {
 
       expect(result.elements).toEqual([]);
       expect(eng.isAvailable()).toBe(false);
+    });
+
+    it('marks unavailable when the engine binary is missing (ENOENT)', async () => {
+      setPlatform('linux');
+      const eng = new OcrEngine();
+      (eng as any).available = true; // skip the `which` probe — we are testing the latch
+      mockExecFile.mockImplementation(() => {
+        throw Object.assign(new Error('spawn python3 ENOENT'), { code: 'ENOENT' });
+      });
+
+      await eng.recognizeScreen();
+
+      expect(eng.isAvailable()).toBe(false);
+    });
+
+    it('does NOT latch unavailable on a transient first-call failure (L1 regression)', async () => {
+      // Live bug: tesseract 5 emits float confidences, the Python parser threw
+      // ValueError on the FIRST call, and the engine latched `available=false`
+      // forever — every later OCR call returned "OCR is not available" in 1ms.
+      setPlatform('linux');
+      const eng = new OcrEngine();
+      (eng as any).available = true;
+      mockExecFile.mockImplementationOnce(() => {
+        throw new Error('Command failed: python3 ocr-recognize.py\nValueError: invalid literal for int() with base 10: \'81.879456\'');
+      });
+
+      const first = await eng.recognizeScreen();
+      expect(first.elements).toEqual([]);
+      expect(eng.isAvailable()).toBe(true);
+
+      mockExecFile.mockReturnValue({ stdout: sampleOcrJson(SAMPLE_ELEMENTS, 'Hello World Test') });
+      const second = await eng.recognizeScreen();
+      expect(second.elements).toHaveLength(3);
+      expect(mockExecFile).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -2,6 +2,155 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`expect` is checked before the action runs, on every path.** A malformed
+  `expect` used to be rejected only AFTER the click/key had been sent, so a
+  retrying agent acted twice. The projected MCP handlers, the agent loop and
+  both batch executors now refuse with "expect rejected (nothing executed)"
+  and touch nothing. `expect` and `verify`/`done` `assertions` also accept the
+  JSON-encoded array string the compound schema already advertises for array
+  params (all OSes).
+- **`accessibility invoke` by name no longer misses an element `find` can see.**
+  When the element is found but exposes no invoke/toggle/select pattern, the
+  Windows and macOS bridges now surface its bounds and the by-name path falls
+  back to clicking the bounds centre — only when the rect is sane and on the
+  virtual screen (never INT_MIN, never offscreen) — reporting "via a11y bounds
+  (coordinate fallback)". Windows `invokeElement` also normalizes
+  `ControlType.Button` → `Button` like `findElements` does, instead of silently
+  dropping the role filter.
+- **Windows: unscoped `find` retries the window clawdcursor last focused.** An
+  unscoped search follows the live foreground window; when that is the MCP
+  host and the search is empty, it retries once against the window a prior
+  `window focus` targeted, and "(no elements found)" now says which window(s)
+  were searched.
+- **Windows: a PowerShell bridge command timeout restarts the bridge.** The
+  bridge protocol has no request ids; previously the next command was sent
+  while the bridge was still busy and the late reply resolved the WRONG call.
+- **macOS: `scripts/mac/find-element.jxa` is now UTF-8/LF** (it was committed
+  as UTF-16LE with CRLF). A test now asserts every bridge script is UTF-8
+  without a UTF-16 BOM and uses LF.
+- **The compact surface could not drive a web page.** `window navigate`
+  launched its own browser on the user debug port and never told the CDP
+  driver, so the next `browser connect` attached to a *different* instance (the
+  dedicated agent browser at `about:blank`), `page_context` saw an empty page,
+  `type`/`select_option` failed, and `list_tabs` — which probed the user port
+  directly — reported no browser at all. `navigate_browser` now goes through
+  the one driver with the same attach-or-launch policy as `cdp_connect`
+  (including `CLAWD_AGENT_CDP_OFF=1` attach-only), and `cdp_list_tabs` lists the
+  connected browser's tabs. Attaching to a browser the user already has on the
+  debug port keeps its tab discipline: the page opens in the agent's own tab
+  and the result says so.
+- **`browser` compound gains a `navigate` action** (`window navigate` still
+  works). Every hint now names tools and actions that exist on the surface the
+  caller is using: compact results say `browser {action:"connect"}` instead of
+  `cdp_connect`, and projected agent-loop tools say `navigate_browser` /
+  `cdp_page_context` instead of `browser_navigate` / `browser_read` (this also
+  corrects `read_screen`'s hint to `ocr_read_screen`).
+- **Screenshots had red and blue swapped on every OS that captures through
+  nut-js (Windows, Linux X11, macOS fallback).** nut-js returns BGR pixels and
+  every capture path handed them to the PNG encoder as RGB. A single shared
+  helper now reorders the channels, so screenshots, region captures, monitor
+  captures and the frames fed to OCR show true colours.
+
+- **Linux X11 screenshots were black, which also blinded OCR.** The 4th byte
+  of an X11 grab is 0, which the encoder read as "fully transparent". Screen
+  captures are now always opaque.
+
+- **The MCP server no longer crashes at startup on Wayland.** Without
+  XWayland it segfaulted ("Could not open main display"); with XWayland
+  (GNOME/KDE) it exited with an X11 BadMatch. Wayland sessions never touch
+  the X11 screen APIs any more: screenshots and OCR use `grim` when it is
+  installed (sway, Hyprland and other wlroots compositors) and otherwise
+  return a clear "needs grim" error, and screen size comes from
+  `swaymsg` / `wlr-randr` / `xrandr`.
+
+- **Wayland input on Ubuntu 24.04 / Debian (ydotool 0.1.8).** clawdcursor
+  spoke the ydotool 1.x syntax, which 0.1.8 either ignores while exiting 0
+  (mouse moves "succeeded" without moving) or misreads (key presses typed
+  digits, every click was a left click). The installed generation is now
+  detected once and 0.1.8 gets its own syntax; what 0.1.8 cannot do at all
+  (scroll, drag, holding keys) reports an honest error instead of typing
+  stray characters. On ydotool 1.x, scrolling now uses the real wheel
+  (`mousemove -w`) instead of a non-existent `scroll` command.
+### Fixed (Linux)
+
+Found driving the MCP server on Ubuntu 24.04 (Xvfb + openbox, GTK3/GTK4
+apps, at-spi2, tesseract 5) and scored against the apps' own logs.
+
+- **OCR failed on current distros.** tesseract 5 prints float confidences
+  (`81.879456`); the Python parser used `int()` and the whole OCR call died
+  with `ValueError`. Worse, the engine latched "OCR is not available" after
+  that first failure, so every later call returned nothing in 1ms. The parser
+  accepts floats, and the engine now only marks itself unavailable when the
+  OCR binary / language pack is actually missing, not on a transient error.
+- **`type` took 6 s and `clipboard_write` 3 s.** xclip / wl-copy fork a child
+  that keeps serving the selection; with stdout/stderr piped it held the pipes
+  open, so the adapter waited for a `close` that never came until the 3 s
+  timeout (twice per `type`: paste + restore). The write now resolves on
+  process exit and inherits no pipes. The forked server is never killed.
+- **`window restore` left minimized windows minimized.** Clearing the
+  `hidden` hint doesn't un-iconify an X window; the adapter now activates it
+  (`wmctrl -i -a`) after clearing the states, the same path focus-by-title
+  already took.
+- **`list_windows` reported an empty process name for every window**, so
+  `window focus processName:"gnome-calculator"` and `app_running` assertions
+  never matched. Names come from `/proc/<pid>/cmdline` (argv[0] basename —
+  not the 15-char-truncated `comm`), falling back to `comm`.
+- **Unknown key names reported success.** `key combo:"notarealkey"` typed the
+  word and answered "Pressed notarealkey"; `"super"` was typed as text. The
+  Linux adapter now throws `Unknown key: "..."` like Windows and macOS, and
+  bare modifiers (`super`, `ctrl`, `alt`, …) press the modifier key.
+- **`GDK_SCALE` faked the DPI on X11.** With `GDK_SCALE=2` on a real
+  1920×1080 X server, `list_displays` claimed dpiRatio 2 / 3840×2160 and every
+  coordinate click landed at half the target. X11 input (xdotool, nut-js) is
+  physical pixels — the env scale is only consulted on Wayland now, in both
+  the platform adapter and the legacy desktop layer.
+- **`accessibility find` without a process id searched the wrong app** (the
+  bridge guessed by a focused-descendant heuristic, else took the first app on
+  the bus); `wait_for` timed out for the same reason. Find / invoke now scope
+  to the foreground window's pid by default, like Windows and macOS.
+- **AT-SPI actions were a stub**, so `accessibility invoke / set_value /
+  toggle / select / focus / get_value`, `smart_click`, `smart_type`,
+  `find_button`→invoke and the `a11y_*` depth tools all failed on Linux even
+  though `find` worked. `atspi-bridge.py --cmd invoke` drives the AT-SPI
+  Action / EditableText / Value / Selection / Component interfaces and always
+  returns the element's bounds so callers can fall back to a coordinate click;
+  the legacy accessibility bridge routes its Linux branches to the adapter
+  instead of answering "not implemented".
+- **AT-SPI roles and bounds.** `compile_ui` showed role `unknown` for almost
+  every element because raw AT-SPI role names (`push button`, `check box`,
+  `combo box`, `text`, `menu item`, …) weren't mapped to the shared
+  vocabulary, so `find_button` found no candidate. Roles are normalized
+  (raw name kept as `subrole`, password fields flagged `secure`), a
+  `controlType` filter now matches the normalized role, elements scrolled out
+  of view (INT_MIN extents) are reported offscreen instead of at
+  `-2147483648,-2147483648`, an empty or partial state set no longer marks a
+  widget disabled (GTK4), and window-relative extents (GTK4 on X11 answers
+  zeros for screen coordinates) are offset by the window origin when the
+  bridge reports them. (libatspi's client cache stays on: disabling it made a
+  single `find` on a real GTK3 app run past 30 s.)
+- **OCR found no text on a Linux desktop.** Tesseract's default page mode is
+  built for prose and read nothing from a 1080p screen of small UI labels.
+  Linux OCR now runs sparse-text mode on a 2x-upscaled capture and maps the
+  boxes back to screen pixels — every button label in the test app was read.
+
+### Fixed (all platforms)
+
+- **Hint rewriting corrupted JSON results.** Rewriting tool names in results
+  to the caller's surface inserted raw double quotes into JSON, so every
+  `system ocr` response failed to parse; it would also have edited tool names
+  appearing in page text, files or the clipboard. JSON results and
+  `<untrusted-screen-content>` blocks are now never rewritten.
+- **`smart_click` could click the wrong item on a repeated OCR word.** Token
+  coverage counted repeats, so "Row Row" matched "Row 50" and the wrong list
+  row was clicked. Coverage now counts distinct target words.
+- **The invoke-by-name coordinate fallback raises the target window first**
+  when the lookup was scoped to a process, so the click can't land on a
+  window covering the element.
+
 ## [1.5.11] - 2026-10-01 — honest compound surface; works with any model, host and OS (security)
 
 Every bug here was hit driving clawdcursor for real to configure npm trusted

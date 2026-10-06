@@ -28,7 +28,7 @@ import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
-import { getEdgePaths, getChromePaths } from '../../llm/browser-config';
+import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
@@ -211,6 +211,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
               refUsed = refLadder[i];
               refRes = await ctx.platform.invokeElement({ name: plan.name, action: refUsed });
             }
+            if (!refRes.success) {
+              const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
+              if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
+            }
             await sleep(150);
             return { success: refRes.success, text: refRes.success ? `Invoked "${plan.name}" via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
           }
@@ -256,6 +260,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
         for (let i = 1; i < ladder.length && !res.success; i++) {
           used = ladder[i];
           res = await ctx.platform.invokeElement({ name, controlType, processId, action: used, value });
+        }
+        // Found but no pattern took: click the surfaced bounds centre (same
+        // fallback the el_NN path and smart_click already have). Live
+        // regression 2026-10: `find` saw the Button, invoke reported "missed".
+        if (!res.success && action === 'click') {
+          const fallback = await clickBoundsFallback(ctx, name, res.bounds, processId);
+          if (fallback) return fallback;
         }
         await sleep(150);
         return {
@@ -1638,15 +1649,16 @@ export function buildUnifiedTools(): UnifiedTool[] {
     // decides; no vision model needed.
     {
       name: 'browser_connect',
-      description: 'Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use browser_navigate/read/click/type. If it fails, fall back to read_text/smart_click.',
+      description: 'Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use browser_navigate, browser_read, browser_click, browser_type. If it fails, fall back to read_text/smart_click.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       changesScreen: true,
       async execute(_args, ctx) {
         if (!ctx.cdp) return { success: false, text: 'browser_connect: CDP not available in this build — use read_text/smart_click for the page instead.' };
-        // CLAWD_AGENT_CDP_OFF=1 → attach-only (never launch a new instance).
-        const allowLaunch = !/^(1|true)$/i.test(process.env.CLAWD_AGENT_CDP_OFF ?? '');
-        const ok = await ctx.cdp.ensureConnected({ launch: allowLaunch, exePaths: [...getEdgePaths(), ...getChromePaths()] }).catch(() => false);
-        if (!ok) return { success: false, text: `browser_connect: could not ${allowLaunch ? 'launch or attach to' : 'attach to'} a CDP browser — fall back to read_text/smart_click.` };
+        // Same policy as navigate_browser (CLAWD_AGENT_CDP_OFF=1 → attach-only),
+        // so both land on the one driver instance.
+        const connectOpts = agentBrowserConnectOptions();
+        const ok = await ctx.cdp.ensureConnected(connectOpts).catch(() => false);
+        if (!ok) return { success: false, text: `browser_connect: could not ${connectOpts.launch ? 'launch or attach to' : 'attach to'} a CDP browser — fall back to read_text/smart_click.` };
         const url = await ctx.cdp.getUrl().catch(() => null);
         const title = await ctx.cdp.getTitle().catch(() => null);
         // Disclose provenance honestly: 'attached' means we connected to a
@@ -1930,6 +1942,44 @@ async function resolveAgentPid(
   } catch {
     return undefined;
   }
+}
+
+/** UIA's "no rectangle" sentinel (System.Windows.Rect.Empty → int). */
+const RECT_INT_MIN = -2147483648;
+
+/**
+ * Coordinate fallback for the activate intent when the element was FOUND
+ * but exposes no invoke/toggle/select pattern: click the centre of the
+ * bounds the adapter surfaced — but ONLY when they are sane (finite,
+ * non-degenerate, not INT_MIN) and the centre lies on the virtual screen.
+ * Never click an offscreen coordinate. Returns null when no safe click exists.
+ */
+async function clickBoundsFallback(
+  ctx: AgentToolContext,
+  name: string,
+  b: { x: number; y: number; width: number; height: number } | undefined,
+  processId?: number,
+): Promise<{ success: true; text: string; targetLabel: string } | null> {
+  if (!b) return null;
+  const vals = [b.x, b.y, b.width, b.height];
+  if (!vals.every(Number.isFinite) || b.width <= 0 || b.height <= 0 || b.x === RECT_INT_MIN || b.y === RECT_INT_MIN) return null;
+  const cx = Math.round(b.x + b.width / 2);
+  const cy = Math.round(b.y + b.height / 2);
+  // Virtual screen = union of displays (logical, and scaled to physical since
+  // a11y rects are physical on Windows); fall back to the primary display.
+  const displays = await ctx.platform.listDisplays().catch(() => []);
+  const rects = displays.length
+    ? displays.flatMap(d => [1, d.dpiRatio || 1].map(r => ({ x: d.bounds.x * r, y: d.bounds.y * r, w: d.bounds.width * r, h: d.bounds.height * r })))
+    : [{ x: 0, y: 0, w: ctx.screen.physicalWidth, h: ctx.screen.physicalHeight }];
+  const onScreen = rects.some(r => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h);
+  if (!onScreen) return null;
+  // A coordinate click hits whatever is on top. When the element was looked
+  // up in a named process (not the foreground window), raise that window
+  // first so the click can't land on a window covering it.
+  if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
+  await ctx.platform.mouseClick(cx, cy);
+  await sleep(150);
+  return { success: true, text: `Clicked "${name}" via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
 }
 
 function buildWinQuery(args: Record<string, unknown>): { processName?: string; processId?: number; title?: string } | undefined {

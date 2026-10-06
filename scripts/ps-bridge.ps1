@@ -700,7 +700,8 @@ function Cmd-InvokeElement {
                     } catch {
                         $rect = $element.Current.BoundingRectangle
                         return @{ success=$false; action="click"; error="No invoke/toggle/select pattern";
-                            clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)} }
+                            clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)};
+                            bounds=@{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
                     }
                 }
             }

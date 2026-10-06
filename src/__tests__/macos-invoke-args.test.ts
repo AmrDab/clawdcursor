@@ -47,6 +47,19 @@ describe('macOS invokeElement — JXA argument contract', () => {
     expect(call.args).not.toContain('-FocusedProcessId');
   });
 
+  it('defaults to the foreground process when no processId is given (the JXA requires one)', async () => {
+    // Live macOS run (GitHub-hosted Mac, 2026-10): invoke / set_value by name
+    // without a processId always failed — invoke-element.jxa rejects a call
+    // with no -ProcessId, and the adapter only passed one when the caller did.
+    const spy = vi.spyOn(mac, 'getActiveWindow').mockResolvedValue({ processId: 4242 } as never);
+    try {
+      nextStdout = JSON.stringify({ success: true, action: 'click' });
+      await mac.invokeElement({ name: 'Charlie', action: 'click' });
+      const call = execFileCalls.find(c => c.args.some(a => String(a).includes('invoke-element.jxa')))!;
+      expect(call.args[call.args.indexOf('-ProcessId') + 1]).toBe('4242');
+    } finally { spy.mockRestore(); }
+  });
+
   it('surfaces the JXA top-level get-value `value` into res.data.value', async () => {
     nextStdout = JSON.stringify({ success: true, action: 'get-value', value: 'hello world', method: 'AXValue' });
     const res = await mac.invokeElement({ name: 'Text editor', processId: 9, action: 'get-value' });
@@ -82,5 +95,23 @@ describe('macOS getUiTree — keeps -FocusedProcessId (the flag get-screen-conte
     expect(call.args).toContain('-FocusedProcessId');
     expect(call.args).toContain('-MaxDepth');
     expect(call.args).toContain('8');
+  });
+});
+
+describe('macOS invokeElement — surfaces the found element on a pattern miss', () => {
+  it('maps the JXA failure clickPoint/bounds into res.bounds so callers can coordinate-fallback', async () => {
+    nextStdout = JSON.stringify({
+      success: false, action: 'click', error: 'Element does not support click(). Use coordinate click.',
+      clickPoint: { x: 125, y: 210 }, bounds: { x: 100, y: 200, width: 50, height: 20 },
+    });
+    const res = await mac.invokeElement({ name: 'Switch', processId: 9, action: 'click' });
+    expect(res.success).toBe(false);
+    expect(res.bounds).toEqual({ x: 100, y: 200, width: 50, height: 20 });
+  });
+
+  it('falls back to a point-sized rect when only clickPoint is reported', async () => {
+    nextStdout = JSON.stringify({ success: false, action: 'click', clickPoint: { x: 125, y: 210 } });
+    const res = await mac.invokeElement({ name: 'Switch', processId: 9, action: 'click' });
+    expect(res.bounds).toEqual({ x: 125, y: 210, width: 1, height: 1 });
   });
 });

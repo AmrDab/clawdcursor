@@ -259,6 +259,31 @@ describe('Smart Tools', () => {
       }
     });
 
+    it('a repeated word cannot stand in for a missing one (live regression: "Row 50" clicked "Row Row")', async () => {
+      // Live Ubuntu VM run 2026-10: smart_click("Row 50") on a list scrolled
+      // to rows 01-17 matched two adjacent "Row" tokens. Token overlap counted
+      // the duplicate twice — 2/2 coverage, 0.85 — and clicked the wrong row.
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      (OcrEngine.prototype as any).recognizeScreen = async () => ({
+        elements: [
+          { text: 'Row', x: 444, y: 126, width: 26, height: 10, line: 1, confidence: 0.97 },
+          { text: 'Row', x: 474, y: 126, width: 26, height: 10, line: 1, confidence: 0.97 },
+        ],
+        fullText: 'Row Row',
+        durationMs: 100,
+      });
+      try {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const ctx = createCtx();
+        const result = await smartClick.handler({ target: 'Row 50' }, ctx);
+        expect(result.isError).toBe(true);
+        expect(mockMouseClick).not.toHaveBeenCalled();
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
+    });
+
     // ── Issue #101: structured failure payloads ──
 
     it('successful click still returns plain human-readable text (not JSON)', async () => {
@@ -283,6 +308,28 @@ describe('Smart Tools', () => {
       const result = await smartClick.handler({ name: 'Submit' }, ctx);
       expect(result.isError).toBeUndefined();
       expect(result.text).toMatch(/^Clicked "Submit"/);
+    });
+
+    it('never reports failure for an a11y invoke that is still running — it waits for the outcome (no ghost click)', async () => {
+      // Live macOS run (2026-10): smart_click("Row 50") returned
+      // deadline_exceeded, then the still-running AXPress clicked Row 50 a
+      // moment later. The invoke IS the click, so its outcome must be awaited;
+      // only the read-only OCR search may be abandoned at the deadline.
+      const lateSuccess = vi.fn(() => new Promise(r => setTimeout(() => r({ success: true }), 600)));
+      const ctx = createCtx({
+        a11y: {
+          getActiveWindow: mockGetActiveWindow,
+          invokeElement: lateSuccess,
+          findElement: mockFindElement,
+          getFocusedElement: mockGetFocusedElement,
+          getScreenContext: mockGetScreenContext,
+          writeClipboard: mockWriteClipboard,
+          invalidateCache: mockInvalidateCache,
+        } as any,
+      });
+      const result = await smartClick.handler({ target: 'NeverGonnaMatchAnythingInOcr', timeout: 200 }, ctx);
+      expect(result.isError).toBeFalsy();
+      expect(result.text).toMatch(/Clicked "NeverGonnaMatchAnythingInOcr" via UI Automation/);
     });
 
     it('returns structured JSON with error: "deadline_exceeded" when the deadline fires', async () => {

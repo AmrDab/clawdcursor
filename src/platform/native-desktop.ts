@@ -15,6 +15,8 @@ import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
 import { normalizeKey } from './keys';
 import { getNativeHelper, captureScreenViaHelper } from './native-helper';
+import { sharpFromGrab, type GrabImage } from './grab-image';
+import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
 
@@ -166,13 +168,17 @@ export class NativeDesktop extends EventEmitter {
     if (!mon) return this.captureForLLM();
 
     try {
-      const { Region } = await import('@nut-tree-fork/nut-js');
-      const region = new Region(mon.x, mon.y, mon.width, mon.height);
-      const img = await screen.grabRegion(region);
+      let img: GrabImage;
+      if (isWaylandSession()) {
+        img = await grimGrab({ x: mon.x, y: mon.y, width: mon.width, height: mon.height });
+      } else {
+        const { Region } = await import('@nut-tree-fork/nut-js');
+        img = await screen.grabRegion(new Region(mon.x, mon.y, mon.width, mon.height));
+      }
       const scaleFactor = mon.width > LLM_TARGET_WIDTH ? mon.width / LLM_TARGET_WIDTH : 1;
       const llmW = Math.round(mon.width / scaleFactor);
       const llmH = Math.round(mon.height / scaleFactor);
-      const processed = await sharp(img.data, { raw: { width: img.width, height: img.height, channels: 4 } })
+      const processed = await sharpFromGrab(img)
         .resize(llmW, llmH)
         .png()
         .toBuffer();
@@ -216,10 +222,22 @@ export class NativeDesktop extends EventEmitter {
       mouse.config.autoDelayMs = 0;      // No auto-delay between actions
       keyboard.config.autoDelayMs = 0;   // No auto-delay between keystrokes
 
-      // Grab a screenshot to determine screen dimensions
-      const img = await screen.grab();
-      this.screenWidth = img.width;
-      this.screenHeight = img.height;
+      if (isWaylandSession()) {
+        // nut-js screen calls are fatal on Wayland (see wayland-screen.ts) —
+        // ask the compositor for geometry; captures refresh it anyway.
+        const ws = await waylandScreenSize();
+        if (ws) {
+          this.screenWidth = ws.physicalWidth;
+          this.screenHeight = ws.physicalHeight;
+        } else {
+          console.warn('⚠️  Screen size unknown on Wayland (need swaymsg, wlr-randr or xrandr) — using the first capture');
+        }
+      } else {
+        // Grab a screenshot to determine screen dimensions
+        const img = await screen.grab();
+        this.screenWidth = img.width;
+        this.screenHeight = img.height;
+      }
 
       // Calculate scale factor
       if (this.screenWidth > LLM_TARGET_WIDTH) {
@@ -259,10 +277,15 @@ export class NativeDesktop extends EventEmitter {
         } catch { /* non-fatal — dpiRatio stays 1 */ }
       } else if (process.platform === 'linux') {
         try {
-          // Check common DE scale environment variables first
+          // Check common DE scale environment variables first — Wayland only.
+          // On X11 the pointer space IS physical pixels (xdotool / XTest /
+          // nut-js), so GDK_SCALE=2 on a 1920x1080 X server made
+          // physicalToMouse halve every click. Mirrors LinuxAdapter.
+          const onWayland = (process.env.XDG_SESSION_TYPE || '').toLowerCase() === 'wayland'
+            || (!process.env.XDG_SESSION_TYPE && !!process.env.WAYLAND_DISPLAY);
           const gdkScale = parseInt(process.env.GDK_SCALE || '1');
           const qtScale = parseFloat(process.env.QT_SCALE_FACTOR || '1');
-          const envScale = Math.max(gdkScale, qtScale);
+          const envScale = onWayland ? Math.max(gdkScale, qtScale) : 1;
           if (envScale > 1) {
             this.dpiRatio = envScale;
           } else {
@@ -321,19 +344,13 @@ export class NativeDesktop extends EventEmitter {
       }
     }
 
-    const img = await screen.grab();
+    const img = await this.grab();
 
     // Update screen dimensions in case of resolution change
     this.screenWidth = img.width;
     this.screenHeight = img.height;
 
-    const processed = await this.processFrame(
-      img.data,
-      img.width,
-      img.height,
-      this.screenWidth,
-      this.screenHeight,
-    );
+    const processed = await this.processFrame(img, this.screenWidth, this.screenHeight);
     // Release the raw RGBA buffer immediately after processing
     (img as any).data = null;
 
@@ -384,7 +401,7 @@ export class NativeDesktop extends EventEmitter {
       }
     }
 
-    const img = await screen.grab();
+    const img = await this.grab();
 
     // Update screen dimensions
     this.screenWidth = img.width;
@@ -400,13 +417,7 @@ export class NativeDesktop extends EventEmitter {
     const llmWidth = Math.min(this.screenWidth, LLM_TARGET_WIDTH);
     const llmHeight = Math.round(this.screenHeight / this.scaleFactor);
 
-    const processed = await this.processFrame(
-      img.data,
-      img.width,
-      img.height,
-      llmWidth,
-      llmHeight,
-    );
+    const processed = await this.processFrame(img, llmWidth, llmHeight);
     // Release the raw RGBA buffer immediately after processing
     (img as any).data = null;
 
@@ -451,7 +462,7 @@ export class NativeDesktop extends EventEmitter {
       return { width: rw, height: rh, buffer, timestamp: Date.now(), format, scaleFactor: cropScale, llmWidth, llmHeight, regionX: rx, regionY: ry };
     }
 
-    const img = await screen.grab();
+    const img = await this.grab();
 
     // Clamp to screen bounds
     const rx = Math.max(0, Math.min(x, img.width - 1));
@@ -466,9 +477,7 @@ export class NativeDesktop extends EventEmitter {
 
     const { format, quality } = this.config.capture;
 
-    let pipeline = sharp(img.data, {
-      raw: { width: img.width, height: img.height, channels: 4 },
-    }).extract({ left: rx, top: ry, width: rw, height: rh });
+    let pipeline = sharpFromGrab(img).extract({ left: rx, top: ry, width: rw, height: rh });
 
     if (llmWidth < rw) {
       pipeline = pipeline.resize(llmWidth, llmHeight, { fit: 'fill', kernel: 'lanczos3' });
@@ -544,28 +553,28 @@ export class NativeDesktop extends EventEmitter {
   }
 
   /**
-   * Process a raw RGBA buffer into the configured output format.
-   * nut-js screen.grab() returns RGBA data directly — no BGRA swap needed.
+   * Full-screen grab. nut-js on X11/Windows/macOS; grim on Wayland, where
+   * nut-js would open X11 and take the process down (see wayland-screen.ts).
+   */
+  private grab(): Promise<GrabImage> {
+    return isWaylandSession() ? grimGrab() : screen.grab();
+  }
+
+  /**
+   * Process a raw grab into the configured output format.
+   * nut-js screen.grab() returns BGR(A) — sharpFromGrab reorders it and forces alpha opaque.
    */
   private async processFrame(
-    rawData: Buffer,
-    srcWidth: number,
-    srcHeight: number,
+    img: GrabImage,
     targetWidth: number,
     targetHeight: number,
   ): Promise<Buffer> {
     const { format, quality } = this.config.capture;
 
-    let pipeline = sharp(rawData, {
-      raw: {
-        width: srcWidth,
-        height: srcHeight,
-        channels: 4,
-      },
-    });
+    let pipeline = sharpFromGrab(img);
 
     // Resize if target is smaller than source
-    if (targetWidth < srcWidth || targetHeight < srcHeight) {
+    if (targetWidth < img.width || targetHeight < img.height) {
       pipeline = pipeline.resize(targetWidth, targetHeight, {
         fit: 'fill',
         kernel: 'lanczos3',

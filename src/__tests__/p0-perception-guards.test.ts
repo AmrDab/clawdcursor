@@ -58,9 +58,18 @@ describe('P0-1 — getUiTree defaults to the active-window pid on every platform
   });
 
   it('linux getUiTree resolves getActiveWindow() when pid is omitted', () => {
-    const body = methodBody(read('platform', 'linux.ts'), 'async getUiTree(processId?: number)');
-    expect(body).toContain('getActiveWindow');
+    // 1.5.12: the foreground-pid lookup moved into resolveA11yPid so that
+    // findElements / invokeElement get the same default (L7 — find without a
+    // pid searched the wrong app). Follow the helper.
+    const linux = read('platform', 'linux.ts');
+    const body = methodBody(linux, 'async getUiTree(processId?: number)');
+    expect(body).toContain('resolveA11yPid');
     expect(body).toContain("'--process-id'");
+    const helper = methodBody(linux, 'private async resolveA11yPid(processId?: number)');
+    expect(helper).toContain('getActiveWindow');
+    for (const m of ['async findElements(query', 'async invokeElement(query']) {
+      expect(methodBody(linux, m), m).toContain('resolveA11yPid');
+    }
   });
 });
 

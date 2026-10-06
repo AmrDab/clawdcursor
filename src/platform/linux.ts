@@ -3,10 +3,13 @@
  *
  * Strategy:
  *   - Mouse + keyboard: nut-js directly (same approach as Windows).
- *   - Screenshot: nut-js screen.grab() → sharp for PNG encode / resize.
- *   - Screen size: xrandr --query; HiDPI via GDK_SCALE / QT_SCALE_FACTOR env.
- *   - Windows: wmctrl -lG for listing; xdotool for active-window detection.
- *   - A11y: AT-SPI bridge not yet implemented — graceful empty returns.
+ *   - Screenshot: nut-js screen.grab() (X11) or grim (Wayland) → sharp for PNG encode / resize.
+ *   - Screen size: xrandr --query vs nut-js capture size. X11 input works
+ *     in physical pixels, so GDK_SCALE / QT_SCALE_FACTOR are NOT a pointer
+ *     scale there (they only ever applied on Wayland).
+ *   - Windows: wmctrl -lG for listing; xdotool for active-window detection;
+ *     process names from /proc/<pid>.
+ *   - A11y: AT-SPI via scripts/linux/atspi-bridge.py (read + invoke).
  *   - Clipboard: xclip -selection clipboard (X11 assumption).
  *   - openApp: spawn by name, falling back to xdg-open.
  *
@@ -16,8 +19,8 @@
 
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
+import * as fs from 'fs';
 import * as path from 'path';
-import sharp from 'sharp';
 import {
   mouse,
   keyboard,
@@ -27,6 +30,8 @@ import {
   Key,
 } from '@nut-tree-fork/nut-js';
 import { WaylandBackend } from './wayland-backend';
+import { sharpFromGrab, type GrabImage } from './grab-image';
+import { detectLinuxEnvironment, waylandScreenSize, grimGrab } from './wayland-screen';
 import type {
   PlatformAdapter,
   ScreenSize,
@@ -189,29 +194,49 @@ export class LinuxAdapter implements PlatformAdapter {
     // Physical dimensions — nut-js screen.grab returns hardware pixels.
     let physicalWidth = logicalWidth;
     let physicalHeight = logicalHeight;
-    try {
-      const w = await nutScreen.width();
-      const h = await nutScreen.height();
-      if (w > 0 && h > 0) {
-        physicalWidth = w;
-        physicalHeight = h;
+    if (this.environment === 'wayland') {
+      // nut-js screen calls are fatal on Wayland (see wayland-screen.ts) —
+      // ask the compositor instead when XWayland's xrandr gave nothing.
+      if (!logicalWidth) {
+        const ws = await waylandScreenSize();
+        if (ws) {
+          logicalWidth = ws.logicalWidth;
+          logicalHeight = ws.logicalHeight;
+          physicalWidth = ws.physicalWidth;
+          physicalHeight = ws.physicalHeight;
+        }
       }
-    } catch {
-      /* nut-js unavailable — keep logical dims as physical */
+    } else {
+      try {
+        const w = await nutScreen.width();
+        const h = await nutScreen.height();
+        if (w > 0 && h > 0) {
+          physicalWidth = w;
+          physicalHeight = h;
+        }
+      } catch {
+        /* nut-js unavailable — keep logical dims as physical */
+      }
     }
 
     // If xrandr gave us nothing, assume physical == logical.
     if (!logicalWidth) logicalWidth = physicalWidth;
     if (!logicalHeight) logicalHeight = physicalHeight;
 
-    // HiDPI hints from desktop environment env vars.
+    // HiDPI hints from desktop environment env vars — Wayland only. X11 has
+    // no global logical scaling: xdotool / nut-js / XTest all address
+    // physical pixels, so GDK_SCALE=2 on a 1920x1080 X server used to report
+    // dpiRatio 2 / 3840x2160 and every coordinate click landed at half the
+    // target. (Xft.dpi is a font scale, not a pointer-space scale either.)
     const gdkScale = parseInt(process.env.GDK_SCALE || '1', 10);
     const qtScale = parseFloat(process.env.QT_SCALE_FACTOR || '1');
-    const envScale = Math.max(
-      Number.isFinite(gdkScale) ? gdkScale : 1,
-      Number.isFinite(qtScale) ? qtScale : 1,
-      1,
-    );
+    const envScale = this.environment === 'wayland'
+      ? Math.max(
+        Number.isFinite(gdkScale) ? gdkScale : 1,
+        Number.isFinite(qtScale) ? qtScale : 1,
+        1,
+      )
+      : 1;
 
     let dpiRatio = 1;
     if (physicalWidth > 0 && logicalWidth > 0 && physicalWidth > logicalWidth) {
@@ -308,9 +333,7 @@ export class LinuxAdapter implements PlatformAdapter {
 
   async screenshot(opts?: { maxWidth?: number; displayIndex?: number }): Promise<ScreenshotResult> {
     const img = await this.grabScreen();
-    let pipeline = sharp(img.data, {
-      raw: { width: img.width, height: img.height, channels: 4 },
-    });
+    let pipeline = sharpFromGrab(img);
 
     let width = img.width;
     let height = img.height;
@@ -354,9 +377,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const top = Math.max(0, Math.min(y, img.height - 1));
       const width = Math.max(1, Math.min(w, img.width - left));
       const height = Math.max(1, Math.min(h, img.height - top));
-      const buffer = await sharp(img.data, {
-        raw: { width: img.width, height: img.height, channels: 4 },
-      })
+      const buffer = await sharpFromGrab(img)
         .extract({ left, top, width, height })
         .png()
         .toBuffer();
@@ -366,9 +387,13 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
-  private async grabScreen(): Promise<{ data: Buffer; width: number; height: number }> {
+  private async grabScreen(): Promise<GrabImage> {
+    // Wayland: nut-js would open X11 and die (see wayland-screen.ts); grim or an honest error.
+    if (this.environment === 'wayland') {
+      return await this.withTimeout(grimGrab(), SCREENSHOT_TIMEOUT_MS, 'grim');
+    }
     return await this.withTimeout(
-      nutScreen.grab() as unknown as Promise<{ data: Buffer; width: number; height: number }>,
+      nutScreen.grab() as unknown as Promise<GrabImage>,
       SCREENSHOT_TIMEOUT_MS,
       'nut-js screen.grab',
     );
@@ -474,6 +499,10 @@ export class LinuxAdapter implements PlatformAdapter {
       } else if (state === 'normal') {
         // Remove maximize + hidden so the window returns to its original bounds.
         await execFileAsync('wmctrl', ['-i', '-r', target, '-b', 'remove,maximized_vert,maximized_horz,hidden'], { timeout: TOOL_TIMEOUT_MS });
+        // Clearing _NET_WM_STATE_HIDDEN alone leaves an iconified window
+        // iconified (WM_STATE stays Iconic). Activating it is what makes the
+        // WM map it again — same path focus-by-title takes.
+        await execFileAsync('wmctrl', ['-i', '-a', target], { timeout: TOOL_TIMEOUT_MS });
       } else if (state === 'close') {
         // wmctrl -c sends _NET_CLOSE_WINDOW — the app can prompt / refuse.
         // wmctrl's -c takes a name-substring, not a window id, so we hand
@@ -550,19 +579,13 @@ export class LinuxAdapter implements PlatformAdapter {
 
   // ─── ACCESSIBILITY ────────────────────────────────────────────────
   //
-  // Tranche 4b — AT-SPI D-Bus bridge (READ-ONLY first pass).
-  //
-  // When the bridge is available (python3 + python3-gi + Atspi), we
-  // spawn `atspi-bridge.py` to answer getUiTree / findElements /
-  // getFocusedElement / waitForElement. The script emits JSON with the
-  // same UiElement shape used on Windows / macOS.
-  //
-  // `invokeElement` stays stubbed — action dispatch (click / focus /
-  // set-value / expand / ...) needs per-role handling via AT-SPI's
-  // Action / EditableText / Value interfaces. Scoped out of this pass
-  // so we can land READ support for Linux now and iterate. When the
-  // bridge isn't available, every method falls back to the same safe
-  // empty responses as before — zero regression on boxes without AT-SPI.
+  // AT-SPI D-Bus bridge. When available (python3 + python3-gi + Atspi),
+  // we spawn `atspi-bridge.py` to answer getUiTree / findElements /
+  // getFocusedElement / waitForElement / invokeElement. The script emits
+  // JSON with the same UiElement shape used on Windows / macOS; raw AT-SPI
+  // role names are normalized here (see ATSPI_ROLE_MAP). When the bridge
+  // isn't available, every method falls back to the same safe empty
+  // responses as before — zero regression on boxes without AT-SPI.
 
   async getUiTree(processId?: number): Promise<UiElement[]> {
     if (!this.atspiAvailable) return [];
@@ -571,18 +594,14 @@ export class LinuxAdapter implements PlatformAdapter {
       // Default to the active window's pid when the caller omits it, so an
       // unscoped read_screen targets the focused app (parity with the Windows
       // adapter) instead of walking the whole desktop tree.
-      let pid = processId;
-      if (typeof pid !== 'number') {
-        const fg = await this.getActiveWindow().catch(() => null);
-        if (fg?.processId) pid = fg.processId;
-      }
+      const pid = await this.resolveA11yPid(processId);
       if (typeof pid === 'number') args.push('--process-id', String(pid));
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
       const data = JSON.parse(stdout) as { elements?: any[] };
       const raw = Array.isArray(data.elements) ? data.elements : [];
-      return raw.map(this.normalizeAtspiElement);
+      return this.offsetWindowRelative(raw, raw.map(this.normalizeAtspiElement));
     } catch {
       return [];
     }
@@ -593,17 +612,60 @@ export class LinuxAdapter implements PlatformAdapter {
     try {
       const args = ['--cmd', 'find'];
       if (query.name) args.push('--name', query.name);
-      if (query.controlType) args.push('--role', query.controlType);
-      if (typeof query.processId === 'number') args.push('--process-id', String(query.processId));
+      // Without a pid the bridge guesses the app (focused-descendant
+      // heuristic, else the first app on the bus) and searched the wrong
+      // one. Scope to the foreground window like Windows / macOS do.
+      const pid = await this.resolveA11yPid(query.processId);
+      if (typeof pid === 'number') args.push('--process-id', String(pid));
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
       const data = JSON.parse(stdout) as { elements?: any[] };
-      const raw = Array.isArray(data.elements) ? data.elements : [];
-      return raw.map(this.normalizeAtspiElement);
+      let raw = Array.isArray(data.elements) ? data.elements : [];
+      // Role filter runs here, on the NORMALIZED role, so "Button" matches a
+      // "push button" and "Edit" matches a "text" entry. Raw AT-SPI role
+      // substrings still match for callers that pass them.
+      if (query.controlType) {
+        const want = query.controlType.replace(/^ControlType\./, '').toLowerCase();
+        raw = raw.filter(el => {
+          const rawRole = String(el?.controlType ?? '').toLowerCase();
+          return normalizeAtspiRole(rawRole).toLowerCase() === want || rawRole.includes(want);
+        });
+      }
+      return this.offsetWindowRelative(raw, raw.map(this.normalizeAtspiElement));
     } catch {
       return [];
     }
+  }
+
+  /** Caller-supplied pid, else the foreground window's pid (if known). */
+  private async resolveA11yPid(processId?: number): Promise<number | undefined> {
+    if (typeof processId === 'number') return processId;
+    const fg = await this.getActiveWindow().catch(() => null);
+    return fg?.processId || undefined;
+  }
+
+  /**
+   * Elements the bridge flagged `coordType:'window'` (toolkit returned
+   * window-relative extents — GTK4 on X11 answers zeros for SCREEN) are
+   * shifted by the origin of the owning window as wmctrl reports it. Only
+   * done when the bridge says so; screen-space elements are untouched.
+   */
+  private async offsetWindowRelative(raw: any[], els: UiElement[]): Promise<UiElement[]> {
+    if (!raw.some(r => r?.coordType === 'window')) return els;
+    const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
+    const active = await this.getActiveWindow().catch(() => null);
+    raw.forEach((r, i) => {
+      if (r?.coordType !== 'window') return;
+      const el = els[i];
+      if (el.offscreen && el.bounds.width === 0) return;
+      const pid = typeof r.processId === 'number' ? r.processId : undefined;
+      const win = (active && active.processId === pid ? active : undefined)
+        ?? windows.find(w => w.processId === pid);
+      if (!win) return;
+      el.bounds = { ...el.bounds, x: el.bounds.x + win.bounds.x, y: el.bounds.y + win.bounds.y };
+    });
+    return els;
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
@@ -619,7 +681,7 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
-  async invokeElement(_query: {
+  async invokeElement(query: {
     name?: string;
     controlType?: string;
     processId?: number;
@@ -630,10 +692,31 @@ export class LinuxAdapter implements PlatformAdapter {
     bounds?: { x: number; y: number; width: number; height: number };
     data?: Record<string, unknown>;
   }> {
-    // Action dispatch is the next AT-SPI step — needs per-role AT-SPI
-    // Action / Value / EditableText interface handling. Until then,
-    // Linux agents use getUiTree + coord click as a coarse fallback.
-    return { success: false };
+    if (!this.atspiAvailable) return { success: false };
+    try {
+      const args = ['--cmd', 'invoke', '--action', query.action ?? 'click'];
+      if (query.name) args.push('--name', query.name);
+      if (query.controlType) args.push('--role', atspiRoleQuery(query.controlType));
+      const pid = await this.resolveA11yPid(query.processId);
+      if (typeof pid === 'number') args.push('--process-id', String(pid));
+      if (query.value !== undefined) args.push('--value', query.value);
+      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
+        timeout: A11Y_TIMEOUT_MS,
+      });
+      const result = JSON.parse(stdout);
+      const bounds = result?.bounds && typeof result.bounds.x === 'number' && !isIntMin(result.bounds.x)
+        ? result.bounds : undefined;
+      const data: Record<string, unknown> = {};
+      if (result?.value !== undefined) data.value = result.value;
+      if (result?.toggleState !== undefined) data.toggleState = result.toggleState;
+      return {
+        success: result?.success === true,
+        ...(bounds ? { bounds } : {}),
+        ...(Object.keys(data).length ? { data } : {}),
+      };
+    } catch {
+      return { success: false };
+    }
   }
 
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
@@ -657,17 +740,28 @@ export class LinuxAdapter implements PlatformAdapter {
    */
   private normalizeAtspiElement = (raw: any): UiElement => {
     const enabled = typeof raw?.enabled === 'boolean' ? raw.enabled : undefined;
+    const rawRole = typeof raw?.controlType === 'string' ? raw.controlType : '';
+    let bounds = raw?.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
+    let offscreen = raw?.offscreen;
+    // Children scrolled out of a viewport report INT_MIN extents. Don't
+    // publish those as coordinates — flag the element offscreen instead.
+    if (isIntMin(bounds.x) || isIntMin(bounds.y)) {
+      bounds = { x: 0, y: 0, width: 0, height: 0 };
+      offscreen = true;
+    }
     return {
       name: raw?.name ?? '',
-      controlType: raw?.controlType ?? '',
-      bounds: raw?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+      controlType: normalizeAtspiRole(rawRole),
+      subrole: rawRole || undefined,
+      secure: rawRole === 'password text' ? true : undefined,
+      bounds,
       value: typeof raw?.value === 'string' ? raw.value : undefined,
       enabled,
       focused: raw?.focused,
       selected: raw?.selected,
       disabled: enabled === false ? true : undefined,
       busy: raw?.busy,
-      offscreen: raw?.offscreen,
+      offscreen,
       automationId: raw?.automationId ?? undefined,
       processId: typeof raw?.processId === 'number' ? raw.processId : undefined,
     };
@@ -868,15 +962,23 @@ export class LinuxAdapter implements PlatformAdapter {
     const keyName = parts[parts.length - 1];
     const modNames = parts.slice(0, -1);
 
-    const modKeys = modNames.map(m => this.resolveModifier(m)).filter((k): k is Key => k !== null);
+    const modKeys = modNames.map(m => {
+      const k = this.resolveModifier(m);
+      if (k === null) throw new Error(`Unknown key: "${m}"`);
+      return k;
+    });
     const mainKey = this.resolveKey(keyName);
 
     if (mainKey === null) {
-      // Unknown multi-char key — best-effort type as text.
-      if (modKeys.length === 0 && keyName.length > 0) {
+      // A single printable character with no Key entry ("*", "!") is typed
+      // (same as the Windows adapter's TYPE_CHAR). Anything else is an
+      // unknown key name — refuse it like Windows / macOS do instead of
+      // typing the name as text and reporting "Pressed notarealkey".
+      if (modKeys.length === 0 && keyName.length === 1) {
         await keyboard.type(keyName);
+        return;
       }
-      return;
+      throw new Error(`Unknown key: "${keyName}"`);
     }
 
     try {
@@ -1005,12 +1107,18 @@ export class LinuxAdapter implements PlatformAdapter {
     const args = tool === 'wl-copy' ? [] : ['-selection', 'clipboard'];
     await new Promise<void>((resolve) => {
       try {
-        const proc = spawn(tool, args);
+        // xclip / wl-copy fork a child that keeps serving the selection
+        // after the parent exits. With stdout/stderr piped, that child holds
+        // the pipes open so 'close' never fires and every write waited the
+        // full TOOL_TIMEOUT_MS (`type` does two writes → 6s per call).
+        // Don't inherit pipes and resolve on 'exit'; the fork must stay
+        // alive — it IS the clipboard — so never kill it on success.
+        const proc = spawn(tool, args, { stdio: ['pipe', 'ignore', 'ignore'] });
         const timer = setTimeout(() => {
           proc.kill();
           resolve();
         }, TOOL_TIMEOUT_MS);
-        proc.on('close', () => {
+        proc.on('exit', () => {
           clearTimeout(timer);
           resolve();
         });
@@ -1212,7 +1320,9 @@ export class LinuxAdapter implements PlatformAdapter {
 
       results.push({
         title,
-        processName: '', // wmctrl doesn't expose process name
+        // wmctrl doesn't expose the process name; resolve it from /proc so
+        // focus-by-processName / app_running assertions can match.
+        processName: Number.isFinite(pid) ? processNameFromProc(pid) : '',
         processId: Number.isFinite(pid) ? pid : 0,
         bounds: {
           x: Number.isFinite(x) ? x : 0,
@@ -1243,25 +1353,93 @@ export class LinuxAdapter implements PlatformAdapter {
 }
 
 /**
- * Detect Linux display server. Wayland reports itself via `XDG_SESSION_TYPE`
- * or `WAYLAND_DISPLAY`; everything else defaults to X11. `detect-once-at-init`
- * semantics — the compositor doesn't change mid-session.
+ * Process name for a pid from /proc: argv[0]'s basename (not truncated to
+ * 15 chars like `comm` — "gnome-calculator" would otherwise come back as
+ * "gnome-calculato"), falling back to comm. '' when unreadable.
  */
-function detectLinuxEnvironment(): 'wayland' | 'x11' {
-  const sessionType = (process.env.XDG_SESSION_TYPE || '').toLowerCase();
-  if (sessionType === 'wayland') return 'wayland';
-  if (sessionType === 'x11') return 'x11';
-  if (process.env.WAYLAND_DISPLAY) return 'wayland';
-  return 'x11';
+function processNameFromProc(pid: number): string {
+  try {
+    const argv0 = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
+    if (argv0) return path.posix.basename(argv0);
+  } catch { /* fall through to comm */ }
+  try {
+    return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+/** AT-SPI reports INT_MIN extents for children scrolled out of a viewport. */
+function isIntMin(v: unknown): boolean {
+  return typeof v === 'number' && v <= -2147483648;
+}
+
+/**
+ * AT-SPI role name → the UIA-style control-type vocabulary the shared
+ * layers already understand (ui-map-normalize ROLE_MAP, find_button,
+ * compile_ui). Unlisted roles are PascalCased ("desktop frame" →
+ * "DesktopFrame") so they never carry spaces.
+ */
+const ATSPI_ROLE_MAP: Record<string, string> = {
+  'push button': 'Button', 'toggle button': 'Button', 'button': 'Button',
+  'menu item': 'MenuItem', 'check menu item': 'MenuItem', 'radio menu item': 'MenuItem',
+  'check box': 'CheckBox', 'radio button': 'RadioButton',
+  'text': 'Edit', 'entry': 'Edit', 'password text': 'Edit', 'editable text': 'Edit',
+  'combo box': 'ComboBox', 'spin button': 'Spinner',
+  'label': 'Text', 'static': 'Text', 'heading': 'Text', 'paragraph': 'Text', 'caption': 'Text',
+  'link': 'Hyperlink', 'hyperlink': 'Hyperlink',
+  'list': 'List', 'list box': 'List', 'list item': 'ListItem',
+  'tree': 'Tree', 'tree item': 'TreeItem', 'tree table': 'Tree',
+  'table': 'Table', 'table row': 'Row', 'table cell': 'Cell', 'column header': 'Header', 'row header': 'Header',
+  'page tab': 'TabItem', 'page tab list': 'Tab',
+  'image': 'Image', 'icon': 'Image',
+  'frame': 'Window', 'window': 'Window', 'dialog': 'Window', 'file chooser': 'Window', 'alert': 'Window',
+  'panel': 'Pane', 'filler': 'Pane', 'viewport': 'Pane', 'scroll pane': 'Pane', 'split pane': 'Pane',
+  'section': 'Group', 'grouping': 'Group',
+  'menu': 'Menu', 'menu bar': 'MenuBar', 'popup menu': 'Menu',
+  'tool bar': 'ToolBar', 'status bar': 'StatusBar', 'separator': 'Separator',
+  'scroll bar': 'ScrollBar', 'slider': 'Slider', 'progress bar': 'ProgressBar',
+  'document text': 'Document', 'document frame': 'Document', 'document web': 'Document',
+  'application': 'Application', 'canvas': 'Pane', 'drawing area': 'Pane',
+};
+
+function normalizeAtspiRole(rawRole: string): string {
+  const lower = rawRole.trim().toLowerCase();
+  if (!lower) return '';
+  const mapped = ATSPI_ROLE_MAP[lower];
+  if (mapped) return mapped;
+  return lower.split(/\s+/).map(w => w[0].toUpperCase() + w.slice(1)).join('');
+}
+
+/**
+ * Inverse for the bridge's raw-role substring filter: a normalized name the
+ * caller passes ("Button", "ControlType.Edit") → a raw AT-SPI substring.
+ * Unknown names pass through lowercased.
+ */
+function atspiRoleQuery(controlType: string): string {
+  const want = controlType.replace(/^ControlType\./, '').toLowerCase();
+  // Shortest raw role that maps here ("button" for Button) keeps the
+  // substring match broad; fall back to the caller's own text.
+  const raws = Object.entries(ATSPI_ROLE_MAP)
+    .filter(([, v]) => v.toLowerCase() === want)
+    .map(([k]) => k)
+    .sort((a, b) => a.length - b.length);
+  return raws[0] ?? want;
 }
 
 // Named-key table — lowercase lookup, maps to nut-js Key enum.
 const LINUX_SPECIAL_KEYS: Record<string, Key> = {
   'return': Key.Return, 'enter': Key.Enter,
   'tab': Key.Tab,
-  'space': Key.Space,
+  'space': Key.Space, 'spacebar': Key.Space,
   'backspace': Key.Backspace,
-  'delete': Key.Delete,
+  'delete': Key.Delete, 'forwarddelete': Key.Delete,
+  // Modifiers pressed on their own ("super" opens the launcher on most DEs).
+  'super': Key.LeftSuper, 'meta': Key.LeftSuper, 'win': Key.LeftSuper, 'windows': Key.LeftSuper,
+  'cmd': Key.LeftSuper, 'command': Key.LeftSuper,
+  'ctrl': Key.LeftControl, 'control': Key.LeftControl, 'mod': Key.LeftControl,
+  'shift': Key.LeftShift,
+  'alt': Key.LeftAlt, 'option': Key.LeftAlt, 'opt': Key.LeftAlt,
   'escape': Key.Escape, 'esc': Key.Escape,
   'left': Key.Left, 'right': Key.Right, 'up': Key.Up, 'down': Key.Down,
   'home': Key.Home, 'end': Key.End,

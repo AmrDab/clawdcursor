@@ -8,7 +8,7 @@
  * Parameters:
  *   -action <string>     - Required. One of: click | focus | set-value | get-value |
  *                          expand | collapse | toggle | select
- *   -name <string>       - Match elements by name (contains match, case-insensitive)
+ *   -name <string>       - Match elements by name or description (contains match, case-insensitive)
  *   -role <string>       - Match elements by role (e.g., "button", "text field")
  *   -processId <number>  - Required. The process ID of the target application
  *   -value <string>      - Value to set (only used with set-value action)
@@ -29,57 +29,76 @@ function safeGet(obj, property, defaultValue) {
     }
 }
 
-// Find element matching criteria
-function findElement(root, targetName, targetRole, maxDepth, currentDepth) {
-    if (currentDepth > maxDepth) {
-        return null;
-    }
-    
-    try {
-        var elName = '';
-        var elRole = '';
-        
-        try {
-            elName = root.name() || '';
-        } catch (e) {}
-        
-        try {
-            elRole = root.role() || '';
-        } catch (e) {}
-        
-        // Check if this element matches
-        var nameMatch = !targetName || 
-            (elName && elName.toLowerCase().indexOf(targetName.toLowerCase()) !== -1);
-        var roleMatch = !targetRole || 
-            (elRole && elRole.toLowerCase().indexOf(targetRole.toLowerCase()) !== -1);
-        
-        if (nameMatch && roleMatch && (elName || elRole)) {
-            return root;
-        }
-        
-        // Search children
-        try {
-            var children = root.uiElements();
-            for (var i = 0; i < children.length; i++) {
-                var found = findElement(children[i], targetName, targetRole, maxDepth, currentDepth + 1);
-                if (found) return found;
-            }
-        } catch (e) {}
-        
-        // Check specific element types
-        var elementTypes = ['buttons', 'textFields', 'popUpButtons', 'checkboxes', 'radioButtons', 'menus'];
-        for (var j = 0; j < elementTypes.length; j++) {
-            try {
-                var typedElements = root[elementTypes[j]]();
-                for (var k = 0; k < typedElements.length; k++) {
-                    var found = findElement(typedElements[k], targetName, targetRole, maxDepth, currentDepth + 1);
-                    if (found) return found;
+// Normalise AX role spellings so 'AXTextField', 'text field' and 'TextField'
+// compare equal (the ControlType map speaks one, System Events the other).
+function normRole(r) { return String(r || '').toLowerCase().replace(/^ax/, '').replace(/\s+/g, ''); }
+
+// Leaf controls: never descended (their children are decoration or a closed
+// menu), so the walk only pays for real containers.
+var LEAF = { button: 1, statictext: 1, textfield: 1, textarea: 1, checkbox: 1, radiobutton: 1,
+             image: 1, slider: 1, valueindicator: 1, incrementor: 1, popupbutton: 1, menubutton: 1,
+             scrollbar: 1, busyindicator: 1, progressindicator: 1, colorwell: 1, splitter: 1,
+             disclosuretriangle: 1, searchfield: 1, combobox: 1 };
+
+// Roles each action should land on, best first. set-value must reach the
+// editable field, never the static label beside it that shares its name.
+var ACTION_ROLES = {
+    'set-value': ['textfield', 'textarea', 'combobox', 'searchfield'],
+    'get-value': ['textfield', 'textarea', 'combobox', 'searchfield', 'statictext'],
+    'toggle':    ['checkbox', 'radiobutton', 'switch'],
+    'click':     ['button', 'menuitem', 'menubuttonitem', 'link', 'radiobutton', 'checkbox', 'popupbutton', 'cell', 'row', 'tab']
+};
+
+/**
+ * Breadth-first search of a window. Each level's names, descriptions and
+ * roles come back in ONE Apple Event per container (batched collection
+ * reads), so controls nested in scroll areas, split views and toolbars are
+ * reachable without the per-element round trips that made deep searches time
+ * out. An element matches on its name (AXTitle) OR its description
+ * (AXDescription — how AppKit exposes accessibilityLabel, e.g. on text fields).
+ */
+function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
+    var want = targetName ? String(targetName).toLowerCase() : null;
+    var wantRole = targetRole ? normRole(targetRole) : null;
+    var out = [];
+    var level = [win];
+    for (var d = 0; d < maxDepth && level.length && Date.now() < deadline; d++) {
+        var next = [];
+        for (var i = 0; i < level.length && Date.now() < deadline; i++) {
+            var kids = level[i].uiElements;
+            var names, descs, roles;
+            try { names = kids.name(); } catch (e) { continue; }
+            try { descs = kids.description(); } catch (e) { descs = []; }
+            try { roles = kids.role(); } catch (e) { roles = []; }
+            for (var k = 0; k < names.length; k++) {
+                var el = kids[k];
+                var nm = names[k] || '', ds = descs[k] || '', rl = roles[k] || '';
+                var hay = [String(nm).toLowerCase(), String(ds).toLowerCase()];
+                var nameOk = !want || hay[0].indexOf(want) !== -1 || hay[1].indexOf(want) !== -1;
+                var roleOk = !wantRole || normRole(rl).indexOf(wantRole) !== -1;
+                if (nameOk && roleOk && (nm || ds || rl)) {
+                    out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want), depth: d });
                 }
-            } catch (e) {}
+                if (!LEAF[normRole(rl)]) next.push(el);
+            }
         }
-    } catch (e) {}
-    
-    return null;
+        level = next;
+    }
+    return out;
+}
+
+// Exact name beats substring; then the role the action wants; then shallower.
+function pickBest(matches, action) {
+    var pref = ACTION_ROLES[action] || [];
+    function score(m) {
+        var rank = pref.indexOf(normRole(m.role));
+        return (m.exact ? 0 : 1000) + (rank === -1 ? 100 : rank) * 10 + m.depth;
+    }
+    var best = null;
+    for (var i = 0; i < matches.length; i++) {
+        if (!best || score(matches[i]) < score(best)) best = matches[i];
+    }
+    return best;
 }
 
 // Get element bounds for coordinate fallback
@@ -179,9 +198,13 @@ function run(argv) {
         var targetElement = null;
         var windows = targetProcess.windows;
         
-        for (var w = 0; w < windows.length && !targetElement; w++) {
-            targetElement = findElement(windows[w], params.name, params.role, 10, 0);
+        var deadline = Date.now() + 6000;
+        var matches = [];
+        for (var w = 0; w < windows.length && Date.now() < deadline; w++) {
+            matches = matches.concat(collectMatches(windows[w], params.name, params.role, 12, deadline));
         }
+        var best = pickBest(matches, params.action);
+        targetElement = best ? best.el : null;
         
         if (!targetElement) {
             var searchDesc = '';
@@ -216,7 +239,8 @@ function run(argv) {
                             clickPoint: {
                                 x: bounds.x + Math.floor(bounds.width / 2),
                                 y: bounds.y + Math.floor(bounds.height / 2)
-                            }
+                            },
+                            bounds: bounds
                         };
                     } else {
                         result = {
@@ -348,29 +372,24 @@ function run(argv) {
                 break;
 
             case 'toggle':
-                // Checkboxes / radios expose AXValue as 0/1.
+                // Press it, as a user would — AXValue on checkboxes is usually
+                // read-only — then read the real state back. The old code read
+                // attributes['AXValue'].value WITHOUT calling it: that is an
+                // object specifier, always truthy, so every toggle wrote 0 and
+                // reported "Off" (live macOS run, 2026-10).
                 try {
-                    var currentValue;
-                    try { currentValue = targetElement.attributes['AXValue'].value; }
-                    catch (vErr) { currentValue = 0; }
-                    var newValue = currentValue ? 0 : 1;
-                    targetElement.attributes['AXValue'].value = newValue;
+                    try { targetElement.actions['AXPress'].perform(); }
+                    catch (pe) { targetElement.click(); }
+                    var after = null;
+                    try { after = targetElement.value(); } catch (ve) {}
                     result = {
                         success: true,
                         action: 'toggle',
-                        data: { toggleState: newValue ? 'On' : 'Off' }
+                        method: 'AXPress',
+                        data: { toggleState: (after === null || after === undefined) ? 'unknown' : (Number(after) ? 'On' : 'Off') }
                     };
                 } catch (e) {
-                    // Fallback: invoke a click (AXPress) — matches UIA Toggle semantics.
-                    try {
-                        targetElement.actions['AXPress'].perform();
-                        result = { success: true, action: 'toggle', method: 'AXPress' };
-                    } catch (e2) {
-                        result = {
-                            success: false,
-                            error: 'Element does not support toggle (no AXValue or AXPress)'
-                        };
-                    }
+                    result = { success: false, error: 'Element does not support toggle (no AXPress): ' + e.toString() };
                 }
                 break;
 

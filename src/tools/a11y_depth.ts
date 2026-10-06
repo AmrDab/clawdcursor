@@ -8,22 +8,12 @@
  *     Selection, Toggle patterns)
  *   - macOS: invoke-element.jxa (AXExpanded / AXValue / AXSelected
  *     attributes + AXPress / AXShowMenu action fallbacks)
- *   - Linux: stubbed — returns not_supported_on_platform until the
- *     AT-SPI bridge lands (Tranche 4b). Non-fatal for other OSes.
- *
- * Every tool here treats Linux as graceful-degradation rather than a
- * hard failure, so agents running on Linux still get a structured
- * error they can act on (emit cannot_read / give_up), not a crash.
+ *   - Linux: atspi-bridge.py (AT-SPI Action / EditableText / Value /
+ *     Selection interfaces). Without AT-SPI the adapter answers
+ *     {success:false} and the tools report a structured failure.
  */
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
-
-function notSupportedOnLinux(tool: string): ToolResult {
-  return {
-    text: `${tool}: not supported on Linux yet (AT-SPI bridge pending — Tranche 4b)`,
-    isError: true,
-  };
-}
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -73,7 +63,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_expand');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_expand');
         const pid = await resolveProcessId(ctx, processId);
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'expand',
@@ -101,7 +90,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_collapse');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_collapse');
         const pid = await resolveProcessId(ctx, processId);
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'collapse',
@@ -134,7 +122,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, value, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('set_field_value');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('set_field_value');
         const safeNameStr = String(name ?? '');
         const safeValue = String(value ?? '');
         const pid = await resolveProcessId(ctx, processId);
@@ -221,7 +208,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_toggle');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_toggle');
         const pid = await resolveProcessId(ctx, processId);
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'toggle',
@@ -251,7 +237,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_select');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_select');
         const pid = await resolveProcessId(ctx, processId);
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'select',
@@ -283,7 +268,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_get_element');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_get_element');
         const pid = await resolveProcessId(ctx, processId);
         const hits = await ctx.platform.findElements({
           name: String(name), controlType, processId: pid,
@@ -312,7 +296,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_get_value');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_get_value');
         const pid = await resolveProcessId(ctx, processId);
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'get-value',
@@ -342,7 +325,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('get_element_state');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('get_element_state');
         const pid = await resolveProcessId(ctx, processId);
         const hits = await ctx.platform.findElements({
           name: String(name), controlType, processId: pid,
@@ -400,7 +382,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       handler: async ({ parentName, controlType, processId, maxChildren }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_list_children');
-        if (ctx.platform.platform === 'linux') return notSupportedOnLinux('a11y_list_children');
         const pid = await resolveProcessId(ctx, processId);
 
         const parents = await ctx.platform.findElements({

@@ -109,55 +109,79 @@ var INTERACTIVE_ROLES = {
     'AXGroup': true
 };
 
-function buildUINode(element, maxDepth, depth) {
-    if (depth > maxDepth) return null;
+// Roles never worth descending into: their children are decoration or a
+// closed menu. Skipping them keeps the walk to real containers (groups,
+// scroll areas, split groups, lists, tables, toolbars).
+var LEAF_ROLES = {
+    'AXButton': true, 'AXStaticText': true, 'AXTextField': true, 'AXTextArea': true,
+    'AXCheckBox': true, 'AXRadioButton': true, 'AXImage': true, 'AXSlider': true,
+    'AXValueIndicator': true, 'AXIncrementor': true, 'AXPopUpButton': true,
+    'AXMenuButton': true, 'AXScrollBar': true, 'AXBusyIndicator': true,
+    'AXProgressIndicator': true, 'AXColorWell': true, 'AXSplitter': true,
+    'AXDisclosureTriangle': true, 'AXSearchField': true, 'AXComboBox': true
+};
 
-    var name    = '';
-    var role    = '';
-    var value   = '';
-    var subrole = '';
+// One batched read of a property across a whole child collection — a single
+// Apple Event instead of one per element. Falls back to per-element reads if
+// the batch throws (a collection mixing elements that lack the property).
+function batch(kids, prop, n) {
+    try { var v = kids[prop](); if (v && v.length === n) return v; } catch (e) {}
+    var out = [];
+    for (var i = 0; i < n; i++) { try { out.push(kids[i][prop]()); } catch (e) { out.push(null); } }
+    return out;
+}
 
-    try { name    = element.name()    || ''; } catch (e) {}
-    try { role    = element.role()    || ''; } catch (e) {}
-    try { value   = element.value()   || ''; } catch (e) {}
-    // Secureness lives in the AX SUBROLE: a password field reports
-    // role=AXTextField, subrole=AXSecureTextField. Surface it so the snapshot
-    // builder can redact the value (audit 2026-06-11, M2) — without this the
-    // cleartext password reached the LLM prompt + fingerprint on macOS.
-    try { subrole = element.subrole() || ''; } catch (e) {}
+function makeNode(p, children) {
+    var isInteractive = !!INTERACTIVE_ROLES[p.role];
+    var hasName = String(p.name || '').trim().length > 0;
+    if (!isInteractive && !hasName && children.length === 0) return null;
+    var isSecure = (p.subrole === 'AXSecureTextField');
+    return {
+        name:         p.name || '',
+        automationId: '',            // macOS has no AutomationId concept
+        controlType:  p.role || '',
+        subrole:      p.subrole || undefined,
+        secure:       isSecure || undefined,
+        bounds:       p.bounds,
+        // never emit the secret, even pre-redaction (audit 2026-06-11, M2)
+        value:        (!isSecure && p.value !== null && p.value !== undefined && p.value !== '') ? p.value : undefined,
+        children:     children.length > 0 ? children : undefined
+    };
+}
 
-    var isInteractive = !!INTERACTIVE_ROLES[role];
-    var hasName       = name.trim().length > 0;
-    var isSecure      = (subrole === 'AXSecureTextField');
-    if (isSecure) { value = ''; }   // never emit the secret, even pre-redaction
-
-    // Build children first so we can decide whether to include this node
+/**
+ * Build the subtree under `element` (whose own properties are `props`).
+ * Children's properties are read in batches — one Apple Event per property
+ * per container — and only containers are descended. The old per-element
+ * crawl cost ~7 round trips per element, so a 100-control window ran past
+ * the adapter's 12 s timeout and compile_ui silently got no a11y elements
+ * on macOS (live run, 2026-10). An element's name falls back to its
+ * description, which is how AppKit exposes accessibilityLabel.
+ */
+function buildUINode(element, props, maxDepth, depth) {
     var children = [];
-    if (depth < maxDepth) {
+    if (depth < maxDepth && !LEAF_ROLES[props.role]) {
         try {
-            var kids = element.uiElements();
-            for (var i = 0; i < kids.length; i++) {
-                try {
-                    var child = buildUINode(kids[i], maxDepth, depth + 1);
+            var kids = element.uiElements;
+            var names = kids.name();
+            var n = names.length;
+            if (n > 0) {
+                var descs = batch(kids, 'description', n), roles = batch(kids, 'role', n),
+                    subs = batch(kids, 'subrole', n), vals = batch(kids, 'value', n),
+                    poss = batch(kids, 'position', n), sizes = batch(kids, 'size', n);
+                for (var i = 0; i < n; i++) {
+                    var pos = poss[i] || [0, 0], sz = sizes[i] || [0, 0];
+                    var child = buildUINode(kids[i], {
+                        name: names[i] || descs[i] || '', role: roles[i] || '', subrole: subs[i] || '',
+                        value: vals[i],
+                        bounds: { x: pos[0] || 0, y: pos[1] || 0, width: sz[0] || 0, height: sz[1] || 0 }
+                    }, maxDepth, depth + 1);
                     if (child) children.push(child);
-                } catch (e) {}
+                }
             }
         } catch (e) {}
     }
-
-    // Skip uninteresting, unnamed leaf nodes (mirrors PS1 behaviour)
-    if (!isInteractive && !hasName && children.length === 0) return null;
-
-    return {
-        name:         name,
-        automationId: '',            // macOS has no AutomationId concept
-        controlType:  role,
-        subrole:      subrole || undefined,
-        secure:       isSecure || undefined,
-        bounds:       getBounds(element),
-        value:        value || undefined,
-        children:     children.length > 0 ? children : undefined
-    };
+    return makeNode(props, children);
 }
 
 function getUITree(SystemEvents, focusedProcessId, maxDepth) {
@@ -172,7 +196,10 @@ function getUITree(SystemEvents, focusedProcessId, maxDepth) {
         if (windows.length === 0) return null;
 
         // Use the first (frontmost) window
-        return buildUINode(windows[0], maxDepth, 0);
+        var win = windows[0];
+        var winProps = { name: safeProp(win, 'name', ''), role: safeProp(win, 'role', 'AXWindow'),
+                         subrole: safeProp(win, 'subrole', ''), value: null, bounds: getBounds(win) };
+        return buildUINode(win, winProps, maxDepth, 0);
     } catch (e) {
         return null;
     }

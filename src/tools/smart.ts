@@ -331,8 +331,13 @@ export function getSmartTools(): ToolDefinition[] {
                   // Token-overlap fallback (handles transposed / partial matches)
                   const phraseWords = phrase.split(' ').filter(Boolean);
                   if (!phraseWords.length) return 0;
-                  const overlap = phraseWords.filter(w => targetWordSet.has(w)).length;
-                  const cov = overlap / targetWords.length;
+                  // Coverage counts DISTINCT target words present. Counting
+                  // phrase tokens let a repeat stand in for a missing word:
+                  // "Row Row" covered 2/2 of "Row 50" and the wrong row was
+                  // clicked (live, 2026-10).
+                  const phraseWordSet = new Set(phraseWords);
+                  const overlap = [...targetWordSet].filter(w => phraseWordSet.has(w)).length;
+                  const cov = overlap / targetWordSet.size;
                   if (cov >= 1) raw = 0.85;
                   else if (cov >= 0.5) raw = 0.5 * cov;
                   else return 0;
@@ -477,15 +482,21 @@ export function getSmartTools(): ToolDefinition[] {
           a11y: null,
           timedOut: false,
         };
+        // The a11y invoke IS the click (it presses the element), so its outcome
+        // is always awaited — it carries its own bridge timeout. Abandoning it
+        // reported failure while the press still landed a moment later (live
+        // macOS 2026-10: deadline_exceeded, then "Row 50" got clicked). Only
+        // the read-only OCR search is cut off at the deadline.
         await new Promise<void>((resolve) => {
-          let settled = 0;
-          const finish = () => { if (++settled >= 2) resolve(); };
+          let a11yDone = false, ocrDone = false, expired = false;
+          const check = () => { if (a11yDone && (ocrDone || expired)) resolve(); };
           const timer = setTimeout(() => {
             parallelResult.timedOut = true;
-            resolve();
+            expired = true;
+            check();
           }, remaining());
-          ocrPromise.then(r => { parallelResult.ocr = r; finish(); }, () => finish());
-          a11yPromise.then(r => { parallelResult.a11y = r; finish(); }, () => finish());
+          ocrPromise.then(r => { parallelResult.ocr = r; }, () => {}).finally(() => { ocrDone = true; check(); });
+          a11yPromise.then(r => { parallelResult.a11y = r; }, () => {}).finally(() => { a11yDone = true; check(); });
           // Cancel the deadline timer once both settle so we don't keep the event loop alive
           Promise.allSettled([ocrPromise, a11yPromise]).then(() => clearTimeout(timer));
         });

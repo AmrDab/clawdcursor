@@ -20,6 +20,8 @@ import { promisify } from 'util';
 import { screen } from '@nut-tree-fork/nut-js';
 import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
+import { sharpFromGrab, type GrabImage } from './grab-image';
+import { isWaylandSession, grimGrab } from './wayland-screen';
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +33,7 @@ const CACHE_TTL_MS = 300;
 const OCR_TIMEOUT = 15000;   // 15s — WinRT assembly load + recognition
 const MAC_OCR_TIMEOUT = 20000; // 20s — Swift compilation on first run
 const LINUX_OCR_TIMEOUT = 30000; // 30s — Tesseract can be slow on large images
+const LINUX_OCR_UPSCALE = 2;      // Tesseract needs UI text larger than native size
 const MAX_BUFFER = 4 * 1024 * 1024; // 4MB — large screens with dense text
 
 // ─── Public types ─────────────────────────────────────────────────────────────
@@ -52,6 +55,17 @@ export interface OcrResult {
 }
 
 const EMPTY_RESULT: OcrResult = Object.freeze({ elements: [], fullText: '', durationMs: 0 });
+
+/**
+ * True when the failure means the OCR engine itself is absent: the runner
+ * binary could not be spawned (ENOENT), or the script reported it could not
+ * find / load an engine ("tesseract not found", "Windows OCR engine not
+ * available - no recognized languages installed", "No OCR available").
+ */
+function isEngineMissing(err: any): boolean {
+  if (err?.code === 'ENOENT') return true;
+  return /\bnot (found|available|installed)\b/i.test(String(err?.message ?? ''));
+}
 
 // ─── OcrEngine ────────────────────────────────────────────────────────────────
 
@@ -136,15 +150,13 @@ export class OcrEngine {
 
     const start = Date.now();
     try {
-      // Capture full-resolution screenshot via nut-js
-      const img = await screen.grab();
+      // Capture full-resolution screenshot via nut-js (grim on Wayland)
+      const img = await this.grab();
       if (!this.cachedResult) {
         // Log image dimensions on first capture to diagnose coordinate space issues
         console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
       }
-      const pngBuffer = await sharp(img.data, {
-        raw: { width: img.width, height: img.height, channels: 4 },
-      }).png().toBuffer();
+      const pngBuffer = await sharpFromGrab(img).png().toBuffer();
       // Release the raw RGBA buffer immediately after processing
       (img as any).data = null;
 
@@ -166,8 +178,12 @@ export class OcrEngine {
       }
     } catch (err: any) {
       console.error(`[OCR] recognizeScreen failed: ${err?.message}`);
-      // If first call ever fails, mark unavailable so pipeline degrades to vision LLM
-      if (this.cachedResult === null) {
+      // If the first call ever fails because the ENGINE is missing (no
+      // binary, no language pack), mark unavailable so the pipeline degrades
+      // to vision. A transient failure (script parse error, timeout, bad
+      // frame) must NOT latch — on Linux a one-off tesseract TSV parse error
+      // used to make every later call return "OCR is not available" forever.
+      if (this.cachedResult === null && isEngineMissing(err)) {
         this.available = false;
       }
       return { ...EMPTY_RESULT, durationMs: Date.now() - start };
@@ -184,7 +200,7 @@ export class OcrEngine {
 
     const start = Date.now();
     try {
-      const img = await screen.grab();
+      const img = await this.grab();
 
       // Clamp to screen bounds
       const rx = Math.max(0, Math.min(x, img.width - 1));
@@ -192,9 +208,7 @@ export class OcrEngine {
       const rw = Math.min(w, img.width - rx);
       const rh = Math.min(h, img.height - ry);
 
-      const pngBuffer = await sharp(img.data, {
-        raw: { width: img.width, height: img.height, channels: 4 },
-      })
+      const pngBuffer = await sharpFromGrab(img)
         .extract({ left: rx, top: ry, width: rw, height: rh })
         .png()
         .toBuffer();
@@ -225,6 +239,11 @@ export class OcrEngine {
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
+
+  /** Full-screen grab — grim on Wayland, where nut-js would crash the process (see wayland-screen.ts). */
+  private grab(): Promise<GrabImage> {
+    return isWaylandSession() ? grimGrab() : screen.grab();
+  }
 
   /**
    * Dispatch to the platform-specific OCR implementation.
@@ -325,13 +344,24 @@ export class OcrEngine {
    * The script outputs a single JSON line with { elements, fullText }.
    */
   private async runLinuxOcr(imagePath: string): Promise<OcrResult> {
-    const { stdout } = await execFileAsync('python3', [
-      LINUX_OCR_SCRIPT,
-      imagePath,
-    ], {
-      timeout: LINUX_OCR_TIMEOUT,
-      maxBuffer: MAX_BUFFER,
-    });
+    // Tesseract misses small UI labels at native size (it found no text at
+    // all on a 1080p desktop). Upscale 2x; the script divides the boxes back.
+    const scaledPath = imagePath.replace(/\.png$/i, '') + '-2x.png';
+    let stdout: string;
+    try {
+      const meta = await sharp(imagePath).metadata();
+      await sharp(imagePath).resize((meta.width ?? 0) * LINUX_OCR_UPSCALE, null, { kernel: 'lanczos3' }).toFile(scaledPath);
+      ({ stdout } = await execFileAsync('python3', [
+        LINUX_OCR_SCRIPT,
+        scaledPath,
+        String(LINUX_OCR_UPSCALE),
+      ], {
+        timeout: LINUX_OCR_TIMEOUT,
+        maxBuffer: MAX_BUFFER,
+      }));
+    } finally {
+      try { fs.unlinkSync(scaledPath); } catch { /* non-fatal */ }
+    }
 
     const trimmed = stdout.trim();
     if (!trimmed) {

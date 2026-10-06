@@ -60,20 +60,25 @@ export class PSRunner {
       this.dead  = false;
       this.ready = false;
 
-      this.proc = spawn('powershell.exe', [
+      const proc = spawn('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',
         '-File', BRIDGE_SCRIPT,
       ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      this.proc = proc;
 
-      this.rl = readline.createInterface({ input: this.proc.stdout! });
+      this.rl = readline.createInterface({ input: proc.stdout! });
 
       const readyTimer = setTimeout(() => {
         reject(new Error('PSRunner: timed out waiting for bridge ready'));
       }, READY_TIMEOUT);
 
       this.rl.on('line', (line) => {
+        // A bridge torn down after a command timeout may still answer later.
+        // The protocol has no request ids — replies match calls by ORDER — so
+        // a late line from a superseded process must never reach `current`.
+        if (this.proc !== proc) return;
         line = line.trim();
         if (!line) return;
 
@@ -104,12 +109,13 @@ export class PSRunner {
         this._drain();
       });
 
-      this.proc.stderr!.on('data', (chunk: Buffer) => {
+      proc.stderr!.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim();
         if (msg) console.error(`[PSBridge] ${msg}`);
       });
 
-      this.proc.on('exit', (code) => {
+      proc.on('exit', (code) => {
+        if (this.proc !== proc) return; // superseded after a timeout — already torn down
         const pending = this.current ? [this.current, ...this.queue] : [...this.queue];
         this.dead  = true;
         this.ready = false;
@@ -152,15 +158,36 @@ export class PSRunner {
         resolve,
         reject,
         timer: setTimeout(() => {
-          if (this.current === call) this.current = null;
           console.error(`[PSBridge] Command timeout after ${CALL_TIMEOUT}ms: ${String(command.cmd)}`);
           reject(new Error(`PSRunner timeout: ${String(command.cmd)}`));
-          this._drain();
+          // The bridge is still busy with THIS command. Sending the next one
+          // would make its late reply resolve the wrong call (no request ids),
+          // so tear the process down; the next run() starts a fresh bridge.
+          if (this.current === call) this._teardownAfterTimeout();
         }, CALL_TIMEOUT),
       };
       this.queue.push(call);
       this._drain();
     });
+  }
+
+  /** Kill a bridge whose in-flight command timed out. Queued commands are
+   *  rejected (they would have run against a wedged bridge); the next run()
+   *  auto-restarts. */
+  private _teardownAfterTimeout(): void {
+    const proc = this.proc;
+    const queued = this.queue;
+    this.current = null;
+    this.queue   = [];
+    this.proc    = null;
+    this.rl?.close();
+    this.rl      = null;
+    this.ready   = false;
+    this.dead    = true;
+    this.startPromise = null;
+    try { proc?.kill(); } catch {}
+    const err = new Error('PSRunner bridge restarted after a command timeout');
+    for (const c of queued) { clearTimeout(c.timer); c.reject(err); }
   }
 
   private _drain(): void {

@@ -286,7 +286,7 @@
     },
     {
       "name": "cdp_click",
-      "description": "Click a page element by visible text or CSS selector (DOM click — no coordinates). Requires browser_connect first.",
+      "description": "Click a page element by visible text or CSS selector (DOM click — no coordinates). Requires cdp_connect first.",
       "category": "browser",
       "parameters": {
         "type": "object",
@@ -305,7 +305,7 @@
     },
     {
       "name": "cdp_connect",
-      "description": "Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use browser_navigate/read/click/type. If it fails, fall back to read_text/smart_click.",
+      "description": "Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use navigate_browser, cdp_page_context, cdp_click, cdp_type. If it fails, fall back to ocr_read_screen/smart_click.",
       "category": "browser",
       "parameters": {
         "type": "object",
@@ -343,7 +343,7 @@
     },
     {
       "name": "cdp_page_context",
-      "description": "Read the current page as structured DOM: interactive elements (links/buttons/inputs with selectors), or text for a CSS selector. Use instead of read_text on web pages. Requires browser_connect first.",
+      "description": "Read the current page as structured DOM: interactive elements (links/buttons/inputs with selectors), or text for a CSS selector. Use instead of ocr_read_screen on web pages. Requires cdp_connect first.",
       "category": "browser",
       "parameters": {
         "type": "object",
@@ -444,7 +444,7 @@
     },
     {
       "name": "cdp_type",
-      "description": "Type text into a page input by CSS selector or associated label (DOM input — no coordinates). Requires browser_connect first.",
+      "description": "Type text into a page input by CSS selector or associated label (DOM input — no coordinates). Requires cdp_connect first.",
       "category": "browser",
       "parameters": {
         "type": "object",
@@ -1648,7 +1648,7 @@
     },
     {
       "name": "navigate_browser",
-      "description": "Open a URL in the browser. Launches with CDP enabled (port 9223) for DOM interaction. Call cdp_connect after. Tier 2 (mutation): triggers network egress to an arbitrary destination + spawns/attaches to a browser process.",
+      "description": "Open a URL in the agent's CDP browser for DOM interaction — attaches to the browser already on the debug port or launches a dedicated agent-owned instance, then navigates. cdp_page_context / cdp_click / cdp_type work on that page directly. Tier 2 (mutation): triggers network egress to an arbitrary destination + spawns/attaches to a browser process.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -1758,7 +1758,7 @@
     },
     {
       "name": "read_screen",
-      "description": "START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. The snapshot is auto-attached each turn; call this again only when you expect the screen changed since the last turn. If the tree is empty, escalate to read_text (OCR) next, then screenshot only as a last resort.",
+      "description": "START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. The snapshot is auto-attached each turn; call this again only when you expect the screen changed since the last turn. If the tree is empty, escalate to ocr_read_screen (OCR) next, then screenshot only as a last resort.",
       "category": "perception",
       "parameters": {
         "type": "object",

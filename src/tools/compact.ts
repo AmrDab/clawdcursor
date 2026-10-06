@@ -34,6 +34,7 @@
 
 import { getTool } from './registry';
 import { getBatchTools } from './batch';
+import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 
 // ─── Action → granular-tool delegation table ────────────────────────
@@ -175,6 +176,10 @@ const TASK_ACTIONS: ActionRoute[] = [
 ];
 
 const BROWSER_ACTIONS: ActionRoute[] = [
+  // `navigate` is ALSO on `window`; aliased here because every browser hint
+  // ("open a URL first") points at this compound, and the compact surface had
+  // no way to open a page in the CDP browser it then drives (1.5.11 live repro).
+  { action: 'navigate',       delegate: 'navigate_browser' },
   { action: 'connect',        delegate: 'cdp_connect' },
   { action: 'page_context',   delegate: 'cdp_page_context' },
   { action: 'read_text',      delegate: 'cdp_read_text' },
@@ -297,6 +302,37 @@ function compoundsForAction(action: string, exclude: string): string[] {
   return hits;
 }
 
+/** Granular delegate name → every (compound, action) that reaches it. */
+let _compactNameIndex: Map<string, Array<{ compound: string; action: string }>> | null = null;
+function compactNameIndex(): Map<string, Array<{ compound: string; action: string }>> {
+  if (_compactNameIndex) return _compactNameIndex;
+  _compactNameIndex = new Map();
+  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
+    for (const r of routes) {
+      const list = _compactNameIndex.get(r.delegate) ?? [];
+      list.push({ compound, action: r.action });
+      _compactNameIndex.set(r.delegate, list);
+    }
+  }
+  return _compactNameIndex;
+}
+
+/**
+ * Rewrite granular tool names in free text to the compact spelling
+ * (`cdp_connect` → `browser {action:"connect"}`). Only multi-word names are
+ * touched so plain English (`wait`) is never rewritten.
+ */
+export function toCompactNames(text: string, preferCompound: string): string {
+  const index = compactNameIndex();
+  const names = [...index.keys()].filter(n => n.includes('_')).sort((a, b) => b.length - a.length);
+  if (!names.length) return text;
+  return text.replace(new RegExp(`\\b(${names.join('|')})\\b`, 'g'), (name) => {
+    const routes = index.get(name)!;
+    const r = routes.find(x => x.compound === preferCompound) ?? routes[0];
+    return `${r.compound} {action:"${r.action}"}`;
+  });
+}
+
 async function dispatchCompound(
   compoundName: string,
   routes: ActionRoute[],
@@ -383,6 +419,11 @@ async function dispatchCompound(
 
   const result = await granular.handler(forwarded, ctx);
 
+  // Granular hints ("Call cdp_connect first") name tools that do not exist
+  // here — a compact caller cannot act on them. Rename to this surface's
+  // vocabulary; the compound being called wins when an action is aliased.
+  if (typeof result.text === 'string') result.text = rewriteOutsideData(result.text, prose => toCompactNames(prose, compoundName));
+
   if (ignored.length) {
     const hints = ignored.map(pname => {
       const accepts = routes
@@ -455,7 +496,7 @@ export function getCompactTools(): ToolDefinition[] {
     {
       name: 'browser',
       description:
-        'Chrome DevTools Protocol control — operates on DOM elements by CSS selector rather than screen pixels. Requires Chrome/Edge launched with remote debugging (see `cdp_connect`). Much more reliable than `computer` for web automation. ' +
+        'Chrome DevTools Protocol control — operates on DOM elements by CSS selector rather than screen pixels. Start with `navigate` (opens the URL in the agent\'s own CDP browser, launching it if needed) or `connect` (attach to a browser already on the debug port), then page_context/click/type on that page. Much more reliable than `computer` for web automation. ' +
         `Pick an action: ${actionCatalog(BROWSER_ACTIONS)}.`,
       parameters: buildCompoundSchema(BROWSER_ACTIONS),
       category: 'browser',

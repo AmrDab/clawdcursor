@@ -29,3 +29,6 @@ coverage/
 
 # MCP registry publisher tooling (vendored locally, never committed)
 .tools/
+
+# Python bytecode (scripts/linux tests)
+__pycache__/
