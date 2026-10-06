@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.12] - 2026-10-06 — Claude Desktop extension; clicks land on target on any screen and host
 
 ### Added
 

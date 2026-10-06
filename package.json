@@ -1,6 +1,6 @@
 {
   "name": "clawdcursor",
-  "version": "1.5.11",
+  "version": "1.5.12",
   "mcpName": "io.github.AmrDab/clawdcursor",
   "description": "Local MCP server that gives any AI agent safe cross-OS desktop control — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available. Works with any tool-calling model (Claude, GPT, Gemini, Llama) on Windows, macOS, and Linux. Open source (MIT).",
   "homepage": "https://clawdcursor.com",
