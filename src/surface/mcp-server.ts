@@ -26,7 +26,7 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
-import { hasConsent } from './onboarding';
+import { hasConsent, writeConsentFile } from './onboarding';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -150,6 +150,47 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'https://clawdcursor.com/llms.txt.';
 
   const server = new McpServer({ name: 'clawdcursor', version: VERSION }, { instructions });
+
+  // First tool call without consent: ask the USER in the host's own UI (MCP
+  // elicitation) instead of telling them to go run a terminal command. The
+  // model cannot answer an elicitation — the host shows it to the person.
+  // Asked at most once per server: concurrent calls share the one prompt, and
+  // a decline is not re-asked on every call (the text prompt takes over).
+  let consentPrompt: Promise<boolean> | null = null;
+  const askConsentInHost = (): Promise<boolean> => {
+    consentPrompt ??= (async () => {
+      const host = (server as unknown as { server?: {
+        getClientCapabilities?: () => { elicitation?: unknown } | undefined;
+        elicitInput?: (params: unknown) => Promise<{ action: string; content?: Record<string, unknown> }>;
+      } }).server;
+      if (!host?.getClientCapabilities?.()?.elicitation || !host.elicitInput) return false;
+      try {
+        const answer = await host.elicitInput({
+          message:
+            'clawdcursor needs your OK once before it can control this computer. ' +
+            'It lets the AI use your mouse, keyboard and screen. Dangerous key combos stay ' +
+            'blocked and destructive actions still ask first.',
+          requestedSchema: {
+            type: 'object',
+            properties: {
+              allow: {
+                type: 'boolean',
+                title: 'Allow clawdcursor to control this computer',
+                default: false,
+              },
+            },
+            required: ['allow'],
+          },
+        });
+        if (answer.action === 'accept' && answer.content?.allow === true) {
+          writeConsentFile('mcp-elicitation');
+          return true;
+        }
+      } catch { /* the host could not show it — fall back to the text prompt */ }
+      return false;
+    })();
+    return consentPrompt;
+  };
   const tools = compact ? getCompactSurface() : getAllTools();
 
   for (const tool of tools) {
@@ -209,8 +250,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // Consent gate (non-fatal): until the user accepts one-time consent,
         // every tool returns a clear, host-VISIBLE prompt instead of the server
         // dying with an opaque "failed". Re-checked per call so `clawdcursor
-        // consent --accept` takes effect immediately, with no restart.
-        if (!hasConsent()) {
+        // consent --accept` takes effect immediately, with no restart. A host
+        // that supports elicitation asks the user in-app first.
+        if (!hasConsent() && !(await askConsentInHost())) {
           return {
             content: [{ type: 'text', text:
               'clawdcursor needs one-time consent before it can control the desktop. ' +

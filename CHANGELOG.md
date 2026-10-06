@@ -15,8 +15,18 @@ All notable changes to Clawd Cursor will be documented in this file.
   only `true`/`1` records it). Each bundle is built and smoke-tested natively
   on its OS in CI (`npm run build:mcpb`, `scripts/smoke-mcpb.mjs`).
 
+- **Consent is asked in the app, not in a terminal.** On the first tool call
+  without consent, clawdcursor asks the user through the host's own UI (MCP
+  elicitation): "Allow clawdcursor to control this computer". Only the person
+  can answer it, not the model. Accepting records consent and the call goes
+  ahead; declining, or a host without elicitation, gets the usual
+  `clawdcursor consent --accept` instructions. Asked at most once per server.
+
 ### Changed
 
+- **No more `punycode` deprecation warning on every command.** It came from a
+  transitive dependency (nut-js → jimp → node-fetch@2 → whatwg-url@5 → tr46);
+  only that one warning code (DEP0040) is silenced.
 - **MCP servers no longer refuse to start when another is running.** The
   single-instance lock made every copy after the first exit with "already
   running … Kill it first". Claude Desktop runs several copies of one

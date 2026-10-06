@@ -51,9 +51,9 @@ export function acceptConsentFromEnv(env: NodeJS.ProcessEnv = process.env): bool
   return true;
 }
 
-/** Write consent file directly (for --accept flag / CI / scripted use) */
-export function writeConsentFile(): void {
-  saveConsent();
+/** Write consent file directly (for --accept flag / CI / scripted use, or a host prompt) */
+export function writeConsentFile(source?: string): void {
+  saveConsent(source);
 }
 
 /** Print the big ASCII banner — only called during first-run onboarding */

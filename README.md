@@ -107,6 +107,10 @@ clawdcursor consent --accept    # one-time desktop-control consent (required)
 clawdcursor grant               # macOS only — approve Accessibility + Screen Recording
 ```
 
+> Hosts that support MCP elicitation (e.g. Claude Code, VS Code) also let you skip
+> `consent --accept`: the first tool call asks **"Allow clawdcursor to control this
+> computer"** right in the app.
+
 > **Zero-install** also works — swap `clawdcursor` for `npx -y clawdcursor` in any
 > snippet below and npx fetches it on demand. A **global install is recommended**
 > anyway: it's pinnable and inspectable on disk (safer for a tool with full desktop

@@ -52,6 +52,7 @@ process.on('unhandledRejection', (reason: any) => {
   }
 });
 
+import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
 import { Agent } from '../core/agent';
 import { createUtilityServer, requireAuth, initServerToken, getServerLogBuffer, isLoopbackHost, mountJson404 } from './http-utility';

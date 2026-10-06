@@ -138,7 +138,10 @@ function seedHome(): NodeJS.ProcessEnv {
 }
 
 function startMcp(env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
-  return spawn(process.execPath, [CLI_PATH, 'mcp', '--compact'], { cwd: REPO_ROOT, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  // cwd = the temp home: with USERPROFILE redirected, Windows can't resolve
+  // LocalAppData, so PowerShell (the UIA bridge) writes its module-analysis
+  // cache relative to cwd — it must not land in the repo.
+  return spawn(process.execPath, [CLI_PATH, 'mcp', '--compact'], { cwd: env.HOME, env, stdio: ['pipe', 'pipe', 'pipe'] });
 }
 
 /** Clean exit everywhere except the headless-Linux native-teardown quirk. */
