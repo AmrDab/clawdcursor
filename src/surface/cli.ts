@@ -1353,12 +1353,13 @@ program
   .option('--compact', 'Expose 7 compound tools instead of 98 granular ones (Anthropic Computer-Use style — recommended for most agents)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts: { compact?: boolean; banner?: boolean }) => {
-    // Single-instance guard (MCP servers can accumulate when editors restart them)
-    const existingMcpPid = claimPidFile('mcp');
-    if (existingMcpPid !== null) {
-      process.stderr.write(`[ERROR] clawdcursor mcp is already running (pid ${existingMcpPid}). Kill it first.\n`);
-      process.exit(1);
-    }
+    // No single-instance lock in MCP mode. Hosts legitimately run several
+    // copies at once — Claude Desktop starts a protocol probe, the main
+    // connection and a Cowork/Code pool for one extension, and another editor
+    // may be running clawdcursor too — and the old lock made every copy after
+    // the first exit "already running … Kill it first", so the .mcpb never
+    // connected (live, 2026-10). The lock existed to stop orphans piling up;
+    // each copy now reaps itself instead (stdin EOF + parent-PID watchdog below).
 
     // MCP mode: stdout is protocol, logs go to stderr
     const stderrWrite = (prefix: string, args: any[]) =>
@@ -1411,25 +1412,16 @@ program
       console.error('Subsystem init failed:', err?.message);
     });
 
-    // Release pidfile on exit so a fresh restart can claim it immediately.
-    // Guard against double-fire (both 'end' and 'close' can emit on the
-    // same stdin teardown). Defer process.exit via setImmediate so libuv
-    // finishes its stream-close bookkeeping before the exit syscall —
-    // calling process.exit() synchronously inside a stdin 'end' handler
-    // causes SIGSEGV on Linux where libuv is still unwinding the read
-    // handle.
-    //
-    // releasePidFile MUST stay synchronous (before the setImmediate). On
-    // headless Linux CI the native subsystems (nut-js → libxdo, sharp's
-    // libvips) can still segfault during process.exit's destructor
-    // chain — so the only way to guarantee the lockfile gets cleaned up
-    // is to unlink it BEFORE any deferred work runs. The orphan-teardown
-    // test asserts lockfile-is-gone for exactly this reason.
+    // Exit when the host goes away. Guard against double-fire (both 'end' and
+    // 'close' can emit on the same stdin teardown). Defer process.exit via
+    // setImmediate so libuv finishes its stream-close bookkeeping before the
+    // exit syscall — calling process.exit() synchronously inside a stdin
+    // 'end' handler causes SIGSEGV on Linux where libuv is still unwinding
+    // the read handle.
     let mcpExiting = false;
     const releaseMcp = () => {
       if (mcpExiting) return;
       mcpExiting = true;
-      releasePidFile('mcp');                       // sync — must run before any segfault
       setImmediate(() => process.exit(0));         // deferred — lets libuv unwind cleanly
     };
     process.on('SIGINT', releaseMcp);

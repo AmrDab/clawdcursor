@@ -15,7 +15,24 @@ All notable changes to Clawd Cursor will be documented in this file.
   only `true`/`1` records it). Each bundle is built and smoke-tested natively
   on its OS in CI (`npm run build:mcpb`, `scripts/smoke-mcpb.mjs`).
 
+### Changed
+
+- **MCP servers no longer refuse to start when another is running.** The
+  single-instance lock made every copy after the first exit with "already
+  running … Kill it first". Claude Desktop runs several copies of one
+  extension (protocol probe, main connection, Cowork/Code pool), and other
+  editors may run clawdcursor at the same time, so the extension could never
+  connect. The lock only existed to stop orphans piling up; each MCP server
+  already exits on its own when its host goes away (stdin EOF + parent-PID
+  watchdog). The `agent` daemon keeps its lock.
+
 ### Fixed
+
+- **The CLI misread its arguments inside Electron hosts.** Claude Desktop runs
+  extensions in an Electron utility process; commander's Electron detection
+  took the script path for the command and the server died with
+  `error: unknown command '…\cli.js'` before logging anything. The CLI now
+  finds its own script in `argv` and parses what follows.
 
 - **`expect` is checked before the action runs, on every path.** A malformed
   `expect` used to be rejected only AFTER the click/key had been sent, so a
