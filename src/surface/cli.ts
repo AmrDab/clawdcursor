@@ -497,6 +497,11 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   if (agent) {
     let platform: import('../platform/types').PlatformAdapter | undefined;
     try { platform = await getPlatform(); } catch { /* non-fatal */ }
+    // macOS mouse space is logical points — see mouseScaleFor (#154).
+    let macLogicalWidth = 0;
+    if (process.platform === 'darwin' && platform) {
+      try { macLogicalWidth = (await platform.getScreenSize())?.logicalWidth ?? 0; } catch { /* physical fallback */ }
+    }
 
     // The Agent class doesn't currently own a CDPDriver — that bridge lives
     // on the toolCtx for both `agent` and `agent --no-llm`. Without this,
@@ -526,7 +531,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
       platform,
       agent,
       getLogBuffer: getServerLogBuffer,
-      getMouseScaleFactor: () => agent!.getDesktop().getScaleFactor(),
+      getMouseScaleFactor: () => mouseScaleFor(agent!.getDesktop(), macLogicalWidth),
       getScreenshotScaleFactor: () => agent!.getDesktop().getScaleFactor(),
       ensureInitialized: async () => {},  // agent already initialized
     };
@@ -1277,6 +1282,21 @@ program
 
 // ── Shared subsystem initialization (used by mcp + serve) ──
 
+/**
+ * Image-space → mouse-driver factor for the image the model was last sent.
+ * Physical px on Windows/Linux (= screenshot scale); logical points on macOS
+ * (logical width / image width — may be < 1, e.g. a 2560-px panel shown at
+ * 1024 points). Read live, never cached.
+ */
+function mouseScaleFor(
+  desktop: { getScaleFactor(): number; getLlmWidth(): number },
+  macLogicalWidth: number,
+): number {
+  const llmW = desktop.getLlmWidth();
+  if (process.platform === 'darwin' && macLogicalWidth > 0 && llmW > 0) return macLogicalWidth / llmW;
+  return desktop.getScaleFactor();
+}
+
 async function createToolContext() {
   const { NativeDesktop } = await import('../platform/native-desktop');
   const { AccessibilityBridge } = await import('../platform/accessibility');
@@ -1300,8 +1320,10 @@ async function createToolContext() {
 
   let initialized = false;
   let initPromise: Promise<void> | null = null;
-  let mouseScaleFactor = 1;
-  let screenshotScaleFactor = 1;
+  // macOS logical (point) width; 0 elsewhere. Scale factors are read LIVE from
+  // the desktop's last capture (mouseScaleFor) — freezing them at startup broke
+  // clicks after a rotation / resolution change.
+  let macLogicalWidth = 0;
 
   const ensureInitialized = async (): Promise<void> => {
     if (initialized) return;
@@ -1309,30 +1331,19 @@ async function createToolContext() {
     initPromise = (async () => {
       await desktop.connect();
       platform = await getPlatform();
-      screenshotScaleFactor = desktop.getScaleFactor();
-      // mouseScaleFactor: image-space → mouse-driver coords.
-      //  • Windows / Linux-X11: nut-js drives in PHYSICAL pixels → use the
-      //    physical/image ratio (screenshotScaleFactor).
-      //  • macOS: nut-js drives in LOGICAL points (Cocoa/CGEvent space). On a
-      //    Retina panel physical≠logical, so the physical scale double-counts
-      //    the backing scale and every click lands ~2× off (#154). Map
-      //    image-space → LOGICAL instead, using NSScreen's logical width.
-      //    (Mirrors imageScale() in agent-loop/coord-scale.ts for System B.)
+      // mouse factor: image-space → mouse-driver coords (see mouseScaleFor).
+      //  • Windows / Linux: nut-js drives PHYSICAL px → the screenshot scale.
+      //  • macOS: nut-js drives LOGICAL points; on Retina physical≠logical and
+      //    the physical scale double-counts the backing scale (#154).
       if (process.platform === 'darwin') {
         try {
-          const { LLM_TARGET_WIDTH } = await import('../core/agent-loop/coord-scale');
           const lsize = await platform.getScreenSize(); // NSScreen logical + physical dims
-          const lw = lsize?.logicalWidth ?? 0;
-          mouseScaleFactor = lw > LLM_TARGET_WIDTH ? lw / LLM_TARGET_WIDTH : 1;
-        } catch {
-          mouseScaleFactor = screenshotScaleFactor; // best-effort fallback
-        }
-      } else {
-        mouseScaleFactor = screenshotScaleFactor;
+          macLogicalWidth = lsize?.logicalWidth ?? 0;
+        } catch { /* best-effort fallback: physical scale */ }
       }
       await a11y.warmup();
       initialized = true;
-      console.log(`Subsystems initialized (mouseScale=${mouseScaleFactor}, screenshotScale=${screenshotScaleFactor})`);
+      console.log(`Subsystems initialized (mouseScale=${mouseScaleFor(desktop, macLogicalWidth)}, screenshotScale=${desktop.getScaleFactor()})`);
     })();
     return initPromise;
   };
@@ -1340,8 +1351,8 @@ async function createToolContext() {
   return {
     desktop, a11y, cdp, uiMaps,
     get platform() { return platform; },
-    getMouseScaleFactor: () => mouseScaleFactor,
-    getScreenshotScaleFactor: () => screenshotScaleFactor,
+    getMouseScaleFactor: () => mouseScaleFor(desktop, macLogicalWidth),
+    getScreenshotScaleFactor: () => desktop.getScaleFactor(),
     ensureInitialized,
   };
 }

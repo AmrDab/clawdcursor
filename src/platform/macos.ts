@@ -32,6 +32,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
+import { llmSize } from '../core/agent-loop/coord-scale';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
@@ -265,13 +266,14 @@ export class MacOSAdapter implements PlatformAdapter {
         }
       }
 
-      if (opts?.maxWidth && width > opts.maxWidth) {
-        scaleFactor = width / opts.maxWidth;
-        const newH = Math.round(height / scaleFactor);
-        const resized = await sharp(buffer).resize(opts.maxWidth, newH, { fit: 'fill' }).png().toBuffer();
+      // maxWidth caps the LONG edge (and area) — see llmScale.
+      const fit = opts?.maxWidth ? llmSize(width, height, opts.maxWidth) : null;
+      if (fit && fit.scale > 1) {
+        scaleFactor = fit.scale;
+        const resized = await sharp(buffer).resize(fit.width, fit.height, { fit: 'fill' }).png().toBuffer();
         buffer = Buffer.from(resized);
-        width = opts.maxWidth;
-        height = newH;
+        width = fit.width;
+        height = fit.height;
       }
 
       return { buffer, width, height, scaleFactor };

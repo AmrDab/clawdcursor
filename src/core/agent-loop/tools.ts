@@ -2020,7 +2020,7 @@ const COORD_SPACE_SCHEMA = {
   type: 'string',
   enum: ['screen', 'image'],
   description:
-    'Coordinate space of the x/y you pass. "screen" = accessibility/COMPILED-UI coords (@x,y), already correct for the real screen. "image" = coords you read off the SCREENSHOT (downscaled to 1280px wide); the tool scales them up to the real screen. When omitted, the DEFAULT FOLLOWS CONTEXT: "image" while a screenshot is in your context, "screen" otherwise. So pass space:"screen" explicitly when clicking an @x,y map coord on a screenshot turn, and space:"image" when you read coords off the picture.',
+    'Coordinate space of the x/y you pass. "screen" = accessibility/COMPILED-UI coords (@x,y), already correct for the real screen. "image" = coords you read off the SCREENSHOT (downscaled to fit 1280px on its long edge); the tool scales them up to the real screen. When omitted, the DEFAULT FOLLOWS CONTEXT: "image" while a screenshot is in your context, "screen" otherwise. So pass space:"screen" explicitly when clicking an @x,y map coord on a screenshot turn, and space:"image" when you read coords off the picture.',
 } as const;
 
 /** One-line coordinate breadcrumb for tool-result text: makes the input space,

@@ -13,7 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const nut = vi.hoisted(() => ({ grabW: 3840, grabH: 2400, mouseW: 1707, osScale: 2.25, setPosition: vi.fn() }));
 vi.mock('@nut-tree-fork/nut-js', () => ({
-  mouse: { config: {}, click: vi.fn(), setPosition: nut.setPosition },
+  mouse: { config: {}, click: vi.fn(), setPosition: nut.setPosition, getPosition: vi.fn(async () => ({ x: 400, y: 300 })) },
   keyboard: { config: {}, type: vi.fn() },
   screen: {
     grab: vi.fn(async () => ({ width: nut.grabW, height: nut.grabH, data: null })),
@@ -65,5 +65,13 @@ describe('WindowsAdapter.mouseClick under DPI-aware and DPI-unaware hosts', () =
     const r = await clickAt(500, 300);
     expect(r.mouse).toEqual({ x: 500, y: 300 });
     expect(r.bridge).toEqual({ x: 500, y: 300 });
+  });
+
+  it('relative moves take physical deltas like absolute ones (no 2.25x overshoot)', async () => {
+    nut.mouseW = 1707;                       // DPI-unaware: driver is logical
+    const adapter = new WindowsAdapter();
+    await adapter.getScreenSize();
+    await adapter.mouseMoveRelative(225, 450); // physical px
+    expect(nut.setPosition.mock.calls[0][0]).toMatchObject({ x: 500, y: 500 }); // 400+100, 300+200
   });
 });

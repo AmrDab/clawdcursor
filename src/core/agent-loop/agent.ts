@@ -46,7 +46,7 @@ import {
   type ToolUseResult,
 } from '../../llm/client';
 import { buildSystemPrompt, renderSnapshot, renderHistory, wrapUntrustedScreenContent } from './prompt';
-import { LLM_TARGET_WIDTH } from './coord-scale';
+import { llmSize } from './coord-scale';
 import { buildUnifiedTools } from './tools';
 import { TOOL_META } from './tool-meta';
 import type {
@@ -229,11 +229,9 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
     }
 
     // DPI/scale header — tells the model how screenshot pixels map to tool coords.
-    const imgScaleNum = screen.physicalWidth > LLM_TARGET_WIDTH
-      ? screen.physicalWidth / LLM_TARGET_WIDTH
-      : 1;
-    const ssScale = imgScaleNum.toFixed(2);
-    const dpiNote = `\nDISPLAY: ${screen.physicalWidth}×${screen.physicalHeight} physical, screenshot ${LLM_TARGET_WIDTH}px wide (×${ssScale} to screen).`;
+    const shot = llmSize(screen.physicalWidth, screen.physicalHeight);
+    const ssScale = shot.scale.toFixed(2);
+    const dpiNote = `\nDISPLAY: ${screen.physicalWidth}×${screen.physicalHeight} physical, screenshot ${shot.width}×${shot.height} (×${ssScale} to screen).`;
     log.info('agent.coordinate_space', {
       physical: `${screen.physicalWidth}×${screen.physicalHeight}`,
       screenshotScale: ssScale,

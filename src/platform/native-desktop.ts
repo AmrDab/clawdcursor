@@ -5,7 +5,7 @@
  * No network connection needed — controls the local desktop directly.
  *
  * - captureScreen() returns full-resolution frames
- * - captureForLLM() returns resized frames (1280px wide) with scaling metadata
+ * - captureForLLM() returns resized frames (long edge ≤1280px, area ≤1.15 MP) with scaling metadata
  * - Coordinate scaling handled transparently
  */
 
@@ -17,6 +17,7 @@ import { normalizeKey } from './keys';
 import { getNativeHelper, captureScreenViaHelper } from './native-helper';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen';
+import { llmScale, llmSize } from '../core/agent-loop/coord-scale';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
 
@@ -64,10 +65,6 @@ const KEY_MAP: Record<string, Key> = {
   '_': resolveNutKey('Minus', 'Subtract', 'NumSubtract'),
 };
 
-/** LLM screenshot target width — smaller = faster API calls + fewer tokens */
-// Higher resolution = better tool/icon identification. 1280 is Anthropic's recommended max.
-// At 2560 screen: 1280 → scale 2x (was 1024 → 2.5x). Icons go from ~12px to ~20px.
-const LLM_TARGET_WIDTH = 1280;
 
 export interface MonitorInfo {
   index: number;
@@ -175,9 +172,7 @@ export class NativeDesktop extends EventEmitter {
         const { Region } = await import('@nut-tree-fork/nut-js');
         img = await screen.grabRegion(new Region(mon.x, mon.y, mon.width, mon.height));
       }
-      const scaleFactor = mon.width > LLM_TARGET_WIDTH ? mon.width / LLM_TARGET_WIDTH : 1;
-      const llmW = Math.round(mon.width / scaleFactor);
-      const llmH = Math.round(mon.height / scaleFactor);
+      const { scale: scaleFactor, width: llmW, height: llmH } = llmSize(mon.width, mon.height);
       const processed = await sharpFromGrab(img)
         .resize(llmW, llmH)
         .png()
@@ -204,7 +199,7 @@ export class NativeDesktop extends EventEmitter {
           const result = await captureScreenViaHelper();
           this.screenWidth = result.width;
           this.screenHeight = result.height;
-          this.scaleFactor = this.screenWidth > LLM_TARGET_WIDTH ? this.screenWidth / LLM_TARGET_WIDTH : 1;
+          this.scaleFactor = llmScale(this.screenWidth, this.screenHeight);
           // Clean up the temp file from connect probe
           try { fs.unlinkSync(result.path); } catch { /* ignore */ }
           this.connected = true;
@@ -240,11 +235,7 @@ export class NativeDesktop extends EventEmitter {
       }
 
       // Calculate scale factor
-      if (this.screenWidth > LLM_TARGET_WIDTH) {
-        this.scaleFactor = this.screenWidth / LLM_TARGET_WIDTH;
-      } else {
-        this.scaleFactor = 1;
-      }
+      this.scaleFactor = llmScale(this.screenWidth, this.screenHeight);
 
       // Detect DPI ratio (physical / mouse-driver px). screen.grab() returns
       // physical pixels; physicalToMouse divides by this before every move.
@@ -288,7 +279,10 @@ export class NativeDesktop extends EventEmitter {
           const envScale = onWayland ? Math.max(gdkScale, qtScale) : 1;
           if (envScale > 1) {
             this.dpiRatio = envScale;
-          } else {
+          } else if (onWayland) {
+            // X11: pointer space IS the physical root window. Comparing it to
+            // the PRIMARY output's width halved every click on a two-monitor
+            // setup (root 3840 / primary 1920 = "2x").
             const { execFileSync } = await import('child_process');
             const output = execFileSync('xrandr', ['--query'], { timeout: 5000, encoding: 'utf-8' });
             const match = output.match(/primary\s+(\d+)x(\d+)/);
@@ -365,7 +359,7 @@ export class NativeDesktop extends EventEmitter {
 
   /**
    * Capture a RESIZED screenshot optimized for LLM vision.
-   * - Resized to 1280px wide (or less if screen is smaller)
+   * - Resized so the long edge ≤1280px and area ≤1.15 MP (never upscaled) — llmSize()
    * - Much smaller payload = fewer tokens = faster API calls
    * - Returns scaleFactor so coordinates in AI response can be mapped back
    */
@@ -379,9 +373,8 @@ export class NativeDesktop extends EventEmitter {
         const frame = await this.captureScreen();
         this.screenWidth = frame.width;
         this.screenHeight = frame.height;
-        this.scaleFactor = this.screenWidth > LLM_TARGET_WIDTH ? this.screenWidth / LLM_TARGET_WIDTH : 1;
-        const llmWidth = Math.min(this.screenWidth, LLM_TARGET_WIDTH);
-        const llmHeight = Math.round(this.screenHeight / this.scaleFactor);
+        const { scale, width: llmWidth, height: llmHeight } = llmSize(this.screenWidth, this.screenHeight);
+        this.scaleFactor = scale;
         const pipeline = sharp(frame.buffer).resize(llmWidth, llmHeight);
         const processed = this.config.capture.format === 'jpeg'
           ? await pipeline.jpeg({ quality: this.config.capture.quality }).toBuffer()
@@ -407,15 +400,9 @@ export class NativeDesktop extends EventEmitter {
     this.screenWidth = img.width;
     this.screenHeight = img.height;
 
-    // Recalculate scale factor in case resolution changed
-    if (this.screenWidth > LLM_TARGET_WIDTH) {
-      this.scaleFactor = this.screenWidth / LLM_TARGET_WIDTH;
-    } else {
-      this.scaleFactor = 1;
-    }
-
-    const llmWidth = Math.min(this.screenWidth, LLM_TARGET_WIDTH);
-    const llmHeight = Math.round(this.screenHeight / this.scaleFactor);
+    // Recalculate scale factor in case resolution changed (long edge AND area capped)
+    const { scale, width: llmWidth, height: llmHeight } = llmSize(this.screenWidth, this.screenHeight);
+    this.scaleFactor = scale;
 
     const processed = await this.processFrame(img, llmWidth, llmHeight);
     // Release the raw RGBA buffer immediately after processing
@@ -450,9 +437,7 @@ export class NativeDesktop extends EventEmitter {
       const ry = Math.max(0, Math.min(y, full.height - 1));
       const rw = Math.min(w, full.width - rx);
       const rh = Math.min(h, full.height - ry);
-      const cropScale = rw > LLM_TARGET_WIDTH ? rw / LLM_TARGET_WIDTH : 1;
-      const llmWidth = Math.min(rw, LLM_TARGET_WIDTH);
-      const llmHeight = Math.round(rh / cropScale);
+      const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh);
       const { format, quality } = this.config.capture;
       let pipeline = sharp(full.buffer).extract({ left: rx, top: ry, width: rw, height: rh });
       if (llmWidth < rw) {
@@ -470,10 +455,8 @@ export class NativeDesktop extends EventEmitter {
     const rw = Math.min(w, img.width - rx);
     const rh = Math.min(h, img.height - ry);
 
-    // Scale crop to LLM-sized output (max 1280px wide)
-    const cropScale = rw > LLM_TARGET_WIDTH ? rw / LLM_TARGET_WIDTH : 1;
-    const llmWidth = Math.min(rw, LLM_TARGET_WIDTH);
-    const llmHeight = Math.round(rh / cropScale);
+    // Scale crop to LLM-sized output (long edge and area capped)
+    const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh);
 
     const { format, quality } = this.config.capture;
 
@@ -508,6 +491,11 @@ export class NativeDesktop extends EventEmitter {
    */
   getScaleFactor(): number {
     return this.scaleFactor;
+  }
+
+  /** Width (px) of the image the model gets for the current screen — llmSize(). */
+  getLlmWidth(): number {
+    return this.screenWidth > 0 ? Math.max(1, Math.round(this.screenWidth / this.scaleFactor)) : 0;
   }
 
   /**

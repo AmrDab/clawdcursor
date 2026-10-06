@@ -45,6 +45,7 @@ import type {
   FocusActivation,
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
+import { llmSize } from '../core/agent-loop/coord-scale';
 
 const execFileAsync = promisify(execFile);
 
@@ -289,12 +290,14 @@ export class WindowsAdapter implements PlatformAdapter {
     let height = srcHeight;
     let scaleFactor = 1;
 
-    if (opts?.maxWidth && srcWidth > opts.maxWidth) {
-      scaleFactor = srcWidth / opts.maxWidth;
-      const newH = Math.round(srcHeight / scaleFactor);
-      pipeline = pipeline.resize(opts.maxWidth, newH, { fit: 'fill', kernel: 'lanczos3' });
-      width = opts.maxWidth;
-      height = newH;
+    // maxWidth caps the LONG edge (and area) — see llmScale — so portrait
+    // and 4:3 screens don't send images the provider shrinks again.
+    const fit = opts?.maxWidth ? llmSize(srcWidth, srcHeight, opts.maxWidth) : null;
+    if (fit && fit.scale > 1) {
+      scaleFactor = fit.scale;
+      pipeline = pipeline.resize(fit.width, fit.height, { fit: 'fill', kernel: 'lanczos3' });
+      width = fit.width;
+      height = fit.height;
     }
 
     const buffer = await pipeline.png().toBuffer();
@@ -860,10 +863,13 @@ export class WindowsAdapter implements PlatformAdapter {
     this.lastCursor = { x: p.x, y: p.y };
   }
 
-  async mouseMoveRelative(dx: number, dy: number): Promise<void> {
-    // NOTE: dx/dy are relative deltas whose coordinate space (image vs physical)
-    // is caller-dependent and not part of the #170 physical→logical fix, so we
-    // intentionally do NOT scale them here. getPosition() returns logical.
+  async mouseMoveRelative(rawDx: number, rawDy: number): Promise<void> {
+    // dx/dy arrive in PHYSICAL px like absolute coords (the MCP surface scales
+    // image deltas by the mouse factor), but getPosition()/setPosition() live
+    // in the driver's space — divide by the same ratio as absolute moves, or a
+    // 100-px move overshoots to 225 px on a 225% display.
+    const dx = rawDx / this.mouseRatio;
+    const dy = rawDy / this.mouseRatio;
     // nut-js `getPosition()` works reliably on Windows — prefer that over
     // the cache. Fall back to the cache if the query fails.
     try {
@@ -874,8 +880,8 @@ export class WindowsAdapter implements PlatformAdapter {
       this.lastCursor = { x: nx, y: ny };
     } catch {
       if (this.lastCursor) {
-        const nx = this.lastCursor.x + dx;
-        const ny = this.lastCursor.y + dy;
+        const nx = Math.round(this.lastCursor.x + dx);
+        const ny = Math.round(this.lastCursor.y + dy);
         await mouse.setPosition(new Point(nx, ny));
         this.lastCursor = { x: nx, y: ny };
       }
