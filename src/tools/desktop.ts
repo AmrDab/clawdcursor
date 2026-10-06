@@ -314,11 +314,18 @@ export function getDesktopTools(): ToolDefinition[] {
         let saved: string | null = null;
         try { saved = await ctx.a11y.readClipboard(); } catch { /* clipboard unreadable — leave saved=null, restore becomes a no-op below */ }
 
-        await ctx.a11y.writeClipboard(text);
-        await new Promise(r => setTimeout(r, 50));
-        // Paste combo is platform-specific
-        await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
-        await new Promise(r => setTimeout(r, 100));
+        // A trailing newline means "submit": a pasted \n is dropped by
+        // single-line fields (address bar, search boxes), so press Return.
+        const submit = /\r?\n$/.test(text);
+        const body = submit ? text.replace(/\r?\n$/, '') : text;
+        if (body) {
+          await ctx.a11y.writeClipboard(body);
+          await new Promise(r => setTimeout(r, 50));
+          // Paste combo is platform-specific
+          await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
+          await new Promise(r => setTimeout(r, 100));
+        }
+        if (submit) await ctx.desktop.keyPress('Return');
 
         // Restore clipboard. Best-effort — if the read failed (no clipboard
         // available) or the restore throws, we don't surface the error;

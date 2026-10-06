@@ -99,7 +99,8 @@ export function getExtraTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_triple_click');
         const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.platform.mouseClick(Math.round(x * sf), Math.round(y * sf), { button: 'left', count: 3 });
+        const px = Math.round(x * sf), py = Math.round(y * sf);
+        await ctx.platform.mouseClick(px, py, { button: 'left', count: 3 });
         // #121: Win11 dialog edit fields (Save As filename box) register the
         // triple-click but don't select-all — subsequent typing APPENDS at the
         // caret instead of replacing ("Untitledclawdcursor-…"). Callers triple-
@@ -111,7 +112,13 @@ export function getExtraTools(): ToolDefinition[] {
         try {
           const fe = await ctx.platform.getFocusedElement();
           const role = (fe?.controlType ?? '').toLowerCase();
-          if (/^(edit|textfield|searchfield|combobox)$/.test(role.replace(/^controltype\./, ''))) {
+          // Only when the focused field is the one we clicked: if focus stayed in
+          // some other input (click landed on page text), ctrl+A would select
+          // that field — or the whole page — instead of the paragraph.
+          const b = fe?.bounds;
+          const hit = !b || !b.width || !b.height
+            || (px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height);
+          if (hit && /^(edit|textfield|searchfield|combobox)$/.test(role.replace(/^controltype\./, ''))) {
             const combo = ctx.platform.platform === 'darwin' ? 'cmd+a' : 'ctrl+a';
             await ctx.platform.keyPress(combo);
             selectAll = ' + select-all (edit field)';

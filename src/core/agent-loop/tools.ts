@@ -755,13 +755,20 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // Save + restore the prior clipboard so a pending copy isn't clobbered
         // (e.g. a copy→paste→type flow). mod+v is portable across OSes.
         // Char-by-char is kept as a fallback for fields that reject paste.
+        // A trailing newline means "submit": a pasted \n is dropped by
+        // single-line fields (address bar, search boxes), so press Return.
+        const submit = /\r?\n$/.test(text);
+        const body = submit ? text.replace(/\r?\n$/, '') : text;
         try {
-          const prior = await ctx.platform.readClipboard().catch(() => '');
-          await ctx.platform.writeClipboard(text);
-          await sleep(40);
-          await ctx.platform.keyPress('mod+v');
-          await sleep(150);
-          await ctx.platform.writeClipboard(prior).catch(() => {});
+          if (body) {
+            const prior = await ctx.platform.readClipboard().catch(() => '');
+            await ctx.platform.writeClipboard(body);
+            await sleep(40);
+            await ctx.platform.keyPress('mod+v');
+            await sleep(150);
+            await ctx.platform.writeClipboard(prior).catch(() => {});
+          }
+          if (submit) await ctx.platform.keyPress('Return');
           return { success: true, text: `Typed ${text.length} chars (paste): "${truncate(text, 60)}"` };
         } catch {
           await ctx.platform.typeText(text);

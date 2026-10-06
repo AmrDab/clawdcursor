@@ -58,6 +58,7 @@ const COMPUTER_ACTIONS: ActionRoute[] = [
   // Perception
   { action: 'screenshot', delegate: 'desktop_screenshot' },
   { action: 'screenshot_region', delegate: 'desktop_screenshot_region' },
+  { action: 'zoom',              delegate: 'desktop_screenshot_region' }, // alias (computer-use name)
   // Mouse
   { action: 'click',         delegate: 'mouse_click' },
   { action: 'double_click',  delegate: 'mouse_double_click' },

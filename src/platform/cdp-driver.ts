@@ -176,9 +176,12 @@ export class CDPDriver {
       const contexts = this.browser.contexts();
       const allPages: Page[] = contexts.flatMap(ctx => ctx.pages());
       const userPages = allPages.filter(p => isUserPage(p.url()));
-      const fallbackPage = allPages.find(p =>
-        !p.url().startsWith('edge://') && !p.url().startsWith('chrome://') && !p.url().startsWith('about:')
-      ) ?? allPages[0] ?? null;
+      // Extension/devtools pages (e.g. a wallet's background UI) are never the
+      // page the agent means — prefer anything else before falling back to them.
+      const INTERNAL = ['edge://', 'chrome://', 'about:', 'chrome-extension://', 'extension://', 'devtools://'];
+      const fallbackPage = allPages.find(p => !INTERNAL.some(s => p.url().startsWith(s)))
+        ?? allPages.find(p => p.url().startsWith('about:'))
+        ?? allPages[0] ?? null;
 
       // Among user pages, prefer the last one (most recently opened/navigated)
       this.activePage = userPages.length > 0

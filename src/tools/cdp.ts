@@ -27,6 +27,9 @@ export function getCdpTools(): ToolDefinition[] {
           // port — which is typically the USER'S own session. Disclose it so
           // the agent knows navigation/tab actions affect the user's tabs, not
           // a private instance (gauntlet F2).
+          if (!/^https?:/i.test(url)) {
+            return { text: `Attached to the EXISTING browser on port ${DEFAULT_CDP_PORT}, but it has no regular web page open (current: "${title}" at ${url}). It may be a separate browser profile rather than the user's signed-in window, so sites can appear logged out. The first navigation opens the agent's OWN tab. Do not close existing tabs/windows.` };
+          }
           return { text: `Attached to the EXISTING browser on port ${DEFAULT_CDP_PORT}: "${title}" at ${url}. ⚠ This is likely the user's own session — reads see their current page; the first navigation automatically opens the agent's OWN tab so their tabs are never navigated away. Do not close their tabs/windows.` };
         }
         return { text: `Failed to connect to CDP on port ${DEFAULT_CDP_PORT}. Use navigate_browser to launch Edge with CDP.`, isError: true };

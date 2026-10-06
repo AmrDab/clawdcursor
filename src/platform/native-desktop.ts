@@ -246,19 +246,19 @@ export class NativeDesktop extends EventEmitter {
         this.scaleFactor = 1;
       }
 
-      // Detect DPI ratio (physical / logical) for OCR coordinate conversion.
-      // On Windows, System.Windows.Forms.Screen returns logical (DPI-scaled) dimensions,
-      // while screen.grab() returns physical pixels. Mouse API uses logical coords.
+      // Detect DPI ratio (physical / mouse-driver px). screen.grab() returns
+      // physical pixels; physicalToMouse divides by this before every move.
       if (process.platform === 'win32') {
+        // Ask nut-js, in THIS process, what space its mouse uses — DPI awareness
+        // is per-process. A DPI-unaware node drives logical px (ratio 2.25 on a
+        // 225% panel); a DPI-aware host (Claude Desktop's Electron utility
+        // process) drives physical px (ratio 1). Measuring via a separate
+        // PowerShell always got the logical width, so in an aware host every
+        // click landed at 1/dpiRatio of its target.
         try {
-          const { execFileSync } = await import('child_process');
-          const result = execFileSync('powershell.exe', [
-            '-NoProfile', '-Command',
-            "Add-Type -AssemblyName System.Windows.Forms; $s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; \"$($s.Width),$($s.Height)\"",
-          ], { timeout: 10000, encoding: 'utf-8' }).trim();
-          const [logicalW] = result.split(',').map(Number);
-          if (logicalW > 0 && logicalW < this.screenWidth) {
-            this.dpiRatio = this.screenWidth / logicalW;
+          const mouseW = await screen.width();
+          if (mouseW > 0 && mouseW < this.screenWidth) {
+            this.dpiRatio = this.screenWidth / mouseW;
           }
         } catch { /* non-fatal — dpiRatio stays 1 */ }
       } else if (process.platform === 'darwin') {
