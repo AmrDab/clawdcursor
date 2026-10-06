@@ -97,6 +97,7 @@ import { e } from './format';
 // liveness check distinguish a real live duplicate from a recycled PID
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose } from './pidfile';
+import { userArgs } from './argv';
 
 /**
  * Graceful exit on a startup-time init failure (bad API key, no providers,
@@ -1624,4 +1625,6 @@ program
     }
   });
 
-program.parse();
+// Explicit user args: commander's Electron auto-detection misreads argv in a
+// packaged Electron host (Claude Desktop's extension runtime) — see argv.ts.
+program.parse(userArgs(process.argv, __filename), { from: 'user' });
