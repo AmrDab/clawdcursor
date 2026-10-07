@@ -2,6 +2,29 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **`accessibility select` takes a `value`: choose an option inside a
+  dropdown / list.** `select name:"Plan" value:"Pro"` expands the control,
+  requires an option whose name matches `value` exactly (bridge name matching
+  is fuzzy — "Pro" must never press "Profile"), selects it, falls back to
+  pressing it, and reads the control back after each attempt. The reply says
+  "verified", reports what the control shows instead, or says it couldn't be
+  verified. Built from existing primitives, so it works the same on Windows,
+  macOS and Linux. `get-value` now reads a combo box / list's selected item
+  (UIA SelectionPattern; AT-SPI Selection on the combo or its popup menu).
+
+### Changed
+
+- **Faster cold start: the CLI ships as one bundled file.** A start used to
+  load ~840 files (zod, ajv, semver, the MCP SDK, express…); on a cold Windows
+  disk with on-access scanning that took 15–25 s and hosts dropped the server
+  before it answered. `dist/surface/cli.js` is now an esbuild bundle; only
+  native or self-locating packages (nut-js, sharp, playwright, clipboardy)
+  load from `node_modules` — ~390 files at startup.
+
 ## [1.5.12] - 2026-10-06 — Claude Desktop extension; clicks land on target on any screen and host
 
 ### Added
