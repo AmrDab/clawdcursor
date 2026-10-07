@@ -22,7 +22,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   window list reports physical pixels but resize took logical ones, so
   1200×900 became 2700×2025 on a 225% display. Resize now takes the same
   screen units as `window list` and accessibility coordinates, and
-  `space:"image"` accepts screenshot coordinates.
+  `space:"image"` accepts screenshot coordinates. Resizing a maximized window
+  now un-maximizes it first (the window manager ignored the new width on
+  Linux; Windows kept the maximized flag).
 - **A resize aimed at a window that doesn't exist moved the front window.** A
   title or process that matched nothing fell back to whatever window was in
   front (Windows). It now fails, like minimize / maximize / close already did.
