@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.13] - 2026-10-07 — choose dropdown values; faster cold start
 
 ### Added
 
