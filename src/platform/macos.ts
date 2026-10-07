@@ -33,6 +33,7 @@ import type {
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
+import { wheelUnitsPerNotch } from './wheel';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
@@ -659,8 +660,8 @@ export class MacOSAdapter implements PlatformAdapter {
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
     await this.delay(30);
-    if (direction === 'down') await mouse.scrollDown(amount);
-    else if (direction === 'up') await mouse.scrollUp(amount);
+    if (direction === 'down') await mouse.scrollDown(amount * wheelUnitsPerNotch());
+    else if (direction === 'up') await mouse.scrollUp(amount * wheelUnitsPerNotch());
     else {
       // macOS horizontal scroll — hold Shift and scroll vertically. Most
       // apps interpret Shift+wheel as horizontal.
@@ -669,8 +670,8 @@ export class MacOSAdapter implements PlatformAdapter {
         : 'tell application "System Events" to key down shift';
       await execFileAsync('osascript', ['-e', shiftScript], { timeout: 2_000 }).catch(() => {});
       try {
-        if (direction === 'left') await mouse.scrollUp(amount);
-        else await mouse.scrollDown(amount);
+        if (direction === 'left') await mouse.scrollUp(amount * wheelUnitsPerNotch());
+        else await mouse.scrollDown(amount * wheelUnitsPerNotch());
       } finally {
         await execFileAsync('osascript', ['-e',
           'tell application "System Events" to key up shift',

@@ -18,6 +18,7 @@ import { getNativeHelper, captureScreenViaHelper } from './native-helper';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen';
 import { llmScale, llmSize } from '../core/agent-loop/coord-scale';
+import { wheelUnitsPerNotch } from './wheel';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
 
@@ -622,10 +623,12 @@ export class NativeDesktop extends EventEmitter {
     await this.delay(30);
     const steps = Math.abs(Math.round(delta));
     for (let i = 0; i < steps; i++) {
+      // One notch per tick (it was 3 raw units: 3/120 of a notch on Windows,
+      // 3 px on macOS, 3 notches on X11 — see wheel.ts).
       if (delta > 0) {
-        await mouse.scrollDown(3);
+        await mouse.scrollDown(wheelUnitsPerNotch());
       } else {
-        await mouse.scrollUp(3);
+        await mouse.scrollUp(wheelUnitsPerNotch());
       }
       await this.delay(30);
     }

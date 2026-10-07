@@ -46,6 +46,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { llmSize } from '../core/agent-loop/coord-scale';
+import { wheelUnitsPerNotch } from './wheel';
 
 const execFileAsync = promisify(execFile);
 
@@ -917,14 +918,14 @@ export class WindowsAdapter implements PlatformAdapter {
     await this.delay(30);
     // nut-js only exposes scrollUp/scrollDown natively. For horizontal,
     // fall back to Shift+scroll which most apps interpret as horizontal.
-    if (direction === 'down') await mouse.scrollDown(amount);
-    else if (direction === 'up') await mouse.scrollUp(amount);
+    if (direction === 'down') await mouse.scrollDown(amount * wheelUnitsPerNotch());
+    else if (direction === 'up') await mouse.scrollUp(amount * wheelUnitsPerNotch());
     else {
       // Horizontal: hold Shift, scroll vertically.
       await keyboard.pressKey(Key.LeftShift);
       try {
-        if (direction === 'left') await mouse.scrollUp(amount);
-        else await mouse.scrollDown(amount);
+        if (direction === 'left') await mouse.scrollUp(amount * wheelUnitsPerNotch());
+        else await mouse.scrollDown(amount * wheelUnitsPerNotch());
       } finally {
         await keyboard.releaseKey(Key.LeftShift);
       }
