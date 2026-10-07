@@ -29,10 +29,6 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // can't follow, which left the SDK — and zod/ajv under it — unbundled.
 const src = path.join(root, 'src', 'surface', 'cli.ts');
 const entry = path.join(root, 'dist', 'surface', 'cli.js');
-if (!fs.existsSync(entry)) {
-  console.error('bundle-cli: dist/surface/cli.js missing — run tsc first.');
-  process.exit(1);
-}
 
 const tmp = path.join(root, 'dist', 'surface', 'cli.bundle.tmp.js');
 const result = await build({
