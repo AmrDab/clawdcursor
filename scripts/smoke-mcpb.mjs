@@ -49,5 +49,7 @@ check(!time.isError, 'checkbox on: a tool call succeeds');
 check(fs.existsSync(path.join(home, '.clawdcursor', 'consent')), 'checkbox on: consent recorded');
 await on.close();
 
-fs.rmSync(home, { recursive: true, force: true });
+// Windows: the server may still hold files under `home` for a moment after
+// close() — retry, and never let temp cleanup fail a passing smoke run.
+try { fs.rmSync(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch { /* temp dir; OS cleans it */ }
 process.exit(failed ? 1 : 0);
