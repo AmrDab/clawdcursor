@@ -483,7 +483,19 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
                 count = safe(lambda: txt.get_character_count(), 0) or 0
                 out["success"], out["value"] = True, (safe(lambda: txt.get_text(0, count), '') or '')
             else:
-                out["error"] = "element exposes neither Value nor Text"
+                # Combo boxes / lists: the value is the selected item's name. GTK
+                # puts the Selection on the combo or on its popup-menu child.
+                chosen = None
+                for holder in (acc, safe(lambda: acc.get_child_at_index(0))):
+                    sel = safe(lambda: holder.get_selection_iface()) if holder else None
+                    if sel and (safe(lambda: sel.get_n_selected_children(), 0) or 0) > 0:
+                        chosen = safe(lambda: sel.get_selected_child(0))
+                        if chosen:
+                            break
+                if chosen:
+                    out["success"], out["value"] = True, (safe(lambda: chosen.get_name(), '') or '')
+                else:
+                    out["error"] = "element exposes neither Value nor Text"
 
     elif action == 'toggle':
         used = do_named_action(acc, 'toggle')

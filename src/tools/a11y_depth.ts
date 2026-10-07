@@ -14,6 +14,7 @@
  */
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
+import { selectOption } from '../platform/select-option';
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -225,19 +226,26 @@ export function getA11yDepthTools(): ToolDefinition[] {
       description:
         'Select a list item, tab, or radio button by accessibility name. ' +
         'Uses UIA SelectionItemPattern on Windows; sets AXSelected on macOS. ' +
-        'More reliable than clicking when an item is scrolled out of view.',
+        'More reliable than clicking when an item is scrolled out of view. ' +
+        'With `value`, `name` is a dropdown / list and `value` the option to choose ' +
+        '(e.g. name:"Plan" value:"Pro"); the result is read back and verified.',
       parameters: {
-        name:        { type: 'string', description: 'Accessibility name', required: true },
+        name:        { type: 'string', description: 'Accessibility name (with `value`: the dropdown / list)', required: true },
+        value:       { type: 'string', description: 'Option to choose inside the named dropdown / list (exact option name)', required: false },
         controlType: { type: 'string', description: 'Optional role filter', required: false },
         processId:   { type: 'number', required: false, description: 'Scope to a process' },
       },
       category: 'perception',
       compactGroup: 'accessibility',
       safetyTier: 1,
-      handler: async ({ name, controlType, processId }, ctx) => {
+      handler: async ({ name, value, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_select');
         const pid = await resolveProcessId(ctx, processId);
+        if (value !== undefined && value !== '') {
+          const r = await selectOption(ctx.platform, { name: String(name), value: String(value), controlType, processId: pid });
+          return { text: r.text, isError: !r.success };
+        }
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'select',
         });

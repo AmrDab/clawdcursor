@@ -28,6 +28,7 @@ import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
+import { selectOption } from '../../platform/select-option';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
@@ -423,11 +424,12 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'a11y_select',
-      description: 'Select a list item / tab / radio by a11y name (UIA SelectionItemPattern, AX AXSelected).',
+      description: 'Select a list item / tab / radio by a11y name (UIA SelectionItemPattern, AX AXSelected). With `value`, `name` is a dropdown / list and `value` the option to choose (name:"Plan" value:"Pro"); the result is read back and verified.',
       inputSchema: {
         type: 'object',
         properties: {
           name: { type: 'string' },
+          value: { type: 'string', description: 'Option to choose inside the named dropdown / list (exact option name).' },
           controlType: { type: 'string' },
           processId: { type: 'number' },
         },
@@ -437,6 +439,14 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: true,
       async execute(args, ctx) {
         const name = String(args.name ?? '');
+        if (typeof args.value === 'string' && args.value !== '') {
+          const r = await selectOption(ctx.platform, {
+            name, value: args.value,
+            controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
+            processId: await resolveAgentPid(args, ctx),
+          });
+          return { success: r.success, text: r.text, targetLabel: name };
+        }
         const res = await ctx.platform.invokeElement({
           name,
           controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
