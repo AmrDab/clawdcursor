@@ -535,6 +535,10 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!target) return false;
 
     try {
+      // A maximized window ignores the new size (live: width stayed 1920 after
+      // a maximize → restore cycle left MAXIMIZED_HORZ set). An explicit
+      // resize means "this size", so drop the maximized state first.
+      await execFileAsync('wmctrl', ['-i', '-r', target, '-b', 'remove,maximized_vert,maximized_horz'], { timeout: TOOL_TIMEOUT_MS }).catch(() => undefined);
       // Read current bounds for fields not supplied.
       const windows = await this.listWindows();
       const current = windows.find(w => typeof w.handle === 'number' && '0x' + w.handle.toString(16) === target);

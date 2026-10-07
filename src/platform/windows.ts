@@ -571,9 +571,14 @@ export class WindowsAdapter implements PlatformAdapter {
         '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();' +
         '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr hWnd, out System.Drawing.Rectangle rect);' +
         '[DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr hWnd, System.IntPtr hWndAfter, int X, int Y, int cx, int cy, uint uFlags);' +
+        '[DllImport("user32.dll")] public static extern bool IsZoomed(System.IntPtr hWnd);' +
+        '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);' +
         "' -ReferencedAssemblies System.Drawing -PassThru | Out-Null;" +
         `$h = ${handleExpr};` +
         'if ($h -eq [System.IntPtr]::Zero) { "no-window"; exit }' +
+        // A maximized window keeps its maximized state through SetWindowPos;
+        // an explicit resize means "this size", so restore it first.
+        'if ([Win32.NativeMethods]::IsZoomed($h)) { [Win32.NativeMethods]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 150 }' +
         '$r = New-Object System.Drawing.Rectangle;' +
         '[Win32.NativeMethods]::GetWindowRect($h, [ref] $r) | Out-Null;' +
         `$nx = ${x}; $ny = ${y}; $nw = ${w}; $nh = ${h};` +
