@@ -26,6 +26,7 @@ import {
 } from '@nut-tree-fork/nut-js';
 
 import { psRunner } from './ps-runner';
+import { normalizeKey } from './keys';
 import { sharpFromGrab } from './grab-image';
 import type {
   PlatformAdapter,
@@ -44,6 +45,7 @@ import type {
   FocusActivation,
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
+import { llmSize } from '../core/agent-loop/coord-scale';
 
 const execFileAsync = promisify(execFile);
 
@@ -98,6 +100,11 @@ export class WindowsAdapter implements PlatformAdapter {
   // space on Windows, but callers hand us PHYSICAL coords (a11y/OCR/screenshot).
   // Every mouse entry point divides by this before touching nut-js. See #170.
   private dpiRatio = 1;
+  // physical / nut-js mouse px, measured IN THIS PROCESS. Equals dpiRatio in a
+  // DPI-unaware node; 1 in a DPI-aware host (Claude Desktop's Electron utility
+  // process), where nut-js already drives physical px. The PowerShell bridge is
+  // always DPI-unaware, so WindowFromPoint keeps using dpiRatio.
+  private mouseRatio = 1;
 
   async init(): Promise<void> {
     // Configure nut-js for snappy input; same tuning as native-desktop.ts.
@@ -171,6 +178,11 @@ export class WindowsAdapter implements PlatformAdapter {
 
     const dpiRatio = physicalWidth > logicalWidth ? physicalWidth / logicalWidth : 1;
     this.dpiRatio = dpiRatio;
+    this.mouseRatio = dpiRatio;
+    try {
+      const mouseW = await screen.width();
+      if (mouseW > 0 && physicalWidth > 0) this.mouseRatio = physicalWidth > mouseW ? physicalWidth / mouseW : 1;
+    } catch { /* keep dpiRatio */ }
 
     this.screenSize = {
       physicalWidth,
@@ -278,12 +290,14 @@ export class WindowsAdapter implements PlatformAdapter {
     let height = srcHeight;
     let scaleFactor = 1;
 
-    if (opts?.maxWidth && srcWidth > opts.maxWidth) {
-      scaleFactor = srcWidth / opts.maxWidth;
-      const newH = Math.round(srcHeight / scaleFactor);
-      pipeline = pipeline.resize(opts.maxWidth, newH, { fit: 'fill', kernel: 'lanczos3' });
-      width = opts.maxWidth;
-      height = newH;
+    // maxWidth caps the LONG edge (and area) — see llmScale — so portrait
+    // and 4:3 screens don't send images the provider shrinks again.
+    const fit = opts?.maxWidth ? llmSize(srcWidth, srcHeight, opts.maxWidth) : null;
+    if (fit && fit.scale > 1) {
+      scaleFactor = fit.scale;
+      pipeline = pipeline.resize(fit.width, fit.height, { fit: 'fill', kernel: 'lanczos3' });
+      width = fit.width;
+      height = fit.height;
     }
 
     const buffer = await pipeline.png().toBuffer();
@@ -804,23 +818,24 @@ export class WindowsAdapter implements PlatformAdapter {
    * clicks dpiRatio× off AND makes activate-at-point resolve the wrong window
    * (foreground theft). No-op at ratio ≤ 1 (100% scale / detection fallback).
    */
-  private physicalToLogical(x: number, y: number): { x: number; y: number } {
-    if (this.dpiRatio <= 1) return { x, y };
-    return { x: Math.round(x / this.dpiRatio), y: Math.round(y / this.dpiRatio) };
+  private physicalToLogical(x: number, y: number, ratio = this.mouseRatio): { x: number; y: number } {
+    if (ratio <= 1) return { x, y };
+    return { x: Math.round(x / ratio), y: Math.round(y / ratio) };
   }
 
   async mouseClick(x: number, y: number, opts?: { button?: MouseButton; count?: number }): Promise<FocusActivation | void> {
-    // Convert ONCE, then feed the same logical point to both the foreground
-    // check and the cursor move — they must agree or activate-at-point promotes
-    // a different window than the click lands on.
+    // Convert ONCE per space from the same physical point — the foreground
+    // check (DPI-unaware bridge) and the cursor move (nut-js) must agree or
+    // activate-at-point promotes a different window than the click lands on.
     const p = this.physicalToLogical(x, y);
+    const bridge = this.physicalToLogical(x, y, this.dpiRatio);
     // Bring the window at the target to the foreground before sending any
     // button events. Without this, a click intended for a Save As dialog
     // can land on a background Explorer window when the dialog lost focus
     // between the screenshot and the click (z-order / activation race).
     // The activation verdict flows back to the caller so a FAILED raise
     // (foreground-lock) is visible instead of a silent wrong-window click.
-    const activation = await this.ensureForegroundAtPoint(p.x, p.y);
+    const activation = await this.ensureForegroundAtPoint(bridge.x, bridge.y);
     await mouse.setPosition(new Point(p.x, p.y));
     this.lastCursor = { x: p.x, y: p.y };
     await this.delay(40);
@@ -848,10 +863,13 @@ export class WindowsAdapter implements PlatformAdapter {
     this.lastCursor = { x: p.x, y: p.y };
   }
 
-  async mouseMoveRelative(dx: number, dy: number): Promise<void> {
-    // NOTE: dx/dy are relative deltas whose coordinate space (image vs physical)
-    // is caller-dependent and not part of the #170 physical→logical fix, so we
-    // intentionally do NOT scale them here. getPosition() returns logical.
+  async mouseMoveRelative(rawDx: number, rawDy: number): Promise<void> {
+    // dx/dy arrive in PHYSICAL px like absolute coords (the MCP surface scales
+    // image deltas by the mouse factor), but getPosition()/setPosition() live
+    // in the driver's space — divide by the same ratio as absolute moves, or a
+    // 100-px move overshoots to 225 px on a 225% display.
+    const dx = rawDx / this.mouseRatio;
+    const dy = rawDy / this.mouseRatio;
     // nut-js `getPosition()` works reliably on Windows — prefer that over
     // the cache. Fall back to the cache if the query fails.
     try {
@@ -862,8 +880,8 @@ export class WindowsAdapter implements PlatformAdapter {
       this.lastCursor = { x: nx, y: ny };
     } catch {
       if (this.lastCursor) {
-        const nx = this.lastCursor.x + dx;
-        const ny = this.lastCursor.y + dy;
+        const nx = Math.round(this.lastCursor.x + dx);
+        const ny = Math.round(this.lastCursor.y + dy);
         await mouse.setPosition(new Point(nx, ny));
         this.lastCursor = { x: nx, y: ny };
       }
@@ -1417,6 +1435,11 @@ export class WindowsAdapter implements PlatformAdapter {
     // Last resort: direct enum name match (e.g. "F13", "NumPad5").
     const enumVal = (Key as any)[name];
     if (enumVal !== undefined) return enumVal as Key;
+
+    // Spelled-out aliases ("minus", "plus", "comma", …) — same table
+    // native-desktop uses; without it `ctrl+minus` threw here.
+    const alias = normalizeKey(name);
+    if (alias !== name) return this.mapKey(alias);
 
     throw new Error(`Unknown key: "${name}"`);
   }

@@ -85,6 +85,10 @@ function fakeCtx(): ToolContext {
 // mocking the SDK so our fake constructor is used instead.
 type HandlerFn = (params: Record<string, unknown>) => Promise<McpToolResult>;
 const capturedHandlers = new Map<string, HandlerFn>();
+// The host's side of MCP elicitation (the low-level server under McpServer).
+// Default: a host without elicitation support, so older tests are unaffected.
+const mockClientCaps = vi.fn<[], Record<string, unknown> | undefined>(() => undefined);
+const mockElicitInput = vi.fn();
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
   class FakeMcpServer implements McpServerLike {
@@ -98,6 +102,10 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
       capturedHandlers.set(name, handler);
     }
     async connect(_transport: unknown): Promise<void> {}
+    server = {
+      getClientCapabilities: () => mockClientCaps(),
+      elicitInput: (params: unknown) => mockElicitInput(params),
+    };
   }
   return { McpServer: FakeMcpServer };
 });
@@ -107,6 +115,7 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
   beforeEach(() => {
     capturedHandlers.clear();
     vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
   });
 
   afterEach(() => {
@@ -259,6 +268,65 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
 
       // Must write a visible warning to stderr instead of silently dying.
       expect(section).toContain('process.stderr.write');
+    });
+  });
+
+  // ── 3. CONSENT ASKED IN THE HOST'S OWN UI (MCP elicitation) ──────────────────
+  // Plugin / Cursor / VS Code users installed clawdcursor and then had to open a
+  // terminal to run `clawdcursor consent --accept`. When the host supports MCP
+  // elicitation, the first tool call asks the USER directly (the model cannot
+  // answer an elicitation) and carries on if they allow it.
+  describe('consent via the host UI (elicitation)', () => {
+    it('asks the user, records consent and runs the call when they allow it', async () => {
+      mockHasConsent.mockReturnValue(false);
+      mockClientCaps.mockReturnValue({ elicitation: {} });
+      mockElicitInput.mockResolvedValue({ action: 'accept', content: { allow: true } });
+      const { evaluateToolCall } = await import('../tools/safety-gate');
+      const { writeConsentFile } = await import('../surface/onboarding');
+      const handler = await buildAndGetHandler();
+
+      await handler({}).catch(() => null);
+
+      expect(mockElicitInput).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(writeConsentFile)).toHaveBeenCalledWith('mcp-elicitation');
+      expect(vi.mocked(evaluateToolCall)).toHaveBeenCalled();
+    });
+
+    it('a decline keeps the gate shut and is not re-asked on every call', async () => {
+      mockHasConsent.mockReturnValue(false);
+      mockClientCaps.mockReturnValue({ elicitation: {} });
+      mockElicitInput.mockResolvedValue({ action: 'decline' });
+      const { evaluateToolCall } = await import('../tools/safety-gate');
+      const handler = await buildAndGetHandler();
+
+      const first = await handler({});
+      const second = await handler({});
+
+      expect(first.isError).toBe(true);
+      expect(second.isError).toBe(true);
+      expect(mockElicitInput).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(evaluateToolCall)).not.toHaveBeenCalled();
+    });
+
+    it('"accept" with the box unticked is not consent', async () => {
+      mockHasConsent.mockReturnValue(false);
+      mockClientCaps.mockReturnValue({ elicitation: {} });
+      mockElicitInput.mockResolvedValue({ action: 'accept', content: { allow: false } });
+      const { evaluateToolCall } = await import('../tools/safety-gate');
+      const handler = await buildAndGetHandler();
+
+      expect((await handler({})).isError).toBe(true);
+      expect(vi.mocked(evaluateToolCall)).not.toHaveBeenCalled();
+    });
+
+    it('a host without elicitation gets the terminal instructions, unasked', async () => {
+      mockHasConsent.mockReturnValue(false);
+      const handler = await buildAndGetHandler();
+
+      const result = await handler({});
+
+      expect(mockElicitInput).not.toHaveBeenCalled();
+      expect(result.isError).toBe(true);
     });
   });
 });

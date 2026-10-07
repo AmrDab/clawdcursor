@@ -516,13 +516,15 @@ function Cmd-FindElement {
     $maxResults  = if ($cmd.maxResults)  { [int]$cmd.maxResults } else { 20 }
 
     $root = [System.Windows.Automation.AutomationElement]::RootElement
-    $searchRoot = $root
+    $searchRoots = @($root)
     if ($wpid -gt 0) {
         $pc = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
         )
-        $searchRoot = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pc)
-        if ($null -eq $searchRoot) { return ,(New-Object System.Object[] 0) }
+        # Every top-level window of the process, not just the first: a browser
+        # with several windows otherwise searched only whichever came first.
+        $searchRoots = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $pc))
+        if ($searchRoots.Count -eq 0) { return ,(New-Object System.Object[] 0) }
     }
 
     $conditions = @()
@@ -541,10 +543,12 @@ function Cmd-FindElement {
         elseif ($conditions.Count -eq 1) { $conditions[0] }
         else { New-Object System.Windows.Automation.AndCondition([System.Windows.Automation.Condition[]]$conditions) }
 
-    $elements = $searchRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $searchCond)
     $results = @()
     $nameLower = $name.ToLower()
 
+    foreach ($searchRoot in $searchRoots) {
+    if ($results.Count -ge $maxResults) { break }
+    $elements = $searchRoot.FindAll([System.Windows.Automation.TreeScope]::Descendants, $searchCond)
     foreach ($el in $elements) {
         if ($results.Count -ge $maxResults) { break }
         try {
@@ -563,6 +567,7 @@ function Cmd-FindElement {
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
             }
         } catch {}
+    }
     }
     return ,$results
 }

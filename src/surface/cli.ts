@@ -52,6 +52,7 @@ process.on('unhandledRejection', (reason: any) => {
   }
 });
 
+import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
 import { Agent } from '../core/agent';
 import { createUtilityServer, requireAuth, initServerToken, getServerLogBuffer, isLoopbackHost, mountJson404 } from './http-utility';
@@ -97,6 +98,7 @@ import { e } from './format';
 // liveness check distinguish a real live duplicate from a recycled PID
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose } from './pidfile';
+import { userArgs } from './argv';
 
 /**
  * Graceful exit on a startup-time init failure (bad API key, no providers,
@@ -495,6 +497,11 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   if (agent) {
     let platform: import('../platform/types').PlatformAdapter | undefined;
     try { platform = await getPlatform(); } catch { /* non-fatal */ }
+    // macOS mouse space is logical points — see mouseScaleFor (#154).
+    let macLogicalWidth = 0;
+    if (process.platform === 'darwin' && platform) {
+      try { macLogicalWidth = (await platform.getScreenSize())?.logicalWidth ?? 0; } catch { /* physical fallback */ }
+    }
 
     // The Agent class doesn't currently own a CDPDriver — that bridge lives
     // on the toolCtx for both `agent` and `agent --no-llm`. Without this,
@@ -524,7 +531,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
       platform,
       agent,
       getLogBuffer: getServerLogBuffer,
-      getMouseScaleFactor: () => agent!.getDesktop().getScaleFactor(),
+      getMouseScaleFactor: () => mouseScaleFor(agent!.getDesktop(), macLogicalWidth),
       getScreenshotScaleFactor: () => agent!.getDesktop().getScaleFactor(),
       ensureInitialized: async () => {},  // agent already initialized
     };
@@ -1275,6 +1282,21 @@ program
 
 // ── Shared subsystem initialization (used by mcp + serve) ──
 
+/**
+ * Image-space → mouse-driver factor for the image the model was last sent.
+ * Physical px on Windows/Linux (= screenshot scale); logical points on macOS
+ * (logical width / image width — may be < 1, e.g. a 2560-px panel shown at
+ * 1024 points). Read live, never cached.
+ */
+function mouseScaleFor(
+  desktop: { getScaleFactor(): number; getLlmWidth(): number },
+  macLogicalWidth: number,
+): number {
+  const llmW = desktop.getLlmWidth();
+  if (process.platform === 'darwin' && macLogicalWidth > 0 && llmW > 0) return macLogicalWidth / llmW;
+  return desktop.getScaleFactor();
+}
+
 async function createToolContext() {
   const { NativeDesktop } = await import('../platform/native-desktop');
   const { AccessibilityBridge } = await import('../platform/accessibility');
@@ -1298,8 +1320,10 @@ async function createToolContext() {
 
   let initialized = false;
   let initPromise: Promise<void> | null = null;
-  let mouseScaleFactor = 1;
-  let screenshotScaleFactor = 1;
+  // macOS logical (point) width; 0 elsewhere. Scale factors are read LIVE from
+  // the desktop's last capture (mouseScaleFor) — freezing them at startup broke
+  // clicks after a rotation / resolution change.
+  let macLogicalWidth = 0;
 
   const ensureInitialized = async (): Promise<void> => {
     if (initialized) return;
@@ -1307,30 +1331,19 @@ async function createToolContext() {
     initPromise = (async () => {
       await desktop.connect();
       platform = await getPlatform();
-      screenshotScaleFactor = desktop.getScaleFactor();
-      // mouseScaleFactor: image-space → mouse-driver coords.
-      //  • Windows / Linux-X11: nut-js drives in PHYSICAL pixels → use the
-      //    physical/image ratio (screenshotScaleFactor).
-      //  • macOS: nut-js drives in LOGICAL points (Cocoa/CGEvent space). On a
-      //    Retina panel physical≠logical, so the physical scale double-counts
-      //    the backing scale and every click lands ~2× off (#154). Map
-      //    image-space → LOGICAL instead, using NSScreen's logical width.
-      //    (Mirrors imageScale() in agent-loop/coord-scale.ts for System B.)
+      // mouse factor: image-space → mouse-driver coords (see mouseScaleFor).
+      //  • Windows / Linux: nut-js drives PHYSICAL px → the screenshot scale.
+      //  • macOS: nut-js drives LOGICAL points; on Retina physical≠logical and
+      //    the physical scale double-counts the backing scale (#154).
       if (process.platform === 'darwin') {
         try {
-          const { LLM_TARGET_WIDTH } = await import('../core/agent-loop/coord-scale');
           const lsize = await platform.getScreenSize(); // NSScreen logical + physical dims
-          const lw = lsize?.logicalWidth ?? 0;
-          mouseScaleFactor = lw > LLM_TARGET_WIDTH ? lw / LLM_TARGET_WIDTH : 1;
-        } catch {
-          mouseScaleFactor = screenshotScaleFactor; // best-effort fallback
-        }
-      } else {
-        mouseScaleFactor = screenshotScaleFactor;
+          macLogicalWidth = lsize?.logicalWidth ?? 0;
+        } catch { /* best-effort fallback: physical scale */ }
       }
       await a11y.warmup();
       initialized = true;
-      console.log(`Subsystems initialized (mouseScale=${mouseScaleFactor}, screenshotScale=${screenshotScaleFactor})`);
+      console.log(`Subsystems initialized (mouseScale=${mouseScaleFor(desktop, macLogicalWidth)}, screenshotScale=${desktop.getScaleFactor()})`);
     })();
     return initPromise;
   };
@@ -1338,8 +1351,8 @@ async function createToolContext() {
   return {
     desktop, a11y, cdp, uiMaps,
     get platform() { return platform; },
-    getMouseScaleFactor: () => mouseScaleFactor,
-    getScreenshotScaleFactor: () => screenshotScaleFactor,
+    getMouseScaleFactor: () => mouseScaleFor(desktop, macLogicalWidth),
+    getScreenshotScaleFactor: () => desktop.getScaleFactor(),
     ensureInitialized,
   };
 }
@@ -1352,12 +1365,13 @@ program
   .option('--compact', 'Expose 7 compound tools instead of 98 granular ones (Anthropic Computer-Use style — recommended for most agents)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts: { compact?: boolean; banner?: boolean }) => {
-    // Single-instance guard (MCP servers can accumulate when editors restart them)
-    const existingMcpPid = claimPidFile('mcp');
-    if (existingMcpPid !== null) {
-      process.stderr.write(`[ERROR] clawdcursor mcp is already running (pid ${existingMcpPid}). Kill it first.\n`);
-      process.exit(1);
-    }
+    // No single-instance lock in MCP mode. Hosts legitimately run several
+    // copies at once — Claude Desktop starts a protocol probe, the main
+    // connection and a Cowork/Code pool for one extension, and another editor
+    // may be running clawdcursor too — and the old lock made every copy after
+    // the first exit "already running … Kill it first", so the .mcpb never
+    // connected (live, 2026-10). The lock existed to stop orphans piling up;
+    // each copy now reaps itself instead (stdin EOF + parent-PID watchdog below).
 
     // MCP mode: stdout is protocol, logs go to stderr
     const stderrWrite = (prefix: string, args: any[]) =>
@@ -1382,7 +1396,10 @@ program
     // VISIBLE consent prompt on every tool call (enforced in mcp-server.ts) —
     // and it takes effect the moment `clawdcursor consent --accept` runs, with
     // no restart needed.
-    const { hasConsent } = await import('./onboarding');
+    const { hasConsent, acceptConsentFromEnv } = await import('./onboarding');
+    // A host that collected consent in its own UI (the .mcpb install screen)
+    // passes it as CLAWDCURSOR_CONSENT=true.
+    if (acceptConsentFromEnv()) process.stderr.write('[clawdcursor] Consent accepted via the host\'s install setting.\n');
     if (!hasConsent()) {
       process.stderr.write(
         `\n[clawdcursor] One-time consent not yet accepted. The server will start, but\n` +
@@ -1407,25 +1424,16 @@ program
       console.error('Subsystem init failed:', err?.message);
     });
 
-    // Release pidfile on exit so a fresh restart can claim it immediately.
-    // Guard against double-fire (both 'end' and 'close' can emit on the
-    // same stdin teardown). Defer process.exit via setImmediate so libuv
-    // finishes its stream-close bookkeeping before the exit syscall —
-    // calling process.exit() synchronously inside a stdin 'end' handler
-    // causes SIGSEGV on Linux where libuv is still unwinding the read
-    // handle.
-    //
-    // releasePidFile MUST stay synchronous (before the setImmediate). On
-    // headless Linux CI the native subsystems (nut-js → libxdo, sharp's
-    // libvips) can still segfault during process.exit's destructor
-    // chain — so the only way to guarantee the lockfile gets cleaned up
-    // is to unlink it BEFORE any deferred work runs. The orphan-teardown
-    // test asserts lockfile-is-gone for exactly this reason.
+    // Exit when the host goes away. Guard against double-fire (both 'end' and
+    // 'close' can emit on the same stdin teardown). Defer process.exit via
+    // setImmediate so libuv finishes its stream-close bookkeeping before the
+    // exit syscall — calling process.exit() synchronously inside a stdin
+    // 'end' handler causes SIGSEGV on Linux where libuv is still unwinding
+    // the read handle.
     let mcpExiting = false;
     const releaseMcp = () => {
       if (mcpExiting) return;
       mcpExiting = true;
-      releasePidFile('mcp');                       // sync — must run before any segfault
       setImmediate(() => process.exit(0));         // deferred — lets libuv unwind cleanly
     };
     process.on('SIGINT', releaseMcp);
@@ -1621,4 +1629,6 @@ program
     }
   });
 
-program.parse();
+// Explicit user args: commander's Electron auto-detection misreads argv in a
+// packaged Electron host (Claude Desktop's extension runtime) — see argv.ts.
+program.parse(userArgs(process.argv, __filename), { from: 'user' });

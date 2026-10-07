@@ -49,6 +49,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
+import { llmSize } from '../core/agent-loop/coord-scale';
 
 const execFileAsync = promisify(execFile);
 
@@ -355,12 +356,13 @@ export class LinuxAdapter implements PlatformAdapter {
       }
     }
 
-    if (opts?.maxWidth && width > opts.maxWidth) {
-      scaleFactor = width / opts.maxWidth;
-      const newH = Math.round(height / scaleFactor);
-      pipeline = pipeline.resize(opts.maxWidth, newH, { fit: 'fill' });
-      width = opts.maxWidth;
-      height = newH;
+    // maxWidth caps the LONG edge (and area) — see llmScale.
+    const fit = opts?.maxWidth ? llmSize(width, height, opts.maxWidth) : null;
+    if (fit && fit.scale > 1) {
+      scaleFactor = fit.scale;
+      pipeline = pipeline.resize(fit.width, fit.height, { fit: 'fill' });
+      width = fit.width;
+      height = fit.height;
     }
 
     const buffer = await pipeline.png().toBuffer();

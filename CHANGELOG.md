@@ -2,9 +2,95 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.12] - 2026-10-06 — Claude Desktop extension; clicks land on target on any screen and host
+
+### Added
+
+- **Claude Desktop extension (`.mcpb`) — install with no terminal.** Every
+  release now attaches `clawdcursor-win32.mcpb`, `clawdcursor-darwin.mcpb` and
+  `clawdcursor-linux.mcpb` (stable links under `releases/latest/download/`).
+  Open one and Claude Desktop installs and runs clawdcursor with its own Node.
+  The install screen asks "Allow clawdcursor to control this computer", which
+  is the one-time desktop-control consent (passed as `CLAWDCURSOR_CONSENT`;
+  only `true`/`1` records it). Each bundle is built and smoke-tested natively
+  on its OS in CI (`npm run build:mcpb`, `scripts/smoke-mcpb.mjs`).
+
+- **Consent is asked in the app, not in a terminal.** On the first tool call
+  without consent, clawdcursor asks the user through the host's own UI (MCP
+  elicitation): "Allow clawdcursor to control this computer". Only the person
+  can answer it, not the model. Accepting records consent and the call goes
+  ahead; declining, or a host without elicitation, gets the usual
+  `clawdcursor consent --accept` instructions. Asked at most once per server.
+
+### Changed
+
+- **Dependencies:** `@modelcontextprotocol/sdk` ^1.32.1 and `sharp` ^0.35.5
+  (patched releases for two high advisories: an OAuth-client issue in the
+  SDK — clawdcursor is a server and never runs that client — and a librsvg
+  CVE in sharp's bundled libvips); lockfile `npm audit fix` for `proxy-addr`.
+
+- **Smaller npm package.** Source maps and type declarations no longer ship
+  (no library entry point uses them): 893 kB → 622 kB packed. Removed dead
+  files: `perf/` (patch notes for a deleted module), unused
+  `src/core/classify` and `src/core/decompose`, two broken legacy test
+  scripts, a stale `guides/README.md` and two old release drafts.
+
+- **No more `punycode` deprecation warning on every command.** It came from a
+  transitive dependency (nut-js → jimp → node-fetch@2 → whatwg-url@5 → tr46);
+  only that one warning code (DEP0040) is silenced.
+- **MCP servers no longer refuse to start when another is running.** The
+  single-instance lock made every copy after the first exit with "already
+  running … Kill it first". Claude Desktop runs several copies of one
+  extension (protocol probe, main connection, Cowork/Code pool), and other
+  editors may run clawdcursor at the same time, so the extension could never
+  connect. The lock only existed to stop orphans piling up; each MCP server
+  already exits on its own when its host goes away (stdin EOF + parent-PID
+  watchdog). The `agent` daemon keeps its lock.
 
 ### Fixed
+
+- **Windows clicks landed at a fraction of the target in DPI-aware hosts.** On
+  a 225% display every click went to 1/2.25 of its target when the server ran
+  inside Claude Desktop (an Electron utility process is DPI-aware, so nut-js
+  already drives physical pixels). The mouse ratio was measured by a separate,
+  DPI-unaware PowerShell and divided in anyway. It is now measured in-process;
+  the PowerShell bridge keeps the logical ratio. This also removes a
+  synchronous PowerShell call that stalled the MCP handshake on a cold start.
+
+- **Screenshots and clicks work on any screen shape.** The screenshot scale
+  came from the width alone, so portrait (1080×1920 → a 2 MP image), 4:3 and
+  5:4 screens sent images over the model's limit; the provider shrank them
+  again and every coordinate read back drifted (up to ~37% short). One helper
+  (`llmSize`) now caps the long edge at 1280 px and the area at 1.15 MP for
+  every capture path, the reported size, and the mouse mapping. Also:
+  - scale factors are read live from the last capture instead of frozen at
+    startup (rotation / resolution changes / a late first Wayland capture);
+  - Linux X11 with two monitors no longer halves every click (the root window
+    was compared to the primary output's width);
+  - macOS: `agent` (daemon) mode maps to logical points like MCP mode (#154),
+    and a "larger text" display (logical narrower than the image) scales down
+    instead of clamping to 1;
+  - Windows relative moves no longer overshoot by the DPI ratio;
+  - OCR's conversion hint names the right factor.
+
+- **Field fixes from a live session** driving Edge on Windows:
+  - `type` text ending in a newline pastes the rest, then presses Return
+    (single-line fields such as the address bar dropped a pasted `\n`).
+  - `key ctrl+minus` (and other spelled-out keys) work on Windows.
+  - `browser connect` never falls back to `chrome-extension://` pages, and
+    says so when no regular web page is open instead of calling it the
+    user's own session.
+  - `triple_click` only adds select-all when the focused field is the one
+    clicked.
+  - `accessibility find` with a `processId` searches every window of the
+    process, not just the first.
+  - `computer zoom` is accepted as an alias of `screenshot_region`.
+
+- **The CLI misread its arguments inside Electron hosts.** Claude Desktop runs
+  extensions in an Electron utility process; commander's Electron detection
+  took the script path for the command and the server died with
+  `error: unknown command '…\cli.js'` before logging anything. The CLI now
+  finds its own script in `argv` and parses what follows.
 
 - **`expect` is checked before the action runs, on every path.** A malformed
   `expect` used to be rejected only AFTER the click/key had been sent, so a

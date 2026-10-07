@@ -80,6 +80,25 @@ clawdcursor is an MCP server published to npm — install it into **any** MCP-ca
 agent (Claude Code, Claude Desktop, Cursor, Windsurf, Zed, OpenAI Codex, or your own
 loop) the same way you install any other MCP server.
 
+### Claude Desktop — one-click extension (no terminal)
+
+Download the extension for your OS and open it — Claude Desktop installs it:
+
+| Windows | macOS | Linux |
+|---|---|---|
+| [clawdcursor-win32.mcpb](https://github.com/AmrDab/clawdcursor/releases/latest/download/clawdcursor-win32.mcpb) | [clawdcursor-darwin.mcpb](https://github.com/AmrDab/clawdcursor/releases/latest/download/clawdcursor-darwin.mcpb) | [clawdcursor-linux.mcpb](https://github.com/AmrDab/clawdcursor/releases/latest/download/clawdcursor-linux.mcpb) |
+
+1. Double-click the file (or **Settings → Extensions → Advanced settings → Install
+   Extension…** and pick it).
+2. Turn on **Allow clawdcursor to control this computer** — that is the one-time
+   desktop-control consent; until it is on, every tool returns a consent prompt.
+3. **macOS:** the first time macOS asks, allow Claude under **Privacy & Security →
+   Accessibility** and **Screen Recording**.
+
+No Node.js, npm or JSON editing needed — Claude Desktop runs the bundled server
+itself. Everything below is for other agents, or for Claude Desktop without the
+extension.
+
 ### 1 — Install the engine + grant consent (once)
 
 ```bash
@@ -87,6 +106,10 @@ npm i -g clawdcursor
 clawdcursor consent --accept    # one-time desktop-control consent (required)
 clawdcursor grant               # macOS only — approve Accessibility + Screen Recording
 ```
+
+> Hosts that support MCP elicitation (e.g. Claude Code, VS Code) also let you skip
+> `consent --accept`: the first tool call asks **"Allow clawdcursor to control this
+> computer"** right in the app.
 
 > **Zero-install** also works — swap `clawdcursor` for `npx -y clawdcursor` in any
 > snippet below and npx fetches it on demand. A **global install is recommended**

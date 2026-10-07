@@ -580,7 +580,7 @@
     },
     {
       "name": "desktop_screenshot",
-      "description": "LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image resized to 1280px wide.",
+      "description": "LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge (the reply states its size and scale).",
       "category": "perception",
       "parameters": {
         "type": "object",

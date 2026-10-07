@@ -50,10 +50,8 @@ export function getOcrTools(): ToolDefinition[] {
           };
         }
 
-        // Compute scale factor for MCP clients that need to convert OCR→mouse coordinates
+        // OCR coords are physical screen px; screenshot (image) px = physical / ssf.
         const ssf = ctx.getScreenshotScaleFactor();
-        const msf = ctx.getMouseScaleFactor();
-        const dpiRatio = ssf / msf;
 
         return {
           text: JSON.stringify({
@@ -62,8 +60,8 @@ export function getOcrTools(): ToolDefinition[] {
             fullText: result.fullText,
             durationMs: result.durationMs,
             coordinateSystem: 'real_screen_pixels',
-            toMouseClick: `Divide coordinates by ${dpiRatio.toFixed(4)} to convert to mouse_click image-space. Or better: use smart_click("element text") which handles conversion automatically.`,
-            hint: 'Coordinates are in real screen pixels. Prefer smart_click(target) over manual coordinate math. If you must use mouse_click, divide OCR coordinates by the dpiRatio above.',
+            toMouseClick: `Divide coordinates by ${ssf.toFixed(4)} to convert to mouse_click image-space. Or better: use smart_click("element text") which handles conversion automatically.`,
+            hint: 'Coordinates are in real screen pixels. Prefer smart_click(target) over manual coordinate math. If you must use mouse_click, divide OCR coordinates by the factor above.',
           }, null, 2),
         };
       },

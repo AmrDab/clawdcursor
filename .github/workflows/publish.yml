@@ -113,3 +113,45 @@ jobs:
           else
             gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           fi
+
+  # Claude Desktop extension: one .mcpb per OS, each built natively on that OS
+  # (sharp's native build is per platform; the macOS helper needs a Mac).
+  # Stable asset names, so releases/latest/download/clawdcursor-<os>.mcpb is a
+  # permanent "Add to Claude Desktop" link. Runs after npm has the version.
+  extension:
+    name: .mcpb / ${{ matrix.os }}
+    needs: publish
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: write               # upload the release assets
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm run build:mcpb
+      - name: Smoke-test the bundle before shipping it
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get install -y -qq xvfb >/dev/null
+            xvfb-run -a node scripts/smoke-mcpb.mjs
+          else
+            node scripts/smoke-mcpb.mjs
+          fi
+      - name: Attach to the GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: gh release upload "$TAG" build/mcpb/clawdcursor-*.mcpb --clobber

@@ -1,6 +1,6 @@
 {
   "name": "clawdcursor",
-  "version": "1.5.11",
+  "version": "1.5.12",
   "mcpName": "io.github.AmrDab/clawdcursor",
   "description": "Local MCP server that gives any AI agent safe cross-OS desktop control — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available. Works with any tool-calling model (Claude, GPT, Gemini, Llama) on Windows, macOS, and Linux. Open source (MIT).",
   "homepage": "https://clawdcursor.com",
@@ -34,6 +34,8 @@
   },
   "files": [
     "dist/",
+    "!dist/**/*.map",
+    "!dist/**/*.d.ts",
     "scripts/verify-install.js",
     "scripts/postinstall-native.js",
     "scripts/sync-version.ts",
@@ -71,10 +73,11 @@
     "sync-version": "tsx scripts/sync-version.ts",
     "version": "tsx scripts/sync-version.ts",
     "test:coverage": "vitest run --coverage",
-    "perf:smoke": "tsx scripts/perf-smoke.ts"
+    "perf:smoke": "tsx scripts/perf-smoke.ts",
+    "build:mcpb": "node scripts/build-mcpb.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.27.1",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@nut-tree-fork/nut-js": "^4.2.0",
     "commander": "^15.0.0",
     "croner": "^10.0.1",
@@ -82,7 +85,7 @@
     "express": "^5.2.1",
     "picocolors": "^1.1.1",
     "playwright": "^1.61.1",
-    "sharp": "^0.35.2",
+    "sharp": "^0.35.5",
     "ws": "^8.21.0",
     "zod": "^4.4.3"
   },

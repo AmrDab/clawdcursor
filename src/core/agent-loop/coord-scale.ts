@@ -30,39 +30,63 @@
  *   Only the MOUSE INPUT mapping differs.
  */
 
-/** Width the screenshot is downscaled to before the model sees it. Keep in
- *  sync with the maxWidth passed to adapter.screenshot() and the native layer. */
+/** Longest edge (px) of the screenshot the model sees. Width-only capping let
+ *  portrait / 4:3 screens send images the provider silently shrank again, so
+ *  every coordinate the model read back drifted. */
 export const LLM_TARGET_WIDTH = 1280;
+/** Area cap — under every major provider's resize threshold (Anthropic ≈1.15 MP). */
+export const LLM_MAX_PIXELS = 1_150_000;
+
+/**
+ * THE downscale factor (physical px per image px) for a w×h capture: the
+ * smallest ≥1 that fits the long edge in LLM_TARGET_WIDTH and the area in
+ * LLM_MAX_PIXELS. Every capture path must use this so the reported scale, the
+ * image and the mouse mapping agree on any screen shape.
+ */
+export function llmScale(w: number, h: number, maxEdge = LLM_TARGET_WIDTH): number {
+  if (!(w > 0) || !(h > 0)) return 1;
+  return Math.max(1, w / maxEdge, h / maxEdge, Math.sqrt((w * h) / LLM_MAX_PIXELS));
+}
+
+/** Image size + scale the model gets for a w×h capture. */
+export function llmSize(w: number, h: number, maxEdge = LLM_TARGET_WIDTH): { scale: number; width: number; height: number } {
+  const scale = llmScale(w, h, maxEdge);
+  return { scale, width: Math.max(1, Math.round(w / scale)), height: Math.max(1, Math.round(h / scale)) };
+}
 
 /**
  * Factor to convert IMAGE-space (screenshot) coords to the OS mouse driver's
- * coordinate space. 1 when the effective width ≤ screenshot width.
+ * coordinate space.
  *
  * On macOS nut-js drives in LOGICAL POINTS, so we scale image → logical.
  * On Windows / Linux nut-js drives in PHYSICAL PIXELS, so we scale image → physical.
+ * The image is always the physical capture downscaled by llmScale(), so the
+ * macOS factor is logicalWidth / imageWidth — which may be < 1 (a 2560-px
+ * panel shown at 1024 points gives a 1280-px image: factor 0.8).
  *
  * `ctx.screen.logicalWidth` is populated by MacOSAdapter.getScreenSize().
- * `ctx.screen.physicalWidth` is populated by all adapters.
+ * `ctx.screen.physicalWidth/Height` are populated by all adapters.
  */
 export function imageScale(ctx: {
-  screen?: { physicalWidth?: number; logicalWidth?: number };
+  screen?: { physicalWidth?: number; physicalHeight?: number; logicalWidth?: number; logicalHeight?: number };
   _platform?: string; // injectable for tests; defaults to process.platform
 }): number {
   const platform = ctx._platform ?? process.platform;
+  const s = ctx.screen ?? {};
+  const pw = s.physicalWidth || 0;
+  // Height unknown → assume 16:10 so old callers keep width-based behaviour.
+  const ph = s.physicalHeight || Math.round(pw * 10 / 16);
   if (platform === 'darwin') {
     // macOS: nut-js mouse operates in logical points.
-    const lw = ctx.screen?.logicalWidth ?? 0;
-    if (lw > 0) {
-      return lw > LLM_TARGET_WIDTH ? lw / LLM_TARGET_WIDTH : 1;
-    }
+    const lw = s.logicalWidth || 0;
+    if (lw > 0 && pw > 0) return lw / llmSize(pw, ph).width;
+    if (lw > 0) return llmScale(lw, s.logicalHeight || Math.round(lw * 10 / 16));
     // logicalWidth unavailable: fall back to physical (best effort — will
     // still be wrong on Retina but avoids a silent ×1 regress).
-    const pw = ctx.screen?.physicalWidth ?? 0;
-    return pw > LLM_TARGET_WIDTH ? pw / LLM_TARGET_WIDTH : 1;
+    return llmScale(pw, ph);
   }
   // Windows / Linux: nut-js mouse operates in physical pixels.
-  const w = ctx.screen?.physicalWidth ?? 0;
-  return w > LLM_TARGET_WIDTH ? w / LLM_TARGET_WIDTH : 1;
+  return llmScale(pw, ph);
 }
 
 /** Round a coordinate after scaling. */

@@ -471,6 +471,23 @@ describe('7. type tool — paste fast-path', () => {
     expect(ctx.platform.typeText).not.toHaveBeenCalled();
   });
 
+  it('a trailing newline pastes the rest, then presses Return (single-line fields drop a pasted \\n)', async () => {
+    const ctx = makeCtx();
+    const typeTool = findTool(buildUnifiedTools(), 'type');
+    await typeTool.execute({ text: 'dashboard.stripe.com/webhooks\n' }, ctx);
+    expect(ctx.platform.writeClipboard).toHaveBeenCalledWith('dashboard.stripe.com/webhooks');
+    const keys = (ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0]);
+    expect(keys).toEqual(['mod+v', 'Return']);
+  });
+
+  it('inner newlines are still pasted as text (multi-line editors unchanged)', async () => {
+    const ctx = makeCtx();
+    const typeTool = findTool(buildUnifiedTools(), 'type');
+    await typeTool.execute({ text: 'line1\nline2' }, ctx);
+    expect(ctx.platform.writeClipboard).toHaveBeenCalledWith('line1\nline2');
+    expect((ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0])).toEqual(['mod+v']);
+  });
+
   it('type tool saves and restores the prior clipboard contents', async () => {
     const ctx = makeCtx();
     // Mock prior clipboard content

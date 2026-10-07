@@ -261,14 +261,14 @@ COORDINATES
     whenever the target has one.
     – If the COMPILED UI map is EMPTY/sparse (a webview or canvas) and the target
       is only visible in the SCREENSHOT, read its x,y off the screenshot (which
-      is 1280px wide) and pass space:"image" — the tool scales it to the real
+      is downscaled, at most 1280px on its long edge) and pass space:"image" — the tool scales it to the real
       screen. Do NOT pre-multiply, and do NOT pass screenshot coords without
       space:"image" (they would land at a fraction of the position, on the
       wrong window). If clicks keep landing on the wrong window, you are likely
       omitting space:"image".
     WHILE A SCREENSHOT IS IN YOUR CONTEXT (it ages out after a few turns), raw
     click/drag/move/scroll coords DEFAULT to image-space automatically — read
-    them straight off the 1280px picture, no space flag needed. To click an
+    them straight off the downscaled picture, no space flag needed. To click an
     a11y/@x,y SCREEN coord on such a turn, pass space:"screen" explicitly.
     When unsure which default applies, pass \`space\` explicitly — it always wins.
 

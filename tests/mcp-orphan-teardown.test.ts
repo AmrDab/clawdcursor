@@ -12,9 +12,9 @@
  * lockfile and call process.exit(0).
  *
  * This test spawns the real built CLI as a child process and asserts that:
- *   1. It claims the lockfile on startup.
- *   2. Closing its stdin causes a clean (exit-0) shutdown within 5s.
- *   3. The lockfile is gone after exit.
+ *   1. Closing its stdin causes a clean (exit-0) shutdown.
+ *   2. A second MCP server can start while another is running — MCP mode
+ *      holds no single-instance lock (each copy reaps itself instead).
  *
  * HOME / USERPROFILE is redirected to a per-test tmpdir so the real user's
  * ~/.clawdcursor/ is never touched. A consent file is pre-written into
@@ -121,77 +121,70 @@ function waitForReady(proc: ChildProcessWithoutNullStreams, timeoutMs: number): 
 const isHeadlessLinux = process.platform === 'linux' && !process.env.DISPLAY;
 const EXIT_BUDGET_MS = process.platform === 'win32' ? 20_000 : 5_000;
 
+function seedHome(): NodeJS.ProcessEnv {
+  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-mcp-orphan-'));
+  // Pre-seed consent so the consent gate doesn't block startup. Format
+  // matches saveConsent() in src/surface/onboarding.ts; only the file's
+  // existence is checked by hasConsent().
+  const consentDir = path.join(tmpHome, '.clawdcursor');
+  fs.mkdirSync(consentDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(consentDir, 'consent'),
+    JSON.stringify({ accepted: true, timestamp: new Date().toISOString(), platform: process.platform, version: 'test' }, null, 2),
+  );
+  // Redirect HOME *and* USERPROFILE — os.homedir() honors HOME on POSIX and
+  // USERPROFILE on Windows. CI=1 keeps the consent prompt path out of play.
+  return { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome, CI: '1' };
+}
+
+function startMcp(env: NodeJS.ProcessEnv): ChildProcessWithoutNullStreams {
+  // cwd = the temp home: with USERPROFILE redirected, Windows can't resolve
+  // LocalAppData, so PowerShell (the UIA bridge) writes its module-analysis
+  // cache relative to cwd — it must not land in the repo.
+  return spawn(process.execPath, [CLI_PATH, 'mcp', '--compact'], { cwd: env.HOME, env, stdio: ['pipe', 'pipe', 'pipe'] });
+}
+
+/** Clean exit everywhere except the headless-Linux native-teardown quirk. */
+function expectCleanExit({ code, signal }: { code: number | null; signal: NodeJS.Signals | null }): void {
+  if (isHeadlessLinux && signal === 'SIGSEGV') return;
+  expect(signal, 'process should exit cleanly via process.exit(0), not via signal').toBeNull();
+  expect(code, 'process exit code should be 0').toBe(0);
+}
+
 describe.skipIf(isHeadlessLinux)('mcp orphan-teardown stdin handler', () => {
-  it('exits cleanly and releases its lockfile when stdin closes', async () => {
-    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-mcp-orphan-'));
-
-    // Pre-seed consent so the gate at cli.ts:1192 doesn't block startup.
-    // Format matches saveConsent() in src/surface/onboarding.ts; only the
-    // file's existence is actually checked by hasConsent().
-    const consentDir = path.join(tmpHome, '.clawdcursor');
-    fs.mkdirSync(consentDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(consentDir, 'consent'),
-      JSON.stringify({ accepted: true, timestamp: new Date().toISOString(), platform: process.platform, version: 'test' }, null, 2),
-    );
-
-    // Redirect HOME *and* USERPROFILE — pidfile.ts uses os.homedir(), which
-    // honors HOME on POSIX and USERPROFILE on Windows. Inherit PATH and the
-    // rest so node can still find its own runtime libs.
-    const env = {
-      ...process.env,
-      HOME: tmpHome,
-      USERPROFILE: tmpHome,
-      // Force non-TTY behavior on stdin so the consent prompt path isn't
-      // even considered (defense in depth on top of the pre-written file).
-      CI: '1',
-    };
-
-    child = spawn(process.execPath, [CLI_PATH, 'mcp', '--compact'], {
-      cwd: REPO_ROOT,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    // Wait for the server to come up. 10s is generous — local dev sees ~1s,
-    // cold CI runners can take 3-5s for the first compile-cache hit.
+  it('exits cleanly when stdin closes (the host went away)', async () => {
+    child = startMcp(seedHome());
+    // 10s is generous — local dev sees ~1s, cold CI runners 3-5s.
     await waitForReady(child, 10_000);
-
-    const pidFile = path.join(tmpHome, '.clawdcursor', 'mcp.pid');
-    expect(fs.existsSync(pidFile)).toBe(true);
-
-    const lockData = JSON.parse(fs.readFileSync(pidFile, 'utf-8'));
-    expect(lockData.pid).toBe(child.pid);
-    expect(lockData.mode).toBe('mcp');
-    expect(lockData.v).toBe(1);
-
-    // Trigger the orphan path: parent closes its end of the stdin pipe.
-    // The child's process.stdin should fire 'end' (and/or 'close') and the
-    // handler in cli.ts calls releasePidFile('mcp') + process.exit(0).
+    // The orphan path: the parent closes its end of the stdin pipe, the
+    // handler in cli.ts fires and calls process.exit(0).
     child.stdin.end();
-
-    const { code, signal } = await waitForExit(child, EXIT_BUDGET_MS);
-
-    // PRIMARY assertion — the logic we actually care about: the orphan
-    // handler ran and unlinked the lockfile. If this is false, the
-    // single-instance guard will block every future reconnect (which
-    // was the original v0.9.1 bug this whole test exists to prevent).
-    expect(fs.existsSync(pidFile), 'lockfile should be unlinked by the stdin handler').toBe(false);
-
-    // SECONDARY assertion — clean process exit. On headless Linux CI
-    // (no DISPLAY) the native subsystems loaded by `clawdcursor mcp`
-    // (nut-js → libxdo for X11, sharp's libvips) can segfault during
-    // their own teardown even when our handler ran successfully — the
-    // lockfile-gone assertion above proves the logic worked, so allow
-    // SIGSEGV there but assert clean exit everywhere else (Windows,
-    // macOS, and Linux with a display).
-    const isHeadlessLinux = process.platform === 'linux' && !process.env.DISPLAY;
-    if (isHeadlessLinux && signal === 'SIGSEGV') {
-      // Acceptable native-subsystem teardown quirk on headless CI.
-      // Don't fail — the orphan-cleanup logic already verified above.
-    } else {
-      expect(signal, 'process should exit cleanly via process.exit(0), not via signal').toBeNull();
-      expect(code, 'process exit code should be 0').toBe(0);
-    }
+    expectCleanExit(await waitForExit(child, EXIT_BUDGET_MS));
   }, 45_000);
+
+  it('a second MCP server starts while another is running (no single-instance refusal)', async () => {
+    // Live, 2026-10: Claude Desktop runs several copies of an extension at
+    // once (protocol probe, main connection, Cowork/Code pool), and other
+    // hosts may be running clawdcursor too. The old lock made every copy
+    // after the first exit with "already running … Kill it first", so the
+    // .mcpb could never connect. Orphans are reaped per process (stdin EOF +
+    // parent watchdog), which is what the lock existed for.
+    const env = seedHome();
+    child = startMcp(env);
+    await waitForReady(child, 10_000);
+    const second = startMcp(env);
+    let secondErr = '';
+    second.stderr.on('data', d => { secondErr += d.toString('utf-8'); });
+    try {
+      await waitForReady(second, 10_000);
+      expect(secondErr).not.toMatch(/already running/);
+      expect(second.exitCode).toBeNull();
+    } finally {
+      second.stdin.end();
+      const exited = await waitForExit(second, EXIT_BUDGET_MS).catch(() => null);
+      if (exited) expectCleanExit(exited); else second.kill('SIGKILL');
+    }
+    child.stdin.end();
+    expectCleanExit(await waitForExit(child, EXIT_BUDGET_MS));
+  }, 60_000);
 });
