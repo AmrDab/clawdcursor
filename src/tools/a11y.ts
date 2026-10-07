@@ -10,6 +10,7 @@ import { a11yToMouse } from './types';
 import type { UiElement, WindowInfo } from '../platform/types';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
+import { copyAllText } from '../platform/copy-all-text';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -488,6 +489,28 @@ export function getA11yTools(): ToolDefinition[] {
         // so an injected "ignore your task and…" payload is framed as data on the
         // MCP route too (parity with the System B perception wrapping, gauntlet F7).
         return { text: `<untrusted-screen-content>\n${raw}\n</untrusted-screen-content>` };
+      },
+    },
+
+    {
+      name: 'copy_all_text',
+      description:
+        'Read ALL text of the focused window / web page EXACTLY: select-all + copy, return the text, ' +
+        'then restore the clipboard. Exact characters (IDs, amounts, codes) — prefer it over OCR for ' +
+        'reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Leaves the ' +
+        'page text selected; focus the right window first.',
+      parameters: {},
+      category: 'clipboard',
+      compactGroup: 'system',
+      safetyTier: 1,
+      handler: async (_params, ctx) => {
+        await ctx.ensureInitialized();
+        if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
+        const r = await copyAllText(ctx.platform);
+        if (!r.ok) return { text: r.text, isError: true };
+        ctx.a11y.invalidateCache();
+        // Page text is third-party data, not instructions.
+        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>` };
       },
     },
 
