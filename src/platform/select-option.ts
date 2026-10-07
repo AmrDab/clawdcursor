@@ -53,21 +53,25 @@ export async function selectOption(
   }
 
   // The option's own role first (keeps fuzzy name matching off look-alikes);
-  // without it if the bridge can't filter on that role. The read-back below
-  // is what decides success.
+  // without it if the bridge can't filter on that role. Read back after EACH
+  // attempt: on GTK, "select" on a combo's popup item only highlights it and
+  // still reports success — "click" is what activates it.
   let picked = false;
+  let after: string | null = null;
   outer: for (const role of [option.controlType || undefined, undefined]) {
     for (const action of ['select', 'click'] as const) {
       const r = await platform.invokeElement({ name: option.name, controlType: role, processId, action }).catch(() => null);
-      if (r?.success) { picked = true; break outer; }
+      if (!r?.success) continue;
+      picked = true;
+      await sleep(250);
+      after = await readValue();
+      if (after === null || norm(after) === norm(value)) break outer;
     }
     if (!option.controlType) break;
   }
-  await sleep(250);
-
-  const after = await readValue();
   if (after !== null) {
     const ok = norm(after) === norm(value);
+    if (!ok && expanded?.success) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
     return {
       success: ok,
       verified: true,

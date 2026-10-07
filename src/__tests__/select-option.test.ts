@@ -6,7 +6,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { selectOption } from '../platform/select-option';
 
-function fakePlatform(opts: { value?: string | null; options: string[]; sticks?: boolean }) {
+function fakePlatform(opts: { value?: string | null; options: string[]; sticks?: boolean; selectOnlyHighlights?: boolean }) {
   let current = opts.value ?? 'Free';
   const calls: Array<{ name?: string; action?: string; controlType?: string }> = [];
   const platform = {
@@ -16,7 +16,7 @@ function fakePlatform(opts: { value?: string | null; options: string[]; sticks?:
       if (q.action === 'get-value') return opts.value === null ? { success: false } : { success: true, data: { value: current } };
       if (q.action === 'expand' || q.action === 'collapse') return { success: true };
       if ((q.action === 'select' || q.action === 'click') && opts.options.includes(q.name ?? '')) {
-        if (opts.sticks !== false) current = q.name!;
+        if (opts.sticks !== false && !(opts.selectOnlyHighlights && q.action === 'select')) current = q.name!;
         return { success: true };
       }
       return { success: false };
@@ -35,6 +35,13 @@ describe('selectOption', () => {
     expect(r).toMatchObject({ success: true, verified: true });
     expect(r.text).toMatch(/Selected "Pro" in "Plan" \(verified\)/);
     expect(p.calls.map(c => c.action)).toEqual(['get-value', 'expand', 'select', 'get-value']);
+  });
+
+  it('falls through to "click" when "select" only highlights (GTK combo popup)', async () => {
+    const p = fakePlatform({ options: ['Free', 'Pro'], selectOnlyHighlights: true });
+    const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' });
+    expect(r).toMatchObject({ success: true, verified: true });
+    expect(p.calls.map(c => c.action)).toEqual(['get-value', 'expand', 'select', 'get-value', 'click', 'get-value']);
   });
 
   it('is a no-op when the control already shows the value', async () => {
