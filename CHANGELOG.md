@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.14] - 2026-10-07 — scrolling that moves; consistent window units; exact page text
 
 ### Added
 
