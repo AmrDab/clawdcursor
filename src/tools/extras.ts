@@ -390,13 +390,15 @@ export function getExtraTools(): ToolDefinition[] {
     {
       name: 'resize_window',
       description:
-        'Set a window\'s logical-pixel bounds. Pass only the dimensions you want to change; ' +
-        'omitted fields preserve the current value. Coordinates are logical pixels — top-left origin.',
+        'Set a window\'s bounds. Pass only the dimensions you want to change; omitted fields ' +
+        'preserve the current value. Units are SCREEN px — the same as `window list` and ' +
+        'accessibility coordinates (top-left origin). Pass space:"image" to give screenshot coordinates instead.',
       parameters: {
-        x:      { type: 'number', description: 'New X (top-left origin, logical px)', required: false },
-        y:      { type: 'number', description: 'New Y (top-left origin, logical px)', required: false },
-        width:  { type: 'number', description: 'New width in logical px', required: false },
-        height: { type: 'number', description: 'New height in logical px', required: false },
+        x:      { type: 'number', description: 'New X (top-left origin)', required: false },
+        y:      { type: 'number', description: 'New Y (top-left origin)', required: false },
+        width:  { type: 'number', description: 'New width', required: false },
+        height: { type: 'number', description: 'New height', required: false },
+        space:  { type: 'string', description: '"screen" (default: window-list / a11y units) or "image" (screenshot pixels)', required: false, enum: ['screen', 'image'] },
         processName: { type: 'string', description: 'Optional process name match', required: false },
         processId:   { type: 'number', description: 'Optional process id match', required: false },
         title:       { type: 'string', description: 'Optional title-substring match', required: false },
@@ -404,13 +406,15 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
-      handler: async ({ x, y, width, height, processName, processId, title }, ctx) => {
+      handler: async ({ x, y, width, height, space, processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('resize_window');
         const query = processName || processId !== undefined || title
           ? { processName, processId, title }
           : undefined;
-        const ok = await ctx.platform.setWindowBounds({ x, y, width, height }, query);
+        const sf = space === 'image' ? ctx.getMouseScaleFactor() : 1;
+        const s = (v: unknown) => (typeof v === 'number' ? Math.round(v * sf) : undefined);
+        const ok = await ctx.platform.setWindowBounds({ x: s(x), y: s(y), width: s(width), height: s(height) }, query);
         return {
           text: ok
             ? `Window bounds set: x=${x ?? '-'}, y=${y ?? '-'}, w=${width ?? '-'}, h=${height ?? '-'}`

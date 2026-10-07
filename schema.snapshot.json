@@ -1800,7 +1800,7 @@
     },
     {
       "name": "resize_window",
-      "description": "Set the foreground (or matched) window bounds in logical pixels. Omitted fields preserved.",
+      "description": "Set the foreground (or matched) window bounds. Units are SCREEN px — the same as get_windows and accessibility coordinates; pass space:\"image\" for screenshot coordinates. Omitted fields preserved.",
       "category": "window",
       "parameters": {
         "type": "object",
@@ -1820,6 +1820,14 @@
           "height": {
             "type": "number",
             "description": "New height in logical px"
+          },
+          "space": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "screen",
+              "image"
+            ]
           },
           "processName": {
             "type": "string",

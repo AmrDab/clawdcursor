@@ -537,16 +537,32 @@ export class WindowsAdapter implements PlatformAdapter {
     if (query) {
       const match = await this.resolveWindow(query);
       if (match && typeof (match as any).handle === 'number') hwnd = (match as any).handle;
+      // FAIL CLOSED, like setWindowState: a named window that matched nothing
+      // used to fall through to GetForegroundWindow() and resize whatever was
+      // in front — live 2026-10, a resize aimed at a window that hadn't opened
+      // yet moved the user's Notepad instead.
+      const hadSelector =
+        query.processId !== undefined ||
+        (query.title !== undefined && query.title !== '') ||
+        (query.processName !== undefined && query.processName !== '');
+      if (hadSelector && hwnd === undefined) return false;
     }
     const handleExpr = hwnd !== undefined
       ? `[IntPtr]${hwnd}`
       : '[Win32.NativeMethods]::GetForegroundWindow()';
 
     try {
-      const x = bounds.x ?? -1;
-      const y = bounds.y ?? -1;
-      const w = bounds.width ?? -1;
-      const h = bounds.height ?? -1;
+      // Callers pass SCREEN px — physical, the same units listWindows and the
+      // a11y bounds report. SetWindowPos runs in the DPI-unaware PowerShell,
+      // which takes logical px, so divide by the bridge ratio. (Passing
+      // physical straight through made 1700x1060 fill a 225% screen.)
+      await this.getScreenSize();
+      const r = this.dpiRatio > 1 ? this.dpiRatio : 1;
+      const toLogical = (v: number | undefined) => (v === undefined ? -1 : Math.round(v / r));
+      const x = toLogical(bounds.x);
+      const y = toLogical(bounds.y);
+      const w = toLogical(bounds.width);
+      const h = toLogical(bounds.height);
       // When a dim is -1, we read the current rect and preserve it.
       const ps =
         // Single-quoted -MemberDefinition (not a here-string) — a here-string header
