@@ -138,7 +138,7 @@
     },
     {
       "name": "a11y_select",
-      "description": "Select a list item / tab / radio by a11y name (UIA SelectionItemPattern, AX AXSelected).",
+      "description": "Select a list item / tab / radio by a11y name (UIA SelectionItemPattern, AX AXSelected). With `value`, `name` is a dropdown / list and `value` the option to choose (name:\"Plan\" value:\"Pro\"); the result is read back and verified.",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -146,6 +146,10 @@
           "name": {
             "type": "string",
             "description": "Accessibility name"
+          },
+          "value": {
+            "type": "string",
+            "description": "Option to choose inside the named dropdown / list (exact option name)."
           },
           "controlType": {
             "type": "string",

@@ -769,6 +769,14 @@ function Cmd-InvokeElement {
                     if ($null -ne $t -and $t.Length -gt 0) { $val = $t; $method = "TextPattern" }
                 } catch { }
             }
+            if ($null -eq $val) {
+                # Combo boxes / lists / tab strips: the value is the selected item.
+                try {
+                    $sp = $element.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern)
+                    $sel = $sp.Current.GetSelection()
+                    if ($sel.Length -gt 0 -and $sel[0].Current.Name) { $val = $sel[0].Current.Name; $method = "SelectionPattern" }
+                } catch { }
+            }
             if ($null -eq $val) { $val = $element.Current.Name; $method = "Name" }
             return @{ success=$true; action="get-value"; value=$val; method=$method }
         }
