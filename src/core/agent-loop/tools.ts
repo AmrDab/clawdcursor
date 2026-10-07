@@ -1002,12 +1002,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'resize_window',
-      description: 'Set the foreground (or matched) window bounds in logical pixels. Omitted fields preserved.',
+      description: 'Set the foreground (or matched) window bounds. Units are SCREEN px — the same as list_windows and accessibility coordinates; pass space:"image" for screenshot coordinates. Omitted fields preserved.',
       inputSchema: {
         type: 'object',
         properties: {
           x: { type: 'number' }, y: { type: 'number' },
           width: { type: 'number' }, height: { type: 'number' },
+          space: { type: 'string', enum: ['screen', 'image'] },
           processName: { type: 'string' },
           processId: { type: 'number' },
           title: { type: 'string' },
@@ -1017,10 +1018,12 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: true,
       async execute(args, ctx) {
         const q = buildWinQuery(args);
-        const x = typeof args.x === 'number' ? args.x : undefined;
-        const y = typeof args.y === 'number' ? args.y : undefined;
-        const width = typeof args.width === 'number' ? args.width : undefined;
-        const height = typeof args.height === 'number' ? args.height : undefined;
+        const sf = args.space === 'image' ? imageScale(ctx) : 1;
+        const s = (v: unknown) => (typeof v === 'number' ? Math.round(v * sf) : undefined);
+        const x = s(args.x);
+        const y = s(args.y);
+        const width = s(args.width);
+        const height = s(args.height);
         const ok = await ctx.platform.setWindowBounds({ x, y, width, height }, q);
         return { success: ok, text: ok ? `Resized window (x=${x ?? '-'}, y=${y ?? '-'}, w=${width ?? '-'}, h=${height ?? '-'}).` : 'Resize failed.' };
       },

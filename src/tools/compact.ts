@@ -138,6 +138,7 @@ const WINDOW_ACTIONS: ActionRoute[] = [
 const SYSTEM_ACTIONS: ActionRoute[] = [
   { action: 'clipboard_read',  delegate: 'read_clipboard' },
   { action: 'clipboard_write', delegate: 'write_clipboard' },
+  { action: 'copy_all_text',   delegate: 'copy_all_text' },
   { action: 'system_time',     delegate: 'get_system_time' },
   { action: 'ocr',             delegate: 'ocr_read_screen' },
   { action: 'undo',            delegate: 'undo_last' },

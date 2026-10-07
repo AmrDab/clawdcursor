@@ -118,6 +118,13 @@ function ConvertTo-UINode {
     # Hard cap on RAW recursion so a pathological/cyclic provider can't hang the
     # bridge now that pass-through containers no longer consume semantic depth.
     if ($RawDepth -gt 60) { return $null }
+    # Time budget (set by get-screen-context): a huge web app (Stripe in Edge)
+    # took longer than the 20 s command timeout, so the caller got NOTHING and
+    # the bridge kept walking. Stop and return what we have, flagged partial.
+    if ($null -ne $script:treeDeadline -and [DateTime]::UtcNow -gt $script:treeDeadline) {
+        $script:treeTruncated = $true
+        return $null
+    }
     try { $cur = $Element.Current } catch { return $null }
 
     $typeName = $cur.ControlType.ProgrammaticName
@@ -253,11 +260,18 @@ function Cmd-GetScreenContext {
         )
         $targetWin = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCond)
         if ($null -ne $targetWin) {
-            $uiTree = ConvertTo-UINode -Element $targetWin -Depth 0 -MaxDepth $maxDepth
+            $budgetMs = if ($cmd.budgetMs) { [int]$cmd.budgetMs } else { 8000 }
+            $script:treeTruncated = $false
+            $script:treeDeadline = [DateTime]::UtcNow.AddMilliseconds($budgetMs)
+            try {
+                $uiTree = ConvertTo-UINode -Element $targetWin -Depth 0 -MaxDepth $maxDepth
+            } finally {
+                $script:treeDeadline = $null
+            }
         }
     }
 
-    return [ordered]@{ windows = $windowList; uiTree = $uiTree }
+    return [ordered]@{ windows = $windowList; uiTree = $uiTree; truncated = [bool]$script:treeTruncated }
 }
 
 # Never raise a window belonging to the AI-agent host or clawdcursor's own

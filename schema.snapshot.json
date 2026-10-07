@@ -551,6 +551,16 @@
       "costClass": "perceive-text"
     },
     {
+      "name": "copy_all_text",
+      "description": "Read ALL text of the focused window / web page EXACTLY: select-all + copy, return the text, then restore the clipboard. Exact characters (IDs, amounts, codes) — prefer it over OCR for reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Leaves the page text selected; focus the right window first.",
+      "category": "clipboard",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "costClass": "perceive-text"
+    },
+    {
       "name": "cursor_position",
       "description": "Read the current mouse cursor position in image-space coordinates (the same space the mouse_* tools accept — a cursor_position read round-trips with mouse_hover). Computer-use parity: pointer-state read, no side effects.",
       "category": "mouse",
@@ -1800,7 +1810,7 @@
     },
     {
       "name": "resize_window",
-      "description": "Set the foreground (or matched) window bounds in logical pixels. Omitted fields preserved.",
+      "description": "Set the foreground (or matched) window bounds. Units are SCREEN px — the same as get_windows and accessibility coordinates; pass space:\"image\" for screenshot coordinates. Omitted fields preserved.",
       "category": "window",
       "parameters": {
         "type": "object",
@@ -1820,6 +1830,14 @@
           "height": {
             "type": "number",
             "description": "New height in logical px"
+          },
+          "space": {
+            "type": "string",
+            "description": "",
+            "enum": [
+              "screen",
+              "image"
+            ]
           },
           "processName": {
             "type": "string",

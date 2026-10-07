@@ -46,6 +46,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { llmSize } from '../core/agent-loop/coord-scale';
+import { wheelUnitsPerNotch } from './wheel';
 
 const execFileAsync = promisify(execFile);
 
@@ -536,16 +537,32 @@ export class WindowsAdapter implements PlatformAdapter {
     if (query) {
       const match = await this.resolveWindow(query);
       if (match && typeof (match as any).handle === 'number') hwnd = (match as any).handle;
+      // FAIL CLOSED, like setWindowState: a named window that matched nothing
+      // used to fall through to GetForegroundWindow() and resize whatever was
+      // in front — live 2026-10, a resize aimed at a window that hadn't opened
+      // yet moved the user's Notepad instead.
+      const hadSelector =
+        query.processId !== undefined ||
+        (query.title !== undefined && query.title !== '') ||
+        (query.processName !== undefined && query.processName !== '');
+      if (hadSelector && hwnd === undefined) return false;
     }
     const handleExpr = hwnd !== undefined
       ? `[IntPtr]${hwnd}`
       : '[Win32.NativeMethods]::GetForegroundWindow()';
 
     try {
-      const x = bounds.x ?? -1;
-      const y = bounds.y ?? -1;
-      const w = bounds.width ?? -1;
-      const h = bounds.height ?? -1;
+      // Callers pass SCREEN px — physical, the same units listWindows and the
+      // a11y bounds report. SetWindowPos runs in the DPI-unaware PowerShell,
+      // which takes logical px, so divide by the bridge ratio. (Passing
+      // physical straight through made 1700x1060 fill a 225% screen.)
+      await this.getScreenSize();
+      const r = this.dpiRatio > 1 ? this.dpiRatio : 1;
+      const toLogical = (v: number | undefined) => (v === undefined ? -1 : Math.round(v / r));
+      const x = toLogical(bounds.x);
+      const y = toLogical(bounds.y);
+      const w = toLogical(bounds.width);
+      const h = toLogical(bounds.height);
       // When a dim is -1, we read the current rect and preserve it.
       const ps =
         // Single-quoted -MemberDefinition (not a here-string) — a here-string header
@@ -554,9 +571,14 @@ export class WindowsAdapter implements PlatformAdapter {
         '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();' +
         '[DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr hWnd, out System.Drawing.Rectangle rect);' +
         '[DllImport("user32.dll")] public static extern bool SetWindowPos(System.IntPtr hWnd, System.IntPtr hWndAfter, int X, int Y, int cx, int cy, uint uFlags);' +
+        '[DllImport("user32.dll")] public static extern bool IsZoomed(System.IntPtr hWnd);' +
+        '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr hWnd, int nCmdShow);' +
         "' -ReferencedAssemblies System.Drawing -PassThru | Out-Null;" +
         `$h = ${handleExpr};` +
         'if ($h -eq [System.IntPtr]::Zero) { "no-window"; exit }' +
+        // A maximized window keeps its maximized state through SetWindowPos;
+        // an explicit resize means "this size", so restore it first.
+        'if ([Win32.NativeMethods]::IsZoomed($h)) { [Win32.NativeMethods]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 150 }' +
         '$r = New-Object System.Drawing.Rectangle;' +
         '[Win32.NativeMethods]::GetWindowRect($h, [ref] $r) | Out-Null;' +
         `$nx = ${x}; $ny = ${y}; $nw = ${w}; $nh = ${h};` +
@@ -917,14 +939,14 @@ export class WindowsAdapter implements PlatformAdapter {
     await this.delay(30);
     // nut-js only exposes scrollUp/scrollDown natively. For horizontal,
     // fall back to Shift+scroll which most apps interpret as horizontal.
-    if (direction === 'down') await mouse.scrollDown(amount);
-    else if (direction === 'up') await mouse.scrollUp(amount);
+    if (direction === 'down') await mouse.scrollDown(amount * wheelUnitsPerNotch());
+    else if (direction === 'up') await mouse.scrollUp(amount * wheelUnitsPerNotch());
     else {
       // Horizontal: hold Shift, scroll vertically.
       await keyboard.pressKey(Key.LeftShift);
       try {
-        if (direction === 'left') await mouse.scrollUp(amount);
-        else await mouse.scrollDown(amount);
+        if (direction === 'left') await mouse.scrollUp(amount * wheelUnitsPerNotch());
+        else await mouse.scrollDown(amount * wheelUnitsPerNotch());
       } finally {
         await keyboard.releaseKey(Key.LeftShift);
       }
