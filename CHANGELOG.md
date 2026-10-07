@@ -2,6 +2,34 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **`system copy_all_text` — read a page's exact text.** Select-all + copy,
+  return the text, put the user's clipboard back. OCR misreads identifiers
+  (`l`→`1`, `o`→`0`); this returns the real characters. Refuses in terminals,
+  where Ctrl+C would interrupt the running program.
+
+### Fixed
+
+- **Scrolling barely moved on Windows and macOS.** The mouse library passes its
+  amount straight to the OS, and the units differ: on Windows 120 is one wheel
+  notch, so `scroll amount:3` was 3/120 of a notch (Notepad: 0 lines); on
+  macOS it was 3 pixels; the compact path sent 3 units per tick (9 notches on
+  X11). One tick is now one notch everywhere (Notepad: ~9 lines).
+- **Window resize used different units from everything else.** On Windows the
+  window list reports physical pixels but resize took logical ones, so
+  1200×900 became 2700×2025 on a 225% display. Resize now takes the same
+  screen units as `window list` and accessibility coordinates, and
+  `space:"image"` accepts screenshot coordinates.
+- **A resize aimed at a window that doesn't exist moved the front window.** A
+  title or process that matched nothing fell back to whatever window was in
+  front (Windows). It now fails, like minimize / maximize / close already did.
+- **`smart_read` stalled 20 s on huge web apps.** The accessibility tree walk
+  outran the bridge timeout and returned nothing. It now stops at an 8 s
+  budget and returns a partial tree, marked PARTIAL.
+
 ## [1.5.13] - 2026-10-07 — choose dropdown values; faster cold start
 
 ### Added

@@ -557,7 +557,8 @@
       "parameters": {
         "type": "object",
         "properties": {}
-      }
+      },
+      "costClass": "perceive-text"
     },
     {
       "name": "cursor_position",
