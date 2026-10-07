@@ -24,6 +24,11 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Changed
 
+- **Dependencies:** `@modelcontextprotocol/sdk` ^1.32.1 and `sharp` ^0.35.5
+  (patched releases for two high advisories: an OAuth-client issue in the
+  SDK — clawdcursor is a server and never runs that client — and a librsvg
+  CVE in sharp's bundled libvips); lockfile `npm audit fix` for `proxy-addr`.
+
 - **Smaller npm package.** Source maps and type declarations no longer ship
   (no library entry point uses them): 893 kB → 622 kB packed. Removed dead
   files: `perf/` (patch notes for a deleted module), unused
