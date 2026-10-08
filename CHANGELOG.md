@@ -2,6 +2,34 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Session log: see what an agent actually did.** Each MCP session writes a
+  small local log (`~/.clawdcursor/sessions/`, last 50 kept): tool, action,
+  whether it was a blind read (accessibility / text), a screenshot, an action
+  by name or by coordinates, the outcome (`empty` / `timeout` / `partial` /
+  `ok`), timing and the host's name. Never typed text, clipboard, element
+  names, window titles, URLs or coordinates. Off with
+  `CLAWDCURSOR_SESSION_LOG=0`.
+- **One-step reports.** `clawdcursor report` now reports on the latest MCP
+  session (it only knew agent task logs, which MCP users never have), and an
+  agent can call `system report` with a note. The report server is
+  unreachable, so both save the full report locally and open (or print) a
+  prefilled GitHub issue — the user reviews it and submits; nothing is sent
+  automatically.
+- **Blind-first nudge.** After 3 screenshots in a row with no text or
+  accessibility read in between (and every 5th after), the screenshot result
+  adds one line naming the exact, cheaper path (`compile_ui` / `smart_read`,
+  `copy_all_text`, act by name).
+
+### Fixed
+
+- **Tests no longer write to the user's real `~/.clawdcursor/logs`**
+  (`CLAWDCURSOR_LOG_DIR`; the suite points it and the session log at a temp
+  folder).
+
 ## [1.5.14] - 2026-10-07 — scrolling that moves; consistent window units; exact page text
 
 ### Added

@@ -1967,6 +1967,21 @@
       "costClass": "perceive-image"
     },
     {
+      "name": "session_report",
+      "description": "Prepare a report of THIS session for the clawdcursor team when something went wrong: which tools ran, blind vs screenshot use, errors — no typed text, clipboard, screenshots, names or paths. Sends nothing: returns a prefilled GitHub issue link to give the USER, who reviews and submits it. Pass `note` with what went wrong.",
+      "category": "orchestration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "description": "What went wrong, in a sentence or two"
+          }
+        }
+      },
+      "costClass": "inspect"
+    },
+    {
       "name": "set_field_value",
       "description": "Set an editable field's value directly via accessibility (more reliable than click+type for forms).",
       "category": "perception",

@@ -14,10 +14,13 @@ import * as os from 'os';
 import * as readline from 'readline';
 import { getVersion } from './version';
 import { TASK_LOGS_DIR, REPORTS_DIR } from '../paths';
+import { listSessions, readSession, type SessionTally } from './session-log';
 
 // ─── Configuration ──────────────────────────────────────────
 
 const REPORT_ENDPOINT = process.env.CLAWD_REPORT_URL || 'https://api.clawdcursor.com/reports';
+/** Fallback when the endpoint is unreachable: a prefilled issue the user reviews and submits. */
+const ISSUES_NEW_URL = 'https://github.com/AmrDab/clawdcursor/issues/new';
 const LOG_DIR = TASK_LOGS_DIR;
 
 // ─── Types ──────────────────────────────────────────────────
@@ -41,6 +44,18 @@ export interface ErrorReport {
     llmCallCount: number;
   };
   steps: RedactedStep[];
+  /** An MCP session (what an external agent did) — no content, only tool/action/class/outcome. */
+  session?: {
+    client?: string;
+    surface?: string;
+    startedAt?: string;
+    durationMs: number;
+    tally: SessionTally;
+    /** Compressed class sequence, e.g. "blind vision×3 act-coords×2" */
+    sequence: string;
+    recentCalls: Array<{ tool: string; action?: string; cls: string; ok: boolean; ms: number }>;
+    errors: string[];
+  };
   userNote?: string;
   errorContext?: string;
 }
@@ -172,8 +187,8 @@ function getRecentLogs(count: number): string[] {
 }
 
 /** Build a report from a task log */
-export function buildReport(logPath?: string, userNote?: string): ErrorReport {
-  const targetPath = logPath || getMostRecentLog();
+export function buildReport(logPath?: string, userNote?: string, skipTaskLog = false): ErrorReport {
+  const targetPath = skipTaskLog ? null : (logPath || getMostRecentLog());
   const entries = targetPath ? readTaskLog(targetPath) : [];
 
   // Separate summary from steps
@@ -219,6 +234,90 @@ export function buildReport(logPath?: string, userNote?: string): ErrorReport {
   return report;
 }
 
+/** Newest MCP session file, or null. */
+export function getMostRecentSession(): string | null {
+  return listSessions()[0] ?? null;
+}
+
+/** Report on an MCP session — what an external agent did through clawdcursor. */
+export function buildSessionReport(sessionPath?: string, userNote?: string): ErrorReport {
+  const file = sessionPath || getMostRecentSession();
+  const report = buildReport(undefined, userNote, /* skipTaskLog */ true);
+  if (!file) return report;
+  const { header, calls, tally } = readSession(file);
+  const seq: Array<{ cls: string; n: number }> = [];
+  for (const c of calls) {
+    const last = seq[seq.length - 1];
+    if (last && last.cls === c.cls) last.n++;
+    else seq.push({ cls: c.cls, n: 1 });
+  }
+  const first = calls.length ? Date.parse(calls[0].t) : NaN;
+  const lastT = calls.length ? Date.parse(calls[calls.length - 1].t) : NaN;
+  report.session = {
+    client: header?.client as string | undefined,
+    surface: header?.surface as string | undefined,
+    startedAt: header?.started as string | undefined,
+    durationMs: Number.isFinite(first) && Number.isFinite(lastT) ? lastT - first : 0,
+    tally,
+    sequence: seq.slice(-60).map(x => (x.n > 1 ? `${x.cls}×${x.n}` : x.cls)).join(' '),
+    recentCalls: calls.slice(-40).map(c => ({ tool: c.tool, ...(c.action ? { action: c.action } : {}), cls: c.cls, ok: c.ok, ms: c.ms })),
+    errors: [...new Set(calls.filter(c => !c.ok && c.err).map(c => redactSensitive(String(c.err))))].slice(0, 8),
+  };
+  if (!report.errorContext && report.session.errors.length) report.errorContext = report.session.errors[report.session.errors.length - 1];
+  return report;
+}
+
+/** The newest source: an MCP session or an agent task log. */
+export function buildLatestReport(userNote?: string): ErrorReport {
+  const sess = getMostRecentSession();
+  const task = getMostRecentLog();
+  const mtime = (p: string | null) => { try { return p ? fs.statSync(p).mtimeMs : 0; } catch { return 0; } };
+  return sess && mtime(sess) >= mtime(task) ? buildSessionReport(sess, userNote) : buildReport(task ?? undefined, userNote);
+}
+
+/** Markdown summary for a GitHub issue — the user sees all of it before submitting. */
+export function reportMarkdown(r: ErrorReport): string {
+  const L: string[] = [];
+  L.push(`**clawdcursor ${r.version}** on ${r.system.platform}/${r.system.arch} (${r.system.osRelease}), Node ${r.system.nodeVersion}`);
+  if (r.userNote) L.push('', `**What happened:** ${r.userNote}`);
+  if (r.session) {
+    const s = r.session;
+    const t = s.tally;
+    L.push('', `**MCP session**: host ${s.client ?? 'unknown'}, ${s.surface ?? '?'} surface, ${t.calls} calls, ${(s.durationMs / 60000).toFixed(1)} min`);
+    L.push(`- perception: ${t.blind} blind (a11y / text) vs ${t.vision} screenshots; first: ${t.firstPerception ?? '-'}; screenshots with a blind read first: ${t.visionAfterBlind}/${t.vision}`);
+    L.push(`- blind reads that came back empty / timed out: ${t.blindEmpty}; screenshots right after one: ${t.visionAfterBlindMiss}`);
+    L.push(`- actions: ${t.actName} by name, ${t.actCoords} by coordinates, ${t.actOther} other; errors: ${t.errors}`);
+    L.push('', '```', s.sequence, '```');
+    if (s.errors.length) L.push('', '**Errors (redacted):**', ...s.errors.map(e => `- ${e}`));
+  }
+  if (r.task) L.push('', `**Agent task:** ${r.task.description} (${r.task.status}, ${r.task.totalSteps} steps)`);
+  if (r.errorContext && !r.session) L.push('', `**Error:** ${r.errorContext}`);
+  L.push('', `<sub>report ${r.reportId} · contains no typed text, clipboard, screenshots, element names or file paths</sub>`);
+  return L.join('\n');
+}
+
+/** Prefilled "new issue" link, kept under GitHub's URL length limits. */
+export function issueUrl(r: ErrorReport): string {
+  const title = r.userNote ? `Report: ${r.userNote.slice(0, 80)}` : `Session report (${r.system.platform}, ${r.version})`;
+  let body = reportMarkdown(r);
+  if (body.length > 6000) body = body.slice(0, 6000) + '\n…(truncated; the full report is saved locally)';
+  return `${ISSUES_NEW_URL}?${new URLSearchParams({ title, body }).toString()}`;
+}
+
+/** Open a URL in the user's browser (best effort). */
+export async function openInBrowser(url: string): Promise<boolean> {
+  const { spawn } = await import('child_process');
+  try {
+    if (process.platform === 'win32') {
+      // rundll32 takes the URL verbatim — `start` would split it on & and ^.
+      spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    } else {
+      spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+    }
+    return true;
+  } catch { return false; }
+}
+
 // ─── Submission ─────────────────────────────────────────────
 
 /** Submit a report to the backend */
@@ -257,17 +356,23 @@ export function saveReportLocally(report: ErrorReport): string {
 /** Interactive report flow — shows what will be sent, asks for confirmation */
 export async function interactiveReport(): Promise<void> {
   const logPath = getMostRecentLog();
+  const sessionPath = getMostRecentSession();
 
-  if (!logPath) {
-    console.log('\n  No task logs found. Run a task first, then try again.\n');
+  if (!logPath && !sessionPath) {
+    console.log('\n  Nothing to report yet: no MCP session or task log found. Use clawdcursor, then try again.\n');
     return;
   }
 
-  const logName = path.basename(logPath);
-  console.log(`\n  Most recent task log: ${logName}`);
+  // Report on whichever is newer — almost always the MCP session an agent just ran.
+  const report = buildLatestReport();
+  if (report.session) {
+    console.log(`\n  Most recent MCP session: ${path.basename(sessionPath!)}`);
+  } else {
+    console.log(`\n  Most recent task log: ${path.basename(logPath!)}`);
+  }
 
   // Show available logs
-  const recentLogs = getRecentLogs(5);
+  const recentLogs = report.session ? [] : getRecentLogs(5);
   if (recentLogs.length > 1) {
     console.log('\n  Recent logs:');
     recentLogs.forEach((l, i) => {
@@ -279,9 +384,6 @@ export async function interactiveReport(): Promise<void> {
       console.log(`    ${i + 1}. ${path.basename(l)} — ${status} — "${task}"${marker}`);
     });
   }
-
-  // Build the report
-  const report = buildReport(logPath);
 
   // Show preview
   console.log('\n  ── Report Preview ──────────────────────────────');
@@ -296,7 +398,14 @@ export async function interactiveReport(): Promise<void> {
     console.log(`  Duration:   ${(report.task.durationMs / 1000).toFixed(1)}s`);
     console.log(`  LLM Calls:  ${report.task.llmCallCount}`);
   }
-  console.log(`  Step data:  ${report.steps.length} entries (redacted)`);
+  if (report.session) {
+    const t = report.session.tally;
+    console.log(`  Host:       ${report.session.client ?? 'unknown'} (${report.session.surface} surface)`);
+    console.log(`  Calls:      ${t.calls} — ${t.blind} blind reads, ${t.vision} screenshots, ${t.actName} by name, ${t.actCoords} by coordinates, ${t.errors} errors`);
+    console.log(`  Sequence:   ${report.session.sequence.slice(0, 200)}`);
+  } else {
+    console.log(`  Step data:  ${report.steps.length} entries (redacted)`);
+  }
   if (report.errorContext) {
     console.log(`  Error:      ${report.errorContext}`);
   }
@@ -340,11 +449,16 @@ export async function interactiveReport(): Promise<void> {
     console.log(`  Report sent. ID: ${result.reportId}`);
     console.log('  Thank you — this helps us make clawdcursor better.\n');
   } else {
-    // Save locally on failure
+    // The report server is unreachable — hand off to a prefilled GitHub issue
+    // the user reviews and submits; the full report stays on disk.
     const savedPath = saveReportLocally(report);
-    console.log(`  Failed to send: ${result.error}`);
-    console.log(`  Report saved locally: ${savedPath}`);
-    console.log('  You can manually share this file if needed.\n');
+    const url = issueUrl(report);
+    console.log(`  Report server unreachable (${result.error}).`);
+    console.log(`  Saved locally: ${savedPath}`);
+    const opened = await openInBrowser(url);
+    console.log(opened
+      ? '  Opened a prefilled GitHub issue in your browser — review it and click "Submit new issue".\n'
+      : `  Open this prefilled GitHub issue to send it:\n  ${url}\n`);
   }
 }
 

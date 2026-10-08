@@ -76,6 +76,7 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   // ── perceive-text ── a11y/OCR/DOM dumps + tools that read them internally. ≤10K tok.
   read_screen: 'perceive-text', ocr_read_screen: 'perceive-text', smart_read: 'perceive-text',
   copy_all_text: 'perceive-text',
+  session_report: 'inspect',
   smart_type: 'perceive-text', smart_click: 'perceive-text',
   cdp_page_context: 'perceive-text', cdp_read_text: 'perceive-text',
   get_system_prompt: 'perceive-text',
