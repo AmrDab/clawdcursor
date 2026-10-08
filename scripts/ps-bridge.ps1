@@ -46,8 +46,6 @@ try {
         [DllImport("user32.dll")]
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")]
-        public static extern IntPtr WindowFromPoint(int x, int y);
-        [DllImport("user32.dll")]
         public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
         // Additional constants for force-focus path:
         //   HWND_TOPMOST    = -1
@@ -323,6 +321,31 @@ public static class ScreenPM {
   [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr h, int t, out uint x, out uint y);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
   public static string ClassOf(IntPtr h) { var sb = new System.Text.StringBuilder(256); GetClassName(h, sb, 256); return sb.ToString(); }
+  [DllImport("user32.dll")] public static extern IntPtr GetTopWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint c);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int i);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT v, int s);
+  // The top-level window a user SEES at (x, y): the first one in z-order that is
+  // visible, not minimized, not DWM-cloaked and not click-through, whose visible
+  // frame contains the point. WindowFromPoint is not reliable for this: with a
+  // UWP window (e.g. Settings) behind the target it returned the UWP window for
+  // every point of the window in front of it.
+  public static IntPtr TopWindowAt(int x, int y) {
+    for (IntPtr h = GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = GetWindow(h, 2)) {
+      if (!IsWindowVisible(h) || IsIconic(h)) continue;
+      if ((GetWindowLong(h, -20) & 0x20) != 0) continue;            // WS_EX_TRANSPARENT
+      int cloaked = 0; DwmGetWindowAttribute(h, 14, out cloaked, 4); // DWMWA_CLOAKED
+      if (cloaked != 0) continue;
+      RECT r;
+      if (DwmGetWindowAttribute(h, 9, out r, 16) != 0 && !GetWindowRect(h, out r)) continue; // DWMWA_EXTENDED_FRAME_BOUNDS
+      if (x >= r.L && x < r.R && y >= r.T && y < r.B) return h;
+    }
+    return IntPtr.Zero;
+  }
   public static IntPtr Aware() { return SetThreadDpiAwarenessContext(new IntPtr(-4)); }
   public static void Restore(IntPtr prev) { if (prev != IntPtr.Zero) SetThreadDpiAwarenessContext(prev); }
   public static List<object[]> Monitors() {
@@ -384,13 +407,9 @@ function Cmd-ActivateAtPoint {
     param($cmd)
     $x = [int]$cmd.x
     $y = [int]$cmd.y
-    # physical:true → (x,y) are physical virtual-desktop pixels (any monitor).
-    if ($cmd.physical) {
-        $prevCtx = [ScreenPM]::Aware()
-        try { $hwnd = [Win32UIA]::WindowFromPoint($x, $y) } finally { [ScreenPM]::Restore($prevCtx) }
-    } else {
-        $hwnd = [Win32UIA]::WindowFromPoint($x, $y)
-    }
+    # (x,y) are physical virtual-desktop pixels (any monitor): this thread is
+    # per-monitor-v2 aware (see Main).
+    $hwnd = [ScreenPM]::TopWindowAt($x, $y)
     if ($hwnd -eq [IntPtr]::Zero) { return @{ success=$true; action="noop"; reason="no-window-at-point" } }
     # Walk up to the root owner (GA_ROOT = 2) so child controls map to their
     # top-level window before we compare / promote to foreground.
@@ -603,6 +622,7 @@ function Cmd-FocusWindow {
         title      = $c.Name
         processId  = $c.ProcessId
         handle     = $c.NativeWindowHandle
+        bounds     = @{ x = [int]$c.BoundingRectangle.X; y = [int]$c.BoundingRectangle.Y; width = [int]$c.BoundingRectangle.Width; height = [int]$c.BoundingRectangle.Height }
     }
 }
 
@@ -955,6 +975,12 @@ function Cmd-GetFocusedElement {
 }
 
 # ── Main: signal ready, then read commands ────────────────────────────────────
+# Every command runs on this thread; make it per-monitor-v2 aware for good, so
+# UIA bounds and window rects are PHYSICAL virtual-desktop pixels on every
+# monitor. Otherwise Windows rescales them on any monitor whose scaling differs
+# from the system DPI (a 225% laptop beside a 100% primary reported an
+# 820x620 window as 364x276) and space:"screen" clicks on them miss.
+[void][ScreenPM]::Aware()
 [Console]::Out.WriteLine('{"ready":true}')
 [Console]::Out.Flush()
 

@@ -15,10 +15,18 @@ All notable changes to Clawd Cursor will be documented in this file.
     the PowerShell bridge under per-monitor DPI awareness, in physical
     desktop pixels (the same space accessibility reports).
   - `computer screenshot` shows the monitor clawdcursor last worked on (a
-    click, a focused window), else the primary; `display:N` picks one. On a
+    click, a focused or launched window — however it was named), else the
+    primary; `display:N` picks one. On a
     multi-monitor desktop the reply names the other monitors. Coordinates
     read off a screenshot of any monitor map back onto that monitor.
   - `window list_displays` reports each monitor's physical bounds and scale.
+  - Accessibility positions are exact on every monitor, including one whose
+    scaling differs from the primary's (a 225% laptop beside a 100% monitor
+    reported an 820×620 window as 364×276, so `space:"screen"` clicks
+    missed).
+  - OCR reads the monitor clawdcursor is working on (it always read the
+    primary), in screen coordinates; its reply now says to click them with
+    `space:"screen"` instead of dividing by a scale factor.
   - `focus` treats a window as on-screen when it overlaps any monitor (it
     used to minimize / snap windows on a monitor left of or above the
     primary).
@@ -46,6 +54,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- **A click could raise the window BEHIND the one you see.** Before a click
+  clawdcursor brings the window under the pointer forward; on Windows it
+  asked `WindowFromPoint`, which — with a UWP app such as Settings behind
+  the target — named the UWP app for every point of the window in front, so
+  the click landed on Settings. It now picks the top visible, uncloaked,
+  non-click-through window at that point.
 - **Windows clipboard reads mangled non-ASCII text** (`café — ✓ 日本` came
   back as `caf? - ? ??`): PowerShell's stdout codepage. `clipboard_read` and
   `copy_all_text` now read UTF-8 exactly.
@@ -55,7 +69,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 - **Tests no longer write to the user's real `~/.clawdcursor/logs`**
   (`CLAWDCURSOR_LOG_DIR`; the suite points it and the session log at a temp
-  folder).
+  folder), and never start the real PowerShell bridge (which moves the real
+  pointer and captures the real screen) unless a test mocks it.
 
 ## [1.5.14] - 2026-10-07 — scrolling that moves; consistent window units; exact page text
 

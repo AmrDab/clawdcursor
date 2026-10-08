@@ -419,6 +419,10 @@ export class WindowsAdapter implements PlatformAdapter {
       if (focusedPid !== undefined) {
         this.lastFocused = { processId: focusedPid, processName: query.processName, title: typeof result.title === 'string' ? result.title : title };
       }
+      // The next default screenshot shows the monitor this window is on (a
+      // launch lands here too, via foregroundLaunched).
+      const b = result.bounds;
+      if (b && b.width > 0 && b.height > 0) setWorkingPoint(b.x + b.width / 2, b.y + b.height / 2);
       return true;
     } catch {
       return false;

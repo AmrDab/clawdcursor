@@ -37,6 +37,7 @@ vi.mock('../platform/ps-runner', () => ({
       if (cmd.cmd === 'move-cursor') { bridge.cursor = { x: cmd.x as number, y: cmd.y as number }; return { success: true, ...bridge.cursor }; }
       if (cmd.cmd === 'get-cursor') return { success: true, ...bridge.cursor };
       if (cmd.cmd === 'activate-at-point') return { success: true, action: 'noop' };
+      if (cmd.cmd === 'focus-window') return { success: true, foreground: true, title: 'Target', processId: 42, bounds: { x: -3760, y: -1243, width: 820, height: 620 } };
       return { success: true };
     }),
     start: vi.fn(), stop: vi.fn(),
@@ -50,12 +51,22 @@ vi.mock('child_process', async (orig) => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
+import { getWorkingPoint, resetWorkingPoint } from '../platform/display-target';
 
 const sent = (cmd: string) => bridge.calls.filter(c => c.cmd === cmd);
 
 beforeEach(() => {
   nut.setPosition.mockClear(); nut.grabW = 3840; nut.grabH = 2400; nut.osScale = 2.25; nut.mouseW = 1707;
   bridge.calls.length = 0; bridge.up = true; bridge.cursor = { x: 400, y: 300 };
+  resetWorkingPoint();
+});
+
+describe('focusing a window picks the monitor the next screenshot shows', () => {
+  it('a title-only focus (no pid / bounds known up front) still records the monitor of the window', async () => {
+    const a = new WindowsAdapter();
+    expect(await a.focusWindow({ title: 'Target' })).toBe(true);
+    expect(getWorkingPoint()).toEqual({ x: -3350, y: -933 });   // centre of the focused window
+  });
 });
 
 describe('WindowsAdapter pointer placement — any monitor', () => {

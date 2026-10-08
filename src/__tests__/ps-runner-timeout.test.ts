@@ -25,6 +25,8 @@ vi.mock('child_process', () => ({
   execFile: vi.fn(),
 }));
 
+// The real PSRunner class (its child process is mocked above), not the global test stub.
+vi.unmock('../platform/ps-runner');
 import { PSRunner } from '../platform/ps-runner';
 
 const flush = () => new Promise<void>(r => setImmediate(r));

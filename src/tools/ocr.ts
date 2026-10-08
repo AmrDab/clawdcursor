@@ -50,9 +50,6 @@ export function getOcrTools(): ToolDefinition[] {
           };
         }
 
-        // OCR coords are physical screen px; screenshot (image) px = physical / ssf.
-        const ssf = ctx.getScreenshotScaleFactor();
-
         return {
           text: JSON.stringify({
             elementCount: result.elements.length,
@@ -60,8 +57,10 @@ export function getOcrTools(): ToolDefinition[] {
             fullText: result.fullText,
             durationMs: result.durationMs,
             coordinateSystem: 'real_screen_pixels',
-            toMouseClick: `Divide coordinates by ${ssf.toFixed(4)} to convert to mouse_click image-space. Or better: use smart_click("element text") which handles conversion automatically.`,
-            hint: 'Coordinates are in real screen pixels. Prefer smart_click(target) over manual coordinate math. If you must use mouse_click, divide OCR coordinates by the factor above.',
+            // Screen coordinates are exact on every monitor; dividing by a scale
+            // factor ignores the origin of a non-primary monitor.
+            toMouseClick: 'Click these coordinates as-is with space:"screen". Or better: smart_click("element text").',
+            hint: 'Coordinates are in real screen pixels (any monitor). Prefer smart_click(target); otherwise pass the coordinates with space:"screen" — no conversion.',
           }, null, 2),
         };
       },
