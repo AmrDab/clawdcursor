@@ -8,6 +8,7 @@
 
 import * as os from 'os';
 import type { ToolDefinition, ToolContext } from './types';
+import { toMouse, toImage } from './types';
 import { isBlockedKey } from './playbooks/keys-blocklist';
 
 const IS_MAC = os.platform() === 'darwin';
@@ -143,8 +144,7 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        const rx = Math.round(x * sf), ry = Math.round(y * sf);
+        const { x: rx, y: ry } = toMouse(ctx, x, y, space);
         await ctx.desktop.mouseClick(rx, ry);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
@@ -165,8 +165,8 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseDoubleClick(Math.round(x * sf), Math.round(y * sf));
+        const p = toMouse(ctx, x, y, space);
+        await ctx.desktop.mouseDoubleClick(p.x, p.y);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
         return { text: `Double-clicked at (${x}, ${y})` };
@@ -186,8 +186,8 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseRightClick(Math.round(x * sf), Math.round(y * sf));
+        const p = toMouse(ctx, x, y, space);
+        await ctx.desktop.mouseRightClick(p.x, p.y);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
         return { text: `Right-clicked at (${x}, ${y})` };
@@ -207,8 +207,8 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseMove(Math.round(x * sf), Math.round(y * sf));
+        const p = toMouse(ctx, x, y, space);
+        await ctx.desktop.mouseMove(p.x, p.y);
         return { text: `Mouse moved to (${x}, ${y})` };
       },
     },
@@ -227,8 +227,7 @@ export function getDesktopTools(): ToolDefinition[] {
         // read the exact inverse of the write on every OS (msf ≠ screenshot
         // factor on Retina — using the wrong one halves coords on macOS).
         const pos = await ctx.desktop.getCursorPosition();
-        const sf = ctx.getMouseScaleFactor() || 1;
-        const img = { x: Math.round(pos.x / sf), y: Math.round(pos.y / sf) };
+        const img = toImage(ctx, pos.x, pos.y);
         return { text: `Cursor at (${img.x}, ${img.y}) in image-space.` };
       },
     },
@@ -247,10 +246,10 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, direction, amount }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getMouseScaleFactor();
+        const p = toMouse(ctx, x, y);
         const ticks = amount ?? 3;
         const delta = direction === 'down' ? ticks : -ticks;
-        await ctx.desktop.mouseScroll(Math.round(x * sf), Math.round(y * sf), delta);
+        await ctx.desktop.mouseScroll(p.x, p.y, delta);
         return { text: `Scrolled ${direction} ${ticks} ticks at (${x}, ${y})` };
       },
     },
@@ -277,11 +276,9 @@ export function getDesktopTools(): ToolDefinition[] {
         const sy = startY ?? y1;
         const ex = endX ?? x2;
         const ey = endY ?? y2;
-        const sf = ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseDrag(
-          Math.round(sx * sf), Math.round(sy * sf),
-          Math.round(ex * sf), Math.round(ey * sf),
-        );
+        const a = toMouse(ctx, sx, sy);
+        const b = toMouse(ctx, ex, ey);
+        await ctx.desktop.mouseDrag(a.x, a.y, b.x, b.y);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
         return { text: `Dragged (${sx},${sy}) → (${ex},${ey})` };

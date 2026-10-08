@@ -22,7 +22,7 @@ import { getFavoritesTools } from './favorites';
 import { getSchedulerTools } from './scheduler';
 import { getIntrospectionTools } from './introspection';
 import type { ToolDefinition, ToolContext, ToolResult, CompactGroup } from './types';
-import { toOpenAiFunctions, toJsonSchema } from './types';
+import { toOpenAiFunctions, toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
@@ -176,12 +176,11 @@ function projectedMouseTools(): ToolDefinition[] {
         return {
           ...base,
           handler: (params: Record<string, unknown>, ctx: ToolContext) => {
-            const sf = ctx.getMouseScaleFactor();
             const dx = Number(params.dx);
             const dy = Number(params.dy);
             const scaled = { ...params };
-            if (Number.isFinite(dx)) scaled.dx = Math.round(dx * sf);
-            if (Number.isFinite(dy)) scaled.dy = Math.round(dy * sf);
+            if (Number.isFinite(dx)) scaled.dx = toMouseLength(ctx, dx);
+            if (Number.isFinite(dy)) scaled.dy = toMouseLength(ctx, dy);
             return sysBHandler(scaled, ctx);
           },
         };

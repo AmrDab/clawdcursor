@@ -114,3 +114,42 @@ export function screenCenter(ctx: {
   }
   return { x: Math.floor((s.physicalWidth ?? 0) / 2), y: Math.floor((s.physicalHeight ?? 0) / 2) };
 }
+
+// ── The frame the model is looking at ─────────────────────────────────────
+//
+// Screenshot coordinates only mean something relative to the image they were
+// read off. A capture of the primary display maps image px → mouse space by
+// the plain mouse scale (unchanged behaviour). A capture of ANY OTHER display
+// (multi-monitor: any position — negative origins included — and any DPI)
+// records its own origin and scale here, in mouse-space units, so the next
+// image-space click lands on that display. Region crops (zoom) never change
+// it: like computer-use, coordinates refer to the last full screenshot.
+
+export interface FrameMapping {
+  /** top-left of the captured display, in mouse-space units */
+  originX: number;
+  originY: number;
+  /** mouse-space units per image pixel */
+  scale: number;
+  /** which display the frame shows (index in listDisplays) */
+  display?: number;
+}
+
+let lastFrame: FrameMapping | null = null;
+
+/** Record the frame just sent to the model; null = the primary display (plain mouse scale). */
+export function setLastFrame(f: FrameMapping | null): void { lastFrame = f; }
+export function getLastFrame(): FrameMapping | null { return lastFrame; }
+
+/** Image-space point → mouse-space point for the last frame. `mouseScale` is the
+ *  primary display's image→mouse factor, used when the last frame was the primary. */
+export function mapImagePoint(x: number, y: number, mouseScale: number): { x: number; y: number } {
+  const f = lastFrame;
+  if (!f) return { x: Math.round(x * mouseScale), y: Math.round(y * mouseScale) };
+  return { x: Math.round(f.originX + x * f.scale), y: Math.round(f.originY + y * f.scale) };
+}
+
+/** Image-space length (width, distance) → mouse-space length for the last frame. */
+export function mapImageLength(v: number, mouseScale: number): number {
+  return Math.round(v * (lastFrame ? lastFrame.scale : mouseScale));
+}
