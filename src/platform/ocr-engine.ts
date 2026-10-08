@@ -197,7 +197,7 @@ export class OcrEngine {
 
       // Save to temp file — OS OCR reads from disk
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
-      fs.writeFileSync(tmpPath, pngBuffer);
+      fs.writeFileSync(tmpPath, pngBuffer, { mode: 0o600, flag: 'wx' });
 
       try {
         const result = await this.runOcr(tmpPath);
@@ -241,7 +241,7 @@ export class OcrEngine {
       const shot = await bridgeCapture({ x, y, width: w, height: h });
       if (shot) {
         const tmp = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
-        fs.writeFileSync(tmp, shot.png);
+        fs.writeFileSync(tmp, shot.png, { mode: 0o600, flag: 'wx' });
         try {
           const result = await this.runOcr(tmp);
           result.durationMs = Date.now() - start;
@@ -268,7 +268,7 @@ export class OcrEngine {
       (img as any).data = null;
 
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
-      fs.writeFileSync(tmpPath, pngBuffer);
+      fs.writeFileSync(tmpPath, pngBuffer, { mode: 0o600, flag: 'wx' });
 
       try {
         const result = await this.runOcr(tmpPath);
