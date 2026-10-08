@@ -174,6 +174,7 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
     task: '',           // No task context available in the MCP surface layer.
     screen,
     screenshotsCaptured: { n: 0 },
+    mcpSurface: true,
     cdp: ctx.cdp ?? null,
     targetWindow: undefined,
     activeApp: undefined,

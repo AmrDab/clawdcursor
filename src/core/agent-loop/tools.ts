@@ -29,6 +29,8 @@ import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../pl
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { selectOption } from '../../platform/select-option';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { getBrowserProcessNames } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
@@ -139,14 +141,21 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const pid = typeof args.processId === 'number' ? args.processId : undefined;
         const tree = await ctx.platform.getUiTree(pid);
+        // Never a dead end: a thin tree (or a browser, whose page content UIA
+        // often omits) says what to do next, in the caller's own tool names.
+        const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
         if (tree.length === 0) {
-          return { success: true, text: '(empty a11y tree — app may be custom-canvas)' };
+          return { success: true, text: `(empty a11y tree — app may be custom-canvas)\n${nextStep}` };
         }
+        const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
+        const isBrowser = !!active && getBrowserProcessNames().includes(String(active.processName ?? '').toLowerCase());
+        const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
         const lines = tree.slice(0, 60).map(el =>
           `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
         );
         const more = tree.length > 60 ? `\n… +${tree.length - 60} more` : '';
-        return { success: true, text: `Fresh a11y (${tree.length} els):\n${wrapUntrustedScreenContent(lines.join('\n') + more)}` };
+        const hint = tree.length < 5 || isBrowser ? `\n${nextStep}` : '';
+        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}:\n${wrapUntrustedScreenContent(lines.join('\n') + more)}${hint}` };
       },
     },
 

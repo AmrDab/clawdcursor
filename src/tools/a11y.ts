@@ -12,6 +12,7 @@ import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP } from './blind-hints';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -141,18 +142,6 @@ function elementLabel(el: UiElement): string {
   if (el.value) return el.value;
   return '';
 }
-
-/** Shown with every element list: a11y positions are SCREEN coordinates —
- *  clicked as image coords they land off-target on a scaled display, which
- *  made blind reads look unreliable. */
-const SCREEN_COORDS_NOTE = '(positions are screen coordinates — click them with space:"screen", or act by name)';
-
-/** Next step when a blind read comes back thin, instead of a dead end that
- *  leaves screenshots as the only option. Names work on both tool surfaces. */
-export const SPARSE_NEXT_STEP =
-  '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
-  'copy_all_text for the exact page text · smart_click name:"…" to press a labelled control (OCR fallback) · ' +
-  'ocr to read it · screenshot only if those fail.';
 
 function formatElement(el: UiElement): string {
   return `[${el.controlType}] "${elementLabel(el)}"` +

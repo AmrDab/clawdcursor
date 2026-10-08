@@ -102,6 +102,9 @@ export interface AgentToolContext {
   screen: { logicalWidth: number; logicalHeight: number; physicalWidth: number; physicalHeight: number; dpiRatio: number };
   /** Mutable counter the tools bump when they take screenshots. */
   screenshotsCaptured: { n: number };
+  /** True when an EXTERNAL agent drives these tools over MCP (System A tools
+   *  like copy_all_text / smart_click exist there; the internal loop has its own). */
+  mcpSurface?: boolean;
   /** Current active app name — used by SafetyLayer for sensitive-app elevation. */
   activeApp?: string;
   /** The window this subtask should run in (the pipeline's resolved anchor).
