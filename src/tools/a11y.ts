@@ -141,6 +141,18 @@ function elementLabel(el: UiElement): string {
   return '';
 }
 
+/** Shown with every element list: a11y positions are SCREEN coordinates —
+ *  clicked as image coords they land off-target on a scaled display, which
+ *  made blind reads look unreliable. */
+const SCREEN_COORDS_NOTE = '(positions are screen coordinates — click them with space:"screen", or act by name)';
+
+/** Next step when a blind read comes back thin, instead of a dead end that
+ *  leaves screenshots as the only option. Names work on both tool surfaces. */
+export const SPARSE_NEXT_STEP =
+  '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
+  'copy_all_text for the exact page text · smart_click name:"…" to press a labelled control (OCR fallback) · ' +
+  'ocr to read it · screenshot only if those fail.';
+
 function formatElement(el: UiElement): string {
   return `[${el.controlType}] "${elementLabel(el)}"` +
     (el.automationId ? ` id:${el.automationId}` : '') +
@@ -177,12 +189,16 @@ export function getA11yTools(): ToolDefinition[] {
           ]);
           const active = processId ?? activeWindow?.processId;
           const tree = await ctx.platform.getUiTree(active);
+          const partial = ctx.platform.lastTreeTruncated
+            ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
+          const isBrowser = !!activeWindow && getBrowserProcessNames().includes(String(activeWindow.processName ?? '').toLowerCase());
           baseText = [
             'WINDOWS',
             windows.length ? windows.map(formatWindow).join('\n') : '(no windows found)',
             '',
-            'FOCUSED WINDOW UI TREE',
+            `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
             tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : '(no elements found)',
+            ...(tree.length < 5 || isBrowser ? [SPARSE_NEXT_STEP] : []),
             '',
             'FOCUSED ELEMENT',
             focused ? formatElement(focused) : '(no focused element)',
@@ -447,9 +463,19 @@ export function getA11yTools(): ToolDefinition[] {
           uiaHits = (elements || []).map((el: any) => ({ ...el, enabled: el.enabled ?? el.isEnabled }));
         }
         if (uiaHits.length) {
-          const lines = uiaHits.slice(0, 20).map(formatElement);
+          const lines = [SCREEN_COORDS_NOTE, ...uiaHits.slice(0, 20).map(formatElement)];
           if (uiaHits.length > 20) lines.push(`... and ${uiaHits.length - 20} more`);
           return { text: lines.join('\n') };
+        }
+        // A timeout is not "nothing there" — say so, or the agent concludes
+        // a11y is useless and switches to screenshots for the rest of the session.
+        if (ctx.platform?.lastFindError === 'timeout') {
+          return {
+            text: 'accessibility search TIMED OUT on a very large window (this is not "nothing found"). ' +
+              'Narrow it with processId and/or controlType. Or: copy_all_text for the exact page text · ' +
+              'smart_click name:"…" to press a labelled control (OCR fallback) · ocr to read it.',
+            isError: true,
+          };
         }
         // UIA returned nothing. For a browser window with CDP attached, ask
         // the renderer directly — Edge/Chrome UIA stops at chrome and never
@@ -468,7 +494,8 @@ export function getA11yTools(): ToolDefinition[] {
         const searched = scopes
           .filter(s => s.processId !== undefined)
           .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` "${s.title}"` : ''}`);
-        return { text: searched.length ? `(no elements found)\nsearched: ${searched.join(', ')} — pass processId to target another window` : '(no elements found)' };
+        const where = searched.length ? `\nsearched: ${searched.join(', ')} — pass processId to target another window` : '';
+        return { text: `(no elements found)${where}\n${SPARSE_NEXT_STEP}` };
       },
     },
 

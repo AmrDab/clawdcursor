@@ -127,7 +127,8 @@ describe('find_element — CDP DOM fallback', () => {
     });
     const result = await findElement.handler({ name: 'Foo' }, ctx);
     expect(cdpEvaluate).not.toHaveBeenCalled();
-    expect(result.text).toBe('(no elements found)');
+    // Empty is never a dead end: the next blind step follows (blind-first fix).
+    expect(result.text).toMatch(/^\(no elements found\)\n→ .*copy_all_text/);
   });
 
   it('does NOT query CDP when CDP is not connected', async () => {
@@ -140,7 +141,8 @@ describe('find_element — CDP DOM fallback', () => {
     });
     const result = await findElement.handler({ name: 'Foo' }, ctx);
     expect(cdpEvaluate).not.toHaveBeenCalled();
-    expect(result.text).toBe('(no elements found)');
+    // Empty is never a dead end: the next blind step follows (blind-first fix).
+    expect(result.text).toMatch(/^\(no elements found\)\n→ .*copy_all_text/);
   });
 
   it('returns "(no elements found)" when both UIA and CDP DOM return empty for a browser', async () => {
@@ -153,7 +155,8 @@ describe('find_element — CDP DOM fallback', () => {
     });
     const result = await findElement.handler({ name: 'NoSuchTarget' }, ctx);
     expect(cdpEvaluate).toHaveBeenCalledTimes(1);
-    expect(result.text).toBe('(no elements found)');
+    // Empty is never a dead end: the next blind step follows (blind-first fix).
+    expect(result.text).toMatch(/^\(no elements found\)\n→ .*copy_all_text/);
   });
 
   // #bug 2026-06-11: the CDP connection was to a DIFFERENT browser than the
@@ -174,7 +177,8 @@ describe('find_element — CDP DOM fallback', () => {
     const result = await findElement.handler({ name: 'Continue' }, ctx);
     expect(cdpEvaluate).not.toHaveBeenCalled();           // never queried the wrong browser's DOM
     expect(result.text).not.toContain('Continue with Google');
-    expect(result.text).toBe('(no elements found)');
+    // Empty is never a dead end: the next blind step follows (blind-first fix).
+    expect(result.text).toMatch(/^\(no elements found\)\n→ .*copy_all_text/);
   });
 
   it('DOES use CDP DOM when the connected page corresponds to the focused window', async () => {

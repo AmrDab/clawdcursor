@@ -269,6 +269,11 @@ export interface PlatformAdapter {
   /** Optional: the window scope(s) the last findElements searched, in order,
    *  so a "(no elements found)" result can say where it looked. */
   lastFindScope?: Array<{ processId?: number; processName?: string; title?: string }> | null;
+  /** Optional: why the last findElements / getUiTree came back short, so tools
+   *  can say "timed out" / "partial" instead of a bare "(no elements found)" —
+   *  an empty-looking blind read is exactly when agents abandon a11y. */
+  lastFindError?: 'timeout' | 'error' | null;
+  lastTreeTruncated?: boolean;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Invoke an accessibility action on a named element. Action union

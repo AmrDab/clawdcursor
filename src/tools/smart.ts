@@ -197,10 +197,10 @@ export function getSmartTools(): ToolDefinition[] {
     {
       name: 'smart_click',
       description:
-        'Click a UI element by name with automatic fallback. ' +
-        'OCR-first: scans screen text and clicks by coordinates. ' +
-        'Also tries a11y invoke (in parallel) and CDP as fallbacks. ' +
-        'No screenshot or coordinate math needed — just provide the element text.',
+        'Click a UI element by its visible name — works even where the accessibility tree is empty ' +
+        '(web pages, canvas apps): an a11y invoke and an OCR text match run in parallel and the first to ' +
+        'succeed wins; CDP is the last fallback. No screenshot or coordinate math needed — just the element text. ' +
+        'For an element the tree already names, `invoke` is the most direct.',
       parameters: {
         target: {
           type: 'string',
@@ -742,8 +742,10 @@ export function getSmartTools(): ToolDefinition[] {
     {
       name: 'invoke_element',
       description:
-        'Invoke a UI Automation action on an element. More precise than smart_click — ' +
-        'supports set-value, get-value, focus, expand, collapse in addition to click.',
+        'PREFERRED way to act on a named element: invoke its accessibility action (click, set-value, ' +
+        'get-value, focus, expand, collapse) — no coordinates, unaffected by DPI or layout. Replies ' +
+        '"Invoked …", or says it fell back to a coordinate click, or fails with the reason. ' +
+        'If the tree does not name the target, use smart_click (adds OCR).',
       parameters: {
         name: {
           type: 'string',

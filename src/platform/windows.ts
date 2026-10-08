@@ -95,6 +95,8 @@ export class WindowsAdapter implements PlatformAdapter {
    *  scope for an unscoped findElements when the live foreground is empty. */
   private lastFocused: { processId: number; processName?: string; title?: string } | null = null;
   lastFindScope: PlatformAdapter['lastFindScope'] = null;
+  lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastTreeTruncated = false;
 
   // Cached physical/logical ratio, populated by getScreenSize(). nut-js mouse
   // input and the (DPI-unaware) WindowFromPoint bridge both live in LOGICAL
@@ -629,6 +631,7 @@ export class WindowsAdapter implements PlatformAdapter {
         maxDepth: 8,
         ...(pid !== undefined ? { focusedProcessId: pid } : {}),
       }) as any;
+      this.lastTreeTruncated = !!result?.truncated;
       const tree = result?.uiTree;
       if (!tree) return [];
       const nodes = Array.isArray(tree) ? tree : [tree];
@@ -668,6 +671,7 @@ export class WindowsAdapter implements PlatformAdapter {
     }
     if (scopes.length === 0) scopes.push({});
     this.lastFindScope = scopes;
+    this.lastFindError = null;
 
     for (const scope of scopes) {
       try {
@@ -679,7 +683,8 @@ export class WindowsAdapter implements PlatformAdapter {
         }) as any;
         const raw = Array.isArray(result) ? result : [];
         if (raw.length > 0) return raw.map(this.normalizeElement);
-      } catch {
+      } catch (err) {
+        this.lastFindError = /timeout/i.test(String((err as Error)?.message ?? err)) ? 'timeout' : 'error';
         return [];
       }
     }
