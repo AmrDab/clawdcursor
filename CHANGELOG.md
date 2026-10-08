@@ -4,6 +4,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
+
 ### Added
 
 - **Multiple monitors, any layout.** clawdcursor no longer assumes one
@@ -77,6 +79,15 @@ All notable changes to Clawd Cursor will be documented in this file.
   (`CLAWDCURSOR_LOG_DIR`; the suite points it and the session log at a temp
   folder), and never start the real PowerShell bridge (which moves the real
   pointer and captures the real screen) unless a test mocks it.
+
+### Security
+
+- OCR temporary screenshots are created owner-only and exclusively
+  (CodeQL `js/insecure-temporary-file`).
+- Dependencies: `qs` 6.16.0, `body-parser` 2.3.0 and `@hono/node-server`
+  1.19.17 (bundled into the CLI); dev tooling `vitest` 4.1.11
+  (GHSA-82fw-gwwq-j7x9), `eslint` 10.12, `typescript-eslint` 8.71, `tsx`
+  4.23; the release workflow uses `actions/setup-node` v7.
 
 ## [1.5.14] - 2026-10-07 — scrolling that moves; consistent window units; exact page text
 
