@@ -7,6 +7,18 @@ import * as path from 'path';
 process.env.CLAWDCURSOR_LOG_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-logs-${process.pid}`);
 process.env.CLAWDCURSOR_SESSION_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-sessions-${process.pid}`);
 
+// The PowerShell bridge drives the REAL pointer and captures the REAL screen —
+// never in unit tests. Default: bridge down (callers fall back). Tests that
+// exercise bridge behaviour mock '../platform/ps-runner' themselves.
+vi.mock('../src/platform/ps-runner', () => ({
+  psRunner: {
+    run: vi.fn(async () => { throw new Error('PowerShell bridge is not available in unit tests'); }),
+    start: vi.fn(async () => {}),
+    stop: vi.fn(),
+  },
+  PSRunner: class {},
+}));
+
 // Global nut-js mock for CI/test environments that don't provide desktop libs
 // (e.g. Linux missing libXtst/libxdo). Individual tests can still override
 // behavior via local vi.mock + vi.mocked exports.

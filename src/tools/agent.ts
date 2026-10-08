@@ -14,6 +14,7 @@
 
 import * as fs from 'fs';
 import type { ToolDefinition } from './types';
+import { setLastFrame } from '../core/agent-loop/coord-scale';
 
 function needAgent(tool: string): { text: string; isError: true } {
   return {
@@ -131,6 +132,7 @@ export function getAgentTools(): ToolDefinition[] {
         try {
           await ctx.ensureInitialized();
           const frame = await ctx.desktop.captureForLLM();
+          setLastFrame(null);   // image coords now refer to this primary capture
           // captureForLLM returns { buffer, scaleFactor, llmWidth, llmHeight,
           // format }. Format is configured per-capture (`'jpeg'` by default,
           // sometimes `'png'`); use it to set the correct mimeType instead

@@ -11,6 +11,8 @@ import type { UiElement, WindowInfo } from '../platform/types';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
 import { copyAllText } from '../platform/copy-all-text';
+import { setWorkingPoint } from '../platform/display-target';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP } from './blind-hints';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -177,12 +179,16 @@ export function getA11yTools(): ToolDefinition[] {
           ]);
           const active = processId ?? activeWindow?.processId;
           const tree = await ctx.platform.getUiTree(active);
+          const partial = ctx.platform.lastTreeTruncated
+            ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
+          const isBrowser = !!activeWindow && getBrowserProcessNames().includes(String(activeWindow.processName ?? '').toLowerCase());
           baseText = [
             'WINDOWS',
             windows.length ? windows.map(formatWindow).join('\n') : '(no windows found)',
             '',
-            'FOCUSED WINDOW UI TREE',
+            `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
             tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : '(no elements found)',
+            ...(tree.length < 5 || isBrowser ? [SPARSE_NEXT_STEP] : []),
             '',
             'FOCUSED ELEMENT',
             focused ? formatElement(focused) : '(no focused element)',
@@ -289,9 +295,23 @@ export function getA11yTools(): ToolDefinition[] {
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 
+        // Multi-monitor: "on screen" means overlapping a real display. A monitor
+        // left of / above the primary has NEGATIVE coordinates, so the old
+        // x>=0 && y>=0 test called every window there off-screen.
+        // Not on macOS: its display frames are bottom-left-origin (Cocoa) while
+        // window bounds are top-left (AX), so they only agree on the primary.
+        const displays = ctx.platform && process.platform !== 'darwin' ? await ctx.platform.listDisplays().catch(() => []) : [];
+        const negativeSpace = displays.some(d => d.bounds.x < 0 || d.bounds.y < 0);
+        const onScreen = (b: { x: number; y: number; width: number; height: number }) => displays.length
+          ? displays.some(d => b.x < d.bounds.x + d.bounds.width && b.x + b.width > d.bounds.x
+            && b.y < d.bounds.y + d.bounds.height && b.y + b.height > d.bounds.y)
+          : (b.x >= 0 && b.y >= 0);
+
         // Fix: minimize phantom off-screen full-screen windows that steal focus.
         // Win11 maximized UWP apps report bounds (-14,-14) and block SetForegroundWindow.
-        try {
+        // Skipped when a monitor sits left of / above the primary: there, a
+        // maximized window legitimately has negative coordinates.
+        if (!negativeSpace) try {
           const allWins = await ctx.a11y.getWindows(true);
           const phantoms = (allWins ?? []).filter((w: any) =>
             w.bounds.x < 0 && w.bounds.y < 0 &&
@@ -321,10 +341,10 @@ export function getA11yTools(): ToolDefinition[] {
           if (title) {
             matches = matches.filter((w: any) => w.title.toLowerCase().includes((title as string).toLowerCase()));
           }
-          // Sort: prefer on-screen windows (x >= 0, y >= 0), then non-minimized
+          // Sort: prefer windows on a display, then non-minimized
           matches.sort((a: any, b: any) => {
-            const aOnScreen = (a.bounds.x >= 0 && a.bounds.y >= 0 && !a.isMinimized) ? 1 : 0;
-            const bOnScreen = (b.bounds.x >= 0 && b.bounds.y >= 0 && !b.isMinimized) ? 1 : 0;
+            const aOnScreen = (onScreen(a.bounds) && !a.isMinimized) ? 1 : 0;
+            const bOnScreen = (onScreen(b.bounds) && !b.isMinimized) ? 1 : 0;
             return bOnScreen - aOnScreen;
           });
           const win = matches[0];
@@ -346,8 +366,8 @@ export function getA11yTools(): ToolDefinition[] {
             );
             // Prefer on-screen, non-minimized windows when multiple match.
             candidates.sort((a: any, b: any) => {
-              const aOn = (a.bounds.x >= 0 && a.bounds.y >= 0 && !a.isMinimized) ? 1 : 0;
-              const bOn = (b.bounds.x >= 0 && b.bounds.y >= 0 && !b.isMinimized) ? 1 : 0;
+              const aOn = (onScreen(a.bounds) && !a.isMinimized) ? 1 : 0;
+              const bOn = (onScreen(b.bounds) && !b.isMinimized) ? 1 : 0;
               return bOn - aOn;
             });
             win = candidates[0];
@@ -374,7 +394,7 @@ export function getA11yTools(): ToolDefinition[] {
         }
 
         // If window is still off-screen, snap-maximize (platform-aware)
-        if (targetBounds && (targetBounds.x < 0 || targetBounds.y < 0)) {
+        if (targetBounds && !onScreen(targetBounds)) {
           const snapKey = process.platform === 'darwin' ? 'ctrl+cmd+f' : 'super+up';
           await ctx.desktop.keyPress(snapKey);
           await new Promise(r => setTimeout(r, 300));
@@ -388,7 +408,9 @@ export function getA11yTools(): ToolDefinition[] {
         }
 
         // Click window center to physically assert focus (only when window is on-screen)
-        if (targetBounds && targetBounds.x >= 0 && targetBounds.y >= 0 && targetBounds.width > 0) {
+        if (targetBounds && onScreen(targetBounds) && targetBounds.width > 0) {
+          // The next default screenshot shows this window's monitor.
+          setWorkingPoint(targetBounds.x + targetBounds.width / 2, targetBounds.y + targetBounds.height / 2);
           const centerX = a11yToMouse(targetBounds.x + Math.round(targetBounds.width / 2), ctx);
           const centerY = a11yToMouse(targetBounds.y + Math.round(targetBounds.height / 4), ctx);
           await ctx.desktop.mouseClick(centerX, centerY);
@@ -447,9 +469,19 @@ export function getA11yTools(): ToolDefinition[] {
           uiaHits = (elements || []).map((el: any) => ({ ...el, enabled: el.enabled ?? el.isEnabled }));
         }
         if (uiaHits.length) {
-          const lines = uiaHits.slice(0, 20).map(formatElement);
+          const lines = [SCREEN_COORDS_NOTE, ...uiaHits.slice(0, 20).map(formatElement)];
           if (uiaHits.length > 20) lines.push(`... and ${uiaHits.length - 20} more`);
           return { text: lines.join('\n') };
+        }
+        // A timeout is not "nothing there" — say so, or the agent concludes
+        // a11y is useless and switches to screenshots for the rest of the session.
+        if (ctx.platform?.lastFindError === 'timeout') {
+          return {
+            text: 'accessibility search TIMED OUT on a very large window (this is not "nothing found"). ' +
+              'Narrow it with processId and/or controlType. Or: copy_all_text for the exact page text · ' +
+              'smart_click name:"…" to press a labelled control (OCR fallback) · ocr to read it.',
+            isError: true,
+          };
         }
         // UIA returned nothing. For a browser window with CDP attached, ask
         // the renderer directly — Edge/Chrome UIA stops at chrome and never
@@ -468,7 +500,8 @@ export function getA11yTools(): ToolDefinition[] {
         const searched = scopes
           .filter(s => s.processId !== undefined)
           .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` "${s.title}"` : ''}`);
-        return { text: searched.length ? `(no elements found)\nsearched: ${searched.join(', ')} — pass processId to target another window` : '(no elements found)' };
+        const where = searched.length ? `\nsearched: ${searched.join(', ')} — pass processId to target another window` : '';
+        return { text: `(no elements found)${where}\n${SPARSE_NEXT_STEP}` };
       },
     },
 

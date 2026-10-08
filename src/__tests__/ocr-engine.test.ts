@@ -15,6 +15,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 const mockExecFile = vi.hoisted(() => vi.fn());
 const mockWriteFileSync = vi.hoisted(() => vi.fn());
 const mockUnlinkSync = vi.hoisted(() => vi.fn());
+// The PowerShell bridge (Windows multi-monitor capture). Down by default, so
+// tests never start a real bridge or capture the real screen.
+const bridge = vi.hoisted(() => ({ up: false, calls: [] as Array<Record<string, unknown>>,
+  displays: [] as Array<{ index: number; primary: boolean; x: number; y: number; width: number; height: number }> }));
+vi.mock('../platform/ps-runner', () => ({
+  psRunner: {
+    run: vi.fn(async (cmd: Record<string, unknown>) => {
+      bridge.calls.push(cmd);
+      if (!bridge.up) throw new Error('bridge down');
+      if (cmd.cmd === 'list-displays') return { success: true, displays: bridge.displays };
+      if (cmd.cmd === 'capture-rect') return { success: true, png: Buffer.from('bridge-png').toString('base64'), width: cmd.width, height: cmd.height };
+      return { success: false };
+    }),
+  },
+}));
 
 // ── Mock heavy native deps before any import ──────────────────────────────────
 vi.mock('@nut-tree-fork/nut-js', () => ({
@@ -90,6 +105,7 @@ vi.mock('child_process', async () => {
 
 // ── Import the module under test ──────────────────────────────────────────────
 import { OcrEngine } from '../platform/ocr-engine';
+import { setWorkingPoint, resetWorkingPoint } from '../platform/display-target';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -121,10 +137,49 @@ describe('OcrEngine', () => {
     mockExecFile.mockReset();
     mockWriteFileSync.mockReset();
     mockUnlinkSync.mockReset();
+    bridge.up = false; bridge.calls.length = 0; bridge.displays = [];
+    resetWorkingPoint();
   });
 
   afterEach(() => {
     restorePlatform();
+  });
+
+  // ── multiple monitors (Windows) ───────────────────────────────────────────
+
+  describe('multiple monitors (Windows)', () => {
+    const LAYOUT = [
+      { index: 0, primary: false, x: -3840, y: -1323, width: 3840, height: 2400 },  // scaled laptop, left of primary
+      { index: 1, primary: false, x: 1920, y: -304, width: 1080, height: 1920 },    // portrait, right of primary
+      { index: 2, primary: true, x: 0, y: 0, width: 1920, height: 1080 },
+    ];
+    const ONE = [{ text: 'Save', x: 10, y: 20, width: 40, height: 12, confidence: 1, line: 0 }];
+
+    it('reads the monitor clawdcursor works on, in virtual-desktop coordinates', async () => {
+      setPlatform('win32'); bridge.up = true; bridge.displays = LAYOUT;
+      setWorkingPoint(-2000, -500);   // on the laptop monitor
+      mockExecFile.mockReturnValue({ stdout: sampleOcrJson(ONE) });
+      const r = await new OcrEngine().recognizeScreen();
+      expect(bridge.calls.find(c => c.cmd === 'capture-rect')).toMatchObject({ x: -3840, y: -1323, width: 3840, height: 2400 });
+      expect(mockWriteFileSync.mock.calls[0][1]).toEqual(Buffer.from('bridge-png'));
+      expect(r.elements[0]).toMatchObject({ x: -3830, y: -1303 });
+    });
+
+    it('primary (or no working point): the nut-js grab, coordinates unchanged', async () => {
+      setPlatform('win32'); bridge.up = true; bridge.displays = LAYOUT;
+      mockExecFile.mockReturnValue({ stdout: sampleOcrJson(ONE) });
+      const r = await new OcrEngine().recognizeScreen();
+      expect(bridge.calls.some(c => c.cmd === 'capture-rect')).toBe(false);
+      expect(r.elements[0]).toMatchObject({ x: 10, y: 20 });
+    });
+
+    it('a region on any monitor is captured exactly and offset back', async () => {
+      setPlatform('win32'); bridge.up = true;
+      mockExecFile.mockReturnValue({ stdout: sampleOcrJson(ONE) });
+      const r = await new OcrEngine().recognizeRegion(2000, -200, 300, 100);
+      expect(bridge.calls.find(c => c.cmd === 'capture-rect')).toMatchObject({ x: 2000, y: -200, width: 300, height: 100 });
+      expect(r.elements[0]).toMatchObject({ x: 2010, y: -180 });
+    });
   });
 
   // ── isAvailable ───────────────────────────────────────────────────────────

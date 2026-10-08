@@ -22,6 +22,9 @@ import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, grimGrab } from './wayland-screen';
+import { psRunner } from './ps-runner';
+import { pickDisplay } from './display-target';
+import type { Display } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -55,6 +58,31 @@ export interface OcrResult {
 }
 
 const EMPTY_RESULT: OcrResult = Object.freeze({ elements: [], fullText: '', durationMs: 0 });
+
+/**
+ * Windows: PNG of a PHYSICAL virtual-desktop rect via the bridge, on any
+ * monitor. nut-js grabs the primary display only, so OCR of the monitor
+ * clawdcursor is working on read the wrong screen. With no rect: the working
+ * monitor when it is not the primary. null → use the nut-js grab.
+ */
+async function bridgeCapture(rect?: { x: number; y: number; width: number; height: number }): Promise<{ png: Buffer; x: number; y: number } | null> {
+  if (process.platform !== 'win32') return null;
+  try {
+    let r = rect;
+    if (!r) {
+      const list = await psRunner.run({ cmd: 'list-displays' }) as { displays?: Array<{ index: number; primary: boolean; x: number; y: number; width: number; height: number }> };
+      const displays = (list?.displays ?? []).map(d => ({ index: d.index, primary: d.primary, bounds: { x: d.x, y: d.y, width: d.width, height: d.height } })) as Display[];
+      const target = pickDisplay(displays);
+      if (!target || target.primary) return null;
+      r = target.bounds;
+    }
+    const x = Math.round(r.x), y = Math.round(r.y);
+    const c = await psRunner.run({ cmd: 'capture-rect', x, y, width: Math.max(1, Math.round(r.width)), height: Math.max(1, Math.round(r.height)) }) as { success?: boolean; png?: string };
+    return c?.success && c.png ? { png: Buffer.from(c.png, 'base64'), x, y } : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * True when the failure means the OCR engine itself is absent: the runner
@@ -150,23 +178,32 @@ export class OcrEngine {
 
     const start = Date.now();
     try {
-      // Capture full-resolution screenshot via nut-js (grim on Wayland)
-      const img = await this.grab();
-      if (!this.cachedResult) {
-        // Log image dimensions on first capture to diagnose coordinate space issues
-        console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
+      // The working monitor via the bridge (Windows, non-primary); otherwise a
+      // full-resolution nut-js grab (grim on Wayland) of the primary.
+      const shot = await bridgeCapture();
+      let pngBuffer: Buffer;
+      if (shot) {
+        pngBuffer = shot.png;
+      } else {
+        const img = await this.grab();
+        if (!this.cachedResult) {
+          // Log image dimensions on first capture to diagnose coordinate space issues
+          console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
+        }
+        pngBuffer = await sharpFromGrab(img).png().toBuffer();
+        // Release the raw RGBA buffer immediately after processing
+        (img as any).data = null;
       }
-      const pngBuffer = await sharpFromGrab(img).png().toBuffer();
-      // Release the raw RGBA buffer immediately after processing
-      (img as any).data = null;
 
       // Save to temp file — OS OCR reads from disk
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
-      fs.writeFileSync(tmpPath, pngBuffer);
+      fs.writeFileSync(tmpPath, pngBuffer, { mode: 0o600, flag: 'wx' });
 
       try {
         const result = await this.runOcr(tmpPath);
         result.durationMs = Date.now() - start;
+        // Back to virtual-desktop coordinates when another monitor was read.
+        if (shot) for (const el of result.elements) { el.x += shot.x; el.y += shot.y; }
 
         // Cache
         this.cachedResult = result;
@@ -200,6 +237,21 @@ export class OcrEngine {
 
     const start = Date.now();
     try {
+      // Windows: the exact rect on whichever monitor it is on.
+      const shot = await bridgeCapture({ x, y, width: w, height: h });
+      if (shot) {
+        const tmp = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
+        fs.writeFileSync(tmp, shot.png, { mode: 0o600, flag: 'wx' });
+        try {
+          const result = await this.runOcr(tmp);
+          result.durationMs = Date.now() - start;
+          for (const el of result.elements) { el.x += shot.x; el.y += shot.y; }
+          return result;
+        } finally {
+          try { fs.unlinkSync(tmp); } catch { /* non-fatal */ }
+        }
+      }
+
       const img = await this.grab();
 
       // Clamp to screen bounds
@@ -216,7 +268,7 @@ export class OcrEngine {
       (img as any).data = null;
 
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
-      fs.writeFileSync(tmpPath, pngBuffer);
+      fs.writeFileSync(tmpPath, pngBuffer, { mode: 0o600, flag: 'wx' });
 
       try {
         const result = await this.runOcr(tmpPath);

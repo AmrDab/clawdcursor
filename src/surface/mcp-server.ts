@@ -130,13 +130,23 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '([perceive-image]) only as a last resort when both tree and OCR fail.'
     : // Stdio MCP (editor integration) — no pipeline; you drive the tools.
       'clawdcursor is a local desktop-automation tool layer. You drive the tools ' +
-      'yourself. To minimize tokens, follow the cost-class prefix on each tool — ' +
-      '[act] < [inspect] < [perceive-text] < [perceive-image]. ' +
-      'For perception always escalate in this order: ' +
-      '(1) read the accessibility tree ([perceive-text], cheapest — start here); ' +
-      '(2) use OCR ([perceive-text]) when the tree is empty or sparse; ' +
-      '(3) capture a screenshot ([perceive-image]) only as a last resort when both fail. ' +
-      'Prefer named-target actions (by a11y name) over pixel coordinates. ' +
+      'yourself. ' +
+      (compact
+        // Compact tools carry no per-tool cost prefix, so name the actions.
+        ? 'Perceive BLIND FIRST, in this order: (1) `accessibility read_tree` / `find` / ' +
+          '`compile_ui` — element names + screen positions, cheapest, start here; ' +
+          '(2) `system copy_all_text` for the exact text of a page or document, `system ocr` ' +
+          'when the tree is empty; (3) `computer screenshot` only as a last resort. ' +
+          'ACT BY NAME: `accessibility invoke` / `smart_click` / `set_value` / `select` — ' +
+          'coordinate clicks are the fallback. Accessibility positions are SCREEN ' +
+          'coordinates: click them with `computer click` + space:"screen". '
+        : 'To minimize tokens, follow the cost-class prefix on each tool — ' +
+          '[act] < [inspect] < [perceive-text] < [perceive-image]. ' +
+          'For perception always escalate in this order: ' +
+          '(1) read the accessibility tree ([perceive-text], cheapest — start here); ' +
+          '(2) use OCR ([perceive-text]) when the tree is empty or sparse; ' +
+          '(3) capture a screenshot ([perceive-image]) only as a last resort when both fail. ' +
+          'Prefer named-target actions (by a11y name) over pixel coordinates. ') +
       'For fully autonomous, low-cost execution, start the daemon (`clawdcursor agent`) ' +
       'and use the `task` tool — it runs a local cheap-model pipeline instead of your model. ' +
       '`task` waits up to 45s; longer tasks return {status:"running"} and CONTINUE in the ' +

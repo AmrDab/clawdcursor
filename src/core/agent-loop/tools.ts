@@ -21,7 +21,7 @@
 
 import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
-import { imageScale, scaleCoord, screenCenter } from './coord-scale';
+import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground } from './focus-guard';
 import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
 import { resolveAlias } from '../router/aliases';
@@ -29,6 +29,8 @@ import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../pl
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { selectOption } from '../../platform/select-option';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { getBrowserProcessNames } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
@@ -139,14 +141,21 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const pid = typeof args.processId === 'number' ? args.processId : undefined;
         const tree = await ctx.platform.getUiTree(pid);
+        // Never a dead end: a thin tree (or a browser, whose page content UIA
+        // often omits) says what to do next, in the caller's own tool names.
+        const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
         if (tree.length === 0) {
-          return { success: true, text: '(empty a11y tree — app may be custom-canvas)' };
+          return { success: true, text: `(empty a11y tree — app may be custom-canvas)\n${nextStep}` };
         }
+        const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
+        const isBrowser = !!active && getBrowserProcessNames().includes(String(active.processName ?? '').toLowerCase());
+        const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
         const lines = tree.slice(0, 60).map(el =>
           `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
         );
         const more = tree.length > 60 ? `\n… +${tree.length - 60} more` : '';
-        return { success: true, text: `Fresh a11y (${tree.length} els):\n${wrapUntrustedScreenContent(lines.join('\n') + more)}` };
+        const hint = tree.length < 5 || isBrowser ? `\n${nextStep}` : '';
+        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}:\n${wrapUntrustedScreenContent(lines.join('\n') + more)}${hint}` };
       },
     },
 
@@ -591,8 +600,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // vision turns by the agent loop); fall back to 'screen'.
         const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
         const scale = space === 'image' ? imageScale(ctx) : 1;
-        const x = scaleCoord(ix, scale);
-        const y = scaleCoord(iy, scale);
+        // Image coords go through the last frame (any monitor); screen coords pass through.
+        const { x, y } = space === 'image' ? mapImagePoint(ix, iy, scale) : { x: scaleCoord(ix, 1), y: scaleCoord(iy, 1) };
         const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
         const raised = await ensureTargetForeground(ctx, fg0);
         const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
@@ -640,7 +649,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
           if (!Array.isArray(pts) || pts.length < 2 || !pts.every(p => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))) {
             return { success: false, isError: true, text: 'drag: `path` needs at least 2 {x,y} points with finite coords' };
           }
-          const scaled = pts.map(p => ({ x: scaleCoord(Number(p.x), scale), y: scaleCoord(Number(p.y), scale) }));
+          const scaled = pts.map(p => space === 'image'
+            ? mapImagePoint(Number(p.x), Number(p.y), scale)
+            : { x: scaleCoord(Number(p.x), 1), y: scaleCoord(Number(p.y), 1) });
           const fg0p = await ctx.platform.getActiveWindow().catch(() => null);
           const raisedP = await ensureTargetForeground(ctx, fg0p);
           const beforeP = raisedP ? await ctx.platform.getActiveWindow().catch(() => null) : fg0p;
@@ -664,8 +675,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (![start.x, start.y, end.x, end.y].every(Number.isFinite)) {
           return { success: false, isError: true, text: `drag: startX/startY/endX/endY must be finite numbers (or pass \`path\`), got ${JSON.stringify(args)}` };
         }
-        const sx = scaleCoord(start.x, scale), sy = scaleCoord(start.y, scale);
-        const ex = scaleCoord(end.x, scale), ey = scaleCoord(end.y, scale);
+        const toDrv = (px: number, py: number) => space === 'image' ? mapImagePoint(px, py, scale) : { x: scaleCoord(px, 1), y: scaleCoord(py, 1) };
+        const { x: sx, y: sy } = toDrv(start.x, start.y);
+        const { x: ex, y: ey } = toDrv(end.x, end.y);
         const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
         const raised = await ensureTargetForeground(ctx, fg0);
         const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
@@ -697,7 +709,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         }
         const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
         const scale = space === 'image' ? imageScale(ctx) : 1;
-        const x = scaleCoord(c.x, scale), y = scaleCoord(c.y, scale);
+        const { x, y } = space === 'image' ? mapImagePoint(c.x, c.y, scale) : { x: scaleCoord(c.x, 1), y: scaleCoord(c.y, 1) };
         await ctx.platform.mouseMove(x, y);
         return { success: true, text: `Cursor moved (hover) to ${space} (${c.x},${c.y}) → screen (${x},${y}) [×${scale}]` };
       },
@@ -734,7 +746,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
         let y = center.y;
         if (hasXY) {
           const c = coerceCoord(args.x, args.y);
-          if (Number.isFinite(c.x) && Number.isFinite(c.y)) { x = scaleCoord(c.x, scale); y = scaleCoord(c.y, scale); }
+          if (Number.isFinite(c.x) && Number.isFinite(c.y)) {
+            const p = space === 'image' ? mapImagePoint(c.x, c.y, scale) : { x: scaleCoord(c.x, 1), y: scaleCoord(c.y, 1) };
+            x = p.x; y = p.y;
+          }
         }
         await ctx.platform.mouseScroll(x, y, dir, amount);
         await sleep(150);
@@ -1018,12 +1033,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: true,
       async execute(args, ctx) {
         const q = buildWinQuery(args);
-        const sf = args.space === 'image' ? imageScale(ctx) : 1;
-        const s = (v: unknown) => (typeof v === 'number' ? Math.round(v * sf) : undefined);
-        const x = s(args.x);
-        const y = s(args.y);
-        const width = s(args.width);
-        const height = s(args.height);
+        const img = args.space === 'image';
+        const sf = img ? imageScale(ctx) : 1;
+        // Position = a point (frame origin + scale); size = a length (scale only).
+        const x = typeof args.x === 'number' ? (img ? mapImagePoint(args.x, 0, sf).x : Math.round(args.x)) : undefined;
+        const y = typeof args.y === 'number' ? (img ? mapImagePoint(0, args.y, sf).y : Math.round(args.y)) : undefined;
+        const width = typeof args.width === 'number' ? (img ? mapImageLength(args.width, sf) : Math.round(args.width)) : undefined;
+        const height = typeof args.height === 'number' ? (img ? mapImageLength(args.height, sf) : Math.round(args.height)) : undefined;
         const ok = await ctx.platform.setWindowBounds({ x, y, width, height }, q);
         return { success: ok, text: ok ? `Resized window (x=${x ?? '-'}, y=${y ?? '-'}, w=${width ?? '-'}, h=${height ?? '-'}).` : 'Resize failed.' };
       },
@@ -1510,6 +1526,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: false,
       async execute(_args, ctx) {
         const shot = await ctx.platform.screenshot({ maxWidth: 1280 });
+        setLastFrame(null); // primary display: plain mouse scale
         ctx.screenshotsCaptured.n += 1;
         return {
           success: true,

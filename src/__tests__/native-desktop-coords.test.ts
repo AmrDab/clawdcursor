@@ -248,46 +248,51 @@ describe('native-desktop.ts source guards', () => {
     expect(body).toContain('Math.round');
   });
 
-  it('mouseClick routes through physicalToMouse', () => {
+  it('mouseClick routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseClick(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseDoubleClick routes through physicalToMouse', () => {
+  it('mouseDoubleClick routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseDoubleClick(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseRightClick routes through physicalToMouse', () => {
+  it('mouseRightClick routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseRightClick(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseMove routes through physicalToMouse', () => {
+  it('mouseMove routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseMove(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseScroll routes through physicalToMouse', () => {
+  it('mouseScroll routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseScroll(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseDown routes through physicalToMouse', () => {
+  it('mouseDown routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseDown(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseUp routes through physicalToMouse', () => {
+  it('mouseUp routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseUp(');
-    expect(body).toContain('physicalToMouse');
+    expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseDrag routes through physicalToMouse (both endpoints)', () => {
+  it('mouseDrag places every waypoint through placePointer', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseDrag(');
-    // drag converts both start and end points
-    const count = (body.match(/physicalToMouse/g) || []).length;
+    const count = (body.match(/this\.placePointer\(/g) || []).length;
     expect(count).toBeGreaterThanOrEqual(2);
+  });
+
+  it('placePointer: bridge move-cursor on Windows (any monitor), physicalToMouse fallback', () => {
+    const body = extractMethodBody(nativeDesktopSrc, 'private async placePointer(');
+    expect(body).toContain("cmd: 'move-cursor'");
+    expect(body).toContain('physicalToMouse');
   });
 
   it('dpiRatio is detected via System.Windows.Forms on Windows', () => {

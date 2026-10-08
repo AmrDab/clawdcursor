@@ -20,6 +20,7 @@
  */
 
 import type { ToolDefinition } from './types';
+import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
 import { windowTextIncludes } from './window-text';
@@ -86,8 +87,7 @@ export function getExtraTools(): ToolDefinition[] {
       handler: async ({ dx, dy }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_move_relative');
-        const sf = ctx.getMouseScaleFactor();
-        await ctx.platform.mouseMoveRelative(Math.round(dx * sf), Math.round(dy * sf));
+        await ctx.platform.mouseMoveRelative(toMouseLength(ctx, dx), toMouseLength(ctx, dy));
         return { text: `Cursor moved by (${dx}, ${dy}) image-space` };
       },
     },
@@ -106,8 +106,8 @@ export function getExtraTools(): ToolDefinition[] {
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_middle_click');
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.platform.mouseClick(Math.round(x * sf), Math.round(y * sf), { button: 'middle' });
+        const p = toMouse(ctx, x, y, space);
+        await ctx.platform.mouseClick(p.x, p.y, { button: 'middle' });
         return { text: `Middle-clicked at (${x}, ${y})` };
       },
     },
@@ -126,8 +126,7 @@ export function getExtraTools(): ToolDefinition[] {
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_triple_click');
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        const px = Math.round(x * sf), py = Math.round(y * sf);
+        const { x: px, y: py } = toMouse(ctx, x, y, space);
         await ctx.platform.mouseClick(px, py, { button: 'left', count: 3 });
         // #121: Win11 dialog edit fields (Save As filename box) register the
         // triple-click but don't select-all — subsequent typing APPENDS at the
@@ -218,10 +217,10 @@ export function getExtraTools(): ToolDefinition[] {
       handler: async ({ x, y, direction, amount, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_scroll_horizontal');
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
+        const sp = toMouse(ctx, x, y, space);
         const ticks = amount ?? 3;
         await ctx.platform.mouseScroll(
-          Math.round(x * sf), Math.round(y * sf),
+          sp.x, sp.y,
           direction as 'left' | 'right',
           ticks,
         );
@@ -254,8 +253,7 @@ export function getExtraTools(): ToolDefinition[] {
         if (!Array.isArray(points) || points.length < 2) {
           return { text: 'mouse_drag_stepped: need at least 2 points', isError: true };
         }
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        const scaled = points.map(p => ({ x: Math.round(p.x * sf), y: Math.round(p.y * sf) }));
+        const scaled = points.map(p => toMouse(ctx, p.x, p.y, space));
 
         await ctx.platform.mouseMove(scaled[0].x, scaled[0].y);
         await ctx.platform.mouseDown('left');
@@ -440,9 +438,16 @@ export function getExtraTools(): ToolDefinition[] {
         const query = processName || processId !== undefined || title
           ? { processName, processId, title }
           : undefined;
-        const sf = space === 'image' ? ctx.getMouseScaleFactor() : 1;
-        const s = (v: unknown) => (typeof v === 'number' ? Math.round(v * sf) : undefined);
-        const ok = await ctx.platform.setWindowBounds({ x: s(x), y: s(y), width: s(width), height: s(height) }, query);
+        const img = space === 'image';
+        // Position = a point (frame origin + scale); size = a length (scale only).
+        const pos = typeof x === 'number' && typeof y === 'number'
+          ? (img ? toMouse(ctx, x, y) : { x: Math.round(x), y: Math.round(y) }) : null;
+        const len = (v: unknown) => (typeof v !== 'number' ? undefined : img ? toMouseLength(ctx, v) : Math.round(v));
+        const ok = await ctx.platform.setWindowBounds({
+          x: pos ? pos.x : (typeof x === 'number' ? (img ? toMouse(ctx, x, 0).x : Math.round(x)) : undefined),
+          y: pos ? pos.y : (typeof y === 'number' ? (img ? toMouse(ctx, 0, y).y : Math.round(y)) : undefined),
+          width: len(width), height: len(height),
+        }, query);
         return {
           text: ok
             ? `Window bounds set: x=${x ?? '-'}, y=${y ?? '-'}, w=${width ?? '-'}, h=${height ?? '-'}`

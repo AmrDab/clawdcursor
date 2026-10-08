@@ -7,6 +7,7 @@
 
 import { OcrEngine } from '../platform/ocr-engine';
 import type { ToolDefinition } from './types';
+import { ocrPointToClickPoint } from './smart';
 
 // Shared OcrEngine instance
 let ocrEngine: OcrEngine | null = null;
@@ -21,7 +22,7 @@ export function getOcrTools(): ToolDefinition[] {
     {
       name: 'ocr_read_screen',
       description:
-        'Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are in real screen pixels.',
+        'Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:"screen".',
       parameters: {},
       category: 'perception',
       compactGroup: 'system',
@@ -50,18 +51,26 @@ export function getOcrTools(): ToolDefinition[] {
           };
         }
 
-        // OCR coords are physical screen px; screenshot (image) px = physical / ssf.
-        const ssf = ctx.getScreenshotScaleFactor();
+        // Screen coordinates on every OS (what space:"screen" clicks take). OCR
+        // reads physical pixels; on macOS a click takes logical points (Retina 2x).
+        const ratio = ctx.desktop.getDpiRatio?.() || 1;
+        const elements = result.elements.map(el => {
+          const p = ocrPointToClickPoint(el.x, el.y, ratio, process.platform);
+          const size = ocrPointToClickPoint(el.width, el.height, ratio, process.platform);
+          return { ...el, x: p.x, y: p.y, width: size.x, height: size.y };
+        });
 
         return {
           text: JSON.stringify({
-            elementCount: result.elements.length,
-            elements: result.elements,
+            elementCount: elements.length,
+            elements,
             fullText: result.fullText,
             durationMs: result.durationMs,
-            coordinateSystem: 'real_screen_pixels',
-            toMouseClick: `Divide coordinates by ${ssf.toFixed(4)} to convert to mouse_click image-space. Or better: use smart_click("element text") which handles conversion automatically.`,
-            hint: 'Coordinates are in real screen pixels. Prefer smart_click(target) over manual coordinate math. If you must use mouse_click, divide OCR coordinates by the factor above.',
+            coordinateSystem: 'screen',
+            // Screen coordinates are exact on every monitor; dividing by a scale
+            // factor ignores the origin of a non-primary monitor.
+            toMouseClick: 'Click these coordinates as-is with space:"screen". Or better: smart_click("element text").',
+            hint: 'Coordinates are screen coordinates (any monitor, any OS). Prefer smart_click(target); otherwise pass the coordinates with space:"screen" — no conversion.',
           }, null, 2),
         };
       },

@@ -598,7 +598,12 @@
       "category": "perception",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "display": {
+            "type": "number",
+            "description": "Monitor to capture (index from window list_displays). Default: the monitor clawdcursor last worked on, else the primary."
+          }
+        }
       },
       "costClass": "perceive-image"
     },
@@ -1680,7 +1685,7 @@
     },
     {
       "name": "ocr_read_screen",
-      "description": "Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are in real screen pixels.",
+      "description": "Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:\"screen\".",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -2098,7 +2103,7 @@
     },
     {
       "name": "smart_click",
-      "description": "Click a UI element by name with automatic fallback. OCR-first: scans screen text and clicks by coordinates. Also tries a11y invoke (in parallel) and CDP as fallbacks. No screenshot or coordinate math needed — just provide the element text.",
+      "description": "Click a UI element by its visible name — works even where the accessibility tree is empty (web pages, canvas apps): an a11y invoke and an OCR text match run in parallel and the first to succeed wins; CDP is the last fallback. No screenshot or coordinate math needed — just the element text. For an element the tree already names, `invoke` is the most direct.",
       "category": "orchestration",
       "parameters": {
         "type": "object",

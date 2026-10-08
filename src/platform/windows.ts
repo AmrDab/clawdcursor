@@ -46,6 +46,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { llmSize } from '../core/agent-loop/coord-scale';
+import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 
 const execFileAsync = promisify(execFile);
@@ -95,6 +96,8 @@ export class WindowsAdapter implements PlatformAdapter {
    *  scope for an unscoped findElements when the live foreground is empty. */
   private lastFocused: { processId: number; processName?: string; title?: string } | null = null;
   lastFindScope: PlatformAdapter['lastFindScope'] = null;
+  lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastTreeTruncated = false;
 
   // Cached physical/logical ratio, populated by getScreenSize(). nut-js mouse
   // input and the (DPI-unaware) WindowFromPoint bridge both live in LOGICAL
@@ -196,6 +199,28 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async listDisplays(): Promise<Display[]> {
+    // Per-monitor truth first: the bridge enumerates monitors under
+    // per-monitor-v2 awareness, so bounds are PHYSICAL virtual-desktop pixels
+    // (the space clicks use) and each monitor reports its OWN scaling — any
+    // layout, negative origins included. Primary is index 0.
+    try {
+      const r = await psRunner.run({ cmd: 'list-displays' }) as {
+        success?: boolean;
+        displays?: Array<{ name: string; primary: boolean; x: number; y: number; width: number; height: number; scale: number }>;
+      };
+      if (r?.success && r.displays?.length) {
+        return [...r.displays]
+          .sort((a, b) => Number(b.primary) - Number(a.primary))
+          .map((d, i) => ({
+            index: i,
+            label: d.name || `Display ${i + 1}`,
+            primary: !!d.primary,
+            bounds: { x: d.x, y: d.y, width: d.width, height: d.height },
+            physicalSize: { width: d.width, height: d.height },
+            dpiRatio: d.scale || 1,
+          }));
+      }
+    } catch { /* fall back to the Forms enumeration below */ }
     // System.Windows.Forms.Screen.AllScreens enumerates every connected
     // display with bounds + primary flag. We call it via the PS UIA path
     // we already have warmed up.
@@ -253,10 +278,28 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
-  async screenshot(opts?: { maxWidth?: number; displayIndex?: number }): Promise<ScreenshotResult> {
-    // displayIndex is plumbed through but nut-js's screen.grab() always
-    // captures ALL displays combined. For index selection on Windows,
-    // we crop to the target display's bounds after the grab.
+  async screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult> {
+    // A region, or any display other than the primary: nut-js can only grab
+    // the PRIMARY display, so capture through the bridge (per-monitor-v2,
+    // physical pixels — any monitor, any position, any scaling).
+    let rect = opts?.region ?? null;
+    if (!rect && opts?.displayIndex !== undefined) {
+      const target = (await this.listDisplays()).find(d => d.index === opts.displayIndex);
+      if (target && !target.primary) rect = target.bounds;
+    }
+    if (rect) {
+      const r = await psRunner.run({ cmd: 'capture-rect', x: Math.round(rect.x), y: Math.round(rect.y),
+        width: Math.max(1, Math.round(rect.width)), height: Math.max(1, Math.round(rect.height)) }) as { success?: boolean; png?: string; width: number; height: number };
+      if (!r?.success || !r.png) throw new Error('screenshot: capturing that area failed');
+      let pipe = sharp(Buffer.from(r.png, 'base64'));
+      let width = r.width, height = r.height, scaleFactor = 1;
+      const fit = opts?.maxWidth ? llmSize(r.width, r.height, opts.maxWidth) : null;
+      if (fit && fit.scale > 1) {
+        scaleFactor = fit.scale; width = fit.width; height = fit.height;
+        pipe = pipe.resize(fit.width, fit.height, { fit: 'fill', kernel: 'lanczos3' });
+      }
+      return { buffer: await pipe.png().toBuffer(), width, height, scaleFactor, origin: { x: Math.round(rect.x), y: Math.round(rect.y) } };
+    }
     const img = await screen.grab();
     let srcWidth = img.width;
     let srcHeight = img.height;
@@ -266,26 +309,7 @@ export class WindowsAdapter implements PlatformAdapter {
     // what sharp() returns, so this is version-agnostic.
     let pipeline: ReturnType<typeof sharp>;
 
-    if (opts?.displayIndex !== undefined && opts.displayIndex > 0) {
-      const displays = await this.listDisplays();
-      const target = displays[opts.displayIndex];
-      if (target) {
-        // Translate logical bounds into the physical image (nut-js returns
-        // hardware pixels; multiply by dpiRatio).
-        const r = target.dpiRatio || 1;
-        const left = Math.max(0, Math.round(target.bounds.x * r));
-        const top = Math.max(0, Math.round(target.bounds.y * r));
-        const width = Math.max(1, Math.min(Math.round(target.bounds.width * r), img.width - left));
-        const height = Math.max(1, Math.min(Math.round(target.bounds.height * r), img.height - top));
-        pipeline = sharpFromGrab(img).extract({ left, top, width, height });
-        srcWidth = width;
-        srcHeight = height;
-      } else {
-        pipeline = sharpFromGrab(img);
-      }
-    } else {
-      pipeline = sharpFromGrab(img);
-    }
+    pipeline = sharpFromGrab(img);
 
     let width = srcWidth;
     let height = srcHeight;
@@ -343,16 +367,20 @@ export class WindowsAdapter implements PlatformAdapter {
       // Try to find the same window in the full list so we get bounds/minimized.
       const all = await this.listWindows();
       const match = all.find(w => w.processId === fg.processId);
-      if (match) return match;
+      const className = typeof fg.className === 'string' && fg.className ? fg.className : undefined;
+      if (match) return className ? { ...match, className } : match;
 
-      return this.normalizeWindow({
-        title: fg.title ?? '',
-        processName: fg.processName ?? '',
-        processId: fg.processId ?? 0,
-        handle: fg.handle,
-        bounds: { x: 0, y: 0, width: 0, height: 0 },
-        isMinimized: false,
-      });
+      return {
+        ...this.normalizeWindow({
+          title: fg.title ?? '',
+          processName: fg.processName ?? '',
+          processId: fg.processId ?? 0,
+          handle: fg.handle,
+          bounds: { x: 0, y: 0, width: 0, height: 0 },
+          isMinimized: false,
+        }),
+        ...(className ? { className } : {}),
+      };
     } catch {
       return null;
     }
@@ -391,6 +419,10 @@ export class WindowsAdapter implements PlatformAdapter {
       if (focusedPid !== undefined) {
         this.lastFocused = { processId: focusedPid, processName: query.processName, title: typeof result.title === 'string' ? result.title : title };
       }
+      // The next default screenshot shows the monitor this window is on (a
+      // launch lands here too, via foregroundLaunched).
+      const b = result.bounds;
+      if (b && b.width > 0 && b.height > 0) setWorkingPoint(b.x + b.width / 2, b.y + b.height / 2);
       return true;
     } catch {
       return false;
@@ -629,6 +661,7 @@ export class WindowsAdapter implements PlatformAdapter {
         maxDepth: 8,
         ...(pid !== undefined ? { focusedProcessId: pid } : {}),
       }) as any;
+      this.lastTreeTruncated = !!result?.truncated;
       const tree = result?.uiTree;
       if (!tree) return [];
       const nodes = Array.isArray(tree) ? tree : [tree];
@@ -668,6 +701,7 @@ export class WindowsAdapter implements PlatformAdapter {
     }
     if (scopes.length === 0) scopes.push({});
     this.lastFindScope = scopes;
+    this.lastFindError = null;
 
     for (const scope of scopes) {
       try {
@@ -679,7 +713,8 @@ export class WindowsAdapter implements PlatformAdapter {
         }) as any;
         const raw = Array.isArray(result) ? result : [];
         if (raw.length > 0) return raw.map(this.normalizeElement);
-      } catch {
+      } catch (err) {
+        this.lastFindError = /timeout/i.test(String((err as Error)?.message ?? err)) ? 'timeout' : 'error';
         return [];
       }
     }
@@ -810,9 +845,28 @@ export class WindowsAdapter implements PlatformAdapter {
    * foreground window, call SetForegroundWindow to bring it forward before
    * the click lands. Non-fatal — if the PS call fails we proceed anyway.
    */
+  /**
+   * Put the pointer at a PHYSICAL virtual-desktop point — any monitor, any
+   * position (negative origins included), any per-monitor scaling. The bridge
+   * does it under per-monitor-v2 awareness. nut-js normalises absolute moves
+   * to the PRIMARY display only, so it is just the fallback (primary only).
+   */
+  private async placeCursor(x: number, y: number): Promise<void> {
+    const px = Math.round(x), py = Math.round(y);
+    try {
+      const r = await psRunner.run({ cmd: 'move-cursor', x: px, y: py }) as { success?: boolean };
+      if (r?.success) { this.lastCursor = { x: px, y: py }; setWorkingPoint(px, py); return; }
+    } catch { /* bridge unavailable — fall back below */ }
+    const p = this.physicalToLogical(px, py);
+    await mouse.setPosition(new Point(p.x, p.y));
+    this.lastCursor = { x: px, y: py };
+    setWorkingPoint(px, py);
+  }
+
   private async ensureForegroundAtPoint(x: number, y: number): Promise<FocusActivation | undefined> {
     try {
-      const r = await psRunner.run({ cmd: 'activate-at-point', x, y }) as {
+      // physical: the point is a physical virtual-desktop pixel (any monitor).
+      const r = await psRunner.run({ cmd: 'activate-at-point', x: Math.round(x), y: Math.round(y), physical: true }) as {
         activated?: boolean; reason?: string; title?: string; processName?: string; action?: string;
       };
       // 'noop' reasons mean nothing to promote (no window, or already foreground)
@@ -849,17 +903,15 @@ export class WindowsAdapter implements PlatformAdapter {
     // Convert ONCE per space from the same physical point — the foreground
     // check (DPI-unaware bridge) and the cursor move (nut-js) must agree or
     // activate-at-point promotes a different window than the click lands on.
-    const p = this.physicalToLogical(x, y);
-    const bridge = this.physicalToLogical(x, y, this.dpiRatio);
     // Bring the window at the target to the foreground before sending any
     // button events. Without this, a click intended for a Save As dialog
     // can land on a background Explorer window when the dialog lost focus
     // between the screenshot and the click (z-order / activation race).
     // The activation verdict flows back to the caller so a FAILED raise
     // (foreground-lock) is visible instead of a silent wrong-window click.
-    const activation = await this.ensureForegroundAtPoint(bridge.x, bridge.y);
-    await mouse.setPosition(new Point(p.x, p.y));
-    this.lastCursor = { x: p.x, y: p.y };
+    // Both the foreground check and the move use the same PHYSICAL point.
+    const activation = await this.ensureForegroundAtPoint(x, y);
+    await this.placeCursor(x, y);
     await this.delay(40);
     const count = opts?.count ?? 1;
     const btn = this.toNutButton(opts?.button);
@@ -880,9 +932,7 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async mouseMove(x: number, y: number): Promise<void> {
-    const p = this.physicalToLogical(x, y);
-    await mouse.setPosition(new Point(p.x, p.y));
-    this.lastCursor = { x: p.x, y: p.y };
+    await this.placeCursor(x, y);
   }
 
   async mouseMoveRelative(rawDx: number, rawDy: number): Promise<void> {
@@ -890,52 +940,51 @@ export class WindowsAdapter implements PlatformAdapter {
     // image deltas by the mouse factor), but getPosition()/setPosition() live
     // in the driver's space — divide by the same ratio as absolute moves, or a
     // 100-px move overshoots to 225 px on a 225% display.
+    // Physical path first (any monitor): read the cursor in physical px, add
+    // the physical deltas, place it.
+    try {
+      const cur = await psRunner.run({ cmd: 'get-cursor' }) as { success?: boolean; x: number; y: number };
+      if (cur?.success) { await this.placeCursor(cur.x + rawDx, cur.y + rawDy); return; }
+    } catch { /* fall back to the driver-space path below */ }
     const dx = rawDx / this.mouseRatio;
     const dy = rawDy / this.mouseRatio;
     // nut-js `getPosition()` works reliably on Windows — prefer that over
     // the cache. Fall back to the cache if the query fails.
+    // (lastCursor is PHYSICAL — set by placeCursor.)
     try {
       const pos = await mouse.getPosition();
       const nx = Math.round(pos.x + dx);
       const ny = Math.round(pos.y + dy);
       await mouse.setPosition(new Point(nx, ny));
-      this.lastCursor = { x: nx, y: ny };
+      this.lastCursor = { x: Math.round(nx * this.mouseRatio), y: Math.round(ny * this.mouseRatio) };
     } catch {
       if (this.lastCursor) {
-        const nx = Math.round(this.lastCursor.x + dx);
-        const ny = Math.round(this.lastCursor.y + dy);
-        await mouse.setPosition(new Point(nx, ny));
-        this.lastCursor = { x: nx, y: ny };
+        const p = this.physicalToLogical(this.lastCursor.x + rawDx, this.lastCursor.y + rawDy);
+        await mouse.setPosition(new Point(p.x, p.y));
+        this.lastCursor = { x: Math.round(this.lastCursor.x + rawDx), y: Math.round(this.lastCursor.y + rawDy) };
       }
     }
   }
 
   async mouseDrag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
-    // Convert both endpoints to logical FIRST, then interpolate in logical
-    // space so every waypoint is correct (not just the endpoints).
-    const a = this.physicalToLogical(x1, y1);
-    const b = this.physicalToLogical(x2, y2);
-    await mouse.setPosition(new Point(a.x, a.y));
-    this.lastCursor = { x: a.x, y: a.y };
+    // Interpolate in PHYSICAL space so every waypoint is exact on any monitor.
+    const a = { x: x1, y: y1 };
+    const b = { x: x2, y: y2 };
+    await this.placeCursor(a.x, a.y);
     await this.delay(50);
     await mouse.pressButton(Button.LEFT);
     await this.delay(80);
     const steps = Math.max(8, Math.floor(Math.hypot(b.x - a.x, b.y - a.y) / 18));
     for (let i = 1; i <= steps; i++) {
       const t = i / steps;
-      const nx = Math.round(a.x + (b.x - a.x) * t);
-      const ny = Math.round(a.y + (b.y - a.y) * t);
-      await mouse.setPosition(new Point(nx, ny));
-      this.lastCursor = { x: nx, y: ny };
+      await this.placeCursor(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
       await this.delay(10);
     }
     await mouse.releaseButton(Button.LEFT);
   }
 
   async mouseScroll(x: number, y: number, direction: ScrollDirection, amount: number = 3): Promise<void> {
-    const p = this.physicalToLogical(x, y);
-    await mouse.setPosition(new Point(p.x, p.y));
-    this.lastCursor = { x: p.x, y: p.y };
+    await this.placeCursor(x, y);
     await this.delay(30);
     // nut-js only exposes scrollUp/scrollDown natively. For horizontal,
     // fall back to Shift+scroll which most apps interpret as horizontal.
@@ -1042,13 +1091,16 @@ export class WindowsAdapter implements PlatformAdapter {
 
   async readClipboard(): Promise<string> {
     try {
+      // PowerShell writes stdout in the console's legacy codepage, so any
+      // non-ASCII text (é, —, ✓, CJK, emoji) came back as '?'. Return the
+      // clipboard as base64-encoded UTF-8 instead — survives any codepage.
       const { stdout } = await execFileAsync(
         'powershell.exe',
-        ['-NoProfile', '-Command', 'Get-Clipboard'],
+        ['-NoProfile', '-Command',
+          '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))'],
         { timeout: CLIPBOARD_TIMEOUT_MS },
       );
-      // Get-Clipboard tacks on a trailing CRLF — trim for consistency with macOS.
-      return stdout?.replace(/\r?\n$/, '') ?? '';
+      return Buffer.from((stdout ?? '').trim(), 'base64').toString('utf8');
     } catch {
       return '';
     }

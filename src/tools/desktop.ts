@@ -8,6 +8,9 @@
 
 import * as os from 'os';
 import type { ToolDefinition, ToolContext } from './types';
+import { toMouse, toImage } from './types';
+import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
 
 const IS_MAC = os.platform() === 'darwin';
@@ -60,16 +63,46 @@ export function getDesktopTools(): ToolDefinition[] {
     {
       name: 'desktop_screenshot',
       description: 'LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge (the reply states its size and scale).',
-      parameters: {},
+      parameters: {
+        display: { type: 'number', description: 'Monitor to capture (index from window list_displays). Default: the monitor clawdcursor last worked on, else the primary.', required: false },
+      },
       category: 'perception',
       compactGroup: 'computer',
       safetyTier: 0,
-      handler: async (_params, ctx) => {
+      handler: async ({ display }, ctx) => {
         await ctx.ensureInitialized();
+        const explicit = typeof display === 'number' ? display : undefined;
+        const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
+        const target = pickDisplay(displays, explicit);
+        if (explicit !== undefined && !target) {
+          return { text: `No display #${explicit}. Displays: ${displays.map(d => `#${d.index} ${d.bounds.width}x${d.bounds.height} at (${d.bounds.x},${d.bounds.y})`).join(', ') || 'none found'}.`, isError: true };
+        }
+        // macOS captures the main display only (for now) — say so rather than
+        // label the main display's image as display N.
+        if (process.platform === 'darwin' && explicit !== undefined && target && !target.primary) {
+          return { text: `display:${explicit} is not supported on macOS yet — screenshots show the main display. Omit display.`, isError: true };
+        }
+        // Any monitor other than the primary. Windows captures it through the
+        // bridge (nut-js only grabs the primary); Linux X11 crops it from the
+        // root window when asked for explicitly. Coordinates read off this
+        // image map back onto THAT monitor via the recorded frame.
+        const otherMonitor = target && !target.primary && ctx.platform
+          && (process.platform === 'win32' || (process.platform === 'linux' && explicit !== undefined));
+        if (otherMonitor) {
+          const shot = await ctx.platform!.screenshot({ maxWidth: LLM_TARGET_WIDTH, displayIndex: target!.index });
+          const o = shot.origin ?? { x: target!.bounds.x, y: target!.bounds.y };
+          setLastFrame({ originX: o.x, originY: o.y, scale: shot.scaleFactor, display: target!.index });
+          return {
+            text: `Screenshot: ${shot.width}x${shot.height}px of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}`,
+            image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+          };
+        }
         const frame = await ctx.desktop.captureForLLM();
+        setLastFrame(null);
         const base64 = frame.buffer.toString('base64');
+        const note = target && (process.platform === 'win32' || explicit !== undefined) ? displayNote(displays, target) : '';
         return {
-          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.`,
+          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },
@@ -90,11 +123,25 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ x, y, width, height, space }, ctx) => {
         await ctx.ensureInitialized();
+        // Region in physical screen px: through the last frame (any monitor)
+        // for image coords; as-is for screen coords.
+        const multi = !!getLastFrame();
         const sf = space === 'screen' ? 1 : ctx.getScreenshotScaleFactor();
-        const frame = await ctx.desktop.captureRegionForLLM(
-          Math.round(x * sf), Math.round(y * sf),
-          Math.round(width * sf), Math.round(height * sf),
-        );
+        const p0 = space === 'screen' || !multi ? { x: Math.round(x * sf), y: Math.round(y * sf) } : mapImagePoint(x, y, sf);
+        const w = space === 'screen' || !multi ? Math.round(width * sf) : mapImageLength(width, sf);
+        const h = space === 'screen' || !multi ? Math.round(height * sf) : mapImageLength(height, sf);
+        if (process.platform === 'win32' && ctx.platform) {
+          // Windows: the bridge captures any rectangle on any monitor; if it is
+          // down, fall back to the primary-display capture below.
+          const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
+          if (shot) {
+            return {
+              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.`,
+              image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+            };
+          }
+        }
+        const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');
         return {
           text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.`,
@@ -143,8 +190,7 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        const rx = Math.round(x * sf), ry = Math.round(y * sf);
+        const { x: rx, y: ry } = toMouse(ctx, x, y, space);
         await ctx.desktop.mouseClick(rx, ry);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
@@ -165,8 +211,8 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseDoubleClick(Math.round(x * sf), Math.round(y * sf));
+        const p = toMouse(ctx, x, y, space);
+        await ctx.desktop.mouseDoubleClick(p.x, p.y);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
         return { text: `Double-clicked at (${x}, ${y})` };
@@ -186,8 +232,8 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseRightClick(Math.round(x * sf), Math.round(y * sf));
+        const p = toMouse(ctx, x, y, space);
+        await ctx.desktop.mouseRightClick(p.x, p.y);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
         return { text: `Right-clicked at (${x}, ${y})` };
@@ -207,8 +253,8 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = space === 'screen' ? 1 : ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseMove(Math.round(x * sf), Math.round(y * sf));
+        const p = toMouse(ctx, x, y, space);
+        await ctx.desktop.mouseMove(p.x, p.y);
         return { text: `Mouse moved to (${x}, ${y})` };
       },
     },
@@ -227,8 +273,7 @@ export function getDesktopTools(): ToolDefinition[] {
         // read the exact inverse of the write on every OS (msf ≠ screenshot
         // factor on Retina — using the wrong one halves coords on macOS).
         const pos = await ctx.desktop.getCursorPosition();
-        const sf = ctx.getMouseScaleFactor() || 1;
-        const img = { x: Math.round(pos.x / sf), y: Math.round(pos.y / sf) };
+        const img = toImage(ctx, pos.x, pos.y);
         return { text: `Cursor at (${img.x}, ${img.y}) in image-space.` };
       },
     },
@@ -247,10 +292,10 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 1,
       handler: async ({ x, y, direction, amount }, ctx) => {
         await ctx.ensureInitialized();
-        const sf = ctx.getMouseScaleFactor();
+        const p = toMouse(ctx, x, y);
         const ticks = amount ?? 3;
         const delta = direction === 'down' ? ticks : -ticks;
-        await ctx.desktop.mouseScroll(Math.round(x * sf), Math.round(y * sf), delta);
+        await ctx.desktop.mouseScroll(p.x, p.y, delta);
         return { text: `Scrolled ${direction} ${ticks} ticks at (${x}, ${y})` };
       },
     },
@@ -277,11 +322,9 @@ export function getDesktopTools(): ToolDefinition[] {
         const sy = startY ?? y1;
         const ex = endX ?? x2;
         const ey = endY ?? y2;
-        const sf = ctx.getMouseScaleFactor();
-        await ctx.desktop.mouseDrag(
-          Math.round(sx * sf), Math.round(sy * sf),
-          Math.round(ex * sf), Math.round(ey * sf),
-        );
+        const a = toMouse(ctx, sx, sy);
+        const b = toMouse(ctx, ex, ey);
+        await ctx.desktop.mouseDrag(a.x, a.y, b.x, b.y);
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
         return { text: `Dragged (${sx},${sy}) → (${ex},${ey})` };

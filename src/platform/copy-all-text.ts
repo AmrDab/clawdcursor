@@ -14,8 +14,21 @@ import type { PlatformAdapter, WindowInfo } from './types';
 
 const TERMINALS = /^(windowsterminal|wt|cmd|powershell|pwsh|conhost|openconsole|terminal|iterm2?|gnome-terminal(-server)?|konsole|xterm|uxterm|alacritty|kitty|wezterm(-gui)?|tilix|xfce4-terminal|terminator|lxterminal|mate-terminal|hyper|warp|tabby|foot|ghostty)(\.exe)?$/i;
 
-export function isTerminalWindow(win: Pick<WindowInfo, 'processName'> | null | undefined): boolean {
-  return !!win && TERMINALS.test(String(win.processName ?? '').trim());
+/** Window classes that ARE terminals (Windows: classic console, Windows Terminal). */
+const TERMINAL_CLASSES = /^(ConsoleWindowClass|CASCADIA_HOSTING_WINDOW_CLASS|PseudoConsoleWindow|mintty|VirtualConsoleClass)$/i;
+/** Shell processes that may also own ordinary GUI windows (a WinForms form, an editor). */
+const SHELLS = /^(cmd|powershell|pwsh|wt)(\.exe)?$/i;
+
+export function isTerminalWindow(win: Pick<WindowInfo, 'processName' | 'className'> | null | undefined): boolean {
+  if (!win) return false;
+  const proc = String(win.processName ?? '').trim();
+  const cls = String(win.className ?? '').trim();
+  if (cls) {
+    if (TERMINAL_CLASSES.test(cls)) return true;
+    // A GUI window (known class) owned by a shell is not a terminal.
+    if (SHELLS.test(proc)) return false;
+  }
+  return TERMINALS.test(proc);
 }
 
 export interface CopyAllTextResult { ok: boolean; text: string; window?: string }

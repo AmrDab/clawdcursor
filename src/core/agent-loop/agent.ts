@@ -942,7 +942,7 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           type: 'text',
           text: firm
             ? `\n⚠ STAGNATION (${consecutiveStagnantTurns} turns, no accessibility change). The screen may still be advancing — this app likely has a sparse a11y tree (new Outlook, web/canvas UIs). STOP repeating the last action. Switch APPROACH WITHIN this app: prefer a keyboard-only flow (open a fresh compose, the recipient field is focused — type, Return to commit the chip, Tab to the next field), or find_input_field/find_action_button to get an el_NN target, or call focus_window to confirm the right window is active, or give_up with a concrete reason. Do NOT open the web version of this app or switch to another app.`
-            : `\n⚠ STAGNATION (${consecutiveStagnantTurns}/${STAGNATION_HARD_LIMIT}): the last ${STAGNATION_WINDOW} actions did not change the accessibility tree. Try a DIFFERENT approach (keyboard shortcut, Tab between fields, different target, focus_window to check the active window) — or, if the screen really is changing, verify with a screenshot. give_up if you're truly stuck.`,
+            : `\n⚠ STAGNATION (${consecutiveStagnantTurns}/${STAGNATION_HARD_LIMIT}): the last ${STAGNATION_WINDOW} actions did not change the accessibility tree. Try a DIFFERENT approach (keyboard shortcut, Tab between fields, different target, focus_window to check the active window) — or, if the screen really is changing, read it with read_text (OCR) first and a screenshot only if that is not enough. give_up if you're truly stuck.`,
         });
         // Re-arm after a firm nudge so it recurs in waves (not every turn) and a
         // later genuine change cleanly resets the cadence. max_turns + the

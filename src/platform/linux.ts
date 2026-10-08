@@ -341,7 +341,8 @@ export class LinuxAdapter implements PlatformAdapter {
     let scaleFactor = 1;
 
     // Display index → crop to that display's bounds (xrandr geometry).
-    if (opts?.displayIndex !== undefined && opts.displayIndex > 0) {
+    // Any index, 0 included: xrandr may list a non-primary output first.
+    if (opts?.displayIndex !== undefined) {
       const displays = await this.listDisplays();
       const target = displays[opts.displayIndex];
       if (target) {

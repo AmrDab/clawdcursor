@@ -10,6 +10,8 @@
  */
 
 /** Parameter definition for a tool (maps to JSON Schema) */
+import { mapImagePoint, mapImageLength, getLastFrame } from '../core/agent-loop/coord-scale';
+
 export interface ParameterDef {
   type: 'string' | 'number' | 'boolean' | 'array';
   description: string;
@@ -207,4 +209,24 @@ export function toOpenAiFunctions(tools: ToolDefinition[]): object[] {
 export function a11yToMouse(physicalCoord: number, ctx: ToolContext): number {
   const dpiRatio = ctx.getScreenshotScaleFactor() / ctx.getMouseScaleFactor();
   return Math.round(physicalCoord / dpiRatio);
+}
+
+/** Image-space (the latest screenshot) → mouse-space; `space:"screen"` passes
+ *  through. Goes through the last frame, so a screenshot of ANY monitor (any
+ *  position, any DPI) maps back onto that monitor. */
+export function toMouse(ctx: ToolContext, x: number, y: number, space?: unknown): { x: number; y: number } {
+  if (space === 'screen') return { x: Math.round(x), y: Math.round(y) };
+  return mapImagePoint(x, y, ctx.getMouseScaleFactor());
+}
+
+/** Image-space LENGTH (relative move, window size) → mouse-space length — scale only, no origin. */
+export function toMouseLength(ctx: ToolContext, v: number): number {
+  return mapImageLength(v, ctx.getMouseScaleFactor());
+}
+
+/** Inverse of toMouse for image space (e.g. reporting the cursor). */
+export function toImage(ctx: ToolContext, x: number, y: number): { x: number; y: number } {
+  const f = getLastFrame();
+  const s = f ? f.scale : (ctx.getMouseScaleFactor() || 1);
+  return { x: Math.round((x - (f?.originX ?? 0)) / s), y: Math.round((y - (f?.originY ?? 0)) / s) };
 }

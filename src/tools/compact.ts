@@ -453,7 +453,9 @@ export function getCompactTools(): ToolDefinition[] {
       description:
         'Direct mouse/keyboard/screenshot control (Anthropic Computer-Use style). ' +
         `Pick an action: ${actionCatalog(COMPUTER_ACTIONS)}. ` +
-        'Coordinates are image-space pixels from the most recent screenshot. ' +
+        '`screenshot` is the LAST RESORT for seeing the screen: first try `accessibility read_tree`/`find`/`compile_ui` ' +
+        '(names + positions) or `system copy_all_text` (exact page text). Coordinates default to image-space pixels of ' +
+        'the latest screenshot; pass space:"screen" to click a position reported by `accessibility`. ' +
         'Prefer `accessibility` for named targets; use `computer` only when you need pixel-level control.',
       parameters: buildCompoundSchema(COMPUTER_ACTIONS),
       category: 'orchestration',
@@ -464,7 +466,7 @@ export function getCompactTools(): ToolDefinition[] {
     {
       name: 'accessibility',
       description:
-        'Interact with the OS accessibility tree — read element names, find by name/role, invoke, toggle, expand/collapse, set value, query state. ' +
+        'START HERE to see and drive a window: the OS accessibility tree — read element names, find by name/role, invoke, toggle, expand/collapse, set value, select an option, query state. ' +
         `Pick an action: ${actionCatalog(ACCESSIBILITY_ACTIONS)}. ` +
         'Always preferred over `computer.click(x,y)` when the target has a name — more reliable across DPI, window resize, layout shifts. ' +
         'For sparse/ambiguous UIs: `compile_ui` fuses a11y+OCR into one ranked map of elements with stable ids; `find_button`/`find_field` locate a target semantically and return an {element_id, snapshot_id} you pass straight to `invoke`/`set_value` (survives layout shifts, no coordinates).',
@@ -488,7 +490,7 @@ export function getCompactTools(): ToolDefinition[] {
     {
       name: 'system',
       description:
-        'System integration — clipboard read/write, system time, OCR screen-reading, undo shortcut, named shortcuts registry, delegate to a sub-agent. ' +
+        'System integration — `copy_all_text` (exact text of the focused page/document; better than OCR), clipboard read/write, OCR screen-reading, system time, undo, named shortcuts, delegate to a sub-agent, `report` a bad session to the clawdcursor team. ' +
         `Pick an action: ${actionCatalog(SYSTEM_ACTIONS)}.`,
       parameters: buildCompoundSchema(SYSTEM_ACTIONS),
       category: 'orchestration',
@@ -511,7 +513,7 @@ export function getCompactTools(): ToolDefinition[] {
       name: 'task',
       description:
         '**Requires the `clawdcursor agent` daemon to be running** (binds 127.0.0.1:3847 with an LLM configured). ' +
-        'Hand clawdcursor a WHOLE natural-language task and let its internal pipeline decide how to execute it (router → blind agent → hybrid → vision fallback). ' +
+        'Hand clawdcursor a WHOLE natural-language task and let its internal agent loop execute it (accessibility first, screenshots when the screen has no readable structure). ' +
         'Use this when you don\'t want to micromanage every primitive — clawdcursor decomposes the task, picks the cheapest execution path, and returns a trace. ' +
         'BOUNDED-SYNC: waits up to `timeout` seconds (default 45) — a longer task returns {status:"running"} with progress while it CONTINUES in the background; re-call with the SAME instruction to keep waiting (re-attaches, never restarts), {action:"status"} to poll, {action:"abort"} to stop it. ' +
         'The `computer`/`accessibility`/`window`/`system`/`browser` compounds are for when you want step-level control yourself. ' +
