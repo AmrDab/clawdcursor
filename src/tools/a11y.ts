@@ -298,7 +298,9 @@ export function getA11yTools(): ToolDefinition[] {
         // Multi-monitor: "on screen" means overlapping a real display. A monitor
         // left of / above the primary has NEGATIVE coordinates, so the old
         // x>=0 && y>=0 test called every window there off-screen.
-        const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
+        // Not on macOS: its display frames are bottom-left-origin (Cocoa) while
+        // window bounds are top-left (AX), so they only agree on the primary.
+        const displays = ctx.platform && process.platform !== 'darwin' ? await ctx.platform.listDisplays().catch(() => []) : [];
         const negativeSpace = displays.some(d => d.bounds.x < 0 || d.bounds.y < 0);
         const onScreen = (b: { x: number; y: number; width: number; height: number }) => displays.length
           ? displays.some(d => b.x < d.bounds.x + d.bounds.width && b.x + b.width > d.bounds.x

@@ -329,11 +329,25 @@ public static class ScreenPM {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out int v, int s);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT v, int s);
-  // The top-level window a user SEES at (x, y): the first one in z-order that is
-  // visible, not minimized, not DWM-cloaked and not click-through, whose visible
-  // frame contains the point. WindowFromPoint is not reliable for this: with a
-  // UWP window (e.g. Settings) behind the target it returned the UWP window for
-  // every point of the window in front of it.
+  // WindowFromPoint takes a POINT BY VALUE: declared as (int x, int y) on x64
+  // the y half was lost, so every hit-test looked at the top row of the screen.
+  [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(PT p);
+  [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr h, uint f);
+  // The top-level window a user SEES at (x, y). WindowFromPoint honours
+  // hit-test transparency (layered overlays); if it lands on a DWM-cloaked
+  // window, walk the z-order instead.
+  public static IntPtr WindowAt(int x, int y) {
+    var p = new PT(); p.X = x; p.Y = y;
+    IntPtr w = WindowFromPoint(p);
+    if (w != IntPtr.Zero) {
+      IntPtr root = GetAncestor(w, 2); if (root == IntPtr.Zero) root = w;
+      int cloaked = 0; DwmGetWindowAttribute(root, 14, out cloaked, 4);
+      if (cloaked == 0) return root;
+    }
+    return TopWindowAt(x, y);
+  }
+  // First visible, not minimized, not cloaked, not click-through window in
+  // z-order whose visible frame contains the point.
   public static IntPtr TopWindowAt(int x, int y) {
     for (IntPtr h = GetTopWindow(IntPtr.Zero); h != IntPtr.Zero; h = GetWindow(h, 2)) {
       if (!IsWindowVisible(h) || IsIconic(h)) continue;
@@ -346,7 +360,11 @@ public static class ScreenPM {
     }
     return IntPtr.Zero;
   }
-  public static IntPtr Aware() { return SetThreadDpiAwarenessContext(new IntPtr(-4)); }
+  // Per-monitor v2 (Windows 10 1703+); v1 on 1607 — both give physical pixels.
+  public static IntPtr Aware() {
+    IntPtr prev = SetThreadDpiAwarenessContext(new IntPtr(-4));
+    return prev != IntPtr.Zero ? prev : SetThreadDpiAwarenessContext(new IntPtr(-3));
+  }
   public static void Restore(IntPtr prev) { if (prev != IntPtr.Zero) SetThreadDpiAwarenessContext(prev); }
   public static List<object[]> Monitors() {
     var o = new List<object[]>();
@@ -409,7 +427,7 @@ function Cmd-ActivateAtPoint {
     $y = [int]$cmd.y
     # (x,y) are physical virtual-desktop pixels (any monitor): this thread is
     # per-monitor-v2 aware (see Main).
-    $hwnd = [ScreenPM]::TopWindowAt($x, $y)
+    $hwnd = [ScreenPM]::WindowAt($x, $y)
     if ($hwnd -eq [IntPtr]::Zero) { return @{ success=$true; action="noop"; reason="no-window-at-point" } }
     # Walk up to the root owner (GA_ROOT = 2) so child controls map to their
     # top-level window before we compare / promote to foreground.
@@ -622,7 +640,8 @@ function Cmd-FocusWindow {
         title      = $c.Name
         processId  = $c.ProcessId
         handle     = $c.NativeWindowHandle
-        bounds     = @{ x = [int]$c.BoundingRectangle.X; y = [int]$c.BoundingRectangle.Y; width = [int]$c.BoundingRectangle.Width; height = [int]$c.BoundingRectangle.Height }
+        # Rect.Empty (infinite X) for a window UIA deems not displayed: no bounds.
+        bounds     = $(if ($c.BoundingRectangle.IsEmpty) { $null } else { @{ x = [int]$c.BoundingRectangle.X; y = [int]$c.BoundingRectangle.Y; width = [int]$c.BoundingRectangle.Width; height = [int]$c.BoundingRectangle.Height } })
     }
 }
 

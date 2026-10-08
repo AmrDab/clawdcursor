@@ -77,6 +77,11 @@ export function getDesktopTools(): ToolDefinition[] {
         if (explicit !== undefined && !target) {
           return { text: `No display #${explicit}. Displays: ${displays.map(d => `#${d.index} ${d.bounds.width}x${d.bounds.height} at (${d.bounds.x},${d.bounds.y})`).join(', ') || 'none found'}.`, isError: true };
         }
+        // macOS captures the main display only (for now) — say so rather than
+        // label the main display's image as display N.
+        if (process.platform === 'darwin' && explicit !== undefined && target && !target.primary) {
+          return { text: `display:${explicit} is not supported on macOS yet — screenshots show the main display. Omit display.`, isError: true };
+        }
         // Any monitor other than the primary. Windows captures it through the
         // bridge (nut-js only grabs the primary); Linux X11 crops it from the
         // root window when asked for explicitly. Coordinates read off this
@@ -126,12 +131,15 @@ export function getDesktopTools(): ToolDefinition[] {
         const w = space === 'screen' || !multi ? Math.round(width * sf) : mapImageLength(width, sf);
         const h = space === 'screen' || !multi ? Math.round(height * sf) : mapImageLength(height, sf);
         if (process.platform === 'win32' && ctx.platform) {
-          // Windows: the bridge captures any rectangle on any monitor.
-          const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } });
-          return {
-            text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.`,
-            image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
-          };
+          // Windows: the bridge captures any rectangle on any monitor; if it is
+          // down, fall back to the primary-display capture below.
+          const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
+          if (shot) {
+            return {
+              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.`,
+              image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+            };
+          }
         }
         const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');

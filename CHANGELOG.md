@@ -25,8 +25,12 @@ All notable changes to Clawd Cursor will be documented in this file.
     reported an 820×620 window as 364×276, so `space:"screen"` clicks
     missed).
   - OCR reads the monitor clawdcursor is working on (it always read the
-    primary), in screen coordinates; its reply now says to click them with
-    `space:"screen"` instead of dividing by a scale factor.
+    primary). `ocr_read_screen` returns screen coordinates on every OS
+    (logical points on macOS) and says to click them with `space:"screen"`
+    instead of dividing by a scale factor.
+  - Linux: `display:0` crops to that monitor when it is not the primary;
+    macOS: `display:N` for a non-main display says it is not supported yet
+    instead of labelling the main display's image as display N.
   - `focus` treats a window as on-screen when it overlaps any monitor (it
     used to minimize / snap windows on a monitor left of or above the
     primary).
@@ -54,12 +58,14 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
-- **A click could raise the window BEHIND the one you see.** Before a click
-  clawdcursor brings the window under the pointer forward; on Windows it
-  asked `WindowFromPoint`, which — with a UWP app such as Settings behind
-  the target — named the UWP app for every point of the window in front, so
-  the click landed on Settings. It now picks the top visible, uncloaked,
-  non-click-through window at that point.
+- **Windows: clicks could raise the window BEHIND the one you see** — on any
+  setup, one monitor included. Before a click clawdcursor brings the window
+  under the pointer forward, asking `WindowFromPoint`. It was declared with
+  two ints instead of a `POINT`, which on 64-bit Windows drops the y
+  coordinate, so every hit-test looked at the TOP ROW of the screen: with a
+  maximized window behind the target (a browser, Settings), that window was
+  raised and took the click. Declared correctly now; when the hit is a
+  DWM-cloaked window it falls back to the top visible window at the point.
 - **Windows clipboard reads mangled non-ASCII text** (`café — ✓ 日本` came
   back as `caf? - ? ??`): PowerShell's stdout codepage. `clipboard_read` and
   `copy_all_text` now read UTF-8 exactly.
