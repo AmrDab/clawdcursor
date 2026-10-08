@@ -1507,16 +1507,18 @@ program
 
 program
   .command('report')
-  .description('Send an error report to help improve clawdcursor. Shows a preview before sending.')
+  .description('Report the last session (or agent task) to the clawdcursor team. Shows a preview first; no typed text, clipboard or screenshots.')
   .option('--log <path>', 'Path to a specific task log file')
   .option('--note <text>', 'Add a note describing what went wrong')
   .option('--save-only', 'Save report locally without sending')
   .action(async (opts) => {
-    const { interactiveReport, buildReport, saveReportLocally, submitReport } = await import('./report');
+    const { interactiveReport, buildReport, buildLatestReport, saveReportLocally, submitReport, issueUrl } = await import('./report');
 
     if (!process.stdin.isTTY) {
-      // Non-interactive: build and submit directly
-      const report = buildReport(opts.log, opts.note);
+      // Non-interactive (e.g. an agent ran this): report on the newest MCP
+      // session or task log; if the server is unreachable, print a prefilled
+      // GitHub issue link the user opens, reviews and submits.
+      const report = opts.log ? buildReport(opts.log, opts.note) : buildLatestReport(opts.note);
       if (opts.saveOnly) {
         const p = saveReportLocally(report);
         console.log(`Report saved: ${p}`);
@@ -1526,7 +1528,8 @@ program
           console.log(`Report sent. ID: ${result.reportId}`);
         } else {
           const p = saveReportLocally(report);
-          console.log(`Send failed: ${result.error}. Saved locally: ${p}`);
+          console.log(`Report server unreachable (${result.error}). Saved locally: ${p}`);
+          console.log(`Send it as a GitHub issue (review, then submit):\n${issueUrl(report)}`);
         }
       }
       return;

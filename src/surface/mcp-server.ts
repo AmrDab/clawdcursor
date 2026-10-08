@@ -27,6 +27,7 @@ import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
 import { hasConsent, writeConsentFile } from './onboarding';
+import { SessionLog, outcomeOf } from './session-log';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -156,6 +157,15 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // model cannot answer an elicitation — the host shows it to the person.
   // Asked at most once per server: concurrent calls share the one prompt, and
   // a decline is not re-asked on every call (the text prompt takes over).
+  // Local record of this session (tool / action / blind-vs-vision / ok — no
+  // content). Feeds `clawdcursor report` and the vision-streak nudge below.
+  const sessionLog = new SessionLog({ version: VERSION, surface: compact ? 'compact' : 'granular' });
+  const VISION_STREAK_HINT = (n: number) => compact
+    ? `[clawdcursor] ${n} screenshots in a row with no text read. Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
+    : `[clawdcursor] ${n} screenshots in a row with no text read. Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
+  const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
+    .server?.getClientVersion?.();
+
   let consentPrompt: Promise<boolean> | null = null;
   const askConsentInHost = (): Promise<boolean> => {
     consentPrompt ??= (async () => {
@@ -274,6 +284,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // first poke and auto-hides after ~30s of inactivity. Read-only
         // perception (tier 0) stays silent.
         if ((tool.safetyTier ?? 0) >= 1) controlBanner.touch();
+        const action = typeof params?.action === 'string' ? params.action : undefined;
+        const started = Date.now();
         let result;
         try {
           result = await tool.handler(params, ctx);
@@ -283,7 +295,19 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           // — in stdio mode an unhandled rejection can corrupt the JSON-RPC
           // stream. Convert to a clean isError result.
           const msg = err instanceof Error ? err.message : String(err);
+          sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg) });
           return { content: [{ type: 'text', text: `${tool.name}: ${msg}` }], isError: true };
+        }
+        const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
+          result.isError ? result.text : undefined, clientInfo(),
+          { outcome: outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined });
+        // Blind first, then vision: field data showed agents drifting into a
+        // screenshot → coordinate-click loop after an early blind miss. After
+        // 3 screenshots with no text/a11y read in between (and every 5th
+        // after), say once what the cheaper, exact path is.
+        const streak = sessionLog.visionOnlyStreak;
+        if (cls === 'vision' && !result.isError && streak >= 3 && (streak - 3) % 5 === 0) {
+          result = { ...result, text: `${result.text}\n\n${VISION_STREAK_HINT(streak)}` };
         }
         const content: McpContentBlock[] = [];
         if (result.image) {

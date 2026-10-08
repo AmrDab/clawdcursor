@@ -124,7 +124,9 @@ const C: Record<'dim' | 'bold' | 'gray' | 'red' | 'green' | 'yellow' | 'blue' | 
 let logDir: string | null = null;
 function getLogDir(): string {
   if (logDir) return logDir;
-  logDir = path.join(os.homedir(), '.clawdcursor', 'logs');
+  // CLAWDCURSOR_LOG_DIR: tests point this at a temp dir — the suite's stub-model
+  // runs used to fill the user's real ~/.clawdcursor/logs.
+  logDir = process.env.CLAWDCURSOR_LOG_DIR || path.join(os.homedir(), '.clawdcursor', 'logs');
   try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* best-effort */ }
   return logDir;
 }

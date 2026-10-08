@@ -40,6 +40,34 @@ function needPlatform(tool: string): { text: string; isError: true } {
 
 export function getExtraTools(): ToolDefinition[] {
   return [
+    // ── REPORT ─────────────────────────────────────────────────────
+    {
+      name: 'session_report',
+      description:
+        'Prepare a report of THIS session for the clawdcursor team when something went wrong: ' +
+        'which tools ran, blind vs screenshot use, errors — no typed text, clipboard, screenshots, ' +
+        'names or paths. Sends nothing: returns a prefilled GitHub issue link to give the USER, ' +
+        'who reviews and submits it. Pass `note` with what went wrong.',
+      parameters: {
+        note: { type: 'string', description: 'What went wrong, in a sentence or two', required: false },
+      },
+      category: 'orchestration',
+      compactGroup: 'system',
+      safetyTier: 0,
+      handler: async ({ note }) => {
+        const { buildSessionReport, saveReportLocally, issueUrl, reportMarkdown } = await import('../surface/report');
+        const report = buildSessionReport(undefined, typeof note === 'string' && note.trim() ? note.trim() : undefined);
+        const saved = saveReportLocally(report);
+        return {
+          text:
+            'Session report prepared — NOTHING has been sent.\n\n' +
+            `${reportMarkdown(report)}\n\n` +
+            'To send it, give the user this link: it opens a prefilled GitHub issue they review and submit.\n' +
+            `${issueUrl(report)}\n\n(Full report saved locally: ${saved})`,
+        };
+      },
+    },
+
     // ── MOUSE ──────────────────────────────────────────────────────
 
     {
