@@ -52,7 +52,8 @@ export function outcomeOf(isError: boolean, text: string): Outcome {
   const head = text.slice(0, 300);
   if (/PSRunner timeout|timed out after|ETIMEDOUT|walk timed out/i.test(head)) return 'timeout';
   if (/UI TREE \(PARTIAL|"truncated":\s*true/i.test(head)) return 'partial';
-  if (/^\(no elements found\)|no elements? (found|named)|no_clickable_target|could not read|Nothing was copied|no option named/i.test(head)) return 'empty';
+  if (head.startsWith('(no elements found)')
+    || /no elements? (?:found|named)|no_clickable_target|could not read|Nothing was copied|no option named/i.test(head)) return 'empty';
   return isError ? 'error' : 'ok';
 }
 export interface SessionTally {
