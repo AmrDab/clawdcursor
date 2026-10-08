@@ -50,6 +50,15 @@ describe('copyAllText', () => {
     expect(p.clip).toBe('old secret');
   });
 
+  it('window class decides for shell-owned windows (Windows)', () => {
+    expect(isTerminalWindow({ processName: 'powershell', className: 'ConsoleWindowClass' })).toBe(true);
+    expect(isTerminalWindow({ processName: 'WindowsTerminal', className: 'CASCADIA_HOSTING_WINDOW_CLASS' })).toBe(true);
+    // a WinForms window owned by powershell.exe is an ordinary GUI window
+    expect(isTerminalWindow({ processName: 'powershell', className: 'WindowsForms10.Window.8.app.0.141b42a_r6_ad1' })).toBe(false);
+    // no class known (other OSes): conservative process check
+    expect(isTerminalWindow({ processName: 'powershell' })).toBe(true);
+  });
+
   it('isTerminalWindow does not flag ordinary apps', () => {
     expect(isTerminalWindow({ processName: 'msedge' })).toBe(false);
     expect(isTerminalWindow({ processName: 'Code' })).toBe(false);

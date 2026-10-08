@@ -301,11 +301,96 @@ function Test-ForegroundDenylisted($procName, $title) {
 #
 # Uses the same AttachThreadInput + AllowSetForegroundWindow dance as
 # Cmd-FocusWindow so that the Windows foreground lock is properly overcome.
+# ── Multi-monitor: physical virtual-desktop coordinates on ANY monitor ─────────
+# The bridge process is DPI-unaware; each command below switches only ITS OWN
+# THREAD to per-monitor-v2 awareness (and restores it), so every coordinate is
+# a physical pixel on the whole virtual desktop — any monitor, any position
+# (negative origins included), any per-monitor scaling. nut-js cannot do this:
+# it normalises absolute moves to the PRIMARY display only.
+if (-not ([System.Management.Automation.PSTypeName]'ScreenPM').Type) {
+Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices; using System.Collections.Generic;
+public static class ScreenPM {
+  [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
+  [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
+  [StructLayout(LayoutKind.Sequential)] public struct PT { public int X, Y; }
+  [DllImport("user32.dll")] public static extern bool GetCursorPos(out PT p);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct MI { public int cb; public RECT rc; public RECT work; public uint flags; [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dev; }
+  public delegate bool EnumProc(IntPtr h, IntPtr dc, ref RECT r, IntPtr d);
+  [DllImport("user32.dll")] public static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, EnumProc cb, IntPtr d);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern bool GetMonitorInfo(IntPtr h, ref MI mi);
+  [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr h, int t, out uint x, out uint y);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, System.Text.StringBuilder s, int n);
+  public static string ClassOf(IntPtr h) { var sb = new System.Text.StringBuilder(256); GetClassName(h, sb, 256); return sb.ToString(); }
+  public static IntPtr Aware() { return SetThreadDpiAwarenessContext(new IntPtr(-4)); }
+  public static void Restore(IntPtr prev) { if (prev != IntPtr.Zero) SetThreadDpiAwarenessContext(prev); }
+  public static List<object[]> Monitors() {
+    var o = new List<object[]>();
+    EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr h, IntPtr dc, ref RECT r, IntPtr d) => {
+      uint dx = 96, dy = 96; try { GetDpiForMonitor(h, 0, out dx, out dy); } catch {}
+      var mi = new MI(); mi.cb = Marshal.SizeOf(typeof(MI)); GetMonitorInfo(h, ref mi);
+      o.Add(new object[] { mi.dev, (mi.flags & 1) == 1, r.L, r.T, r.R - r.L, r.B - r.T, (int)dx });
+      return true; }, IntPtr.Zero);
+    return o;
+  }
+}
+"@
+}
+
+function Cmd-ListDisplays {
+    $prev = [ScreenPM]::Aware()
+    try {
+        $i = 0
+        $list = foreach ($m in [ScreenPM]::Monitors()) {
+            [ordered]@{ index = $i++; name = $m[0]; primary = $m[1]; x = $m[2]; y = $m[3]; width = $m[4]; height = $m[5]; dpi = $m[6]; scale = [math]::Round($m[6] / 96, 4) }
+        }
+        return @{ success = $true; displays = @($list) }
+    } finally { [ScreenPM]::Restore($prev) }
+}
+
+function Cmd-MoveCursor {
+    param($cmd)
+    $prev = [ScreenPM]::Aware()
+    try {
+        [void][ScreenPM]::SetCursorPos([int]$cmd.x, [int]$cmd.y)
+        $p = New-Object ScreenPM+PT; [void][ScreenPM]::GetCursorPos([ref]$p)
+        return @{ success = $true; x = $p.X; y = $p.Y }
+    } finally { [ScreenPM]::Restore($prev) }
+}
+
+function Cmd-GetCursor {
+    $prev = [ScreenPM]::Aware()
+    try { $p = New-Object ScreenPM+PT; [void][ScreenPM]::GetCursorPos([ref]$p); return @{ success = $true; x = $p.X; y = $p.Y } }
+    finally { [ScreenPM]::Restore($prev) }
+}
+
+function Cmd-CaptureRect {
+    param($cmd)
+    Add-Type -AssemblyName System.Drawing
+    $prev = [ScreenPM]::Aware()
+    try {
+        $w = [int]$cmd.width; $h = [int]$cmd.height
+        $bmp = New-Object System.Drawing.Bitmap $w, $h
+        $g = [System.Drawing.Graphics]::FromImage($bmp)
+        try { $g.CopyFromScreen([int]$cmd.x, [int]$cmd.y, 0, 0, $bmp.Size) } finally { $g.Dispose() }
+        $ms = New-Object System.IO.MemoryStream
+        $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
+        return @{ success = $true; width = $w; height = $h; png = [Convert]::ToBase64String($ms.ToArray()) }
+    } finally { [ScreenPM]::Restore($prev) }
+}
+
 function Cmd-ActivateAtPoint {
     param($cmd)
     $x = [int]$cmd.x
     $y = [int]$cmd.y
-    $hwnd = [Win32UIA]::WindowFromPoint($x, $y)
+    # physical:true → (x,y) are physical virtual-desktop pixels (any monitor).
+    if ($cmd.physical) {
+        $prevCtx = [ScreenPM]::Aware()
+        try { $hwnd = [Win32UIA]::WindowFromPoint($x, $y) } finally { [ScreenPM]::Restore($prevCtx) }
+    } else {
+        $hwnd = [Win32UIA]::WindowFromPoint($x, $y)
+    }
     if ($hwnd -eq [IntPtr]::Zero) { return @{ success=$true; action="noop"; reason="no-window-at-point" } }
     # Walk up to the root owner (GA_ROOT = 2) so child controls map to their
     # top-level window before we compare / promote to foreground.
@@ -382,7 +467,8 @@ function Cmd-GetForegroundWindow {
         $el = [System.Windows.Automation.AutomationElement]::FromHandle($fgWin)
         if ($el) { $title = $el.Current.Name }
     } catch {}
-    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; title=$title; success=$true }
+    $cls = ''; try { $cls = [ScreenPM]::ClassOf($fgWin) } catch {}
+    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; title=$title; className=$cls; success=$true }
 }
 
 # ── Command: focus-window ─────────────────────────────────────────────────────
@@ -888,6 +974,10 @@ while ($true) {
             "invoke-element"        { Cmd-InvokeElement $cmd }
             "get-focused-element"   { Cmd-GetFocusedElement }
             "activate-at-point"     { Cmd-ActivateAtPoint $cmd }
+            "list-displays"         { Cmd-ListDisplays }
+            "move-cursor"           { Cmd-MoveCursor $cmd }
+            "get-cursor"            { Cmd-GetCursor }
+            "capture-rect"          { Cmd-CaptureRect $cmd }
             "ping"                  { @{ pong=$true } }
             default                 { @{ error="Unknown command: $($cmd.cmd)" } }
         }

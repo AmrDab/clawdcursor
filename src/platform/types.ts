@@ -50,12 +50,17 @@ export interface ScreenshotResult {
   height: number;
   /** Multiplier to convert image coords back to physical screen coords. */
   scaleFactor: number;
+  /** Top-left of the captured area on the desktop (screen space); absent = (0,0). */
+  origin?: { x: number; y: number };
 }
 
 export interface WindowInfo {
   title: string;
   processName: string;
   processId: number;
+  /** Native window class when the platform reports it (Windows) — e.g. tells a
+   *  console window from a GUI window owned by a shell process. */
+  className?: string;
   bounds: { x: number; y: number; width: number; height: number };
   isMinimized: boolean;
   /** Platform-opaque handle for re-targeting. */
@@ -222,7 +227,8 @@ export interface PlatformAdapter {
    * `displayIndex` (Tranche 1A) selects a specific display — 0 (default)
    * is primary. Passing an out-of-range index falls back to primary.
    */
-  screenshot(opts?: { maxWidth?: number; displayIndex?: number }): Promise<ScreenshotResult>;
+  /** `region` (screen space) captures that rectangle; `displayIndex` one monitor. */
+  screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult>;
   /** Capture a region of the screen. */
   screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult>;
 

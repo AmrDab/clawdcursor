@@ -598,7 +598,12 @@
       "category": "perception",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "display": {
+            "type": "number",
+            "description": "Monitor to capture (index from window list_displays). Default: the monitor clawdcursor last worked on, else the primary."
+          }
+        }
       },
       "costClass": "perceive-image"
     },

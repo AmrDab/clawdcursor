@@ -6,6 +6,26 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Added
 
+- **Multiple monitors, any layout.** clawdcursor no longer assumes one
+  screen. It reads the real layout from the OS — every monitor's position
+  (left of / above the primary means negative coordinates), size and its own
+  scaling — and adapts:
+  - Windows: the pointer reaches every monitor. nut-js can only address the
+    primary display, so clicks, moves, drags and scrolls are placed through
+    the PowerShell bridge under per-monitor DPI awareness, in physical
+    desktop pixels (the same space accessibility reports).
+  - `computer screenshot` shows the monitor clawdcursor last worked on (a
+    click, a focused window), else the primary; `display:N` picks one. On a
+    multi-monitor desktop the reply names the other monitors. Coordinates
+    read off a screenshot of any monitor map back onto that monitor.
+  - `window list_displays` reports each monitor's physical bounds and scale.
+  - `focus` treats a window as on-screen when it overlaps any monitor (it
+    used to minimize / snap windows on a monitor left of or above the
+    primary).
+  Linux X11 already spans all monitors (one root window) and gains
+  `display:N`; on macOS the pointer already spans displays, screenshots stay
+  on the main display for now.
+
 - **Session log: see what an agent actually did.** Each MCP session writes a
   small local log (`~/.clawdcursor/sessions/`, last 50 kept): tool, action,
   whether it was a blind read (accessibility / text), a screenshot, an action
@@ -25,6 +45,13 @@ All notable changes to Clawd Cursor will be documented in this file.
   `copy_all_text`, act by name).
 
 ### Fixed
+
+- **Windows clipboard reads mangled non-ASCII text** (`café — ✓ 日本` came
+  back as `caf? - ? ??`): PowerShell's stdout codepage. `clipboard_read` and
+  `copy_all_text` now read UTF-8 exactly.
+- **`copy_all_text` refused GUI windows owned by PowerShell / cmd** (e.g. a
+  WinForms tool): the terminal guard now checks the window class on Windows
+  — a real console window is refused, a GUI window is not.
 
 - **Tests no longer write to the user's real `~/.clawdcursor/logs`**
   (`CLAWDCURSOR_LOG_DIR`; the suite points it and the session log at a temp

@@ -9,6 +9,8 @@
 import * as os from 'os';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage } from './types';
+import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
 
 const IS_MAC = os.platform() === 'darwin';
@@ -61,16 +63,41 @@ export function getDesktopTools(): ToolDefinition[] {
     {
       name: 'desktop_screenshot',
       description: 'LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge (the reply states its size and scale).',
-      parameters: {},
+      parameters: {
+        display: { type: 'number', description: 'Monitor to capture (index from window list_displays). Default: the monitor clawdcursor last worked on, else the primary.', required: false },
+      },
       category: 'perception',
       compactGroup: 'computer',
       safetyTier: 0,
-      handler: async (_params, ctx) => {
+      handler: async ({ display }, ctx) => {
         await ctx.ensureInitialized();
+        const explicit = typeof display === 'number' ? display : undefined;
+        const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
+        const target = pickDisplay(displays, explicit);
+        if (explicit !== undefined && !target) {
+          return { text: `No display #${explicit}. Displays: ${displays.map(d => `#${d.index} ${d.bounds.width}x${d.bounds.height} at (${d.bounds.x},${d.bounds.y})`).join(', ') || 'none found'}.`, isError: true };
+        }
+        // Any monitor other than the primary. Windows captures it through the
+        // bridge (nut-js only grabs the primary); Linux X11 crops it from the
+        // root window when asked for explicitly. Coordinates read off this
+        // image map back onto THAT monitor via the recorded frame.
+        const otherMonitor = target && !target.primary && ctx.platform
+          && (process.platform === 'win32' || (process.platform === 'linux' && explicit !== undefined));
+        if (otherMonitor) {
+          const shot = await ctx.platform!.screenshot({ maxWidth: LLM_TARGET_WIDTH, displayIndex: target!.index });
+          const o = shot.origin ?? { x: target!.bounds.x, y: target!.bounds.y };
+          setLastFrame({ originX: o.x, originY: o.y, scale: shot.scaleFactor, display: target!.index });
+          return {
+            text: `Screenshot: ${shot.width}x${shot.height}px of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}`,
+            image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+          };
+        }
         const frame = await ctx.desktop.captureForLLM();
+        setLastFrame(null);
         const base64 = frame.buffer.toString('base64');
+        const note = target && (process.platform === 'win32' || explicit !== undefined) ? displayNote(displays, target) : '';
         return {
-          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.`,
+          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },
@@ -91,11 +118,22 @@ export function getDesktopTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ x, y, width, height, space }, ctx) => {
         await ctx.ensureInitialized();
+        // Region in physical screen px: through the last frame (any monitor)
+        // for image coords; as-is for screen coords.
+        const multi = !!getLastFrame();
         const sf = space === 'screen' ? 1 : ctx.getScreenshotScaleFactor();
-        const frame = await ctx.desktop.captureRegionForLLM(
-          Math.round(x * sf), Math.round(y * sf),
-          Math.round(width * sf), Math.round(height * sf),
-        );
+        const p0 = space === 'screen' || !multi ? { x: Math.round(x * sf), y: Math.round(y * sf) } : mapImagePoint(x, y, sf);
+        const w = space === 'screen' || !multi ? Math.round(width * sf) : mapImageLength(width, sf);
+        const h = space === 'screen' || !multi ? Math.round(height * sf) : mapImageLength(height, sf);
+        if (process.platform === 'win32' && ctx.platform) {
+          // Windows: the bridge captures any rectangle on any monitor.
+          const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } });
+          return {
+            text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.`,
+            image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+          };
+        }
+        const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');
         return {
           text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.`,

@@ -21,7 +21,7 @@
 
 import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
-import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } from './coord-scale';
+import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground } from './focus-guard';
 import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
 import { resolveAlias } from '../router/aliases';
@@ -1517,6 +1517,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: false,
       async execute(_args, ctx) {
         const shot = await ctx.platform.screenshot({ maxWidth: 1280 });
+        setLastFrame(null); // primary display: plain mouse scale
         ctx.screenshotsCaptured.n += 1;
         return {
           success: true,

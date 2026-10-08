@@ -554,10 +554,12 @@ export class AccessibilityBridge {
   async readClipboard(): Promise<string> {
     try {
       if (IS_WIN) {
+        // base64 UTF-8: PowerShell's stdout codepage turned non-ASCII into '?'.
         const { stdout } = await execFileAsync('powershell.exe', [
-          '-NoProfile', '-Command', 'Get-Clipboard',
+          '-NoProfile', '-Command',
+          '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))',
         ], { timeout: 2000 });
-        return stdout?.trim() ?? '';
+        return Buffer.from((stdout ?? '').trim(), 'base64').toString('utf8').trim();
       }
       if (IS_MAC) {
         const { stdout } = await execFileAsync('pbpaste', [], { timeout: 2000 });
