@@ -8,14 +8,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-const swiftc = vi.hoisted(() => ({ calls: [] as string[][], fail: false }));
+const swiftc = vi.hoisted(() => ({ calls: [] as string[][], fail: false, real: false }));
 vi.mock('child_process', async (orig) => {
   const actual = await orig<typeof import('child_process')>();
   return {
     ...actual,
     // promisify(execFile) → resolves with the first value passed to the callback
     execFile: (cmd: string, args: string[], opts: unknown, cb: (e: Error | null, r?: unknown) => void) => {
-      if (cmd !== 'swiftc') return actual.execFile(cmd, args, opts as never, cb as never);
+      if (cmd !== 'swiftc' || swiftc.real) return actual.execFile(cmd, args, opts as never, cb as never);   // real compiler: the macOS-only test
       swiftc.calls.push(args);
       if (swiftc.fail) return cb(new Error('swiftc: command not found'));
       fs.writeFileSync(args[args.indexOf('-o') + 1], '#!/bin/sh\necho {}\n');   // the "compiled" output
@@ -31,7 +31,7 @@ import {
 let dir: string;
 let script: string;
 beforeEach(() => {
-  swiftc.calls.length = 0; swiftc.fail = false;
+  swiftc.calls.length = 0; swiftc.fail = false; swiftc.real = false;
   resetMacOcrBinaryState();
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-macocr-'));
   script = path.join(dir, 'ocr-recognize.swift');
@@ -81,11 +81,15 @@ describe('mac OCR binary cache', () => {
 
 describe.runIf(process.platform === 'darwin')('real Vision binary (macOS only)', () => {
   it('compiles the shipped script and returns the OCR JSON shape', async () => {
+    swiftc.real = true;                       // the other tests fake swiftc; this one needs the real compiler
+    resetMacOcrBinaryState();                 // forget the previous test's failed-compile latch
     const { execFileSync } = await vi.importActual<typeof import('child_process')>('child_process');
     const real = path.resolve(__dirname, '../../scripts/mac/ocr-recognize.swift');
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-macocr-real-'));
     const bin = await compileMacOcrBinary(real, out);
     expect(bin, 'swiftc must be able to build scripts/mac/ocr-recognize.swift').toBeTruthy();
+    expect(swiftc.calls, 'a real compile ran').toHaveLength(0);          // (the fake records its calls; the real one does not)
+    expect(fs.readFileSync(bin!).subarray(0, 2).toString(), 'a real executable, not the fake shell script').not.toBe('#!');
     // A plain white PNG: no text, but a valid image — the binary must answer with the JSON shape.
     const sharp = (await import('sharp')).default;
     const png = path.join(out, 'blank.png');
