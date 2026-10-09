@@ -18,7 +18,9 @@ const mockUnlinkSync = vi.hoisted(() => vi.fn());
 // The PowerShell bridge (Windows multi-monitor capture). Down by default, so
 // tests never start a real bridge or capture the real screen.
 const bridge = vi.hoisted(() => ({ up: false, calls: [] as Array<Record<string, unknown>>,
-  displays: [] as Array<{ index: number; primary: boolean; x: number; y: number; width: number; height: number }> }));
+  displays: [] as Array<{ index: number; primary: boolean; x: number; y: number; width: number; height: number }>,
+  /** Answer for the persistent `ocr` command; undefined = bridge OCR unavailable (the one-shot script is used). */
+  ocr: undefined as undefined | (() => unknown) }));
 vi.mock('../platform/ps-runner', () => ({
   psRunner: {
     run: vi.fn(async (cmd: Record<string, unknown>) => {
@@ -26,6 +28,7 @@ vi.mock('../platform/ps-runner', () => ({
       if (!bridge.up) throw new Error('bridge down');
       if (cmd.cmd === 'list-displays') return { success: true, displays: bridge.displays };
       if (cmd.cmd === 'capture-rect') return { success: true, png: Buffer.from('bridge-png').toString('base64'), width: cmd.width, height: cmd.height };
+      if (cmd.cmd === 'ocr') { if (cmd.warm) return { ready: true }; if (bridge.ocr) return bridge.ocr(); throw new Error('bridge ocr unavailable'); }
       return { success: false };
     }),
   },
@@ -137,12 +140,50 @@ describe('OcrEngine', () => {
     mockExecFile.mockReset();
     mockWriteFileSync.mockReset();
     mockUnlinkSync.mockReset();
-    bridge.up = false; bridge.calls.length = 0; bridge.displays = [];
+    bridge.up = false; bridge.calls.length = 0; bridge.displays = []; bridge.ocr = undefined;
     resetWorkingPoint();
   });
 
   afterEach(() => {
     restorePlatform();
+  });
+
+  // ── Windows: persistent bridge OCR ────────────────────────────────────────
+
+  describe('Windows persistent bridge OCR', () => {
+    const WORD = [{ text: 'Save', x: 1, y: 2, width: 3, height: 4, confidence: 1, line: 0 }];
+
+    it('reads through the warm bridge — the one-shot PowerShell script is not spawned', async () => {
+      setPlatform('win32'); bridge.up = true;
+      bridge.ocr = () => ({ elements: WORD, fullText: 'Save' });
+      const r = await new OcrEngine().recognizeScreen();
+      expect(r.elements[0]).toMatchObject({ text: 'Save', x: 1, y: 2 });
+      expect(mockExecFile).not.toHaveBeenCalled();
+    });
+
+    it('bridge down → falls back to the one-shot script', async () => {
+      setPlatform('win32'); bridge.up = false;
+      mockExecFile.mockReturnValue({ stdout: sampleOcrJson(WORD) });
+      const r = await new OcrEngine().recognizeScreen();
+      expect(r.elements[0]).toMatchObject({ text: 'Save' });
+      expect(mockExecFile).toHaveBeenCalledTimes(1);
+    });
+
+    it('a missing OCR language pack is final — no pointless retry through the script', async () => {
+      setPlatform('win32'); bridge.up = true;
+      bridge.ocr = () => { throw new Error('Windows OCR engine not available - no recognized languages installed'); };
+      const eng = new OcrEngine();
+      const r = await eng.recognizeScreen();
+      expect(r.elements).toEqual([]);
+      expect(mockExecFile).not.toHaveBeenCalled();
+      expect(eng.isAvailable()).toBe(false);   // latched: later tools degrade to vision
+    });
+
+    it('asks the bridge to load the engine ahead of the first read', () => {
+      setPlatform('win32'); bridge.up = true;
+      new OcrEngine().isAvailable();
+      expect(bridge.calls.some(c => c.cmd === 'ocr' && c.warm === true)).toBe(true);
+    });
   });
 
   // ── multiple monitors (Windows) ───────────────────────────────────────────

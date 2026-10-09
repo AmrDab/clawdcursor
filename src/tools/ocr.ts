@@ -17,17 +17,39 @@ function getOcrEngine(): OcrEngine {
   return ocrEngine;
 }
 
+/**
+ * Physical-pixel rectangle (what the OCR engine crops) for a window's bounds,
+ * or null when the window has no usable area. `bounds` are screen coordinates:
+ * physical pixels on Windows / Linux, logical points on macOS (physical = ×ratio).
+ */
+export function windowOcrRegion(
+  bounds: { x: number; y: number; width: number; height: number } | undefined,
+  dpiRatio: number,
+  platform: NodeJS.Platform,
+): { x: number; y: number; width: number; height: number } | null {
+  if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
+  const k = platform === 'darwin' ? (dpiRatio || 1) : 1;
+  return { x: Math.round(bounds.x * k), y: Math.round(bounds.y * k), width: Math.round(bounds.width * k), height: Math.round(bounds.height * k) };
+}
+
 export function getOcrTools(): ToolDefinition[] {
   return [
     {
       name: 'ocr_read_screen',
       description:
-        'Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:"screen".',
-      parameters: {},
+        'Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:"screen". scope:"window" reads only the focused window — faster, and it does not read the text of other apps.',
+      parameters: {
+        scope: {
+          type: 'string',
+          description: '"screen" (default): the whole screen (the monitor being worked on). "window": only the focused window — focus your target first; falls back to the screen when no usable window is focused.',
+          required: false,
+          enum: ['screen', 'window'],
+        },
+      },
       category: 'perception',
       compactGroup: 'system',
       safetyTier: 0,
-      handler: async (_params, ctx) => {
+      handler: async ({ scope }, ctx) => {
         await ctx.ensureInitialized();
         const engine = getOcrEngine();
 
@@ -38,7 +60,23 @@ export function getOcrTools(): ToolDefinition[] {
           };
         }
 
-        const result = await engine.recognizeScreen();
+        // Screen coordinates on every OS (what space:"screen" clicks take). OCR
+        // reads physical pixels; on macOS a click takes logical points (Retina 2x).
+        const ratio = ctx.desktop.getDpiRatio?.() || 1;
+
+        let read: 'screen' | 'window' = 'screen';
+        let windowTitle: string | undefined;
+        let result: Awaited<ReturnType<typeof engine.recognizeScreen>> | undefined;
+        if (scope === 'window') {
+          const win = ctx.platform ? await ctx.platform.getActiveWindow().catch(() => null) : null;
+          const region = win && !win.isMinimized ? windowOcrRegion(win.bounds, ratio, process.platform) : null;
+          if (region) {
+            result = await engine.recognizeRegion(region.x, region.y, region.width, region.height);
+            read = 'window';
+            windowTitle = win!.title;
+          }
+        }
+        if (!result) result = await engine.recognizeScreen();
 
         if (result.elements.length === 0) {
           return {
@@ -46,14 +84,14 @@ export function getOcrTools(): ToolDefinition[] {
               elements: [],
               fullText: '',
               durationMs: result.durationMs,
-              hint: 'No text detected. Screen may be blank or contain only images. Try desktop_screenshot for visual content.',
+              scope: read,
+              hint: read === 'window'
+                ? 'No text detected in the focused window. Try scope:"screen", or desktop_screenshot for visual content.'
+                : 'No text detected. Screen may be blank or contain only images. Try desktop_screenshot for visual content.',
             }),
           };
         }
 
-        // Screen coordinates on every OS (what space:"screen" clicks take). OCR
-        // reads physical pixels; on macOS a click takes logical points (Retina 2x).
-        const ratio = ctx.desktop.getDpiRatio?.() || 1;
         const elements = result.elements.map(el => {
           const p = ocrPointToClickPoint(el.x, el.y, ratio, process.platform);
           const size = ocrPointToClickPoint(el.width, el.height, ratio, process.platform);
@@ -67,6 +105,8 @@ export function getOcrTools(): ToolDefinition[] {
             fullText: result.fullText,
             durationMs: result.durationMs,
             coordinateSystem: 'screen',
+            scope: read,
+            ...(read === 'window' ? { window: windowTitle } : {}),
             // Screen coordinates are exact on every monitor; dividing by a scale
             // factor ignores the origin of a non-primary monitor.
             toMouseClick: 'Click these coordinates as-is with space:"screen". Or better: smart_click("element text").',

@@ -993,6 +993,90 @@ function Cmd-GetFocusedElement {
     }
 }
 
+# ── Command: ocr (Windows.Media.Ocr, engine kept loaded) ──────────────────────
+# The one-shot scripts/ocr-recognize.ps1 spent ~95% of its time starting
+# PowerShell and loading WinRT; recognition itself is ~35 ms for a window and
+# ~350 ms for a 4K screen. Loading once here makes every later read that cheap.
+# Same JSON shape and error strings as the one-shot script (the caller falls
+# back to it if this bridge is unavailable).
+$script:OcrLoaded = $false
+$script:OcrEngine = $null
+$script:OcrAsTask = $null
+
+function Initialize-Ocr {
+    Add-Type -AssemblyName System.Runtime.WindowsRuntime
+    $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+    $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]
+    $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
+    $null = [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsRuntime]
+    $null = [Windows.Storage.Streams.RandomAccessStream, Windows.Foundation, ContentType = WindowsRuntime]
+    $script:OcrAsTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+        $_.Name -eq 'AsTask' -and $_.IsGenericMethod -and $_.GetParameters().Count -eq 1 -and
+        $_.GetParameters()[0].ParameterType.IsGenericType -and
+        $_.GetParameters()[0].ParameterType.GetGenericTypeDefinition().Name -eq 'IAsyncOperation`1'
+    } | Select-Object -First 1
+    $script:OcrEngine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+    $script:OcrLoaded = $true
+}
+
+function Invoke-OcrAsync {
+    param([object]$AsyncOp, [Type]$ResultType)
+    $task = $script:OcrAsTask.MakeGenericMethod($ResultType).Invoke($null, @($AsyncOp))
+    $task.Wait() | Out-Null
+    return $task.Result
+}
+
+function Cmd-Ocr {
+    param($cmd)
+    $stream = $null; $bitmap = $null
+    try {
+        if ($cmd.warm) {   # load the engine ahead of the first read
+            if (-not $script:OcrLoaded) { Initialize-Ocr }
+            return @{ ready = [bool]$script:OcrEngine }
+        }
+        $path = [string]$cmd.path
+        if (-not $path -or -not (Test-Path -LiteralPath $path)) { return @{ error = "OCR image not found" } }
+        $path = (Resolve-Path -LiteralPath $path).Path
+        if (-not $script:OcrLoaded) { Initialize-Ocr }
+        if (-not $script:OcrAsTask) { return @{ error = "Cannot find AsTask method for WinRT async" } }
+        if (-not $script:OcrEngine) {
+            return @{ error = "Windows OCR engine not available - no recognized languages installed" }
+        }
+        $file    = Invoke-OcrAsync ([Windows.Storage.StorageFile]::GetFileFromPathAsync($path)) ([Windows.Storage.StorageFile])
+        $stream  = Invoke-OcrAsync ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+        $decoder = Invoke-OcrAsync ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+        $bitmap  = Invoke-OcrAsync ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+        $result  = Invoke-OcrAsync ($script:OcrEngine.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
+
+        $elements = New-Object System.Collections.Generic.List[object]
+        $lineIdx = 0
+        foreach ($line in $result.Lines) {
+            foreach ($word in $line.Words) {
+                $r = $word.BoundingRect
+                $elements.Add([ordered]@{
+                    text       = ($word.Text -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', '')
+                    x          = [math]::Round($r.X)
+                    y          = [math]::Round($r.Y)
+                    width      = [math]::Round($r.Width)
+                    height     = [math]::Round($r.Height)
+                    confidence = 1.0   # Windows.Media.Ocr does not expose per-word confidence
+                    line       = $lineIdx
+                })
+            }
+            $lineIdx++
+        }
+        return [ordered]@{
+            elements = $elements.ToArray()
+            fullText = $(if ($result.Text) { $result.Text } else { "" })
+        }
+    } catch {
+        return @{ error = $_.Exception.Message }
+    } finally {
+        if ($stream) { try { $stream.Dispose() } catch {} }
+        if ($bitmap) { try { $bitmap.Dispose() } catch {} }
+    }
+}
+
 # ── Main: signal ready, then read commands ────────────────────────────────────
 # Every command runs on this thread; make it per-monitor-v2 aware for good, so
 # UIA bounds and window rects are PHYSICAL virtual-desktop pixels on every
@@ -1023,6 +1107,7 @@ while ($true) {
             "move-cursor"           { Cmd-MoveCursor $cmd }
             "get-cursor"            { Cmd-GetCursor }
             "capture-rect"          { Cmd-CaptureRect $cmd }
+            "ocr"                   { Cmd-Ocr $cmd }
             "ping"                  { @{ pong=$true } }
             default                 { @{ error="Unknown command: $($cmd.cmd)" } }
         }
