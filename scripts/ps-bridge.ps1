@@ -1048,7 +1048,7 @@ function Cmd-Ocr {
             return @{ ready = [bool]$script:OcrEngine }
         }
         $path = [string]$cmd.path
-        if (-not $path -or -not (Test-Path -LiteralPath $path)) { return @{ error = "OCR image not found" } }
+        if (-not $path -or -not (Test-Path -LiteralPath $path)) { return @{ error = "OCR image missing" } }
         $path = (Resolve-Path -LiteralPath $path).Path
         if (-not $script:OcrLoaded) { Initialize-Ocr }
         if (-not $script:OcrAsTask) { return @{ error = "Cannot find AsTask method for WinRT async" } }

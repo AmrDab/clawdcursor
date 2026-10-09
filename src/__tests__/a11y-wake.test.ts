@@ -48,7 +48,43 @@ describe('getUiTreeWithWake', () => {
     const p = platformWith(els(3));
     const r = await getUiTreeWithWake(p, 7, { pollMs: 1, budgetMs: 4 });
     expect(r.woke).toBe(false);
-    expect(p.getUiTree).toHaveBeenCalledTimes(1 + 4);  // first read + one per poll, bounded by the budget
+    expect(p.getUiTree).toHaveBeenCalledTimes(1 + 4);  // first read + budget/poll polls, no more
+  });
+
+  it('the default wait is about 3 s, not 3 s plus a poll (4 polls of 700 ms)', async () => {
+    const polls: number[] = [];
+    const p = platformWith(els(3));
+    const saved = process.env.CLAWDCURSOR_WAKE_BUDGET_MS;   // the test setup turns the wait off
+    delete process.env.CLAWDCURSOR_WAKE_BUDGET_MS;
+    const realSetTimeout = globalThis.setTimeout;
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => { polls.push(ms ?? 0); return realSetTimeout(fn, 0); }) as never);
+    try {
+      await getUiTreeWithWake(p, 7);
+    } finally {
+      vi.restoreAllMocks();
+      if (saved !== undefined) process.env.CLAWDCURSOR_WAKE_BUDGET_MS = saved;
+    }
+    expect(polls.filter(ms => ms === 700)).toHaveLength(4);
+  });
+
+  it('CLAWDCURSOR_WAKE_BUDGET_MS=0 turns the wait off', async () => {
+    process.env.CLAWDCURSOR_WAKE_BUDGET_MS = '0';
+    try {
+      const p = platformWith(els(3), els(14));
+      const r = await getUiTreeWithWake(p, 7);
+      expect(r.woke).toBe(false);
+      expect(p.getUiTree).toHaveBeenCalledTimes(1);
+    } finally { delete process.env.CLAWDCURSOR_WAKE_BUDGET_MS; }
+  });
+
+  it('an app whose process id is unknown is rate-limited too — not made to wait on every read', async () => {
+    const p = platformWith(els(2));
+    p.getActiveWindow.mockResolvedValue(null);   // no pid anywhere (e.g. Linux without wmctrl / bridge down)
+    let t = 5_000_000;
+    await getUiTreeWithWake(p, undefined, { pollMs: 1, budgetMs: 2, now: () => t });
+    const afterFirst = p.getUiTree.mock.calls.length;
+    await getUiTreeWithWake(p, undefined, { pollMs: 1, budgetMs: 2, now: () => (t += 1_000) });
+    expect(p.getUiTree.mock.calls.length).toBe(afterFirst + 1);   // one read, no waiting
   });
 
   it('a genuinely sparse app does not make every later read wait again', async () => {

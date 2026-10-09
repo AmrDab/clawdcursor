@@ -36,8 +36,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   none of the page at first, then 14 with all of it. `read_tree` and
   `compile_ui` now wake the app (macOS: sets the per-app
   `AXManualAccessibility` switch) and keep reading for up to 3 s until the
-  tree fills in, noting when they did. One wait per app per 5 minutes, so a
-  genuinely sparse app (canvas, game) is not slowed down again.
+  tree fills in, noting when they did. One wait per app per 5 minutes (also
+  when the app cannot be identified), so a genuinely sparse app (canvas, game)
+  is not slowed down again. `CLAWDCURSOR_WAKE_BUDGET_MS=0` turns the wait off.
 - The thin-tree guidance now says that Electron/Chromium apps launched with
   `--force-renderer-accessibility` expose the whole page — required on Linux,
   where nothing enabled after launch (including AT-SPI's own switch) exposes

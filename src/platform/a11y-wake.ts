@@ -30,11 +30,14 @@ const execFileAsync = promisify(execFile);
 export const SPARSE_TREE_MAX = 10;
 /** Pause between re-reads while waiting for the tree to fill in. */
 export const WAKE_POLL_MS = 700;
-/** Give up after this long: a genuinely sparse app (canvas, game) stays sparse. */
+/** Give up after about this long: a genuinely sparse app (canvas, game) stays sparse.
+ *  CLAWDCURSOR_WAKE_BUDGET_MS overrides it (0 turns the wait off). */
 export const WAKE_BUDGET_MS = 3000;
 /** Don't wait on the same process again for this long (the wait is only paid by thin apps). */
 const RETRY_COOLDOWN_MS = 5 * 60_000;
 
+/** Cooldown key when the app's process id is unknown — still rate-limited, never waits on every read. */
+const UNKNOWN_PID = -1;
 const lastTry = new Map<number, number>();
 const MAC_ENABLE_SCRIPT = path.join(getPackageRoot(), 'scripts', 'mac', 'enable-accessibility.jxa');
 
@@ -65,19 +68,23 @@ export async function getUiTreeWithWake(
   const first = await platform.getUiTree(pid);
   if (first.length >= SPARSE_TREE_MAX) return { tree: first, woke: false };
 
+  const envBudget = Number(process.env.CLAWDCURSOR_WAKE_BUDGET_MS);
+  const budgetMs = opts.budgetMs ?? (Number.isFinite(envBudget) && process.env.CLAWDCURSOR_WAKE_BUDGET_MS !== undefined ? envBudget : WAKE_BUDGET_MS);
+  if (budgetMs <= 0) return { tree: first, woke: false };
+
   const target = pid ?? (await platform.getActiveWindow().catch(() => null))?.processId;
+  const key = target ?? UNKNOWN_PID;
   const now = (opts.now ?? Date.now)();
-  if (target !== undefined) {
-    const prev = lastTry.get(target);
-    if (prev !== undefined && now - prev < RETRY_COOLDOWN_MS) return { tree: first, woke: false };
-    lastTry.set(target, now);
-  }
+  const prev = lastTry.get(key);
+  if (prev !== undefined && now - prev < RETRY_COOLDOWN_MS) return { tree: first, woke: false };
+  lastTry.set(key, now);
 
   await wakeAccessibility(target);
   const pollMs = opts.pollMs ?? WAKE_POLL_MS;
-  const budgetMs = opts.budgetMs ?? WAKE_BUDGET_MS;
+  // A fixed number of polls, so the wait is ~budget (plus read time), not budget + a poll.
+  const polls = Math.max(1, Math.floor(budgetMs / Math.max(pollMs, 1)));
   let best = first;
-  for (let waited = 0; waited < budgetMs; waited += Math.max(pollMs, 1)) {
+  for (let i = 0; i < polls; i++) {
     await new Promise(r => setTimeout(r, pollMs));
     const next = await platform.getUiTree(pid).catch(() => best);
     if (next.length > best.length) best = next;

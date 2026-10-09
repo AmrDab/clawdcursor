@@ -396,17 +396,22 @@ export class OcrEngine {
         if (isEngineMissing(err)) throw err;
         // fall through to the interpreted script
       }
-    } else {
-      void compileMacOcrBinary(MAC_OCR_SCRIPT);
     }
 
-    const { stdout } = await execFileAsync('swift', [
-      MAC_OCR_SCRIPT,
-      imagePath,
-    ], {
-      timeout: MAC_OCR_TIMEOUT,
-      maxBuffer: MAX_BUFFER,
-    });
+    let stdout: string;
+    try {
+      ({ stdout } = await execFileAsync('swift', [
+        MAC_OCR_SCRIPT,
+        imagePath,
+      ], {
+        timeout: MAC_OCR_TIMEOUT,
+        maxBuffer: MAX_BUFFER,
+      }));
+    } finally {
+      // Build the cached binary once this read is done — never two Swift
+      // compiles at the same time on a cold machine (the read has a 20 s limit).
+      if (!bin) void compileMacOcrBinary(MAC_OCR_SCRIPT);
+    }
 
     const trimmed = stdout.trim();
     if (!trimmed) {
