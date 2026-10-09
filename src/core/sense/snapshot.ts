@@ -12,6 +12,7 @@
  */
 
 import type { PlatformAdapter } from '../../platform/types';
+import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import type { Snapshot, SnapshotElement, Platform } from './types';
 import { fingerprint } from './fingerprint';
 
@@ -63,7 +64,8 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
   } catch { /* active window optional */ }
 
   try {
-    const tree = await adapter.getUiTree(activeWindow?.processId);
+    // A thin tree may be a sleeping Electron / Chromium app: wake it, read again.
+    const { tree } = await getUiTreeWithWake(adapter, activeWindow?.processId);
     if (tree && tree.length > 0) {
       sources.push('a11y');
       elements = tree

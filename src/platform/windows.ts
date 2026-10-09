@@ -364,10 +364,27 @@ export class WindowsAdapter implements PlatformAdapter {
       const fg = await psRunner.run({ cmd: 'get-foreground-window' }) as any;
       if (!fg || fg.success === false) return null;
 
-      // Try to find the same window in the full list so we get bounds/minimized.
+      const className = typeof fg.className === 'string' && fg.className ? fg.className : undefined;
+      // The bridge answers with the focused window's own bounds / minimized
+      // state: no need to enumerate every window (200+ ms) and, unlike the
+      // first same-process match below, it IS the window that has focus.
+      if (fg.bounds && Number(fg.bounds.width) > 0) {
+        return {
+          ...this.normalizeWindow({
+            title: fg.title ?? '',
+            processName: fg.processName ?? '',
+            processId: fg.processId ?? 0,
+            handle: fg.handle,
+            bounds: fg.bounds,
+            isMinimized: !!fg.isMinimized,
+          }),
+          ...(className ? { className } : {}),
+        };
+      }
+
+      // Older bridge / no bounds: find the same window in the full list.
       const all = await this.listWindows();
       const match = all.find(w => w.processId === fg.processId);
-      const className = typeof fg.className === 'string' && fg.className ? fg.className : undefined;
       if (match) return className ? { ...match, className } : match;
 
       return {

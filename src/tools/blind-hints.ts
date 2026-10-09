@@ -12,7 +12,8 @@ export const SCREEN_COORDS_NOTE = '(positions are screen coordinates — click t
 export const SPARSE_NEXT_STEP =
   '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
   'copy_all_text for the exact page text · smart_click name:"…" to press a labelled control (OCR fallback) · ' +
-  'ocr to read it · screenshot only if those fail.';
+  'ocr to read it · screenshot only if those fail. ' +
+  'Electron/Chromium app? Restarting it with --force-renderer-accessibility exposes the whole page (required on Linux).';
 
 /** The same advice for clawdcursor's internal agent loop, in its own tool names. */
 export const SPARSE_NEXT_STEP_INTERNAL =

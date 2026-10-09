@@ -500,12 +500,25 @@ function Cmd-GetForegroundWindow {
     $pName = "unknown"
     try { $pName = [System.Diagnostics.Process]::GetProcessById($wpid).ProcessName } catch {}
     $title = ""
+    # Bounds + minimized state from the same UIA element listWindows reads, so the
+    # caller need not enumerate every window just to look this one up (200+ ms).
+    $bounds = $null; $isMin = $false
     try {
         $el = [System.Windows.Automation.AutomationElement]::FromHandle($fgWin)
-        if ($el) { $title = $el.Current.Name }
+        if ($el) {
+            $title = $el.Current.Name
+            $rect = $el.Current.BoundingRectangle
+            if (-not [double]::IsInfinity($rect.X)) {
+                $bounds = @{ x=[Math]::Round($rect.X); y=[Math]::Round($rect.Y); width=[Math]::Round($rect.Width); height=[Math]::Round($rect.Height) }
+            }
+            try {
+                $wp = $el.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+                if ($wp.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Minimized) { $isMin = $true }
+            } catch {}
+        }
     } catch {}
     $cls = ''; try { $cls = [ScreenPM]::ClassOf($fgWin) } catch {}
-    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; title=$title; className=$cls; success=$true }
+    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; title=$title; className=$cls; bounds=$bounds; isMinimized=$isMin; success=$true }
 }
 
 # ── Command: focus-window ─────────────────────────────────────────────────────

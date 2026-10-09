@@ -14,7 +14,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const nut = vi.hoisted(() => ({ grabW: 3840, grabH: 2400, mouseW: 1707, osScale: 2.25, setPosition: vi.fn() }));
-const bridge = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown>>, up: true, cursor: { x: 400, y: 300 } }));
+const bridge = vi.hoisted(() => ({ calls: [] as Array<Record<string, unknown>>, up: true, cursor: { x: 400, y: 300 },
+  fg: { success: true } as Record<string, unknown>,
+  windows: [] as Array<Record<string, unknown>> }));
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, click: vi.fn(), pressButton: vi.fn(), releaseButton: vi.fn(), setPosition: nut.setPosition, getPosition: vi.fn(async () => ({ x: 400, y: 300 })) },
   keyboard: { config: {}, type: vi.fn() },
@@ -37,6 +39,8 @@ vi.mock('../platform/ps-runner', () => ({
       if (cmd.cmd === 'move-cursor') { bridge.cursor = { x: cmd.x as number, y: cmd.y as number }; return { success: true, ...bridge.cursor }; }
       if (cmd.cmd === 'get-cursor') return { success: true, ...bridge.cursor };
       if (cmd.cmd === 'activate-at-point') return { success: true, action: 'noop' };
+      if (cmd.cmd === 'get-foreground-window') return bridge.fg;
+      if (cmd.cmd === 'get-screen-context') return { success: true, windows: bridge.windows };
       if (cmd.cmd === 'focus-window') return { success: true, foreground: true, title: 'Target', processId: 42, bounds: { x: -3760, y: -1243, width: 820, height: 620 } };
       return { success: true };
     }),
@@ -58,7 +62,35 @@ const sent = (cmd: string) => bridge.calls.filter(c => c.cmd === cmd);
 beforeEach(() => {
   nut.setPosition.mockClear(); nut.grabW = 3840; nut.grabH = 2400; nut.osScale = 2.25; nut.mouseW = 1707;
   bridge.calls.length = 0; bridge.up = true; bridge.cursor = { x: 400, y: 300 };
+  bridge.fg = { success: true }; bridge.windows = [];
   resetWorkingPoint();
+});
+
+describe('getActiveWindow', () => {
+  const FG = { success: true, handle: 77, processId: 42, processName: 'notepad', title: 'Notes', className: 'Notepad',
+    bounds: { x: -3760, y: -1243, width: 820, height: 620 }, isMinimized: false };
+
+  it('uses the focused window own bounds from the bridge — no enumeration of every window', async () => {
+    bridge.fg = FG;
+    const w = await new WindowsAdapter().getActiveWindow();
+    expect(w).toMatchObject({ title: 'Notes', processName: 'notepad', processId: 42, className: 'Notepad', isMinimized: false,
+      bounds: { x: -3760, y: -1243, width: 820, height: 620 } });
+    expect(sent('get-screen-context')).toHaveLength(0);
+  });
+
+  it('it is the focused window even when the same process has another window listed first', async () => {
+    bridge.fg = FG;
+    bridge.windows = [{ title: 'Other Notepad window', processName: 'notepad', processId: 42, bounds: { x: 0, y: 0, width: 100, height: 100 }, isMinimized: false }];
+    expect((await new WindowsAdapter().getActiveWindow())?.title).toBe('Notes');
+  });
+
+  it('a bridge answer without bounds falls back to the window list', async () => {
+    bridge.fg = { success: true, handle: 77, processId: 42, processName: 'notepad', title: 'Notes' };
+    bridge.windows = [{ title: 'Notes', processName: 'notepad', processId: 42, bounds: { x: 5, y: 6, width: 300, height: 200 }, isMinimized: false }];
+    const w = await new WindowsAdapter().getActiveWindow();
+    expect(w?.bounds).toEqual({ x: 5, y: 6, width: 300, height: 200 });
+    expect(sent('get-screen-context')).toHaveLength(1);
+  });
 });
 
 describe('focusing a window picks the monitor the next screenshot shows', () => {
