@@ -1685,11 +1685,20 @@
     },
     {
       "name": "ocr_read_screen",
-      "description": "Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:\"screen\".",
+      "description": "Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:\"screen\". scope:\"window\" reads only the focused window — faster, and it does not read the text of other apps.",
       "category": "perception",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "scope": {
+            "type": "string",
+            "description": "\"screen\" (default): the whole screen (the monitor being worked on). \"window\": only the focused window — focus your target first; falls back to the screen when no usable window is focused.",
+            "enum": [
+              "screen",
+              "window"
+            ]
+          }
+        }
       },
       "costClass": "perceive-text"
     },

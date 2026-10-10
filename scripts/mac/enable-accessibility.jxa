@@ -1,0 +1,17 @@
+// Switch on the accessibility tree of an Electron / Chromium app.
+// Electron documents AXManualAccessibility as the way for an assistive client
+// to ask an app to build its accessibility tree (without it a macOS Electron
+// window exposes only its frame). Per app, takes effect immediately, and is
+// reset when the app quits — nothing system-wide changes.
+//
+// Usage: osascript -l JavaScript enable-accessibility.jxa <pid>
+// Prints {"ok":true|false,"axError":<AXError code, 0 = success>}.
+ObjC.import('ApplicationServices');
+
+function run(argv) {
+  var pid = parseInt(argv[0], 10);
+  if (!(pid > 0)) return JSON.stringify({ ok: false, error: 'usage: enable-accessibility.jxa <pid>' });
+  var app = $.AXUIElementCreateApplication(pid);
+  var err = $.AXUIElementSetAttributeValue(app, $('AXManualAccessibility'), $.kCFBooleanTrue);
+  return JSON.stringify({ ok: err === 0, axError: err });
+}

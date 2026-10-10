@@ -24,6 +24,7 @@ import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, grimGrab } from './wayland-screen';
 import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
+import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
 import type { Display } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -35,6 +36,7 @@ const LINUX_OCR_SCRIPT = path.join(SCRIPTS_DIR, 'linux', 'ocr-recognize.py');
 const CACHE_TTL_MS = 300;
 const OCR_TIMEOUT = 15000;   // 15s — WinRT assembly load + recognition
 const MAC_OCR_TIMEOUT = 20000; // 20s — Swift compilation on first run
+const MAC_OCR_BIN_TIMEOUT = 15000; // compiled binary: Vision only
 const LINUX_OCR_TIMEOUT = 30000; // 30s — Tesseract can be slow on large images
 const LINUX_OCR_UPSCALE = 2;      // Tesseract needs UI text larger than native size
 const MAX_BUFFER = 4 * 1024 * 1024; // 4MB — large screens with dense text
@@ -113,6 +115,8 @@ export class OcrEngine {
       // Windows.Media.Ocr ships with Windows 10+.
       // Actual availability (language packs) is verified on first recognizeScreen() call.
       this.available = true;
+      // Load the engine in the persistent bridge now, so the first read is warm.
+      psRunner.run({ cmd: 'ocr', warm: true }).catch(() => { /* bridge down: reads fall back to the one-shot script */ });
       return true;
     }
 
@@ -318,6 +322,16 @@ export class OcrEngine {
    * The script outputs a single JSON line with { elements, fullText }.
    */
   private async runWindowsOcr(imagePath: string): Promise<OcrResult> {
+    // Fast path: the persistent PowerShell bridge keeps the WinRT OCR engine
+    // loaded (~35 ms per window, ~350 ms per 4K screen instead of 0.8-1.8 s of
+    // process start-up). A missing engine / language pack is final; any other
+    // failure (bridge down or restarting) falls back to the one-shot script.
+    try {
+      const data = await psRunner.run({ cmd: 'ocr', path: imagePath }) as Record<string, unknown>;
+      return this.parseOcrJson(data);
+    } catch (err: any) {
+      if (isEngineMissing(err)) throw err;
+    }
     const { stdout } = await execFileAsync('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
@@ -369,13 +383,35 @@ export class OcrEngine {
    * The script outputs a single JSON line with { elements, fullText }.
    */
   private async runMacOcr(imagePath: string): Promise<OcrResult> {
-    const { stdout } = await execFileAsync('swift', [
-      MAC_OCR_SCRIPT,
-      imagePath,
-    ], {
-      timeout: MAC_OCR_TIMEOUT,
-      maxBuffer: MAX_BUFFER,
-    });
+    // Compiled binary (no per-read Swift compile) once it exists; until then —
+    // or if it cannot be built / run — the interpreted script below.
+    const bin = cachedMacOcrBinary(MAC_OCR_SCRIPT);
+    if (bin) {
+      try {
+        const { stdout } = await execFileAsync(bin, [imagePath], { timeout: MAC_OCR_BIN_TIMEOUT, maxBuffer: MAX_BUFFER });
+        const data = JSON.parse(stdout.trim());
+        if (data.error) throw new Error(data.error);
+        return this.parseOcrJson(data);
+      } catch (err: any) {
+        if (isEngineMissing(err)) throw err;
+        // fall through to the interpreted script
+      }
+    }
+
+    let stdout: string;
+    try {
+      ({ stdout } = await execFileAsync('swift', [
+        MAC_OCR_SCRIPT,
+        imagePath,
+      ], {
+        timeout: MAC_OCR_TIMEOUT,
+        maxBuffer: MAX_BUFFER,
+      }));
+    } finally {
+      // Build the cached binary once this read is done — never two Swift
+      // compiles at the same time on a cold machine (the read has a 20 s limit).
+      if (!bin) void compileMacOcrBinary(MAC_OCR_SCRIPT);
+    }
 
     const trimmed = stdout.trim();
     if (!trimmed) {

@@ -4,6 +4,46 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **OCR is warm, on every OS.** It spent ~95% of its time starting a process,
+  not recognizing text. Measured on a 3840×2400 screen:
+  - Windows: the recognizer now stays loaded in the PowerShell bridge
+    (loaded ahead of the first read). Full screen 1.2–1.8 s → ~0.54 s; one
+    window ~0.8 s → 55–85 ms. Same results as before, word for word; the
+    one-shot script remains the fallback if the bridge is down.
+  - macOS: the Vision script is compiled once into a cached binary
+    (`~/.clawdcursor/bin`) instead of being re-interpreted on every read; the
+    interpreted script is the fallback while it compiles or if `swiftc` is
+    missing.
+  - Linux: unchanged (tesseract is already a process per read); use
+    `scope:"window"` below to read less.
+- **`getActiveWindow` is ~10× faster on Windows** (200–400 ms → ~20 ms): the
+  bridge reports the focused window's own bounds instead of the adapter
+  enumerating every window to look it up. It is also now the window that has
+  focus, not the first window of the same process, and unnamed windows get
+  real bounds. It runs before nearly every click and key press.
+
+### Added
+
+- **`system ocr scope:"window"`** reads only the focused window: ~80% fewer
+  words (39 vs 486 on the test screen), faster, and it does not read other
+  apps' text. The default stays the whole screen — the focused window can be
+  the agent's own host app.
+- **Thin accessibility trees are no longer mistaken for empty ones.** Chromium
+  / Electron apps build their page tree only after a client asks for it, and
+  it arrives ~1.5–2.5 s later: a plain Electron window read 6 elements and
+  none of the page at first, then 14 with all of it. `read_tree` and
+  `compile_ui` now wake the app (macOS: sets the per-app
+  `AXManualAccessibility` switch) and keep reading for up to 3 s until the
+  tree fills in, noting when they did. One wait per app per 5 minutes (also
+  when the app cannot be identified), so a genuinely sparse app (canvas, game)
+  is not slowed down again. `CLAWDCURSOR_WAKE_BUDGET_MS=0` turns the wait off.
+- The thin-tree guidance now says that Electron/Chromium apps launched with
+  `--force-renderer-accessibility` expose the whole page — required on Linux,
+  where nothing enabled after launch (including AT-SPI's own switch) exposes
+  a Chromium page.
+
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 
 ### Added

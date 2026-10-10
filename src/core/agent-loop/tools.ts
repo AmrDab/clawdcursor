@@ -30,6 +30,7 @@ import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { selectOption } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { getBrowserProcessNames } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
@@ -140,7 +141,9 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: false,
       async execute(args, ctx) {
         const pid = typeof args.processId === 'number' ? args.processId : undefined;
-        const tree = await ctx.platform.getUiTree(pid);
+        // A thin tree is often a sleeping one (Electron / Chromium build their
+        // page tree on first request): wake the app and read once more.
+        const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid);
         // Never a dead end: a thin tree (or a browser, whose page content UIA
         // often omits) says what to do next, in the caller's own tool names.
         const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
@@ -155,7 +158,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
         );
         const more = tree.length > 60 ? `\n… +${tree.length - 60} more` : '';
         const hint = tree.length < 5 || isBrowser ? `\n${nextStep}` : '';
-        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}:\n${wrapUntrustedScreenContent(lines.join('\n') + more)}${hint}` };
+        const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
+        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n') + more)}${hint}` };
       },
     },
 
