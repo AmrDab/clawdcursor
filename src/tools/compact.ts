@@ -146,6 +146,9 @@ const SYSTEM_ACTIONS: ActionRoute[] = [
   { action: 'shortcuts_list',  delegate: 'shortcuts_list' },
   { action: 'shortcuts_run',   delegate: 'shortcuts_execute' },
   { action: 'delegate',        delegate: 'delegate_to_agent' },
+  // Hand the desktop to the user at a roadblock (sign-in, 2FA, CAPTCHA) and
+  // continue when they click Resume on screen.
+  { action: 'pause_for_user',  delegate: 'pause_for_user' },
   // v0.8.2 — Electron/WebView2 bridge
   { action: 'detect_webview',  delegate: 'detect_webview_apps' },
   { action: 'relaunch_with_cdp', delegate: 'relaunch_with_cdp' },
@@ -176,6 +179,7 @@ const TASK_ACTIONS: ActionRoute[] = [
   { action: 'run',    delegate: 'delegate_to_agent', argRemap: { instruction: 'task' } },
   { action: 'status', delegate: 'agent_status' },
   { action: 'abort',  delegate: 'abort_task' },
+  { action: 'resume', delegate: 'resume_task' },
 ];
 
 const BROWSER_ACTIONS: ActionRoute[] = [
@@ -490,7 +494,7 @@ export function getCompactTools(): ToolDefinition[] {
     {
       name: 'system',
       description:
-        'System integration — `copy_all_text` (exact text of the focused page/document; better than OCR), clipboard read/write, OCR screen-reading, system time, undo, named shortcuts, delegate to a sub-agent, `report` a bad session to the clawdcursor team. ' +
+        'System integration — `copy_all_text` (exact text of the focused page/document; better than OCR), clipboard read/write, OCR screen-reading, system time, undo, named shortcuts, delegate to a sub-agent, `pause_for_user` (hand the desktop to the user for a sign-in / 2FA / CAPTCHA, continue when they click Resume), `report` a bad session to the clawdcursor team. ' +
         `Pick an action: ${actionCatalog(SYSTEM_ACTIONS)}.`,
       parameters: buildCompoundSchema(SYSTEM_ACTIONS),
       category: 'orchestration',
@@ -516,14 +520,15 @@ export function getCompactTools(): ToolDefinition[] {
         'Hand clawdcursor a WHOLE natural-language task and let its internal agent loop execute it (accessibility first, screenshots when the screen has no readable structure). ' +
         'Use this when you don\'t want to micromanage every primitive — clawdcursor decomposes the task, picks the cheapest execution path, and returns a trace. ' +
         'BOUNDED-SYNC: waits up to `timeout` seconds (default 45) — a longer task returns {status:"running"} with progress while it CONTINUES in the background; re-call with the SAME instruction to keep waiting (re-attaches, never restarts), {action:"status"} to poll, {action:"abort"} to stop it. ' +
+        'At a roadblock (sign-in, 2FA, CAPTCHA, an approval) the task PAUSES for the user and returns {status:"paused", waitingFor}: keep re-calling to wait, never restart; {action:"resume"} if the user tells you they finished. ' +
         'The `computer`/`accessibility`/`window`/`system`/`browser` compounds are for when you want step-level control yourself. ' +
         'If the daemon isn\'t running you get a clear error telling you how to start it.',
       parameters: {
         action: {
           type: 'string',
-          description: 'Default "run" (submit/continue the instruction). "status" → poll the running task (cheap, poll at 1–2 Hz). "abort" → stop the running task.',
+          description: 'Default "run" (submit/continue the instruction). "status" → poll the running task (cheap, poll at 1–2 Hz). "abort" → stop the running task. "resume" → continue a task paused for the user, when they tell you they finished.',
           required: false,
-          enum: ['run', 'status', 'abort'],
+          enum: ['run', 'status', 'abort', 'resume'],
         },
         instruction: {
           type: 'string',

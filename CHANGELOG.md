@@ -26,6 +26,26 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Added
 
+- **Pause for the user at a roadblock, then continue.** A sign-in, a 2FA code,
+  a CAPTCHA, or an action that needs approval no longer ends the task with the
+  agent confused. The run pauses, keeping its history: the glow turns blue and
+  the pill says what to do, with **Resume / End task**, or **Allow / Deny** for
+  an approval. After Resume the agent re-reads the screen and carries on from
+  where it is. Windows for now; macOS and Linux overlays are next.
+  - Built-in agent: new `ask_user` tool. `give_up`, the repeat guard and
+    confirm-tier actions (Send, Delete, closing a window…) now pause instead of
+    failing. Paused time doesn't count toward the 12-minute task limit. No
+    answer in 15 min (`CLAWD_PAUSE_TIMEOUT_MIN`) ends the task.
+  - Outside agents: `system pause_for_user` (bounded wait; re-call to keep
+    waiting); confirm-tier calls show the same on-screen Allow / Deny (re-issue
+    the identical call to keep waiting). A delegated `task` reports
+    `{status:"paused", waitingFor}`, and `task {action:"resume"}` resumes a
+    "your turn" pause. An approval can only be answered on screen.
+  - Also answerable with `clawdcursor resume [--allow|--deny|--end]`,
+    `POST /resume`, or the dashboard, whose Approve/Reject banner now works.
+  - `CLAWD_NO_PAUSE=1` restores the old fail-fast behaviour (CI, unattended
+    runs). Nothing reads the screen while paused.
+- **The edge glow covers every monitor**, not just the primary one.
 - **`system ocr scope:"window"`** reads only the focused window: ~80% fewer
   words (39 vs 486 on the test screen), faster, and it does not read other
   apps' text. The default stays the whole screen — the focused window can be

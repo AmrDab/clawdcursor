@@ -8,6 +8,9 @@ process.env.CLAWDCURSOR_LOG_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-log
 process.env.CLAWDCURSOR_SESSION_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-sessions-${process.pid}`);
 // Tests fake the UI tree; a thin fake must not make every read wait for an app to "wake" (the wake tests pass their own budget).
 process.env.CLAWDCURSOR_WAKE_BUDGET_MS ??= '0';
+// A pause would put the real overlay on screen and wait for a human. Off by
+// default; the pause tests turn it on with a fake banner spawner.
+process.env.CLAWD_NO_PAUSE ??= '1';
 
 // The PowerShell bridge drives the REAL pointer and captures the REAL screen —
 // never in unit tests. Default: bridge down (callers fall back). Tests that

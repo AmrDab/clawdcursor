@@ -258,6 +258,7 @@ const TOOL_TIER: Record<string, Tier> = {
   'batch': 'read',
   'done': 'read',
   'give_up': 'read',
+  'ask_user': 'read',
   'cannot_read': 'read',
   // Tranche 1B — new MCP tools (extras.ts)
   'mouse_move_relative': 'input',

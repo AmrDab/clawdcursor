@@ -1043,3 +1043,90 @@ describe('runAgent — malformed tool arguments are refused, not executed', () =
     expect(setWindowState).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('runAgent — pause for the user at a roadblock', () => {
+  beforeEach(() => { llmTurnQueue.length = 0; capturedLlmCalls.length = 0; });
+
+  const toolResultTexts = () => (capturedLlmCalls[capturedLlmCalls.length - 1].messages as any[])
+    .filter((m: any) => m.role === 'user')
+    .flatMap((m: any) => (m.content as any[]))
+    .filter((b: any) => b.type === 'tool_result')
+    .flatMap((b: any) => Array.isArray(b.content) ? b.content : [])
+    .map((c: any) => c.text ?? '')
+    .join('\n');
+
+  it('ask_user pauses with the model\'s message and the SAME run continues after Resume', async () => {
+    const pause = vi.fn(async () => 'resumed' as const);
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in to GitHub, then click Resume' }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'signed-in page is showing' }));
+
+    const result = await runAgent({ task: 'star the repo', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+
+    expect(pause).toHaveBeenCalledWith({ kind: 'needs_user', message: 'Sign in to GitHub, then click Resume' });
+    expect(result.exit).toBe('done');
+    expect(result.steps[0].result.text).toMatch(/resumed/);
+    expect(toolResultTexts()).toMatch(/USER RESUMED.*Do not restart it/s);
+  });
+
+  it('give_up pauses first; after Resume the run continues instead of ending', async () => {
+    const pause = vi.fn(async () => 'resumed' as const);
+    llmTurnQueue.push(turnCall('give_up', { reason: 'login required' }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'dashboard is showing' }));
+
+    const result = await runAgent({ task: 't', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+
+    expect(pause).toHaveBeenCalledWith({ kind: 'needs_user', message: 'login required' });
+    expect(result.exit).toBe('done');
+    expect(toolResultTexts()).toMatch(/Not given up/);
+  });
+
+  it('give_up that the user ends still gives up (terminal, as before)', async () => {
+    const pause = vi.fn(async () => 'ended' as const);
+    llmTurnQueue.push(turnCall('give_up', { reason: 'login required' }));
+    const result = await runAgent({ task: 't', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    expect(result.exit).toBe('give_up');
+    expect(result.text).toMatch(/login required/);
+  });
+
+  it('ask_user ended by the user → aborted; unanswered → give_up', async () => {
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Enter the 2FA code' }));
+    const ended = await runAgent({ task: 't', maxTurns: 4, pause: async () => 'ended' }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    expect(ended.exit).toBe('aborted');
+
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Enter the 2FA code' }));
+    const silent = await runAgent({ task: 't', maxTurns: 4, pause: async () => 'timeout' }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    expect(silent.exit).toBe('give_up');
+    expect(silent.text).toMatch(/nobody answered/);
+  });
+
+  it('with no human reachable (pause → null) give_up ends the run exactly as before', async () => {
+    llmTurnQueue.push(turnCall('give_up', { reason: 'captcha' }));
+    const result = await runAgent({ task: 't', maxTurns: 4, pause: async () => null }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    expect(result.exit).toBe('give_up');
+  });
+
+  it('a confirm-tier action asks Allow / Deny on screen; Allow runs it', async () => {
+    const pause = vi.fn(async () => 'allowed' as const);
+    const adapter = makeAdapter({ activeProcessName: 'olk' }); // sensitive app → raw click needs confirm
+    llmTurnQueue.push(turnCall('click', { x: 100, y: 200 }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'clicked after approval' }));
+
+    const result = await runAgent({ task: 'send an email', maxTurns: 4, pause }, { adapter, llm: LLM_CONFIG });
+
+    expect(pause).toHaveBeenCalledWith(expect.objectContaining({ kind: 'confirm', message: expect.stringMatching(/click at \(100, 200\) in olk/) }));
+    expect(result.steps.some(s => /safety_confirm/.test(s.result.text))).toBe(false);
+    expect(adapter.mouseClick).toHaveBeenCalled();
+  });
+
+  it('Deny refuses the action and tells the model not to retry it', async () => {
+    const adapter = makeAdapter({ activeProcessName: 'olk' });
+    llmTurnQueue.push(turnCall('click', { x: 100, y: 200 }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'stopped after the deny' }));
+
+    const result = await runAgent({ task: 'send an email', maxTurns: 4, pause: async () => 'denied' }, { adapter, llm: LLM_CONFIG });
+
+    expect(adapter.mouseClick).not.toHaveBeenCalled();
+    expect(result.steps[0].result.text).toMatch(/safety_denied/);
+    expect(toolResultTexts()).toMatch(/clicked Deny.*Do NOT retry/s);
+  });
+});

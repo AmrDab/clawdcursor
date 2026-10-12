@@ -473,6 +473,34 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           continue;
         }
 
+        // 5'. Roadblocks hand the desktop to the user instead of ending the
+        // run: ask_user always, give_up whenever someone can answer. The loop
+        // waits on the answer and continues with its history intact.
+        if ((call.name === 'ask_user' || call.name === 'give_up') && input.pause) {
+          const reason = String(call.args.message ?? call.args.reason ?? '').trim() || 'The agent needs your help to continue.';
+          const outcome = await input.pause({ kind: 'needs_user', message: reason });
+          if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
+          if (outcome === 'resumed') {
+            log.info('agent.pause.resumed', { turn, tool: call.name });
+            holder.invalidate(); // the user changed the screen — mint a fresh map
+            const lead = call.name === 'give_up' ? 'Not given up: you were paused for the user. ' : '';
+            toolResults.push({ id: call.id, text: lead + resumedNote(reason), isError: false });
+            steps.push({
+              turn, toolName: call.name, toolArgs: call.args,
+              result: { success: true, text: 'paused for the user → resumed' },
+              durationMs: Date.now() - turnStart, fingerprintChanged: false, thought: llmResult.text,
+            });
+            continue;
+          }
+          if (call.name === 'ask_user' && outcome === 'ended') {
+            return finish('aborted', `ended by the user while paused: ${reason}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
+          }
+          if (call.name === 'ask_user' && outcome === 'timeout') {
+            return finish('give_up', `nobody answered the pause: ${reason}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
+          }
+          // give_up that the user ended or nobody answered: runs as before (terminal).
+        }
+
         let targetLabel = typeof call.args.name === 'string' ? call.args.name
           : typeof call.args.target === 'string' ? call.args.target
           : undefined;
@@ -503,7 +531,37 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           activeApp,
           userTaskText: input.task,
         });
-        if (!isAllowed(decision)) {
+        // A confirm with a human at the machine becomes an on-screen
+        // Allow / Deny instead of a dead end.
+        let userAllowed = false;
+        if (decision.decision === 'confirm' && input.pause) {
+          const what = describeAction(call.name, call.args, targetLabel, activeApp);
+          const outcome = await input.pause({ kind: 'confirm', message: `The agent wants to: ${what} (${decision.reason})` });
+          if (isAborted() || outcome === 'ended') {
+            return finish('aborted', `ended by the user at the approval for: ${what}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
+          }
+          if (outcome === 'timeout') {
+            return finish('give_up', `nobody answered the approval for: ${what}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
+          }
+          if (outcome === 'allowed') {
+            userAllowed = true;
+            log.info('agent.tool.user_allowed', { turn, tool: call.name });
+          } else if (outcome === 'denied') {
+            log.info('agent.tool.user_denied', { turn, tool: call.name });
+            toolResults.push({
+              id: call.id,
+              text: `[denied] The user clicked Deny for: ${what}. Do NOT retry it. Find another way that does not need this action, or give_up with the reason.`,
+              isError: true,
+            });
+            steps.push({
+              turn, toolName: call.name, toolArgs: call.args,
+              result: { success: false, text: `safety_denied: user denied ${what}` },
+              durationMs: Date.now() - turnStart, fingerprintChanged: false, thought: llmResult.text,
+            });
+            continue;
+          }
+        }
+        if (!isAllowed(decision) && !userAllowed) {
           const reason = decision.decision === 'block'
             ? decision.reason
             : decision.decision === 'confirm'
@@ -573,6 +631,18 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
             fingerprintChanged: false,
             thought: llmResult.text,
           });
+          if (input.pause) {
+            const stuck = `I keep repeating ${call.name} and can't tell whether it works. Check the screen: fix it or do this step yourself, then click Resume.`;
+            const outcome = await input.pause({ kind: 'needs_user', message: stuck });
+            if (isAborted() || outcome === 'ended') {
+              return finish('aborted', `ended by the user while paused: ${stuck}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
+            }
+            if (outcome === 'resumed') {
+              holder.invalidate();
+              toolResults.push({ id: call.id, text: `NOT EXECUTED (repeat guard). ${resumedNote(stuck)} Do not repeat this exact call.`, isError: true });
+              continue;
+            }
+          }
           return finish(
             'give_up',
             `runaway-guard: repeated ${call.name} with identical args (${recentRepeats}× in last ${REPEAT_WINDOW} turns). The agent is likely unable to see whether the action succeeded — try a different approach or use detect_webview_apps + CDP bridge if the target is an Electron/WebView2 app.`,
@@ -1025,6 +1095,21 @@ async function storeUIMap(
   }, { max_cost: 'cheap' });                                              // cheap = window+a11y only
   holder.put(map, now, 'cheap');
   return { render: renderUIMap(map), anchors: map.anchors, id };
+}
+
+/** Fed back to the model after the user answered a pause with Resume. */
+function resumedNote(what: string): string {
+  return `USER RESUMED: the user handled "${truncate(what, 160)}" and clicked Resume. ` +
+    'The screen may have changed (new page, dialog closed, focus moved): read the fresh COMPILED UI below before acting, ' +
+    'then continue the ORIGINAL task from where it now stands. Do not restart it.';
+}
+
+/** Short human-readable form of a tool call for the on-screen approval. */
+function describeAction(tool: string, args: Record<string, unknown>, label: string | undefined, app: string | undefined): string {
+  const target = label ? ` "${truncate(label, 60)}"`
+    : typeof args.x === 'number' && typeof args.y === 'number' ? ` at (${args.x}, ${args.y})` : '';
+  const text = typeof args.text === 'string' ? ` text "${truncate(args.text, 40)}"` : '';
+  return `${tool}${target}${text}${app ? ` in ${app}` : ''}`;
 }
 
 function toUnifiedLLMTools(tools: UnifiedTool[]): LLMTool[] {

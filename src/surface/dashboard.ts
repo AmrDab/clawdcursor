@@ -597,8 +597,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     <div class="confirm-banner" id="confirmBanner">
       <span class="msg" id="confirmMsg">⚠️ Action requires confirmation</span>
-      <button class="approve-btn" onclick="confirmAction(true)">✅ Approve</button>
-      <button class="reject-btn" onclick="confirmAction(false)">❌ Reject</button>
+      <button class="approve-btn" id="approveBtn" onclick="confirmAction(true)">✅ Approve</button>
+      <button class="reject-btn" id="rejectBtn" onclick="confirmAction(false)">❌ Reject</button>
     </div>
 
     <div class="response-card" id="responseCard">
@@ -877,6 +877,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     } else if (st === 'waiting_confirm') {
       displayStatus = 'Confirming';
       dotClass = 'confirming';
+    } else if (st === 'paused') {
+      displayStatus = 'Paused for you';
+      dotClass = 'confirming';
     } else {
       displayStatus = 'Running';
       dotClass = 'running';
@@ -885,10 +888,15 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     statusDot.className = 'status-dot ' + dotClass;
     statusText.textContent = displayStatus;
 
-    // Show/hide confirm banner
-    if (st === 'waiting_confirm') {
-      const desc = data.currentStep || 'An action requires your approval';
-      confirmMsg.textContent = '⚠️ ' + desc;
+    // Show/hide the pause banner: a task paused for the user (sign-in, 2FA,
+    // CAPTCHA) or waiting on an approval. Same answers as the on-screen pill.
+    const pause = data.pause || null;
+    pauseKind = pause ? pause.kind : null;
+    if (pause) {
+      const isConfirm = pause.kind === 'confirm';
+      confirmMsg.textContent = (isConfirm ? '⚠️ ' : '⏸ ') + pause.message;
+      document.getElementById('approveBtn').textContent = isConfirm ? '✅ Allow' : '▶ Resume';
+      document.getElementById('rejectBtn').textContent = isConfirm ? '❌ Deny' : '⏹ End task';
       confirmBanner.classList.add('visible');
     } else {
       confirmBanner.classList.remove('visible');
@@ -964,21 +972,25 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     setTimeout(check, 1500);
   }
 
-  // Confirm/reject — placeholder. The /confirm endpoint was removed in
-  // the v0.9 REST→MCP collapse; the human-in-the-loop confirm flow now
-  // surfaces through the editor host's tool-approval UI (or in the
-  // dashboard's pending-task list, server-side). Left as a no-op visible
-  // dismiss so the banner can be cleared from the UI while the new flow
-  // is wired up; the LLM-side confirmation is enforced server-side by
-  // the safety gate regardless.
+  // Answer a pause (POST /resume): Allow / Deny for an approval,
+  // Resume / End task for a "your turn" pause.
+  let pauseKind = null;
   window.confirmAction = async function(approved) {
+    if (!pauseKind) { confirmBanner.classList.remove('visible'); return; }
+    const answer = pauseKind === 'confirm' ? (approved ? 'allow' : 'deny') : (approved ? 'resume' : 'end');
     try {
-      // Server-side: confirmation is decided by the safety-gate module,
-      // not by a dashboard POST. This handler only dismisses the banner.
-      void approved;
+      const res = await fetch('/resume', {
+        method: 'POST',
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ answer: answer }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(function() { return {}; });
+        alert('Could not answer: ' + (data.error || res.statusText));
+      }
       confirmBanner.classList.remove('visible');
     } catch(e) {
-      alert('Failed to send confirmation: ' + e.message);
+      alert('Failed to send the answer: ' + e.message);
     }
   };
 

@@ -915,6 +915,41 @@ program
   });
 
 program
+  .command('resume')
+  .description('Answer a task paused for you (same as the on-screen buttons): resume, or --allow / --deny an approval, or --end the task')
+  .option('--allow', 'Approve the action the agent is waiting on')
+  .option('--deny', 'Refuse the action the agent is waiting on')
+  .option('--end', 'End the paused task')
+  .option('--port <port>', 'API server port', '3847')
+  .action(async (opts) => {
+    const port = parseInt(opts.port, 10);
+    const answer = opts.allow ? 'allow' : opts.deny ? 'deny' : opts.end ? 'end' : 'resume';
+    if (!(await isClawdInstance(port))) {
+      console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/resume`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json() as { outcome?: string; was?: string; error?: string };
+      if (res.ok) {
+        console.log(`${e('▶', '>')} ${data.outcome}${data.was ? `: ${data.was}` : ''}`);
+      } else {
+        console.error(`${e('❌', '[ERR]')} ${data.error ?? res.statusText}`);
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      console.error(`${e('❌', '[ERR]')} ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command('task [text]')
   .description('Send a task to a running Clawd Cursor instance (interactive if no text given)')
   .option('--port <port>', 'API server port', '3847')

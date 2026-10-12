@@ -15,6 +15,10 @@
 import * as fs from 'fs';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
+import { pauseGate } from '../core/pause-gate';
+
+const PAUSE_WAIT_DEFAULT_MS = 45_000; // under common 60s MCP client timeouts
+const normMessage = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
 function needAgent(tool: string): { text: string; isError: true } {
   return {
@@ -109,10 +113,86 @@ export function getAgentTools(): ToolDefinition[] {
               status: 'no_agent',
               stepsCompleted: 0,
               stepsTotal: 0,
+              pause: pauseGate.current() ?? undefined,
             }),
           };
         }
-        return { text: JSON.stringify(ctx.agent.getState()) };
+        return { text: JSON.stringify({ ...ctx.agent.getState(), pause: pauseGate.current() ?? undefined }) };
+      },
+    },
+
+    {
+      name: 'pause_for_user',
+      description:
+        'Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make) instead of stopping or asking them to come back to this chat. ' +
+        'Shows an on-screen prompt: blue glow, your message, Resume / End task. ' +
+        'BOUNDED: waits up to `timeout` seconds (default 45). {status:"waiting"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). ' +
+        '{status:"resumed"} → re-read the screen, then continue the task. {status:"ended"} → the user stopped it: report back.',
+      parameters: {
+        message: { type: 'string', description: 'Exactly what the user should do, e.g. "Sign in to GitHub, then click Resume".', required: true },
+        timeout: { type: 'number', description: 'Max seconds to wait for the answer before returning {status:"waiting"} (default 45, clamped 1–50). The prompt stays up.', required: false },
+      },
+      category: 'orchestration',
+      compactGroup: 'system',
+      safetyTier: 0,
+      handler: async ({ message, timeout }) => {
+        const text = String(message ?? '').trim();
+        if (!text) return { text: 'pause_for_user: `message` is required (what the user should do).', isError: true };
+        if (!pauseGate.available()) {
+          return {
+            text: 'pause_for_user: no on-screen prompt is available on this machine (the overlay is off: --no-banner, CLAWD_NO_BANNER, CLAWD_NO_PAUSE, or not supported on this OS yet). Ask the user in your own chat instead.',
+            isError: true,
+          };
+        }
+        const key = `mcp:${normMessage(text)}`;
+        const sec = Number(timeout);
+        const boundMs = Math.min(50_000, Math.max(1_000, Number.isFinite(sec) && sec > 0 ? sec * 1000 : PAUSE_WAIT_DEFAULT_MS));
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const outcome = await Promise.race([
+          pauseGate.request({ kind: 'needs_user', message: text, key }),
+          new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
+        ]);
+        clearTimeout(timer);
+        if (outcome === null) {
+          return {
+            text: JSON.stringify({
+              status: 'waiting',
+              waitingFor: text,
+              next: 'The user has not answered yet. Re-call pause_for_user with the SAME message to keep waiting (re-attaches; the prompt stays up). Do not act on the desktop meanwhile.',
+            }),
+          };
+        }
+        pauseGate.forget(key);
+        if (outcome === 'resumed') {
+          return { text: JSON.stringify({ status: 'resumed', next: 'The user finished and clicked Resume. The screen may have changed: read it again before acting, then continue the task.' }) };
+        }
+        return {
+          text: JSON.stringify({
+            status: outcome === 'timeout' ? 'timed_out' : 'ended',
+            next: outcome === 'timeout' ? 'Nobody answered the on-screen prompt. Stop and report back.' : 'The user clicked End task. Stop and report back.',
+          }),
+        };
+      },
+    },
+
+    {
+      name: 'resume_task',
+      description:
+        'Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen). ' +
+        'Only for "your turn" pauses: an approval (Allow / Deny) can only be answered by the user on screen.',
+      parameters: {},
+      category: 'orchestration',
+      compactGroup: 'task',
+      safetyTier: 1,
+      handler: async () => {
+        const p = pauseGate.current();
+        if (!p) return { text: 'resume_task: nothing is paused.', isError: true };
+        if (p.kind === 'confirm') {
+          return { text: `resume_task: this pause is an approval ("${p.message}"). Only the user can answer it, with Allow or Deny on screen.`, isError: true };
+        }
+        const r = pauseGate.answer('resume');
+        if (!r.ok) return { text: `resume_task: ${r.error}`, isError: true };
+        return { text: JSON.stringify({ resumed: true, was: p.message }) };
       },
     },
 

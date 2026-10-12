@@ -16,7 +16,7 @@
  *
  * COVERAGE
  * --------
- * Terminal actions (done, give_up, cannot_read) and the vision compound tools
+ * Terminal / loop-control actions (done, give_up, cannot_read, ask_user) and the vision compound tools
  * (mouse, keyboard, window — defined in compound.ts) are intentionally EXCLUDED:
  *   - Terminal actions do not appear on the MCP surface.
  *   - Vision compounds collapse many granular tools into 3 schemas; they have no

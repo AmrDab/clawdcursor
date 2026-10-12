@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../llm/browser-config';
 import { resolveAlias } from '../core/router/aliases';
+import { pauseGate } from '../core/pause-gate';
 
 const execFileAsync = promisify(execFile);
 
@@ -158,6 +159,24 @@ export function getOrchestrationTools(): ToolDefinition[] {
         // Still running — return a receipt instead of blowing the caller's
         // MCP timeout. NOT an error: the task is alive and progressing.
         const st = ctx.agent.getState?.() ?? {};
+        const pause = pauseGate.current();
+        if (pause && (st.status === 'paused' || st.status === 'waiting_confirm')) {
+          // Paused for the user at the machine — the caller must wait, not
+          // restart or abort (that is what confused agents before).
+          return {
+            text: JSON.stringify({
+              status: 'paused',
+              task: entry.task,
+              waitingFor: pause.message,
+              kind: pause.kind,
+              pausedFor: `${((Date.now() - pause.since) / 1000).toFixed(0)}s`,
+              next: 'The agent is waiting for the user at the computer (on-screen prompt with ' +
+                (pause.kind === 'confirm' ? 'Allow / Deny' : 'Resume / End task') + '). Do NOT restart or abort the task. ' +
+                'Re-call this tool with the SAME task text to keep waiting. If the user tells you here that they are done, ' +
+                (pause.kind === 'confirm' ? 'ask them to click Allow or Deny on screen (an approval can only come from there).' : 'call task {action:"resume"}.'),
+            }, null, 2),
+          };
+        }
         return {
           text: JSON.stringify({
             status: 'running',

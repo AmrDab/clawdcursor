@@ -1,4 +1,5 @@
 import { evaluateInput } from '../core/safety';
+import { pauseGate } from '../core/pause-gate';
 import type { ToolDefinition, ToolResult } from './types';
 import type { UIMapHolder } from '../core/sense/ui-map-holder';
 
@@ -37,13 +38,14 @@ function labelFromArgs(args: Record<string, unknown>, uiMaps?: UIMapHolder): str
  * the name string.
  *
  * Returns null when the tool is allowed; returns an error ToolResult when
- * blocked or requiring confirmation.
+ * blocked or requiring confirmation (the latter carries `confirmReason`, so a
+ * caller with a human at the machine can ask on screen — confirmOnScreen).
  */
 export function evaluateToolCall(
   tool: ToolDefinition,
   args: Record<string, unknown>,
   opts?: { uiMaps?: UIMapHolder },
-): ToolResult | null {
+): (ToolResult & { confirmReason?: string }) | null {
   const decision = evaluateInput({
     toolName: tool.name,
     args,
@@ -71,5 +73,43 @@ export function evaluateToolCall(
           `Next step: surface this to the user and wait for approval — re-issuing the same call will just block again. ` +
           `If the user already authorized this intent, run the step inside \`batch({allowConfirm:true})\`.`,
     isError: true,
+    confirmReason: reason,
   };
+}
+
+const CONFIRM_WAIT_MS = 45_000; // under common 60s MCP client timeouts
+
+/**
+ * Ask the human at the machine to Allow / Deny a confirm-tier call on screen
+ * (pause-gate.ts). Bounded like `task`: if they haven't answered within the
+ * wait, the caller is told to re-issue the identical call, which re-attaches
+ * to the same prompt. Null when no on-screen prompt can be shown — the caller
+ * keeps the plain "requires confirmation" error.
+ */
+export async function confirmOnScreen(
+  tool: ToolDefinition,
+  args: Record<string, unknown>,
+  reason: string,
+  opts?: { uiMaps?: UIMapHolder; waitMs?: number },
+): Promise<{ allowed: true } | { allowed: false; text: string } | null> {
+  if (!pauseGate.available()) return null;
+  const action = typeof args.action === 'string' ? ` ${args.action}` : '';
+  // Name the target so the user knows what they approve (window, app, URL…).
+  const target = labelFromArgs(args, opts?.uiMaps)
+    ?? [args.processName, args.app, args.url, args.path].find(v => typeof v === 'string' && v.trim()) as string | undefined;
+  const what = `${tool.name}${action}${target ? ` "${target.slice(0, 60)}"` : ''}`;
+  const key = `confirm:${tool.name}:${JSON.stringify(args)}`;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const outcome = await Promise.race([
+    pauseGate.request({ kind: 'confirm', message: `An AI agent wants to: ${what} (${reason})`, key }),
+    new Promise<null>(r => { timer = setTimeout(() => r(null), opts?.waitMs ?? CONFIRM_WAIT_MS); }),
+  ]);
+  clearTimeout(timer);
+  if (outcome === null) {
+    return { allowed: false, text: `${tool.name}: WAITING for the user to Allow or Deny on screen: ${what}. Re-issue this exact call to keep waiting (it runs as soon as they click Allow). Do not try another way meanwhile.` };
+  }
+  pauseGate.forget(key);
+  if (outcome === 'allowed') return { allowed: true };
+  if (outcome === 'denied') return { allowed: false, text: `${tool.name}: the user clicked Deny on screen for: ${what}. Do NOT retry it; find another way or ask the user.` };
+  return { allowed: false, text: `${tool.name}: ${outcome === 'timeout' ? 'nobody answered' : 'the user ended the task at'} the on-screen approval for: ${what}. Stop and report back.` };
 }

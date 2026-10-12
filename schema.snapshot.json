@@ -1775,6 +1775,28 @@
       "costClass": "act"
     },
     {
+      "name": "pause_for_user",
+      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make) instead of stopping or asking them to come back to this chat. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
+      "category": "orchestration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Exactly what the user should do, e.g. \"Sign in to GitHub, then click Resume\"."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max seconds to wait for the answer before returning {status:\"waiting\"} (default 45, clamped 1–50). The prompt stays up."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "costClass": "act"
+    },
+    {
       "name": "read_clipboard",
       "description": "Read the current text content of the OS clipboard.",
       "category": "clipboard",
@@ -1889,6 +1911,16 @@
             "description": "Optional title-substring match"
           }
         }
+      },
+      "costClass": "act"
+    },
+    {
+      "name": "resume_task",
+      "description": "Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen). Only for \"your turn\" pauses: an approval (Allow / Deny) can only be answered by the user on screen.",
+      "category": "orchestration",
+      "parameters": {
+        "type": "object",
+        "properties": {}
       },
       "costClass": "act"
     },

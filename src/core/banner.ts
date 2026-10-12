@@ -10,6 +10,12 @@
  * a human at the machine sees it — and can kill it (double-click → the parent
  * runs the `clawdcursor stop` flow). Two lifecycles feed it:
  *
+ * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
+ * roadblock, both overlays are respawned in their paused form — a BLUE glow and
+ * a pill that says what to do, with answer buttons (Resume / End task, or
+ * Allow / Deny for an approval). The pill prints BANNER_RESUME / BANNER_END /
+ * BANNER_ALLOW / BANNER_DENY; showRunning() swaps back to the amber form.
+ *
  *   - pin()/unpin(): the autonomous task loop pins the banner for the whole
  *     task (agent.executeTask). A pinned banner ignores idle timers.
  *   - touch(): every consequential (safetyTier ≥ 1) MCP tool call pokes the
@@ -26,10 +32,21 @@ import { spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
+import type { PauseAnswer, PauseInfo } from './pause-gate';
 
 const IDLE_HIDE_MS = 30_000;
+const PAUSED_GLOW = '#3b82f6'; // blue — "your turn"
 
-type Spawner = () => ChildProcess;
+/** Which form of the overlay to draw: running (default) or paused for the user. */
+export interface OverlayMode { paused?: PauseInfo }
+type Spawner = (mode: OverlayMode) => ChildProcess;
+
+const ANSWER_LINES: Record<string, PauseAnswer> = {
+  BANNER_RESUME: 'resume', BANNER_ALLOW: 'allow', BANNER_DENY: 'deny', BANNER_END: 'end',
+};
+
+const psArgs = (script: string, extra: string[] = []) =>
+  ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script, ...extra];
 
 class ControlBanner {
   private child: ChildProcess | null = null;        // the pill (carries BANNER_STOP)
@@ -42,18 +59,23 @@ class ControlBanner {
   // the pill's double-click-to-stop affordance.
   private glowEnabled = process.env.CLAWD_NO_GLOW !== '1';
   private onStopRequested: (() => void) | undefined;
-  private spawner: Spawner = () => {
+  private paused: PauseInfo | null = null;
+  private onAnswer: ((a: PauseAnswer) => void) | undefined;
+  private spawner: Spawner = (mode) => {
     const script = path.join(getPackageRoot(), 'scripts', 'banner.ps1');
-    return spawn('powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script],
+    // The paused text goes through the environment, not argv — no quoting of
+    // arbitrary model-written text into a PowerShell command line.
+    const env = mode.paused
+      ? { ...process.env, CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_KIND: mode.paused.kind, CLAWD_BANNER_MESSAGE: mode.paused.message }
+      : process.env;
+    return spawn('powershell.exe', psArgs(script),
       // windowsHide: suppress the console/csc.exe compile flash so the pill spawn
       // can't briefly steal foreground from the app the agent is driving.
-      { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
+      { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, env });
   };
-  private glowSpawner: Spawner = () => {
+  private glowSpawner: Spawner = (mode) => {
     const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
-    return spawn('powershell.exe',
-      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script],
+    return spawn('powershell.exe', psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
       { stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true }); // click-through visual only — no stdout contract
   };
 
@@ -72,6 +94,34 @@ class ControlBanner {
     return this.child !== null;
   }
 
+  /** True when the overlay can be drawn here — the pause gate's precondition. */
+  canShow(): boolean {
+    return this.enabled;
+  }
+
+  /**
+   * Switch to the paused form (blue glow + instruction + answer buttons) and
+   * keep it up until showRunning(), regardless of pin or idle timers.
+   */
+  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer) => void): void {
+    if (!this.enabled) return;
+    this.paused = info;
+    this.onAnswer = onAnswer;
+    this.clearIdleTimer();
+    this.killChildren();
+    this.show();
+  }
+
+  /** Leave the paused form: back to the amber running overlay (or hidden). */
+  showRunning(): void {
+    if (!this.paused) return;
+    this.paused = null;
+    this.onAnswer = undefined;
+    this.killChildren();
+    if (this.pinned) this.show();
+    else this.touch(); // external-agent session: running form, then the idle hide
+  }
+
   /** Show and keep shown until unpin() — the autonomous-task lifecycle. */
   pin(): void {
     if (!this.enabled) return;
@@ -83,7 +133,7 @@ class ControlBanner {
   /** Release the task pin; hides unless tool activity re-touches it. */
   unpin(): void {
     this.pinned = false;
-    this.forceHide();
+    if (!this.paused) this.forceHide(); // a pending pause keeps its prompt up
   }
 
   /**
@@ -93,11 +143,11 @@ class ControlBanner {
   touch(idleMs: number = IDLE_HIDE_MS): void {
     if (!this.enabled) return;
     this.show();
-    if (this.pinned) return; // task lifecycle owns visibility
+    if (this.pinned || this.paused) return; // task lifecycle / pending pause owns visibility
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
-      if (!this.pinned) this.forceHide();
+      if (!this.pinned && !this.paused) this.forceHide();
     }, idleMs);
     this.idleTimer.unref?.();
   }
@@ -116,7 +166,7 @@ class ControlBanner {
     if (this.child) return;
     let child: ChildProcess;
     try {
-      child = this.spawner();
+      child = this.spawner({ paused: this.paused ?? undefined });
     } catch {
       return; // cosmetic feature — never let it break control
     }
@@ -124,9 +174,11 @@ class ControlBanner {
     if (child.stdout) {
       const rl = readline.createInterface({ input: child.stdout });
       rl.on('line', line => {
-        if (line.trim() === 'BANNER_STOP') {
-          try { this.onStopRequested?.(); } catch { /* never throw into the rl loop */ }
-        }
+        const msg = line.trim();
+        try {
+          if (msg === 'BANNER_STOP') this.onStopRequested?.();
+          else if (ANSWER_LINES[msg] && this.child === child) this.onAnswer?.(ANSWER_LINES[msg]);
+        } catch { /* never throw into the rl loop */ }
       });
     }
     child.on('error', () => { if (this.child === child) this.child = null; });
@@ -140,7 +192,7 @@ class ControlBanner {
     if (!this.glowEnabled || this.glowChild) return;
     let child: ChildProcess;
     try {
-      child = this.glowSpawner();
+      child = this.glowSpawner({ paused: this.paused ?? undefined });
     } catch {
       return; // cosmetic — never let it break control
     }
@@ -169,14 +221,20 @@ class ControlBanner {
     }
   }
 
-  private forceHide(): void {
-    this.clearIdleTimer();
+  private killChildren(): void {
     const c = this.child;
     this.child = null;
     if (c) {
       try { c.kill(); } catch { /* already gone */ }
     }
     this.killGlow();
+  }
+
+  private forceHide(): void {
+    this.clearIdleTimer();
+    this.paused = null;
+    this.onAnswer = undefined;
+    this.killChildren();
   }
 
   private clearIdleTimer(): void {

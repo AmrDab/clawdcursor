@@ -24,7 +24,7 @@ import type { ZodTypeAny } from 'zod';
 import { VERSION } from './version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
-import { evaluateToolCall } from '../tools/safety-gate';
+import { evaluateToolCall, confirmOnScreen } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
@@ -152,6 +152,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '`task` waits up to 45s; longer tasks return {status:"running"} and CONTINUE in the ' +
       'background — re-call with the same instruction to keep waiting, task {action:"status"} ' +
       'to poll, task {action:"abort"} to stop. A timeout on your side is NOT a task failure. ' +
+      'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA): call system {action:"pause_for_user", message} — ' +
+      'the user does it and clicks Resume on screen; never type or guess credentials. A paused task returns ' +
+      '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
@@ -287,7 +290,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // the destructive-label rule (Send/Delete/Pay) on the MCP route too.
         const safetyError = evaluateToolCall(tool, params ?? {}, { uiMaps: ctx.uiMaps });
         if (safetyError) {
-          return { content: [{ type: 'text', text: safetyError.text }], isError: true };
+          // A confirm with a human at the machine becomes an on-screen
+          // Allow / Deny (bounded wait; re-issuing the call re-attaches).
+          const onScreen = safetyError.confirmReason !== undefined
+            ? await confirmOnScreen(tool, params ?? {}, safetyError.confirmReason, { uiMaps: ctx.uiMaps })
+            : null;
+          if (!onScreen?.allowed) {
+            return { content: [{ type: 'text', text: onScreen?.text ?? safetyError.text }], isError: true };
+          }
         }
         // Transparency: any consequential (mutating) tool call from an
         // EXTERNAL agent pokes the on-screen control banner — it shows on the

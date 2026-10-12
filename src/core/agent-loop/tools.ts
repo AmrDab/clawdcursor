@@ -1915,8 +1915,25 @@ export function buildUnifiedTools(): UnifiedTool[] {
     },
 
     {
+      name: 'ask_user',
+      description: 'Pause and hand the desktop to the user for a step only they can do: sign in, a password or 2FA code, a CAPTCHA, a choice only they can make. Say exactly what to do. The run waits, then continues where it left off.',
+      inputSchema: {
+        type: 'object',
+        properties: { message: { type: 'string', description: 'Instruction shown on screen, e.g. "Sign in to GitHub, then click Resume".' } },
+        required: ['message'],
+        additionalProperties: false,
+      },
+      changesScreen: false,
+      // The loop handles ask_user itself when a human can be reached; this
+      // only runs when nobody can see the on-screen prompt.
+      async execute() {
+        return { success: false, text: 'ask_user: no human can be reached on this machine right now (no on-screen prompt). Use give_up with the reason instead.' };
+      },
+    },
+
+    {
       name: 'give_up',
-      description: 'Abandon the task when it\'s impossible from here (credentials missing, captcha, destructive action needs user confirm, stuck after retries).',
+      description: 'Abandon the task when it\'s impossible from here (stuck after retries). When a human is at the machine this pauses for them first; for sign-in, 2FA or CAPTCHA prefer ask_user.',
       inputSchema: {
         type: 'object',
         properties: { reason: { type: 'string' } },
