@@ -23,7 +23,8 @@
 # For a manual DEMO, pass -DurationSec so it self-closes, e.g.:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File edge-glow.ps1 -DurationSec 12
 #
-# Windows-only today, same as the banner. macOS/Linux overlays are a follow-up.
+# The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and
+# scripts/linux/overlay.py with the same arguments.
 # Covers every display (one layered window each), not just the primary.
 
 param(

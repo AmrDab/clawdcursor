@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// macOS verification for the warm-OCR / accessibility-wake changes.
+// macOS verification for the warm-OCR / accessibility-wake changes and the on-screen overlay (pause for the user).
 // Run from the repo root after `npm ci && npm run build`:
 //   node scripts/verify-macos.mjs                 # auto-detects a running Electron app
 //   node scripts/verify-macos.mjs --app "Slack"   # or name one (System Events process name)
 // Prints a PASS / FAIL / SKIP line per check and writes verify-macos-report.json.
-// Read-only apart from: compiling the OCR helper into ~/.clawdcursor/bin and a temp dir,
+// Read-only apart from: compiling the OCR helper and the overlay into ~/.clawdcursor/bin and a temp dir,
 // and setting AXManualAccessibility on the tested app (resets when the app quits).
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -113,7 +113,66 @@ else try {
   line(verdict, `Electron wake (${target.name}, pid ${target.pid})`, `raw read ${raw.length} els → with wake ${w.tree.length} els in ${t} ms (woke=${w.woke}) → plain re-read ${after.length} els${raw.length >= 10 ? ' — tree was already awake (another assistive app may have woken it); quit and reopen the app to test from cold' : ''}`);
 } catch (err) { line('FAIL', 'Electron wake', String(err.message).slice(0, 160)); }
 
-// ── 6. the macOS-only unit tests ──────────────────────────────────────────────
+// ── 6. the on-screen overlay (glow + pill) and the pause prompt ──────────────
+const { macOverlayBinary } = require(dist('platform/mac-ocr-binary.js'));
+const { spawn } = await import('node:child_process');
+const OVERLAY = path.join(ROOT, 'scripts', 'mac', 'overlay.swift');
+const frontApp = () => { try { return sh('osascript', ['-e', 'tell application "System Events" to name of first process whose frontmost is true']); } catch { return '?'; } };
+/** Run the overlay; resolve with its first stdout line, its exit code, or 'timeout'. */
+const runOverlay = (bin, args, env, waitMs) => new Promise(resolve => {
+  const child = spawn(bin, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  const timer = setTimeout(() => { child.kill(); resolve('timeout'); }, waitMs);
+  child.stdout.on('data', d => { out += d; if (out.includes('\n')) { clearTimeout(timer); child.kill(); resolve(out.trim()); } });
+  child.on('exit', code => { clearTimeout(timer); resolve(out.trim() || `exit ${code}`); });
+});
+let overlayBin = null;
+if (!env.swiftc) line('FAIL', 'compile overlay', 'swiftc missing — install Xcode Command Line Tools');
+else {
+  macOverlayBinary.reset();
+  const t0 = Date.now(); overlayBin = await macOverlayBinary.compile(OVERLAY, path.join(tmp, 'bin'));
+  line(overlayBin ? 'PASS' : 'FAIL', 'compile overlay (scripts/mac/overlay.swift)', overlayBin ? `${ms(t0)} ms` : 'compile failed — run: swiftc -O scripts/mac/overlay.swift -o /tmp/o  to see the error');
+}
+if (overlayBin) {
+  console.log('\n  → Watch your screens: a BLUE glow should pulse on every edge of every display for 5 s.');
+  const g = await runOverlay(overlayBin, ['glow', '--color', '#3b82f6', '--duration', '5'], {}, 20_000);
+  line(g === 'exit 0' ? 'PASS' : 'FAIL', 'glow runs on every display and exits on time', `${g} (check by eye: did all ${sh('osascript', ['-l', 'JavaScript', '-e', "ObjC.import('AppKit'); $.NSScreen.screens.count"])} screen(s) glow blue?)`);
+
+  const before = frontApp();
+  console.log('\n  → A pill saying "ClawdCursor paused - your turn" is at the top of your main screen. Click RESUME (60 s).');
+  const r = await runOverlay(overlayBin, ['pill'], { CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: 'This is the clawdcursor Mac check. Click Resume on this pill.' }, 60_000);
+  const after = frontApp();
+  if (r === 'timeout') line('SKIP', 'paused pill: Resume', 'no click within 60 s');
+  else line(r === 'BANNER_RESUME' ? 'PASS' : 'FAIL', 'paused pill: Resume prints BANNER_RESUME', r);
+  if (r !== 'timeout') line(after === before ? 'PASS' : 'FAIL', 'clicking the pill keeps focus where it was', `frontmost before "${before}", after "${after}"`);
+
+  console.log('\n  → Now the normal "desktop control in progress" pill: DOUBLE-CLICK it (30 s).');
+  const s = await runOverlay(overlayBin, ['pill'], {}, 30_000);
+  if (s === 'timeout') line('SKIP', 'running pill: double-click to stop', 'no double-click within 30 s');
+  else line(s === 'BANNER_STOP' ? 'PASS' : 'FAIL', 'running pill: double-click prints BANNER_STOP', s);
+
+  // End to end through clawdcursor itself: the pause gate draws the blue glow + pill via banner.ts.
+  await macOverlayBinary.compile(OVERLAY); // the real cache in ~/.clawdcursor/bin, which banner.ts uses
+  delete process.env.CLAWD_NO_PAUSE; delete process.env.CLAWD_NO_BANNER;
+  const { pauseGate } = require(dist('core/pause-gate.js'));
+  const { controlBanner } = require(dist('core/banner.js'));
+  if (!pauseGate.available()) line('FAIL', 'clawdcursor pause (end to end)', 'pauseGate.available() is false — the overlay binary is not usable');
+  else {
+    console.log('\n  → Last one, through clawdcursor itself: blue glow + pill again. Click RESUME (60 s).');
+    let t;
+    const outcome = await Promise.race([
+      pauseGate.request({ message: 'clawdcursor Mac check (end to end): click Resume.' }),
+      new Promise(r => { t = setTimeout(() => r('timeout'), 60_000); }),
+    ]);
+    clearTimeout(t);
+    controlBanner.setEnabled(false); // take the amber "running" form down again
+    if (outcome === 'timeout') { pauseGate.answer('end'); line('SKIP', 'clawdcursor pause (end to end)', 'no click within 60 s'); }
+    else line(outcome === 'resumed' ? 'PASS' : 'FAIL', 'clawdcursor pause (end to end): Resume continues', outcome);
+  }
+  console.log('');
+}
+
+// ── 7. the macOS-only unit tests ──────────────────────────────────────────────
 try {
   const out = sh('npx', ['vitest', 'run', 'src/__tests__/mac-ocr-binary.test.ts', 'src/__tests__/a11y-wake.test.ts'], { cwd: ROOT, timeout: 600_000 });
   const m = /Tests\s+(.*)/.exec(out); line('PASS', 'macOS-only unit tests', m ? m[1].replace(/\x1b\[[0-9;]*m/g, '') : 'passed');

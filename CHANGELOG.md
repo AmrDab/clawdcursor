@@ -30,8 +30,7 @@ All notable changes to Clawd Cursor will be documented in this file.
   a CAPTCHA, or a step the agent may not take no longer ends the task with the
   agent confused. The run pauses, keeping its history: the glow turns blue and
   the pill says what to do, with **Resume / End task**. After Resume the agent
-  re-reads the screen and carries on from where it is. Windows for now; macOS
-  and Linux overlays are next.
+  re-reads the screen and carries on from where it is.
   - Built-in agent: new `ask_user` tool. `give_up` and the repeat guard now
     pause instead of failing. Paused time doesn't count toward the 12-minute
     task limit. No answer in 15 min (`CLAWD_PAUSE_TIMEOUT_MIN`) ends the task.
@@ -44,7 +43,16 @@ All notable changes to Clawd Cursor will be documented in this file.
     dashboard, whose pause banner now has working Resume / End task buttons.
   - `CLAWD_NO_PAUSE=1` restores the old fail-fast behaviour (CI, unattended
     runs). Nothing reads the screen while paused.
-- **The edge glow covers every monitor**, not just the primary one.
+- **The on-screen overlay (glow + pill) now works on macOS and Linux**, not
+  only Windows, and the glow covers every monitor, not just the primary one.
+  - macOS: `scripts/mac/overlay.swift`, compiled once into `~/.clawdcursor/bin`
+    (needs the Xcode Command Line Tools, like the OCR helper).
+  - Linux: `scripts/linux/overlay.py` (GTK 3 via python3-gi, already needed for
+    the accessibility bridge). X11, or Wayland through XWayland. With a
+    compositor the glow fades in from the edges; without one it is a thin solid
+    border. Clicks pass through the glow on every OS.
+  - Where the overlay can't run, nothing is drawn and pauses fall back to the
+    old fail-fast behaviour.
 - **`system ocr scope:"window"`** reads only the focused window: ~80% fewer
   words (39 vs 486 on the test screen), faster, and it does not read other
   apps' text. The default stays the whole screen — the focused window can be

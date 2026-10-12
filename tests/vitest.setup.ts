@@ -11,6 +11,8 @@ process.env.CLAWDCURSOR_WAKE_BUDGET_MS ??= '0';
 // A pause would put the real overlay on screen and wait for a human. Off by
 // default; the pause tests turn it on with a fake banner spawner.
 process.env.CLAWD_NO_PAUSE ??= '1';
+// Same for the overlay itself (pill + glow): tests that need it enable it with fake spawners.
+process.env.CLAWD_NO_BANNER ??= '1';
 
 // The PowerShell bridge drives the REAL pointer and captures the REAL screen —
 // never in unit tests. Default: bridge down (callers fall back). Tests that

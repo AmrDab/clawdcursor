@@ -1,10 +1,17 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
- *   - scripts/banner.ps1: topmost, no-activate pill with a blinking red dot;
- *     carries the double-click → stop affordance.
- *   - scripts/edge-glow.ps1: a full-screen, click-through amber glow that pulses
- *     on all four screen edges. Pure ambient signal; spawned/killed in lockstep
- *     with the pill so the two are always in sync. Opt out via CLAWD_NO_GLOW=1.
+ *   - the pill: topmost, never-focused, with a blinking red dot; carries the
+ *     double-click → stop affordance.
+ *   - the glow: a click-through amber glow that pulses on every edge of every
+ *     display. Pure ambient signal; spawned/killed in lockstep with the pill so
+ *     the two are always in sync. Opt out via CLAWD_NO_GLOW=1.
+ *
+ * One contract, three drawers (same modes, same stdout lines):
+ *   - Windows: scripts/banner.ps1 + scripts/edge-glow.ps1 (WinForms)
+ *   - macOS:   scripts/mac/overlay.swift, compiled once into ~/.clawdcursor/bin
+ *   - Linux:   scripts/linux/overlay.py (GTK 3; X11, or Wayland via XWayland)
+ * Where the drawer can't run (no swiftc, no python3-gi, no display) the overlay
+ * is unavailable: nothing is drawn and pauses fall back to failing fast.
  *
  * Transparency contract: whenever an agent is actively driving this desktop,
  * a human at the machine sees it — and can kill it (double-click → the parent
@@ -22,15 +29,14 @@
  *     inactivity. This covers EXTERNAL agents (editor-hosted over stdio or
  *     HTTP /mcp) where there is no task boundary to hook.
  *
- * Windows-only today (WinForms via the warm PowerShell host); macOS/Linux are
- * silent no-ops — the API is platform-neutral so adapters can land later.
  * Disable via `--no-banner` or CLAWD_NO_BANNER=1.
  */
 
-import { spawn, type ChildProcess } from 'child_process';
+import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
+import { macOverlayBinary } from '../platform/mac-ocr-binary';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 
 const IDLE_HIDE_MS = 30_000;
@@ -45,12 +51,55 @@ const ANSWER_LINES: Record<string, PauseAnswer> = { BANNER_RESUME: 'resume', BAN
 const psArgs = (script: string, extra: string[] = []) =>
   ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script, ...extra];
 
+const OVERLAY_OS = new Set(['win32', 'darwin', 'linux']);
+const macScript = () => path.join(getPackageRoot(), 'scripts', 'mac', 'overlay.swift');
+const linuxScript = () => path.join(getPackageRoot(), 'scripts', 'linux', 'overlay.py');
+
+// The paused text goes through the environment, not argv — no quoting of
+// arbitrary model-written text into a command line.
+const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  ...process.env,
+  ...extra,
+  ...(mode.paused ? { CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: mode.paused.message } : {}),
+});
+
+let linuxReady: boolean | null = null;
+
+/**
+ * Can this machine draw the overlay right now? Windows always; macOS once the
+ * Swift drawer is compiled (the compile starts here, in the background);
+ * Linux when python3 + GTK can open the X display (probed once).
+ */
+function overlayReady(): boolean {
+  if (process.platform === 'win32') return true;
+  if (process.platform === 'darwin') {
+    if (macOverlayBinary.cached(macScript())) return true;
+    void macOverlayBinary.compile(macScript());
+    return false;
+  }
+  if (process.platform === 'linux') {
+    if (linuxReady === null) {
+      try {
+        linuxReady = !!process.env.DISPLAY && execFileSync('python3', [linuxScript(), '--probe'], {
+          encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
+          env: { ...process.env, GDK_BACKEND: 'x11' },
+        }).trim() === 'ok';
+      } catch {
+        linuxReady = false;
+      }
+    }
+    return linuxReady;
+  }
+  return false;
+}
+
 class ControlBanner {
   private child: ChildProcess | null = null;        // the pill (carries BANNER_STOP)
   private glowChild: ChildProcess | null = null;    // the screen-edge glow overlay
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private pinned = false;
-  private enabled = process.platform === 'win32' && process.env.CLAWD_NO_BANNER !== '1';
+  private enabled = OVERLAY_OS.has(process.platform) && process.env.CLAWD_NO_BANNER !== '1';
+  private ready: () => boolean = overlayReady;
   // The edge glow rides the same lifecycle as the pill but is independently
   // opt-out-able (some users find ambient pulsing distracting) without losing
   // the pill's double-click-to-stop affordance.
@@ -59,31 +108,42 @@ class ControlBanner {
   private paused: PauseInfo | null = null;
   private onAnswer: ((a: PauseAnswer) => void) | undefined;
   private spawner: Spawner = (mode) => {
+    const stdio: ['ignore', 'pipe', 'ignore'] = ['ignore', 'pipe', 'ignore'];
+    if (process.platform === 'darwin') {
+      return spawn(macOverlayBinary.cached(macScript())!, ['pill'], { stdio, env: overlayEnv(mode) });
+    }
+    if (process.platform === 'linux') {
+      return spawn('python3', [linuxScript(), 'pill'], { stdio, env: overlayEnv(mode, { GDK_BACKEND: 'x11' }) });
+    }
     const script = path.join(getPackageRoot(), 'scripts', 'banner.ps1');
-    // The paused text goes through the environment, not argv — no quoting of
-    // arbitrary model-written text into a PowerShell command line.
-    const env = mode.paused
-      ? { ...process.env, CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: mode.paused.message }
-      : process.env;
     return spawn('powershell.exe', psArgs(script),
       // windowsHide: suppress the console/csc.exe compile flash so the pill spawn
       // can't briefly steal foreground from the app the agent is driving.
-      { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, env });
+      { stdio, windowsHide: true, env: overlayEnv(mode) });
   };
   private glowSpawner: Spawner = (mode) => {
+    const stdio: ['ignore', 'ignore', 'ignore'] = ['ignore', 'ignore', 'ignore']; // click-through visual only — no stdout contract
+    const color = mode.paused ? ['--color', PAUSED_GLOW] : [];
+    if (process.platform === 'darwin') {
+      return spawn(macOverlayBinary.cached(macScript())!, ['glow', ...color], { stdio });
+    }
+    if (process.platform === 'linux') {
+      return spawn('python3', [linuxScript(), 'glow', ...color], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
+    }
     const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
     return spawn('powershell.exe', psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
-      { stdio: ['ignore', 'ignore', 'ignore'], windowsHide: true }); // click-through visual only — no stdout contract
+      { stdio, windowsHide: true });
   };
 
   /** Wire the double-click → stop callback (the `clawdcursor stop` flow). */
   configure(opts: { onStopRequested?: () => void }): void {
     this.onStopRequested = opts.onStopRequested;
+    if (this.enabled) this.ready(); // start the macOS compile / Linux probe before the first tool call
   }
 
   /** Hard enable/disable (CLI --no-banner / config). Disabling hides immediately. */
   setEnabled(v: boolean): void {
-    this.enabled = v && process.platform === 'win32' && process.env.CLAWD_NO_BANNER !== '1';
+    this.enabled = v && OVERLAY_OS.has(process.platform) && process.env.CLAWD_NO_BANNER !== '1';
     if (!this.enabled) this.forceHide();
   }
 
@@ -93,7 +153,7 @@ class ControlBanner {
 
   /** True when the overlay can be drawn here — the pause gate's precondition. */
   canShow(): boolean {
-    return this.enabled;
+    return this.enabled && this.ready();
   }
 
   /**
@@ -152,7 +212,7 @@ class ControlBanner {
   private exitHookInstalled = false;
 
   private show(): void {
-    if (!this.enabled) return;
+    if (!this.canShow()) return;
     this.installExitHook();
     this.spawnPill();
     this.spawnGlow();
@@ -244,7 +304,7 @@ class ControlBanner {
   // ── test hooks ──
   __setSpawnerForTests(s: Spawner): void { this.spawner = s; }
   __setGlowSpawnerForTests(s: Spawner): void { this.glowSpawner = s; }
-  __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; }
+  __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; }
   __setGlowEnabledForTests(v: boolean): void { this.glowEnabled = v; }
   __resetForTests(): void {
     this.forceHide();

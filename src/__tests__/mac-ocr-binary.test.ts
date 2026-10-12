@@ -25,7 +25,7 @@ vi.mock('child_process', async (orig) => {
 });
 
 import {
-  cachedMacOcrBinary, compileMacOcrBinary, macOcrBinaryPath, resetMacOcrBinaryState,
+  cachedMacOcrBinary, compileMacOcrBinary, macOcrBinaryPath, resetMacOcrBinaryState, macOverlayBinary,
 } from '../platform/mac-ocr-binary';
 
 let dir: string;
@@ -98,5 +98,18 @@ describe.runIf(process.platform === 'darwin')('real Vision binary (macOS only)',
     expect(data.error).toBeUndefined();
     expect(Array.isArray(data.elements)).toBe(true);
     expect(typeof data.fullText).toBe('string');
+  }, 300_000);
+});
+
+describe.runIf(process.platform === 'darwin')('real overlay binary (macOS only)', () => {
+  it('compiles scripts/mac/overlay.swift; an unknown mode exits 2 without touching the screen', async () => {
+    swiftc.real = true;
+    macOverlayBinary.reset();
+    const { spawnSync } = await vi.importActual<typeof import('child_process')>('child_process');
+    const script = path.resolve(__dirname, '../../scripts/mac/overlay.swift');
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-macoverlay-real-'));
+    const bin = await macOverlayBinary.compile(script, out);
+    expect(bin, 'swiftc must be able to build scripts/mac/overlay.swift').toBeTruthy();
+    expect(spawnSync(bin!, ['bogus'], { timeout: 30_000 }).status).toBe(2);
   }, 300_000);
 });
