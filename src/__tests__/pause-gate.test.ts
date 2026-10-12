@@ -3,8 +3,7 @@
  * Contract under test:
  *   - a pause swaps both overlays to the paused form (spawners get the pause),
  *     an answer line from the pill settles it, and the running form comes back
- *   - needs_user: resume → resumed, end/deny → ended
- *   - confirm: only an explicit allow/deny answers it; "resume" never approves
+ *   - resume → resumed, end → ended
  *   - same key re-attaches to the pending pause; a keyed outcome the caller
  *     missed is handed over once; forget() drops it
  *   - abort signal → ended; no answer within CLAWD_PAUSE_TIMEOUT_MIN → timeout
@@ -68,11 +67,11 @@ describe('pauseGate', () => {
     controlBanner.pin();
     expect(pills[0].mode.paused).toBeUndefined();
 
-    const p = pauseGate.request({ kind: 'needs_user', message: '  Sign in to GitHub,\n then click Resume ' });
+    const p = pauseGate.request({ message: '  Sign in to GitHub,\n then click Resume ' });
     expect(pills[0].child.killed).toBe(true);                 // running pill replaced
     const paused = livePill()[0];
     expect(paused.mode.paused?.message).toBe('Sign in to GitHub, then click Resume');
-    expect(glows.filter(g => !g.child.killed)[0].mode.paused?.kind).toBe('needs_user');
+    expect(glows.filter(g => !g.child.killed)[0].mode.paused?.message).toBe('Sign in to GitHub, then click Resume');
     expect(pauseGate.current()?.message).toBe('Sign in to GitHub, then click Resume');
 
     say('BANNER_RESUME');
@@ -83,26 +82,14 @@ describe('pauseGate', () => {
     expect(back[0].mode.paused).toBeUndefined();               // amber running form again (still pinned)
   });
 
-  it('needs_user: End task ends it', async () => {
-    const p = pauseGate.request({ kind: 'needs_user', message: 'Solve the CAPTCHA' });
+  it('End task ends it', async () => {
+    const p = pauseGate.request({ message: 'Solve the CAPTCHA' });
     say('BANNER_END');
     await expect(p).resolves.toBe('ended');
   });
 
-  it('confirm: "resume" alone never approves; allow / deny answer it', async () => {
-    const p = pauseGate.request({ kind: 'confirm', message: 'Send the email' });
-    expect(pauseGate.answer('resume')).toEqual({ ok: false, error: expect.stringMatching(/allow or deny/) });
-    expect(pauseGate.current()).not.toBeNull();
-    say('BANNER_ALLOW');
-    await expect(p).resolves.toBe('allowed');
-
-    const q = pauseGate.request({ kind: 'confirm', message: 'Delete the file' });
-    expect(pauseGate.answer('deny')).toEqual({ ok: true, outcome: 'denied' });
-    await expect(q).resolves.toBe('denied');
-  });
-
   it('a line from a replaced (stale) pill cannot answer', async () => {
-    const p = pauseGate.request({ kind: 'needs_user', message: 'one' });
+    const p = pauseGate.request({ message: 'one' });
     const first = livePill()[0].child;
     controlBanner.showPaused(pauseGate.current()!, a => { pauseGate.answer(a); }); // respawn
     first.stdout.write('BANNER_RESUME\n');
@@ -113,30 +100,30 @@ describe('pauseGate', () => {
   });
 
   it('same key re-attaches; an outcome the caller missed is handed over once; forget() drops it', async () => {
-    const a = pauseGate.request({ kind: 'needs_user', message: 'Enter the 2FA code', key: 'k1' });
-    const b = pauseGate.request({ kind: 'needs_user', message: 'Enter the 2FA code', key: 'k1' });
+    const a = pauseGate.request({ message: 'Enter the 2FA code', key: 'k1' });
+    const b = pauseGate.request({ message: 'Enter the 2FA code', key: 'k1' });
     expect(livePill().length).toBe(1);
     pauseGate.answer('resume');
     await expect(a).resolves.toBe('resumed');
     await expect(b).resolves.toBe('resumed');
 
     // the caller re-calls after the answer → handed over, once
-    await expect(pauseGate.request({ kind: 'needs_user', message: 'x', key: 'k1' })).resolves.toBe('resumed');
-    const again = pauseGate.request({ kind: 'needs_user', message: 'x', key: 'k1' });
+    await expect(pauseGate.request({ message: 'x', key: 'k1' })).resolves.toBe('resumed');
+    const again = pauseGate.request({ message: 'x', key: 'k1' });
     expect(pauseGate.current()).not.toBeNull();                 // asks again
     pauseGate.answer('end');
     await again;
 
     pauseGate.forget('k1');
-    const fresh = pauseGate.request({ kind: 'confirm', message: 'y', key: 'k1' });
-    expect(pauseGate.current()?.kind).toBe('confirm');          // forgotten → a real new pause
-    pauseGate.answer('deny');
-    await expect(fresh).resolves.toBe('denied');
+    const fresh = pauseGate.request({ message: 'y', key: 'k1' });
+    expect(pauseGate.current()?.message).toBe('y');             // forgotten → a real new pause
+    pauseGate.answer('end');
+    await expect(fresh).resolves.toBe('ended');
   });
 
   it('an abort signal ends the pause', async () => {
     const ctl = new AbortController();
-    const p = pauseGate.request({ kind: 'needs_user', message: 'Sign in' }, { signal: ctl.signal });
+    const p = pauseGate.request({ message: 'Sign in' }, { signal: ctl.signal });
     ctl.abort();
     await expect(p).resolves.toBe('ended');
     expect(pauseGate.current()).toBeNull();
@@ -145,7 +132,7 @@ describe('pauseGate', () => {
   it('times out after CLAWD_PAUSE_TIMEOUT_MIN', async () => {
     vi.useFakeTimers();
     process.env.CLAWD_PAUSE_TIMEOUT_MIN = '2';
-    const p = pauseGate.request({ kind: 'needs_user', message: 'Sign in' });
+    const p = pauseGate.request({ message: 'Sign in' });
     await vi.advanceTimersByTimeAsync(119_000);
     expect(pauseGate.current()).not.toBeNull();
     await vi.advanceTimersByTimeAsync(2_000);
@@ -153,16 +140,16 @@ describe('pauseGate', () => {
   });
 
   it('one pause at a time: a second request waits for the first', async () => {
-    const first = pauseGate.request({ kind: 'needs_user', message: 'first' });
-    const second = pauseGate.request({ kind: 'confirm', message: 'second' });
+    const first = pauseGate.request({ message: 'first' });
+    const second = pauseGate.request({ message: 'second' });
     await flush();
     expect(pauseGate.current()?.message).toBe('first');
     pauseGate.answer('resume');
     await expect(first).resolves.toBe('resumed');
     await flush();
     expect(pauseGate.current()?.message).toBe('second');
-    pauseGate.answer('allow');
-    await expect(second).resolves.toBe('allowed');
+    pauseGate.answer('end');
+    await expect(second).resolves.toBe('ended');
   });
 
   it('answering with nothing paused is a clear error', () => {
@@ -174,7 +161,7 @@ describe('controlBanner paused form', () => {
   it('stays up through idle timers and unpin while paused', async () => {
     vi.useFakeTimers();
     controlBanner.touch(1_000);
-    const p = pauseGate.request({ kind: 'needs_user', message: 'Sign in' });
+    const p = pauseGate.request({ message: 'Sign in' });
     vi.advanceTimersByTime(5_000);
     controlBanner.unpin();
     expect(livePill().length).toBe(1);

@@ -1062,7 +1062,7 @@ describe('runAgent — pause for the user at a roadblock', () => {
 
     const result = await runAgent({ task: 'star the repo', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
 
-    expect(pause).toHaveBeenCalledWith({ kind: 'needs_user', message: 'Sign in to GitHub, then click Resume' });
+    expect(pause).toHaveBeenCalledWith({ message: 'Sign in to GitHub, then click Resume' });
     expect(result.exit).toBe('done');
     expect(result.steps[0].result.text).toMatch(/resumed/);
     expect(toolResultTexts()).toMatch(/USER RESUMED.*Do not restart it/s);
@@ -1075,7 +1075,7 @@ describe('runAgent — pause for the user at a roadblock', () => {
 
     const result = await runAgent({ task: 't', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
 
-    expect(pause).toHaveBeenCalledWith({ kind: 'needs_user', message: 'login required' });
+    expect(pause).toHaveBeenCalledWith({ message: 'login required' });
     expect(result.exit).toBe('done');
     expect(toolResultTexts()).toMatch(/Not given up/);
   });
@@ -1105,28 +1105,16 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(result.exit).toBe('give_up');
   });
 
-  it('a confirm-tier action asks Allow / Deny on screen; Allow runs it', async () => {
-    const pause = vi.fn(async () => 'allowed' as const);
-    const adapter = makeAdapter({ activeProcessName: 'olk' }); // sensitive app → raw click needs confirm
+  it('a confirm-tier action is still refused (no on-screen approval); the model is told how to proceed', async () => {
+    const pause = vi.fn(async () => 'resumed' as const);
+    const adapter = makeAdapter({ activeProcessName: 'olk' });
     llmTurnQueue.push(turnCall('click', { x: 100, y: 200 }));
-    llmTurnQueue.push(turnCall('done', { evidence: 'clicked after approval' }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'adapted after the refusal' }));
 
     const result = await runAgent({ task: 'send an email', maxTurns: 4, pause }, { adapter, llm: LLM_CONFIG });
 
-    expect(pause).toHaveBeenCalledWith(expect.objectContaining({ kind: 'confirm', message: expect.stringMatching(/click at \(100, 200\) in olk/) }));
-    expect(result.steps.some(s => /safety_confirm/.test(s.result.text))).toBe(false);
-    expect(adapter.mouseClick).toHaveBeenCalled();
-  });
-
-  it('Deny refuses the action and tells the model not to retry it', async () => {
-    const adapter = makeAdapter({ activeProcessName: 'olk' });
-    llmTurnQueue.push(turnCall('click', { x: 100, y: 200 }));
-    llmTurnQueue.push(turnCall('done', { evidence: 'stopped after the deny' }));
-
-    const result = await runAgent({ task: 'send an email', maxTurns: 4, pause: async () => 'denied' }, { adapter, llm: LLM_CONFIG });
-
+    expect(pause).not.toHaveBeenCalled();
     expect(adapter.mouseClick).not.toHaveBeenCalled();
-    expect(result.steps[0].result.text).toMatch(/safety_denied/);
-    expect(toolResultTexts()).toMatch(/clicked Deny.*Do NOT retry/s);
+    expect(result.steps[0].result.text).toMatch(/safety_confirm/);
   });
 });

@@ -231,7 +231,7 @@ The HTTP transport uses **MCP's streamable-HTTP envelope** (JSON-RPC over POST),
 POST /mcp        → JSON-RPC: tools/list, tools/call (the catalog + every tool)
 GET  /mcp        → SSE channel for server-initiated notifications (auth)
 GET  /health     → {"status":"ok","version":"<x.y.z>"}  (no auth, readiness probe)
-POST /resume     → answer a pause for the user: {"answer":"resume"|"allow"|"deny"|"end"} (auth, localhost-only; same as `clawdcursor resume`)
+POST /resume     → answer a pause for the user: {"answer":"resume"|"end"} (auth, localhost-only; same as `clawdcursor resume`)
 POST /stop       → graceful shutdown (auth, localhost-only)
 GET  /           → minimal dashboard, calls /mcp via JSON-RPC under the hood
 ```
@@ -421,7 +421,7 @@ with the same semantics. Full reference via the MCP `tools/list` request.
 | Tier | Actions | Behavior |
 |---|---|---|
 | 🟢 Auto (read/input) | Reading, typing, clicking, opening apps, navigating | Runs immediately |
-| 🟡 Confirm (destructive) | Close a window, sends, deletes, purchases | Pauses - the user gets an on-screen **Allow / Deny** (Windows today); re-issue the identical call to keep waiting. Without the on-screen prompt: **ask the user first** |
+| 🟡 Confirm (destructive) | Close a window, sends, deletes, purchases | Pauses - **always ask the user first** before sending the next tool call |
 | 🔴 Block | `Alt+F4`, `Ctrl+Alt+Delete`, system shortcuts | Refused outright |
 
 Rules for autonomous use:

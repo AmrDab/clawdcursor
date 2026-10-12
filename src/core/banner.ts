@@ -12,9 +12,8 @@
  *
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
  * roadblock, both overlays are respawned in their paused form — a BLUE glow and
- * a pill that says what to do, with answer buttons (Resume / End task, or
- * Allow / Deny for an approval). The pill prints BANNER_RESUME / BANNER_END /
- * BANNER_ALLOW / BANNER_DENY; showRunning() swaps back to the amber form.
+ * a pill that says what to do, with Resume / End task. The pill prints
+ * BANNER_RESUME / BANNER_END; showRunning() swaps back to the amber form.
  *
  *   - pin()/unpin(): the autonomous task loop pins the banner for the whole
  *     task (agent.executeTask). A pinned banner ignores idle timers.
@@ -41,9 +40,7 @@ const PAUSED_GLOW = '#3b82f6'; // blue — "your turn"
 export interface OverlayMode { paused?: PauseInfo }
 type Spawner = (mode: OverlayMode) => ChildProcess;
 
-const ANSWER_LINES: Record<string, PauseAnswer> = {
-  BANNER_RESUME: 'resume', BANNER_ALLOW: 'allow', BANNER_DENY: 'deny', BANNER_END: 'end',
-};
+const ANSWER_LINES: Record<string, PauseAnswer> = { BANNER_RESUME: 'resume', BANNER_END: 'end' };
 
 const psArgs = (script: string, extra: string[] = []) =>
   ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script, ...extra];
@@ -66,7 +63,7 @@ class ControlBanner {
     // The paused text goes through the environment, not argv — no quoting of
     // arbitrary model-written text into a PowerShell command line.
     const env = mode.paused
-      ? { ...process.env, CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_KIND: mode.paused.kind, CLAWD_BANNER_MESSAGE: mode.paused.message }
+      ? { ...process.env, CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: mode.paused.message }
       : process.env;
     return spawn('powershell.exe', psArgs(script),
       // windowsHide: suppress the console/csc.exe compile flash so the pill spawn
@@ -100,7 +97,7 @@ class ControlBanner {
   }
 
   /**
-   * Switch to the paused form (blue glow + instruction + answer buttons) and
+   * Switch to the paused form (blue glow + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
   showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer) => void): void {

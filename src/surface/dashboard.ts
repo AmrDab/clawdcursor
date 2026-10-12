@@ -889,14 +889,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     statusText.textContent = displayStatus;
 
     // Show/hide the pause banner: a task paused for the user (sign-in, 2FA,
-    // CAPTCHA) or waiting on an approval. Same answers as the on-screen pill.
+    // CAPTCHA). Same answers as the on-screen pill.
     const pause = data.pause || null;
-    pauseKind = pause ? pause.kind : null;
+    paused = !!pause;
     if (pause) {
-      const isConfirm = pause.kind === 'confirm';
-      confirmMsg.textContent = (isConfirm ? '⚠️ ' : '⏸ ') + pause.message;
-      document.getElementById('approveBtn').textContent = isConfirm ? '✅ Allow' : '▶ Resume';
-      document.getElementById('rejectBtn').textContent = isConfirm ? '❌ Deny' : '⏹ End task';
+      confirmMsg.textContent = '⏸ ' + pause.message;
+      document.getElementById('approveBtn').textContent = '▶ Resume';
+      document.getElementById('rejectBtn').textContent = '⏹ End task';
       confirmBanner.classList.add('visible');
     } else {
       confirmBanner.classList.remove('visible');
@@ -972,12 +971,11 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     setTimeout(check, 1500);
   }
 
-  // Answer a pause (POST /resume): Allow / Deny for an approval,
-  // Resume / End task for a "your turn" pause.
-  let pauseKind = null;
+  // Answer a pause (POST /resume): Resume or End task.
+  let paused = false;
   window.confirmAction = async function(approved) {
-    if (!pauseKind) { confirmBanner.classList.remove('visible'); return; }
-    const answer = pauseKind === 'confirm' ? (approved ? 'allow' : 'deny') : (approved ? 'resume' : 'end');
+    if (!paused) { confirmBanner.classList.remove('visible'); return; }
+    const answer = approved ? 'resume' : 'end';
     try {
       const res = await fetch('/resume', {
         method: 'POST',

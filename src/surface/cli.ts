@@ -916,14 +916,12 @@ program
 
 program
   .command('resume')
-  .description('Answer a task paused for you (same as the on-screen buttons): resume, or --allow / --deny an approval, or --end the task')
-  .option('--allow', 'Approve the action the agent is waiting on')
-  .option('--deny', 'Refuse the action the agent is waiting on')
+  .description('Continue a task paused for you (same as the on-screen Resume), or --end it')
   .option('--end', 'End the paused task')
   .option('--port <port>', 'API server port', '3847')
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
-    const answer = opts.allow ? 'allow' : opts.deny ? 'deny' : opts.end ? 'end' : 'resume';
+    const answer = opts.end ? 'end' : 'resume';
     if (!(await isClawdInstance(port))) {
       console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
       process.exitCode = 1;

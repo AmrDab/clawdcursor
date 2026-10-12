@@ -14,10 +14,9 @@
 #   - Parent kills this process to hide the banner.
 #   - PAUSED mode (env CLAWD_BANNER_MODE=paused, set by src/core/pause-gate.ts
 #     via banner.ts): the agent handed the desktop to the user. Blue dot, the
-#     instruction from CLAWD_BANNER_MESSAGE, and two buttons:
-#       CLAWD_BANNER_KIND=needs_user -> Resume (BANNER_RESUME) / End task (BANNER_END)
-#       CLAWD_BANNER_KIND=confirm    -> Allow  (BANNER_ALLOW)  / Deny     (BANNER_DENY)
-#     The click prints that line on stdout and exits. No double-click stop here.
+#     instruction from CLAWD_BANNER_MESSAGE, and two buttons: Resume
+#     (BANNER_RESUME) / End task (BANNER_END). The click prints that line on
+#     stdout and exits. No double-click stop here.
 #
 # CRITICAL: the window must NEVER steal focus — it appears WHILE the agent is
 # typing/clicking, and an activating window would redirect those keystrokes
@@ -95,7 +94,6 @@ function Send-Line([string]$line) {
 
 # ── PAUSED: the user's turn ──────────────────────────────────────────────────
 if ($env:CLAWD_BANNER_MODE -eq 'paused') {
-    $confirm = $env:CLAWD_BANNER_KIND -eq 'confirm'
     $blue    = [System.Drawing.Color]::FromArgb(59, 130, 246)
     $form.Width = 560
 
@@ -108,7 +106,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     $dot.Location  = New-Object System.Drawing.Point(14, 7)
 
     $title = New-Object System.Windows.Forms.Label
-    $title.Text      = $(if ($confirm) { 'ClawdCursor needs your OK' } else { 'ClawdCursor paused - your turn' })
+    $title.Text      = 'ClawdCursor paused - your turn'
     $title.Font      = New-Object System.Drawing.Font('Segoe UI Semibold', 10)
     $title.ForeColor = [System.Drawing.Color]::White
     $title.BackColor = [System.Drawing.Color]::Transparent
@@ -144,8 +142,8 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     }
     $btnY  = 38 + $msgH + 12
     $gray  = [System.Drawing.Color]::FromArgb(60, 60, 72)
-    $yes   = New-PillButton $(if ($confirm) { 'Allow' } else { 'Resume' }) $(if ($confirm) { 'BANNER_ALLOW' } else { 'BANNER_RESUME' }) ($form.Width - 250) $btnY $blue
-    $no    = New-PillButton $(if ($confirm) { 'Deny' } else { 'End task' }) $(if ($confirm) { 'BANNER_DENY' } else { 'BANNER_END' }) ($form.Width - 130) $btnY $gray
+    $yes   = New-PillButton 'Resume'   'BANNER_RESUME' ($form.Width - 250) $btnY $blue
+    $no    = New-PillButton 'End task' 'BANNER_END'    ($form.Width - 130) $btnY $gray
 
     $form.Height = $btnY + 30 + 14
     $form.Controls.AddRange(@($dot, $title, $msg, $yes, $no))

@@ -149,7 +149,7 @@ export function getAgentTools(): ToolDefinition[] {
         const boundMs = Math.min(50_000, Math.max(1_000, Number.isFinite(sec) && sec > 0 ? sec * 1000 : PAUSE_WAIT_DEFAULT_MS));
         let timer: ReturnType<typeof setTimeout> | undefined;
         const outcome = await Promise.race([
-          pauseGate.request({ kind: 'needs_user', message: text, key }),
+          pauseGate.request({ message: text, key }),
           new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
         ]);
         clearTimeout(timer);
@@ -178,8 +178,7 @@ export function getAgentTools(): ToolDefinition[] {
     {
       name: 'resume_task',
       description:
-        'Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen). ' +
-        'Only for "your turn" pauses: an approval (Allow / Deny) can only be answered by the user on screen.',
+        'Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen).',
       parameters: {},
       category: 'orchestration',
       compactGroup: 'task',
@@ -187,9 +186,6 @@ export function getAgentTools(): ToolDefinition[] {
       handler: async () => {
         const p = pauseGate.current();
         if (!p) return { text: 'resume_task: nothing is paused.', isError: true };
-        if (p.kind === 'confirm') {
-          return { text: `resume_task: this pause is an approval ("${p.message}"). Only the user can answer it, with Allow or Deny on screen.`, isError: true };
-        }
         const r = pauseGate.answer('resume');
         if (!r.ok) return { text: `resume_task: ${r.error}`, isError: true };
         return { text: JSON.stringify({ resumed: true, was: p.message }) };

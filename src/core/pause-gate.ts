@@ -2,9 +2,9 @@
  * Pause gate — hand the desktop to the human at a roadblock, then continue.
  *
  * When an agent hits something only the user can do (sign in, a 2FA code, a
- * CAPTCHA, approving a Send/Delete), it asks the gate to pause. The on-screen
- * overlay turns blue and shows what the user should do plus the answer
- * buttons; the agent's run is simply suspended on the returned promise, so it
+ * CAPTCHA, a step it isn't allowed to take), it asks the gate to pause. The
+ * on-screen overlay turns blue and shows what the user should do with Resume /
+ * End task; the agent's run is simply suspended on the returned promise, so it
  * continues with its history intact once the user answers.
  *
  * Answers come from any of: the overlay buttons, `clawdcursor resume`,
@@ -22,13 +22,11 @@
 
 import { controlBanner } from './banner';
 
-export type PauseKind = 'needs_user' | 'confirm';
-export type PauseAnswer = 'resume' | 'allow' | 'deny' | 'end';
-export type PauseOutcome = 'resumed' | 'allowed' | 'denied' | 'ended' | 'timeout';
+export type PauseAnswer = 'resume' | 'end';
+export type PauseOutcome = 'resumed' | 'ended' | 'timeout';
 
 export interface PauseRequest {
-  kind: PauseKind;
-  /** What the user should do / what is being approved. Shown on screen. */
+  /** What the user should do. Shown on screen. */
   message: string;
   /** Re-attach key (MCP callers). Same key → same pending pause. */
   key?: string;
@@ -36,7 +34,6 @@ export interface PauseRequest {
 
 export interface PauseInfo {
   id: number;
-  kind: PauseKind;
   message: string;
   since: number;
 }
@@ -87,7 +84,6 @@ class PauseGate {
 
     const info: PauseInfo = {
       id: this.nextId++,
-      kind: req.kind,
       message: req.message.replace(/\s+/g, ' ').trim().slice(0, MAX_MESSAGE) || 'Your turn.',
       since: Date.now(),
     };
@@ -109,20 +105,11 @@ class PauseGate {
     return promise;
   }
 
-  /**
-   * Answer the pending pause. A confirm pause needs an explicit allow/deny —
-   * "resume" alone must never approve a Send/Delete.
-   */
+  /** Answer the pending pause: Resume continues the run, End task ends it. */
   answer(a: PauseAnswer): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
     const p = this.pending;
     if (!p) return { ok: false, error: 'nothing is paused' };
-    let outcome: PauseOutcome;
-    if (p.info.kind === 'confirm') {
-      if (a === 'resume') return { ok: false, error: 'this pause is an approval: answer allow or deny' };
-      outcome = a === 'allow' ? 'allowed' : a === 'deny' ? 'denied' : 'ended';
-    } else {
-      outcome = a === 'end' || a === 'deny' ? 'ended' : 'resumed';
-    }
+    const outcome: PauseOutcome = a === 'end' ? 'ended' : 'resumed';
     this.finish(p, outcome);
     return { ok: true, outcome };
   }

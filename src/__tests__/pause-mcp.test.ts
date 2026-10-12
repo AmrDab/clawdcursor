@@ -4,8 +4,7 @@
  *     waits for the user (so the caller waits instead of restarting)
  *   - pause_for_user: bounded wait → {status:"waiting"}, re-call re-attaches,
  *     Resume → {status:"resumed"}; unavailable → clear error
- *   - resume_task answers a "your turn" pause, never an approval
- *   - confirmOnScreen: a confirm-tier call becomes an on-screen Allow / Deny
+ *   - resume_task answers the pause
  *   - POST /resume answers the pause
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -18,8 +17,6 @@ import { controlBanner } from '../core/banner';
 import { pauseGate } from '../core/pause-gate';
 import { getOrchestrationTools, __resetInflightDelegationForTests } from '../tools/orchestration';
 import { getAgentTools } from '../tools/agent';
-import { getTool } from '../tools/registry';
-import { evaluateToolCall, confirmOnScreen } from '../tools/safety-gate';
 import { createUtilityServer, initServerToken } from '../surface/http-utility';
 
 // The daemon token lives in DATA_DIR — never touch the user's real one.
@@ -68,7 +65,7 @@ describe('delegate_to_agent while the task is paused', () => {
 
     const call = delegate.handler({ task: 'star the repo', timeout: 1 }, ctx); // starts the task
     // ...which then pauses for the user while the caller is waiting
-    const p = pauseGate.request({ kind: 'needs_user', message: 'Sign in to GitHub, then click Resume' });
+    const p = pauseGate.request({ message: 'Sign in to GitHub, then click Resume' });
     state = { status: 'paused', currentStep: 'Sign in to GitHub, then click Resume' };
     const r = await call;
     const body = JSON.parse(r.text);
@@ -120,55 +117,12 @@ describe('pause_for_user', () => {
 });
 
 describe('resume_task', () => {
-  it('resumes a "your turn" pause but never answers an approval', async () => {
+  it('resumes the pause; says so when nothing is paused', async () => {
     expect((await resumeTask.handler({}, noCtx)).text).toMatch(/nothing is paused/);
 
-    const approval = pauseGate.request({ kind: 'confirm', message: 'Send the email' });
-    const refused = await resumeTask.handler({}, noCtx);
-    expect(refused.isError).toBe(true);
-    expect(refused.text).toMatch(/Only the user can answer it/);
-    pauseGate.answer('deny');
-    await approval;
-
-    const turn = pauseGate.request({ kind: 'needs_user', message: 'Sign in' });
+    const turn = pauseGate.request({ message: 'Sign in' });
     expect(JSON.parse((await resumeTask.handler({}, noCtx)).text)).toEqual({ resumed: true, was: 'Sign in' });
     await expect(turn).resolves.toBe('resumed');
-  });
-});
-
-describe('confirmOnScreen (outside AI hits a confirm-tier call)', () => {
-  const tool = getTool('close_window')!;
-
-  it('the gate marks the confirm so it can be asked on screen', () => {
-    expect(evaluateToolCall(tool, {})?.confirmReason).toBeTruthy();
-  });
-
-  it('Allow lets the call run; the same call later asks again', async () => {
-    const r = confirmOnScreen(tool, { title: 'Notes' }, 'closes a window', { waitMs: 2_000 });
-    await new Promise(res => setTimeout(res, 10));
-    expect(pauseGate.current()).toMatchObject({ kind: 'confirm', message: expect.stringMatching(/close_window "Notes"/) });
-    pauseGate.answer('allow');
-    await expect(r).resolves.toEqual({ allowed: true });
-
-    const again = confirmOnScreen(tool, { title: 'Notes' }, 'closes a window', { waitMs: 50 });
-    const res = await again;
-    expect(res).toMatchObject({ allowed: false, text: expect.stringMatching(/WAITING/) });
-  });
-
-  it('no answer within the wait → WAITING; re-issuing re-attaches; Deny refuses', async () => {
-    const first = await confirmOnScreen(tool, { title: 'X' }, 'r', { waitMs: 20 });
-    expect(first).toMatchObject({ allowed: false, text: expect.stringMatching(/Re-issue this exact call/) });
-    const id = pauseGate.current()?.id;
-    const second = confirmOnScreen(tool, { title: 'X' }, 'r', { waitMs: 2_000 });
-    await new Promise(res => setTimeout(res, 10));
-    expect(pauseGate.current()?.id).toBe(id);
-    pauseGate.answer('deny');
-    expect(await second).toMatchObject({ allowed: false, text: expect.stringMatching(/clicked Deny/) });
-  });
-
-  it('returns null (plain error path) when no prompt can be shown', async () => {
-    process.env.CLAWD_NO_PAUSE = '1';
-    await expect(confirmOnScreen(tool, {}, 'r', { waitMs: 10 })).resolves.toBeNull();
   });
 });
 
@@ -187,23 +141,14 @@ describe('POST /resume', () => {
     try {
       expect((await post({ answer: 'resume' })).status).toBe(409);
       expect((await post({ answer: 'maybe' })).status).toBe(400);
-      const p = pauseGate.request({ kind: 'confirm', message: 'Send it' });
-      const res = await post({ answer: 'allow' });
+      expect((await post({ answer: 'allow' })).status).toBe(400);
+      const p = pauseGate.request({ message: 'Sign in' });
+      const res = await post({ answer: 'resume' });
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ ok: true, outcome: 'allowed', was: 'Send it' });
-      await expect(p).resolves.toBe('allowed');
+      expect(await res.json()).toMatchObject({ ok: true, outcome: 'resumed', was: 'Sign in' });
+      await expect(p).resolves.toBe('resumed');
     } finally {
       server.close();
     }
-  });
-});
-
-describe('confirmOnScreen names the target', () => {
-  it('uses the window / app / URL when there is no element label', async () => {
-    const r = confirmOnScreen(getTool('close_window')!, { processName: 'Notepad' }, 'destructive', { waitMs: 1_000 });
-    await new Promise(res => setTimeout(res, 10));
-    expect(pauseGate.current()?.message).toMatch(/close_window "Notepad"/);
-    pauseGate.answer('deny');
-    await r;
   });
 });

@@ -106,9 +106,9 @@ Every tool call routes through one `safety.evaluate()` chokepoint regardless of
 transport (stdio or HTTP). Sensitive actions auto-elevate to Confirm. HTTP requires
 a bearer token. Local-only by default. An on-screen "desktop control in progress"
 indicator shows whenever an agent is driving — double-click it to stop.
-At a roadblock (sign-in, 2FA, CAPTCHA, an approval) the agent pauses instead of
-failing: the glow turns blue, the prompt says what to do, and the task continues
-when the user clicks Resume (or Allow / Deny). Outside agents use
+At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
+glow turns blue, the prompt says what to do, and the task continues when the
+user clicks Resume. Outside agents use
 `system pause_for_user`; `clawdcursor resume` answers from a terminal.
 
 ## Links

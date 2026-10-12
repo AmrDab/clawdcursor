@@ -319,7 +319,7 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
   });
 
   // POST /resume — Bearer-gated, localhost-only: answer a pause for the user
-  // (pause-gate.ts). Body {answer: "resume" | "allow" | "deny" | "end"}.
+  // (pause-gate.ts). Body {answer: "resume" | "end"}.
   // Used by `clawdcursor resume` and the dashboard buttons.
   app.post('/resume', requireAuth, (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || '';
@@ -328,8 +328,8 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
       return res.status(403).json({ error: 'Resume is only allowed from localhost' });
     }
     const answer = (req.body?.answer ?? 'resume') as string;
-    if (!['resume', 'allow', 'deny', 'end'].includes(answer)) {
-      return res.status(400).json({ error: 'answer must be one of: resume, allow, deny, end' });
+    if (!['resume', 'end'].includes(answer)) {
+      return res.status(400).json({ error: 'answer must be "resume" or "end"' });
     }
     const pause = pauseGate.current();
     const r = pauseGate.answer(answer as PauseAnswer);

@@ -15,7 +15,7 @@ import { loadPipelineConfig } from '../surface/doctor';
 import { runAgent } from './agent-loop/agent';
 import { getPlatform } from '../platform';
 import { controlBanner } from './banner';
-import { pauseGate, type PauseKind, type PauseOutcome } from './pause-gate';
+import { pauseGate, type PauseOutcome } from './pause-gate';
 import type { ClawdConfig, AgentState, TaskResult, StepResult } from '../types';
 import type { ResolvedConfig } from '../llm/config';
 
@@ -105,7 +105,7 @@ export class Agent {
     const startTime = Date.now();
 
     // Wrap the entire task with a global wall-clock timeout. Time the user
-    // spends on a pause (signing in, approving) does not count against it.
+    // spends on a pause (signing in, solving a CAPTCHA) does not count against it.
     this.pausedMs = 0;
     this.pausedSince = null;
     const deadline = () => startTime + Agent.TASK_TIMEOUT_MS + this.pausedMs
@@ -217,7 +217,7 @@ export class Agent {
         task,
         isAborted: () => this.aborted,
         abortSignal: this.abortCtl?.signal,
-        pause: req => this.pauseForUser(req.kind, req.message),
+        pause: req => this.pauseForUser(req.message),
       },
       {
         adapter,
@@ -262,14 +262,14 @@ export class Agent {
    * Hand the desktop to the user and wait for their answer (pause-gate.ts).
    * Null when nobody can see the prompt — the loop then fails fast as before.
    */
-  private async pauseForUser(kind: PauseKind, message: string): Promise<PauseOutcome | null> {
+  private async pauseForUser(message: string): Promise<PauseOutcome | null> {
     if (!pauseGate.available() || this.aborted) return null;
     this.pausedSince = Date.now();
-    this.state = { ...this.state, status: kind === 'confirm' ? 'waiting_confirm' : 'paused', currentStep: message };
+    this.state = { ...this.state, status: 'paused', currentStep: message };
     console.log(`
 ⏸ Paused for the user: ${message}`);
     try {
-      return await pauseGate.request({ kind, message }, { signal: this.abortCtl?.signal });
+      return await pauseGate.request({ message }, { signal: this.abortCtl?.signal });
     } finally {
       this.pausedMs += Date.now() - this.pausedSince;
       this.pausedSince = null;

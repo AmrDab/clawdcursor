@@ -1916,7 +1916,7 @@
     },
     {
       "name": "resume_task",
-      "description": "Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen). Only for \"your turn\" pauses: an approval (Allow / Deny) can only be answered by the user on screen.",
+      "description": "Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen).",
       "category": "orchestration",
       "parameters": {
         "type": "object",

@@ -27,22 +27,21 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Added
 
 - **Pause for the user at a roadblock, then continue.** A sign-in, a 2FA code,
-  a CAPTCHA, or an action that needs approval no longer ends the task with the
+  a CAPTCHA, or a step the agent may not take no longer ends the task with the
   agent confused. The run pauses, keeping its history: the glow turns blue and
-  the pill says what to do, with **Resume / End task**, or **Allow / Deny** for
-  an approval. After Resume the agent re-reads the screen and carries on from
-  where it is. Windows for now; macOS and Linux overlays are next.
-  - Built-in agent: new `ask_user` tool. `give_up`, the repeat guard and
-    confirm-tier actions (Send, Delete, closing a window…) now pause instead of
-    failing. Paused time doesn't count toward the 12-minute task limit. No
-    answer in 15 min (`CLAWD_PAUSE_TIMEOUT_MIN`) ends the task.
+  the pill says what to do, with **Resume / End task**. After Resume the agent
+  re-reads the screen and carries on from where it is. Windows for now; macOS
+  and Linux overlays are next.
+  - Built-in agent: new `ask_user` tool. `give_up` and the repeat guard now
+    pause instead of failing. Paused time doesn't count toward the 12-minute
+    task limit. No answer in 15 min (`CLAWD_PAUSE_TIMEOUT_MIN`) ends the task.
+    Confirm-tier actions (Send, Delete…) are still refused as before; if that
+    blocks the task, the agent pauses so the user can do that step.
   - Outside agents: `system pause_for_user` (bounded wait; re-call to keep
-    waiting); confirm-tier calls show the same on-screen Allow / Deny (re-issue
-    the identical call to keep waiting). A delegated `task` reports
-    `{status:"paused", waitingFor}`, and `task {action:"resume"}` resumes a
-    "your turn" pause. An approval can only be answered on screen.
-  - Also answerable with `clawdcursor resume [--allow|--deny|--end]`,
-    `POST /resume`, or the dashboard, whose Approve/Reject banner now works.
+    waiting). A delegated `task` reports `{status:"paused", waitingFor}`, and
+    `task {action:"resume"}` resumes it.
+  - Also answerable with `clawdcursor resume [--end]`, `POST /resume`, or the
+    dashboard, whose pause banner now has working Resume / End task buttons.
   - `CLAWD_NO_PAUSE=1` restores the old fail-fast behaviour (CI, unattended
     runs). Nothing reads the screen while paused.
 - **The edge glow covers every monitor**, not just the primary one.

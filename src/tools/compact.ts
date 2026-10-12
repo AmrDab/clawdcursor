@@ -520,7 +520,7 @@ export function getCompactTools(): ToolDefinition[] {
         'Hand clawdcursor a WHOLE natural-language task and let its internal agent loop execute it (accessibility first, screenshots when the screen has no readable structure). ' +
         'Use this when you don\'t want to micromanage every primitive — clawdcursor decomposes the task, picks the cheapest execution path, and returns a trace. ' +
         'BOUNDED-SYNC: waits up to `timeout` seconds (default 45) — a longer task returns {status:"running"} with progress while it CONTINUES in the background; re-call with the SAME instruction to keep waiting (re-attaches, never restarts), {action:"status"} to poll, {action:"abort"} to stop it. ' +
-        'At a roadblock (sign-in, 2FA, CAPTCHA, an approval) the task PAUSES for the user and returns {status:"paused", waitingFor}: keep re-calling to wait, never restart; {action:"resume"} if the user tells you they finished. ' +
+        'At a roadblock (sign-in, 2FA, CAPTCHA, a step it may not take) the task PAUSES for the user and returns {status:"paused", waitingFor}: keep re-calling to wait, never restart; {action:"resume"} if the user tells you they finished. ' +
         'The `computer`/`accessibility`/`window`/`system`/`browser` compounds are for when you want step-level control yourself. ' +
         'If the daemon isn\'t running you get a clear error telling you how to start it.',
       parameters: {

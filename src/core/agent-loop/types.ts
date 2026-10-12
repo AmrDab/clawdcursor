@@ -33,13 +33,13 @@ export interface AgentInput {
    */
   targetWindow?: { title: string; processName: string };
   /**
-   * Hand the desktop to the human at a roadblock (sign-in, 2FA, CAPTCHA, an
-   * approval) and wait for their answer — the run is suspended, not ended.
-   * Resolves null when no human can be reached (no overlay / CLAWD_NO_PAUSE):
-   * the loop then keeps its old fail-fast behaviour. Wired by Agent.
+   * Hand the desktop to the human at a roadblock (sign-in, 2FA, CAPTCHA, a
+   * step the agent may not take) and wait for Resume / End task — the run is
+   * suspended, not ended. Resolves null when no human can be reached (no
+   * overlay / CLAWD_NO_PAUSE): the loop then keeps its old fail-fast
+   * behaviour. Wired by Agent.
    */
-  pause?: (req: { kind: 'needs_user' | 'confirm'; message: string }) =>
-    Promise<'resumed' | 'allowed' | 'denied' | 'ended' | 'timeout' | null>;
+  pause?: (req: { message: string }) => Promise<'resumed' | 'ended' | 'timeout' | null>;
 }
 
 export interface AgentStep {
