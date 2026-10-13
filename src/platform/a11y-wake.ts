@@ -81,10 +81,16 @@ export async function getUiTreeWithWake(
 
   await wakeAccessibility(target);
   const pollMs = opts.pollMs ?? WAKE_POLL_MS;
-  // A fixed number of polls, so the wait is ~budget (plus read time), not budget + a poll.
+  const nowFn = opts.now ?? Date.now;
+  // A fixed number of polls, so the wait is ~budget, not budget + a poll — and a
+  // wall-clock bound, so slow reads count against the budget too: on macOS a
+  // System Events walk of a Chromium app takes ~10 s, which turned "3 s" into
+  // 41 s. One re-read is always attempted, so the wake gets its chance.
   const polls = Math.max(1, Math.floor(budgetMs / Math.max(pollMs, 1)));
+  const started = nowFn();
   let best = first;
   for (let i = 0; i < polls; i++) {
+    if (i > 0 && nowFn() - started >= budgetMs) break;
     await new Promise(r => setTimeout(r, pollMs));
     const next = await platform.getUiTree(pid).catch(() => best);
     if (next.length > best.length) best = next;
