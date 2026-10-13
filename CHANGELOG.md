@@ -43,6 +43,17 @@ All notable changes to Clawd Cursor will be documented in this file.
     dashboard, whose pause banner now has working Resume / End task buttons.
   - `CLAWD_NO_PAUSE=1` restores the old fail-fast behaviour (CI, unattended
     runs). Nothing reads the screen while paused.
+- **`clawdcursor versions`, and the same list in `clawdcursor doctor`:** every
+  copy of clawdcursor on the machine with its version: the global install,
+  Claude Desktop extensions (including the Microsoft Store build's folder), the
+  Claude Code plugin's pinned version and npx's cache. Old copies are flagged
+  with the fix for each. The website installer only updates the global copy, so
+  an old Desktop extension used to go unnoticed.
+- **The installers say what they did.** "Updated 1.5.12 → 1.5.15" (or
+  "installed", or "already the latest"), a reminder to restart editor and Claude
+  sessions, and the list of other copies. On Windows they warn when open
+  sessions are using the global copy (the cause of `EBUSY` failures) and explain
+  that error if it happens.
 - **The on-screen overlay (glow + pill) now works on macOS and Linux**, not
   only Windows, and the glow covers every monitor, not just the primary one.
   - macOS: `scripts/mac/overlay.swift`, compiled once into `~/.clawdcursor/bin`

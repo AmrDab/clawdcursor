@@ -38,7 +38,10 @@ if [ "$NODE_MAJOR" -lt 20 ]; then
 fi
 echo "  ✅ Node.js $(node --version)"
 
-# ── 2. Install from npm ──────────────────────────────────────────────────────
+# ── 2. Install from npm (updates an existing global copy in place) ───────────
+# The version already installed, so we can say "updated X -> Y" afterwards.
+BEFORE="$(npm ls -g clawdcursor --depth=0 --json 2>/dev/null | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).dependencies.clawdcursor.version||"")}catch{}})' 2>/dev/null || true)"
+
 echo "  📦 Installing $PKG (global)..."
 if ! npm install -g "$PKG" --loglevel error; then
     echo ""
@@ -61,7 +64,21 @@ fi
 # ── 4. Verify ─────────────────────────────────────────────────────────────────
 echo ""
 if command -v clawdcursor &>/dev/null; then
-    echo "  ✅ Clawd Cursor $(clawdcursor --version 2>/dev/null || echo "$DISPLAY_VERSION") installed!"
+    NOW="$(clawdcursor --version 2>/dev/null | tail -n 1)"
+    NOW="${NOW:-$DISPLAY_VERSION}"
+    if [ -z "$BEFORE" ]; then
+        echo "  ✅ Clawd Cursor $NOW installed!"
+    elif [ "$BEFORE" = "$NOW" ]; then
+        echo "  ✅ Clawd Cursor $NOW is already the latest (reinstalled)."
+    else
+        echo "  ✅ Clawd Cursor updated: $BEFORE → $NOW"
+        echo "     Restart any editor or Claude session that uses clawdcursor so it picks up $NOW."
+    fi
+    # The installer only updates this global copy. The Claude Desktop extension
+    # and the Claude Code plugin carry their own: list them so old ones show.
+    echo ""
+    echo "  Copies of clawdcursor on this machine:"
+    clawdcursor versions 2>/dev/null || true
 else
     NPM_PREFIX="$(npm prefix -g 2>/dev/null)/bin"
     echo "  ✅ Installed, but npm's global bin folder isn't on your PATH."

@@ -40,6 +40,7 @@ import type { ResolvedConfig } from '../llm/config';
 import { callVisionLLMDirect } from '../llm/client';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, isMacOS } from '../platform/native-helper';
+import { findInstalledCopies, describeCopies } from './installed-copies';
 
 const CONFIG_FILE = '.clawdcursor-config.json';
 const execFileAsync = promisify(execFile);
@@ -205,7 +206,13 @@ export async function runDoctor(opts: {
 
   // ─── 0. Version Check ───────────────────────────────────────────
   console.log('📦 Version check...');
-  await checkForUpdates(results);
+  const latest = await checkForUpdates(results);
+
+  // ─── 0a. Every installed copy ───────────────────────────────────
+  // The installer updates the global copy only; the Desktop extension and the
+  // Claude Code plugin carry their own. Show them all so a stale one is obvious.
+  console.log('📦 Installed copies...');
+  checkInstalledCopies(results, latest);
 
   // ─── 0b. Consent Check ──────────────────────────────────────────
   console.log('📝 Consent check...');
@@ -1307,9 +1314,25 @@ async function registerExternalSkills(results: DiagResult[]): Promise<void> {
 }
 
 /**
- * Check for newer versions on GitHub releases.
+ * List every copy of clawdcursor on this machine and flag the stale ones.
  */
-async function checkForUpdates(results: DiagResult[]): Promise<void> {
+function checkInstalledCopies(results: DiagResult[], latest: string | undefined): void {
+  try {
+    const { lines, stale } = describeCopies(findInstalledCopies(), { latest, running: getPackageRoot() });
+    for (const line of lines) console.log(`   ${line}`);
+    results.push(stale.length
+      ? { name: 'Installed copies', ok: false, detail: `${stale.length} older cop${stale.length === 1 ? 'y' : 'ies'}: ${stale.map(c => `${c.kind} v${c.version}`).join(', ')}` }
+      : { name: 'Installed copies', ok: true, detail: 'all on the same version' });
+  } catch {
+    console.log('   ⚠️  Could not list installed copies — skipping');
+  }
+}
+
+/**
+ * Check for newer versions on GitHub releases. Returns the latest released
+ * version when the check succeeded.
+ */
+async function checkForUpdates(results: DiagResult[]): Promise<string | undefined> {
   try {
     const pkgPath = path.join(getPackageRoot(), 'package.json');
     const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
@@ -1352,6 +1375,7 @@ async function checkForUpdates(results: DiagResult[]): Promise<void> {
         console.log(`   ✅ Up to date (v${currentVersion})`);
         results.push({ name: 'Version', ok: true, detail: `v${currentVersion} (latest)` });
       }
+      return latestTag || undefined;
     } else {
       // GitHub API rate limit or error — skip gracefully
       console.log(`   ✅ v${currentVersion} (update check skipped — GitHub API returned ${res.status})`);

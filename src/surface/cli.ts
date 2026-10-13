@@ -785,6 +785,15 @@ program
   });
 
 program
+  .command('versions')
+  .description('📦 List every copy of clawdcursor on this machine (global install, Claude Desktop extension, Claude Code plugin) and flag old ones')
+  .action(async () => {
+    const { findInstalledCopies, describeCopies } = await import('./installed-copies');
+    const { lines } = describeCopies(findInstalledCopies(), { latest: VERSION, running: getPackageRoot() });
+    for (const line of lines) console.log(`  ${line}`);
+  });
+
+program
   .command('grant')
   .description('🔐 Request macOS permissions (triggers system permission dialogs)')
   .action(async () => {
