@@ -128,6 +128,10 @@ export async function waitForLaunchedWindow(
     // then predicate match.
     let pidNew: WindowInfo | null = null;
     let predNew: WindowInfo | null = null;
+    // A new window with NO owning pid (X11 without _NET_WM_PID — xcalc) can
+    // match neither the spawn pid nor, when its title differs from the launch
+    // name, the predicate. Having appeared since the launch, it is ours.
+    let unownedNew: WindowInfo | null = null;
     for (const w of current) {
       if (w.isMinimized) continue;
       if (beforeIds.has(idOf(w))) continue;
@@ -138,9 +142,11 @@ export async function waitForLaunchedWindow(
       if (!predNew && predicate(w)) {
         predNew = w;
       }
+      if (!unownedNew && !w.processId) unownedNew = w;
     }
     if (pidNew) return pidNew;
     if (predNew) return predNew;
+    if (unownedNew) return unownedNew;
 
     // Pass 2: remember the best already-existing match for the timeout
     // fallback. Prefer PID, then predicate.

@@ -275,14 +275,17 @@ def walk(acc: Any, out: list, depth: int = 0) -> None:
 
 
 def active_application(process_id: Optional[int] = None,
-                       window_title: Optional[str] = None) -> Optional[Any]:
+                       window_title: Optional[str] = None,
+                       exclude_pids: Optional[set] = None) -> Optional[Any]:
     """Pick an Atspi.Accessible application root to walk.
 
     process_id wins. Else window_title (the active window's title, for a
     window that sets no _NET_WM_PID): the app owning a toplevel of that name,
     else the app owning the ACTIVE toplevel, else None — never some other
     app. With neither: the ACTIVE toplevel's app, then the legacy
-    focused-descendant heuristic, then the first app.
+    focused-descendant heuristic, then the first app. exclude_pids: apps that
+    own a DIFFERENT window with the same title (xcalc and GNOME Calculator are
+    both "Calculator") — never chosen by title.
     """
     try:
         desktop = Atspi.get_desktop(0)
@@ -303,6 +306,8 @@ def active_application(process_id: Optional[int] = None,
         return None
 
     if window_title:
+        if exclude_pids:
+            apps = [a for a in apps if safe(lambda a=a: a.get_process_id()) not in exclude_pids]
         for app in apps:
             for top in toplevels_active_first(app):
                 if (safe(lambda top=top: top.get_name(), '') or '') == window_title:
@@ -345,13 +350,14 @@ def has_focused_descendant(acc: Any, depth: int = 0) -> bool:
 
 
 def focused_element(process_id: Optional[int] = None,
-                    window_title: Optional[str] = None) -> Optional[dict]:
+                    window_title: Optional[str] = None,
+                    exclude_pids: Optional[set] = None) -> Optional[dict]:
     """The focused element of the active app (scoped by pid / window title
     when given), searching its ACTIVE window first. Toolkits keep FOCUSED on
     the last-focused widget of inactive windows and apps, so an unscoped
     first-hit search answered with another app's element."""
     if process_id is not None or window_title:
-        app = active_application(process_id, window_title)
+        app = active_application(process_id, window_title, exclude_pids)
         apps = [app] if app is not None else []
     else:
         try:
@@ -398,8 +404,9 @@ def on_screen(el: dict) -> bool:
             and b.get("x", 0) > INT_MIN and b.get("y", 0) > INT_MIN)
 
 
-def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None) -> dict:
-    app = active_application(process_id, window_title)
+def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
+                 exclude_pids: Optional[set] = None) -> dict:
+    app = active_application(process_id, window_title, exclude_pids)
     out: list = []
     if app is not None:
         root = node_to_dict(app)
@@ -423,10 +430,10 @@ def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None) 
 
 
 def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int],
-             window_title: Optional[str] = None) -> dict:
+             window_title: Optional[str] = None, exclude_pids: Optional[set] = None) -> dict:
     # Implement find as a post-filter over the tree walk — simpler than
     # deep-diving the collection interface and more predictable.
-    tree = cmd_get_tree(process_id, window_title).get("elements", [])
+    tree = cmd_get_tree(process_id, window_title, exclude_pids).get("elements", [])
     if name is None and role is None:
         return {"elements": tree}
 
@@ -448,8 +455,9 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
     return {"elements": hits}
 
 
-def cmd_focused(process_id: Optional[int] = None, window_title: Optional[str] = None) -> dict:
-    el = focused_element(process_id, window_title)
+def cmd_focused(process_id: Optional[int] = None, window_title: Optional[str] = None,
+                exclude_pids: Optional[set] = None) -> dict:
+    el = focused_element(process_id, window_title, exclude_pids)
     return {"element": el}
 
 
@@ -643,10 +651,11 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
 
 
 def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[int],
-               action: str, value: Optional[str], window_title: Optional[str] = None) -> dict:
+               action: str, value: Optional[str], window_title: Optional[str] = None,
+               exclude_pids: Optional[set] = None) -> dict:
     if not name and not role:
         return {"success": False, "action": action, "error": "name or role required"}
-    app = active_application(process_id, window_title)
+    app = active_application(process_id, window_title, exclude_pids)
     if app is None:
         return {"success": False, "action": action, "error": "application not found"}
     target, showing = find_target(app, name, role)
@@ -670,21 +679,24 @@ def main() -> int:
     p.add_argument('--process-id', type=int, default=None)
     # Scope for an active window that sets no _NET_WM_PID (no pid to pass).
     p.add_argument('--window-title', default=None)
+    # With --window-title: pids of OTHER windows that carry the same title.
+    p.add_argument('--exclude-pids', default='')
     p.add_argument('--action', default='click',
                    choices=['click', 'focus', 'set-value', 'get-value', 'toggle', 'select', 'expand', 'collapse'])
     p.add_argument('--value', default=None)
     args = p.parse_args()
+    excl = {int(x) for x in args.exclude_pids.split(',') if x.strip().isdigit()}
 
     try:
         if args.cmd == 'get-tree':
-            result = cmd_get_tree(args.process_id, args.window_title)
+            result = cmd_get_tree(args.process_id, args.window_title, excl)
         elif args.cmd == 'find':
-            result = cmd_find(args.name, args.role, args.process_id, args.window_title)
+            result = cmd_find(args.name, args.role, args.process_id, args.window_title, excl)
         elif args.cmd == 'focused':
-            result = cmd_focused(args.process_id, args.window_title)
+            result = cmd_focused(args.process_id, args.window_title, excl)
         elif args.cmd == 'invoke':
             result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value,
-                                args.window_title)
+                                args.window_title, excl)
         else:
             result = {"error": f"unknown command: {args.cmd}"}
     except Exception as exc:

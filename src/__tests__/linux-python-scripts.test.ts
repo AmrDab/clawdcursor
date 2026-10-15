@@ -61,6 +61,16 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.ocr_sparse.fullText).toBe('Submit\nCancel');
   });
 
+  // Live (xcalc): sparse mode numbered every word line 1, so smart_click
+  // joined "@" from one row with "sin" from the row above ("@ sin").
+  it('OCR line = visual row, not tesseract\'s per-block line_num', () => {
+    const r = out.ocr_rows;
+    expect(r.sin).toBe(r.tan);
+    expect(r['@']).not.toBe(r.sin);
+    expect(r.Save).toBe(r.As);
+    expect(r.Save).toBeGreaterThan(r['@']);
+  });
+
   // ── L7 (bridge side) ──
   it('find with --process-id searches only that application', () => {
     expect(out.find_scoped.elements.map((e: any) => e.processId)).toEqual([4242]);
@@ -155,6 +165,9 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('B5 a window with no pid is scoped by its title, never by guessing another app', () => {
     expect(out.by_title).toEqual([4242]);
     expect(out.by_unknown_title).toEqual([]);
+    // Same title as another app's window, which owns a pid: never that app.
+    expect(out.by_colliding_title).toEqual([]);
+    expect(out.invoke_colliding.success).toBe(false);
   });
 
   it('B7 tree: on-screen first (active dialog leading), hidden after, nameless rows dropped', () => {

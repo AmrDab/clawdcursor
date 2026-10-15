@@ -324,6 +324,10 @@ export function getSmartTools(): ToolDefinition[] {
                 // regression 2026-06-06: smart_click("OK") on a discard-draft
                 // dialog clicked a stray "O" near the taskbar instead.
                 if (phrase.length === 1 && targetNorm.length > 1) return 0;
+                // Nor can a 2-char FRAGMENT of a longer target: "in" inside
+                // "sin" scored 0.6 and smart_click("sin") clicked an "in" in
+                // another window while xcalc's key went unread (VM 2026-10-15).
+                if (phrase.length === 2 && targetNorm.length > 2 && targetNorm.includes(phrase)) return 0;
                 let raw: number;
                 if (phrase.includes(targetNorm) || targetNorm.includes(phrase)) {
                   raw = Math.min(phrase.length, targetNorm.length) / Math.max(phrase.length, targetNorm.length) * 0.9;
