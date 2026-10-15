@@ -221,12 +221,16 @@ func windowDict(_ w: AXUIElement, _ app: NSRunningApplication) -> [String: Any] 
 }
 
 /// Titled windows, plus untitled real windows (Calculator's has no title) — but not the
-/// untitled helper panels menu-bar apps keep around.
-func worthListing(_ w: [String: Any]) -> Bool {
+/// untitled helper panels menu-bar apps keep around. An accessory (menu-bar / system UI) app
+/// only counts with a real window or a dialog: Notification Center keeps desktop widgets and a
+/// full-screen overlay that are windows to the AX API but not something to drive.
+func worthListing(_ w: [String: Any], _ app: NSRunningApplication) -> Bool {
+    let sub = (w["subrole"] as? String) ?? ""
+    let realWindow = ["AXStandardWindow", "AXDialog", "AXSystemDialog"].contains(sub)
+    if app.activationPolicy != .regular && !realWindow { return false }
     if !((w["title"] as? String) ?? "").isEmpty { return true }
     let b = w["bounds"] as? [String: Int] ?? [:]
-    let sub = (w["subrole"] as? String) ?? ""
-    return ["AXStandardWindow", "AXDialog", "AXSystemDialog"].contains(sub) && (b["width"] ?? 0) >= 40 && (b["height"] ?? 0) >= 40
+    return realWindow && (b["width"] ?? 0) >= 40 && (b["height"] ?? 0) >= 40
 }
 
 /// Why one app could not be read: a call that waited out the whole messaging timeout means it is hung.
@@ -613,7 +617,7 @@ func cmdWindows() -> Never {
     let (results, unresponsive) = readAllApps(apps)
     var windows: [[String: Any]] = []
     for app in apps {
-        for w in results[Int(app.processIdentifier)] ?? [] where worthListing(w) {
+        for w in results[Int(app.processIdentifier)] ?? [] where worthListing(w, app) {
             var d = w
             d.removeValue(forKey: "subrole")
             windows.append(d)
@@ -667,7 +671,7 @@ func cmdApps() -> Never {
             "finishedLaunching": app.isFinishedLaunching,
             "active": app.isActive,
             "activationPolicy": policyName(app),
-            "windows": (results[Int(app.processIdentifier)] ?? []).filter(worthListing).map { w -> [String: Any] in
+            "windows": (results[Int(app.processIdentifier)] ?? []).filter { worthListing($0, app) }.map { w -> [String: Any] in
                 var x = w; x.removeValue(forKey: "subrole"); return x
             },
         ]
