@@ -134,6 +134,31 @@ VM and an Ubuntu 24.04 VM:
   so an agent doesn't click a toggle twice.
 - **Windows: an earlier still-running click that failed later** is reported
   on the next invoke instead of being lost.
+- **`get_value` reads the field, not a same-named label** ("City" = "City").
+- **OCR clicks never hit another app on a partial match.** `smart_click "1"`
+  in Calculator clicked the "14" of the menu-bar clock on a Mac and opened
+  Notification Center. Short and numeric targets now need a whole-token match,
+  and with a `processId` (or the agent's working window) a match outside that
+  window is refused, not clicked with a warning. The window check also compares
+  in the same coordinate space on Retina screens.
+- **Multi-word OCR targets survive one misread word** ("Make … Text"), and a
+  clear miss fails fast instead of a 24 s `deadline_exceeded`.
+- **`smart_type` replaces a field's text by default** (`mode: "append"` to
+  add); in the macOS Save panel it typed after the preselected base name
+  ("blind-note.txt.txt").
+- **`compile_ui` accepts `processId`** and reads that app's window; OCR
+  coordinates from it, and from the agent loop's `smart_click` / `read_text`,
+  are screen coordinates (points on macOS), not physical pixels.
+- **The overlay shows for what an action does.** `accessibility invoke` /
+  `set_value` (a tier-0 compound) never lit it, while reads on `system` / `task`
+  / `window` (tier-1 compounds) did, e.g. polling `task status`.
+- **HTTP `/mcp` works with standard MCP SDK clients.** Every request after the
+  first failed with "Already connected to a transport"; each SDK session now
+  gets its own server, and one-shot posts (dashboard, curl, CLI) still work.
+- **`clawdcursor task "…"` and the dashboard work against a `--compact`
+  daemon** (they called granular tool names it doesn't serve).
+- **The session log records refused and consent-blocked calls,** and counts
+  `batch` steps individually.
 - **`open_app Settings`: 10–17 s → ~5 s** (launched directly instead of after a
   failing launcher and a Start-menu search).
 - **No false "FOCUS NOT CONFIRMED" warning** for clicks on clawdcursor's own
