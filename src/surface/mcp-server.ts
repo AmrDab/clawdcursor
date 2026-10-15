@@ -26,6 +26,9 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+
+const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 
@@ -296,7 +299,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // EXTERNAL agent pokes the on-screen control banner — it shows on the
         // first poke and auto-hides after ~30s of inactivity. Read-only
         // perception (tier 0) stays silent.
-        if ((tool.safetyTier ?? 0) >= 1) controlBanner.touch();
+        // Compound tools (compact surface) decide per action in dispatchCompound.
+        if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
         const started = Date.now();
         let result;

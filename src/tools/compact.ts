@@ -33,6 +33,7 @@
  */
 
 import { getTool } from './registry';
+import { controlBanner } from '../core/banner';
 import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
@@ -435,6 +436,11 @@ async function dispatchCompound(
     k => k !== 'expect' && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
   );
 
+  // Transparency: show the overlay for what the ACTION does, not the compound
+  // it came through — accessibility invoke/set_value act (the compound is tier
+  // 0, so blind-mode actions never lit it), while system ocr/clipboard reads
+  // don't. mcp-server leaves compounds to this check.
+  if ((granular.safetyTier ?? 0) >= 1) controlBanner.touch();
   const result = await granular.handler(forwarded, ctx);
 
   // Granular hints ("Call cdp_connect first") name tools that do not exist
