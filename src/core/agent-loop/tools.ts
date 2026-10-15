@@ -522,12 +522,18 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: false,
       async execute(args, ctx) {
         const name = String(args.name ?? '');
-        const res = await ctx.platform.invokeElement({
-          name,
-          controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
-          processId: await resolveAgentPid(args, ctx),
-          action: 'get-value',
-        });
+        const processId = await resolveAgentPid(args, ctx);
+        let controlType = typeof args.controlType === 'string' ? args.controlType : undefined;
+        if (!controlType) {
+          // A label and its field often share the name ("City" + "City"); the
+          // label came first and its own text was returned as the value. Read
+          // the editable one when both exist.
+          const found = await ctx.platform.findElements({ name, processId }).catch(() => []);
+          const types = found.map(el => String(el.controlType ?? ''));
+          const editable = types.find(t => EDITABLE_ROLE.test(t) && !/^text$/i.test(t));
+          if (editable && types.some(t => !EDITABLE_ROLE.test(t) || /^text$/i.test(t))) controlType = editable;
+        }
+        const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'get-value' });
         if (!res.success) return { success: false, text: `"${name}" has no readable value.` };
         const value = (res.data as any)?.value ?? '';
         return { success: true, text: wrapUntrustedScreenContent(`"${name}" = "${truncate(String(value), 120)}"`) };

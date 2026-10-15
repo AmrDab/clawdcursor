@@ -52,3 +52,32 @@ describe('agent-loop set_field_value', () => {
     expect(p.typeText).not.toHaveBeenCalled();
   });
 });
+
+describe('agent-loop a11y_get_value', () => {
+  const getTool = buildUnifiedTools().find(t => t.name === 'a11y_get_value')!;
+
+  it('reads the field, not the same-named label (live Linux Chrome: "City" = "City")', async () => {
+    const invoke = vi.fn(async (q: any) => ({ success: true, data: { value: q.controlType === 'Edit' ? 'Porto' : 'City' } }));
+    const ctx = { platform: {
+      platform: 'linux',
+      invokeElement: invoke,
+      findElements: vi.fn(async () => [
+        { name: 'City', controlType: 'Text', bounds: { x: 1, y: 1, width: 30, height: 10 } },
+        { name: 'City', controlType: 'Edit', bounds: { x: 40, y: 1, width: 200, height: 20 } },
+      ]),
+      getActiveWindow: vi.fn(async () => null),
+    } } as any;
+    const r = await getTool.execute({ name: 'City', processId: 7 }, ctx);
+    expect(r.text).toContain('"City" = "Porto"');
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ controlType: 'Edit', action: 'get-value' }));
+  });
+
+  it('an explicit controlType is respected as given', async () => {
+    const invoke = vi.fn(async () => ({ success: true, data: { value: 'x' } }));
+    const find = vi.fn(async () => []);
+    const ctx = { platform: { platform: 'win32', invokeElement: invoke, findElements: find, getActiveWindow: vi.fn(async () => null) } } as any;
+    await getTool.execute({ name: 'File name', controlType: 'ComboBox', processId: 7 }, ctx);
+    expect(find).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ controlType: 'ComboBox' }));
+  });
+});
