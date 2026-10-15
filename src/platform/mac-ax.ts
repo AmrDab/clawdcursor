@@ -593,6 +593,11 @@ export function createMacAx(deps: MacAxDeps): MacAx {
 
     async invoke(q: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult> {
       const what = 'accessibility invoke';
+      // With nothing to aim at, a search matches every element and "best" is arbitrary —
+      // invoke-element.jxa used to press whichever button came first.
+      if (!q.name && !q.controlType && !q.automationId) {
+        return { success: false, error: 'invoke needs a name, controlType or automationId to aim at — refusing to act on an arbitrary element' };
+      }
       const reply = await viaHelper(
         ['invoke', ...(q.processId ? ['--pid', String(q.processId)] : []),
           '--action', q.action,
@@ -605,6 +610,10 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         what,
       );
       if (reply) return toInvokeResult(reply);
+      if (!q.name && !q.controlType) {
+        // The script has no AXIdentifier matching; run unaimed it would act on an arbitrary element.
+        return { success: false, error: 'matching by AXIdentifier needs the accessibility helper, which is not built yet (building in the background, or swiftc is unavailable) — aim by name or controlType instead' };
+      }
       const out = await viaJxa(
         'invoke-element.jxa',
         [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),

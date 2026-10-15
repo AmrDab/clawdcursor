@@ -471,6 +471,29 @@ describe('find', () => {
   });
 });
 
+describe('invoke — never acts without a selector', () => {
+  // invoke-element.jxa with no -Name and no -ControlType matched EVERY element and
+  // pressed the "best" one: `invoke {automationId}` (ignored by the script) clicked an arbitrary button.
+  it.each([
+    ['nothing', {}],
+    ['only a pid', { processId: 7 }],
+  ])('%s to aim at → a plain miss, and nothing is run', async (_label, aim) => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    const res = await ax.invoke({ ...aim, action: 'click' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/name|controlType|automationId/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('the osascript fallback cannot aim by identifier, so an identifier-only call is refused rather than run unaimed', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    const res = await ax.invoke({ processId: 7, automationId: 'One', action: 'click' });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/AXIdentifier|identifier/i);
+    expect(calls.filter(c => c.file === 'osascript')).toHaveLength(0);
+  });
+});
+
 describe('invoke', () => {
   it('passes the target and the action to the helper', async () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'set-value', method: 'AXValue' }) });
