@@ -106,6 +106,21 @@ VM and an Ubuntu 24.04 VM:
   type filters accept any spelling (`MenuItem`, `menu item`…).
 - **`smart_click "Save"` clicks the Save button,** not the "Save as" title: a
   standalone word beats the same word inside a longer phrase.
+- **Content below the fold is readable blind.** `read_tree` lists scrolled-out
+  elements after the visible ones (marked offscreen) and pages with
+  `offset`/`limit`; `compile_ui` shows them in an OFFSCREEN section;
+  `list_children` works when the parent has no on-screen bounds. Settings →
+  About now reads "Windows 11 Pro, 25H2" without guessing names.
+- **`copy_all_text` in Settings-style (UWP/XAML) windows:** 13.4 s and nothing
+  → 1.1 s, falling back to the window's accessibility text (and saying so).
+- **No false success from OCR clicks on running text.** When the only match is
+  a word inside a sentence and nothing changes after the click, `smart_click`
+  reports "not confirmed — that is text, not a control".
+- **`state` reports checked / unchecked** for checkboxes and toggles.
+- **`open_app Settings`: 10–17 s → ~5 s** (launched directly instead of after a
+  failing launcher and a Start-menu search).
+- **No false "FOCUS NOT CONFIRMED" warning** for clicks on clawdcursor's own
+  never-focused overlay.
 - **Linux: `invoke` by name picks what you can see.** It took the first match
   in tree order — a hidden 0×0 toolbar "Save" instead of the dialog's — and
   reported success. Visible matches in the active window now win; a match that
