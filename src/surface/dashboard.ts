@@ -7,6 +7,7 @@
 
 import type { Express } from 'express';
 import { VERSION } from './version';
+import { dashboardToolCall } from './dashboard-tools';
 
 export function mountDashboard(app: Express, getToken?: () => string): void {
   app.get('/', (_req, res) => {
@@ -709,6 +710,31 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     return result;
   }
 
+  // Which surface does this daemon serve? A --compact daemon has no
+  // submit_task / agent_status: ask tools/list once and map every call onto
+  // what is served (dashboardToolCall, shared with the server-side tests).
+  ${dashboardToolCall.toString()}
+  var __servedTools = null;
+  function servedTools() {
+    __servedTools = __servedTools || (async function() {
+      try {
+        var res = await fetch('/mcp', {
+          method: 'POST',
+          headers: authHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }),
+          body: JSON.stringify({ jsonrpc: '2.0', id: __mcpRequestId++, method: 'tools/list', params: {} })
+        });
+        var rpc = await res.json();
+        return ((rpc.result && rpc.result.tools) || []).map(function(t) { return t.name; });
+      } catch (e) { __servedTools = null; return []; }
+    })();
+    return __servedTools;
+  }
+  async function toolCall(tool, args) {
+    var call = dashboardToolCall(await servedTools(), tool, args || {});
+    if (!call) throw new Error('Not available on the --compact MCP surface of this daemon (start it without --compact for ' + tool + ')');
+    return mcpCall(call.name, call.arguments);
+  }
+
   // State
   let currentTab = 'task';
   let connected = false;
@@ -757,7 +783,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var list = document.getElementById('schedList');
     var empty = document.getElementById('emptySched');
     try {
-      var res = await mcpCall('scheduled_task_list', {});
+      var res = await toolCall('scheduled_task_list', {});
       var tasks = (res && res.tasks) || [];
       list.innerHTML = '';
       if (tasks.length === 0) {
@@ -808,7 +834,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     try {
       var args = { cron: cron, task: task };
       if (tz) args.tz = tz;
-      var res = await mcpCall('scheduled_task_create', args);
+      var res = await toolCall('scheduled_task_create', args);
       if (res && res.ok) {
         cronInput.value = '';
         taskInput.value = '';
@@ -824,7 +850,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
   async function toggleSchedule(id, enabled) {
     try {
-      await mcpCall('scheduled_task_toggle', { id: id, enabled: enabled });
+      await toolCall('scheduled_task_toggle', { id: id, enabled: enabled });
       loadSchedules();
     } catch (err) {
       alert('Toggle failed: ' + (err && err.message || err));
@@ -834,7 +860,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   async function deleteSchedule(id) {
     if (!confirm('Delete this schedule?')) return;
     try {
-      await mcpCall('scheduled_task_delete', { id: id });
+      await toolCall('scheduled_task_delete', { id: id });
       loadSchedules();
     } catch (err) {
       alert('Delete failed: ' + (err && err.message || err));
@@ -851,7 +877,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   async function pollStatus() {
     try {
       // v0.9 PR7.3: status now goes through MCP agent_status.
-      const data = await mcpCall('agent_status', {});
+      const data = await toolCall('agent_status', {});
       setConnected(true);
       updateStatus(data);
     } catch(e) {
@@ -922,9 +948,13 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     try {
       // v0.9 PR7.3: submit_task replaces POST /task.
-      const data = await mcpCall('submit_task', { task: task });
+      const data = await toolCall('submit_task', { task: task });
       responseCard.classList.add('visible');
-      if (data && data.accepted) {
+      // granular submit_task: {accepted}; compact task: a running / paused
+      // receipt, or the result when it finished within the 1 s wait.
+      const started = data && typeof data === 'object' &&
+        (data.accepted || data.status === 'running' || data.status === 'paused' || typeof data.success === 'boolean');
+      if (started) {
         responseText.textContent = 'Task accepted: ' + task + '\\nWaiting for completion...';
         addHistory(task, 'accepted');
         taskInput.value = '';
@@ -954,7 +984,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
       }
       try {
         // v0.9 PR7.3: agent_status replaces GET /status.
-        const data = await mcpCall('agent_status', {});
+        const data = await toolCall('agent_status', {});
         if (data && data.status === 'idle') {
           responseText.textContent = 'Task completed: ' + task;
           updateHistoryResult(task, 'Completed');
@@ -1042,7 +1072,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   async function loadFavorites() {
     try {
       // v0.9 PR7.3: favorites_list replaces GET /favorites.
-      var data = await mcpCall('favorites_list', {});
+      var data = await toolCall('favorites_list', {});
       if (Array.isArray(data)) {
         favorites = data;
         renderFavorites();
@@ -1107,7 +1137,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
 
     try {
       // v0.9 PR7.3: favorites_add / favorites_remove replace POST/DELETE /favorites.
-      var data = await mcpCall(
+      var data = await toolCall(
         isFav ? 'favorites_remove' : 'favorites_add',
         { task: item.task }
       );
@@ -1130,7 +1160,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     var text = chip.querySelector('.fav-text').textContent;
     try {
       // v0.9 PR7.3: favorites_remove replaces DELETE /favorites.
-      var data = await mcpCall('favorites_remove', { task: text });
+      var data = await toolCall('favorites_remove', { task: text });
       favorites = (data && data.favorites) || [];
       renderFavorites();
       renderHistory();
@@ -1143,7 +1173,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   async function pollLogs() {
     try {
       // v0.9 PR7.3: logs_recent replaces GET /logs.
-      const logs = await mcpCall('logs_recent', {});
+      const logs = await toolCall('logs_recent', {});
       if (!Array.isArray(logs) || logs.length === 0) return;
 
       if (logs.length !== lastLogCount) {
