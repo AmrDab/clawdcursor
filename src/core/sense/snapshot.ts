@@ -43,7 +43,8 @@ function looksSecure(controlType?: string, name?: string, subrole?: string): boo
  * Capture a structured snapshot. a11y-only for v0.8.1; OCR merge is a
  * future enhancement.
  */
-export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapshot> {
+/** `processId` reads that app's window instead of the focused one. */
+export async function captureSnapshot(adapter: PlatformAdapter, processId?: number): Promise<Snapshot> {
   const capturedAt = Date.now();
   const platform = normPlatform(adapter.platform);
   const sources: Array<'a11y' | 'ocr' | 'cdp'> = [];
@@ -53,7 +54,13 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
   let activeWindow: Snapshot['activeWindow'] | undefined = undefined;
 
   try {
-    const aw = await adapter.getActiveWindow();
+    let aw = await adapter.getActiveWindow();
+    if (processId && aw?.processId !== processId) {
+      const wins = await adapter.listWindows().catch(() => []);
+      aw = wins
+        .filter(w => w.processId === processId && !w.isMinimized && w.bounds.width > 0 && w.bounds.height > 0)
+        .sort((a, b) => b.bounds.width * b.bounds.height - a.bounds.width * a.bounds.height)[0] ?? null;
+    }
     if (aw) {
       activeWindow = {
         processId: aw.processId,
@@ -66,7 +73,7 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
 
   try {
     // A thin tree may be a sleeping Electron / Chromium app: wake it, read again.
-    const { tree } = await getUiTreeWithWake(adapter, activeWindow?.processId);
+    const { tree } = await getUiTreeWithWake(adapter, processId ?? activeWindow?.processId);
     if (tree && tree.length > 0) {
       sources.push('a11y');
       const toSnap = (el: typeof tree[number]): SnapshotElement => {
@@ -84,7 +91,7 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
           interactive: el.enabled !== false,
           value: secure ? undefined : el.value,
           secure,
-          processId: activeWindow?.processId,
+          processId: processId ?? activeWindow?.processId,
         };
       };
       elements = tree.filter(el => el.bounds.width > 0 && el.bounds.height > 0).map(toSnap);
