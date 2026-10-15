@@ -850,7 +850,7 @@
     },
     {
       "name": "get_element_state",
-      "description": "Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded).",
+      "description": "Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded, and checked for checkboxes/toggles).",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -1820,6 +1820,14 @@
           "processId": {
             "type": "number",
             "description": "Optional: limit to a specific process"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip this many elements — page past \"… +N more\" (default 0)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "How many elements to list (default 60)"
           }
         }
       },

@@ -84,7 +84,9 @@ export const APP_ALIASES: Record<string, AppAlias> = {
   'iterm2':             { processNames: ['iTerm2'],                           searchTerm: 'iTerm2',             macOSAppName: 'iTerm' },
 
   // Settings / system
-  'settings':           { processNames: ['SystemSettings'],                   searchTerm: 'Settings',           macOSAppName: 'System Settings' },
+  // uwpAppId: launch straight through shell:AppsFolder — without it
+  // Start-Process 'Settings' failed and the Start-Menu fallback cost ~10 s.
+  'settings':           { processNames: ['SystemSettings'],                   searchTerm: 'Settings',           macOSAppName: 'System Settings', uwpAppId: 'windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel' },
   'system settings':    { processNames: ['System Preferences', 'System Settings'], searchTerm: 'System Settings', macOSAppName: 'System Settings' },
   'task manager':       { processNames: ['Taskmgr'],                          searchTerm: 'Task Manager',       macOSAppName: 'Activity Monitor' },
   'activity monitor':   { processNames: ['Activity Monitor'],                 searchTerm: 'Activity Monitor',   macOSAppName: 'Activity Monitor' },

@@ -61,4 +61,9 @@ export interface Snapshot {
   capturedAt: number;
   /** Which sources successfully contributed; empty sources fell back silently. */
   sources: Array<'a11y' | 'ocr' | 'cdp'>;
+  /**
+   * Named a11y elements scrolled out of view (empty bounds), kept OUT of
+   * `elements` (nothing to click, no geometry) but readable by name/value.
+   */
+  offscreen?: SnapshotElement[];
 }

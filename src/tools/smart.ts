@@ -283,7 +283,7 @@ export function getSmartTools(): ToolDefinition[] {
         // OCR finds text coordinates, a11y tries invoke — whoever succeeds first wins.
 
         // Start OCR scan
-        type OcrHit = { x: number; y: number; text: string; warning?: string; bounds: { x: number; y: number; w: number; h: number }; confidence: number | null };
+        type OcrHit = { x: number; y: number; text: string; warning?: string; bounds: { x: number; y: number; w: number; h: number }; confidence: number | null; sentence?: string };
         const ocrPromise: Promise<OcrHit | null> = (async (): Promise<OcrHit | null> => {
           try {
             const engine = getOcr();
@@ -313,6 +313,7 @@ export function getSmartTools(): ToolDefinition[] {
 
               let bestMatch: typeof cands[number] | null = null;
               let bestScore = 0;
+              let bestSentence: string | undefined;
 
               const scorePhrase = (phrase: string, tokenCount: number) => {
                 if (!phrase) return 0;
@@ -396,11 +397,19 @@ export function getSmartTools(): ToolDefinition[] {
                     const inPhrase = (i > 0 && joined(sorted[i - 1], span[0]))
                       || (i + n < sorted.length && joined(span[n - 1], sorted[i + n]));
                     if (inPhrase) score *= 0.95;
-                    if (score > bestScore) recordCandidate(span, score);
+                    if (score > bestScore) {
+                      recordCandidate(span, score);
+                      // Inside a SENTENCE (2+ more words in the same visual
+                      // chunk): that is running text, not a control's label.
+                      let l = i, r = i + n - 1;
+                      while (l > 0 && joined(sorted[l - 1], sorted[l])) l--;
+                      while (r + 1 < sorted.length && joined(sorted[r], sorted[r + 1])) r++;
+                      bestSentence = r - l + 1 >= n + 2 ? sorted.slice(l, r + 1).map(t => t.text).join(' ') : undefined;
+                    }
                   }
                 }
               }
-              return bestMatch && bestScore >= 0.4 ? { match: bestMatch, score: bestScore } : null;
+              return bestMatch && bestScore >= 0.4 ? { match: bestMatch, score: bestScore, sentence: bestSentence } : null;
             };
 
             // Prefer matches inside the focused window's bounds — full-screen OCR can
@@ -408,7 +417,7 @@ export function getSmartTools(): ToolDefinition[] {
             // account" dialog showing the same email). Only widen to the full screen
             // when the foreground window has no match. See issue #71.
             const winBounds = activeWin?.bounds;
-            let pick: { match: typeof result.elements[number]; score: number } | null = null;
+            let pick: { match: typeof result.elements[number]; score: number; sentence?: string } | null = null;
             let warning: string | undefined;
 
             if (winBounds && winBounds.width > 0 && winBounds.height > 0) {
@@ -440,6 +449,7 @@ export function getSmartTools(): ToolDefinition[] {
               warning,
               bounds: { x: m.x, y: m.y, w: m.width, h: m.height },
               confidence: typeof (m as any).confidence === 'number' ? (m as any).confidence : null,
+              sentence: pick.sentence,
             };
           } catch { return null; }
         })();
@@ -553,6 +563,37 @@ export function getSmartTools(): ToolDefinition[] {
           }
           ctx.a11y.invalidateCache();
           const warningSuffix = m.warning ? `  [WARNING: ${m.warning} — verify with read_screen]` : '';
+          // The match was a word inside running text, not a control's label
+          // (live 2026-10-15: "Resume" in the pause pill's message, while OCR
+          // never read the button). Check the click did something before
+          // calling it a hit: re-read the screen text and the focused window.
+          if (m.sentence) {
+            await new Promise(r => setTimeout(r, 400));
+            let changed: boolean | null = null;
+            try {
+              const eng = getOcr();
+              eng.invalidateCache();
+              const after = await eng.recognizeScreen();
+              const awAfter = await ctx.a11y.getActiveWindow().catch(() => null);
+              // Not a whole-screen text diff: a clock tick or OCR jitter elsewhere
+              // reads as "changed" (live: the pause pill). Did the clicked text
+              // itself go away, or did the focused window change?
+              const flat = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+              changed = !flat(after.fullText ?? '').includes(flat(m.sentence))
+                || (awAfter?.title ?? '') !== (activeWin?.title ?? '');
+            } catch { /* unverifiable */ }
+            const where = `the word inside the text "${m.sentence}"`;
+            if (changed === false) {
+              return {
+                text: `smart_click "${target}" not confirmed: the only OCR match was ${where} — text, not a control. `
+                  + `Clicked it at ${cx},${cy} but nothing visible changed. Find the real control by name `
+                  + `(accessibility find / compile_ui), or take a screenshot to locate it.`,
+                isError: true,
+              };
+            }
+            return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}) — note: that is ${where}, `
+              + `${changed ? 'and the screen changed after the click' : 'and the effect could not be verified'}; check the result.${warningSuffix}` };
+          }
           return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}${(cx !== m.x || cy !== m.y) ? ` — DPI-corrected from physical ${m.x},${m.y}` : ''})${warningSuffix}` };
         }
 

@@ -27,5 +27,15 @@ export function renderUIMap(map: UIMap, opts: { max?: number } = {}): string {
   const body = shown.map(line).join('\n');
   const context = `${map.active_app} — "${map.window_title}" [${map.snapshot_id}] (${map.sources_used.join('+')})`;
   const trunc = ranked.length > max ? `\n… ${max} of ${ranked.length} shown` : '';
-  return `${body}${trunc}\n${context}`;
+  // Below the fold: names/values only, after everything on screen.
+  const off = map.offscreen ?? [];
+  const offShown = off.slice(0, max);
+  const offLines = offShown.map(e => {
+    const v = e.state?.value;
+    const val = v ? ` = "${v.length > 60 ? v.slice(0, 59) + '…' : v}"` : '';
+    return `[${e.role}] "${e.text ?? ''}"${val}`;
+  });
+  const offMore = off.length > offShown.length ? `\n… ${offShown.length} of ${off.length} offscreen shown` : '';
+  const offBody = offLines.length ? `\nOFFSCREEN (scroll to see; act by name):\n${offLines.join('\n')}${offMore}` : '';
+  return `${body}${trunc}${offBody}\n${context}`;
 }

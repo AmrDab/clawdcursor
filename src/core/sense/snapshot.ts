@@ -49,6 +49,7 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
   const sources: Array<'a11y' | 'ocr' | 'cdp'> = [];
 
   let elements: SnapshotElement[] = [];
+  let offscreen: SnapshotElement[] = [];
   let activeWindow: Snapshot['activeWindow'] | undefined = undefined;
 
   try {
@@ -68,26 +69,33 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
     const { tree } = await getUiTreeWithWake(adapter, activeWindow?.processId);
     if (tree && tree.length > 0) {
       sources.push('a11y');
-      elements = tree
-        .filter(el => el.bounds.width > 0 && el.bounds.height > 0)
-        .map(el => {
-          // Trust the adapter's explicit secure flag first (macOS AX subrole),
-          // then fall back to control-type/name/subrole heuristics.
-          const secure = el.secure === true || looksSecure(el.controlType, el.name, el.subrole);
-          return {
-            name: el.name ?? '',
-            role: el.controlType,
-            x: el.bounds.x,
-            y: el.bounds.y,
-            width: el.bounds.width,
-            height: el.bounds.height,
-            source: 'a11y' as const,
-            interactive: el.enabled !== false,
-            value: secure ? undefined : el.value,
-            secure,
-            processId: activeWindow?.processId,
-          };
-        });
+      const toSnap = (el: typeof tree[number]): SnapshotElement => {
+        // Trust the adapter's explicit secure flag first (macOS AX subrole),
+        // then fall back to control-type/name/subrole heuristics.
+        const secure = el.secure === true || looksSecure(el.controlType, el.name, el.subrole);
+        return {
+          name: el.name ?? '',
+          role: el.controlType,
+          x: el.bounds.x,
+          y: el.bounds.y,
+          width: el.bounds.width,
+          height: el.bounds.height,
+          source: 'a11y' as const,
+          interactive: el.enabled !== false,
+          value: secure ? undefined : el.value,
+          secure,
+          processId: activeWindow?.processId,
+        };
+      };
+      elements = tree.filter(el => el.bounds.width > 0 && el.bounds.height > 0).map(toSnap);
+      // Named elements scrolled out of view come back with empty bounds. Keep
+      // them aside (read-only) so compile_ui can still show their text —
+      // except copies of something already on screen (live 2026-10-15:
+      // Settings → About's "Windows 11 Pro" / "25H2" were dropped entirely).
+      const shown = new Set(elements.map(e => e.name));
+      offscreen = tree
+        .filter(el => !(el.bounds.width > 0 && el.bounds.height > 0) && (el.name ?? '').trim() !== '' && !shown.has(el.name))
+        .map(toSnap);
     }
   } catch { /* a11y unavailable — snapshot stays empty */ }
 
@@ -98,6 +106,7 @@ export async function captureSnapshot(adapter: PlatformAdapter): Promise<Snapsho
     activeWindow,
     elements,
     fingerprint: fp,
+    ...(offscreen.length ? { offscreen } : {}),
     capturedAt,
     sources,
   };

@@ -15,6 +15,7 @@
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { selectOption } from '../platform/select-option';
+import type { UiElement } from '../platform/types';
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -410,7 +411,36 @@ export function getA11yDepthTools(): ToolDefinition[] {
           parents.find(p => (p.name ?? '').trim().toLowerCase() === wantName)
           ?? [...parents].sort((a, b) => area(b) - area(a))[0];
         if (parent.bounds.width <= 0 || parent.bounds.height <= 0) {
-          return { text: `a11y_list_children: parent "${parentName}" has zero bounds.`, isError: true };
+          // Scrolled out of view: empty bounds, so geometry can't find the
+          // children — use the tree structure (depth) when the adapter gives it
+          // (live 2026-10-15: Settings → About "Windows specifications").
+          // The WINDOW's tree first: a hosted UWP page's elements report their
+          // content process (SystemSettings), whose own top-level read is empty.
+          const cap = typeof maxChildren === 'number' ? maxChildren : 50;
+          const named = parents.filter(p => (p.name ?? '').trim().toLowerCase() === wantName);
+          const pids = [...new Set([pid, parent.processId].filter((p): p is number => p !== undefined))];
+          for (const treePid of pids.length ? pids : [undefined]) {
+            const tree: UiElement[] = await ctx.platform.getUiTree(treePid);
+            for (const cand of named.length ? named : [parent]) {
+              const at = tree.findIndex(el => el.depth !== undefined && el.name === cand.name && el.controlType === cand.controlType);
+              if (at === -1) continue;
+              const d = tree[at].depth!;
+              const kids: UiElement[] = [];
+              for (let i = at + 1; i < tree.length && (tree[i].depth ?? -1) > d; i++) kids.push(tree[i]);
+              if (kids.length === 0) continue;
+              return {
+                text: JSON.stringify({
+                  parent: { name: cand.name, controlType: cand.controlType, bounds: cand.bounds },
+                  offscreen: true,
+                  note: 'parent is scrolled out of view (no bounds); children taken from the accessibility tree — scroll to see them',
+                  children: kids.slice(0, cap).map(c => ({ name: c.name, controlType: c.controlType, bounds: c.bounds, value: c.value })),
+                  totalCount: kids.length,
+                  truncated: kids.length > cap,
+                }),
+              };
+            }
+          }
+          return { text: `a11y_list_children: parent "${parentName}" has zero bounds (scrolled out of view) and no children in the accessibility tree.`, isError: true };
         }
 
         // For the tree walk, prefer the parent element's own processId so

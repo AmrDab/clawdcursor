@@ -57,6 +57,8 @@ export interface UIMap {
   compiled_at: string;
   sources_used: Source[];
   elements: UIElement[];
+  /** Named elements scrolled out of view: read-only (no bounds), never ranked or actionable by id. */
+  offscreen?: UIElement[];
   anchors: { focused?: ElementRef; primary_action_candidate?: ElementRef };
   truncation?: { total_elements: number; returned_elements: number };
 }

@@ -1485,6 +1485,9 @@ export class WindowsAdapter implements PlatformAdapter {
       expanded: raw?.expanded,
       automationId: raw?.automationId,
       processId: raw?.processId ?? raw?.pid,
+      ...(raw?.toggleState === 'On' ? { checked: true }
+        : raw?.toggleState === 'Off' ? { checked: false }
+        : raw?.toggleState === 'Indeterminate' ? { checked: 'mixed' as const } : {}),
     };
   };
 
@@ -1492,17 +1495,18 @@ export class WindowsAdapter implements PlatformAdapter {
    * Flatten the UIA tree into a single list, matching the macOS adapter's
    * contract. Drops purely structural unnamed nodes to keep the list useful.
    */
-  private flattenTree(node: any, acc: UiElement[]): void {
+  private flattenTree(node: any, acc: UiElement[], depth = 0): void {
     if (!node) return;
     // ConvertTo-UINode may return an array of children when it skipped an
-    // unnamed container — just recurse through those.
+    // unnamed container — just recurse through those (same depth: the
+    // container was flattened out).
     if (Array.isArray(node)) {
-      for (const n of node) this.flattenTree(n, acc);
+      for (const n of node) this.flattenTree(n, acc, depth);
       return;
     }
-    if (node.controlType || node.name) acc.push(this.normalizeElement(node));
+    if (node.controlType || node.name) acc.push({ ...this.normalizeElement(node), depth });
     if (Array.isArray(node.children)) {
-      for (const child of node.children) this.flattenTree(child, acc);
+      for (const child of node.children) this.flattenTree(child, acc, depth + 1);
     }
   }
 

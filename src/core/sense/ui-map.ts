@@ -120,6 +120,11 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
     compiled_at: String(deps.now),
     sources_used: sourcesUsed,
     elements,
+    // Scrolled out of view: text only — no bounds to click, so never ranked,
+    // anchored or addressable by element_id.
+    ...(snap.offscreen?.length
+      ? { offscreen: snap.offscreen.map((se, i) => ({ ...a11yToUI(se, `off_${i}`), clickable: false, editable: false, actionable: false })) }
+      : {}),
     anchors: computeAnchors(elements, deps.prevAnchors),
     truncation: { total_elements: elements.length, returned_elements: elements.length },
   };

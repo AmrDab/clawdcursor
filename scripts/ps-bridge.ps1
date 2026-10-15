@@ -539,6 +539,13 @@ function Cmd-ActivateAtPoint {
     if ($root -eq [IntPtr]::Zero) { $root = $hwnd }
     $fg = [Win32UIA]::GetForegroundWindow()
     if ($root -eq $fg) { return @{ success=$true; action="noop"; reason="already-foreground" } }
+    # WS_EX_NOACTIVATE (0x08000000): the window takes clicks WITHOUT becoming
+    # foreground (clawdcursor's own pause pill, on-screen keyboards). Raising it
+    # always "fails" by design, which read as a focus theft (live 2026-10-15:
+    # "FOCUS NOT CONFIRMED" after clicking the pill's Resume).
+    if (([ScreenPM]::GetWindowLong($root, -20) -band 0x08000000) -ne 0) {
+        return @{ success=$true; action="noop"; reason="no-activate-window" }
+    }
 
     # Resolve identity BEFORE deciding whether to raise, so a denylisted
     # self/host window can be skipped without ever touching foreground.
@@ -826,10 +833,17 @@ function Cmd-FindElement {
             $rect = $c.BoundingRectangle
             $bounds = if ([double]::IsInfinity($rect.X)) { @{x=0;y=0;width=0;height=0} }
                 else { @{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
-            $results += [ordered]@{
+            $r = [ordered]@{
                 name=$c.Name; automationId=$c.AutomationId; controlType=$c.ControlType.ProgrammaticName
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
             }
+            # Checkbox / toggle state, so `state` can say checked/unchecked.
+            try {
+                if ($el.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsTogglePatternAvailableProperty)) {
+                    $r.toggleState = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
+                }
+            } catch {}
+            $results += $r
         } catch {}
     }
     }
