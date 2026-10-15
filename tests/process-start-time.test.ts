@@ -35,9 +35,17 @@ function platformBinaryAvailable(): boolean {
 
 const HAS_BIN = platformBinaryAvailable();
 
-describe('getProcessStartTime', () => {
+// Under full-suite load (many vitest workers spawning processes at once) a
+// cold PowerShell + Win32_Process query can exceed the production 5 s budget,
+// at which point getProcessStartTime gives up and returns null. These tests
+// check the real lookup, not the budget, so give it plenty of room. The
+// vitest timeout must exceed it: execFileSync blocks the event loop, so the
+// per-test timer can't fire until the shell-out returns anyway.
+const LOOKUP_TIMEOUT_MS = 30_000;
+
+describe('getProcessStartTime', { timeout: LOOKUP_TIMEOUT_MS + 10_000 }, () => {
   it.skipIf(!HAS_BIN)('returns a finite positive number for the current process', () => {
-    const t = getProcessStartTime(process.pid);
+    const t = getProcessStartTime(process.pid, LOOKUP_TIMEOUT_MS);
     expect(t).not.toBeNull();
     expect(typeof t).toBe('number');
     expect(Number.isFinite(t as number)).toBe(true);
@@ -52,7 +60,7 @@ describe('getProcessStartTime', () => {
     // so coarse Linux jiffy precision (~10ms) plus busy-CI clock skew
     // doesn't make the test flake.
     const expected = Date.now() - process.uptime() * 1000;
-    const actual = getProcessStartTime(process.pid);
+    const actual = getProcessStartTime(process.pid, LOOKUP_TIMEOUT_MS);
     expect(actual).not.toBeNull();
     expect(Math.abs((actual as number) - expected)).toBeLessThanOrEqual(10_000);
   });
@@ -62,6 +70,6 @@ describe('getProcessStartTime', () => {
     // (Windows caps PIDs at ~2^32 but doesn't reuse aggressively; Linux
     // default kernel.pid_max is 32768; macOS uses 99999). The same value
     // is used as the canonical "dead PID" sentinel in pidfile.test.ts.
-    expect(getProcessStartTime(999999)).toBeNull();
+    expect(getProcessStartTime(999999, LOOKUP_TIMEOUT_MS)).toBeNull();
   });
 });
