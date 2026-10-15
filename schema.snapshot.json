@@ -549,6 +549,10 @@
               "ocr_ok",
               "vision_ok"
             ]
+          },
+          "processId": {
+            "type": "number",
+            "description": "Optional: compile this app's window (its tree, and OCR of its window only) instead of the focused one"
           }
         }
       },
@@ -2171,7 +2175,7 @@
           },
           "processId": {
             "type": "number",
-            "description": "Limit search to a specific process"
+            "description": "Limit search to a specific process. OCR matches outside the window of that process are refused, never clicked."
           },
           "timeout": {
             "type": "number",
@@ -2215,7 +2219,7 @@
     },
     {
       "name": "smart_type",
-      "description": "Type text into a UI element. If target is specified, finds and focuses the element first. Uses clipboard paste for reliability (no dropped characters).",
+      "description": "Type text into a UI element. With a target, finds and focuses the element, then REPLACES its whole content (select-all, then paste) — pass mode:\"append\" to keep the content and type at the cursor. Without a target, types at the cursor of the focused element. Uses clipboard paste for reliability (no dropped characters).",
       "category": "keyboard",
       "parameters": {
         "type": "object",
@@ -2235,6 +2239,14 @@
           "processId": {
             "type": "number",
             "description": "Limit search to a specific process"
+          },
+          "mode": {
+            "type": "string",
+            "description": "\"replace\" (default with a target): select all of the field, then type. \"append\": type at the cursor, keeping the content (default without a target).",
+            "enum": [
+              "replace",
+              "append"
+            ]
           }
         },
         "required": [
