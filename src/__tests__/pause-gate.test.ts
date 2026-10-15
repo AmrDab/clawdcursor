@@ -4,8 +4,9 @@
  *   - a pause swaps both overlays to the paused form (spawners get the pause),
  *     an answer line from the pill settles it, and the running form comes back
  *   - resume → resumed, end → ended
- *   - same key re-attaches to the pending pause; a keyed outcome the caller
- *     missed is handed over once; forget() drops it
+ *   - same key re-attaches to the pending pause; the outcome is handed over
+ *     once ONLY to a caller that was told "waiting"; forget() drops it
+ *   - a pill answers only the pause it was drawn for (even after it exited)
  *   - abort signal → ended; no answer within CLAWD_PAUSE_TIMEOUT_MIN → timeout
  *   - one pause at a time: a second request waits for the first
  *   - unavailable when the overlay can't show or CLAWD_NO_PAUSE=1
@@ -88,21 +89,39 @@ describe('pauseGate', () => {
     await expect(p).resolves.toBe('ended');
   });
 
-  it('a line from a replaced (stale) pill cannot answer', async () => {
-    const p = pauseGate.request({ message: 'one' });
-    const first = livePill()[0].child;
-    controlBanner.showPaused(pauseGate.current()!, a => { pauseGate.answer(a); }); // respawn
-    first.stdout.write('BANNER_RESUME\n');
+  it('a pill from an EARLIER pause cannot answer a newer one', async () => {
+    const p1 = pauseGate.request({ message: 'one' });
+    const oldPill = livePill()[0].child;
+    pauseGate.answer('resume');
+    await expect(p1).resolves.toBe('resumed');
+    const p2 = pauseGate.request({ message: 'two' });
+    oldPill.stdout.write('BANNER_RESUME\n');       // late line from the first pause's pill
     await flush();
-    expect(pauseGate.current()).not.toBeNull();
+    expect(pauseGate.current()?.message).toBe('two');
     say('BANNER_RESUME');
+    await expect(p2).resolves.toBe('resumed');
+  });
+
+  it('an answer still counts when the pill already exited (stdout drains after exit)', async () => {
+    const p = pauseGate.request({ message: 'Sign in' });
+    const pill = livePill()[0].child;
+    pill.emit('exit', 0);                              // exit observed first…
+    pill.stdout.write('BANNER_RESUME\n');             // …then the buffered line
     await expect(p).resolves.toBe('resumed');
+  });
+
+  it('control characters in the message are stripped (a NUL would break the spawn)', async () => {
+    const p = pauseGate.request({ message: 'Sign\u0000 in\u0007 now' });
+    expect(pauseGate.current()?.message).toBe('Sign in now');
+    pauseGate.answer('end');
+    await p;
   });
 
   it('same key re-attaches; an outcome the caller missed is handed over once; forget() drops it', async () => {
     const a = pauseGate.request({ message: 'Enter the 2FA code', key: 'k1' });
     const b = pauseGate.request({ message: 'Enter the 2FA code', key: 'k1' });
     expect(livePill().length).toBe(1);
+    pauseGate.markWaiting('k1');                       // the caller was told "waiting"
     pauseGate.answer('resume');
     await expect(a).resolves.toBe('resumed');
     await expect(b).resolves.toBe('resumed');
@@ -119,6 +138,31 @@ describe('pauseGate', () => {
     expect(pauseGate.current()?.message).toBe('y');             // forgotten → a real new pause
     pauseGate.answer('end');
     await expect(fresh).resolves.toBe('ended');
+  });
+
+  it('an outcome is never reused for a NEW pause unless its caller was told "waiting"', async () => {
+    const first = pauseGate.request({ message: 'Sign in, then click Resume', key: 'k2' });
+    pauseGate.answer('resume');
+    await first;                                      // delivered directly — no hand-over
+    const second = pauseGate.request({ message: 'Sign in, then click Resume', key: 'k2' });
+    expect(pauseGate.current()?.message).toBe('Sign in, then click Resume');   // asks again
+    pauseGate.answer('end');
+    await expect(second).resolves.toBe('ended');
+  });
+
+  it('a same-key call queued behind another pause re-attaches instead of prompting twice', async () => {
+    const other = pauseGate.request({ message: 'agent pause' });
+    const a = pauseGate.request({ message: 'Enter the code', key: 'k3' });
+    const b = pauseGate.request({ message: 'Enter the code', key: 'k3' });
+    await flush();
+    pauseGate.answer('resume');                       // ends the agent's pause
+    await other;
+    await flush();
+    expect(pauseGate.current()?.message).toBe('Enter the code');
+    pauseGate.answer('resume');
+    await expect(a).resolves.toBe('resumed');
+    await expect(b).resolves.toBe('resumed');
+    expect(pauseGate.current()).toBeNull();           // not shown a second time
   });
 
   it('an abort signal ends the pause', async () => {

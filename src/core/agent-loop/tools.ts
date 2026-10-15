@@ -299,14 +299,18 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // The Windows bridge stops waiting on an Invoke that opened a modal box
         // and answers {pending:true}; the screen has changed under the agent.
         const pending = (res.data as { pending?: unknown } | undefined)?.pending === true;
+        // An EARLIER still-running invoke that failed after the bridge stopped
+        // waiting reports its error on the next invoke reply.
+        const late = (res.data as { lateInvokeError?: unknown } | undefined)?.lateInvokeError;
+        const lateNote = typeof late === 'string' && late ? ` Note: an earlier action that was still running later failed: ${late}.` : '';
         return {
           success: res.success,
-          text: res.success
+          text: (res.success
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
                 : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
-            : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`,
+            : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
           targetLabel: name,
         };
       },

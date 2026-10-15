@@ -354,9 +354,12 @@ describe('Smart Tools', () => {
         const result = await smartClick.handler({ target: 'Resume' }, createCtx());
         expect(mockMouseClick).toHaveBeenCalledTimes(1);
         expect(recognize.mock.calls.length).toBeGreaterThanOrEqual(2); // re-read after the click
-        expect(result.isError).toBe(true);
+        // The click was performed: not an error (an error invites a second
+        // click that re-flips a toggle), but clearly NOT confirmed.
+        expect(result.isError).toBeFalsy();
+        expect(result.text).toMatch(/NOT confirmed/);
         expect(result.text).toMatch(/inside/i);
-        expect(result.text).toMatch(/not a control|no visible/i);
+        expect(result.text).toMatch(/Do NOT click it again/);
         expect(result.text).not.toMatch(/^Clicked "Resume"/);
       } finally {
         (OcrEngine.prototype as any).recognizeScreen = origRecognize;

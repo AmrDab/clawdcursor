@@ -480,11 +480,11 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           const reason = String(call.args.message ?? call.args.reason ?? '').trim() || 'The agent needs your help to continue.';
           const outcome = await input.pause({ message: reason });
           if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
-          if (outcome === 'resumed') {
-            log.info('agent.pause.resumed', { turn, tool: call.name });
+          if (outcome === 'resumed' || outcome === 'resumed_unverified') {
+            log.info('agent.pause.resumed', { turn, tool: call.name, verified: outcome === 'resumed' });
             holder.invalidate(); // the user changed the screen — mint a fresh map
             const lead = call.name === 'give_up' ? 'Not given up: you were paused for the user. ' : '';
-            toolResults.push({ id: call.id, text: lead + resumedNote(reason), isError: false });
+            toolResults.push({ id: call.id, text: lead + resumedNote(reason, outcome === 'resumed'), isError: false });
             steps.push({
               turn, toolName: call.name, toolArgs: call.args,
               result: { success: true, text: 'paused for the user → resumed' },
@@ -607,9 +607,9 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
             if (isAborted() || outcome === 'ended') {
               return finish('aborted', `ended by the user while paused: ${stuck}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
             }
-            if (outcome === 'resumed') {
+            if (outcome === 'resumed' || outcome === 'resumed_unverified') {
               holder.invalidate();
-              toolResults.push({ id: call.id, text: `NOT EXECUTED (repeat guard). ${resumedNote(stuck)} Do not repeat this exact call.`, isError: true });
+              toolResults.push({ id: call.id, text: `NOT EXECUTED (repeat guard). ${resumedNote(stuck, outcome === 'resumed')} Do not repeat this exact call.`, isError: true });
               continue;
             }
           }
@@ -1067,9 +1067,12 @@ async function storeUIMap(
   return { render: renderUIMap(map), anchors: map.anchors, id };
 }
 
-/** Fed back to the model after the user answered a pause with Resume. */
-function resumedNote(what: string): string {
-  return `USER RESUMED: the user handled "${truncate(what, 160)}" and clicked Resume. ` +
+/** Fed back to the model after a pause was answered with Resume. */
+function resumedNote(what: string, byUser = true): string {
+  const who = byUser
+    ? `USER RESUMED: the user handled "${truncate(what, 160)}" and clicked Resume. `
+    : `RESUMED BY AN AI, NOT CONFIRMED BY THE USER ON SCREEN: "${truncate(what, 160)}" may not be done. Check the screen; if it still needs the user, pause again. `;
+  return who +
     'The screen may have changed (new page, dialog closed, focus moved): read the fresh COMPILED UI below before acting, ' +
     'then continue the ORIGINAL task from where it now stands. Do not restart it.';
 }

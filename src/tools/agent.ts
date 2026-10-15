@@ -154,6 +154,7 @@ export function getAgentTools(): ToolDefinition[] {
         ]);
         clearTimeout(timer);
         if (outcome === null) {
+          pauseGate.markWaiting(key); // only a caller told "waiting" gets the outcome handed over
           return {
             text: JSON.stringify({
               status: 'waiting',
@@ -163,8 +164,16 @@ export function getAgentTools(): ToolDefinition[] {
           };
         }
         pauseGate.forget(key);
-        if (outcome === 'resumed') {
-          return { text: JSON.stringify({ status: 'resumed', next: 'The user finished and clicked Resume. The screen may have changed: read it again before acting, then continue the task.' }) };
+        if (outcome === 'resumed' || outcome === 'resumed_unverified') {
+          return {
+            text: JSON.stringify({
+              status: 'resumed',
+              confirmedByUser: outcome === 'resumed',
+              next: outcome === 'resumed'
+                ? 'The user finished and clicked Resume. The screen may have changed: read it again before acting, then continue the task.'
+                : 'Resumed by an AI (task resume), not by the user on screen: check the screen before assuming the step was done.',
+            }),
+          };
         }
         return {
           text: JSON.stringify({
@@ -186,7 +195,7 @@ export function getAgentTools(): ToolDefinition[] {
       handler: async () => {
         const p = pauseGate.current();
         if (!p) return { text: 'resume_task: nothing is paused.', isError: true };
-        const r = pauseGate.answer('resume');
+        const r = pauseGate.answer('resume', 'agent'); // an AI resuming is never the user's on-screen confirmation
         if (!r.ok) return { text: `resume_task: ${r.error}`, isError: true };
         return { text: JSON.stringify({ resumed: true, was: p.message }) };
       },

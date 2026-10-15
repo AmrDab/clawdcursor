@@ -39,7 +39,7 @@ export interface AgentInput {
    * overlay / CLAWD_NO_PAUSE): the loop then keeps its old fail-fast
    * behaviour. Wired by Agent.
    */
-  pause?: (req: { message: string }) => Promise<'resumed' | 'ended' | 'timeout' | null>;
+  pause?: (req: { message: string }) => Promise<'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | null>;
 }
 
 export interface AgentStep {

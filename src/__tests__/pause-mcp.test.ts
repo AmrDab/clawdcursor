@@ -122,7 +122,8 @@ describe('resume_task', () => {
 
     const turn = pauseGate.request({ message: 'Sign in' });
     expect(JSON.parse((await resumeTask.handler({}, noCtx)).text)).toEqual({ resumed: true, was: 'Sign in' });
-    await expect(turn).resolves.toBe('resumed');
+    // an AI resuming is never the user's on-screen confirmation
+    await expect(turn).resolves.toBe('resumed_unverified');
   });
 });
 

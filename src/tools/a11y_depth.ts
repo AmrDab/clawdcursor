@@ -139,12 +139,12 @@ export function getA11yDepthTools(): ToolDefinition[] {
           return { text: `Set "${safeNameStr}" = "${preview}".` };
         }
 
-        // ValuePattern not available on this element (common for Win11 XAML
-        // controls such as the Save As filename ComboBox+Pane composite).
-        // Fall back: focus the element, select-all existing text, type the
-        // new value. We first try a UIA focus(), then fall back to clicking
-        // the element's bounding-rect centre if focus() didn't work.
-        if (ctx.platform.platform === 'win32') {
+        // No value pattern on this element (Win11 XAML composites such as the
+        // Save As filename box; Chrome text fields on Linux, which expose
+        // neither EditableText nor Value). Fall back on every OS: focus the
+        // element, select-all, type the new value — but ONLY once the field
+        // was really focused or located, never into whatever has focus.
+        {
           // Try UIA focus first (brings keyboard to element without a click)
           const focusRes = await ctx.platform.invokeElement({
             name: safeNameStr,
@@ -171,9 +171,13 @@ export function getA11yDepthTools(): ToolDefinition[] {
               bounds = widest.bounds;
             }
           }
-          if (bounds && bounds.width > 0) {
-            const cx = Math.round(bounds.x + bounds.width / 2);
-            const cy = Math.round(bounds.y + bounds.height / 2);
+          const located = !!bounds && bounds.width > 0;
+          if (!focusRes.success && !located) {
+            return { text: `set_field_value failed for "${safeNameStr}": ${typeof res.data?.error === 'string' ? res.data.error : 'no settable value'}, and the field could not be focused to type into it.`, isError: true };
+          }
+          if (located) {
+            const cx = Math.round(bounds!.x + bounds!.width / 2);
+            const cy = Math.round(bounds!.y + bounds!.height / 2);
             await ctx.platform.mouseClick(cx, cy);
           }
 
@@ -186,8 +190,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
           const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
           return { text: `Set "${safeNameStr}" = "${preview}" (via keyboard fallback).` };
         }
-
-        return { text: `set_field_value failed for "${safeNameStr}".`, isError: true };
       },
     },
 

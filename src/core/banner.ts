@@ -60,7 +60,9 @@ const linuxScript = () => path.join(getPackageRoot(), 'scripts', 'linux', 'overl
 const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...process.env,
   ...extra,
-  ...(mode.paused ? { CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: mode.paused.message } : {}),
+  // The message is model-written: say so on screen, so injected text can't pose
+  // as clawdcursor's own instructions.
+  ...(mode.paused ? { CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: `The agent says: ${mode.paused.message}` } : {}),
 });
 
 let linuxReady: boolean | null = null;
@@ -231,8 +233,13 @@ class ControlBanner {
   private spawnPill(): void {
     if (this.child) return;
     let child: ChildProcess;
+    let forPause: number | undefined;
     try {
       child = this.spawner({ paused: this.paused ?? undefined });
+      // Which pause this pill answers. Its answer counts while that pause is the
+      // current one, even if the process already exited (stdout can drain after
+      // 'exit'); a pill from an earlier pause can never answer a newer one.
+      forPause = this.paused?.id;
     } catch {
       return; // cosmetic feature — never let it break control
     }
@@ -243,7 +250,7 @@ class ControlBanner {
         const msg = line.trim();
         try {
           if (msg === 'BANNER_STOP') this.onStopRequested?.();
-          else if (ANSWER_LINES[msg] && this.child === child) this.onAnswer?.(ANSWER_LINES[msg]);
+          else if (ANSWER_LINES[msg] && forPause !== undefined && this.paused?.id === forPause) this.onAnswer?.(ANSWER_LINES[msg]);
         } catch { /* never throw into the rl loop */ }
       });
     }

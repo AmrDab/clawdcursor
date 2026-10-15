@@ -64,4 +64,13 @@ describe('compound schema merge', () => {
     expect(accepts(p, 'file name')).toBe(true);
     expect(p.description).toMatch(/general/);
   });
+
+  it('the free-text note is added at most once per param, on every compound', () => {
+    for (const [name, tool] of compounds) {
+      for (const [param, def] of Object.entries(tool.parameters)) {
+        const notes = (def.description ?? '').split('(Where the action restricts it').length - 1;
+        expect(notes, `${name}.${param}`).toBeLessThanOrEqual(1);
+      }
+    }
+  });
 });

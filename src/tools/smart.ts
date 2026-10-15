@@ -284,11 +284,16 @@ export function getSmartTools(): ToolDefinition[] {
 
         // Start OCR scan
         type OcrHit = { x: number; y: number; text: string; warning?: string; bounds: { x: number; y: number; w: number; h: number }; confidence: number | null; sentence?: string };
+        // Why OCR gave no target, for the failure report: "no match" alone hid
+        // whether OCR failed, read nothing, or read text that didn't match.
+        let ocrDiag: string | null = null;
         const ocrPromise: Promise<OcrHit | null> = (async (): Promise<OcrHit | null> => {
           try {
             const engine = getOcr();
-            if (!engine.isAvailable()) return null;
+            if (!engine.isAvailable()) { ocrDiag = 'ocr: engine unavailable'; return null; }
             const result = await engine.recognizeScreen();
+            const wordsRead = result.elements?.length ?? 0;
+            ocrDiag = wordsRead === 0 ? 'ocr: read no text on screen' : `ocr: read ${wordsRead} words, none matched`;
 
             // Pick best OCR candidate from a (possibly filtered) subset.
             // Builds n-grams from adjacent same-line tokens so a multi-word
@@ -455,12 +460,15 @@ export function getSmartTools(): ToolDefinition[] {
               confidence: typeof (m as any).confidence === 'number' ? (m as any).confidence : null,
               sentence: pick.sentence,
             };
-          } catch { return null; }
+          } catch (err) {
+            ocrDiag = `ocr: failed (${err instanceof Error ? err.message.slice(0, 80) : String(err)})`;
+            return null;
+          }
         })();
 
         // Start a11y invoke in parallel
         type A11yHit =
-          | { method: 'invoke'; pending?: boolean }
+          | { method: 'invoke'; pending?: boolean; lateInvokeError?: string }
           | { method: 'bounds'; clickPoint: { x: number; y: number }; bounds?: { x: number; y: number; w: number; h: number }; text?: string };
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
@@ -470,7 +478,10 @@ export function getSmartTools(): ToolDefinition[] {
               processId: processId || activeWin?.processId,
               action: 'click',
             });
-            if (result.success) return { method: 'invoke', pending: (result as any).data?.pending === true };
+            if (result.success) {
+              const data = (result as any).data;
+              return { method: 'invoke', pending: data?.pending === true, lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined };
+            }
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
             return null;
           } catch {
@@ -534,7 +545,9 @@ export function getSmartTools(): ToolDefinition[] {
           ctx.a11y.invalidateCache();
           const stillRunning = (a11yResult as { pending?: boolean }).pending
             ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : '';
-          return { text: `Clicked "${target}" via UI Automation (invoke_element)${stillRunning}` };
+          const late = (a11yResult as { lateInvokeError?: string }).lateInvokeError;
+          const lateNote = late ? ` Note: an earlier action that was still running later failed: ${late}.` : '';
+          return { text: `Clicked "${target}" via UI Automation (invoke_element)${stillRunning}${lateNote}` };
         }
 
         // OCR found the element — coordinate click. OCR returns PHYSICAL
@@ -588,11 +601,13 @@ export function getSmartTools(): ToolDefinition[] {
             } catch { /* unverifiable */ }
             const where = `the word inside the text "${m.sentence}"`;
             if (changed === false) {
+              // The click WAS performed. Not an error: an error invites a second
+              // click, which re-flips a toggle or double-submits (a checkbox whose
+              // label is running text stays on screen after a real hit).
               return {
-                text: `smart_click "${target}" not confirmed: the only OCR match was ${where} — text, not a control. `
-                  + `Clicked it at ${cx},${cy} but nothing visible changed. Find the real control by name `
-                  + `(accessibility find / compile_ui), or take a screenshot to locate it.`,
-                isError: true,
+                text: `smart_click "${target}": clicked at ${cx},${cy}, but NOT confirmed — the only OCR match was ${where}, `
+                  + `and nothing visible changed. It may be text rather than a control. Do NOT click it again blindly: `
+                  + `check the state (accessibility state / read_screen), or find the real control by name (find / compile_ui).`,
               };
             }
             return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}) — note: that is ${where}, `
@@ -631,7 +646,7 @@ export function getSmartTools(): ToolDefinition[] {
         } else {
           attempted.push('UIA(invoke): element not found or not invocable');
         }
-        attempted.push(ocrMatch === null ? 'ocr: no text match found' : 'ocr: unavailable');
+        attempted.push(ocrDiag ?? (ocrMatch === null ? 'ocr: no text match found' : 'ocr: unavailable'));
 
         // ── Step 2: CDP click (browser content) ──
         // Deadline-gated so the outer wall-clock can't fire mid-evaluate.

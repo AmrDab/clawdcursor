@@ -13,8 +13,13 @@
  * One pause at a time per process. A second request while one is pending
  * waits its turn — except a request with the SAME `key`, which re-attaches to
  * the pending pause (MCP callers re-issue the same call to keep waiting).
- * A keyed pause that settled while its caller was away is handed over once
- * (callers that got the outcome directly call forget(key)).
+ * A keyed pause that settled while its caller was away — the caller had been
+ * told "waiting" (markWaiting) — is handed over once to its next call; nothing
+ * else is ever handed over, so a NEW pause with the same text asks again.
+ *
+ * Who answered matters: the pill, CLI, dashboard and POST /resume are the
+ * human ('resumed'); an AI calling task {action:"resume"} is 'resumed_unverified',
+ * so the agent is told the user did NOT confirm it on screen.
  *
  * Only offered when a human can see it: the overlay must be able to show, and
  * CLAWD_NO_PAUSE=1 restores the old fail-fast behaviour (CI / unattended runs).
@@ -23,7 +28,7 @@
 import { controlBanner } from './banner';
 
 export type PauseAnswer = 'resume' | 'end';
-export type PauseOutcome = 'resumed' | 'ended' | 'timeout';
+export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout';
 
 export interface PauseRequest {
   /** What the user should do. Shown on screen. */
@@ -57,6 +62,8 @@ class PauseGate {
   private pending: Pending | null = null;
   private nextId = 1;
   private recent = new Map<string, { outcome: PauseOutcome; at: number }>();
+  /** Keys whose caller was answered "waiting" — only their outcome is handed over. */
+  private waiting = new Set<string>();
 
   /** True when a pause would reach a human (overlay can show, not opted out). */
   available(): boolean {
@@ -68,23 +75,28 @@ class PauseGate {
   }
 
   async request(req: PauseRequest, opts: { signal?: AbortSignal } = {}): Promise<PauseOutcome> {
-    if (opts.signal?.aborted) return 'ended';
-    if (req.key) {
-      if (this.pending?.key === req.key) return this.pending.promise;
-      const done = this.recent.get(req.key);
-      if (done && Date.now() - done.at < RECENT_TTL_MS) {
-        this.recent.delete(req.key);
-        return done.outcome;
-      }
-    }
-    while (this.pending) {
-      await this.pending.promise;
+    for (;;) {
       if (opts.signal?.aborted) return 'ended';
+      // Re-checked after every wait: a same-key call that queued behind another
+      // pause must re-attach, not show the same prompt a second time.
+      if (req.key) {
+        if (this.pending?.key === req.key) return this.pending.promise;
+        const done = this.recent.get(req.key);
+        if (done && Date.now() - done.at < RECENT_TTL_MS) {
+          this.recent.delete(req.key);
+          return done.outcome;
+        }
+      }
+      if (!this.pending) break;
+      await this.pending.promise;
     }
 
     const info: PauseInfo = {
       id: this.nextId++,
-      message: req.message.replace(/\s+/g, ' ').trim().slice(0, MAX_MESSAGE) || 'Your turn.',
+      // Control characters (NUL in particular) would make the overlay spawn fail
+      // silently, leaving a pause nobody can see.
+      // eslint-disable-next-line no-control-regex -- stripping control characters is the point
+      message: req.message.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_MESSAGE) || 'Your turn.',
       since: Date.now(),
     };
     let settle!: (o: PauseOutcome) => void;
@@ -105,13 +117,21 @@ class PauseGate {
     return promise;
   }
 
-  /** Answer the pending pause: Resume continues the run, End task ends it. */
-  answer(a: PauseAnswer): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
+  /**
+   * Answer the pending pause: Resume continues the run, End task ends it.
+   * `by: 'agent'` (an AI calling task {action:"resume"}) resumes as unverified.
+   */
+  answer(a: PauseAnswer, by: 'user' | 'agent' = 'user'): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
     const p = this.pending;
     if (!p) return { ok: false, error: 'nothing is paused' };
-    const outcome: PauseOutcome = a === 'end' ? 'ended' : 'resumed';
+    const outcome: PauseOutcome = a === 'end' ? 'ended' : by === 'agent' ? 'resumed_unverified' : 'resumed';
     this.finish(p, outcome);
     return { ok: true, outcome };
+  }
+
+  /** A keyed caller was answered "waiting": hand its outcome over on its next call. */
+  markWaiting(key: string): void {
+    this.waiting.add(key);
   }
 
   /**
@@ -120,12 +140,13 @@ class PauseGate {
    */
   forget(key: string): void {
     this.recent.delete(key);
+    this.waiting.delete(key);
   }
 
   private finish(p: Pending, outcome: PauseOutcome): void {
     if (this.pending !== p) return;
     this.pending = null;
-    if (p.key) this.recent.set(p.key, { outcome, at: Date.now() });
+    if (p.key && this.waiting.delete(p.key)) this.recent.set(p.key, { outcome, at: Date.now() });
     controlBanner.showRunning();
     p.settle(outcome);
   }
@@ -134,6 +155,7 @@ class PauseGate {
   __resetForTests(): void {
     if (this.pending) this.finish(this.pending, 'ended');
     this.recent.clear();
+    this.waiting.clear();
   }
 }
 

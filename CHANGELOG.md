@@ -43,6 +43,11 @@ All notable changes to Clawd Cursor will be documented in this file.
     dashboard, whose pause banner now has working Resume / End task buttons.
   - `CLAWD_NO_PAUSE=1` restores the old fail-fast behaviour (CI, unattended
     runs). Nothing reads the screen while paused.
+  - Only the person at the machine confirms a pause. An AI calling
+    `task {action:"resume"}` resumes it as unverified, and the agent is told
+    the user did not confirm it on screen. The pill shows the message as
+    "The agent says: …", so injected page text can't pass for clawdcursor's
+    own instructions.
 - **`clawdcursor versions`, and the same list in `clawdcursor doctor`:** every
   copy of clawdcursor on the machine with its version: the global install,
   Claude Desktop extensions (including the Microsoft Store build's folder), the
@@ -117,6 +122,18 @@ VM and an Ubuntu 24.04 VM:
   a word inside a sentence and nothing changes after the click, `smart_click`
   reports "not confirmed — that is text, not a control".
 - **`state` reports checked / unchecked** for checkboxes and toggles.
+- **`set_value` types into fields that have no settable value, on every OS**
+  (Chrome text fields on Linux, Win11 XAML composites), and only after the
+  field was focused or located. It never types into whatever has focus.
+- **`find_field` with a multi-word purpose** ("file name") prefers the whole
+  phrase ("File name:") over a field matching one word of it (the file list's
+  "Name" column). Trailing colons on labels no longer cost the exact match.
+- **`smart_click` says why OCR didn't help** (engine unavailable, failed, read
+  nothing, or read N words with no match), and a click on running text that
+  changed nothing is reported as performed but unconfirmed, not as an error,
+  so an agent doesn't click a toggle twice.
+- **Windows: an earlier still-running click that failed later** is reported
+  on the next invoke instead of being lost.
 - **`open_app Settings`: 10–17 s → ~5 s** (launched directly instead of after a
   failing launcher and a Start-menu search).
 - **No false "FOCUS NOT CONFIRMED" warning** for clicks on clawdcursor's own

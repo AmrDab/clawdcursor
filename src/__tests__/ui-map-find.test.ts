@@ -108,3 +108,23 @@ describe('associateLabel', () => {
     expect(associateLabel(fld, [fld, far])).toBe('');
   });
 });
+
+describe('multi-word purpose (live Save-As regression, Windows VM 2026-10-15)', () => {
+  const field = (id: string, label: string): UIElement => ({
+    id, role: 'textbox', text: label, normalized_text: label, bounds: [0, 0, 200, 20], confidence: 0.85,
+    sources: ['a11y'], clickable: true, editable: true, actionable: true,
+  });
+
+  it('"file name" picks the "File name:" box over the file list\'s "Name" column boxes', () => {
+    const els = [field('el_43', 'name'), field('el_48', 'name'), field('el_53', 'name'), field('el_58', 'file name:')];
+    const r = findInputField(els, 'obs_9', 'file name');
+    expect(r.status).toBe('ok');
+    if (r.status === 'ok') expect(r.best.element_id).toBe('el_58');
+  });
+
+  it('a single-word purpose still scores an exact label as before', () => {
+    const r = findInputField([field('el_1', 'name'), field('el_2', 'file name:')], 'obs_9', 'name');
+    expect(r.status === 'ok' || r.status === 'ambiguous').toBe(true);
+    expect(r.candidates[0].element_id).toBe('el_1');
+  });
+});

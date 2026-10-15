@@ -98,6 +98,18 @@ describe('waitForLaunchedWindow', () => {
     expect((await p)?.handle).toBe('h-xcalc');
   });
 
+  it('does NOT adopt a pid-less window when two appeared, or when nothing was spawned', async () => {
+    const two: WindowInfo[] = [w({ processId: 0, title: 'Calculator', handle: 'h-a' }), w({ processId: 0, title: 'Notification', handle: 'h-b' })];
+    const p1 = waitForLaunchedWindow([], async () => two, buildAppPredicate('xcalc'), { intervalMs: 100, timeoutMs: 300, spawnPid: 77 });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await p1).toBeNull();
+
+    const one: WindowInfo[] = [w({ processId: 0, title: 'Some popup', handle: 'h-pop' })];
+    const p2 = waitForLaunchedWindow([], async () => one, buildAppPredicate('xcalc'), { intervalMs: 100, timeoutMs: 300 });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(await p2).toBeNull();
+  });
+
   it('a predicate match still beats an unowned new window', async () => {
     const after: WindowInfo[] = [
       w({ processId: 0, title: 'Some popup', handle: 'h-pop' }),
