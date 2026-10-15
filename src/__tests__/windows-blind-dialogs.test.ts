@@ -19,7 +19,8 @@
  * source-level guards (verified live on the VM).
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -97,8 +98,91 @@ describe('ps-bridge — owned / modal dialogs (bugs 2, 3)', () => {
   });
 
   it('lists visible OWNED top-level windows (dialogs) alongside the desktop children', () => {
-    expect(ctx).toMatch(/\[ScreenPM\]::GetWindow\(\$h, 4\)/); // GW_OWNER
-    expect(ctx).toContain('[ScreenPM]::IsWindowVisible($h)');
-    expect(ctx).toMatch(/FromHandle\(\$h\)/);
+    const owned = fnBody('Get-OwnedWindowElements');
+    expect(ctx).toContain('Get-OwnedWindowElements');
+    expect(owned).toMatch(/\[ScreenPM\]::GetWindow\(\$h, 4\)/); // GW_OWNER
+    expect(owned).toContain('[ScreenPM]::IsWindowVisible($h)');
+    expect(owned).toMatch(/FromHandle\(\$h\)/);
+  });
+});
+
+// ── Follow-ups (2026-10-15) ──────────────────────────────────────────────────
+
+/** The C# source of the bridge's compiled UIA helpers (the here-string that defines UiaInvoker). */
+function invokerSource(): string {
+  const at = bridge.indexOf('class UiaInvoker');
+  if (at === -1) return '';
+  const start = bridge.indexOf('\n', bridge.lastIndexOf('@"', at)) + 1;
+  return bridge.slice(start, bridge.indexOf('\n"@', at)).replace(/\r$/, '');
+}
+
+describe('ps-bridge — a Win32 Invoke that opens a modal box does not block the bridge', () => {
+  // Live 2026-10-14: invoking the Save as dialog's Save button (or smart_click
+  // "Save") took ~10 s because InvokePattern.Invoke on a Win32 button only
+  // returns when the modal "Confirm Save As" box it opened is dismissed.
+  it('click runs InvokePattern through the bounded UiaInvoker and reports a pending invoke', () => {
+    const body = fnBody('Cmd-InvokeElement');
+    expect(invokerSource()).toContain('class UiaInvoker');
+    expect(body).toMatch(/\[UiaInvoker\]::Invoke\(\$p, \d+\)/);
+    expect(body).toContain('pending=$true');
+  });
+
+  it.runIf(process.platform === 'win32')('UiaInvoker returns "pending" for a long call, "ok" / "error:" otherwise, and keeps a late error', () => {
+    const src = invokerSource();
+    expect(src).not.toBe('');
+    const script = [
+      `Add-Type -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase @'\n${src}\n'@`,
+      `Add-Type @'\npublic static class T { public static void Slow() { System.Threading.Thread.Sleep(1500); }`,
+      ` public static void SlowThrow() { System.Threading.Thread.Sleep(600); throw new System.InvalidOperationException("late boom"); }`,
+      ` public static void Fast() { } public static void Boom() { throw new System.InvalidOperationException("boom"); } }\n'@`,
+      `function D($n) { [System.Delegate]::CreateDelegate([System.Action], [T].GetMethod($n)) }`,
+      `$sw = [Diagnostics.Stopwatch]::StartNew(); $a = [UiaInvoker]::Run((D 'Slow'), 300); $ms = $sw.ElapsedMilliseconds`,
+      `$b = [UiaInvoker]::Run((D 'Fast'), 300); $c = [UiaInvoker]::Run((D 'Boom'), 300)`,
+      `$d = [UiaInvoker]::Run((D 'SlowThrow'), 100); Start-Sleep -Milliseconds 1000; $e = [UiaInvoker]::TakeLateError(); $f = [UiaInvoker]::TakeLateError()`,
+      `@{ a=$a; ms=$ms; b=$b; c=$c; d=$d; e=$e; f=$f } | ConvertTo-Json -Compress`,
+    ].join('\n');
+    const dir = mkdtempSync(join(tmpdir(), 'clawd-invoker-'));
+    const file = join(dir, 'invoker.ps1');
+    writeFileSync(file, '﻿' + script, 'utf8');
+    let out: string;
+    try {
+      out = execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file],
+        { encoding: 'utf8', timeout: 60_000 });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    const r = JSON.parse(out.trim().split(/\r?\n/).pop()!);
+    expect(r.a).toBe('pending');
+    expect(r.ms).toBeLessThan(1000);  // returned at the wait, not when the call ended
+    expect(r.b).toBe('ok');           // the still-running call does not block the next one
+    expect(r.c).toBe('error:boom');
+    expect(r.d).toBe('pending');
+    expect(r.e).toBe('late boom');    // a failure after the wait is kept…
+    expect(r.f).toBeNull();           // …and reported once
+  }, 90_000);
+});
+
+describe('ps-bridge — value reads/writes prefer the editable control over its label', () => {
+  // Live 2026-10-14: get_value "File name" returned the label "File name:"
+  // (a Text) — the label, its ComboBox and the inner Edit all carry that name.
+  const body = fnBody('Cmd-InvokeElement');
+
+  it('a value action takes an editable name match before a label', () => {
+    expect(body).toMatch(/\$valueAction = .*'set-value'.*'get-value'|\$valueAction = .*'get-value'.*'set-value'/);
+    expect(body).toContain('$EDITABLE -contains');
+  });
+
+  it('get-value on a label reads the control it labels (LabeledBy only)', () => {
+    expect(body).toMatch(/Resolve-EditableTarget \$element -LabeledOnly/);
+    expect(fnBody('Resolve-EditableTarget')).toContain('$LabeledOnly');
+  });
+});
+
+describe('ps-bridge — focus-window reaches owned dialogs', () => {
+  const body = fnBody('Cmd-FocusWindow');
+  it('matches over the desktop children plus visible owned windows', () => {
+    expect(body).toContain('Get-OwnedWindowElements');
+    expect(fnBody('Cmd-GetScreenContext')).toContain('Get-OwnedWindowElements');
+  });
+  it('tells the caller the focused window is owned', () => {
+    expect(body).toMatch(/owned\s+= /);
   });
 });

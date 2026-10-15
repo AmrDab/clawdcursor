@@ -82,6 +82,37 @@ try {
             ClientSettings.RegisterClientSideProviderAssembly(n);
         }
     }
+    // InvokePattern.Invoke on a Win32 button returns only when the modal box
+    // it opened is dismissed (live 2026-10-14: Save -> "Confirm Save As" held
+    // the bridge ~10 s). Run it on a worker and stop waiting after waitMs: the
+    // bridge answers "pending" and serves the next command while the call
+    // finishes on its own. The worker never writes to stdout; a failure after
+    // the wait is kept for TakeLateError.
+    public static class UiaInvoker {
+        static readonly object Gate = new object();
+        static string _late;
+        class Call { public bool Done, Abandoned; public string Error; }
+        // "ok", "error:<message>" or "pending".
+        public static string Run(System.Action action, int waitMs) {
+            var call = new Call();
+            var t = new System.Threading.Thread(() => {
+                string err = null;
+                try { action(); } catch (System.Exception e) { err = (e.InnerException ?? e).Message; }
+                lock (Gate) { call.Done = true; call.Error = err; if (call.Abandoned && err != null) _late = err; }
+            });
+            t.IsBackground = true;
+            t.SetApartmentState(System.Threading.ApartmentState.MTA);
+            t.Start();
+            t.Join(waitMs);
+            lock (Gate) {
+                if (call.Done) return call.Error == null ? "ok" : "error:" + call.Error;
+                call.Abandoned = true;
+                return "pending";
+            }
+        }
+        public static string Invoke(InvokePattern p, int waitMs) { return Run(p.Invoke, waitMs); }
+        public static string TakeLateError() { lock (Gate) { var e = _late; _late = null; return e; } }
+    }
 "@
     [UiaProxies]::Register()
 } catch { }
@@ -243,6 +274,25 @@ function ConvertTo-UINode {
     return $node
 }
 
+# Owned top-level windows (Save as, message boxes, error dialogs) are UIA
+# children of their OWNER window, not of the desktop root, so a desktop
+# Children scan never sees them (live 2026-10-14: Notepad's Save as dialog was
+# missing from `window list` and `window focus`). Walk the Win32 z-order for
+# visible, uncloaked OWNED windows; $skip holds handles already listed.
+function Get-OwnedWindowElements {
+    param($skip)
+    $found = @()
+    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
+        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
+        if ([ScreenPM]::GetWindow($h, 4) -eq [IntPtr]::Zero) { continue }  # GW_OWNER: unowned = desktop child
+        if ($skip -and $skip.ContainsKey([int64]$h)) { continue }
+        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
+        if ($cloaked -ne 0) { continue }
+        try { $found += [System.Windows.Automation.AutomationElement]::FromHandle($h) } catch {}
+    }
+    return ,$found
+}
+
 # ── Command: get-screen-context ───────────────────────────────────────────────
 function Cmd-GetScreenContext {
     param($cmd)
@@ -284,21 +334,9 @@ function Cmd-GetScreenContext {
         $w = & $winInfo $win
         if ($null -ne $w) { $windowList += $w }
     }
-    # Owned top-level windows (Save as, message boxes, error dialogs) are UIA
-    # children of their OWNER window, not of the desktop root, so the Children
-    # scan above never listed them (live 2026-10-14: Notepad's Save as dialog was
-    # missing from `window list`). Walk the Win32 z-order for visible OWNED
-    # windows and add them by handle.
-    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
-        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
-        if ([ScreenPM]::GetWindow($h, 4) -eq [IntPtr]::Zero) { continue }  # GW_OWNER: unowned = already scanned
-        if ($listed.ContainsKey([int64]$h)) { continue }
-        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
-        if ($cloaked -ne 0) { continue }
-        try {
-            $w = & $winInfo ([System.Windows.Automation.AutomationElement]::FromHandle($h))
-            if ($null -ne $w) { $windowList += $w }
-        } catch {}
+    foreach ($win in (Get-OwnedWindowElements $listed)) {
+        $w = & $winInfo $win
+        if ($null -ne $w) { $windowList += $w }
     }
 
     $uiTree = $null
@@ -599,7 +637,12 @@ function Cmd-FocusWindow {
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Window
     )
-    $allWins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond)
+    $allWins = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond))
+    # Owned dialogs too, AFTER the desktop children so a pid-only match still
+    # picks the main window.
+    $listed = @{}
+    foreach ($w in $allWins) { try { $listed[[int64]$w.Current.NativeWindowHandle] = $true } catch {} }
+    $allWins += Get-OwnedWindowElements $listed
 
     $target = $null
     # When BOTH pid and title are supplied, AND-match. Disambiguates tabbed
@@ -719,6 +762,9 @@ function Cmd-FocusWindow {
         title      = $c.Name
         processId  = $c.ProcessId
         handle     = $c.NativeWindowHandle
+        # An owned window (dialog / message box): callers must not "assert focus"
+        # with a click at its centre — that lands on one of its controls.
+        owned      = ([ScreenPM]::GetWindow($hwnd, 4) -ne [IntPtr]::Zero)
         # Rect.Empty (infinite X) for a window UIA deems not displayed: no bounds.
         bounds     = $(if ($c.BoundingRectangle.IsEmpty) { $null } else { @{ x = [int]$c.BoundingRectangle.X; y = [int]$c.BoundingRectangle.Y; width = [int]$c.BoundingRectangle.Width; height = [int]$c.BoundingRectangle.Height } })
     }
@@ -796,7 +842,9 @@ function Cmd-FindElement {
 # an Edit. Walk to the real editable target so set-value writes somewhere writable.
 # App-agnostic: relies only on UIA control types and the LabeledBy relationship.
 function Resolve-EditableTarget {
-    param($el)
+    # -LabeledOnly: resolve a label only to the control it LABELS (LabeledBy);
+    # no "first editable nearby" guess, $null when there is none.
+    param($el, [switch]$LabeledOnly)
     if ($null -eq $el) { return $null }
     $EDIT  = [System.Windows.Automation.ControlType]::Edit
     $DOC   = [System.Windows.Automation.ControlType]::Document
@@ -829,12 +877,13 @@ function Resolve-EditableTarget {
                     }
                 } catch {}
             }
-            if ($fallback) {
+            if ($fallback -and -not $LabeledOnly) {
                 if ($fallback.Current.ControlType -eq $COMBO) { try { $i = $fallback.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCond); if ($i) { return $i } } catch {} }
                 return $fallback
             }
         }
     } catch {}
+    if ($LabeledOnly) { return $null }
     return $el
 }
 
@@ -886,14 +935,26 @@ function Cmd-InvokeElement {
         # "File name" took the first element named just "Name" (a list column
         # header in the Save as dialog) and set_value typed into the file list
         # (live 2026-10-14).
+        # A value read/write takes an EDITABLE match over the label that shares
+        # its name: the Save as dialog's "File name:" is a Text label, a ComboBox
+        # and an Edit, and get-value read the label's caption (live 2026-10-14).
+        $valueAction = ($action -eq 'get-value' -or $action -eq 'set-value')
+        $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox)
         foreach ($pass in 1, 2, 3) {
+            $firstHit = $null
             for ($k = 0; $k -lt $names.Count; $k++) {
                 $elName = $names[$k]
                 if ($elName.Length -eq 0) { continue }
                 if (($pass -eq 1 -and $elName -eq $nameLower) -or
                     ($pass -eq 2 -and $elName.Contains($nameLower)) -or
-                    ($pass -eq 3 -and $nameLower.Contains($elName))) { $element = $candidates[$k]; break }
+                    ($pass -eq 3 -and $nameLower.Contains($elName))) {
+                    if (-not $valueAction) { $element = $candidates[$k]; break }
+                    if ($null -eq $firstHit) { $firstHit = $candidates[$k] }
+                    $ct = $null; try { $ct = $candidates[$k].Current.ControlType } catch {}
+                    if ($EDITABLE -contains $ct) { $element = $candidates[$k]; break }
+                }
             }
+            if ($null -eq $element) { $element = $firstHit }
             if ($null -ne $element) { break }
         }
     }
@@ -911,9 +972,17 @@ function Cmd-InvokeElement {
             # the agent never has to retry verbs or fall back to a coord-click
             # (which needs a screenshot). Live regression 2026-06-07: invoke
             # "Cool blue" (a ListItem) failed here because only SelectionItem fit.
+            $invokeErr = $null
             try {
                 $p = $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                $p.Invoke()
+                # Bounded: a button that opens a modal box would hold the bridge
+                # until the box closes (see UiaInvoker).
+                $r = if ('UiaInvoker' -as [type]) { [UiaInvoker]::Invoke($p, 1200) } else { $p.Invoke(); 'ok' }
+                if ($r -eq 'pending') {
+                    return @{ success=$true; action="click"; method="InvokePattern";
+                        data=@{ pending=$true; note="invoked; still running after 1.2 s - a dialog probably opened, re-read the screen" } }
+                }
+                if ($r -ne 'ok') { $invokeErr = $r.Substring(6); throw $invokeErr }
                 return @{ success=$true; action="click"; method="InvokePattern" }
             } catch {
                 try {
@@ -927,7 +996,8 @@ function Cmd-InvokeElement {
                         return @{ success=$true; action="click"; method="SelectionItemPattern" }
                     } catch {
                         $rect = $element.Current.BoundingRectangle
-                        return @{ success=$false; action="click"; error="No invoke/toggle/select pattern";
+                        $why = if ($invokeErr) { "Invoke failed: $invokeErr" } else { "No invoke/toggle/select pattern" }
+                        return @{ success=$false; action="click"; error=$why;
                             clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)};
                             bounds=@{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
                     }
@@ -994,6 +1064,11 @@ function Cmd-InvokeElement {
             # Try ValuePattern, and if it yields nothing, fall through to
             # TextPattern, then Name. Prefer the first NON-EMPTY result.
             $val = $null; $method = $null
+            # Matched only a label ("File name:" Text): read the control it labels.
+            if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text) {
+                $labeled = Resolve-EditableTarget $element -LabeledOnly
+                if ($labeled) { $element = $labeled }
+            }
             try {
                 $vp = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
                 $v = $vp.Current.Value
@@ -1208,6 +1283,12 @@ while ($true) {
             "ocr"                   { Cmd-Ocr $cmd }
             "ping"                  { @{ pong=$true } }
             default                 { @{ error="Unknown command: $($cmd.cmd)" } }
+        }
+        # An earlier invoke that outlived its wait and then failed: report it
+        # on the next invoke reply rather than dropping it.
+        if ($cmd.cmd -eq "invoke-element" -and $result -is [hashtable] -and ('UiaInvoker' -as [type])) {
+            $late = [UiaInvoker]::TakeLateError()
+            if ($late) { $result.lateInvokeError = $late }
         }
         # -InputObject (NOT pipe): piping an EMPTY array sends zero objects to
         # ConvertTo-Json, which then writes nothing → the bridge never answers

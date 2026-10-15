@@ -178,3 +178,27 @@ describe('focus_window — Bug 4: off-screen recovery', () => {
     }
   });
 });
+
+describe('focus_window — owned dialogs', () => {
+  // Live Win11 2026-10-14: `window focus` could not reach Notepad's Save as
+  // dialog. Once the bridge finds owned dialogs, the tool must not "assert
+  // focus" by clicking the window centre: on a dialog that click presses one
+  // of its controls (the Save as file list's column header sits there).
+  it('does not click inside an owned dialog the bridge focused', async () => {
+    mockGetWindows.mockResolvedValue([
+      { processId: 100, processName: 'notepad', title: 'notes.txt - Notepad', bounds: { x: 26, y: 26, width: 768, height: 519 }, isMinimized: false },
+      { processId: 100, processName: 'notepad', title: 'Save as', bounds: { x: 32, y: 26, width: 625, height: 480 }, isMinimized: false },
+    ]);
+    mockFocusWindow.mockResolvedValue({ success: true, title: 'Save as', processId: 100, owned: true });
+    mockGetActiveWindow.mockResolvedValue({
+      title: 'Save as', processName: 'notepad', processId: 100,
+      bounds: { x: 32, y: 26, width: 625, height: 480 },
+    });
+    const ctx = createCtx();
+    const res = await focusWindow.handler({ processId: 100, title: 'Save as' }, ctx);
+    expect(mockFocusWindow).toHaveBeenCalledWith('Save as', 100);
+    expect(mockMouseClick).not.toHaveBeenCalled();
+    expect(res.isError).toBeFalsy();
+    expect(res.text).toContain('Save as');
+  });
+});

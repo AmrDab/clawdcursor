@@ -398,7 +398,7 @@ export class AccessibilityBridge {
   async focusWindow(
     title?: string,
     processId?: number,
-  ): Promise<{ success: boolean; title?: string; processId?: number; error?: string }> {
+  ): Promise<{ success: boolean; title?: string; processId?: number; error?: string; owned?: boolean }> {
     try {
       let result: any;
       if (IS_WIN) {

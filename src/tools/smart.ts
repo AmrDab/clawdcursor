@@ -446,7 +446,7 @@ export function getSmartTools(): ToolDefinition[] {
 
         // Start a11y invoke in parallel
         type A11yHit =
-          | { method: 'invoke' }
+          | { method: 'invoke'; pending?: boolean }
           | { method: 'bounds'; clickPoint: { x: number; y: number }; bounds?: { x: number; y: number; w: number; h: number }; text?: string };
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
@@ -456,7 +456,7 @@ export function getSmartTools(): ToolDefinition[] {
               processId: processId || activeWin?.processId,
               action: 'click',
             });
-            if (result.success) return { method: 'invoke' };
+            if (result.success) return { method: 'invoke', pending: (result as any).data?.pending === true };
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
             return null;
           } catch {
@@ -518,7 +518,9 @@ export function getSmartTools(): ToolDefinition[] {
         // a11y invoke succeeded — best outcome (OS-level click, most reliable)
         if (a11yResult && (a11yResult as any).method === 'invoke') {
           ctx.a11y.invalidateCache();
-          return { text: `Clicked "${target}" via UI Automation (invoke_element)` };
+          const stillRunning = (a11yResult as { pending?: boolean }).pending
+            ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : '';
+          return { text: `Clicked "${target}" via UI Automation (invoke_element)${stillRunning}` };
         }
 
         // OCR found the element — coordinate click. OCR returns PHYSICAL

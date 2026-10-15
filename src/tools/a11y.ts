@@ -386,6 +386,13 @@ export function getA11yTools(): ToolDefinition[] {
         ctx.a11y.invalidateCache();
         if (!result.success) return { text: `Failed to focus: ${result.error}`, isError: true };
 
+        // An owned window (Save as, a message box) is foreground once the bridge
+        // says so; the centre clicks below would press one of its controls.
+        if (result.owned) {
+          const active = await ctx.a11y.getActiveWindow();
+          return { text: `Focused: "${active?.title}" [${active?.processName}] pid:${active?.processId}` };
+        }
+
         // Bug 4 fix: re-read bounds after focus (restore may have updated them)
         if (targetPid) {
           const freshWindows = await ctx.a11y.getWindows(true);

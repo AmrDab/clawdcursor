@@ -314,6 +314,15 @@ describe('Smart Tools', () => {
       }
     });
 
+    it('says when the a11y invoke is still running (a modal box opened)', async () => {
+      // Windows bridge: Save -> "Confirm Save As" keeps InvokePattern.Invoke
+      // running; the bridge answers {pending:true} instead of blocking ~10 s.
+      mockInvokeElement.mockResolvedValue({ success: true, data: { pending: true } });
+      const result = await smartClick.handler({ target: 'Save' }, createCtx());
+      expect(result.text).toMatch(/via UI Automation/);
+      expect(result.text).toMatch(/still running.*re-read/i);
+    });
+
     // ── Issue #101: structured failure payloads ──
 
     it('successful click still returns plain human-readable text (not JSON)', async () => {
