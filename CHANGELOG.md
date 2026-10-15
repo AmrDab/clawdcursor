@@ -126,6 +126,23 @@ VM and an Ubuntu 24.04 VM:
   (calculator → gnome-calculator).
 - **`batch` accepts `args` and `arguments`** for each step, on both the MCP
   and the agent-loop batch.
+- **`accessibility find_field` works on the compact surface** (every OS). Its
+  free-text `purpose` had inherited `compile_ui`'s `purpose` enum, so every
+  call failed validation. A test now checks every compound action's params.
+- **Linux: window positions under openbox / framed WMs** come from the real
+  client geometry (wmctrl counted the frame twice), so element refs in dialogs
+  are no longer rejected as "off the active window".
+- **Linux: two windows with the same title** (e.g. xcalc and GNOME Calculator,
+  "Calculator") can't be confused: a window without a pid is never scoped to
+  another window's app.
+- **Linux: the agent's own Chrome is accessible** (`--force-renderer-
+  accessibility` on its launch; the user's browser is untouched) and shows as
+  `chrome`, not its rewritten command line.
+- **`open_app` recognises a new window without a pid** as the launched app
+  (xcalc: 8 s and "no window" → 0.3 s, opened).
+- **OCR click targets: rows no longer merge** (tesseract's sparse mode put every
+  word on "line 1", so a click could land between two rows) and a 2-letter
+  fragment no longer matches a longer target.
 
 - **macOS Retina: clicks landed 2× off again (#154), in `agent` and `mcp` modes
   alike.** The NSScreen probe behind `getScreenSize()` used `size of frame`,
