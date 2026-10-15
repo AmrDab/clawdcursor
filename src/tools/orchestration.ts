@@ -194,7 +194,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
 
     {
       name: 'open_app',
-      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, gtk-launch / xdg-open on Linux).',
+      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Errors when no window appears.',
       parameters: {
         name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")', required: true },
       },
@@ -238,10 +238,12 @@ export function getOrchestrationTools(): ToolDefinition[] {
                 ?? (process.platform === 'darwin' ? alias?.macOSAppName : undefined),
             });
             ctx.a11y.invalidateCache();
+            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window="${res.title}")` };
+            // No window is not a launch: say so instead of "Launched".
             return {
-              text: res?.title
-                ? `Opened "${rawName}" (pid=${res.pid}, window="${res.title}")`
-                : `Launched "${rawName}" (no window surfaced yet)`,
+              text: `Could not confirm "${rawName}" opened — no window appeared` +
+                `${res?.pid ? ` (process pid=${res.pid} is still running)` : ''}. Check list_windows before acting on it.`,
+              isError: true,
             };
           } catch (err: any) {
             return { text: `Failed to launch "${rawName}": ${err?.message ?? err}`, isError: true };

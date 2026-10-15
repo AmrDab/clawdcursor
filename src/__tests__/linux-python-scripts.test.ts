@@ -124,4 +124,50 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.missing.success).toBe(false);
     expect(String(out.missing.error)).toMatch(/not found/i);
   });
+
+  // ── Blind-mode batch (Ubuntu 24.04 live blind test) ──
+  it('B1 invoke picks the visible Save in the active dialog, not a hidden 0x0 duplicate', () => {
+    expect(out.save).toMatchObject({ success: true, bounds: { x: 500, y: 600, width: 80, height: 30 } });
+    expect(out.save_done).toEqual({ dialog: ['click'], toolbar: [], menu: [] });
+  });
+
+  it('B1 invoke on an element that is only hidden fails and does nothing', () => {
+    expect(out.hidden_only.success).toBe(false);
+    expect(out.hidden_only.notVisible).toBe(true);
+    expect(String(out.hidden_only.error)).toMatch(/not visible/i);
+    expect(out.hidden_only.bounds).toBeUndefined();
+    expect(out.hidden_only_done).toEqual([]);
+  });
+
+  it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {
+    expect(out.text_view.value).toBe('hello world');
+    expect(out.get_value).toMatchObject({ success: true, value: '42' });
+    // A label's text equals its name — not repeated as a value.
+    expect(out.label_value).toBeNull();
+  });
+
+  it('B4 focused is scoped to the app and its active window', () => {
+    expect(out.focused_editor).toMatchObject({ name: 'Name', value: 'notes.txt', processId: 7777 });
+    // calc has no focused widget; mousepad's stale FOCUSED must not leak in.
+    expect(out.focused_calc).toBeNull();
+  });
+
+  it('B5 a window with no pid is scoped by its title, never by guessing another app', () => {
+    expect(out.by_title).toEqual([4242]);
+    expect(out.by_unknown_title).toEqual([]);
+  });
+
+  it('B7 tree: on-screen first (active dialog leading), hidden after, nameless rows dropped', () => {
+    const names = out.tree.map((t: [string, string]) => `${t[1]}:${t[0]}`);
+    expect(names).toEqual([
+      'file chooser:Save As', 'text:Name', 'push button:Save', 'frame:notes.txt - Editor', 'text:',
+      // hidden: the 0x0 application node, the closed menu, the hidden toolbar
+      'application:editor', 'menu item:Save      ', 'menu item:Print', 'push button:Save',
+    ]);
+  });
+
+  it('B7 GTK4 SCREEN extents of 0,0 fall back to WINDOW extents', () => {
+    expect(out.gtk4.bounds).toEqual({ x: 16, y: 349, width: 64, height: 44 });
+    expect(out.gtk4.coordType).toBe('window');
+  });
 });
