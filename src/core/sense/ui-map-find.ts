@@ -100,6 +100,7 @@ export function runFinder(
   table: Record<string, string[]>,
   isCandidate: (e: UIElement) => boolean,
   labelOf: (e: UIElement, all: UIElement[]) => string,
+  mergeNested = false,
 ): FindResult {
   const terms = expandTerms(intent, table);
   const intentTokens = normText(intent).split(' ').filter(Boolean);
@@ -112,6 +113,22 @@ export function runFinder(
     scored.push({ element_id: e.id, label, role: e.role, score: raw * e.confidence, confidence: e.confidence });
   }
   scored.sort((a, b) => b.score - a.score);
+  // One field, two elements: a combo box and the edit nested inside it carry
+  // the same label ("File name:") and would tie as "ambiguous". Keep the first
+  // (best-scored) of any same-label pair where one's bounds contain the other's.
+  const byId = new Map(elements.map(e => [e.id, e]));
+  const contains = (a: UIElement, b: UIElement) => {
+    const [ax, ay, aw, ah] = a.bounds; const [bx, by, bw, bh] = b.bounds;
+    return bx >= ax && by >= ay && bx + bw <= ax + aw && by + bh <= ay + ah;
+  };
+  for (let i = scored.length - 1; mergeNested && i > 0; i--) {
+    const e = byId.get(scored[i].element_id)!;
+    const dup = scored.slice(0, i).some(c => {
+      const o = byId.get(c.element_id)!;
+      return normText(c.label) === normText(scored[i].label) && (contains(o, e) || contains(e, o));
+    });
+    if (dup) scored.splice(i, 1);
+  }
   const candidates = scored.slice(0, MAX_CANDIDATES);
   const best = scored[0];
   if (!best || best.score < MATCH_THRESHOLD) {
@@ -185,5 +202,6 @@ export function findInputField(elements: UIElement[], snapshotId: string, purpos
     (e, all) => {
       const own = e.normalized_text ?? '';
       return own !== '' ? own : associateLabel(e, all);
-    });
+    },
+    true); // a field's box and the edit nested in it are one field
 }

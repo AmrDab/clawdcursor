@@ -128,3 +128,20 @@ describe('multi-word purpose (live Save-As regression, Windows VM 2026-10-15)', 
     expect(r.candidates[0].element_id).toBe('el_1');
   });
 });
+
+describe('one field, two elements (live Save-As check, Windows VM 2026-10-15)', () => {
+  it('a combo box and the edit nested in it, same label, are one candidate — not "ambiguous"', () => {
+    const el = (id: string, label: string, bounds: [number, number, number, number]): UIElement => ({
+      id, role: 'textbox', text: label, normalized_text: label, bounds, confidence: 0.85,
+      sources: ['a11y'], clickable: true, editable: true, actionable: true,
+    });
+    const els = [
+      el('el_43', 'name', [10, 100, 120, 20]),
+      el('el_58', 'file name:', [100, 400, 500, 24]),   // the combo box
+      el('el_59', 'file name:', [102, 402, 470, 20]),   // the edit inside it
+    ];
+    const r = findInputField(els, 'obs_2', 'file name');
+    expect(r.status).toBe('ok');
+    if (r.status === 'ok') expect(['el_58', 'el_59']).toContain(r.best.element_id);
+  });
+});

@@ -349,9 +349,12 @@ export function buildUnifiedTools(): UnifiedTool[] {
           }
           const [bx, by, bw, bh] = plan.bounds;
           await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
+          // Replace, don't append: a set_value that types after the old text
+          // left "old textnew" in the Save-As box (live Windows check).
+          await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(fillValue);
           await sleep(150);
-          return { success: true, text: `Filled ${plan.element.id} via bounds + type (${fillValue.length} chars).`, targetLabel: plan.element.id };
+          return { success: true, text: `Filled ${plan.element.id} via bounds + select-all + type (${fillValue.length} chars).`, targetLabel: plan.element.id };
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -359,11 +362,19 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const processId = typeof args.processId === 'number' ? args.processId : undefined;
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'set-value', value });
         await sleep(150);
-        return {
-          success: res.success,
-          text: res.success ? `Set "${name}" = ${value.length} chars` : `Set "${name}" failed.`,
-          targetLabel: name,
-        };
+        if (res.success) return { success: true, text: `Set "${name}" = ${value.length} chars`, targetLabel: name };
+        // No settable value (a Chrome field on Linux exposes neither EditableText
+        // nor Value; Win11 XAML composites): type into the INPUT — never its
+        // same-named label, never into whatever happens to have focus.
+        const target = await editableTarget(ctx, name, controlType, processId);
+        if (!target) {
+          return { success: false, text: `Set "${name}" failed: no settable value and no editable field named "${name}" to type into.`, targetLabel: name };
+        }
+        await ctx.platform.mouseClick(target.x, target.y);
+        await ctx.platform.keyPress('mod+a');
+        await ctx.platform.typeText(value);
+        await sleep(150);
+        return { success: true, text: `Set "${name}" = ${value.length} chars (keyboard fallback: no settable value).`, targetLabel: name };
       },
     },
 
@@ -2127,6 +2138,27 @@ function focusBreadcrumb(
   const a = after?.title ?? '?';
   if (b === a) return '';
   return ` · focus "${truncateTitle(b)}"→"${truncateTitle(a)}"`;
+}
+
+/** Roles that take typed text, across UIA / AX / AT-SPI names. */
+const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
+
+/**
+ * The on-screen centre of the editable element called `name` — the input, not
+ * a label that shares its name ("City" label + "City" field). Null when none is
+ * found: the caller must then NOT type anything.
+ */
+async function editableTarget(
+  ctx: AgentToolContext, name: string, controlType: string | undefined, processId: number | undefined,
+): Promise<{ x: number; y: number } | null> {
+  const found = await ctx.platform.findElements({ name, controlType, processId }).catch(() => []);
+  const onScreen = found.filter(el => el.bounds && el.bounds.width > 0 && el.bounds.height > 0);
+  // Types are normalized per platform: a label is "Text" everywhere (UIA Text,
+  // AT-SPI label) and an editable text view is "Edit" (AT-SPI "text"/"entry").
+  const editable = onScreen.filter(el => EDITABLE_ROLE.test(String(el.controlType ?? '')) && !/^text$/i.test(String(el.controlType ?? '')));
+  const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
+  if (!pick?.bounds) return null;
+  return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
 }
 
 function truncateTitle(s: string): string {

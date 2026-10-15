@@ -1574,13 +1574,14 @@ function normalizeAtspiRole(rawRole: string): string {
  */
 function atspiRoleQuery(controlType: string): string {
   const want = controlType.replace(/^ControlType\./, '').toLowerCase();
-  // Shortest raw role that maps here ("button" for Button) keeps the
-  // substring match broad; fall back to the caller's own text.
+  // EVERY raw role that maps here, as "a|b|c" alternatives: Edit is "text"
+  // (GTK text view) AND "entry" (Chrome / GTK fields) AND "password text".
+  // Only the shortest used to be sent, so Edit never matched a Chrome field.
   const raws = Object.entries(ATSPI_ROLE_MAP)
     .filter(([, v]) => v.toLowerCase() === want)
     .map(([k]) => k)
     .sort((a, b) => a.length - b.length);
-  return raws[0] ?? want;
+  return raws.length ? raws.join('|') : want;
 }
 
 // Named-key table — lowercase lookup, maps to nut-js Key enum.

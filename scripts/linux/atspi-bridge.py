@@ -438,17 +438,15 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
         return {"elements": tree}
 
     name_l = name.lower() if name else None
-    role_l = role.lower() if role else None
+    roles = role_alternatives(role)
 
     def matches(el: dict) -> bool:
         if name_l is not None:
             el_name = (el.get("name") or "").lower()
             if name_l not in el_name:
                 return False
-        if role_l is not None:
-            el_role = (el.get("controlType") or "").lower()
-            if role_l not in el_role:
-                return False
+        if roles is not None and not role_matches(roles, (el.get("controlType") or "").lower()):
+            return False
         return True
 
     hits = [e for e in tree if matches(e)]
@@ -475,6 +473,20 @@ ACTION_NAMES = {
 }
 
 
+def role_alternatives(role: Optional[str]) -> Optional[list]:
+    """--role "text|entry|password text" → ['text', 'entry', 'password text'].
+    One clawdcursor type maps to several AT-SPI roles (Edit: a GTK text view is
+    "text", a Chrome/GTK field is "entry"); a single substring missed some."""
+    if not role:
+        return None
+    alts = [a.strip() for a in role.lower().split('|') if a.strip()]
+    return alts or None
+
+
+def role_matches(alts: list, role_name: str) -> bool:
+    return any(a in role_name for a in alts)
+
+
 def find_target(app: Any, name: Optional[str], role: Optional[str]):
     """(accessible, showing) for the best match under `app`: name exact
     (case-insensitive, padding ignored) before substring, role substring;
@@ -483,7 +495,7 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
     dialog's button) used to win just by coming first in the tree.
     (None, False) when nothing matches."""
     name_l = name.lower().strip() if name else None
-    role_l = role.lower() if role else None
+    roles = role_alternatives(role)
     exact: list = []
     partial: list = []
 
@@ -493,14 +505,14 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
             return False
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
         r = (safe(lambda: acc.get_role_name(), '') or '').lower()
-        if (role_l is None or role_l in r) and name_l is not None:
+        if (roles is None or role_matches(roles, r)) and name_l is not None:
             if n == name_l:
                 exact.append(acc)
                 if is_showing(acc):
                     return True
             elif name_l in n:
                 partial.append(acc)
-        elif role_l is not None and name_l is None and role_l in r:
+        elif roles is not None and name_l is None and role_matches(roles, r):
             partial.append(acc)
         count = safe(lambda: acc.get_child_count(), 0) or 0
         for i in range(count):
