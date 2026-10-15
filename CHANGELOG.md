@@ -310,6 +310,22 @@ M1 iMac, no screenshots):
   list with the old script's (nothing missing, same geometry) and reads a live tree;
   `mac-ax-live.test.ts` drives a throwaway AppKit app (identifier-only buttons, a
   secure field, two windows, a frozen process) with `CLAWD_LIVE_MAC_TESTS=1`.
+- Hardening from an independent review of the helper, each reproduced on the Mac
+  first: every accessibility call is bounded by one timeout (the per-app setting
+  never reached a window's or a control's own calls); a button whose action opens a
+  modal panel is reported as *pending*, not as a failed click, so callers stop
+  clicking it again; a value that starts with `--` is a value (`set-value "--- notes"`
+  wrote an empty string and said success); `find` / `invoke` match the label the
+  tree shows (text that is a child of the control) and refuse to act on a partial
+  match like "Save As…" for "Save" when part of the window did not answer; a subtree
+  that did not answer is reported as PARTIAL instead of vanishing, an unreadable
+  window is an error, and a hung app is a timeout, not "no elements found". One
+  transient failure of the helper no longer pushes the whole session onto the slow
+  osascript path (retried after a minute); a launcher's panel (Raycast, Alfred) is
+  typed into, not mistaken for a system dialog. On the osascript path, secure-field
+  values are no longer returned by `find` / `invoke get-value` / the focused element,
+  the focused window (not the main one) is preferred like the helper does, and a
+  locked screen is reported instead of System Events' empty answers.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

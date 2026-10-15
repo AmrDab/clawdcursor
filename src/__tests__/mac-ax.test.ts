@@ -173,12 +173,33 @@ describe('listWindows — a broken helper must not cost the user the feature', (
     expect(wins).toHaveLength(1);
   });
 
-  it('after the helper broke once it is not retried on every call', async () => {
-    const enoent = Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
-    const { ax, calls } = harness({ reply: (file) => (file === '/fake/ax-helper' ? enoent : JSON.stringify([WIN()])) });
-    await ax.listWindows();
-    await ax.listWindows();
-    expect(calls.filter(c => c.file === '/fake/ax-helper')).toHaveLength(1);
+  describe('a failure of the helper is not forever', () => {
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('after the helper broke it is not retried on every call…', async () => {
+      const enoent = Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' });
+      const { ax, calls } = harness({ reply: (file) => (file === '/fake/ax-helper' ? enoent : JSON.stringify([WIN()])) });
+      await ax.listWindows();
+      await ax.listWindows();
+      expect(calls.filter(c => c.file === '/fake/ax-helper')).toHaveLength(1);
+    });
+
+    it('…but one OOM kill or a transient exec failure does not demote the whole session to the slow path: it tries again after a minute', async () => {
+      vi.useFakeTimers();
+      let healthy = false;
+      const { ax, calls } = harness({
+        reply: (file) => {
+          if (file !== '/fake/ax-helper') return JSON.stringify([WIN()]);
+          return healthy ? JSON.stringify({ ok: true, windows: [WIN()] }) : Object.assign(new Error('spawn EAGAIN'), { code: 'EAGAIN' });
+        },
+      });
+      await ax.listWindows();                               // helper fails → osascript answers
+      healthy = true;
+      vi.advanceTimersByTime(61_000);
+      await ax.listWindows();                               // retried, works
+      await ax.listWindows();                               // and stays on the helper
+      expect(calls.map(c => c.file)).toEqual(['/fake/ax-helper', 'osascript', '/fake/ax-helper', '/fake/ax-helper']);
+    });
   });
 });
 
@@ -318,6 +339,14 @@ describe('uiTree', () => {
 
   it('never surfaces a secure field\'s value, even if the helper sent one', async () => {
     const tree = { ...CALC, tree: { name: 'Password', automationId: '', controlType: 'AXTextField', subrole: 'AXSecureTextField', secure: true, value: 'hunter2', bounds: R(0, 0) } };
+    const { ax } = harness({ reply: JSON.stringify(tree) });
+    const [el] = (await ax.uiTree(321)).elements;
+    expect(el.secure).toBe(true);
+    expect(el.value).toBeUndefined();
+  });
+
+  it('a secure SUBROLE alone withholds the value (osascript scripts that do not send secure:true)', async () => {
+    const tree = { ...CALC, tree: { name: 'Password', automationId: '', controlType: 'AXTextField', subrole: 'AXSecureTextField', value: '••••••', bounds: R(0, 0) } };
     const { ax } = harness({ reply: JSON.stringify(tree) });
     const [el] = (await ax.uiTree(321)).elements;
     expect(el.secure).toBe(true);
@@ -690,6 +719,32 @@ describe('classifyKeyboardOwner (B11 — a system alert / lock screen that owns 
       .toEqual({ kind: 'app' });
   });
 
+  it('a modal dialog from an unknown accessory process owns the keyboard', () => {
+    const owner = classifyKeyboardOwner(app({
+      name: 'SomeAgent', bundleId: 'com.example.agent', processId: 9, activationPolicy: 'accessory',
+      windows: [{ title: 'Allow access?', subrole: 'AXDialog', modal: true }],
+    }));
+    expect(owner).toMatchObject({ kind: 'alert', name: 'SomeAgent', title: 'Allow access?' });
+  });
+
+  it('a launcher panel (Raycast, Alfred: an accessory app with a NON-modal dialog-ish window) is typed into, not blocked', () => {
+    expect(classifyKeyboardOwner(app({
+      name: 'Raycast', bundleId: 'com.raycast.macos', activationPolicy: 'accessory',
+      windows: [{ title: '', subrole: 'AXDialog', modal: false }],
+    }))).toEqual({ kind: 'app' });
+    expect(classifyKeyboardOwner(app({
+      name: 'Alfred', bundleId: 'com.runningwithcrayons.Alfred', activationPolicy: 'accessory',
+      windows: [{ title: 'Alfred', subrole: 'AXDialog' }],
+    }))).toEqual({ kind: 'app' });
+  });
+
+  it('clawdcursor\'s own overlay is recognised under its cached name (clawd-overlay-<hash>)', () => {
+    expect(classifyKeyboardOwner(app({
+      name: 'clawd-overlay-815dcbe9955a', bundleId: undefined, activationPolicy: 'accessory',
+      windows: [{ title: '', subrole: 'AXSystemDialog' }],
+    }))).toEqual({ kind: 'app' });
+  });
+
   it('a sheet on the app you are driving never blocks (you type your filename into it)', () => {
     expect(classifyKeyboardOwner(app({ windows: [{ title: 'Save', subrole: 'AXDialog', modal: true }] }))).toEqual({ kind: 'app' });
   });
@@ -746,6 +801,14 @@ describe('appState (B2 — is the launched app running, and does it have a windo
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, apps: [] }) });
     await ax.appState('/System/Applications/Calculator.app');
     expect(calls[0].args[calls[0].args.indexOf('--name') + 1]).toBe('Calculator');
+  });
+
+  it('an empty name matches nothing (it used to match every app and return the newest)', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, apps: [APP()] }) });
+    await expect(ax.appState('')).resolves.toBeNull();
+    await expect(ax.appState('   ')).resolves.toBeNull();
+    await expect(ax.appState('/')).resolves.toBeNull();
+    expect(calls).toHaveLength(0);
   });
 
   it('a helper timeout throws — the caller treats the state as unknown, not as "not running"', async () => {
@@ -957,5 +1020,50 @@ describe('focusedElement (the first read smart_type makes)', () => {
       const { ax } = harness({ helper: null, reply: 'null' });
       await expect(ax.focusedElement()).resolves.toBeNull();
     });
+  });
+});
+
+
+describe('osascript fallback behind the lock screen', () => {
+  // System Events does not fail when the screen is locked: it answers with empty shells (0 windows, null focus,
+  // zero bounds) — the "empty answer instead of an error" the helper's lock check exists to prevent.
+  function lockedHarness(locked: boolean) {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const ax = createMacAx({
+      helper: () => null,
+      ensureHelper: () => undefined,
+      scriptsDir: '/fake/scripts/mac',
+      screenLocked: async () => locked,
+      exec: async (file, args) => { calls.push({ file, args }); return { stdout: JSON.stringify([WIN()]) }; },
+    });
+    return { ax, calls };
+  }
+
+  it('a locked screen is reported, and no osascript is run', async () => {
+    const { ax, calls } = lockedHarness(true);
+    for (const op of [() => ax.listWindows(), () => ax.activeWindow(), () => ax.uiTree(1), () => ax.find({ processId: 1, name: 'x' }),
+      () => ax.invoke({ processId: 1, name: 'x', action: 'click' }), () => ax.focusedElement()]) {
+      const err = await op().then(() => null, e => e);
+      expect(err).toBeInstanceOf(MacAxError);
+      expect(err.kind).toBe('locked');
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it('an unlocked screen runs the script as usual', async () => {
+    const { ax, calls } = lockedHarness(false);
+    await ax.listWindows();
+    expect(calls.map(c => c.file)).toEqual(['osascript']);
+  });
+
+  it('a lock probe that fails never blocks the read', async () => {
+    const calls: string[] = [];
+    const ax = createMacAx({
+      helper: () => null, ensureHelper: () => undefined, scriptsDir: '/fake',
+      screenLocked: async () => { throw new Error('lsappinfo missing'); },
+      exec: async (file) => { calls.push(file); return { stdout: JSON.stringify([WIN()]) }; },
+    });
+    await expect(ax.listWindows()).resolves.toHaveLength(1);
+    expect(calls).toEqual(['osascript']);
   });
 });

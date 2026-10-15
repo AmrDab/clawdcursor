@@ -239,6 +239,17 @@ describe('launchApp (B2 — confirm the launch from the process, not the window 
     expect(osascripts().some(c => c.args.join(' ').includes('focus-window.jxa') && c.args.includes('4242'))).toBe(true);
   });
 
+  it('without the helper (lsappinfo knows the process, not its windows) an app that is up is still focused, not launched again', async () => {
+    const ax = fakeAx({
+      appState: vi.fn(async () => APP({ windows: [], windowsKnown: false })),
+      listWindows: vi.fn(async () => [WIN({ title: 'Other', processId: 1, handle: 1 }), WIN()]),
+    });
+    const res = await settle(new MacOSAdapter({ ax }).launchApp('TextEdit'));
+    expect(res).toMatchObject({ pid: 4242, title: 'Untitled 7' });
+    expect(opens()).toHaveLength(0);
+    expect(osascripts().some(c => c.args.join(' ').includes('focus-window.jxa'))).toBe(true);
+  });
+
   it('running but no window within the budget: report the pid (still loading), not a failure, and do not touch Spotlight', async () => {
     // not running before the launch, then up but windowless for the whole budget
     const ax = fakeAx({ appState: vi.fn(sequence<AppState | null>(null, APP({ finishedLaunching: false, windows: [] }))) });

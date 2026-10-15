@@ -46,6 +46,14 @@ describe('get-foreground-window.jxa — the window the app calls main', () => {
     expect(r).toMatchObject({ success: true, processId: 4242, title: 'Untitled 7', bounds: { width: 603, height: 505 } });
   });
 
+  it('when the main window and the focused window differ, the focused one wins — it has the keyboard (same rule as the helper)', () => {
+    const r = runForeground([
+      { title: 'Document', w: 900, h: 700, main: true },
+      { title: 'Find', w: 300, h: 120, focused: true },
+    ]);
+    expect(r.title).toBe('Find');
+  });
+
   it('falls back to the AXFocused window when none is main', () => {
     const r = runForeground([
       { title: 'Big', w: 1600, h: 900 },

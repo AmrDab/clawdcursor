@@ -52,6 +52,11 @@ export interface MacAxDeps {
   ensureHelper(): Promise<string | null> | void;
   /** Directory holding the JXA fallback scripts. */
   scriptsDir: string;
+  /**
+   * Whether the screen is locked. System Events does not fail behind the lock screen — it answers with empty
+   * shells — so the osascript path asks first. Optional: a probe that is absent or fails never blocks a read.
+   */
+  screenLocked?(): Promise<boolean>;
 }
 
 // ─── Budgets ────────────────────────────────────────────────────────────────
@@ -79,6 +84,8 @@ const FIND_MAX_RESULTS = 500;
 const JXA_FIND_TIMEOUT_MS = 12_000;
 const JXA_INVOKE_TIMEOUT_MS = 8_000;
 const LSAPPINFO_TIMEOUT_MS = 3_000;
+/** How long the osascript path answers after the helper itself failed, before the helper is tried again. */
+const HELPER_RETRY_MS = 60_000;
 /**
  * The helper compiles in a few seconds; the osascript walk it replaces takes 10–25 s. So the
  * first call waits for the build — but not forever (swiftc can hang); the build carries on.
@@ -173,7 +180,7 @@ const GENERATED_ID = /^_NS:\d+$/;
 export function toUiElement(raw: any, depth?: number, processId?: number): UiElement {
   const automationId: string = raw.automationId ?? raw.identifier ?? '';
   const label: string = raw.name ?? '';
-  const secure = raw.secure === true;
+  const secure = raw.secure === true || raw.subrole === 'AXSecureTextField';
   const value = secure || raw.value === undefined || raw.value === null ? undefined : String(raw.value);
   return {
     name: label || (automationId && !GENERATED_ID.test(automationId) ? automationId : ''),
@@ -244,8 +251,8 @@ const KEYBOARD_OK_BUNDLES = new Set([
   'com.apple.Spotlight', 'com.apple.dock', 'com.apple.systemuiserver',
   'com.apple.controlcenter', 'com.apple.notificationcenterui',
 ]);
-const KEYBOARD_OK_NAMES = /^(clawd-overlay|ClawdCursor(Host)?)$/i;
-const DIALOG_SUBROLES = new Set(['AXSystemDialog', 'AXDialog']);
+/** The overlay binary is cached as clawd-overlay-<hash>, so its process name carries the hash. */
+const KEYBOARD_OK_NAMES = /^(clawd-overlay(-[0-9a-f]+)?|ClawdCursor(Host)?)$/i;
 
 export function classifyKeyboardOwner(info: FrontmostInfo): KeyboardOwner {
   if (info.locked) return { kind: 'locked' };
@@ -253,7 +260,8 @@ export function classifyKeyboardOwner(info: FrontmostInfo): KeyboardOwner {
   // A regular app (even one showing its own sheet) is what the caller is driving.
   if (!a || a.activationPolicy === 'regular') return { kind: 'app' };
   if (KEYBOARD_OK_BUNDLES.has(a.bundleId ?? '') || KEYBOARD_OK_NAMES.test(a.name)) return { kind: 'app' };
-  const dialog = a.windows.find(w => DIALOG_SUBROLES.has(w.subrole ?? '') || w.role === 'AXSheet');
+  // A system dialog, or a MODAL dialog: a launcher's panel (Raycast, Alfred) is an accessory app's AXDialog too, and is typed into.
+  const dialog = a.windows.find(w => w.subrole === 'AXSystemDialog' || (w.subrole === 'AXDialog' && w.modal === true) || w.role === 'AXSheet');
   if (ALERT_OWNER_BUNDLES.has(a.bundleId ?? '') || dialog) {
     return {
       kind: 'alert', name: a.name, processId: a.processId, bundleId: a.bundleId,
@@ -326,7 +334,7 @@ export interface AppState {
 
 /** 'open -a' accepts names, "Name.app" and paths; NSWorkspace knows the bare display name. */
 function appSearchName(name: string): string {
-  const base = name.trim().split('/').filter(Boolean).pop() ?? name.trim();
+  const base = name.trim().split('/').filter(Boolean).pop() ?? '';
   return base.replace(/\.app$/i, '');
 }
 
@@ -347,6 +355,20 @@ function bestApp(apps: AppState[], want: string): AppState | null {
   const w = want.toLowerCase();
   const rank = (a: AppState) => (a.name.toLowerCase() === w ? 0 : a.name.toLowerCase().startsWith(w) ? 1 : 2);
   return [...apps].sort((a, b) => rank(a) - rank(b) || (b.launchDate ?? 0) - (a.launchDate ?? 0))[0] ?? null;
+}
+
+/** LaunchServices' frontmost app, in a few ms and without any permission. Throws a timeout `MacAxError`. */
+async function lsappinfoFrontmost(exec: MacAxDeps['exec']): Promise<FrontmostInfo> {
+  try {
+    const { stdout: front } = await exec('lsappinfo', ['front'], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
+    const asn = front.trim().split(/\s+/)[0];
+    if (!asn.startsWith('ASN:')) return { locked: false, app: null };
+    const { stdout } = await exec('lsappinfo', ['info', asn], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
+    return parseLsappinfo(stdout);
+  } catch (err) {
+    if (isTimeout(err)) throw timeoutError('frontmost app lookup', LSAPPINFO_TIMEOUT_MS);
+    return { locked: false, app: null };
+  }
 }
 
 export interface MacAx {
@@ -417,8 +439,13 @@ function toInvokeResult(r: any): InvokeResult {
 }
 
 export function createMacAx(deps: MacAxDeps): MacAx {
-  /** Set once the helper crashed or printed garbage; the JXA path is used from then on. */
-  let helperBroken = false;
+  /**
+   * After the helper crashed or printed garbage the osascript path answers — for a minute, not for the life of the
+   * process: one OOM kill or EAGAIN must not demote a long session to the 10–25 s path.
+   */
+  let helperRetryAt = 0;
+  const helperUsable = (): boolean => process.env.CLAWD_NO_MAC_AX !== '1' && Date.now() >= helperRetryAt;
+  const helperFailed = (): void => { helperRetryAt = Date.now() + HELPER_RETRY_MS; };
 
   /** Join the helper's build, up to BUILD_WAIT_MS. Null: not built (yet) — use the osascript path. */
   async function waitForBuild(): Promise<string | null> {
@@ -442,7 +469,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
    * would only be slower).
    */
   async function viaHelper(args: string[], timeoutMs: number, what: string, opts: { waitForBuild?: boolean } = {}): Promise<any | null> {
-    if (process.env.CLAWD_NO_MAC_AX === '1' || helperBroken) return null;
+    if (!helperUsable()) return null;
     let bin = deps.helper();
     if (!bin) {
       if (opts.waitForBuild === false) {
@@ -458,18 +485,18 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       ({ stdout } = await deps.exec(bin, args, { timeoutMs }));
     } catch (err) {
       if (isTimeout(err)) throw timeoutError(what, timeoutMs);
-      helperBroken = true;
+      helperFailed();
       return null;
     }
     let reply: any;
     try {
       reply = JSON.parse(stdout);
     } catch {
-      helperBroken = true;
+      helperFailed();
       return null;
     }
     if (!reply || typeof reply !== 'object' || typeof reply.ok !== 'boolean') {
-      helperBroken = true;
+      helperFailed();
       return null;
     }
     if (!reply.ok) throw helperError(reply, what);
@@ -481,6 +508,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     script: string, args: string[], timeoutMs: number, what: string,
     opts: { errorJsonIsData?: boolean } = {},
   ): Promise<any> {
+    if (deps.screenLocked) {
+      try {
+        if (await deps.screenLocked()) throw helperError({ ok: false, kind: 'locked' }, what);
+      } catch (err) {
+        if (err instanceof MacAxError && err.kind === 'locked') throw err;
+        // couldn't tell: read anyway
+      }
+    }
     let stdout: string;
     try {
       // The '--' keeps osascript from reading the script's own -Flags as its options.
@@ -521,7 +556,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     activeWindow,
 
     prepare(): void {
-      if (process.env.CLAWD_NO_MAC_AX === '1' || helperBroken) return;
+      if (!helperUsable()) return;
       if (!deps.helper()) Promise.resolve(deps.ensureHelper()).catch(() => { /* stays on osascript */ });
     },
 
@@ -572,21 +607,13 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       const reply = await viaHelper(['frontmost', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)], HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, what, { waitForBuild: false });
       if (reply) return { locked: reply.locked === true, app: reply.frontmost ? toFrontmostApp(reply.frontmost) : null };
       // No helper: LaunchServices answers in a few ms without any permission.
-      try {
-        const { stdout: front } = await deps.exec('lsappinfo', ['front'], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
-        const asn = front.trim().split(/\s+/)[0];
-        if (!asn.startsWith('ASN:')) return { locked: false, app: null };
-        const { stdout } = await deps.exec('lsappinfo', ['info', asn], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
-        return parseLsappinfo(stdout);
-      } catch (err) {
-        if (isTimeout(err)) throw timeoutError(what, LSAPPINFO_TIMEOUT_MS);
-        return { locked: false, app: null };
-      }
+      return lsappinfoFrontmost(deps.exec);
     },
 
     async appState(name: string): Promise<AppState | null> {
       const what = 'app state lookup';
       const want = appSearchName(name);
+      if (!want) return null;       // an empty name would match every app and return the newest
       const reply = await viaHelper(
         ['apps', '--name', want, '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
         HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
@@ -733,5 +760,6 @@ export function defaultMacAx(): MacAx {
     // compile() is one-shot, shares one build between callers and remembers a failure, so asking on every use is cheap.
     ensureHelper: makeHelperBuilder({ devToolsInstalled, compile: () => macAxBinary.compile(AX_HELPER_SCRIPT) }),
     scriptsDir: SCRIPTS_DIR,
+    screenLocked: async () => (await lsappinfoFrontmost(defaultExec)).locked,
   }));
 }

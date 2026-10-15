@@ -56,8 +56,9 @@ do {
     while i < argv.count {
         let a = argv[i]
         if a.hasPrefix("--") {
+            // Every option takes a value, and a value may itself start with "--" ("--- notes", "--force"): the next token is the value.
             let key = String(a.dropFirst(2))
-            if i + 1 < argv.count && !argv[i + 1].hasPrefix("--") { opts[key] = argv[i + 1]; i += 2 } else { opts[key] = ""; i += 1 }
+            if i + 1 < argv.count { opts[key] = argv[i + 1]; i += 2 } else { opts[key] = ""; i += 1 }
         } else { i += 1 }
     }
 }
@@ -69,9 +70,15 @@ func timeUp() -> Bool { Date() >= deadline }
 func elapsedMs() -> Int { Int(Date().timeIntervalSince(startedAt) * 1000) }
 /// One call to one app may block this long (the AX default is 6 s — a single hung app would eat the whole budget).
 let axTimeout: Float = Float(Double(opts["ax-timeout-ms"] ?? "") ?? 1500) / 1000
+// AXUIElementSetMessagingTimeout on an app element covers THAT element only ("not … other accessibility objects"), so a
+// limit set per app never reached its windows and descendants — they kept the OS default (1.5 s here, 6 s on older macOS).
+// The system-wide element sets it for every call this process makes.
+AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), axTimeout)
 let ownPid = getpid()
-/// clawdcursor's own windows are never "the active window".
-let ownNames: Set<String> = ["clawd-overlay", "ClawdCursorHost", "ClawdCursor"]
+/// clawdcursor's own windows are never "the active window". The overlay is cached as clawd-overlay-<hash>.
+func isOwnProcessName(_ name: String) -> Bool {
+    name.hasPrefix("clawd-overlay") || name == "ClawdCursorHost" || name == "ClawdCursor"
+}
 
 // MARK: - Session
 
@@ -100,18 +107,21 @@ func copyAttr(_ el: AXUIElement, _ name: String) -> (value: CFTypeRef?, error: A
     return (r == .success ? v : nil, r)
 }
 
-/// Several attributes in ONE round trip. Missing attributes are simply absent.
-func multi(_ el: AXUIElement, _ names: [String]) -> [String: CFTypeRef] {
+/// Several attributes in ONE round trip. Missing attributes are simply absent; `error` says whether the whole read failed
+/// (an element that answers nothing — hung, or gone — is not an element with no attributes).
+func multiChecked(_ el: AXUIElement, _ names: [String]) -> (values: [String: CFTypeRef], error: AXError) {
     var out: CFArray?
-    guard AXUIElementCopyMultipleAttributeValues(el, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &out) == .success,
-          let arr = out as? [AnyObject] else { return [:] }
+    let err = AXUIElementCopyMultipleAttributeValues(el, names as CFArray, AXCopyMultipleAttributeOptions(rawValue: 0), &out)
+    guard err == .success, let arr = out as? [AnyObject] else { return ([:], err == .success ? .failure : err) }
     var d: [String: CFTypeRef] = [:]
     for (i, v) in arr.enumerated() where i < names.count {
         if CFGetTypeID(v) == AXValueGetTypeID(), AXValueGetType(v as! AXValue) == .axError { continue }
         d[names[i]] = v
     }
-    return d
+    return (d, .success)
 }
+
+func multi(_ el: AXUIElement, _ names: [String]) -> [String: CFTypeRef] { multiChecked(el, names).values }
 
 func str(_ v: CFTypeRef?) -> String? {
     guard let v = v else { return nil }
@@ -141,7 +151,8 @@ func axSize(_ v: CFTypeRef?) -> CGSize? {
     return AXValueGetValue(v as! AXValue, .cgSize, &out) ? out : nil
 }
 
-func finite(_ x: CGFloat) -> Int { x.isFinite ? Int(x.rounded()) : 0 }
+/// Frames can be absurd (CGRectInfinite): Int(x.rounded()) would trap past Int.max, so clamp to what any screen could hold.
+func finite(_ x: CGFloat) -> Int { x.isFinite ? Int(max(-1_000_000, min(1_000_000, x)).rounded()) : 0 }
 
 func rect(_ p: CGPoint?, _ s: CGSize?) -> [String: Int] {
     ["x": finite(p?.x ?? 0), "y": finite(p?.y ?? 0), "width": finite(s?.width ?? 0), "height": finite(s?.height ?? 0)]
@@ -182,7 +193,7 @@ func topmostRegularApp() -> NSRunningApplication? {
     for w in list {
         guard (w[kCGWindowLayer as String] as? Int) == 0, let pid = w[kCGWindowOwnerPID as String] as? Int32, pid != ownPid,
               let app = NSRunningApplication(processIdentifier: pid), app.activationPolicy == .regular,
-              !ownNames.contains(app.localizedName ?? "") else { continue }
+              !isOwnProcessName(app.localizedName ?? "") else { continue }
         return app
     }
     return nil
@@ -191,7 +202,7 @@ func topmostRegularApp() -> NSRunningApplication? {
 /// NSWorkspace's frontmost application (which, unlike System Events, includes system dialogs).
 func activeApplication() -> NSRunningApplication? {
     guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
-    if ownNames.contains(front.localizedName ?? "") { return topmostRegularApp() ?? front }
+    if isOwnProcessName(front.localizedName ?? "") { return topmostRegularApp() ?? front }
     return front
 }
 
@@ -328,6 +339,10 @@ struct Walk {
     let maxNodes: Int
     let maxDepth: Int
     var cut: String? = nil
+    /// Elements that answered nothing (a hung subtree): the tree is real but incomplete.
+    var unreadable = 0
+    /// Set when the window itself could not be read — there is no tree to return.
+    var rootError: AXError? = nil
 }
 
 let nodeAttrs = [
@@ -351,7 +366,11 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     if w.nodes >= w.maxNodes { if w.cut == nil { w.cut = "nodes" }; return nil }
     w.nodes += 1
 
-    let a = multi(el, nodeAttrs)
+    let (a, readError) = multiChecked(el, nodeAttrs)
+    if readError != .success {
+        if depth == 0 { w.rootError = readError } else { w.unreadable += 1 }
+        return nil
+    }
     let role = str(a["AXRole"]) ?? ""
     let subrole = str(a["AXSubrole"]) ?? ""
     let secure = subrole == "AXSecureTextField"
@@ -370,7 +389,8 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
             if w.cut == "time" { break }
         }
     }
-    if name.isEmpty && (ident.isEmpty || isGeneratedIdentifier(ident)) && labelPeekRoles.contains(role) { name = firstStaticTextValue(kids) }
+    // The text on the control beats its identifier as a name: that is what an agent matches against what it sees.
+    if name.isEmpty && labelPeekRoles.contains(role) { name = firstStaticTextValue(kids) }
 
     let hasValue = !(value ?? "").isEmpty
     let keep = depth == 0 || !name.isEmpty || (!ident.isEmpty && !isGeneratedIdentifier(ident)) || hasValue
@@ -422,27 +442,40 @@ func currentAim() -> Aim {
 
 let searchAttrs = ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXChildren"]
 
+/// What a search collected, and how much of the window it could not read.
+struct SearchCtx {
+    var hits: [Hit] = []
+    /// Elements that answered nothing. A name that is absent from what WAS read may be hiding there.
+    var unreadable = 0
+}
+
 /// Breadth-first search of one window: shallow matches first, one batched read per element.
-func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, into hits: inout [Hit]) {
+func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, ctx: inout SearchCtx) {
     let wantName = aim.name?.lowercased()
     let wantRole = aim.role.map(normRole)
     var level: [AXUIElement] = [root]
     var depth = 0
-    while !level.isEmpty && depth <= maxDepth && !timeUp() && hits.count < limit {
+    while !level.isEmpty && depth <= maxDepth && !timeUp() && ctx.hits.count < limit {
         var next: [AXUIElement] = []
         for el in level {
-            if timeUp() || hits.count >= limit { break }
-            let a = multi(el, searchAttrs)
+            if timeUp() || ctx.hits.count >= limit { break }
+            let (a, readError) = multiChecked(el, searchAttrs)
+            if readError != .success { ctx.unreadable += 1; continue }
             let role = str(a["AXRole"]) ?? ""
             let title = str(a["AXTitle"]) ?? ""
             let desc = str(a["AXDescription"]) ?? ""
             let ident = str(a["AXIdentifier"]) ?? ""
+            // A control the tree shows as Button "Save" (its text is a child) must be findable by that name too.
+            var label = ""
+            if wantName != nil && title.isEmpty && desc.isEmpty && labelPeekRoles.contains(role), let kids = a["AXChildren"] as? [AXUIElement] {
+                label = firstStaticTextValue(kids)
+            }
             var matches = !role.isEmpty
             var exact = false
             if let w = wantName {
-                let tl = title.lowercased(), dl = desc.lowercased(), il = ident.lowercased()
-                matches = matches && (tl.contains(w) || dl.contains(w) || il.contains(w))
-                exact = tl == w || dl == w || il == w
+                let tl = title.lowercased(), dl = desc.lowercased(), il = ident.lowercased(), ll = label.lowercased()
+                matches = matches && (tl.contains(w) || dl.contains(w) || il.contains(w) || ll.contains(w))
+                exact = tl == w || dl == w || il == w || ll == w
             }
             if let id = aim.id {
                 let ok = ident == id || ident.lowercased() == id.lowercased()
@@ -451,8 +484,8 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
             }
             if let r = wantRole { matches = matches && normRole(role).contains(r) }
             if matches {
-                hits.append(Hit(element: el, name: title.isEmpty ? desc : title, title: title, desc: desc, ident: ident, role: role,
-                                subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact))
+                ctx.hits.append(Hit(element: el, name: !title.isEmpty ? title : (!desc.isEmpty ? desc : label), title: title, desc: desc, ident: ident, role: role,
+                                    subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact))
                 // An identifier names one element; walking the rest of a big window would only cost time.
                 if stopAtExactId && exact && aim.name == nil && aim.role == nil { return }
             }
@@ -463,8 +496,8 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
     }
 }
 
-/// Every window of the app, the key window first.
-func windowsToSearch(_ app: NSRunningApplication) -> [AXUIElement] {
+/// Every window of the app, the key window first. `hung`: the app did not answer at all (not "it has no windows").
+func windowsToSearch(_ app: NSRunningApplication) -> (windows: [AXUIElement], hung: Bool) {
     let el = appElement(app.processIdentifier)
     var out: [AXUIElement] = []
     let key = keyWindow(el)
@@ -472,7 +505,7 @@ func windowsToSearch(_ app: NSRunningApplication) -> [AXUIElement] {
     if let all = copyAttr(el, "AXWindows").value as? [AXUIElement] {
         for w in all where !out.contains(where: { CFEqual($0, w) }) { out.append(w) }
     }
-    return out
+    return (out, key.hung)
 }
 
 func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
@@ -525,13 +558,32 @@ func settable(_ el: AXUIElement, _ attr: String) -> Bool {
     return AXUIElementIsAttributeSettable(el, attr as CFString, &s) == .success && s.boolValue
 }
 
+/// AXUIElementPerformAction. The SDK: kAXErrorCannotComplete "does not necessarily mean that the function has failed" — an
+/// action that runs a modal loop (a button that opens a panel or an alert) does not return before the timeout. After a full
+/// timeout it was started and is still running: report it as pending, not as a failure to click (callers click again).
+func press(_ el: AXUIElement, _ action: String = "AXPress") -> (done: Bool, pending: Bool, code: Int32) {
+    let t0 = Date()
+    let r = AXUIElementPerformAction(el, action as CFString)
+    if r == .success { return (true, false, 0) }
+    if r == .cannotComplete && Date().timeIntervalSince(t0) >= Double(axTimeout) * 0.8 { return (true, true, r.rawValue) }
+    return (false, false, r.rawValue)
+}
+
+func pressed(_ action: String, method: String, pending: Bool, extra: [String: Any] = [:]) -> [String: Any] {
+    var d = extra
+    if pending { d["pending"] = true }
+    var r: [String: Any] = ["ok": true, "success": true, "action": action, "method": method]
+    if !d.isEmpty { r["data"] = d }
+    return r
+}
+
 func perform(_ action: String, _ h: Hit) -> [String: Any] {
     let el = h.element
     switch action {
     case "click":
-        let r = AXUIElementPerformAction(el, "AXPress" as CFString)
-        if r == .success { return ["ok": true, "success": true, "action": action, "method": "AXPress"] }
-        return miss(action, "the element does not support AXPress (AXError \(r.rawValue)) — click its coordinates instead", element: el)
+        let p = press(el)
+        if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
+        return miss(action, "the element does not support AXPress (AXError \(p.code)) — click its coordinates instead", element: el)
     case "focus":
         let r = AXUIElementSetAttributeValue(el, "AXFocused" as CFString, kCFBooleanTrue)
         return r == .success ? ["ok": true, "success": true, "action": action] : miss(action, "could not focus the element (AXError \(r.rawValue))", element: el)
@@ -553,13 +605,15 @@ func perform(_ action: String, _ h: Hit) -> [String: Any] {
         if settable(el, "AXExpanded"), AXUIElementSetAttributeValue(el, "AXExpanded" as CFString, want ? kCFBooleanTrue : kCFBooleanFalse) == .success {
             return ["ok": true, "success": true, "action": action, "method": "AXExpanded"]
         }
-        if want, AXUIElementPerformAction(el, "AXShowMenu" as CFString) == .success {
-            return ["ok": true, "success": true, "action": action, "method": "AXShowMenu"]
+        if want {
+            let p = press(el, "AXShowMenu")
+            if p.done { return pressed(action, method: "AXShowMenu", pending: p.pending) }
         }
         return miss(action, "the element does not support \(action) (no AXExpanded)", element: el)
     case "toggle":
-        let r = AXUIElementPerformAction(el, "AXPress" as CFString)
-        if r != .success { return miss(action, "the element does not support toggle (no AXPress; AXError \(r.rawValue))", element: el) }
+        let p = press(el)
+        if !p.done { return miss(action, "the element does not support toggle (no AXPress; AXError \(p.code))", element: el) }
+        if p.pending { return pressed(action, method: "AXPress", pending: true, extra: ["toggleState": "unknown"]) }
         Thread.sleep(forTimeInterval: 0.05)
         let after = str(copyAttr(el, "AXValue").value)
         let state = after == nil ? "unknown" : (after == "0" ? "Off" : "On")
@@ -568,9 +622,8 @@ func perform(_ action: String, _ h: Hit) -> [String: Any] {
         if settable(el, "AXSelected"), AXUIElementSetAttributeValue(el, "AXSelected" as CFString, kCFBooleanTrue) == .success {
             return ["ok": true, "success": true, "action": action, "method": "AXSelected"]
         }
-        if AXUIElementPerformAction(el, "AXPress" as CFString) == .success {
-            return ["ok": true, "success": true, "action": action, "method": "AXPress"]
-        }
+        let p = press(el)
+        if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
         return miss(action, "the element does not support select (no AXSelected / AXPress)", element: el)
     default:
         return miss(action, "unknown action: \(action)")
@@ -695,11 +748,16 @@ func cmdTree() -> Never {
     }
     var walk = Walk(maxNodes: Int(opts["max-nodes"] ?? "") ?? 3000, maxDepth: Int(opts["max-depth"] ?? "") ?? 12)
     let root = buildNode(win, 0, &walk)
+    // The window itself unreadable (hung, or gone): an error, not an empty window.
+    if let e = walk.rootError {
+        fail(e == .cannotComplete ? "timeout" : "failed", "could not read the window of \(app.localizedName ?? "the app") (AXError \(e.rawValue))")
+    }
     // Out of time before even the window itself was read: that is a timeout, not an empty window.
     if root == nil && walk.cut == "time" { fail("timeout", "ran out of time before reading the window") }
     reply["tree"] = root ?? NSNull()
-    reply["truncated"] = walk.cut != nil
-    reply["reason"] = walk.cut ?? NSNull()
+    reply["truncated"] = walk.cut != nil || walk.unreadable > 0
+    reply["reason"] = walk.cut ?? (walk.unreadable > 0 ? "unreadable" : NSNull())
+    reply["unreadable"] = walk.unreadable
     reply["nodeCount"] = walk.nodes
     reply["window"] = ["source": key.source]
     reply["elapsedMs"] = elapsedMs()
@@ -734,15 +792,19 @@ func cmdFind() -> Never {
     let app = targetApplication()
     let aim = currentAim()
     let limit = Int(opts["max-results"] ?? "") ?? 200
-    var hits: [Hit] = []
     let idOnly = aim.id != nil && aim.name == nil && aim.role == nil
-    for w in windowsToSearch(app) where !timeUp() && hits.count < limit {
-        search(w, aim, maxDepth: 12, limit: limit * 4, stopAtExactId: idOnly, into: &hits)
-        if idOnly && hits.contains(where: { $0.exact }) { break }
+    var found = SearchCtx()
+    let (windows, hung) = windowsToSearch(app)
+    if hung { fail("timeout", "\(app.localizedName ?? "the app") is not responding") }
+    for w in windows where !timeUp() && found.hits.count < limit {
+        search(w, aim, maxDepth: 12, limit: limit * 4, stopAtExactId: idOnly, ctx: &found)
+        if idOnly && found.hits.contains(where: { $0.exact }) { break }
     }
-    if hits.isEmpty && timeUp() { fail("timeout", "the element search ran out of time") }
-    let ranked = rankHits(hits, action: nil).prefix(limit)
-    emit(["ok": true, "elements": ranked.map { hitDict($0, pid: app.processIdentifier) }, "truncated": timeUp(), "elapsedMs": elapsedMs()])
+    if found.hits.isEmpty && (timeUp() || found.unreadable > 0) {
+        fail("timeout", "the element search could not read part of the window (\(found.unreadable) element(s) did not answer) — not \"nothing found\"")
+    }
+    let ranked = rankHits(found.hits, action: nil).prefix(limit)
+    emit(["ok": true, "elements": ranked.map { hitDict($0, pid: app.processIdentifier) }, "truncated": timeUp() || found.unreadable > 0, "elapsedMs": elapsedMs()])
 }
 
 func cmdInvoke() -> Never {
@@ -752,18 +814,25 @@ func cmdInvoke() -> Never {
     // With nothing to aim at every element matches and "best" is arbitrary — never act on that.
     if aim.isEmpty { emit(miss(action, "invoke needs a name, role or id to aim at — refusing to act on an arbitrary element")) }
     let app = targetApplication()
-    var hits: [Hit] = []
-    for w in windowsToSearch(app) where !timeUp() {
-        search(w, aim, maxDepth: 12, limit: 60, into: &hits)
-        if hits.contains(where: { $0.exact }) { break }
+    var found = SearchCtx()
+    let (windows, hung) = windowsToSearch(app)
+    if hung { fail("timeout", "\(app.localizedName ?? "the app") is not responding") }
+    for w in windows where !timeUp() {
+        search(w, aim, maxDepth: 12, limit: 400, ctx: &found)
+        if found.hits.contains(where: { $0.exact }) { break }
     }
-    guard let best = rankHits(hits, action: action).first else {
-        if timeUp() { fail("timeout", "the element search ran out of time") }
+    guard let best = rankHits(found.hits, action: action).first else {
+        if timeUp() || found.unreadable > 0 { fail("timeout", "the element search could not read part of the window — not \"Element not found\"") }
         var what = ""
         if let n = aim.name { what += "name=\"\(n)\" " }
         if let r = aim.role { what += "role=\"\(r)\" " }
         if let i = aim.id { what += "id=\"\(i)\" " }
         emit(miss(action, "Element not found: \(what.trimmingCharacters(in: .whitespaces))"))
+    }
+    // A name that is only a substring of the best hit ("Save As…" for "Save") may be hiding its exact match in the part of the
+    // window that did not answer or past the deadline: acting on that would press the wrong control.
+    if !best.exact && (aim.name != nil || aim.id != nil) && (timeUp() || found.unreadable > 0) {
+        fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name)\")")
     }
     emit(perform(action, best))
 }

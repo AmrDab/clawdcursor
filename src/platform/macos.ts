@@ -863,10 +863,16 @@ export class MacOSAdapter implements PlatformAdapter {
     // we want a stable cross-OS contract: check first, focus-if-running,
     // launch only when needed. Prevents the "Outlook keeps opening" class
     // of bug from any retry loop in the pipeline.
+    // Without the helper the process is known (lsappinfo) but its windows are not: ask the window list for them.
+    let beforeWindows = before?.windows ?? [];
+    if (before && !before.windowsKnown) {
+      beforeWindows = (await this.listWindows().catch(() => [] as WindowInfo[]))
+        .filter(w => w.processId === before.processId && !w.isMinimized);
+    }
     if (!opts?.alwaysNewInstance && !opts?.url) {
-      if (before && before.windows.length > 0) {
+      if (before && beforeWindows.length > 0) {
         await this.focusWindow({ processId: before.processId }).catch(() => {});
-        return this.launchResult(before, before.windows[0]);
+        return this.launchResult(before, beforeWindows[0]);
       }
       if (before === undefined) {
         const target = name.toLowerCase();

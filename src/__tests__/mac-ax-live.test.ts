@@ -101,6 +101,22 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
   let fixture: ChildProcess | null = null;
   let pid = 0;
   let usable = false;
+  let fixtureBin = '';
+  const extra: ChildProcess[] = [];
+
+  /** Start the fixture app; resolves its pid once both windows are up. */
+  async function startFixture(mode: 'normal' | 'slow' = 'normal'): Promise<{ proc: ChildProcess; pid: number }> {
+    const proc = spawn(fixtureBin, [], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AXFIXTURE_MODE: mode } });
+    const p = await new Promise<number>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('fixture did not start')), 30_000);
+      proc.stdout!.on('data', d => {
+        const m = /READY (\d+)/.exec(String(d));
+        if (m) { clearTimeout(t); resolve(Number(m[1])); }
+      });
+    });
+    await new Promise(r => setTimeout(r, 600));   // let AppKit register the windows
+    return { proc, pid: p };
+  }
 
   beforeAll(async () => {
     if (!helper) return;
@@ -110,21 +126,15 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       console.warn(`[mac-ax-live] fixture tests skipped: ${probe.kind} — ${probe.error}`);
       return;
     }
-    const bin = path.join(tmp, 'ax-fixture');
+    fixtureBin = path.join(tmp, 'ax-fixture');
     await new Promise<void>((resolve, reject) =>
-      execFile('swiftc', ['-O', FIXTURE_SRC, '-o', bin], { timeout: 120_000 }, err => (err ? reject(err) : resolve())));
-    fixture = spawn(bin, [], { stdio: ['ignore', 'pipe', 'ignore'] });
-    pid = await new Promise<number>((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('fixture did not start')), 30_000);
-      fixture!.stdout!.on('data', d => {
-        const m = /READY (\d+)/.exec(String(d));
-        if (m) { clearTimeout(t); resolve(Number(m[1])); }
-      });
-    });
-    await new Promise(r => setTimeout(r, 600));   // let AppKit register both windows
+      execFile('swiftc', ['-O', FIXTURE_SRC, '-o', fixtureBin], { timeout: 120_000 }, err => (err ? reject(err) : resolve())));
+    const f = await startFixture('normal');
+    fixture = f.proc;
+    pid = f.pid;
   }, 300_000);
 
-  afterAll(() => { fixture?.kill('SIGKILL'); });
+  afterAll(() => { fixture?.kill('SIGKILL'); for (const p of extra) p.kill('SIGKILL'); });
 
   const node = (tree: any, pred: (n: any) => boolean): any => {
     if (!tree) return undefined;
@@ -286,6 +296,86 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     }
   });
 
+  it('a value that starts with "--" is a value, not the next flag', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const text = '--- title: not a flag';
+    const set = await run(['invoke', '--pid', String(pid), '--id', 'nameField', '--action', 'set-value', '--value', text]);
+    expect(set).toMatchObject({ ok: true, success: true });
+    const got = await run(['invoke', '--pid', String(pid), '--id', 'nameField', '--action', 'get-value']);
+    expect(got.value).toBe(text);
+  });
+
+  it('a name that starts with "--" still filters (it used to turn find into an unfiltered dump)', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const r = await run(['find', '--pid', String(pid), '--name', '--no-such-control']);
+    expect(r.ok).toBe(true);
+    expect(r.elements).toEqual([]);
+  });
+
+  it('a press whose action runs a modal loop is reported as pending — it happened — not as a failure to click', async (ctx) => {
+    if (!usable) return ctx.skip();
+    // AXPress does not return until the modal ends; the SDK says kAXErrorCannotComplete there "does not
+    // necessarily mean that the function has failed". Reporting a miss made callers click it again.
+    const r = await run(['invoke', '--pid', String(pid), '--id', 'modalButton', '--action', 'click', '--ax-timeout-ms', '600']);
+    expect(r).toMatchObject({ ok: true, success: true, data: { pending: true } });
+    await new Promise(res => setTimeout(res, 3_800));   // the fixture closes its own alert after 3 s
+    const status = await run(['find', '--pid', String(pid), '--id', 'status']);
+    expect(status.elements[0].value).toBe('modal: closed');
+  });
+
+  it('find and invoke match the label the tree shows: a button named only by a child static text', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const tree = await run(['tree', '--pid', String(pid)]);
+    const peek = node(tree.tree, n => n.automationId === 'peekButton');
+    expect(peek.name).toBe('Peeked');                       // the tree names it
+    const found = await run(['find', '--pid', String(pid), '--name', 'Peeked']);
+    expect(found.elements.map((e: any) => e.automationId)).toContain('peekButton');
+    const pressed = await run(['invoke', '--pid', String(pid), '--name', 'Peeked', '--action', 'click']);
+    expect(pressed).toMatchObject({ ok: true, success: true });
+    await new Promise(res => setTimeout(res, 200));
+    expect((await run(['find', '--pid', String(pid), '--id', 'status'])).elements[0].value).toBe('pressed: peekButton');
+  });
+
+  describe('inside a live app, one hung subtree', () => {
+    let slowPid = 0;
+    let slowProc: ChildProcess | null = null;
+    beforeAll(async () => {
+      if (!usable) return;
+      const s = await startFixture('slow');
+      slowProc = s.proc;
+      extra.push(s.proc);
+      slowPid = s.pid;
+    }, 60_000);
+    // It is stalled by every read of its slow element: gone before the tests that expect a healthy desktop.
+    afterAll(() => { slowProc?.kill('SIGKILL'); });
+
+    it('every call to the app is bounded by --ax-timeout-ms, not only the first one', async (ctx) => {
+      if (!usable) return ctx.skip();
+      // AXUIElementSetMessagingTimeout on an app element covers that element only ("not … other accessibility
+      // objects"): window and descendant calls kept the OS default (1.5 s here, 6 s on older macOS). The slow
+      // view blocks the app for 3 s, so with a 100 ms limit on every call the walk is over in about a second;
+      // with the default it waits the stall out.
+      const t0 = Date.now();
+      const r = await run(['tree', '--pid', String(slowPid), '--ax-timeout-ms', '100', '--timeout-ms', '9000']);
+      expect(Date.now() - t0).toBeLessThan(1_800);
+      expect(r.ok).toBe(true);
+      expect(r.truncated).toBe(true);          // part of the window could not be read — and it says so
+      expect(r.reason).toBe('unreadable');
+    });
+
+    it('refuses to press a partial match when part of the window could not be read', async (ctx) => {
+      if (!usable) return ctx.skip();
+      await new Promise(res => setTimeout(res, 3_500));     // let the previous stall drain
+      // "Save" is a substring of "Save As…"; an exact "Save" could be hiding in the unreadable subtree.
+      const r = await run(['invoke', '--pid', String(slowPid), '--name', 'Save', '--action', 'click', '--ax-timeout-ms', '700', '--timeout-ms', '4000']);
+      expect(r.success === true).toBe(false);
+      expect(r.kind === 'timeout' || r.ok === true).toBe(true);
+      // wait the stall out (a long per-call limit, so the read queues behind it instead of failing), then look
+      const status = await run(['find', '--pid', String(slowPid), '--id', 'status', '--ax-timeout-ms', '8000', '--timeout-ms', '15000']);
+      expect(status.elements[0].value).toBe('idle');         // nothing was pressed
+    });
+  });
+
   it('WebKit / Electron helper processes are not apps: a healthy desktop lists nothing as "not responding"', async (ctx) => {
     if (!usable) return ctx.skip();
     // "Safari Web Content", "Mail Networking", Electron renderers: XPC/helper processes that never finish
@@ -310,6 +400,9 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
 
       const tree = await run(['tree', '--pid', String(pid), '--ax-timeout-ms', '800']);
       expect(tree).toMatchObject({ ok: false, kind: 'timeout' });
+      // not "no elements found" / "Element not found": the app did not answer
+      expect(await run(['find', '--pid', String(pid), '--name', 'Save', '--ax-timeout-ms', '800'])).toMatchObject({ ok: false, kind: 'timeout' });
+      expect(await run(['invoke', '--pid', String(pid), '--name', 'Save', '--action', 'click', '--ax-timeout-ms', '800'])).toMatchObject({ ok: false, kind: 'timeout' });
     } finally {
       fixture!.kill('SIGCONT');
     }

@@ -18,7 +18,7 @@
  * processes.where({frontmost: true})[0].windows[0], which on apps that
  * spawn a popup (Xcode "Downloads", Safari "Notifications") returned the
  * popup instead of the user's actual interaction window. We now take the
- * window the app marks AXMain (else AXFocused); only an app exposing
+ * window the app marks AXFocused (else AXMain); only an app exposing
  * neither falls back to scoring the windows (area alone picked the wrong
  * document when two were open — live macOS blind test, 2026-10-15).
  *
@@ -81,14 +81,15 @@ function scoreWindow(win, index) {
     return score;
 }
 
-// The app itself says which window it is working in: AXMain, else AXFocused. Scoring by
-// area picked the BIGGEST document ("Untitled 4") while the user typed in the small main one.
+// The app itself says which window it is working in: the one with keyboard focus (AXFocused),
+// else its main window (AXMain) — the same rule as the compiled helper. Scoring by area picked
+// the BIGGEST document ("Untitled 4") while the user typed in the small main one.
 function axFlag(win, name) {
     try { return win.attributes.byName(name).value() === true; } catch (e) { return false; }
 }
 
 function pickInteractionWindow(windows) {
-    var flags = ['AXMain', 'AXFocused'];
+    var flags = ['AXFocused', 'AXMain'];
     for (var f = 0; f < flags.length; f++) {
         for (var w = 0; w < windows.length; w++) {
             if (axFlag(windows[w], flags[f])) return { window: windows[w], index: w };
