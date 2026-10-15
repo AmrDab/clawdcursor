@@ -194,7 +194,9 @@ try {
 const { macOverlayBinary } = require(dist('platform/mac-ocr-binary.js'));
 const { spawn } = await import('node:child_process');
 const OVERLAY = path.join(ROOT, 'scripts', 'mac', 'overlay.swift');
-const frontApp = () => { try { return sh('osascript', ['-e', 'tell application "System Events" to name of first process whose frontmost is true']); } catch { return '?'; } };
+// NSWorkspace, not System Events: System Events keeps naming the old app while
+// another process is really active (measured on macOS 26).
+const frontApp = () => { try { return sh('osascript', ['-l', 'JavaScript', '-e', "ObjC.import('AppKit'); $.NSWorkspace.sharedWorkspace.frontmostApplication.localizedName.js"]); } catch { return '?'; } };
 /** Run the overlay; resolve with its first stdout line, its exit code, or 'timeout'. */
 const runOverlay = (bin, args, env, waitMs) => new Promise(resolve => {
   const child = spawn(bin, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -217,8 +219,12 @@ if (overlayBin) {
 
   const before = frontApp();
   console.log('\n  → A pill saying "ClawdCursor paused - your turn" is at the top of your main screen. Click RESUME (60 s).');
+  let during = null;
+  const sample = setTimeout(() => { during = frontApp(); }, 2000); // while the pill is up, before any click
   const r = await runOverlay(overlayBin, ['pill'], { CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: 'This is the clawdcursor Mac check. Click Resume on this pill.' }, 60_000);
+  clearTimeout(sample);
   const after = frontApp();
+  if (during !== null) line(during === before ? 'PASS' : 'FAIL', 'showing the pill does not take focus', `frontmost before "${before}", while the pill is up "${during}"`);
   if (r === 'timeout') line('SKIP', 'paused pill: Resume', 'no click within 60 s');
   else line(r === 'BANNER_RESUME' ? 'PASS' : 'FAIL', 'paused pill: Resume prints BANNER_RESUME', r);
   if (r !== 'timeout') line(after === before ? 'PASS' : 'FAIL', 'clicking the pill keeps focus where it was', `frontmost before "${before}", after "${after}"`);

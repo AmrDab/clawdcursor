@@ -14,8 +14,11 @@
 //                  straight through it.
 //
 // The parent kills the process to hide it. The app is an accessory (no Dock
-// icon, never activates) and the pill is a non-activating panel, so neither
-// can steal focus from the app being driven or the field the user types in.
+// icon) and the pill is a non-activating panel, so neither may take focus from
+// the app being driven or the field the user types in. macOS can still make a
+// freshly launched process the active app (measured on macOS 26: the pill
+// launch did), so whenever this app finds itself active it hands activation
+// straight back to the app that was frontmost when it started.
 
 import AppKit
 
@@ -74,7 +77,29 @@ func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false) ->
     return l
 }
 
-final class Overlay: NSObject {
+/// The app that was frontmost when this process started: focus goes back there.
+let previousApp = NSWorkspace.shared.frontmostApplication
+
+func giveFocusBack() {
+    guard NSApp.isActive, let prev = previousApp,
+          prev.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+    NSApp.deactivate()
+    if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
+}
+
+final class Overlay: NSObject, NSApplicationDelegate {
+    let mode: String
+    init(mode: String) { self.mode = mode }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if mode == "pill" { pill() } else { glow() }
+        giveFocusBack()
+        // Activation can also land a moment after launch.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { giveFocusBack() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
+                                               object: nil, queue: .main) { _ in giveFocusBack() }
+    }
+
     var windows: [NSWindow] = []
     var timer: Timer?
 
@@ -231,6 +256,6 @@ guard mode == "pill" || mode == "glow" else {
 }
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let overlay = Overlay()
-if mode == "pill" { overlay.pill() } else { overlay.glow() }
+let overlay = Overlay(mode: mode)
+app.delegate = overlay
 app.run()

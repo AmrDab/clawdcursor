@@ -212,7 +212,16 @@ class ControlBanner {
   private exitHookInstalled = false;
 
   private show(): void {
-    if (!this.canShow()) return;
+    if (!this.canShow()) {
+      // macOS: the drawer is still compiling (first run after install). Show it
+      // as soon as it is ready, if the overlay is still wanted by then.
+      if (this.enabled && process.platform === 'darwin') {
+        void macOverlayBinary.compile(macScript()).then(bin => {
+          if (bin && (this.pinned || this.paused || this.idleTimer)) this.show();
+        });
+      }
+      return;
+    }
     this.installExitHook();
     this.spawnPill();
     this.spawnGlow();
