@@ -34,6 +34,7 @@ import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
+import { readMainScreenInfo, readDisplayList } from './mac-screen';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
@@ -126,27 +127,25 @@ export class MacOSAdapter implements PlatformAdapter {
   async getScreenSize(): Promise<ScreenSize> {
     if (this.screenSize) return this.screenSize;
 
-    // Query NSScreen for logical dimensions.
-    let logicalWidth = 0, logicalHeight = 0;
-    try {
-      const out = await execFileAsync('osascript', ['-e',
-        `use framework "AppKit"\n` +
-        `set frame to current application's NSScreen's mainScreen's frame()\n` +
-        `set sz to size of frame\n` +
-        `return ((width of sz) as integer) & "," & ((height of sz) as integer) as text`,
-      ], { timeout: 5_000 });
-      const [w, h] = out.stdout.trim().split(',').map(s => parseInt(s, 10));
-      logicalWidth = w || 0; logicalHeight = h || 0;
-    } catch { /* fall through */ }
+    // Query NSScreen for logical (point) dimensions and the backing scale, through
+    // the one shared probe (mac-screen.ts). The inline `size of frame` script that
+    // lived here threw on macOS 26, the error was swallowed, and logicalWidth
+    // silently fell back to the PHYSICAL width — so dpiRatio was 1, the mouse
+    // scale was physical/1280 instead of logical/1280, and every Retina click
+    // landed 2× off (#154). OCR reported physical pixels as screen coords too.
+    const main = await readMainScreenInfo();
+    let logicalWidth = main?.logicalWidth ?? 0, logicalHeight = main?.logicalHeight ?? 0;
+    const backingScale = main?.backingScaleFactor ?? 1;
 
     // Capture a probe screenshot to learn physical (retina) dimensions.
     // If the screenshot-helper binary is missing (e.g. published npm install
-    // before `cd native && ./build.sh`), degrade gracefully: assume 1x DPI
-    // so that listDisplays() and the a11y pipeline still work.  callers that
-    // genuinely need screenshots will get the actionable error from screenshot().
-    let physicalWidth = logicalWidth;
-    let physicalHeight = logicalHeight;
-    let dpiRatio = 1;
+    // before `cd native && ./build.sh`) or Screen Recording is not granted,
+    // derive them from NSScreen's backing scale instead, so listDisplays(), the
+    // mouse scale and the a11y pipeline still work. Callers that genuinely need
+    // screenshots will get the actionable error from screenshot().
+    let physicalWidth = Math.round(logicalWidth * backingScale);
+    let physicalHeight = Math.round(logicalHeight * backingScale);
+    let dpiRatio = backingScale;
     try {
       const probe = await this.screenshot();
       physicalWidth = probe.width * probe.scaleFactor;
@@ -155,15 +154,12 @@ export class MacOSAdapter implements PlatformAdapter {
       if (!logicalHeight) logicalHeight = probe.height;
       dpiRatio = physicalWidth > logicalWidth ? physicalWidth / logicalWidth : 1;
     } catch (err) {
-      // Screenshot-helper absent or Screen Recording not granted.
-      // logicalWidth/logicalHeight may already be set from NSScreen above;
-      // if not, we have no dimensions at all — surface a clear error.
+      // No probe. If NSScreen answered we already hold logical dims and the
+      // scaled physical dims; if it did not, we have no dimensions at all —
+      // surface a clear error.
       if (!logicalWidth || !logicalHeight) {
         throw err; // re-throw so init()'s .catch() swallows it, not an opaque crash
       }
-      // Usable logical dims from NSScreen — keep the physical = logical / 1x
-      // fallback set at declaration (screenshot() is the first statement in the
-      // try, so on this path physicalWidth/Height still hold the logical dims).
     }
 
     this.screenSize = { physicalWidth, physicalHeight, logicalWidth, logicalHeight, dpiRatio };
@@ -172,35 +168,25 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async listDisplays(): Promise<Display[]> {
     try {
-      const out = await execFileAsync('osascript', ['-e',
-        `use framework "AppKit"\n` +
-        `set output to ""\n` +
-        `set idx to 0\n` +
-        `set primaryScreen to current application's NSScreen's mainScreen()\n` +
-        `repeat with s in (current application's NSScreen's screens())\n` +
-        `  set frame to frame of s\n` +
-        `  set isPrimary to (s as any) = primaryScreen\n` +
-        `  set output to output & (idx as text) & "|" & (item 1 of item 1 of frame) & "," & (item 2 of item 1 of frame) & "," & (item 1 of item 2 of frame) & "," & (item 2 of item 2 of frame) & "|" & (isPrimary as text) & linefeed\n` +
-        `  set idx to idx + 1\n` +
-        `end repeat\n` +
-        `return output`,
-      ], { timeout: 5_000 });
-
-      const lines = out.stdout.trim().split('\n').filter(Boolean);
+      // NSScreen.screens through mac-screen.ts: index 0 is the primary (menu-bar)
+      // screen, frames are points, and each screen reports its own backing scale.
+      // The inline script that was here did not compile (`(s as any) = primaryScreen`,
+      // -2741), so macOS always fell through to the single-display fallback below.
+      const rows = await readDisplayList();
+      if (!rows) throw new Error('NSScreen enumeration unavailable');
       const primary = await this.getScreenSize();
-      return lines.map((line, i) => {
-        const [idx, bounds, primaryFlag] = line.split('|');
-        const [x, y, w, h] = bounds.split(',').map(v => parseInt(v, 10) || 0);
+      return rows.map((r, i) => {
+        const scale = r.backingScaleFactor > 0 ? r.backingScaleFactor : primary.dpiRatio;
         return {
-          index: parseInt(idx, 10) || i,
-          label: parseInt(idx, 10) === 0 ? 'Built-in Display' : `Display ${i + 1}`,
-          primary: primaryFlag.trim() === 'true',
-          bounds: { x, y, width: w, height: h },
+          index: r.index,
+          label: r.index === 0 ? 'Built-in Display' : `Display ${i + 1}`,
+          primary: r.primary,
+          bounds: { x: r.x, y: r.y, width: r.width, height: r.height },
           physicalSize: {
-            width: Math.round(w * primary.dpiRatio),
-            height: Math.round(h * primary.dpiRatio),
+            width: Math.round(r.width * scale),
+            height: Math.round(r.height * scale),
           },
-          dpiRatio: primary.dpiRatio,
+          dpiRatio: scale,
         };
       });
     } catch {

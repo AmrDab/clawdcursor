@@ -82,6 +82,56 @@ All notable changes to Clawd Cursor will be documented in this file.
   where nothing enabled after launch (including AT-SPI's own switch) exposes
   a Chromium page.
 
+### Fixed
+
+- **macOS Retina: clicks landed 2× off again (#154), in `agent` and `mcp` modes
+  alike.** The NSScreen probe behind `getScreenSize()` used `size of frame`,
+  which throws on macOS 26 (an NSRect bridges into AppleScript as a nested
+  list, not a record). The error was swallowed, the logical width silently fell
+  back to the physical width, `dpiRatio` became 1 and the mouse scale was
+  physical/1280 (3.5 on a 4480×2520 panel) instead of logical/1280 (1.75).
+  Measured on a 2× MacBook display: `image (681,43) → screen (2384,151)`, past
+  the 2240-pt edge. The same bug made `list_displays` report `dpiRatio: 1`,
+  and `NativeDesktop` had a twin on its normal (screenshot-helper) path:
+  `connect()` returned before its DPI probe, so `getDpiRatio()` stayed 1 —
+  `system ocr` / `ocr_read_screen` returned physical pixels labelled as screen
+  coordinates (so `space:"screen"` clicks from OCR missed), `smart_click`'s OCR
+  fallback clicked physical pixels, and `scope:"window"` OCR cropped half the
+  window. One shared probe (`src/platform/mac-screen.ts`) now reads the frame
+  by list index plus `backingScaleFactor`, and is used by the adapter, the
+  helper path and the nut-js fallback alike. The v1.5.0 fix had only ever been
+  exercised against pinned fixtures;
+  `mac-screen.test.ts` runs the real script on a Mac and
+  `scripts/verify-macos.mjs` checks the resulting geometry.
+- **macOS `window list_displays` never enumerated monitors.** Its AppleScript
+  did not compile (`(s as any) = primaryScreen`, -2741), so it always fell back
+  to a single display. `NSScreen.screens` index 0 is the primary; each screen
+  now reports its own `backingScaleFactor`.
+- **The accessibility wake never fired on macOS.** `enable-accessibility.jxa`
+  passed `$.kCFBooleanTrue`, which the JXA bridge exposes as an opaque `Ref`,
+  so every `AXManualAccessibility` set returned `kAXErrorFailure` (-25200) —
+  on Claude Desktop and on a cold Discord alike. Passing an `NSNumber` works: a
+  cold Discord goes from 191 to 1,082 AX nodes within a second. Known
+  limitation, tracked separately: the JXA / System Events walk behind
+  `read_tree` still reads only a sliver of Chromium / Catalyst apps (Claude
+  Desktop 15 of 1,119 AX nodes in 11 s; Discord 13 of 1,082; Freeform 0 of
+  549) and hits its 12 s timeout, so a woken tree is mostly invisible to it.
+- **The wake budget is wall-clock.** It counted only the pauses between
+  re-reads, so on macOS, where that walk takes ~10 s per read, "up to 3 s"
+  became 41 s. Slow reads now count against the budget (one re-read is always
+  attempted).
+- **`scripts/verify-macos.mjs` reported false results.** The compiled-vs-
+  interpreted OCR check compared raw JSON — Swift dictionaries serialize in a
+  random key order per process, while the words and boxes were identical (the
+  Swift script now emits sorted keys as well); the Screen Recording probe
+  called `$.CGPreflightScreenCaptureAccess`, which JXA does not bridge, so it
+  threw and reported "not granted" on a Mac that has the permission, skipping
+  the live-OCR check; and the Electron-wake check passed on a set that had
+  failed. It now asks the native `permission-check` helper, counts AX nodes
+  through the AX C API before and after the wake
+  (`scripts/mac/ax-node-count.swift`) so the wake is judged independently of
+  the tree walk, and checks the Retina geometry and `listDisplays()`.
+
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 
 ### Added

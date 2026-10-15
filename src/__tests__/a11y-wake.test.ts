@@ -31,7 +31,7 @@ describe('getUiTreeWithWake', () => {
 
   it('a thin tree is re-read until the page appears (the sleeping-Electron case: 6, 6, 6, then 14)', async () => {
     const p = platformWith(els(6), els(6), els(6), els(14));
-    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3 });
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, now: () => 0 });   // frozen clock: this counts polls, not time
     expect(r.woke).toBe(true);
     expect(r.tree).toHaveLength(14);
     expect(p.getUiTree).toHaveBeenCalledTimes(4);     // stops as soon as it is dense: no wasted reads
@@ -46,9 +46,19 @@ describe('getUiTreeWithWake', () => {
 
   it('still thin after the whole budget: keeps the first, reports not woken, and stops', async () => {
     const p = platformWith(els(3));
-    const r = await getUiTreeWithWake(p, 7, { pollMs: 1, budgetMs: 4 });
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 1, budgetMs: 4, now: () => 0 });   // frozen clock: this counts polls, not time
     expect(r.woke).toBe(false);
     expect(p.getUiTree).toHaveBeenCalledTimes(1 + 4);  // first read + budget/poll polls, no more
+  });
+
+  it('slow reads count against the budget (wall-clock): 2 s per read cannot turn a 3 s budget into a 40 s wait', async () => {
+    let t = 0;
+    const getUiTree = vi.fn(async () => { t += 2000; return els(3); });   // each read costs 2 s of wall-clock (a System Events walk of a Chromium app takes ~10 s)
+    const p = { getUiTree, getActiveWindow: vi.fn(async () => ({ processId: 1 })) } as any;
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3000, now: () => t });
+    expect(r.woke).toBe(false);
+    // first read, then re-reads starting at +0 s and +2 s of budget; the next would start at +4 s > 3 s → stop (not 3000 polls)
+    expect(getUiTree).toHaveBeenCalledTimes(3);
   });
 
   it('the default wait is about 3 s, not 3 s plus a poll (4 polls of 700 ms)', async () => {

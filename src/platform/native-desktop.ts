@@ -20,6 +20,7 @@ import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen'
 import { llmScale, llmSize } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
+import { readMainScreenInfo } from './mac-screen';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
 
@@ -189,6 +190,23 @@ export class NativeDesktop extends EventEmitter {
   }
 
   /**
+   * macOS: dpiRatio = physical pixels / logical points (2 on Retina), read from
+   * NSScreen through mac-screen.ts — the inline `frame()'s size's width` that
+   * lived here threw on macOS 26 (#154). Runs on BOTH connect() paths: the
+   * screenshot-helper path used to return before it, so getDpiRatio() stayed 1
+   * on every Mac that had the helper, and the OCR → screen-coordinate
+   * conversion (ocr.ts, smart.ts) silently reported physical pixels.
+   * An unreadable NSScreen leaves the ratio at 1.
+   * TODO: multi-monitor — mainScreen only.
+   */
+  private async detectMacDpiRatio(): Promise<void> {
+    const main = await readMainScreenInfo();
+    if (main && main.logicalWidth > 0 && main.logicalWidth < this.screenWidth) {
+      this.dpiRatio = this.screenWidth / main.logicalWidth;
+    }
+  }
+
+  /**
    * "Connect" to the native desktop — detects screen size and configures nut-js.
    * No actual network connection; just initializes the local screen interface.
    */
@@ -204,10 +222,16 @@ export class NativeDesktop extends EventEmitter {
           this.scaleFactor = llmScale(this.screenWidth, this.screenHeight);
           // Clean up the temp file from connect probe
           try { fs.unlinkSync(result.path); } catch { /* ignore */ }
+          // The helper reports physical pixels; OCR → screen coordinates divide by
+          // this. Returning before the probe left it at 1 on every Mac (#154).
+          await this.detectMacDpiRatio();
           this.connected = true;
           console.log(`🐾 Native desktop connected (macOS screenshot-helper)`);
           console.log(`   Screen: ${this.screenWidth}x${this.screenHeight}`);
           console.log(`   LLM scale factor: ${this.scaleFactor.toFixed(2)}x`);
+          if (this.dpiRatio > 1) {
+            console.log(`   DPI ratio: ${this.dpiRatio.toFixed(2)}x (physical/logical)`);
+          }
           return;
         } catch (err: any) {
           console.warn(`⚠️  macOS screenshot-helper failed, falling back to nut-js: ${err?.message || err}`);
@@ -255,19 +279,7 @@ export class NativeDesktop extends EventEmitter {
           }
         } catch { /* non-fatal — dpiRatio stays 1 */ }
       } else if (process.platform === 'darwin') {
-        try {
-          const { execFileSync } = await import('child_process');
-          // NSScreen reports in logical (point) dimensions — compare with physical pixels from screen.grab()
-          // TODO: Multi-monitor support — currently uses mainScreen only. For multi-monitor,
-          // enumerate NSScreen.screens and sum widths to get the full virtual canvas size.
-          const result = execFileSync('osascript', ['-e',
-            'use framework "AppKit"\nreturn (current application\'s NSScreen\'s mainScreen\'s frame()\'s size\'s width) as integer',
-          ], { timeout: 5000, encoding: 'utf-8' }).trim();
-          const logicalW = parseInt(result);
-          if (logicalW > 0 && logicalW < this.screenWidth) {
-            this.dpiRatio = this.screenWidth / logicalW;
-          }
-        } catch { /* non-fatal — dpiRatio stays 1 */ }
+        await this.detectMacDpiRatio();
       } else if (process.platform === 'linux') {
         try {
           // Check common DE scale environment variables first — Wayland only.
