@@ -229,8 +229,16 @@ func readWindows(of app: NSRunningApplication) -> AppRead {
         // Quick refusals (app without accessibility support) are ordinary; only a full timeout is a hang.
         return waited >= Double(axTimeout) * 0.8 && err == .cannotComplete ? .unresponsive : .windows([])
     }
-    let wins = (value as? [AXUIElement]) ?? []
-    return .windows(wins.map { windowDict($0, app) })
+    var out: [[String: Any]] = []
+    for w in (value as? [AXUIElement]) ?? [] {
+        if timeUp() { return .unresponsive }
+        let t1 = Date()
+        let d = windowDict(w, app)
+        // Answered the list, then took a whole messaging timeout on one window: it is stalling.
+        if Date().timeIntervalSince(t1) >= Double(axTimeout) * 0.8 { return .unresponsive }
+        out.append(d)
+    }
+    return .windows(out)
 }
 
 /// Fan out across apps: one hung app costs its own timeout, not everyone's.
@@ -399,7 +407,7 @@ func currentAim() -> Aim {
 let searchAttrs = ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXChildren"]
 
 /// Breadth-first search of one window: shallow matches first, one batched read per element.
-func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, into hits: inout [Hit]) {
+func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, into hits: inout [Hit]) {
     let wantName = aim.name?.lowercased()
     let wantRole = aim.role.map(normRole)
     var level: [AXUIElement] = [root]
@@ -429,6 +437,8 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, into hit
             if matches {
                 hits.append(Hit(element: el, name: title.isEmpty ? desc : title, title: title, desc: desc, ident: ident, role: role,
                                 subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact))
+                // An identifier names one element; walking the rest of a big window would only cost time.
+                if stopAtExactId && exact && aim.name == nil && aim.role == nil { return }
             }
             if !leafRoles.contains(role), let kids = a["AXChildren"] as? [AXUIElement] { next.append(contentsOf: kids) }
         }
@@ -563,6 +573,7 @@ func cmdFrontmost() -> Never {
     if !locked && app.activationPolicy != .regular && AXIsProcessTrusted() {
         let el = appElement(app.processIdentifier)
         for w in ((copyAttr(el, "AXWindows").value as? [AXUIElement]) ?? []).prefix(6) {
+            if timeUp() { break }
             let a = multi(w, ["AXTitle", "AXSubrole", "AXRole", "AXModal"])
             var d: [String: Any] = ["title": str(a["AXTitle"]) ?? "", "subrole": str(a["AXSubrole"]) ?? "", "role": str(a["AXRole"]) ?? ""]
             if bool(a["AXModal"]) == true { d["modal"] = true }
@@ -685,8 +696,10 @@ func cmdFind() -> Never {
     let aim = currentAim()
     let limit = Int(opts["max-results"] ?? "") ?? 200
     var hits: [Hit] = []
+    let idOnly = aim.id != nil && aim.name == nil && aim.role == nil
     for w in windowsToSearch(app) where !timeUp() && hits.count < limit {
-        search(w, aim, maxDepth: 12, limit: limit * 4, into: &hits)
+        search(w, aim, maxDepth: 12, limit: limit * 4, stopAtExactId: idOnly, into: &hits)
+        if idOnly && hits.contains(where: { $0.exact }) { break }
     }
     if hits.isEmpty && timeUp() { fail("timeout", "the element search ran out of time") }
     let ranked = rankHits(hits, action: nil).prefix(limit)

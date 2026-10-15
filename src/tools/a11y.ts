@@ -467,7 +467,7 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         let uiaHits: UiElement[];
         if (ctx.platform) {
-          const elements = await ctx.platform.findElements({ name, controlType, processId });
+          const elements = await ctx.platform.findElements({ name, controlType, automationId, processId });
           uiaHits = automationId
             ? elements.filter((el: UiElement) => el.automationId === automationId)
             : elements;
