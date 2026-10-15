@@ -42,6 +42,19 @@ describe('executeBatch — happy path', () => {
     expect(r.steps.map(s => s.status)).toEqual(['ok', 'ok']);
     expect(tools.open_app.handler).toHaveBeenCalledTimes(1);
   });
+
+  // Live blind test: a step written with the agent-loop's `args` key ran with
+  // NO arguments here. Both spellings are accepted on both batch surfaces.
+  it('accepts `args` as an alias of `arguments` (handler, safety gate and label)', async () => {
+    tools.type_text = okTool('type_text');
+    const seen: any[] = [];
+    safetyFor = (_n, a) => { seen.push(a); return null; };
+    const r = await executeBatch([{ name: 'type_text', args: { action: 'x', text: 'hi' } } as any], ctx);
+    expect(r.allDone).toBe(true);
+    expect(tools.type_text.handler).toHaveBeenCalledWith({ action: 'x', text: 'hi' }, ctx);
+    expect(seen).toEqual([{ action: 'x', text: 'hi' }]);
+    expect(r.steps[0].label).toBe('type_text.x');
+  });
 });
 
 describe('executeBatch — halting', () => {
