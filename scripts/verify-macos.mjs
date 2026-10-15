@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // macOS verification on a real Mac: Retina coordinate scale (#154), the warm OCR
-// path, the accessibility wake, the macOS-only unit tests, and the on-screen
+// path, the accessibility wake, the accessibility helper (window list / active
+// window / tree), the macOS-only unit tests, and the on-screen
 // overlay (glow + pill, pause for the user — interactive, last).
 // Run from the repo root after `npm ci && npm run build`:
 //   node scripts/verify-macos.mjs                 # auto-detects a running Electron app
@@ -184,9 +185,60 @@ try {
   line(verdict, 'enable-accessibility.jxa sets AXManualAccessibility', `pid ${setPid}${target ? ` (${target.name})` : ' (frontmost app)'} → ${JSON.stringify(out)}${why}`);
 } catch (err) { line('FAIL', 'enable-accessibility.jxa sets AXManualAccessibility', String(err.message).slice(0, 160)); }
 
+// ── 7b. the accessibility helper: window list, active window, tree, system dialogs ──
+// The osascript scripts it replaces took 9–10 s for the window list and 12–25 s for a tree,
+// past the old 8 s / 12 s timeouts whose errors were reported as "0 windows" / "empty tree".
+const { macAxBinary } = require(dist('platform/mac-ocr-binary.js'));
+const AX_HELPER = path.join(ROOT, 'scripts', 'mac', 'ax-helper.swift');
+{
+  const t0 = Date.now();
+  macAxBinary.reset();
+  const bin = await macAxBinary.compile(AX_HELPER, path.join(tmp, 'bin'));
+  line(bin ? 'PASS' : 'FAIL', 'compile ax-helper (scripts/mac/ax-helper.swift)', bin ? `${ms(t0)} ms` : 'compile failed — run: swiftc -O scripts/mac/ax-helper.swift -o /tmp/ax  to see the error');
+  if (bin) {
+    const ax = args => { const t = Date.now(); const out = JSON.parse(sh(bin, args)); return { out, ms: ms(t) }; };
+    const front = ax(['frontmost']);
+    const f = front.out.frontmost;
+    line(front.out.ok ? 'PASS' : 'FAIL', 'ax-helper frontmost (NSWorkspace)', `${f ? `${f.name} (${f.activationPolicy})` : 'none'} · locked=${front.out.locked} · ${front.ms} ms`);
+    if (front.out.locked) {
+      for (const c of ['windows', 'active', 'tree']) line('SKIP', `ax-helper ${c}`, 'the screen is locked — unlock it (the AX tree behind the lock screen is empty shells)');
+    } else {
+      const w = ax(['windows']);
+      if (!w.out.ok) line(w.out.kind === 'permission' ? 'SKIP' : 'FAIL', 'ax-helper windows', `${w.out.kind}: ${w.out.error}`);
+      else {
+        let old = null;
+        const t1 = Date.now();
+        try { old = JSON.parse(sh('osascript', ['-l', 'JavaScript', path.join(ROOT, 'scripts', 'mac', 'get-windows.jxa')], { timeout: 90_000 })); } catch { /* too slow / failed — itself the finding */ }
+        const oldMs = ms(t1);
+        const key = x => `${x.processId}\u0000${x.title}`;
+        const mine = new Set(w.out.windows.map(key));
+        const lost = old ? old.filter(x => !mine.has(key(x))).length : null;
+        const verdict = w.ms < 3000 && lost === 0 ? 'PASS' : 'FAIL';
+        line(verdict, 'ax-helper window list: fast, and nothing the old script saw is missing',
+          `${w.out.windows.length} windows in ${w.ms} ms${w.out.unresponsive.length ? ` (+${w.out.unresponsive.length} not responding)` : ''} · old osascript: ${old ? `${old.length} windows` : 'failed'} in ${oldMs} ms${lost ? ` · MISSING ${lost}` : ''}`);
+      }
+      const a = ax(['active']);
+      if (a.out.ok) {
+        const seFront = (() => { try { return sh('osascript', ['-e', 'tell application "System Events" to name of first process whose frontmost is true']); } catch { return '?'; } })();
+        const same = !a.out.active || a.out.active.processName === seFront;
+        line('PASS', 'ax-helper active window', `${a.out.active ? `${a.out.active.processName} via ${a.out.active.source}` : 'none'} · ${a.ms} ms · System Events says ${seFront}${same ? '' : ' (differs: a system dialog or accessory app has the keyboard)'}`);
+        const pid = a.out.active?.processId;
+        if (pid) {
+          const t = ax(['tree', '--pid', String(pid)]);
+          if (!t.out.ok) line('FAIL', 'ax-helper tree of the active app', `${t.out.kind}: ${t.out.error}`);
+          else {
+            const ids = (function count(n) { return !n ? 0 : (n.automationId ? 1 : 0) + (n.children || []).reduce((acc, c) => acc + count(c), 0); })(t.out.tree);
+            line(t.out.nodeCount > 0 ? 'PASS' : 'SKIP', 'ax-helper tree of the active app', `${t.out.nodeCount} nodes, ${ids} with an AXIdentifier, in ${t.ms} ms${t.out.truncated ? ` (truncated: ${t.out.reason})` : ''}`);
+          }
+        }
+      } else line(a.out.kind === 'permission' ? 'SKIP' : 'FAIL', 'ax-helper active window', `${a.out.kind}: ${a.out.error}`);
+    }
+  }
+}
+
 // ── 8. the macOS-only unit tests ──────────────────────────────────────────────
 try {
-  const out = sh('npx', ['vitest', 'run', 'src/__tests__/mac-ocr-binary.test.ts', 'src/__tests__/a11y-wake.test.ts', 'src/__tests__/mac-screen.test.ts', 'src/__tests__/mac-screen-displays.test.ts'], { cwd: ROOT, timeout: 600_000 });
+  const out = sh('npx', ['vitest', 'run', 'src/__tests__/mac-ocr-binary.test.ts', 'src/__tests__/a11y-wake.test.ts', 'src/__tests__/mac-screen.test.ts', 'src/__tests__/mac-screen-displays.test.ts', 'src/__tests__/mac-ax-live.test.ts'], { cwd: ROOT, timeout: 600_000 });
   const m = /Tests\s+(.*)/.exec(out); line('PASS', 'macOS-only unit tests', m ? m[1].replace(/\x1b\[[0-9;]*m/g, '') : 'passed');
 } catch (err) { const o = String(err.stdout || err.message); line('FAIL', 'macOS-only unit tests', (o.match(/FAIL.*|×.*/g) || [o.slice(-300)]).slice(0, 3).join(' | ').replace(/\x1b\[[0-9;]*m/g, '')); }
 

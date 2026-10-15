@@ -45,8 +45,11 @@ export interface MacAxDeps {
   exec(file: string, args: string[], opts: { timeoutMs: number }): Promise<{ stdout: string }>;
   /** The compiled helper if it is built, else null (the JXA scripts are used meanwhile). */
   helper(): string | null;
-  /** Start the one-time background compile of the helper. Safe to call on every use. */
-  ensureHelper(): void;
+  /**
+   * Start (or join) the one-time build of the helper. Resolves its path, or null when it
+   * cannot be built. Safe to call on every use; concurrent callers share one build.
+   */
+  ensureHelper(): Promise<string | null> | void;
   /** Directory holding the JXA fallback scripts. */
   scriptsDir: string;
 }
@@ -76,6 +79,11 @@ const FIND_MAX_RESULTS = 500;
 const JXA_FIND_TIMEOUT_MS = 12_000;
 const JXA_INVOKE_TIMEOUT_MS = 8_000;
 const LSAPPINFO_TIMEOUT_MS = 3_000;
+/**
+ * The helper compiles in a few seconds; the osascript walk it replaces takes 10–25 s. So the
+ * first call waits for the build — but not forever (swiftc can hang); the build carries on.
+ */
+const BUILD_WAIT_MS = 20_000;
 
 const NOT_EMPTY = 'This is NOT an empty result — not "no windows", not a custom-canvas app. Retry, or fall back to a screenshot / OCR.';
 
@@ -396,19 +404,39 @@ export function createMacAx(deps: MacAxDeps): MacAx {
   /** Set once the helper crashed or printed garbage; the JXA path is used from then on. */
   let helperBroken = false;
 
+  /** Join the helper's build, up to BUILD_WAIT_MS. Null: not built (yet) — use the osascript path. */
+  async function waitForBuild(): Promise<string | null> {
+    const building = deps.ensureHelper();
+    if (!building) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        Promise.resolve(building).catch(() => null),
+        new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), BUILD_WAIT_MS); }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   /**
    * Run one helper command. Resolves the parsed reply, or null when the helper
    * is unavailable / unusable (caller falls back to JXA). Throws `MacAxError`
    * for failures the helper itself reported and for timeouts (a JXA retry
    * would only be slower).
    */
-  async function viaHelper(args: string[], timeoutMs: number, what: string): Promise<any | null> {
+  async function viaHelper(args: string[], timeoutMs: number, what: string, opts: { waitForBuild?: boolean } = {}): Promise<any | null> {
     if (process.env.CLAWD_NO_MAC_AX === '1' || helperBroken) return null;
-    const bin = deps.helper();
+    let bin = deps.helper();
     if (!bin) {
-      deps.ensureHelper();
-      return null;
+      if (opts.waitForBuild === false) {
+        // A millisecond fallback exists (lsappinfo): start the build for next time, don't wait for it.
+        Promise.resolve(deps.ensureHelper()).catch(() => { /* stays on the fallback */ });
+        return null;
+      }
+      bin = await waitForBuild();
     }
+    if (!bin) return null;
     let stdout: string;
     try {
       ({ stdout } = await deps.exec(bin, args, { timeoutMs }));
@@ -478,7 +506,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
 
     prepare(): void {
       if (process.env.CLAWD_NO_MAC_AX === '1' || helperBroken) return;
-      if (!deps.helper()) deps.ensureHelper();
+      if (!deps.helper()) Promise.resolve(deps.ensureHelper()).catch(() => { /* stays on osascript */ });
     },
 
     async listWindows(): Promise<WindowInfo[]> {
@@ -525,7 +553,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
 
     async frontmost(): Promise<FrontmostInfo> {
       const what = 'frontmost app lookup';
-      const reply = await viaHelper(['frontmost', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)], HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, what);
+      const reply = await viaHelper(['frontmost', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)], HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, what, { waitForBuild: false });
       if (reply) return { locked: reply.locked === true, app: reply.frontmost ? toFrontmostApp(reply.frontmost) : null };
       // No helper: LaunchServices answers in a few ms without any permission.
       try {
@@ -547,6 +575,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         ['apps', '--name', want, '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
         HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
         what,
+        { waitForBuild: false },
       );
       if (reply) return bestApp((reply.apps ?? []).map(toAppState), want);
       try {
@@ -644,6 +673,22 @@ export async function defaultExec(file: string, args: string[], opts: { timeoutM
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
 const AX_HELPER_SCRIPT = path.join(SCRIPTS_DIR, 'ax-helper.swift');
 
+/**
+ * Build the helper only where swiftc exists. Running `swiftc` on a Mac without the Command Line
+ * Tools pops macOS's "install developer tools" dialog at an agent that never asked for it;
+ * `xcode-select -p` answers the same question silently.
+ */
+export function makeHelperBuilder(d: {
+  devToolsInstalled: () => Promise<boolean>;
+  compile: () => Promise<string | null>;
+}): () => Promise<string | null> {
+  return async () => ((await d.devToolsInstalled()) ? await d.compile().catch(() => null) : null);
+}
+
+let devTools: Promise<boolean> | null = null;
+const devToolsInstalled = (): Promise<boolean> =>
+  (devTools ??= execFileAsync('xcode-select', ['-p'], { timeout: 5_000 }).then(() => true, () => false));
+
 let shared: MacAx | null = null;
 
 /** The process-wide client: compiled helper from ~/.clawdcursor/bin, JXA until it is built. */
@@ -651,8 +696,8 @@ export function defaultMacAx(): MacAx {
   return (shared ??= createMacAx({
     exec: defaultExec,
     helper: () => macAxBinary.cached(AX_HELPER_SCRIPT),
-    // compile() is one-shot and remembers a failure, so calling it on every use is cheap.
-    ensureHelper: () => { macAxBinary.compile(AX_HELPER_SCRIPT).catch(() => { /* stays on JXA */ }); },
+    // compile() is one-shot, shares one build between callers and remembers a failure, so asking on every use is cheap.
+    ensureHelper: makeHelperBuilder({ devToolsInstalled, compile: () => macAxBinary.compile(AX_HELPER_SCRIPT) }),
     scriptsDir: SCRIPTS_DIR,
   }));
 }

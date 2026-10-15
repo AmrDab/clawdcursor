@@ -15,7 +15,7 @@
 import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  createMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner,
+  createMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner, makeHelperBuilder,
   type MacAxDeps, type FrontmostInfo,
 } from '../platform/mac-ax';
 
@@ -24,7 +24,7 @@ type Reply = string | Error | ((file: string, args: string[]) => string | Error)
 /** A runner that records every call and answers from `reply`. */
 function harness(opts: { helper?: string | null; reply?: Reply } = {}) {
   const calls: Array<{ file: string; args: string[]; timeoutMs: number }> = [];
-  const ensureHelper = vi.fn();
+  const ensureHelper = vi.fn<() => Promise<string | null> | void>();
   const deps: MacAxDeps = {
     helper: () => (opts.helper === undefined ? '/fake/ax-helper' : opts.helper),
     ensureHelper,
@@ -807,5 +807,93 @@ describe('prepare (build the helper before it is first needed)', () => {
     const { ax, ensureHelper } = harness({ helper: null });
     ax.prepare();
     expect(ensureHelper).not.toHaveBeenCalled();
+  });
+});
+
+
+describe('first call while the helper is still being built', () => {
+  afterEach(() => { vi.useRealTimers(); });
+
+  /** helper() is null until the build "finishes". */
+  function building(build: () => Promise<string | null>) {
+    let built: string | null = null;
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const ax = createMacAx({
+      helper: () => built,
+      ensureHelper: () => build().then(p => { built = p; return p; }),
+      scriptsDir: '/fake/scripts/mac',
+      exec: async (file, args) => {
+        calls.push({ file, args });
+        return { stdout: file === 'osascript' ? JSON.stringify([WIN()]) : JSON.stringify({ ok: true, windows: [WIN()] }) };
+      },
+    });
+    return { ax, calls };
+  }
+
+  it('waits for the build (a few seconds) rather than paying for a 10–25 s osascript walk', async () => {
+    const { ax, calls } = building(async () => '/fake/ax-helper');
+    await ax.listWindows();
+    expect(calls.map(c => c.file)).toEqual(['/fake/ax-helper']);
+  });
+
+  it('a build that fails falls back to osascript', async () => {
+    const { ax, calls } = building(async () => null);
+    await ax.listWindows();
+    expect(calls.map(c => c.file)).toEqual(['osascript']);
+  });
+
+  it('does not wait forever for a slow build: osascript answers, the build carries on', async () => {
+    vi.useFakeTimers();
+    const { ax, calls } = building(() => new Promise<string | null>(() => { /* never finishes */ }));
+    const p = ax.listWindows();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await p;
+    expect(calls.map(c => c.file)).toEqual(['osascript']);
+  });
+
+  it('frontmost and appState never wait for the build: they have a millisecond lsappinfo answer (the keyboard guard runs before every keystroke)', async () => {
+    const exec = vi.fn(async (file: string, args: string[]) => ({
+      stdout: args[0] === 'front' || args[0] === 'find' ? 'ASN:0x0-0x3003:\n' : '"TextEdit" ASN:0x0-0x3003: \n    bundleID="com.apple.TextEdit"\n    pid = 4242 type="Foreground"\n',
+    }));
+    const ensureHelper = vi.fn(() => new Promise<string | null>(() => { /* a build that never finishes */ }));
+    const ax = createMacAx({ helper: () => null, ensureHelper, scriptsDir: '/fake/scripts/mac', exec });
+    // no fake timers advanced: if either waited for the build this would hang until the test timeout
+    const front = await ax.frontmost();
+    const app = await ax.appState('TextEdit');
+    expect(front.app?.name).toBe('TextEdit');
+    expect(app?.processId).toBe(4242);
+    expect(ensureHelper).toHaveBeenCalled();                 // the build is still kicked off
+    expect(exec.mock.calls.every(c => c[0] === 'lsappinfo')).toBe(true);
+  });
+
+  it('concurrent first calls share one build', async () => {
+    let builds = 0;
+    const { ax, calls } = building(async () => { builds++; return '/fake/ax-helper'; });
+    // each call asks ensureHelper while helper() is still null; the real compile() memoises, this fake counts asks
+    await Promise.all([ax.listWindows(), ax.activeWindow()]);
+    expect(calls.every(c => c.file === '/fake/ax-helper')).toBe(true);
+    expect(builds).toBeGreaterThanOrEqual(1);
+  });
+});
+
+
+describe('makeHelperBuilder — never trigger the "install developer tools" dialog', () => {
+  // Running `swiftc` on a Mac without the Command Line Tools pops a system dialog.
+  // `xcode-select -p` answers the same question silently.
+  it('no developer tools → null, and swiftc is never started', async () => {
+    const compile = vi.fn(async () => '/bin/ax-helper');
+    const build = makeHelperBuilder({ devToolsInstalled: async () => false, compile });
+    await expect(build()).resolves.toBeNull();
+    expect(compile).not.toHaveBeenCalled();
+  });
+
+  it('developer tools present → the compiled path', async () => {
+    const build = makeHelperBuilder({ devToolsInstalled: async () => true, compile: async () => '/bin/ax-helper' });
+    await expect(build()).resolves.toBe('/bin/ax-helper');
+  });
+
+  it('a compile that blows up is just "no helper"', async () => {
+    const build = makeHelperBuilder({ devToolsInstalled: async () => true, compile: async () => { throw new Error('swiftc exploded'); } });
+    await expect(build()).resolves.toBeNull();
   });
 });
