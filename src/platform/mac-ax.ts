@@ -1,0 +1,649 @@
+/**
+ * macOS accessibility client — one place that knows how to ask the OS about
+ * windows and UI elements, shared by `MacOSAdapter` and the legacy
+ * `AccessibilityBridge`.
+ *
+ * Two engines behind one API:
+ *   1. scripts/mac/ax-helper.swift, compiled once into ~/.clawdcursor/bin (same
+ *      content-addressed cache as the OCR and overlay helpers). It talks to the
+ *      AX C API directly: a window list or a window's tree in tens of
+ *      milliseconds, where System Events took 8–25 s.
+ *   2. The original osascript/JXA scripts, used until the helper is built (or
+ *      when `swiftc` is missing / the helper misbehaves).
+ *
+ * The rule both engines follow: a failure is an ERROR, never an empty answer.
+ * A timeout used to be swallowed into `[]` and showed up to agents as
+ * "Windows (0)" / "empty a11y tree — custom-canvas app" — a lie that sent them
+ * down the wrong path (live blind test, 2026-10-15).
+ *
+ * Helper protocol (one JSON object on stdout, exit 0 even for logical failures):
+ *   {"ok":false,"kind":"timeout|locked|permission|unavailable|failed","error":"…"}
+ *   windows   {"ok":true,"windows":[{title,processName,processId,bounds,isMinimized}],
+ *              "unresponsive":[{processId,processName}]}
+ */
+import * as path from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { getPackageRoot } from '../paths';
+import { macAxBinary } from './mac-ocr-binary';
+import type { InvokeAction, UiElement, WindowInfo } from './types';
+
+const execFileAsync = promisify(execFile);
+
+export type MacAxErrorKind = 'timeout' | 'locked' | 'permission' | 'unavailable' | 'failed';
+
+/** A failed AX read — thrown instead of returning an empty result. */
+export class MacAxError extends Error {
+  constructor(readonly kind: MacAxErrorKind, message: string) {
+    super(message);
+    this.name = 'MacAxError';
+  }
+}
+
+export interface MacAxDeps {
+  /** Run an executable and resolve its stdout. Rejects like `execFile` (a timeout sets `killed`). */
+  exec(file: string, args: string[], opts: { timeoutMs: number }): Promise<{ stdout: string }>;
+  /** The compiled helper if it is built, else null (the JXA scripts are used meanwhile). */
+  helper(): string | null;
+  /** Start the one-time background compile of the helper. Safe to call on every use. */
+  ensureHelper(): void;
+  /** Directory holding the JXA fallback scripts. */
+  scriptsDir: string;
+}
+
+// ─── Budgets ────────────────────────────────────────────────────────────────
+/** The helper stops itself at this deadline and reports a timeout… */
+const HELPER_LIST_DEADLINE_MS = 4_000;
+/** …and we only kill it if it is stuck well past that. */
+const HELPER_GRACE_MS = 3_000;
+/**
+ * osascript has no deadline of its own. The window list measured 9.4 s with 15
+ * windows open on an M1 iMac, so the old 8 s limit turned a working call into a
+ * silent "no windows".
+ */
+const JXA_LIST_TIMEOUT_MS = 25_000;
+/** A tree walk gets longer than a list; the helper stops itself, then we allow the same grace. */
+const HELPER_TREE_DEADLINE_MS = 8_000;
+const TREE_MAX_DEPTH = 12;
+const TREE_MAX_NODES = 3_000;
+/** Calculator measured 24.8 s through System Events; the old 12 s limit threw that away. */
+const JXA_TREE_TIMEOUT_MS = 30_000;
+/** Depth the original get-screen-context.jxa walk always used. */
+const JXA_TREE_DEPTH = 8;
+const HELPER_FIND_DEADLINE_MS = 6_000;
+/** An unfiltered find returns the whole tree for the caller to filter (find {automationId} used to); keep it generous. */
+const FIND_MAX_RESULTS = 500;
+const JXA_FIND_TIMEOUT_MS = 12_000;
+const JXA_INVOKE_TIMEOUT_MS = 8_000;
+const LSAPPINFO_TIMEOUT_MS = 3_000;
+
+const NOT_EMPTY = 'This is NOT an empty result — not "no windows", not a custom-canvas app. Retry, or fall back to a screenshot / OCR.';
+
+interface HelperFailure {
+  ok: false;
+  kind?: string;
+  error?: string;
+}
+
+const isTimeout = (err: unknown): boolean =>
+  (err as { killed?: boolean })?.killed === true || (err as { code?: string })?.code === 'ETIMEDOUT';
+
+const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+/** Turn a helper `{ok:false}` reply into the error an agent should read. */
+function helperError(reply: HelperFailure, what: string): MacAxError {
+  switch (reply.kind) {
+    case 'timeout':
+      return new MacAxError('timeout',
+        `${what} timed out — the accessibility service did not answer in time (an app may be hung or busy). ${NOT_EMPTY}`);
+    case 'locked':
+      return new MacAxError('locked',
+        `${what} failed: the screen is locked — the lock screen (loginwindow) owns the display and keyboard. ` +
+        'Unlock the Mac; clawdcursor cannot read or control apps behind it.');
+    case 'permission':
+      return new MacAxError('permission',
+        `${what} failed: Accessibility permission is not granted to the app running clawdcursor ` +
+        '(System Settings → Privacy & Security → Accessibility).');
+    case 'unavailable':
+      return new MacAxError('unavailable', `${what} failed: ${reply.error ?? 'the app does not expose accessibility'}`);
+    default:
+      return new MacAxError('failed', `${what} failed: ${reply.error ?? 'unknown error'}`);
+  }
+}
+
+function timeoutError(what: string, ms: number): MacAxError {
+  return new MacAxError('timeout',
+    `${what} timed out after ${Math.round(ms / 1000)}s — the accessibility service did not answer in time ` +
+    `(an app may be hung or busy). ${NOT_EMPTY}`);
+}
+
+const toWindow = (raw: any): WindowInfo => ({
+  title: raw.title ?? '',
+  processName: raw.processName ?? '',
+  processId: raw.processId ?? 0,
+  bounds: raw.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+  isMinimized: raw.isMinimized ?? false,
+  handle: raw.handle ?? raw.processId,
+});
+
+const ZERO_RECT = { x: 0, y: 0, width: 0, height: 0 };
+
+/** Cross-platform ControlType names (what the tools say) → macOS AX roles. */
+const CONTROL_TYPE_TO_ROLE: Record<string, string> = {
+  Button: 'AXButton', Edit: 'AXTextField', Document: 'AXWebArea', ComboBox: 'AXComboBox',
+  CheckBox: 'AXCheckBox', RadioButton: 'AXRadioButton', Hyperlink: 'AXLink', MenuItem: 'AXMenuItem',
+  Menu: 'AXMenu', Tab: 'AXTabGroup', TabItem: 'AXTab', ListItem: 'AXCell', TreeItem: 'AXOutlineRow',
+  Slider: 'AXSlider', ScrollBar: 'AXScrollBar', ToolBar: 'AXToolbar', StaticText: 'AXStaticText',
+  Text: 'AXStaticText', Window: 'AXWindow', Group: 'AXGroup',
+};
+
+/** 'Button' → 'AXButton'; an AX role passes through; anything else gets the AX prefix. */
+export function axRoleFor(controlType: string): string {
+  return CONTROL_TYPE_TO_ROLE[controlType] ?? (controlType.startsWith('AX') ? controlType : `AX${controlType}`);
+}
+/** AppKit stamps generated ids ("_NS:833") on unlabeled elements — not a name worth showing. */
+const GENERATED_ID = /^_NS:\d+$/;
+
+/**
+ * One AX node (helper or JXA shape) → UiElement.
+ *
+ * `name` falls back to the AXIdentifier when the control has no title /
+ * description: SwiftUI controls (the macOS 26 Calculator) expose nothing else,
+ * and an agent that sees `Button ""` ×20 cannot pick one.
+ */
+export function toUiElement(raw: any, depth?: number, processId?: number): UiElement {
+  const automationId: string = raw.automationId ?? raw.identifier ?? '';
+  const label: string = raw.name ?? '';
+  const secure = raw.secure === true;
+  const value = secure || raw.value === undefined || raw.value === null ? undefined : String(raw.value);
+  return {
+    name: label || (automationId && !GENERATED_ID.test(automationId) ? automationId : ''),
+    controlType: String(raw.controlType ?? raw.role ?? '').replace(/^AX/, ''),
+    subrole: raw.subrole,
+    secure,
+    bounds: raw.bounds ?? { ...ZERO_RECT },
+    value,
+    enabled: raw.enabled,
+    focused: raw.focused,
+    selected: raw.selected,
+    disabled: raw.enabled === false ? true : undefined,
+    busy: raw.busy,
+    offscreen: raw.offscreen,
+    expandable: raw.expandable,
+    expanded: raw.expanded,
+    automationId: automationId || undefined,
+    description: raw.description || undefined,
+    processId: raw.processId ?? processId,
+    depth,
+  };
+}
+
+/** Depth-first flatten of a node tree, parents before children. */
+export function flattenAxTree(node: any, processId?: number, depth = 0, acc: UiElement[] = []): UiElement[] {
+  if (!node) return acc;
+  const el = toUiElement(node, depth, processId);
+  if (el.controlType || el.name) acc.push(el);
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) flattenAxTree(child, processId, depth + 1, acc);
+  }
+  return acc;
+}
+
+// ─── Who owns the keyboard (B11) ───────────────────────────────────────────
+
+export interface FrontmostWindow { title: string; subrole?: string; role?: string; modal?: boolean }
+export interface FrontmostApp {
+  name: string;
+  bundleId?: string;
+  processId: number;
+  activationPolicy: 'regular' | 'accessory' | 'prohibited';
+  windows: FrontmostWindow[];
+}
+/** The frontmost application according to NSWorkspace / LaunchServices — not System Events. */
+export interface FrontmostInfo { locked: boolean; app: FrontmostApp | null }
+
+export type KeyboardOwner =
+  | { kind: 'app' }
+  | { kind: 'locked' }
+  | { kind: 'alert'; name: string; processId: number; bundleId?: string; title?: string };
+
+/**
+ * System Events only ever calls an ordinary app "frontmost". A TCC permission
+ * prompt, an auth dialog or the lock screen is an accessory process: it takes
+ * the keyboard while System Events still names the app behind it, so a
+ * keystroke "to TextEdit" lands on the dialog — a Return can even press Allow.
+ */
+const ALERT_OWNER_BUNDLES = new Set([
+  'com.apple.UserNotificationCenter',               // TCC prompts, "app wants to …"
+  'com.apple.SecurityAgent',                        // password / authorisation prompts
+  'com.apple.coreservices.uiagent',                 // Gatekeeper / quarantine dialogs
+  'com.apple.accessibility.universalAccessAuthWarn', // the Accessibility permission prompt
+  'com.apple.LocalAuthentication.UIAgent',          // Touch ID / password sheets
+]);
+/** Accessory processes that are meant to be typed into, or are ours. */
+const KEYBOARD_OK_BUNDLES = new Set([
+  'com.apple.Spotlight', 'com.apple.dock', 'com.apple.systemuiserver',
+  'com.apple.controlcenter', 'com.apple.notificationcenterui',
+]);
+const KEYBOARD_OK_NAMES = /^(clawd-overlay|ClawdCursor(Host)?)$/i;
+const DIALOG_SUBROLES = new Set(['AXSystemDialog', 'AXDialog']);
+
+export function classifyKeyboardOwner(info: FrontmostInfo): KeyboardOwner {
+  if (info.locked) return { kind: 'locked' };
+  const a = info.app;
+  // A regular app (even one showing its own sheet) is what the caller is driving.
+  if (!a || a.activationPolicy === 'regular') return { kind: 'app' };
+  if (KEYBOARD_OK_BUNDLES.has(a.bundleId ?? '') || KEYBOARD_OK_NAMES.test(a.name)) return { kind: 'app' };
+  const dialog = a.windows.find(w => DIALOG_SUBROLES.has(w.subrole ?? '') || w.role === 'AXSheet');
+  if (ALERT_OWNER_BUNDLES.has(a.bundleId ?? '') || dialog) {
+    return {
+      kind: 'alert', name: a.name, processId: a.processId, bundleId: a.bundleId,
+      title: (dialog ?? a.windows[0])?.title || undefined,
+    };
+  }
+  return { kind: 'app' };
+}
+
+/** Agent-facing explanation for a keyboard that something else owns. */
+export function describeKeyboardOwner(owner: KeyboardOwner): string {
+  if (owner.kind === 'locked') {
+    return 'The screen is locked — the lock screen (loginwindow) owns the keyboard, so keystrokes cannot reach any app. Unlock the Mac, then retry.';
+  }
+  if (owner.kind === 'alert') {
+    return `A system dialog owns the keyboard: "${owner.name}"${owner.title ? ` — "${owner.title}"` : ''} (pid ${owner.processId}) is frontmost per NSWorkspace, ` +
+      'although System Events still names the app behind it. Keystrokes would go to the dialog, not the app you are driving. ' +
+      `Answer it first: accessibility find/invoke with processId ${owner.processId} (read its buttons), or ask the user; then retry.`;
+  }
+  return '';
+}
+
+const toFrontmostApp = (raw: any): FrontmostApp => ({
+  name: raw.name ?? '',
+  bundleId: raw.bundleId ?? undefined,
+  processId: raw.processId ?? 0,
+  activationPolicy: raw.activationPolicy ?? 'regular',
+  windows: Array.isArray(raw.windows) ? raw.windows : [],
+});
+
+/** `lsappinfo info` text → the app it describes (the no-helper fallback; no window detail). */
+function parseLsappinfoApp(text: string): (FrontmostApp & { inFront: boolean }) | null {
+  const name = /^"(.*?)"\s+ASN:/m.exec(text)?.[1];
+  const pid = Number(/\bpid\s*=\s*(\d+)/.exec(text)?.[1]);
+  if (!name || !Number.isFinite(pid)) return null;
+  const bundleId = /bundleID="([^"]+)"/.exec(text)?.[1];
+  const type = /\btype="(\w+)"/.exec(text)?.[1];
+  const activationPolicy = type === 'Foreground' ? 'regular' : type === 'BackgroundOnly' ? 'prohibited' : 'accessory';
+  return { name, bundleId, processId: pid, activationPolicy, windows: [], inFront: /\(in front\)/.test(text) };
+}
+
+function parseLsappinfo(text: string): FrontmostInfo {
+  const app = parseLsappinfoApp(text);
+  if (!app) return { locked: false, app: null };
+  return {
+    locked: app.bundleId === 'com.apple.loginwindow',
+    app: { name: app.name, bundleId: app.bundleId, processId: app.processId, activationPolicy: app.activationPolicy, windows: [] },
+  };
+}
+
+// ─── Launch confirmation (B2) ───────────────────────────────────────────────
+
+/** A running application as NSWorkspace sees it, with the windows the AX API can read. */
+export interface AppState {
+  name: string;
+  bundleId?: string;
+  processId: number;
+  finishedLaunching: boolean;
+  active: boolean;
+  activationPolicy: FrontmostApp['activationPolicy'];
+  launchDate?: number;
+  windows: WindowInfo[];
+  /**
+   * Whether `windows` is a real reading. The compiled helper reads them through
+   * the AX API; the lsappinfo fallback only knows the process, so an empty list
+   * there means "ask the window list", not "no windows".
+   */
+  windowsKnown: boolean;
+}
+
+/** 'open -a' accepts names, "Name.app" and paths; NSWorkspace knows the bare display name. */
+function appSearchName(name: string): string {
+  const base = name.trim().split('/').filter(Boolean).pop() ?? name.trim();
+  return base.replace(/\.app$/i, '');
+}
+
+const toAppState = (raw: any): AppState => ({
+  name: raw.name ?? '',
+  bundleId: raw.bundleId ?? undefined,
+  processId: raw.processId ?? 0,
+  finishedLaunching: raw.finishedLaunching !== false,
+  active: raw.active === true,
+  activationPolicy: raw.activationPolicy ?? 'regular',
+  launchDate: typeof raw.launchDate === 'number' ? raw.launchDate : undefined,
+  windows: Array.isArray(raw.windows) ? raw.windows.map(toWindow) : [],
+  windowsKnown: true,
+});
+
+/** Best match first: exact name, then prefix, then substring; among equals the newest launch. */
+function bestApp(apps: AppState[], want: string): AppState | null {
+  const w = want.toLowerCase();
+  const rank = (a: AppState) => (a.name.toLowerCase() === w ? 0 : a.name.toLowerCase().startsWith(w) ? 1 : 2);
+  return [...apps].sort((a, b) => rank(a) - rank(b) || (b.launchDate ?? 0) - (a.launchDate ?? 0))[0] ?? null;
+}
+
+export interface MacAx {
+  /** Every titled window. Throws `MacAxError` on a timeout / locked screen — never returns `[]` for a failure. */
+  listWindows(): Promise<WindowInfo[]>;
+  /**
+   * The window that has the keyboard: the frontmost app's focused (else main)
+   * window — not "window 1" or the biggest one. Null only when nothing is
+   * frontmost; a timeout / locked screen throws.
+   */
+  activeWindow(): Promise<WindowInfo | null>;
+  /**
+   * The accessibility tree of a process's key window (the frontmost app when
+   * `processId` is omitted), flattened. `truncated` means the walk hit its time
+   * or size budget — what is returned is real but incomplete. A timeout or a
+   * locked screen throws; an app with no window is a genuine `[]`.
+   */
+  uiTree(processId?: number): Promise<{ elements: UiElement[]; truncated: boolean }>;
+  /**
+   * Elements of a process matching a name (title, description or AXIdentifier),
+   * a role and/or an exact AXIdentifier, best match first. A timeout throws.
+   */
+  find(query: ElementQuery): Promise<UiElement[]>;
+  /** Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws. */
+  invoke(query: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult>;
+  /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
+  frontmost(): Promise<FrontmostInfo>;
+  /**
+   * A running app by (display) name — its pid, launch state and readable windows —
+   * straight from NSWorkspace, so a launch can be confirmed without diffing the
+   * (slow, fallible) window list. Null = not running. A timeout throws: the
+   * state is unknown, which is not the same as "not running".
+   */
+  appState(name: string): Promise<AppState | null>;
+  /** Start building the helper now (background, once), so the first real call already has it. */
+  prepare(): void;
+}
+
+export interface ElementQuery {
+  name?: string;
+  controlType?: string;
+  /** Exact AXIdentifier (SwiftUI accessibilityIdentifier). */
+  automationId?: string;
+  processId?: number;
+}
+
+export interface InvokeResult {
+  success: boolean;
+  bounds?: { x: number; y: number; width: number; height: number };
+  data?: Record<string, unknown>;
+  error?: string;
+}
+
+function toInvokeResult(r: any): InvokeResult {
+  return {
+    success: r?.success === true,
+    // A refused click reports the element's rect / centre so the caller can fall back to coordinates.
+    bounds: r?.bounds ?? (r?.clickPoint ? { x: r.clickPoint.x, y: r.clickPoint.y, width: 1, height: 1 } : undefined),
+    // get-value reports its payload at the top level; consumers read res.data?.value.
+    data: r?.data ?? (r?.value !== undefined ? { value: r.value } : undefined),
+    error: typeof r?.error === 'string' ? r.error : undefined,
+  };
+}
+
+export function createMacAx(deps: MacAxDeps): MacAx {
+  /** Set once the helper crashed or printed garbage; the JXA path is used from then on. */
+  let helperBroken = false;
+
+  /**
+   * Run one helper command. Resolves the parsed reply, or null when the helper
+   * is unavailable / unusable (caller falls back to JXA). Throws `MacAxError`
+   * for failures the helper itself reported and for timeouts (a JXA retry
+   * would only be slower).
+   */
+  async function viaHelper(args: string[], timeoutMs: number, what: string): Promise<any | null> {
+    if (process.env.CLAWD_NO_MAC_AX === '1' || helperBroken) return null;
+    const bin = deps.helper();
+    if (!bin) {
+      deps.ensureHelper();
+      return null;
+    }
+    let stdout: string;
+    try {
+      ({ stdout } = await deps.exec(bin, args, { timeoutMs }));
+    } catch (err) {
+      if (isTimeout(err)) throw timeoutError(what, timeoutMs);
+      helperBroken = true;
+      return null;
+    }
+    let reply: any;
+    try {
+      reply = JSON.parse(stdout);
+    } catch {
+      helperBroken = true;
+      return null;
+    }
+    if (!reply || typeof reply !== 'object' || typeof reply.ok !== 'boolean') {
+      helperBroken = true;
+      return null;
+    }
+    if (!reply.ok) throw helperError(reply, what);
+    return reply;
+  }
+
+  /** Run one of the original JXA scripts and parse its JSON. */
+  async function viaJxa(
+    script: string, args: string[], timeoutMs: number, what: string,
+    opts: { errorJsonIsData?: boolean } = {},
+  ): Promise<any> {
+    let stdout: string;
+    try {
+      // The '--' keeps osascript from reading the script's own -Flags as its options.
+      ({ stdout } = await deps.exec('osascript', ['-l', 'JavaScript', path.join(deps.scriptsDir, script), ...(args.length ? ['--', ...args] : [])], { timeoutMs }));
+    } catch (err) {
+      if (isTimeout(err)) throw timeoutError(what, timeoutMs);
+      throw new MacAxError('failed', `${what} failed: ${msg(err)}`);
+    }
+    let out: any;
+    try {
+      out = JSON.parse(stdout);
+    } catch {
+      throw new MacAxError('failed', `${what} failed: unreadable output from ${script}`);
+    }
+    if (!opts.errorJsonIsData && out && typeof out === 'object' && !Array.isArray(out) && out.error) {
+      throw new MacAxError('failed', `${what} failed: ${out.error}`);
+    }
+    return out;
+  }
+
+  async function activeWindow(): Promise<WindowInfo | null> {
+    const what = 'active window lookup';
+    const reply = await viaHelper(
+      ['active', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+      HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
+      what,
+    );
+    if (reply) return reply.active ? toWindow(reply.active) : null;
+    const raw = await viaJxa('get-foreground-window.jxa', [], JXA_LIST_TIMEOUT_MS, what, { errorJsonIsData: true });
+    if (raw?.success === false) {
+      if (/no foreground window/i.test(String(raw.error ?? ''))) return null;
+      throw new MacAxError('failed', `${what} failed: ${raw.error ?? 'unknown error'}`);
+    }
+    return raw ? toWindow(raw) : null;
+  }
+
+  return {
+    activeWindow,
+
+    prepare(): void {
+      if (process.env.CLAWD_NO_MAC_AX === '1' || helperBroken) return;
+      if (!deps.helper()) deps.ensureHelper();
+    },
+
+    async listWindows(): Promise<WindowInfo[]> {
+      const reply = await viaHelper(
+        ['windows', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
+        'window list',
+      );
+      if (reply) {
+        const wins: WindowInfo[] = (reply.windows ?? []).map(toWindow);
+        for (const u of reply.unresponsive ?? []) {
+          wins.push(toWindow({ title: '(not responding)', processName: u.processName, processId: u.processId }));
+        }
+        return wins;
+      }
+      const raw = await viaJxa('get-windows.jxa', [], JXA_LIST_TIMEOUT_MS, 'window list');
+      if (!Array.isArray(raw)) throw new MacAxError('failed', 'window list failed: unexpected output from get-windows.jxa');
+      return raw.map(toWindow);
+    },
+
+    async uiTree(processId?: number): Promise<{ elements: UiElement[]; truncated: boolean }> {
+      const what = `accessibility tree read${processId ? ` (pid ${processId})` : ''}`;
+      const reply = await viaHelper(
+        ['tree', ...(processId ? ['--pid', String(processId)] : []),
+          '--max-depth', String(TREE_MAX_DEPTH), '--max-nodes', String(TREE_MAX_NODES),
+          '--timeout-ms', String(HELPER_TREE_DEADLINE_MS)],
+        HELPER_TREE_DEADLINE_MS + HELPER_GRACE_MS,
+        what,
+      );
+      if (reply) {
+        return { elements: flattenAxTree(reply.tree, reply.processId ?? processId), truncated: reply.truncated === true };
+      }
+      // The script needs an explicit pid; resolve the frontmost app's like the adapter always did.
+      const pid = processId ?? (await activeWindow())?.processId;
+      if (!pid) return { elements: [], truncated: false };
+      const out = await viaJxa(
+        'get-screen-context.jxa',
+        ['-FocusedProcessId', String(pid), '-MaxDepth', String(JXA_TREE_DEPTH)],
+        JXA_TREE_TIMEOUT_MS,
+        what,
+      );
+      return { elements: flattenAxTree(out?.uiTree, pid), truncated: false };
+    },
+
+    async frontmost(): Promise<FrontmostInfo> {
+      const what = 'frontmost app lookup';
+      const reply = await viaHelper(['frontmost', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)], HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS, what);
+      if (reply) return { locked: reply.locked === true, app: reply.frontmost ? toFrontmostApp(reply.frontmost) : null };
+      // No helper: LaunchServices answers in a few ms without any permission.
+      try {
+        const { stdout: front } = await deps.exec('lsappinfo', ['front'], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
+        const asn = front.trim().split(/\s+/)[0];
+        if (!asn.startsWith('ASN:')) return { locked: false, app: null };
+        const { stdout } = await deps.exec('lsappinfo', ['info', asn], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
+        return parseLsappinfo(stdout);
+      } catch (err) {
+        if (isTimeout(err)) throw timeoutError(what, LSAPPINFO_TIMEOUT_MS);
+        return { locked: false, app: null };
+      }
+    },
+
+    async appState(name: string): Promise<AppState | null> {
+      const what = 'app state lookup';
+      const want = appSearchName(name);
+      const reply = await viaHelper(
+        ['apps', '--name', want, '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
+        what,
+      );
+      if (reply) return bestApp((reply.apps ?? []).map(toAppState), want);
+      try {
+        const { stdout: found } = await deps.exec('lsappinfo', ['find', `name=${want}`], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
+        const asn = found.trim().split('\n')[0]?.trim();
+        if (!asn || !asn.startsWith('ASN:')) return null;
+        const { stdout } = await deps.exec('lsappinfo', ['info', asn], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
+        const app = parseLsappinfoApp(stdout);
+        if (!app) return null;
+        return {
+          name: app.name, bundleId: app.bundleId, processId: app.processId, activationPolicy: app.activationPolicy,
+          finishedLaunching: true, active: app.inFront, windows: [], windowsKnown: false,
+        };
+      } catch (err) {
+        if (isTimeout(err)) throw timeoutError(what, LSAPPINFO_TIMEOUT_MS);
+        return null;
+      }
+    },
+
+    async find(q: ElementQuery): Promise<UiElement[]> {
+      const what = 'element search';
+      const reply = await viaHelper(
+        ['find', ...(q.processId ? ['--pid', String(q.processId)] : []),
+          ...(q.name ? ['--name', q.name] : []),
+          ...(q.controlType ? ['--role', axRoleFor(q.controlType)] : []),
+          ...(q.automationId ? ['--id', q.automationId] : []),
+          '--max-results', String(FIND_MAX_RESULTS), '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
+        HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
+        what,
+      );
+      if (reply) return (reply.elements ?? []).map((el: any) => toUiElement(el, undefined, q.processId));
+      const out = await viaJxa(
+        'find-element.jxa',
+        [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
+          ...(q.name ? ['-Name', q.name] : []),
+          ...(q.controlType ? ['-ControlType', q.controlType] : []),
+          // find-element.jxa has no AutomationId concept yet and ignores it; passed so a script that learns it just works.
+          ...(q.automationId ? ['-AutomationId', q.automationId] : [])],
+        JXA_FIND_TIMEOUT_MS,
+        what,
+      );
+      return Array.isArray(out) ? out.map((el: any) => toUiElement(el, undefined, q.processId)) : [];
+    },
+
+    async invoke(q: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult> {
+      const what = 'accessibility invoke';
+      const reply = await viaHelper(
+        ['invoke', ...(q.processId ? ['--pid', String(q.processId)] : []),
+          '--action', q.action,
+          ...(q.name ? ['--name', q.name] : []),
+          ...(q.controlType ? ['--role', axRoleFor(q.controlType)] : []),
+          ...(q.automationId ? ['--id', q.automationId] : []),
+          ...(q.value !== undefined ? ['--value', q.value] : []),
+          '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
+        HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
+        what,
+      );
+      if (reply) return toInvokeResult(reply);
+      const out = await viaJxa(
+        'invoke-element.jxa',
+        [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
+          ...(q.name ? ['-Name', q.name] : []),
+          ...(q.controlType ? ['-ControlType', q.controlType] : []),
+          '-Action', q.action,
+          ...(q.value !== undefined ? ['-Value', q.value] : [])],
+        JXA_INVOKE_TIMEOUT_MS,
+        what,
+        { errorJsonIsData: true },
+      );
+      return toInvokeResult(out);
+    },
+  };
+}
+
+
+// ─── Default wiring ─────────────────────────────────────────────────────────
+
+/** A big window's tree is megabytes of JSON; node's 1 MB default would read that as a crash. */
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+export async function defaultExec(file: string, args: string[], opts: { timeoutMs: number }): Promise<{ stdout: string }> {
+  const { stdout } = await execFileAsync(file, args, { timeout: opts.timeoutMs, maxBuffer: MAX_OUTPUT_BYTES });
+  return { stdout: String(stdout) };
+}
+
+const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
+const AX_HELPER_SCRIPT = path.join(SCRIPTS_DIR, 'ax-helper.swift');
+
+let shared: MacAx | null = null;
+
+/** The process-wide client: compiled helper from ~/.clawdcursor/bin, JXA until it is built. */
+export function defaultMacAx(): MacAx {
+  return (shared ??= createMacAx({
+    exec: defaultExec,
+    helper: () => macAxBinary.cached(AX_HELPER_SCRIPT),
+    // compile() is one-shot and remembers a failure, so calling it on every use is cheap.
+    ensureHelper: () => { macAxBinary.compile(AX_HELPER_SCRIPT).catch(() => { /* stays on JXA */ }); },
+    scriptsDir: SCRIPTS_DIR,
+  }));
+}

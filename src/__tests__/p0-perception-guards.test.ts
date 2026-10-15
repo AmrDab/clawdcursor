@@ -52,8 +52,14 @@ describe('P0-1 — getUiTree defaults to the active-window pid on every platform
   });
 
   it('macos getUiTree resolves getActiveWindow() when pid is omitted', () => {
-    const body = methodBody(read('platform', 'macos.ts'), 'async getUiTree(processId?: number)');
-    expect(body).toContain('getActiveWindow');
+    // The adapter hands the read to the AX client (src/platform/mac-ax.ts), which
+    // owns the foreground-pid default: the compiled helper reads the frontmost
+    // app when no --pid is given, and the osascript path resolves the active
+    // window's pid itself before passing -FocusedProcessId. (Behaviour tests:
+    // mac-ax.test.ts "without a pid …".) Follow the move, as linux did.
+    expect(methodBody(read('platform', 'macos.ts'), 'async getUiTree(processId?: number)')).toContain('this.ax.uiTree(processId)');
+    const body = methodBody(read('platform', 'mac-ax.ts'), 'async uiTree(processId?: number)');
+    expect(body).toContain('activeWindow');
     expect(body).toContain("'-FocusedProcessId'");
   });
 

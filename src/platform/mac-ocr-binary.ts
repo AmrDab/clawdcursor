@@ -8,7 +8,8 @@
  * uses the interpreted script; if `swiftc` is missing or fails the interpreted
  * script stays the engine and the compile is not retried this session.
  *
- * The on-screen overlay (scripts/mac/overlay.swift) is cached the same way.
+ * The on-screen overlay (scripts/mac/overlay.swift) and the accessibility helper
+ * (scripts/mac/ax-helper.swift) are cached the same way.
  */
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -93,3 +94,6 @@ export const resetMacOcrBinaryState = ocrBinary.reset;
 
 /** The on-screen overlay (glow + pill), scripts/mac/overlay.swift. */
 export const macOverlayBinary = swiftBinary('clawd-overlay');
+
+/** The accessibility helper (windows, UI trees, find/invoke), scripts/mac/ax-helper.swift. */
+export const macAxBinary = swiftBinary('ax-helper');

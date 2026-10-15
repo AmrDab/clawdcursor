@@ -279,7 +279,11 @@ export interface PlatformAdapter {
 
   // ─── ACCESSIBILITY ──────────────────────────────────────────────
   getUiTree(processId?: number): Promise<UiElement[]>;
-  findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]>;
+  /**
+   * `automationId` (optional) matches the element's platform identifier exactly —
+   * UIA AutomationId, macOS AXIdentifier. Adapters without the concept ignore it.
+   */
+  findElements(query: { name?: string; controlType?: string; automationId?: string; processId?: number }): Promise<UiElement[]>;
   /** Optional: the window scope(s) the last findElements searched, in order,
    *  so a "(no elements found)" result can say where it looked. */
   lastFindScope?: Array<{ processId?: number; processName?: string; title?: string }> | null;
@@ -297,6 +301,8 @@ export interface PlatformAdapter {
   invokeElement(query: {
     name?: string;
     controlType?: string;
+    /** Exact platform identifier (macOS AXIdentifier); adapters without it ignore it. */
+    automationId?: string;
     processId?: number;
     action?: InvokeAction;
     value?: string;
