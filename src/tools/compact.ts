@@ -257,6 +257,15 @@ function buildCompoundSchema(
           if (merged.length !== existing.enum.length) {
             existing.enum = merged;
           }
+        } else if (Array.isArray(existing.enum) !== Array.isArray(pdef.enum)) {
+          // One action takes FREE TEXT where another takes an enum (find_field's
+          // `purpose` vs compile_ui's). Keeping the enum made the free-text
+          // action uncallable ("expected one of general|find_text|act"), so
+          // publish free text and name the restricted values in the
+          // description; each granular tool still validates its own.
+          const values = (existing.enum ?? pdef.enum)!;
+          delete existing.enum;
+          existing.description = `${existing.description} (Where the action restricts it: one of ${values.join(' | ')}.)`;
         }
         continue;
       }
