@@ -84,6 +84,49 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+Blind mode (accessibility first, no screenshots), from live tests on a Windows 11
+VM and an Ubuntu 24.04 VM:
+
+- **Windows: classic controls were reported as blank "Pane"s.** Windows' UIA
+  client loads the Edit/Button/ComboBox type providers once, on first need, and
+  that load failed when the bridge's first UIA call came from script code —
+  almost every start. Text boxes, buttons and combo boxes then had no type, no
+  value and no Invoke, so `set_value`, `invoke` and `smart_type` failed on them.
+  The bridge now registers the providers at startup.
+- **Windows: the open dialog is what gets read.** `compile_ui` / `read_tree`
+  read the app's main window even while a Save As or error box was in front;
+  they now read the foreground dialog of that app. `window list` includes owned
+  dialogs, and `window focus` finds them.
+- **Windows: no more 10 s stall** when invoking a button that opens a modal box
+  (Save → "replace?"): the press runs on a worker and the call returns after
+  ~1.2 s saying a dialog probably opened (Save-As flow: 10.5 s → 2.2 s).
+- **Windows: the right field by name.** "File name" no longer matches a column
+  header; value reads and writes prefer the edit over its label; the file-name
+  box is filled by typing so the dialog actually takes the new name; control
+  type filters accept any spelling (`MenuItem`, `menu item`…).
+- **`smart_click "Save"` clicks the Save button,** not the "Save as" title: a
+  standalone word beats the same word inside a longer phrase.
+- **Linux: `invoke` by name picks what you can see.** It took the first match
+  in tree order — a hidden 0×0 toolbar "Save" instead of the dialog's — and
+  reported success. Visible matches in the active window now win; a match that
+  only exists hidden is refused.
+- **Linux: text fields and the Calculator display read empty.** PyGObject's
+  Text interface clashed with an old method name; text is now read through the
+  interface explicitly.
+- **Linux: `focused` returned another app's element,** and a window without a
+  process id made `read_tree` read a different app. Both are scoped to the
+  foreground app / window now.
+- **Linux: `smart_read` no longer claims accessibility is unavailable,** and
+  the tree lists visible elements first (closed menus and nameless rows last;
+  GTK4 positions corrected).
+- **`open_app` says what really happened.** "Opened" with the window, or
+  "Started … no window yet, do not launch it again" while a slow app loads, or
+  an error when nothing started — never "Launched" with nothing on screen.
+  Linux resolves app names through installed `.desktop` entries
+  (calculator → gnome-calculator).
+- **`batch` accepts `args` and `arguments`** for each step, on both the MCP
+  and the agent-loop batch.
+
 - **macOS Retina: clicks landed 2× off again (#154), in `agent` and `mcp` modes
   alike.** The NSScreen probe behind `getScreenSize()` used `size of frame`,
   which throws on macOS 26 (an NSRect bridges into AppleScript as a nested
