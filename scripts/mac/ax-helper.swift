@@ -159,9 +159,20 @@ func policyName(_ app: NSRunningApplication) -> String {
 
 // MARK: - Applications and windows
 
-func candidateApps() -> [NSRunningApplication] {
+/// Real apps announce themselves ("finished launching") within moments. WebKit's Web Content / Networking
+/// processes (XPC services) and Electron's renderer helpers never do, never answer accessibility queries, and
+/// System Events never listed them — reading them only costs a full timeout each and adds "not responding" noise.
+/// `allowLaunching` keeps an app that started in the last 30 s: the launch check wants to see that one coming up.
+func isRealApp(_ app: NSRunningApplication, allowLaunching: Bool) -> Bool {
+    if app.bundleURL?.pathExtension == "xpc" { return false }
+    if app.isFinishedLaunching { return true }
+    guard allowLaunching, let started = app.launchDate else { return false }
+    return Date().timeIntervalSince(started) < 30
+}
+
+func candidateApps(allowLaunching: Bool = false) -> [NSRunningApplication] {
     NSWorkspace.shared.runningApplications.filter {
-        !$0.isTerminated && $0.activationPolicy != .prohibited && $0.processIdentifier != ownPid
+        !$0.isTerminated && $0.activationPolicy != .prohibited && $0.processIdentifier != ownPid && isRealApp($0, allowLaunching: allowLaunching)
     }
 }
 
@@ -646,7 +657,7 @@ func appNames(_ app: NSRunningApplication) -> [String] {
 func cmdApps() -> Never {
     requireUsableSession()
     let want = (opts["name"] ?? "").lowercased()
-    let apps = candidateApps().filter { want.isEmpty || appNames($0).contains { $0.contains(want) } }
+    let apps = candidateApps(allowLaunching: true).filter { want.isEmpty || appNames($0).contains { $0.contains(want) } }
     let (results, unresponsive) = readAllApps(apps)
     var out: [[String: Any]] = []
     for app in apps {

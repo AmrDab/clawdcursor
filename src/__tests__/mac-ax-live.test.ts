@@ -37,14 +37,16 @@ function run(args: string[], timeoutMs = 30_000): Promise<any> {
   });
 }
 
-describe.skipIf(!isMac)('ax-helper — protocol (macOS)', () => {
-  beforeAll(async () => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-axlive-'));
-    macAxBinary.reset();
-    helper = await macAxBinary.compile(HELPER_SRC, path.join(tmp, 'bin'));
-  }, 240_000);
-  afterAll(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
+// Built once for the whole file and removed after the last group has run.
+beforeAll(async () => {
+  if (!isMac) return;
+  tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-axlive-'));
+  macAxBinary.reset();
+  helper = await macAxBinary.compile(HELPER_SRC, path.join(tmp, 'bin'));
+}, 240_000);
+afterAll(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
 
+describe.skipIf(!isMac)('ax-helper — protocol (macOS)', () => {
   it('compiles with swiftc', () => {
     expect(helper, 'swiftc could not build scripts/mac/ax-helper.swift').toBeTruthy();
   });
@@ -101,11 +103,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
   let usable = false;
 
   beforeAll(async () => {
-    tmp = tmp ?? fs.mkdtempSync(path.join(os.tmpdir(), 'cc-axlive-'));
-    if (!helper) {
-      macAxBinary.reset();
-      helper = await macAxBinary.compile(HELPER_SRC, path.join(tmp, 'bin'));
-    }
+    if (!helper) return;
     const probe = await run(['windows']);
     usable = probe.ok === true;
     if (!usable) {
@@ -285,6 +283,35 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       expect(typeof r.active.processName).toBe('string');
       expect(typeof r.active.bounds.width).toBe('number');
       expect(['AXFocusedWindow', 'AXMainWindow', 'AXWindows', 'none']).toContain(r.active.source);
+    }
+  });
+
+  it('WebKit / Electron helper processes are not apps: a healthy desktop lists nothing as "not responding"', async (ctx) => {
+    if (!usable) return ctx.skip();
+    // "Safari Web Content", "Mail Networking", Electron renderers: XPC/helper processes that never finish
+    // launching and never answer AX. Reading them cost 1.5 s each and added bogus "(not responding)" rows.
+    const t0 = Date.now();
+    const r = await run(['windows']);
+    expect(r.unresponsive).toEqual([]);
+    expect(Date.now() - t0).toBeLessThan(3_000);
+  });
+
+  // Last on purpose: it freezes the fixture.
+  it('a hung app costs only its own timeout, is reported rather than dropped, and does not take the list down', async (ctx) => {
+    if (!usable) return ctx.skip();
+    fixture!.kill('SIGSTOP');
+    try {
+      const t0 = Date.now();
+      const r = await run(['windows', '--ax-timeout-ms', '800']);
+      expect(Date.now() - t0).toBeLessThan(3_500);
+      expect(r.ok).toBe(true);
+      expect(r.unresponsive.some((u: any) => u.processId === pid)).toBe(true);
+      expect(Array.isArray(r.windows)).toBe(true);
+
+      const tree = await run(['tree', '--pid', String(pid), '--ax-timeout-ms', '800']);
+      expect(tree).toMatchObject({ ok: false, kind: 'timeout' });
+    } finally {
+      fixture!.kill('SIGCONT');
     }
   });
 });
