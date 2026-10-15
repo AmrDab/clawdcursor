@@ -53,6 +53,13 @@ describe('agent batch — happy path', () => {
     expect(r.success).toBe(true);
     expect(r.text).toMatch(/all 2 steps completed/);
   });
+
+  it('accepts the MCP batch spelling `arguments` as an alias of `args`', async () => {
+    unified.type = uTool('type');
+    const r = await run([{ name: 'type', arguments: { text: 'hi' } }]);
+    expect(r.success).toBe(true);
+    expect(unified.type.execute).toHaveBeenCalledWith({ text: 'hi' }, expect.anything());
+  });
 });
 
 describe('agent batch — halting', () => {

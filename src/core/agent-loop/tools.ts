@@ -289,7 +289,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
                 : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}.`)
-            : `a11y invoke "${name}" missed — element not found or not actionable.`,
+            : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`,
           targetLabel: name,
         };
       },
@@ -896,21 +896,29 @@ export function buildUnifiedTools(): UnifiedTool[] {
           }
         }
 
-        const res = await ctx.platform.launchApp(launchName, {
-          alwaysNewInstance: alias?.alwaysNewInstance,
-          uwpAppId: alias?.uwpAppId,
-          // Pick the searchTerm that gives the OS native launcher (Start
-          // Menu / Spotlight) the best chance of resolving to the right
-          // app — alias.searchTerm wins when present, mac falls back to
-          // the bundle name.
-          searchTerm: alias?.searchTerm
-            ?? (platform === 'darwin' ? alias?.macOSAppName : undefined),
-        });
+        let res: Awaited<ReturnType<typeof ctx.platform.launchApp>>;
+        try {
+          res = await ctx.platform.launchApp(launchName, {
+            alwaysNewInstance: alias?.alwaysNewInstance,
+            uwpAppId: alias?.uwpAppId,
+            // Pick the searchTerm that gives the OS native launcher (Start
+            // Menu / Spotlight) the best chance of resolving to the right
+            // app — alias.searchTerm wins when present, mac falls back to
+            // the bundle name.
+            searchTerm: alias?.searchTerm
+              ?? (platform === 'darwin' ? alias?.macOSAppName : undefined),
+          });
+        } catch (err) {
+          return { success: false, text: `Failed to launch "${name}": ${err instanceof Error ? err.message : String(err)}` };
+        }
         await sleep(800);
-        return {
-          success: true,
-          text: res.title ? `Opened "${name}" (pid=${res.pid}, window="${res.title}")` : `Launched "${name}" (no window surfaced yet)`,
-        };
+        // No window is not a launch: say so instead of "Launched".
+        return res.title
+          ? { success: true, text: `Opened "${name}" (pid=${res.pid}, window="${res.title}")` }
+          : {
+            success: false,
+            text: `Could not confirm "${name}" opened — no window appeared${res.pid ? ` (process pid=${res.pid} is still running)` : ''}. Check list_windows before acting on it.`,
+          };
       },
     },
 

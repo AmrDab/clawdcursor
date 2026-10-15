@@ -214,14 +214,14 @@
     },
     {
       "name": "batch",
-      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? }. `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
+      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
       "category": "orchestration",
       "parameters": {
         "type": "object",
         "properties": {
           "steps": {
             "type": "array",
-            "description": "Ordered steps to run. Each step is a normal tool call: { \"name\": \"<tool>\", \"arguments\": {...}, \"expect\"?: {\"window\"?,\"element\"?} }. (A JSON-encoded string of the same array is also accepted.)",
+            "description": "Ordered steps to run. Each step is a normal tool call: { \"name\": \"<tool>\", \"arguments\": {...}, \"expect\"?: {\"window\"?,\"element\"?} } (\"args\" is accepted for \"arguments\"). (A JSON-encoded string of the same array is also accepted.)",
             "items": {
               "type": "object",
               "properties": {
@@ -232,6 +232,10 @@
                 "arguments": {
                   "type": "object",
                   "description": "Arguments for that tool, e.g. {\"action\":\"type\",\"text\":\"hi\"}. May include an `expect` ASSERTION ARRAY (post-condition) — verified after the step by the tool itself."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Alias of `arguments`."
                 },
                 "expect": {
                   "type": "object",
@@ -1704,7 +1708,7 @@
     },
     {
       "name": "open_app",
-      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, gtk-launch / xdg-open on Linux).",
+      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Errors when no window appears.",
       "category": "orchestration",
       "parameters": {
         "type": "object",

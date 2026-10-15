@@ -388,7 +388,8 @@ export class AccessibilityBridge {
           clickPoint: { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) },
         };
       }
-      return { success: false, error: `Element not found or not actionable: ${opts.name ?? opts.automationId}` };
+      const why = res.data && typeof (res.data as any).error === 'string' ? ` (${(res.data as any).error})` : '';
+      return { success: false, error: `Element not found or not actionable: ${opts.name ?? opts.automationId}${why}` };
     } catch (err) {
       return { success: false, error: String(err) };
     }
@@ -678,7 +679,33 @@ export class AccessibilityBridge {
           } catch { /* skip */ }
         }
       } else {
-        context += '(Accessibility unavailable on Linux — browser CDP and OCR remain available)';
+        // Linux: the LinuxAdapter's AT-SPI bridge — the same source read_tree uses.
+        const adapter = await linuxAdapter();
+        const perms = await adapter.checkPermissions().catch(() => null);
+        if (!perms?.accessibility) {
+          context += '(Accessibility unavailable on Linux — the AT-SPI bridge needs python3-gi + gir1.2-atspi-2.0 and a running at-spi bus; browser CDP and OCR remain available)';
+        } else {
+          const windows = await adapter.listWindows().catch(() => []);
+          if (windows.length) {
+            context += 'WINDOWS:\n';
+            for (const w of windows) {
+              context += `  🟢 [${w.processName}] "${w.title}" pid:${w.processId} at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}\n`;
+            }
+          }
+          // On-screen elements only: closed menus / hidden toolbars report 0x0.
+          const tree = (await adapter.getUiTree(focusedProcessId))
+            .filter(el => !el.offscreen && el.bounds.width > 0 && el.bounds.height > 0);
+          context += `\nFOCUSED WINDOW UI TREE${focusedProcessId ? ` (pid:${focusedProcessId})` : ''}:\n`;
+          for (const el of tree) {
+            if (!el.name?.trim() && !el.value && !el.focused) continue;
+            context += `  [${el.controlType}] "${el.name ?? ''}" @${el.bounds.x},${el.bounds.y}` +
+              `${el.value ? ` value="${el.value.substring(0, 100)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}\n`;
+            if (context.length > AccessibilityBridge.MAX_CONTEXT_CHARS) {
+              context += '  ... (truncated)\n';
+              break;
+            }
+          }
+        }
       }
     } catch (err) {
       context += `\n[A11y tree unavailable: ${err}]\n`;

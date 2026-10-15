@@ -60,7 +60,7 @@ class CoordType:
 
 class StateType:
     (FOCUSED, ENABLED, SENSITIVE, SELECTED, BUSY, VISIBLE, SHOWING,
-     CHECKED, PRESSED, EXPANDED, EXPANDABLE, EDITABLE) = range(12)
+     CHECKED, PRESSED, EXPANDED, EXPANDABLE, EDITABLE, ACTIVE) = range(13)
 
 
 class Cache:
@@ -119,17 +119,21 @@ class Action:
 
 
 class Text:
+    """Atspi.Text as PyGObject exposes it: interface functions taking the
+    Accessible as their first argument."""
+    @staticmethod
+    def get_character_count(acc):
+        return len(acc.text or '')
+
+    @staticmethod
+    def get_text(acc, a, b):
+        return (acc.text or '')[a:b]
+
+
+class EditableText:
     def __init__(self, acc):
         self.acc = acc
 
-    def get_character_count(self):
-        return len(self.acc.text or '')
-
-    def get_text(self, a, b):
-        return (self.acc.text or '')[a:b]
-
-
-class EditableText(Text):
     def set_text_contents(self, s):
         self.acc.text = s
         return True
@@ -184,7 +188,11 @@ class Acc:
     def get_process_id(self): return self.pid
     def get_accessible_id(self): return None
     def get_value_iface(self): return Value(self) if self.value is not None else None
-    def get_text_iface(self): return Text(self) if self.text is not None else None
+    # Real PyGObject: get_text_iface() returns the Accessible itself, and
+    # Accessible.get_text is the deprecated NO-ARGUMENT getter that shadows
+    # Text.get_text(start, end) — calling .get_text(0, n) on it raises.
+    def get_text_iface(self): return self if self.text is not None else None
+    def get_text(self): return self
     def get_editable_text_iface(self): return EditableText(self) if self.editable else None
     def get_selection_iface(self): return self.selection
     def get_parent(self): return self.parent
@@ -203,17 +211,43 @@ tabs = Acc('', 'page tab list', children=[tab1, tab2], selection=True)
 empty_state = Acc('Ghost', 'push button', states=())
 sensitive_only = Acc('Half', 'push button', states=(StateType.SENSITIVE,))
 rel = Acc('Rel', 'push button', screen=(0, 0, 0, 0), window=(5, 6, 7, 8))
-node = Acc('Node', 'tree item', states=(StateType.ENABLED, StateType.SENSITIVE, StateType.EXPANDABLE), actions=['expand'])
+node = Acc('Node', 'tree item', states=(StateType.ENABLED, StateType.SENSITIVE, StateType.EXPANDABLE,
+                                       StateType.VISIBLE, StateType.SHOWING), actions=['expand'])
+# GTK4 on X11: SCREEN extents are 0,0 with the real size; WINDOW has the position.
+gtk4 = Acc('Gtk4', 'push button', screen=(0, 0, 64, 44), window=(16, 349, 64, 44))
 frame = Acc('Calculator', 'frame', screen=(100, 200, 800, 600),
-            children=[seven, agree, name_field, display, canvas, tabs, empty_state, sensitive_only, rel, node])
+            children=[seven, agree, name_field, display, canvas, tabs, empty_state, sensitive_only, rel, node, gtk4])
 calc_app = Acc('gnome-calculator', 'application', children=[frame], pid=4242)
-other_app = Acc('mousepad', 'application', children=[Acc('7', 'push button', pid=5555)], pid=5555)
-desktop = Acc('main', 'desktop frame', children=[other_app, calc_app], pid=0)
+# Another app whose (inactive) window still holds FOCUSED on a widget.
+other_app = Acc('mousepad', 'application', pid=5555, children=[
+    Acc('7', 'push button', pid=5555),
+    Acc('', 'text', pid=5555, text='other app', states=(StateType.FOCUSED, StateType.VISIBLE, StateType.SHOWING)),
+])
+# An editor with a Save dialog open over its main window: the main window has
+# a closed menu + a hidden toolbar "Save" (0x0) and keeps FOCUSED on its text
+# view; the ACTIVE dialog has the real, visible "Save" button.
+HIDDEN = (StateType.ENABLED, StateType.SENSITIVE)
+toolbar_save = Acc('Save', 'push button', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
+menu_save = Acc('Save      ', 'menu item', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
+only_hidden = Acc('Print', 'menu item', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
+main_view = Acc('', 'text', pid=7777, text='hello world', screen=(5, 50, 400, 300),
+                states=(StateType.FOCUSED, StateType.VISIBLE, StateType.SHOWING, StateType.ENABLED))
+nameless_row = Acc('', 'list item', pid=7777, screen=(5, 400, 100, 20))
+main_win = Acc('notes.txt - Editor', 'frame', screen=(0, 0, 640, 480), pid=7777,
+               children=[menu_save, only_hidden, toolbar_save, main_view, nameless_row])
+dialog_save = Acc('Save', 'push button', screen=(500, 600, 80, 30), actions=['click'], pid=7777)
+file_name = Acc('Name', 'text', pid=7777, text='notes.txt', editable=True, screen=(300, 200, 200, 25),
+                states=(StateType.FOCUSED, StateType.VISIBLE, StateType.SHOWING, StateType.ENABLED))
+dialog = Acc('Save As', 'file chooser', screen=(200, 100, 600, 560), pid=7777,
+             states=(StateType.ACTIVE, StateType.ENABLED, StateType.VISIBLE, StateType.SHOWING),
+             children=[file_name, dialog_save])
+editor_app = Acc('editor', 'application', children=[main_win, dialog], pid=7777, screen=(0, 0, 0, 0))
+desktop = Acc('main', 'desktop frame', children=[other_app, calc_app, editor_app], pid=0)
 
 gi = types.ModuleType('gi')
 gi.require_version = lambda *a, **k: None
 repo = types.ModuleType('gi.repository')
-repo.Atspi = types.SimpleNamespace(CoordType=CoordType, StateType=StateType, Cache=Cache,
+repo.Atspi = types.SimpleNamespace(CoordType=CoordType, StateType=StateType, Cache=Cache, Text=Text,
                                    get_desktop=lambda i: desktop)
 gi.repository = repo
 sys.modules['gi'] = gi
@@ -242,5 +276,32 @@ OUT['expand'] = bridge.cmd_invoke('Node', None, 4242, 'expand', None)
 OUT['no_action'] = bridge.cmd_invoke('canvas', None, 4242, 'click', None)
 OUT['missing'] = bridge.cmd_invoke('nope', None, 4242, 'click', None)
 OUT['cache_mask'] = getattr(calc_app, 'cache_mask', None)
+
+# Text views: value comes from the Text interface (was always empty).
+OUT['text_view'] = bridge.node_to_dict(main_view)
+OUT['gtk4'] = bridge.node_to_dict(gtk4)
+OUT['label_value'] = bridge.node_to_dict(Acc('Seven', 'label', text='Seven'))['value']
+
+# Hidden duplicates: the dialog's visible Save wins over the hidden toolbar one.
+OUT['save'] = bridge.cmd_invoke('Save', None, 7777, 'click', None)
+OUT['save_done'] = {'dialog': dialog_save.action.done, 'toolbar': toolbar_save.action.done,
+                    'menu': menu_save.action.done}
+OUT['hidden_only'] = bridge.cmd_invoke('Print', None, 7777, 'click', None)
+OUT['hidden_only_done'] = only_hidden.action.done
+
+# Tree order: on-screen elements first (active dialog first), hidden last,
+# nameless rows dropped.
+OUT['tree'] = [(e['name'], e['controlType']) for e in bridge.cmd_get_tree(7777)['elements']]
+
+# Focus: scoped to the app, active window first — never another app's widget.
+OUT['focused_editor'] = bridge.cmd_focused(7777)['element']
+name_field.states.discard(StateType.FOCUSED)  # focused by the 'focus' invoke above
+OUT['focused_calc'] = bridge.cmd_focused(4242)['element']
+
+# Window without _NET_WM_PID: scope by the active window's title.
+OUT['by_title'] = [e['processId'] for e in bridge.cmd_get_tree(None, 'Calculator')['elements']][:1]
+dialog.states.discard(StateType.ACTIVE)
+OUT['by_unknown_title'] = bridge.cmd_get_tree(None, 'xcalc')['elements']
+dialog.states.add(StateType.ACTIVE)
 
 sys.stdout.write(json.dumps(OUT))

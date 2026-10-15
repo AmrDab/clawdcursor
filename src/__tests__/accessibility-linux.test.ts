@@ -26,6 +26,7 @@ const adapter = vi.hoisted(() => ({
   invokeElement: vi.fn(),
   focusWindow: vi.fn(),
   getFocusedElement: vi.fn(),
+  getUiTree: vi.fn(),
 }));
 vi.mock('../platform/index', () => ({ getPlatform: async () => adapter }));
 
@@ -53,6 +54,7 @@ describe('AccessibilityBridge on Linux', () => {
     adapter.invokeElement.mockResolvedValue({ success: false });
     adapter.focusWindow.mockResolvedValue(true);
     adapter.getFocusedElement.mockResolvedValue(null);
+    adapter.getUiTree.mockResolvedValue([]);
     setPlatform('linux');
   });
 
@@ -123,9 +125,31 @@ describe('AccessibilityBridge on Linux', () => {
     await expect(bridge.getFocusedElement()).resolves.toMatchObject({ name: 'Name', controlType: 'Edit', value: 'Ada', processId: 4242, isEnabled: true });
   });
 
-  it('returns an explanatory screen context message', async () => {
+  // Live blind test (Ubuntu 24.04): smart_read said "Accessibility unavailable
+  // on Linux" while read_tree worked — getScreenContext never asked AT-SPI.
+  it('screen context lists windows and the focused window tree from AT-SPI', async () => {
+    adapter.getUiTree.mockResolvedValue([
+      { name: '', controlType: 'Edit', bounds: { x: 100, y: 377, width: 360, height: 42 }, value: '15', focused: true },
+      { name: '7', controlType: 'Button', bounds: { x: 116, y: 549, width: 64, height: 44 } },
+      { name: 'Save      ', controlType: 'MenuItem', bounds: { x: 0, y: 0, width: 0, height: 0 }, offscreen: true },
+    ]);
     const { AccessibilityBridge } = await import('../platform/accessibility');
     const bridge = new AccessibilityBridge();
-    await expect(bridge.getScreenContext()).resolves.toContain('Linux');
+    const ctx = await bridge.getScreenContext(4242);
+    expect(adapter.getUiTree).toHaveBeenCalledWith(4242);
+    expect(ctx).not.toMatch(/unavailable/i);
+    expect(ctx).toContain('[gnome-calculator] "Calculator" pid:4242');
+    expect(ctx).toContain('[Edit] "" @100,377 value="15" [FOCUSED]');
+    expect(ctx).toContain('[Button] "7" @116,549');
+    expect(ctx).not.toContain('Save'); // hidden 0x0 menu item is noise
+  });
+
+  it('screen context says why when the AT-SPI bridge is unavailable', async () => {
+    adapter.checkPermissions.mockResolvedValue({ input: true, accessibility: false, screenRecording: true });
+    const { AccessibilityBridge } = await import('../platform/accessibility');
+    const bridge = new AccessibilityBridge();
+    const ctx = await bridge.getScreenContext();
+    expect(ctx).toMatch(/AT-SPI/);
+    expect(adapter.getUiTree).not.toHaveBeenCalled();
   });
 });

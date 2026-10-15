@@ -7,7 +7,8 @@
  * machinery: UnifiedTool catalog, AgentToolContext, and the loop's own
  * `safety.evaluate` chokepoint. Declarative + guarded:
  *
- *   - Each step { name, args, precheck? } is a normal agent-loop tool call.
+ *   - Each step { name, args, precheck? } is a normal agent-loop tool call
+ *     (`arguments` is accepted for `args`, matching the MCP batch).
  *   - Optional `precheck` ({window}|{element}) is re-checked against LIVE state
  *     before the step — so an action can't fire into the wrong window.
  *   - Steps get the SAME per-call treatment as single tool calls (audit
@@ -33,6 +34,8 @@ import { windowTextIncludes } from '../../tools/window-text';
 interface AgentBatchStep {
   name: string;
   args?: Record<string, unknown>;
+  /** Alias of `args` — the MCP batch's spelling. */
+  arguments?: Record<string, unknown>;
   /** Precondition re-checked against live state before the step. */
   precheck?: { element?: string; window?: string };
   /** Legacy alias: an OBJECT here is treated as `precheck`; an ARRAY is
@@ -62,7 +65,7 @@ export function buildBatchTool(): UnifiedTool {
     name: 'batch',
     description:
       'Run SEVERAL known next actions in ONE call instead of one per turn (saves round-trips). ' +
-      'steps = JSON array of {"name","args","precheck"?}. Each step is a normal tool call (e.g. ' +
+      'steps = JSON array of {"name","args","precheck"?} ("arguments" is accepted for "args"). Each step is a normal tool call (e.g. ' +
       '{"name":"type","args":{"text":"hi"}}). Optional "precheck" is a precondition re-checked ' +
       'against live state before the step: {"window":"notepad"} (that window must be focused) or ' +
       '{"element":"Send"} (that a11y element must exist). An `expect` assertion array inside a ' +
@@ -78,12 +81,13 @@ export function buildBatchTool(): UnifiedTool {
         steps: {
           type: 'array',
           maxItems: 10,
-          description: 'The steps to run (max 10). Each step is a normal tool call: {"name","args","precheck"?}, e.g. {"name":"type","args":{"text":"hi"}}.',
+          description: 'The steps to run (max 10). Each step is a normal tool call: {"name","args","precheck"?} ("arguments" is accepted for "args"), e.g. {"name":"type","args":{"text":"hi"}}.',
           items: {
             type: 'object',
             properties: {
               name: { type: 'string', description: 'Tool to call (e.g. "type", "key", "invoke_element").' },
               args: { type: 'object', description: 'Arguments object for that tool (may include an `expect` assertion array, verified after the step).' },
+              arguments: { type: 'object', description: 'Alias of `args`.' },
               precheck: { type: 'object', description: 'Optional precondition re-checked against live state before the step: {"window":"..."} or {"element":"..."}.' },
             },
             required: ['name'],
@@ -123,7 +127,8 @@ export function buildBatchTool(): UnifiedTool {
 
       for (let i = 0; i < steps.length; i++) {
         const step = steps[i];
-        const label = step.label || `${step.name}${step.args?.action ? '.' + String(step.args.action) : ''}`;
+        const a = step.args ?? step.arguments ?? {};
+        const label = step.label || `${step.name}${a.action ? '.' + String(a.action) : ''}`;
 
         if (i >= MAX_STEPS) { trace.push(`  ${i}. [skipped] ${label}`); return halt(`batch: ${done}/${steps.length} done — capped at ${MAX_STEPS}; submit the rest as a new batch.`); }
 
@@ -175,7 +180,6 @@ export function buildBatchTool(): UnifiedTool {
           }
         }
 
-        const a = step.args ?? {};
         let targetLabel = typeof a.name === 'string' ? a.name : typeof a.target === 'string' ? a.target : undefined;
         // el_NN refs carry no name/target — resolve the element's label from the
         // holder so the safety gate sees a real label (same as the loop's 5a;
