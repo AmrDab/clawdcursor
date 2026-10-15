@@ -325,7 +325,9 @@ M1 iMac, no screenshots):
   typed into, not mistaken for a system dialog. On the osascript path, secure-field
   values are no longer returned by `find` / `invoke get-value` / the focused element,
   the focused window (not the main one) is preferred like the helper does, and a
-  locked screen is reported instead of System Events' empty answers.
+  locked screen is reported instead of System Events' empty answers. `read_screen`
+  prints "(window list failed: …)" instead of "(no windows found)" when the list
+  failed.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 
