@@ -41,9 +41,12 @@ export function classifyCall(tool: string, action?: string): CallClass {
   return 'act-other';
 }
 
-/** What a call produced: `empty` / `timeout` blind reads are where agents give up on blind perception. */
-export type Outcome = 'ok' | 'empty' | 'partial' | 'timeout' | 'error';
-export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; err?: string }
+/** What a call produced: `empty` / `timeout` blind reads are where agents give up on blind perception.
+ *  `refused`: the safety gate stopped it before it ran. */
+export type Outcome = 'ok' | 'empty' | 'partial' | 'timeout' | 'error' | 'refused';
+/** One step of a batch, classified like a call of its own. */
+export interface StepCall { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome }
+export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; err?: string; steps?: StepCall[] }
 
 /** Derive an outcome from a result's text (no content is stored, only the class). */
 export function outcomeOf(isError: boolean, text: string): Outcome {
@@ -102,14 +105,37 @@ export class SessionLog {
     } catch { /* logging must never break a tool call */ }
   }
 
-  /** Record one tool call. `client` (host name/version) is written once, when first known. */
+  /** Record one tool call. `client` (host name/version) is written once, when first known.
+   *  A batch passes its `steps`: each is tallied by its own class instead of the batch's. */
   record(tool: string, action: string | undefined, ok: boolean, ms: number, err?: string,
-    client?: { name?: string; version?: string }, extra?: { outcome?: Outcome; space?: string }): CallClass {
+    client?: { name?: string; version?: string },
+    extra?: { outcome?: Outcome; space?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }> }): CallClass {
     const cls = classifyCall(tool, action);
-    const t = this.tally;
     const outcome = extra?.outcome ?? (ok ? 'ok' : 'error');
-    t.calls++;
-    if (!ok) t.errors++;
+    const steps: StepCall[] | undefined = extra?.steps?.map(s => ({ tool: s.tool, ...(s.action ? { action: s.action } : {}),
+      cls: classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error') }));
+    this.tally.calls++;
+    if (!ok) this.tally.errors++;
+    if (steps?.length) for (const s of steps) this.tallyClass(s.cls, s.outcome);
+    else this.tallyClass(cls, outcome);
+
+    if (this.file) {
+      try {
+        if (!this.headerWritten) {
+          fs.appendFileSync(this.file, JSON.stringify({ type: 'session', started: new Date().toISOString(), ...this.meta,
+            platform: process.platform, client: client?.name ? `${client.name} ${client.version ?? ''}`.trim() : undefined }) + '\n');
+          this.headerWritten = true;
+        }
+        const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),
+          outcome, ...(extra?.space ? { space: extra.space } : {}), ...(err ? { err: redact(err) } : {}), ...(steps ? { steps } : {}) };
+        fs.appendFileSync(this.file, JSON.stringify(line) + '\n');
+      } catch { /* never break a tool call over logging */ }
+    }
+    return cls;
+  }
+
+  private tallyClass(cls: CallClass, outcome: Outcome): void {
+    const t = this.tally;
     if (cls === 'blind') {
       t.blind++; this.blindSinceVision = true; this.visionStreak = 0; t.firstPerception ??= 'blind';
       this.lastBlindMissed = outcome === 'empty' || outcome === 'timeout';
@@ -126,20 +152,6 @@ export class SessionLog {
     else if (cls === 'act-name') t.actName++;
     else if (cls === 'act-coords') t.actCoords++;
     else t.actOther++;
-
-    if (this.file) {
-      try {
-        if (!this.headerWritten) {
-          fs.appendFileSync(this.file, JSON.stringify({ type: 'session', started: new Date().toISOString(), ...this.meta,
-            platform: process.platform, client: client?.name ? `${client.name} ${client.version ?? ''}`.trim() : undefined }) + '\n');
-          this.headerWritten = true;
-        }
-        const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),
-          outcome, ...(extra?.space ? { space: extra.space } : {}), ...(err ? { err: redact(err) } : {}) };
-        fs.appendFileSync(this.file, JSON.stringify(line) + '\n');
-      } catch { /* never break a tool call over logging */ }
-    }
-    return cls;
   }
 
   /** Screenshots in a row with no blind read in between. */
@@ -158,7 +170,7 @@ export function readSession(file: string): { header: Record<string, unknown> | n
     }
   } catch { /* missing file */ }
   const replay = new SessionLog({ version: '', surface: '' }, false);
-  for (const c of calls) replay.record(c.tool, c.action, c.ok, c.ms, undefined, undefined, { outcome: c.outcome });
+  for (const c of calls) replay.record(c.tool, c.action, c.ok, c.ms, undefined, undefined, { outcome: c.outcome, steps: c.steps });
   return { header: header[0] ?? null, calls, tally: replay.summary };
 }
 

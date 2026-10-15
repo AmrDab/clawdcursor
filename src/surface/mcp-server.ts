@@ -293,6 +293,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // the destructive-label rule (Send/Delete/Pay) on the MCP route too.
         const safetyError = evaluateToolCall(tool, params ?? {}, { uiMaps: ctx.uiMaps });
         if (safetyError) {
+          sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
+            safetyError.text, clientInfo(), { outcome: 'refused' });
           return { content: [{ type: 'text', text: safetyError.text }], isError: true };
         }
         // Transparency: any consequential (mutating) tool call from an
@@ -317,7 +319,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         }
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
-          { outcome: outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined });
+          { outcome: outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
+            // A batch: one row per step class, not one act-other row. Steps the
+            // cap skipped never ran.
+            steps: result.steps?.filter(s => s.status !== 'skipped').map(s => ({
+              tool: s.tool, action: s.action, ok: s.status === 'ok',
+              outcome: s.status === 'blocked' || s.status === 'needs_confirm' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
+            })) });
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
         // 3 screenshots with no text/a11y read in between (and every 5th

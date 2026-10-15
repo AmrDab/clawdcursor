@@ -78,6 +78,28 @@ describe('SessionLog', () => {
     expect(log.visionOnlyStreak).toBe(0);
   });
 
+  it('records a safety-refused call with outcome "refused"', () => {
+    const log = new SessionLog({ version: 'x', surface: 'compact' });
+    log.record('computer', 'key', false, 0, 'computer: safety block - blocked key combo', undefined, { outcome: 'refused' });
+    const back = readSession(log.file!);
+    expect(back.calls).toHaveLength(1);
+    expect(back.calls[0]).toMatchObject({ tool: 'computer', action: 'key', ok: false, outcome: 'refused' });
+  });
+
+  it('classifies batch steps one by one (not one act-other row)', () => {
+    const log = new SessionLog({ version: 'x', surface: 'compact' });
+    log.record('batch', undefined, false, 900, undefined, undefined, { outcome: 'error', steps: [
+      { tool: 'accessibility', action: 'find', ok: true, outcome: 'ok' },
+      { tool: 'computer', action: 'click', ok: true, outcome: 'ok' },
+      { tool: 'computer', action: 'screenshot', ok: false, outcome: 'refused' },
+    ] });
+    expect(log.summary).toMatchObject({ calls: 1, blind: 1, actCoords: 1, vision: 1, actOther: 0, firstPerception: 'blind' });
+    const back = readSession(log.file!);
+    expect(back.calls[0].steps!.map(s => s.cls)).toEqual(['blind', 'act-coords', 'vision']);
+    expect(back.calls[0].steps![2]).toMatchObject({ ok: false, outcome: 'refused' });
+    expect(back.tally).toMatchObject({ calls: 1, blind: 1, actCoords: 1, vision: 1, actOther: 0 });
+  });
+
   it('CLAWDCURSOR_SESSION_LOG=0 writes nothing', () => {
     process.env.CLAWDCURSOR_SESSION_LOG = '0';
     const log = new SessionLog({ version: 'x', surface: 'compact' });
