@@ -18,8 +18,9 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public left: number, public top: number, public width: number, public height: number) {} },
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
+const consent = { given: true };
 vi.mock('../surface/onboarding', () => ({
-  hasConsent: () => true, writeConsentFile: vi.fn(), revokeConsent: vi.fn(), runOnboarding: vi.fn(),
+  hasConsent: () => consent.given, writeConsentFile: vi.fn(), revokeConsent: vi.fn(), runOnboarding: vi.fn(),
 }));
 vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn() },
@@ -51,6 +52,7 @@ beforeEach(async () => {
   process.env.CLAWDCURSOR_SESSION_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-mcp-sess-'));
   delete process.env.CLAWDCURSOR_SESSION_LOG;
   handlers.clear();
+  consent.given = true;
   await createMcpServer({ ctx, compact: true });
 });
 
@@ -61,6 +63,15 @@ describe('MCP session log', () => {
     const { calls } = readSession(listSessions()[0]);
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ tool: 'computer', action: 'key', ok: false, outcome: 'refused' });
+  });
+
+  it('logs a call blocked by the consent prompt with outcome "consent_required"', async () => {
+    consent.given = false;
+    const r = await handlers.get('computer')!({ action: 'screenshot' });
+    expect(r.isError).toBe(true);
+    const { calls } = readSession(listSessions()[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ tool: 'computer', action: 'screenshot', ok: false, outcome: 'consent_required' });
   });
 
   it('logs each batch step with its own class and outcome', async () => {

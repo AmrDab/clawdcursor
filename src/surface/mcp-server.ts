@@ -279,6 +279,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // consent --accept` takes effect immediately, with no restart. A host
         // that supports elicitation asks the user in-app first.
         if (!hasConsent() && !(await askConsentInHost())) {
+          sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
+            undefined, clientInfo(), { outcome: 'consent_required' });
           return {
             content: [{ type: 'text', text:
               'clawdcursor needs one-time consent before it can control the desktop. ' +
