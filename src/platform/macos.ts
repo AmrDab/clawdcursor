@@ -509,13 +509,9 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
+    // Optional context for callers; a failed read is "nothing focused", as it always was.
     try {
-      const scriptPath = path.join(SCRIPTS_DIR, 'get-focused-element.jxa');
-      const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', scriptPath], {
-        timeout: OSASCRIPT_TIMEOUT_MS,
-      });
-      const raw = JSON.parse(stdout);
-      return raw ? this.normalizeElement(raw) : null;
+      return await this.ax.focusedElement();
     } catch {
       return null;
     }
@@ -1017,33 +1013,6 @@ export class MacOSAdapter implements PlatformAdapter {
     ];
     return candidates.find(p => fs.existsSync(p)) ?? null;
   }
-
-  private normalizeElement = (raw: any): UiElement => {
-    const enabled = raw.enabled;
-    // AX secure fields (subrole AXSecureTextField) carry secure=true from the
-    // JXA helper. Never surface their value — the helper already blanked it, but
-    // drop it here too so a future helper change can't leak it (M2).
-    const secure = raw.secure === true;
-    return {
-      name: raw.name ?? '',
-      controlType: (raw.controlType ?? '').replace('AX', ''),
-      subrole: raw.subrole,
-      secure,
-      bounds: raw.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-      value: secure ? undefined : raw.value,
-      enabled,
-      focused: raw.focused,
-      // Tranche 1A: state fields — the JXA helper surfaces these when set.
-      selected: raw.selected,
-      disabled: enabled === false ? true : undefined,
-      busy: raw.busy,
-      offscreen: raw.offscreen,
-      expandable: raw.expandable,
-      expanded: raw.expanded,
-      automationId: raw.identifier ?? raw.automationId,
-      processId: raw.processId,
-    };
-  };
 
   private delay(ms: number): Promise<void> {
     return new Promise(r => setTimeout(r, ms));

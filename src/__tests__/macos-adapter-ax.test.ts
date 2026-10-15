@@ -55,6 +55,7 @@ function fakeAx(over: Partial<MacAx> = {}): MacAx & { [K in keyof MacAx]: Return
     invoke: vi.fn(async () => ({ success: true })),
     frontmost: vi.fn(async () => FRONT()),
     appState: vi.fn(async () => null),
+    focusedElement: vi.fn(async () => EL({ name: 'Body', controlType: 'Edit' })),
     prepare: vi.fn(),
     ...over,
   } as never;
@@ -341,5 +342,18 @@ describe('keyboard guard (B11)', () => {
     await new MacOSAdapter({ ax }).typeText('hello');
     expect(ax.frontmost).not.toHaveBeenCalled();
     expect(osascripts()).toHaveLength(1);
+  });
+});
+
+
+describe('getFocusedElement', () => {
+  it('is the client\'s focused element', async () => {
+    const ax = fakeAx();
+    await expect(new MacOSAdapter({ ax }).getFocusedElement()).resolves.toMatchObject({ name: 'Body', controlType: 'Edit' });
+  });
+
+  it('a failed read is "nothing focused" (callers treat it as optional), as before', async () => {
+    const ax = fakeAx({ focusedElement: vi.fn(async () => { throw new MacAxError('timeout', 'x'); }) });
+    await expect(new MacOSAdapter({ ax }).getFocusedElement()).resolves.toBeNull();
   });
 });

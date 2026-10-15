@@ -535,21 +535,17 @@ export class AccessibilityBridge {
     }
     if (IS_MAC) {
       try {
-        const script = path.join(MAC_SCRIPTS_DIR, 'get-focused-element.jxa');
-        const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', script], {
-          timeout: MAC_SCRIPT_TIMEOUT,
-        });
-        const result = JSON.parse(stdout.trim());
-        if (!result) return null;
+        const el = await defaultMacAx().focusedElement();
+        if (!el) return null;
         return {
-          name: result.name ?? '',
-          automationId: result.automationId ?? '',
-          controlType: result.controlType ?? '',
-          className: result.className ?? '',
-          processId: result.processId ?? 0,
-          isEnabled: result.isEnabled ?? true,
-          bounds: result.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-          value: result.value ?? '',
+          name: el.name ?? '',
+          automationId: el.automationId ?? '',
+          controlType: el.controlType ?? '',
+          className: '',
+          processId: el.processId ?? 0,
+          isEnabled: el.enabled !== false,
+          bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+          value: el.value ?? '',
         };
       } catch {
         return null;

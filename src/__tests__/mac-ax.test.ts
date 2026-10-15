@@ -897,3 +897,65 @@ describe('makeHelperBuilder — never trigger the "install developer tools" dial
     await expect(build()).resolves.toBeNull();
   });
 });
+
+
+describe('focusedElement (the first read smart_type makes)', () => {
+  const FOCUSED = (over: Record<string, unknown> = {}) => ({
+    ok: true,
+    focused: { name: 'Name', automationId: 'nameField', controlType: 'AXTextField', bounds: { x: 1, y: 2, width: 200, height: 22 }, value: 'hello', enabled: true, processId: 4242, ...over },
+  });
+
+  it('asks the helper, scoped to a pid when given, and keeps the control-type names the script used ("Edit")', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify(FOCUSED()) });
+    const el = await ax.focusedElement(4242);
+    expect(calls[0].args.slice(0, 3)).toEqual(['focused', '--pid', '4242']);
+    expect(el).toMatchObject({ name: 'Name', automationId: 'nameField', controlType: 'Edit', value: 'hello', processId: 4242, bounds: { x: 1, y: 2, width: 200, height: 22 } });
+  });
+
+  it('unknown roles lose the AX prefix like everywhere else', async () => {
+    const { ax } = harness({ reply: JSON.stringify(FOCUSED({ controlType: 'AXDisclosureTriangle' })) });
+    expect((await ax.focusedElement())!.controlType).toBe('DisclosureTriangle');
+  });
+
+  it('a control with no label is named by its identifier (B9)', async () => {
+    const { ax } = harness({ reply: JSON.stringify(FOCUSED({ name: '', automationId: 'One', controlType: 'AXButton' })) });
+    expect(await ax.focusedElement()).toMatchObject({ name: 'One', controlType: 'Button' });
+  });
+
+  it('never carries a secure field\'s value', async () => {
+    const { ax } = harness({ reply: JSON.stringify(FOCUSED({ secure: true, value: 'hunter2' })) });
+    const el = await ax.focusedElement();
+    expect(el!.secure).toBe(true);
+    expect(el!.value).toBeUndefined();
+  });
+
+  it('nothing focused → null', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: true, focused: null }) });
+    await expect(ax.focusedElement()).resolves.toBeNull();
+  });
+
+  it('a timeout throws', async () => {
+    const { ax } = harness({ reply: execTimeout() });
+    const err = await ax.focusedElement().then(() => null, e => e);
+    expect(err).toBeInstanceOf(MacAxError);
+    expect(err.kind).toBe('timeout');
+  });
+
+  describe('osascript fallback', () => {
+    it('reads get-focused-element.jxa (its control types are already mapped)', async () => {
+      const { ax, calls } = harness({
+        helper: null,
+        reply: JSON.stringify({ name: 'Body', automationId: '', controlType: 'Edit', className: 'TextEdit', processId: 4242, isEnabled: true, bounds: { x: 1, y: 2, width: 3, height: 4 }, value: 'text' }),
+      });
+      const el = await ax.focusedElement();
+      expect(calls[0].file).toBe('osascript');
+      expect(calls[0].args[2]).toBe(path.join('/fake/scripts/mac', 'get-focused-element.jxa'));
+      expect(el).toMatchObject({ name: 'Body', controlType: 'Edit', value: 'text', processId: 4242, enabled: true });
+    });
+
+    it('a null answer is null', async () => {
+      const { ax } = harness({ helper: null, reply: 'null' });
+      await expect(ax.focusedElement()).resolves.toBeNull();
+    });
+  });
+});

@@ -64,7 +64,7 @@ describe.skipIf(!isMac)('ax-helper — protocol (macOS)', () => {
   it('a locked screen is reported by every command that would read garbage (the AX tree behind it is empty shells)', async () => {
     const { locked } = await run(['frontmost']);
     if (!locked) return;   // only meaningful while the screen happens to be locked
-    for (const args of [['windows'], ['active'], ['tree'], ['find', '--name', 'x'], ['invoke', '--name', 'x', '--action', 'click'], ['apps', '--name', 'Finder']]) {
+    for (const args of [['windows'], ['active'], ['focused'], ['tree'], ['find', '--name', 'x'], ['invoke', '--name', 'x', '--action', 'click'], ['apps', '--name', 'Finder']]) {
       const r = await run(args);
       expect(r, args.join(' ')).toMatchObject({ ok: false, kind: 'locked' });
       expect(r.error).toMatch(/locked/i);
@@ -264,6 +264,16 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     if (!usable) return ctx.skip();
     const r = await run(['invoke', '--pid', String(pid), '--action', 'click']);
     expect(r).toMatchObject({ ok: true, success: false });
+  });
+
+  it('focused: the focused control of the app, or null when nothing in it has focus', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const r = await run(['focused', '--pid', String(pid)]);
+    expect(r.ok).toBe(true);
+    if (r.focused) {
+      expect(typeof r.focused.controlType).toBe('string');
+      expect(r.focused.processId).toBe(pid);
+    }
   });
 
   it('active: the frontmost app\'s window, in the WindowInfo shape', async (ctx) => {

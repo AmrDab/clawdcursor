@@ -145,6 +145,17 @@ const CONTROL_TYPE_TO_ROLE: Record<string, string> = {
   Text: 'AXStaticText', Window: 'AXWindow', Group: 'AXGroup',
 };
 
+/**
+ * get-focused-element.jxa reported the focused control with Windows-style type names ("Edit",
+ * "Hyperlink"); consumers (ui-map, the focused-element dump) already read those.
+ */
+const FOCUSED_TYPE_NAMES: Record<string, string> = {
+  AXTextField: 'Edit', AXTextArea: 'Edit', AXButton: 'Button', AXCheckBox: 'CheckBox', AXRadioButton: 'RadioButton',
+  AXComboBox: 'ComboBox', AXList: 'List', AXTable: 'Table', AXMenu: 'Menu', AXMenuItem: 'MenuItem',
+  AXStaticText: 'Text', AXImage: 'Image', AXLink: 'Hyperlink', AXGroup: 'Group', AXWindow: 'Window',
+  AXWebArea: 'Document', AXScrollArea: 'ScrollBar', AXTab: 'Tab', AXSlider: 'Slider',
+};
+
 /** 'Button' → 'AXButton'; an AX role passes through; anything else gets the AX prefix. */
 export function axRoleFor(controlType: string): string {
   return CONTROL_TYPE_TO_ROLE[controlType] ?? (controlType.startsWith('AX') ? controlType : `AX${controlType}`);
@@ -370,6 +381,11 @@ export interface MacAx {
    * state is unknown, which is not the same as "not running".
    */
   appState(name: string): Promise<AppState | null>;
+  /**
+   * The control with keyboard focus in a process (the frontmost app's when omitted), or null
+   * when nothing has focus. Control types use the names get-focused-element.jxa used ("Edit").
+   */
+  focusedElement(processId?: number): Promise<UiElement | null>;
   /** Start building the helper now (background, once), so the first real call already has it. */
   prepare(): void;
 }
@@ -593,6 +609,24 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         if (isTimeout(err)) throw timeoutError(what, LSAPPINFO_TIMEOUT_MS);
         return null;
       }
+    },
+
+    async focusedElement(processId?: number): Promise<UiElement | null> {
+      const what = 'focused element lookup';
+      const reply = await viaHelper(
+        ['focused', ...(processId ? ['--pid', String(processId)] : []), '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
+        what,
+      );
+      if (reply) {
+        const raw = reply.focused;
+        if (!raw) return null;
+        const el = toUiElement(raw, undefined, raw.processId ?? processId);
+        el.controlType = FOCUSED_TYPE_NAMES[raw.controlType] ?? el.controlType;
+        return el;
+      }
+      const out = await viaJxa('get-focused-element.jxa', [], JXA_LIST_TIMEOUT_MS, what);
+      return out ? toUiElement({ ...out, enabled: out.isEnabled }, undefined, out.processId) : null;
     },
 
     async find(q: ElementQuery): Promise<UiElement[]> {

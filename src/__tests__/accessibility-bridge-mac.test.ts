@@ -25,6 +25,7 @@ const fake = vi.hoisted(() => ({
     invoke: vi.fn(),
     frontmost: vi.fn(),
     appState: vi.fn(),
+    focusedElement: vi.fn(),
     prepare: vi.fn(),
   },
 }));
@@ -138,5 +139,22 @@ describe('getScreenContext', () => {
     expect(ctx).toContain('id:One');
     expect(fake.ax.uiTree).toHaveBeenCalledWith(4242);
     expect(execFileCalls).toHaveLength(0);
+  });
+});
+
+
+describe('getFocusedElement', () => {
+  it('reads the AX client and keeps the bridge\'s FocusedElementInfo shape', async () => {
+    fake.ax.focusedElement.mockResolvedValue({ name: 'Body', controlType: 'Edit', automationId: 'body', bounds: R, value: 'text', enabled: true, processId: 4242 });
+    const el = await bridge.getFocusedElement();
+    expect(el).toEqual({ name: 'Body', automationId: 'body', controlType: 'Edit', className: '', processId: 4242, isEnabled: true, bounds: R, value: 'text' });
+    expect(execFileCalls).toHaveLength(0);
+  });
+
+  it('nothing focused, or a failed read, is null', async () => {
+    fake.ax.focusedElement.mockResolvedValueOnce(null);
+    expect(await bridge.getFocusedElement()).toBeNull();
+    fake.ax.focusedElement.mockRejectedValueOnce(new MacAxError('timeout', 'x'));
+    expect(await bridge.getFocusedElement()).toBeNull();
   });
 });

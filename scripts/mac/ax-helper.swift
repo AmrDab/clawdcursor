@@ -20,6 +20,7 @@
 //   ax-helper active    [--timeout-ms N]
 //   ax-helper frontmost [--timeout-ms N]
 //   ax-helper apps      [--name S] [--timeout-ms N]
+//   ax-helper focused   [--pid N] [--timeout-ms N]
 //   ax-helper tree      [--pid N] [--max-depth N] [--max-nodes N] [--timeout-ms N]
 //   ax-helper find      [--pid N] [--name S] [--role R] [--id S] [--max-results N] [--timeout-ms N]
 //   ax-helper invoke    [--pid N] --action A [--name S] [--role R] [--id S] [--value V] [--timeout-ms N]
@@ -690,6 +691,29 @@ func cmdTree() -> Never {
     emit(reply)
 }
 
+func cmdFocused() -> Never {
+    requireUsableSession()
+    let app = targetApplication()
+    let appEl = appElement(app.processIdentifier)
+    guard let focused = copyAttr(appEl, "AXFocusedUIElement").value, isElement(focused) else {
+        emit(["ok": true, "focused": NSNull(), "elapsedMs": elapsedMs()])
+    }
+    let el = focused as! AXUIElement
+    let a = multi(el, ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXPosition", "AXSize", "AXEnabled"])
+    let secure = str(a["AXSubrole"]) == "AXSecureTextField"
+    let title = str(a["AXTitle"]) ?? ""
+    var d: [String: Any] = [
+        "name": title.isEmpty ? (str(a["AXDescription"]) ?? "") : title,
+        "automationId": str(a["AXIdentifier"]) ?? "",
+        "controlType": str(a["AXRole"]) ?? "",
+        "bounds": rect(axPoint(a["AXPosition"]), axSize(a["AXSize"])),
+        "processId": Int(app.processIdentifier),
+    ]
+    if secure { d["secure"] = true } else if let v = str(a["AXValue"]), !v.isEmpty { d["value"] = String(v.prefix(500)) }
+    if bool(a["AXEnabled"]) == false { d["enabled"] = false }
+    emit(["ok": true, "focused": d, "elapsedMs": elapsedMs()])
+}
+
 func cmdFind() -> Never {
     requireUsableSession()
     let app = targetApplication()
@@ -734,8 +758,9 @@ case "frontmost": cmdFrontmost()
 case "windows": cmdWindows()
 case "active": cmdActive()
 case "apps": cmdApps()
+case "focused": cmdFocused()
 case "tree": cmdTree()
 case "find": cmdFind()
 case "invoke": cmdInvoke()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|tree|find|invoke [options] (got \"\(command)\")")
+default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke [options] (got \"\(command)\")")
 }
