@@ -64,4 +64,45 @@ describe('copyAllText', () => {
     expect(isTerminalWindow({ processName: 'Code' })).toBe(false);
     expect(isTerminalWindow({ processName: 'notepad' })).toBe(false);
   });
+
+  // Live Win11 re-test 2026-10-15: copy_all_text in Settings (a UWP/XAML page)
+  // took 13.4 s — 15 clipboard polls, each a PowerShell spawn — then said
+  // "Nothing was copied". A XAML page has no select-all; its text is in the
+  // accessibility tree.
+  const tree = [
+    { name: 'Settings', controlType: 'Window', bounds: { x: 0, y: 0, width: 800, height: 600 } },
+    { name: 'Edition', controlType: 'Text', bounds: { x: 0, y: 0, width: 0, height: 0 } },
+    { name: 'Windows 11 Pro', controlType: 'Text', bounds: { x: 0, y: 0, width: 0, height: 0 } },
+    { name: 'Search box', controlType: 'Edit', value: 'about', bounds: { x: 1, y: 1, width: 9, height: 9 } },
+    { name: '', controlType: 'Pane', bounds: { x: 1, y: 1, width: 9, height: 9 } },
+  ];
+
+  it('a UWP / XAML window skips select-all and returns its accessibility text, saying so', async () => {
+    const p = { ...fakePlatform({ processName: 'ApplicationFrameHost' }), getUiTree: vi.fn(async () => tree) };
+    p.getActiveWindow = vi.fn(async () => ({ processName: 'ApplicationFrameHost', title: 'Settings', processId: 4, className: 'ApplicationFrameWindow' } as any));
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.source).toBe('accessibility');
+    expect(r.text).toContain('Windows 11 Pro');
+    expect(r.text).toContain('Search box: about');
+  });
+
+  it('falls back to accessibility text when nothing was copied', async () => {
+    const p = { ...fakePlatform({ processName: 'someapp', pageText: null }), getUiTree: vi.fn(async () => tree) };
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual(['mod+a', 'mod+c']);
+    expect(r).toMatchObject({ ok: true, source: 'accessibility' });
+    expect(r.text).toContain('Edition');
+  });
+
+  it('gives up on the clipboard within ~2 s even when each read is slow', async () => {
+    const p = fakePlatform({ processName: 'someapp', pageText: null });
+    const slow = p.readClipboard;
+    p.readClipboard = vi.fn(async () => { await new Promise(r => setTimeout(r, 300)); return slow(); });
+    const t0 = Date.now();
+    const r = await copyAllText(p as any);
+    expect(r.ok).toBe(false);
+    expect(Date.now() - t0).toBeLessThan(2600);
+  });
 });

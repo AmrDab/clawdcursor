@@ -112,6 +112,14 @@ export interface UiElement {
    * Added 0.9.4 for issue #101 bug 5.
    */
   description?: string;
+  /** Checkbox / toggle state when the element supports toggling (UIA TogglePattern). */
+  checked?: boolean | 'mixed';
+  /**
+   * Nesting depth in the tree getUiTree returned (0 = the window), when the
+   * adapter knows it. Lets callers recover parent/child structure from the
+   * flat list where geometry can't — e.g. scrolled-out elements with empty bounds.
+   */
+  depth?: number;
 }
 
 export interface PermissionStatus {

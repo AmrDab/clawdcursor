@@ -336,6 +336,54 @@ describe('Smart Tools', () => {
       }
     });
 
+    it('a match that is only a word inside a sentence, with no visible effect, is NOT reported as a hit', async () => {
+      // Live Win11 re-test 2026-10-15: smart_click("Resume") on the pause pill.
+      // OCR never read the button's label, only the message "Windows blind
+      // re-test: click Resume" — the click hit the sentence's last word, nothing
+      // changed, and the tool still said "Clicked "Resume" via OCR".
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      const sentence = ['Windows', 'blind', 're-test:', 'click', 'Resume'];
+      let x = 274;
+      const elements = sentence.map(t => { const e = { text: t, x, y: 50, width: t.length * 7, height: 10, line: 19, confidence: 0.9 }; x += t.length * 7 + 5; return e; });
+      elements.push({ text: 'End', x: 692, y: 90, width: 21, height: 10, line: 29, confidence: 0.9 }, { text: 'task', x: 718, y: 90, width: 25, height: 10, line: 29, confidence: 0.9 });
+      const recognize = vi.fn(async () => ({ elements, fullText: 'Windows blind re-test: click Resume End task', durationMs: 50 }));
+      (OcrEngine.prototype as any).recognizeScreen = recognize;
+      try {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: 'Resume' }, createCtx());
+        expect(mockMouseClick).toHaveBeenCalledTimes(1);
+        expect(recognize.mock.calls.length).toBeGreaterThanOrEqual(2); // re-read after the click
+        expect(result.isError).toBe(true);
+        expect(result.text).toMatch(/inside/i);
+        expect(result.text).toMatch(/not a control|no visible/i);
+        expect(result.text).not.toMatch(/^Clicked "Resume"/);
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
+    });
+
+    it('a word inside a sentence that DID change the screen succeeds, flagged as text', async () => {
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      const words = ['Read', 'the', 'full', 'terms', 'here'];
+      let x = 100;
+      const elements = words.map(t => { const e = { text: t, x, y: 300, width: t.length * 7, height: 10, line: 4, confidence: 0.9 }; x += t.length * 7 + 5; return e; });
+      let n = 0;
+      (OcrEngine.prototype as any).recognizeScreen = async () => (++n === 1
+        ? { elements, fullText: 'Read the full terms here', durationMs: 50 }
+        : { elements: [], fullText: 'Terms of service 1. Scope', durationMs: 50 });
+      try {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: 'terms' }, createCtx());
+        expect(result.isError).toBeUndefined();
+        expect(result.text).toMatch(/^Clicked "terms" via OCR/);
+        expect(result.text).toMatch(/inside the text/i);
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
+    });
+
     it('says when the a11y invoke is still running (a modal box opened)', async () => {
       // Windows bridge: Save -> "Confirm Save As" keeps InvokePattern.Invoke
       // running; the bridge answers {pending:true} instead of blocking ~10 s.

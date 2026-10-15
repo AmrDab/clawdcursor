@@ -135,12 +135,16 @@ export function buildUnifiedTools(): UnifiedTool[] {
         type: 'object',
         properties: {
           processId: { type: 'number', description: 'Optional: limit to a specific process' },
+          offset: { type: 'number', description: 'Skip this many elements — page past "… +N more" (default 0)' },
+          limit: { type: 'number', description: 'How many elements to list (default 60)' },
         },
         additionalProperties: false,
       },
       changesScreen: false,
       async execute(args, ctx) {
         const pid = typeof args.processId === 'number' ? args.processId : undefined;
+        const offset = typeof args.offset === 'number' && args.offset > 0 ? Math.floor(args.offset) : 0;
+        const limit = typeof args.limit === 'number' && args.limit > 0 ? Math.floor(args.limit) : 60;
         // A thin tree is often a sleeping one (Electron / Chromium build their
         // page tree on first request): wake the app and read once more.
         const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid);
@@ -153,13 +157,22 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
         const isBrowser = !!active && getBrowserProcessNames().includes(String(active.processName ?? '').toLowerCase());
         const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
-        const lines = tree.slice(0, 60).map(el =>
-          `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
+        // Below-the-fold elements come back with empty (0×0) bounds: list them
+        // AFTER the on-screen ones, marked, instead of interleaved at @0,0 where
+        // they read as noise (live 2026-10-15: Settings → About's "Windows 11
+        // Pro" / "25H2" sat past the 60-element cap).
+        const isOff = (el: typeof tree[number]) => el.offscreen === true || (el.bounds.width <= 0 && el.bounds.height <= 0);
+        const ordered = [...tree.filter(el => !isOff(el)), ...tree.filter(isOff)];
+        const page = ordered.slice(offset, offset + limit);
+        const lines = page.map(el => isOff(el)
+          ? `[${el.controlType || 'Element'}] "${el.name || ''}"${el.value ? ` value="${el.value.slice(0, 40)}"` : ''} (offscreen — scroll to see)`
+          : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
         );
-        const more = tree.length > 60 ? `\n… +${tree.length - 60} more` : '';
+        const rest = ordered.length - (offset + page.length);
+        const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
         const hint = tree.length < 5 || isBrowser ? `\n${nextStep}` : '';
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
-        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n') + more)}${hint}` };
+        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
       },
     },
 
@@ -538,7 +551,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'get_element_state',
-      description: 'Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded).',
+      description: 'Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded, and checked for checkboxes/toggles).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -572,6 +585,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
             offscreen: el.offscreen ?? false,
             expandable: el.expandable ?? false,
             expanded: el.expanded ?? false,
+            // Checkbox / toggle: only when the platform read it (TogglePattern).
+            ...(el.checked !== undefined ? { checked: el.checked } : {}),
           }),
         };
       },

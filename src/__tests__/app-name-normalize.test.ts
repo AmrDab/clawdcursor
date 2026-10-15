@@ -127,3 +127,12 @@ describe('resolveAlias picks up normalization', () => {
     expect(resolveAlias("'edge'")?.key).toBe('edge');
   });
 });
+
+describe('Windows Settings launches directly', () => {
+  // Live Win11 re-test 2026-10-15: open_app "Settings" took 16.8 s. The alias
+  // had no launcher, so `Start-Process -FilePath Settings` failed, its 4 s
+  // window wait ran out, and only then did the Start-Menu search open it.
+  it('the settings alias carries the Settings AppsFolder id', () => {
+    expect(resolveAlias('settings')?.uwpAppId).toBe('windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel');
+  });
+});

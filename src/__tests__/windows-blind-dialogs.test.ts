@@ -186,3 +186,17 @@ describe('ps-bridge — focus-window reaches owned dialogs', () => {
     expect(body).toMatch(/owned\s+= /);
   });
 });
+
+describe('ps-bridge — clicking a no-activate overlay is not a focus failure', () => {
+  // Live 2026-10-15: clicking the pause pill's Resume printed "⚠ FOCUS NOT
+  // CONFIRMED — the click may have landed on Settings". The pill is
+  // WS_EX_NOACTIVATE (it must never steal focus), so the raise attempt always
+  // "failed" — by design. Such windows take clicks without activation.
+  it('activate-at-point treats a WS_EX_NOACTIVATE window as a no-op, not a failed raise', () => {
+    const body = fnBody('Cmd-ActivateAtPoint');
+    const check = body.indexOf('0x08000000');
+    expect(check).toBeGreaterThan(-1);
+    expect(body).toContain('no-activate-window');
+    expect(check).toBeLessThan(body.indexOf('SetForegroundWindow($root)'));
+  });
+});
