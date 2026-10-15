@@ -912,13 +912,14 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return { success: false, text: `Failed to launch "${name}": ${err instanceof Error ? err.message : String(err)}` };
         }
         await sleep(800);
-        // No window is not a launch: say so instead of "Launched".
-        return res.title
-          ? { success: true, text: `Opened "${name}" (pid=${res.pid}, window="${res.title}")` }
-          : {
-            success: false,
-            text: `Could not confirm "${name}" opened — no window appeared${res.pid ? ` (process pid=${res.pid} is still running)` : ''}. Check list_windows before acting on it.`,
-          };
+        if (res.title) return { success: true, text: `Opened "${name}" (pid=${res.pid}, window="${res.title}")` };
+        // Running but no window yet: a slow app still loading. Not a failure —
+        // a failure invites a second launch.
+        if (res.pid) {
+          return { success: true, text: `Started "${name}" (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+        }
+        // No process and no window is not a launch: say so instead of "Launched".
+        return { success: false, text: `Could not confirm "${name}" opened — no window appeared. Check list_windows before acting on it.` };
       },
     },
 

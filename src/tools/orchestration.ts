@@ -194,7 +194,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
 
     {
       name: 'open_app',
-      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Errors when no window appears.',
+      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).',
       parameters: {
         name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")', required: true },
       },
@@ -239,12 +239,13 @@ export function getOrchestrationTools(): ToolDefinition[] {
             });
             ctx.a11y.invalidateCache();
             if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window="${res.title}")` };
-            // No window is not a launch: say so instead of "Launched".
-            return {
-              text: `Could not confirm "${rawName}" opened — no window appeared` +
-                `${res?.pid ? ` (process pid=${res.pid} is still running)` : ''}. Check list_windows before acting on it.`,
-              isError: true,
-            };
+            // Running but no window yet: a slow app still loading (Outlook, IDEs).
+            // Not an error — an error invites a second launch.
+            if (res?.pid) {
+              return { text: `Started "${rawName}" (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+            }
+            // No process and no window is not a launch: say so instead of "Launched".
+            return { text: `Could not confirm "${rawName}" opened — no window appeared. Check list_windows before acting on it.`, isError: true };
           } catch (err: any) {
             return { text: `Failed to launch "${rawName}": ${err?.message ?? err}`, isError: true };
           }

@@ -77,8 +77,9 @@ func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false) ->
     return l
 }
 
-/// The app that was frontmost when this process started: focus goes back there.
-let previousApp = NSWorkspace.shared.frontmostApplication
+/// The app the user was last in (frontmost at start, then kept current as they
+/// switch apps while the overlay is up): focus goes back there.
+var previousApp = NSWorkspace.shared.frontmostApplication
 
 func giveFocusBack() {
     guard NSApp.isActive, let prev = previousApp,
@@ -98,6 +99,15 @@ final class Overlay: NSObject, NSApplicationDelegate {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { giveFocusBack() }
         NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification,
                                                object: nil, queue: .main) { _ in giveFocusBack() }
+        // Follow the user: if they switch apps while the pill is up (to sign in,
+        // say), that app — not the launch-time one — is where focus goes back.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                          object: nil, queue: .main) { note in
+            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+               app.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                previousApp = app
+            }
+        }
     }
 
     var windows: [NSWindow] = []

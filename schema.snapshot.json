@@ -1708,7 +1708,7 @@
     },
     {
       "name": "open_app",
-      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Errors when no window appears.",
+      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).",
       "category": "orchestration",
       "parameters": {
         "type": "object",

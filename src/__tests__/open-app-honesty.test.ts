@@ -30,12 +30,17 @@ describe('MCP open_app', () => {
     expect(r.text).toContain('Opened "calculator"');
   });
 
-  it('is an error, not "Launched", when no window appeared', async () => {
-    const r = await mcpOpenApp.handler({ name: 'calculator' }, mcpCtx(async () => ({ pid: 7 })));
+  it('is an error, not "Launched", when no process and no window appeared', async () => {
+    const r = await mcpOpenApp.handler({ name: 'calculator' }, mcpCtx(async () => ({})));
     expect(r.isError).toBe(true);
     expect(r.text).not.toMatch(/^Launched/);
     expect(r.text).toMatch(/no window appeared/i);
-    expect(r.text).toContain('pid=7');
+  });
+
+  it('a running process with no window yet is "started, still loading" — not an error (an error invites a second launch)', async () => {
+    const r = await mcpOpenApp.handler({ name: 'outlook' }, mcpCtx(async () => ({ pid: 7 })));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toMatch(/Started "outlook" \(pid=7\).*Do not launch it again/);
   });
 
   it('passes a launch failure through', async () => {
@@ -46,10 +51,16 @@ describe('MCP open_app', () => {
 });
 
 describe('agent-loop open_app', () => {
-  it('fails (success:false) when no window appeared', async () => {
+  it('fails (success:false) when no process and no window appeared', async () => {
     const r = await agentOpenApp.execute({ name: 'calculator' }, agentCtx(async () => ({})));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/no window appeared/i);
+  });
+
+  it('a running process with no window yet succeeds with "do not launch it again"', async () => {
+    const r = await agentOpenApp.execute({ name: 'outlook' }, agentCtx(async () => ({ pid: 9 })));
+    expect(r.success).toBe(true);
+    expect(r.text).toMatch(/Do not launch it again/);
   });
 
   it('fails cleanly when the launch throws', async () => {
