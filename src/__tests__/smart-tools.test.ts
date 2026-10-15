@@ -284,6 +284,36 @@ describe('Smart Tools', () => {
       }
     });
 
+    it('prefers a standalone exact word over the same word inside a title phrase (live regression: "Save" clicked "Save as")', async () => {
+      // Live Win11 VM 2026-10-14: smart_click("Save") on Notepad's Save as
+      // dialog fell back to OCR, where the title "Save as" and the Save button
+      // both held an exact "Save" token. The tie went to the first line — the
+      // title — and the click landed on the title bar at (82,42).
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      (OcrEngine.prototype as any).recognizeScreen = async () => ({
+        elements: [
+          { text: 'Save',   x: 66,  y: 35,  width: 32, height: 14, line: 0,  confidence: 0.98 },
+          { text: 'as',     x: 102, y: 38,  width: 14, height: 11, line: 0,  confidence: 0.98 },
+          { text: 'Save',   x: 473, y: 461, width: 30, height: 14, line: 20, confidence: 0.97 },
+          { text: 'Cancel', x: 560, y: 461, width: 44, height: 14, line: 20, confidence: 0.97 },
+        ],
+        fullText: 'Save as\nSave Cancel',
+        durationMs: 100,
+      });
+      try {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const ctx = createCtx();
+        const result = await smartClick.handler({ target: 'Save' }, ctx);
+        expect(result.isError).toBeUndefined();
+        const m = result.text.match(/at (\d+),(\d+)/);
+        expect(m).toBeTruthy();
+        expect(Number(m![2])).toBeGreaterThan(400); // the button row, not the title
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
+    });
+
     // ── Issue #101: structured failure payloads ──
 
     it('successful click still returns plain human-readable text (not JSON)', async () => {

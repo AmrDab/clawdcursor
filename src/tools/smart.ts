@@ -371,6 +371,10 @@ export function getSmartTools(): ToolDefinition[] {
               };
 
               const MAX_N = Math.min(8, targetWords.length + 2);
+              // Two tokens belong to one visual chunk (a phrase) unless a big
+              // horizontal gap separates them.
+              const joined = (a: typeof cands[number], b: typeof cands[number]) =>
+                b.x - (a.x + a.width) <= Math.max(a.height * 1.5, 30);
               for (const lineToks of lineMap.values()) {
                 const sorted = [...lineToks].sort((a, b) => a.x - b.x);
                 for (let i = 0; i < sorted.length; i++) {
@@ -379,12 +383,19 @@ export function getSmartTools(): ToolDefinition[] {
                     // Reject spans with a big horizontal gap (different visual chunks)
                     let contiguous = true;
                     for (let k = 1; k < span.length; k++) {
-                      const gap = span[k].x - (span[k - 1].x + span[k - 1].width);
-                      if (gap > Math.max(span[k - 1].height * 1.5, 30)) { contiguous = false; break; }
+                      if (!joined(span[k - 1], span[k])) { contiguous = false; break; }
                     }
                     if (!contiguous) continue;
                     const phrase = norm(span.map(t => t.text).join(' '));
-                    const score = scorePhrase(phrase, span.length);
+                    let score = scorePhrase(phrase, span.length);
+                    // A span that is only PART of a longer phrase ("Save" inside
+                    // the title "Save as") ranks below the same text standing
+                    // alone, the way a button label does. Live 2026-10-14:
+                    // smart_click("Save") on Notepad's Save as dialog tied the
+                    // title's "Save" with the button's and clicked the title.
+                    const inPhrase = (i > 0 && joined(sorted[i - 1], span[0]))
+                      || (i + n < sorted.length && joined(span[n - 1], sorted[i + n]));
+                    if (inPhrase) score *= 0.95;
                     if (score > bestScore) recordCandidate(span, score);
                   }
                 }
