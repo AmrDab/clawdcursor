@@ -87,6 +87,27 @@ describe('waitForLaunchedWindow', () => {
     vi.useRealTimers();
   });
 
+  // Live (Ubuntu, xcalc): the new window had no _NET_WM_PID (pid 0) and a
+  // title ("Calculator") that does not contain the launch name, so open_app
+  // waited 8 s and said "no window yet" while the window was on screen.
+  it('accepts a NEW window with no owning pid when nothing else matches', async () => {
+    const before: WindowInfo[] = [w({ processId: 5, processName: 'gnome-calculator', title: 'Calculator', handle: 'h-5' })];
+    const after: WindowInfo[] = [...before, w({ processId: 0, title: 'Calculator', handle: 'h-xcalc' })];
+    const p = waitForLaunchedWindow(before, async () => after, buildAppPredicate('xcalc'), { intervalMs: 100, timeoutMs: 5_000, spawnPid: 77 });
+    await vi.advanceTimersByTimeAsync(150);
+    expect((await p)?.handle).toBe('h-xcalc');
+  });
+
+  it('a predicate match still beats an unowned new window', async () => {
+    const after: WindowInfo[] = [
+      w({ processId: 0, title: 'Some popup', handle: 'h-pop' }),
+      w({ processId: 9, processName: 'xcalc', title: 'Calculator', handle: 'h-9' }),
+    ];
+    const p = waitForLaunchedWindow([], async () => after, buildAppPredicate('xcalc'), { intervalMs: 100, timeoutMs: 5_000 });
+    await vi.advanceTimersByTimeAsync(150);
+    expect((await p)?.handle).toBe('h-9');
+  });
+
   it('returns a NEW window appearing on the first tick', async () => {
     const before: WindowInfo[] = [w({ processId: 1, processName: 'chrome', handle: 'h-1' })];
     const after: WindowInfo[] = [

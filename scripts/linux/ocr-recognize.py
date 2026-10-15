@@ -37,6 +37,29 @@ def parse_conf(raw):
 PSM = '11'
 
 
+def assign_rows(elements):
+    """Set each element's `line` to its VISUAL row (1 = top of the screen).
+
+    Tesseract's line_num restarts in every block, and in sparse-text mode
+    almost every label is its own block, so every word came back as line 1.
+    Callers group and join words per line (smart_click builds phrases from
+    adjacent same-line words): "@" from one xcalc row and "sin" from the row
+    above became the phrase "@ sin", clicked at the midpoint between the rows.
+    A word joins the current row when its vertical centre falls inside it."""
+    order = sorted(range(len(elements)), key=lambda i: elements[i]["y"] + elements[i]["height"] / 2)
+    row, top, bottom = 0, None, None
+    for i in order:
+        el = elements[i]
+        centre = el["y"] + el["height"] / 2
+        if top is None or not (top <= centre <= bottom):
+            row += 1
+            top, bottom = el["y"], el["y"] + el["height"]
+        else:
+            bottom = max(bottom, el["y"] + el["height"])
+        el["line"] = row
+    return elements
+
+
 def parse_tsv(tsv_text, scale=1.0):
     """Parse `tesseract ... tsv` output into the shared {elements, fullText} shape."""
     elements = []
@@ -77,7 +100,7 @@ def parse_tsv(tsv_text, scale=1.0):
         })
 
     return {
-        "elements": elements,
+        "elements": assign_rows(elements),
         "fullText": '\n'.join(lines_text)
     }
 
@@ -141,7 +164,7 @@ def ocr_with_pytesseract(image_path, scale=1.0):
             })
 
         return {
-            "elements": elements,
+            "elements": assign_rows(elements),
             "fullText": '\n'.join(lines_text)
         }
     except ImportError:

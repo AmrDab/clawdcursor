@@ -198,6 +198,17 @@ describe('L4 — listWindows resolves processName from /proc', () => {
     expect(wins.map(w => w.processName)).toEqual(['gnome-calculator', 'mousepad']);
   });
 
+  it('a cmdline rewritten into one space-joined string (Chromium) yields the binary name', async () => {
+    h.proc['/proc/4242/cmdline'] = '/opt/google/chrome/chrome --remote-debugging-port=9333 --user-data-dir=/home/c/.clawdcursor/cdp-profile --no-first-run\0';
+    h.proc['/proc/4242/comm'] = 'chrome\n';
+    // A path with a space and no rewrite still trusts comm over a half path.
+    h.proc['/proc/5555/cmdline'] = '/opt/My App/myapp\0';
+    h.proc['/proc/5555/comm'] = 'myapp\n';
+    const adapter = new LinuxAdapter();
+    const wins = await adapter.listWindows();
+    expect(wins.map(w => w.processName)).toEqual(['chrome', 'myapp']);
+  });
+
   it('focusWindow({processName}) now matches', async () => {
     h.proc['/proc/4242/cmdline'] = 'gnome-calculator\0';
     h.proc['/proc/5555/comm'] = 'mousepad\n';
@@ -592,5 +603,53 @@ describe('B7 — a GTK4 focused element gets the same window offset as the tree'
     const el = await adapter.getFocusedElement();
     // wmctrl says pid 4242's window sits at (100,200)
     expect(el?.bounds).toEqual({ x: 100, y: 365, width: 360, height: 42 });
+  });
+});
+
+describe('R1 — window bounds are the client window\'s real position, not wmctrl\'s', () => {
+  it('wmctrl adds the frame extents (openbox); xwininfo absolute origin wins', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'xwininfo') {
+        return { stdout: [
+          'xwininfo: Window id: 0x1d8 (the root window) (has no name)',
+          '     0x3c00001 "frame": ()  802x625+99+180  +99+180',
+          '        0x3c00003 "gnome-calculator": ("x" "X")  800x600+1+20  +99+180',
+          '     0x3c00004 "Untitled - Mousepad": ("m" "M")  640x480+0+0  +50+60',
+          '',
+        ].join('\n') };
+      }
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    const wins = await adapter.listWindows();
+    expect(wins[0].bounds).toEqual({ x: 99, y: 180, width: 800, height: 600 });
+    expect(wins[1].bounds).toEqual({ x: 50, y: 60, width: 640, height: 480 });
+  });
+
+  it('without xwininfo output the wmctrl geometry is kept', async () => {
+    const adapter = new LinuxAdapter();
+    const wins = await adapter.listWindows();
+    expect(wins[0].bounds).toEqual({ x: 100, y: 200, width: 800, height: 600 });
+  });
+});
+
+describe('R2 — a pid-less window whose title another app also uses is never scoped to that app', () => {
+  it('passes the other window\'s pid as --exclude-pids', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'wmctrl' && args[0] === '-l') {
+        // gnome-calculator (pid 4242) and xcalc (no pid) are both "Calculator".
+        return { stdout: '0x03c00003  0 4242   100 200 800 600  box Calculator\n0x03c00005  0 0   2 40 226 394  box Calculator\n' };
+      }
+      if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: String(0x3c00005) + '\n' };
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.findElements({ name: '=' });
+    const args = bridgeCalls()[0];
+    expect(args[args.indexOf('--window-title') + 1]).toBe('Calculator');
+    expect(args[args.indexOf('--exclude-pids') + 1]).toBe('4242');
   });
 });

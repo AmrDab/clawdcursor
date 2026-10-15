@@ -47,6 +47,18 @@ SPARSE = (
     "5\t1\t2\t1\t1\t1\t10\t80\t50\t15\t90\tCancel\n"
 )
 OUT['ocr_sparse'] = ocr.parse_tsv(SPARSE)
+# xcalc in sparse mode: every label its own block, all line_num 1. "sin" and
+# the "@" one row below must land on different lines; "Save" + "As" (own
+# blocks, same row) on one.
+ROWS = (
+    "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n"
+    "5\t1\t1\t1\t1\t1\t262\t699\t30\t14\t94\tsin\n"
+    "5\t1\t2\t1\t1\t1\t259\t735\t10\t14\t10\t@\n"
+    "5\t1\t3\t1\t1\t1\t400\t701\t30\t14\t90\ttan\n"
+    "5\t1\t4\t1\t1\t1\t500\t900\t40\t16\t95\tSave\n"
+    "5\t1\t5\t1\t1\t1\t546\t901\t20\t16\t95\tAs\n"
+)
+OUT['ocr_rows'] = {e['text']: e['line'] for e in ocr.parse_tsv(ROWS)['elements']}
 OUT['ocr_psm'] = ocr.PSM
 
 
@@ -302,6 +314,9 @@ OUT['focused_calc'] = bridge.cmd_focused(4242)['element']
 OUT['by_title'] = [e['processId'] for e in bridge.cmd_get_tree(None, 'Calculator')['elements']][:1]
 dialog.states.discard(StateType.ACTIVE)
 OUT['by_unknown_title'] = bridge.cmd_get_tree(None, 'xcalc')['elements']
+# xcalc (no pid, no AT-SPI) titled like calc's frame: calc's pid is excluded.
+OUT['by_colliding_title'] = bridge.cmd_get_tree(None, 'Calculator', {4242})['elements']
+OUT['invoke_colliding'] = bridge.cmd_invoke('7', None, None, 'click', None, 'Calculator', {4242})
 dialog.states.add(StateType.ACTIVE)
 
 sys.stdout.write(json.dumps(OUT))

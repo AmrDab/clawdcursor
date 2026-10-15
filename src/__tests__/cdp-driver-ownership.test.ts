@@ -49,7 +49,7 @@ vi.mock('playwright', () => ({
   },
 }));
 
-import { CDPDriver } from '../platform/cdp-driver';
+import { CDPDriver, agentBrowserArgs } from '../platform/cdp-driver';
 import { AGENT_CDP_PORT, DEFAULT_CDP_PORT } from '../llm/browser-config';
 
 beforeEach(() => {
@@ -121,5 +121,20 @@ describe('CDPDriver — attached mode never navigates the user\'s tab', () => {
     await d.navigate('https://example.com');
     expect(state.newPages.length).toBe(0);
     expect(state.userPage._gotos).toEqual(['https://example.com']);
+  });
+});
+
+describe('agent-owned browser launch flags', () => {
+  it('Linux: the agent browser exposes its page to AT-SPI (--force-renderer-accessibility)', () => {
+    const args = agentBrowserArgs('/home/u/.clawdcursor/cdp-profile', 'linux');
+    expect(args).toContain('--force-renderer-accessibility');
+    expect(args).toContain(`--remote-debugging-port=${AGENT_CDP_PORT}`);
+    expect(args).toContain('--user-data-dir=/home/u/.clawdcursor/cdp-profile');
+    expect(args[args.length - 1]).toBe('about:blank');
+  });
+
+  it('other OSes keep their flags unchanged', () => {
+    expect(agentBrowserArgs('p', 'win32')).not.toContain('--force-renderer-accessibility');
+    expect(agentBrowserArgs('p', 'darwin')).not.toContain('--force-renderer-accessibility');
   });
 });

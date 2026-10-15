@@ -259,6 +259,28 @@ describe('Smart Tools', () => {
       }
     });
 
+    it('a 2-char fragment must NOT claim a short target (live: "sin" clicked an "in" in the top bar)', async () => {
+      // Live Ubuntu VM 2026-10-15: xcalc's "sin" key was not read by OCR, but
+      // an "in" in another window was — substring rule 2/3*0.9 = 0.6 — and
+      // smart_click clicked it.
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      (OcrEngine.prototype as any).recognizeScreen = async () => ({
+        elements: [{ text: 'in', x: 996, y: 22, width: 12, height: 14, line: 1, confidence: 0.9 }],
+        fullText: 'in',
+        durationMs: 100,
+      });
+      try {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const ctx = createCtx();
+        const result = await smartClick.handler({ target: 'sin' }, ctx);
+        expect(result.isError).toBe(true);
+        expect(mockMouseClick).not.toHaveBeenCalled();
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
+    });
+
     it('a repeated word cannot stand in for a missing one (live regression: "Row 50" clicked "Row Row")', async () => {
       // Live Ubuntu VM run 2026-10: smart_click("Row 50") on a list scrolled
       // to rows 01-17 matched two adjacent "Row" tokens. Token overlap counted

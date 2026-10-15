@@ -411,10 +411,36 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('wmctrl', ['-l', '-G', '-p'], {
         timeout: TOOL_TIMEOUT_MS,
       });
-      return this.parseWmctrlOutput(stdout);
+      return await this.withClientOrigins(this.parseWmctrlOutput(stdout));
     } catch {
       return [];
     }
+  }
+
+  /**
+   * wmctrl -G adds the window-manager frame offset to the origin a second
+   * time (openbox: a Save dialog whose client sits at 413,139 came back as
+   * 414,159), which pushed dialog elements "off the active window". One
+   * `xwininfo -root -tree` gives every window's real absolute origin.
+   */
+  private async withClientOrigins(windows: WindowInfo[]): Promise<WindowInfo[]> {
+    if (!windows.length || !(await this.hasBinary('xwininfo'))) return windows;
+    let tree: string;
+    try {
+      ({ stdout: tree } = await execFileAsync('xwininfo', ['-root', '-tree'], { timeout: TOOL_TIMEOUT_MS }));
+    } catch {
+      return windows;
+    }
+    const origin = new Map<number, { x: number; y: number }>();
+    for (const line of tree.split('\n')) {
+      const m = line.match(/^\s*(0x[0-9a-f]+)\s.*\s\d+x\d+[+-]-?\d+[+-]-?\d+\s+\+?(-?\d+)\+?(-?\d+)\s*$/i);
+      if (m) origin.set(parseInt(m[1], 16), { x: parseInt(m[2], 10), y: parseInt(m[3], 10) });
+    }
+    for (const w of windows) {
+      const o = typeof w.handle === 'number' ? origin.get(w.handle) : undefined;
+      if (o) w.bounds = { ...w.bounds, x: o.x, y: o.y };
+    }
+    return windows;
   }
 
   async getActiveWindow(): Promise<WindowInfo | null> {
@@ -651,8 +677,13 @@ export class LinuxAdapter implements PlatformAdapter {
     if (typeof processId === 'number') return ['--process-id', String(processId)];
     const fg = await this.getActiveWindow().catch(() => null);
     if (fg?.processId) return ['--process-id', String(fg.processId)];
-    if (fg?.title) return ['--window-title', fg.title];
-    return [];
+    if (!fg?.title) return [];
+    // Another app's window with the same title (xcalc and GNOME Calculator
+    // are both "Calculator") must not be taken for this one: exclude it.
+    const others = (await this.listWindows().catch(() => [] as WindowInfo[]))
+      .filter(w => w.processId && w.title === fg.title && w.handle !== fg.handle)
+      .map(w => w.processId);
+    return ['--window-title', fg.title, ...(others.length ? ['--exclude-pids', [...new Set(others)].join(',')] : [])];
   }
 
   /**
@@ -1280,7 +1311,8 @@ export class LinuxAdapter implements PlatformAdapter {
       { spawnPid: pid },
     );
     return win
-      ? { pid: win.processId, title: win.title, handle: win.handle }
+      // A window with no _NET_WM_PID reports pid 0: the process we spawned is it.
+      ? { pid: win.processId || pid, title: win.title, handle: win.handle }
       : null;
   }
 
@@ -1400,15 +1432,23 @@ export class LinuxAdapter implements PlatformAdapter {
  * "gnome-calculato"), falling back to comm. '' when unreadable.
  */
 function processNameFromProc(pid: number): string {
+  let comm = '';
   try {
-    const argv0 = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
-    if (argv0) return path.posix.basename(argv0);
+    comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+  } catch { /* cmdline alone */ }
+  try {
+    const parts = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+    if (parts.length === 1 && /\s/.test(parts[0])) {
+      // Chromium rewrites its cmdline into ONE space-joined string, so the
+      // basename of "/opt/google/chrome/chrome --user-data-dir=/x/cdp-profile
+      // --no-first-run" came out as "cdp-profile --no-first-run …". Take the
+      // first word when comm (truncated to 15 chars) confirms it, else comm.
+      const first = path.posix.basename(parts[0].split(/\s/)[0]);
+      if (comm) return first.startsWith(comm) ? first : comm;
+    }
+    if (parts[0]) return path.posix.basename(parts[0]);
   } catch { /* fall through to comm */ }
-  try {
-    return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
-  } catch {
-    return '';
-  }
+  return comm;
 }
 
 function isProcessAlive(pid: number): boolean {
