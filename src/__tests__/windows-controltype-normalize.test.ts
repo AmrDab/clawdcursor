@@ -71,3 +71,37 @@ describe('WindowsAdapter.findElements — controlType normalization', () => {
     expect(runCalls[0]).not.toHaveProperty('controlType');
   });
 });
+
+describe('WindowsAdapter — controlType spelling (MenuItem / "menu item" / menuitem)', () => {
+  let adapter: WindowsAdapter;
+
+  beforeEach(() => {
+    runCalls.length = 0;
+    adapter = new WindowsAdapter();
+    vi.spyOn(adapter, 'getActiveWindow').mockResolvedValue({ processId: 42 } as never);
+  });
+
+  // Live Win11 VM 2026-10-14: invoke with a controlType missed a menu item that
+  // the same invoke WITHOUT a controlType found. UIA itself spells the role
+  // several ways — ProgrammaticName "ControlType.MenuItem", LocalizedControlType
+  // "menu item" — and agents copy whichever they saw; only the exact PascalCase
+  // bare name was honored, every other spelling failed closed.
+  for (const spelling of ['MenuItem', 'ControlType.MenuItem', 'menuitem', 'menu item', 'Menu Item', 'controltype.menuitem']) {
+    it(`invokeElement sends MenuItem for "${spelling}"`, async () => {
+      await adapter.invokeElement({ name: 'Save as', controlType: spelling, processId: 7 });
+      expect(runCalls).toHaveLength(1);
+      expect(runCalls[0].controlType).toBe('MenuItem');
+    });
+  }
+
+  it('findElements maps localized multi-word types too ("list item" → ListItem)', async () => {
+    await adapter.findElements({ name: 'x', controlType: 'list item' });
+    expect(runCalls[0].controlType).toBe('ListItem');
+  });
+
+  it('still fails closed on an unknown type', async () => {
+    const res = await adapter.invokeElement({ name: 'x', controlType: 'menu thing', processId: 7 });
+    expect(res.success).toBe(false);
+    expect(runCalls).toHaveLength(0);
+  });
+});
