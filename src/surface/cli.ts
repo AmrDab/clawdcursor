@@ -563,7 +563,10 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     const { server: mcpServer, toolCount } = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
     mcpToolCount = toolCount;
     app.use('/mcp', requireAuth);
-    await startMcpHttp(mcpServer, app, '/mcp');
+    // A server per SDK-client session and per concurrent one-shot post —
+    // one shared server refused every request while another held it.
+    await startMcpHttp(mcpServer, app, '/mcp',
+      async () => (await createMcpServer({ compact: compactSurface, ctx: toolCtx })).server);
   } catch (err) {
     console.warn('MCP HTTP transport not loaded:', (err as Error).message);
   }
@@ -962,6 +965,9 @@ program
   .option('--port <port>', 'API server port', '3847')
   .action(async (text, opts) => {
     const url = `http://127.0.0.1:${opts.port}/mcp`;
+    // A --compact daemon serves the `task` compound, not submit_task.
+    const { resolveTaskTool } = await import('./task-tool');
+    const tool = await resolveTaskTool(url, authHeaders());
 
     const sendTask = async (taskText: string) => {
       try {
@@ -977,7 +983,7 @@ program
             jsonrpc: '2.0',
             id: 1,
             method: 'tools/call',
-            params: { name: 'submit_task', arguments: { task: taskText } },
+            params: { name: tool.name, arguments: { [tool.key]: taskText } },
           }),
         });
         if (res.status === 401) {
@@ -1044,7 +1050,7 @@ while ($true) {
             jsonrpc = '2.0'
             id      = $rpcId
             method  = 'tools/call'
-            params  = @{ name = 'submit_task'; arguments = @{ task = $task } }
+            params  = @{ name = '${tool.name}'; arguments = @{ ${tool.key} = $task } }
         } | ConvertTo-Json -Depth 6 -Compress
         $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/mcp -Method POST -Headers $headers -Body $body
         if ($response.error) {
@@ -1088,7 +1094,7 @@ while true; do
     echo "> Sending: $task"
     RPC_ID=$((RPC_ID + 1))
     # JSON-encode the task by piping through python; falls back to naive escape if python missing
-    BODY=$(python3 -c "import json,sys; print(json.dumps({'jsonrpc':'2.0','id':$RPC_ID,'method':'tools/call','params':{'name':'submit_task','arguments':{'task':sys.argv[1]}}}))" "$task" 2>/dev/null) || BODY="{\\"jsonrpc\\":\\"2.0\\",\\"id\\":$RPC_ID,\\"method\\":\\"tools/call\\",\\"params\\":{\\"name\\":\\"submit_task\\",\\"arguments\\":{\\"task\\":\\"$task\\"}}}"
+    BODY=$(python3 -c "import json,sys; print(json.dumps({'jsonrpc':'2.0','id':$RPC_ID,'method':'tools/call','params':{'name':'${tool.name}','arguments':{'${tool.key}':sys.argv[1]}}}))" "$task" 2>/dev/null) || BODY="{\\"jsonrpc\\":\\"2.0\\",\\"id\\":$RPC_ID,\\"method\\":\\"tools/call\\",\\"params\\":{\\"name\\":\\"${tool.name}\\",\\"arguments\\":{\\"${tool.key}\\":\\"$task\\"}}}"
     curl -s -X POST http://127.0.0.1:${opts.port}/mcp \\
       -H "Content-Type: application/json" \\
       -H "Accept: application/json, text/event-stream"${token ? ' \\\n      -H "$AUTH_HEADER"' : ''} \\
