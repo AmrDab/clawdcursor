@@ -315,7 +315,14 @@ export function getBatchTools(): ToolDefinition[] {
           allowConfirm: params.allowConfirm === true,
           maxSteps: typeof params.maxSteps === 'number' ? params.maxSteps : undefined,
         });
-        return { text: renderResult(result), isError: !result.allDone };
+        return {
+          text: renderResult(result),
+          isError: !result.allDone,
+          steps: result.steps.map(s => {
+            const a = stepArgs(steps[s.i]).action;
+            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text };
+          }),
+        };
       },
     },
   ];

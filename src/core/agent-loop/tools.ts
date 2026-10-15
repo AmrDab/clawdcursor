@@ -1639,6 +1639,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           purpose: { type: 'string', enum: ['general', 'find_text', 'act'], description: 'What the compile is for' },
           target_text: { type: 'string', description: 'If set and absent from a11y, pull OCR to find it' },
           max_cost: { type: 'string', enum: ['cheap', 'ocr_ok', 'vision_ok'], description: 'Hard ceiling on perception cost (default ocr_ok)' },
+          processId: { type: 'number', description: 'Optional: compile this app\'s window (its tree, and OCR of its window only) instead of the focused one' },
         },
         additionalProperties: false,
       },
@@ -1646,6 +1647,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const holder = ctx.uiMaps;
         if (!holder) return { success: false, text: 'compile_ui: no UIMap holder on this context.' };
+        const processId = typeof args.processId === 'number' ? args.processId : undefined;
         const now = Date.now();
         const id = holder.nextId();
         const hints = {
@@ -1653,7 +1655,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           target_text: typeof args.target_text === 'string' ? args.target_text : undefined,
           max_cost: typeof args.max_cost === 'string' ? args.max_cost as 'cheap' | 'ocr_ok' | 'vision_ok' : undefined,
         };
-        const map = await compileUIMap(defaultCompileDeps(ctx.platform, now, id), hints);
+        const map = await compileUIMap(defaultCompileDeps(ctx.platform, now, id, undefined, processId), hints);
         holder.put(map, now, hints.max_cost ?? 'ocr_ok');
         return { success: true, text: wrapUntrustedScreenContent(renderUIMap(map)) };
       },
