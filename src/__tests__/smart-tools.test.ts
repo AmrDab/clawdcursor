@@ -70,6 +70,7 @@ const mockFindElement = vi.fn();
 const mockGetFocusedElement = vi.fn();
 const mockGetScreenContext = vi.fn();
 const mockWriteClipboard = vi.fn();
+const mockGetWindows = vi.fn().mockResolvedValue([]);
 
 function createCtx(overrides?: Partial<ToolContext>): ToolContext {
   return {
@@ -85,6 +86,7 @@ function createCtx(overrides?: Partial<ToolContext>): ToolContext {
       getScreenContext: mockGetScreenContext,
       writeClipboard: mockWriteClipboard,
       invalidateCache: mockInvalidateCache,
+      getWindows: mockGetWindows,
     },
     cdp: {
       isConnected: vi.fn().mockResolvedValue(false),
@@ -105,7 +107,25 @@ beforeEach(() => {
     processId: 1234,
     bounds: { x: 0, y: 0, width: 1920, height: 1080 },
   });
+  mockGetWindows.mockResolvedValue([]);
 });
+
+/** Run `fn` with the mocked OCR engine returning `elements`. */
+async function withOcr<T>(elements: Array<Record<string, unknown>>, fn: () => Promise<T>): Promise<T> {
+  const { OcrEngine } = await import('../platform/ocr-engine');
+  const orig = (OcrEngine.prototype as any).recognizeScreen;
+  (OcrEngine.prototype as any).recognizeScreen = async () => ({
+    elements, fullText: elements.map(e => e.text).join(' '), durationMs: 10,
+  });
+  try { return await fn(); } finally { (OcrEngine.prototype as any).recognizeScreen = orig; }
+}
+
+/** Run `fn` as if on `platform` (smart_click reads process.platform). */
+async function onPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
+  const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  Object.defineProperty(process, 'platform', { ...desc, value: platform });
+  try { return await fn(); } finally { Object.defineProperty(process, 'platform', desc); }
+}
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -387,6 +407,120 @@ describe('Smart Tools', () => {
       }
     });
 
+    // ── B6: live macOS blind test 2026-10-15 — smart_click("1") with the
+    // Calculator's pid clicked the menu-bar clock's "14" and opened
+    // Notification Center, reported as a success.
+    it('a short / numeric target never matches a substring of a longer token ("1" is not "14")', async () => {
+      await withOcr([{ text: '14', x: 4290, y: 20, width: 36, height: 20, line: 0, confidence: 0.95 }], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: '1' }, createCtx());
+        expect(result.isError).toBe(true);
+        expect(mockMouseClick).not.toHaveBeenCalled();
+      });
+    });
+
+    it('a short target still clicks the token that IS exactly it', async () => {
+      await withOcr([
+        { text: '14', x: 1700, y: 5, width: 30, height: 20, line: 0, confidence: 0.95 },
+        { text: '1', x: 300, y: 500, width: 12, height: 20, line: 9, confidence: 0.9 },
+      ], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: '1' }, createCtx());
+        expect(result.isError).toBeUndefined();
+        expect(mockMouseClick).toHaveBeenCalledWith(306, 510);
+      });
+    });
+
+    it('with processId, refuses an OCR match outside that process window instead of clicking it', async () => {
+      mockGetWindows.mockResolvedValue([
+        { processId: 1234, title: 'Test App', processName: 'testapp', bounds: { x: 0, y: 0, width: 1920, height: 1080 }, isMinimized: false },
+        { processId: 777, title: 'Calculator', processName: 'calculator', bounds: { x: 600, y: 300, width: 300, height: 400 }, isMinimized: false },
+      ]);
+      await withOcr([{ text: '1', x: 1800, y: 5, width: 12, height: 20, line: 0, confidence: 0.95 }], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: '1', processId: 777 }, createCtx());
+        expect(result.isError).toBe(true);
+        expect(mockMouseClick).not.toHaveBeenCalled();
+        expect(result.text).toMatch(/outside the window of process 777/);
+      });
+    });
+
+    it('with processId on a Retina Mac, finds the match inside that window (window bounds are points, OCR is physical)', async () => {
+      // Calculator at points (1000,300) 230x400 -> physical (2000,600) 460x800.
+      mockGetWindows.mockResolvedValue([
+        { processId: 777, title: 'Calculator', processName: 'Calculator', bounds: { x: 1000, y: 300, width: 230, height: 400 }, isMinimized: false },
+      ]);
+      mockGetActiveWindow.mockResolvedValue({ title: 'Calculator', processName: 'Calculator', processId: 777, bounds: { x: 1000, y: 300, width: 230, height: 400 } });
+      await onPlatform('darwin', () => withOcr([
+        { text: '1', x: 2100, y: 1300, width: 20, height: 30, line: 7, confidence: 0.95 },
+        { text: '1', x: 4300, y: 20, width: 10, height: 20, line: 0, confidence: 0.95 },
+      ], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const ctx = createCtx({ desktop: { mouseClick: mockMouseClick, keyPress: mockKeyPress, getDpiRatio: () => 2 } as any });
+        const result = await smartClick.handler({ target: '1', processId: 777 }, ctx);
+        expect(result.isError).toBeUndefined();
+        expect(mockMouseClick).toHaveBeenCalledWith(1055, 658);
+        expect(result.text).not.toMatch(/WARNING/);
+      }));
+    });
+
+    it('without processId, a match outside the focused window is still clicked with a warning', async () => {
+      mockGetActiveWindow.mockResolvedValue({ title: 'Test App', processName: 'testapp', processId: 1234, bounds: { x: 0, y: 100, width: 500, height: 500 } });
+      await withOcr([{ text: 'Submit', x: 1500, y: 20, width: 60, height: 20, line: 0, confidence: 0.95 }], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: 'Submit' }, createCtx());
+        expect(result.isError).toBeUndefined();
+        expect(result.text).toMatch(/WARNING: matched outside focused window/);
+      });
+    });
+
+    // ── B8: live macOS 2026-10-15 — "Make Plain Text" was read by OCR as
+    // "Make ... Text" and smart_click ran 24 s into deadline_exceeded.
+    it('a multi-word target matches when OCR dropped one middle word', async () => {
+      await withOcr([
+        { text: 'Make', x: 400, y: 300, width: 40, height: 16, line: 5, confidence: 0.9 },
+        { text: '...', x: 446, y: 300, width: 14, height: 16, line: 5, confidence: 0.5 },
+        { text: 'Text', x: 466, y: 300, width: 34, height: 16, line: 5, confidence: 0.9 },
+      ], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: 'Make Plain Text' }, createCtx());
+        expect(result.isError).toBeUndefined();
+        expect(result.text).toMatch(/^Clicked "Make Plain Text" via OCR/);
+      });
+    });
+
+    it('a different middle word is NOT a fuzzy match ("Make Rich Text" is not "Make Plain Text")', async () => {
+      await withOcr([
+        { text: 'Make', x: 400, y: 300, width: 40, height: 16, line: 5, confidence: 0.9 },
+        { text: 'Rich', x: 446, y: 300, width: 30, height: 16, line: 5, confidence: 0.9 },
+        { text: 'Text', x: 482, y: 300, width: 34, height: 16, line: 5, confidence: 0.9 },
+      ], async () => {
+        mockInvokeElement.mockResolvedValue({ success: false });
+        const result = await smartClick.handler({ target: 'Make Plain Text' }, createCtx());
+        expect(result.isError).toBe(true);
+        expect(mockMouseClick).not.toHaveBeenCalled();
+      });
+    });
+
+    it('a slow a11y search with no OCR match fails as not-found, not deadline_exceeded', async () => {
+      const slowMiss = vi.fn(() => new Promise(r => setTimeout(() => r({ success: false }), 400)));
+      const ctx = createCtx({ a11y: { getActiveWindow: mockGetActiveWindow, invokeElement: slowMiss, findElement: mockFindElement,
+        invalidateCache: mockInvalidateCache, getWindows: mockGetWindows } as any });
+      const result = await smartClick.handler({ target: 'NeverGonnaMatchAnythingInOcr', timeout: 100 }, ctx);
+      expect(result.isError).toBe(true);
+      const parsed = JSON.parse(result.text);
+      expect(parsed.error).toBe('no_clickable_target');
+      expect(parsed.tried.join(' ')).toMatch(/none matched/);
+    });
+
+    it('a11y "Element not found" does not trigger a second full tree search', async () => {
+      const notFound = vi.fn().mockRejectedValue(new Error('Element not found: name="Make Plain Text"'));
+      const ctx = createCtx({ a11y: { getActiveWindow: mockGetActiveWindow, invokeElement: notFound, findElement: mockFindElement,
+        invalidateCache: mockInvalidateCache, getWindows: mockGetWindows } as any });
+      await smartClick.handler({ target: 'Make Plain Text' }, ctx);
+      expect(mockFindElement).not.toHaveBeenCalled();
+    });
+
     it('says when the a11y invoke is still running (a modal box opened)', async () => {
       // Windows bridge: Save -> "Confirm Save As" keeps InvokePattern.Invoke
       // running; the bridge answers {pending:true} instead of blocking ~10 s.
@@ -462,15 +596,23 @@ describe('Smart Tools', () => {
           invalidateCache: mockInvalidateCache,
         } as any,
       });
-      // Slow down OCR too by patching the singleton via re-import isn't easy;
-      // instead use a target the OCR mock won't match so OCR returns null
-      // quickly — what we're testing is the a11y branch overrunning the deadline.
-      const result = await smartClick.handler(
-        // 200ms deadline (was 50ms — too tight under CI event-loop jitter);
-        // still fires well before the 5000ms slow a11y invoke above.
-        { target: 'NeverGonnaMatchAnythingInOcr', timeout: 200 },
-        ctx,
-      );
+      // OCR must be cut off by the deadline too: an OCR that FINISHED with no
+      // match is a plain not-found (no_clickable_target), whatever a11y took.
+      const { OcrEngine } = await import('../platform/ocr-engine');
+      const origRecognize = (OcrEngine.prototype as any).recognizeScreen;
+      (OcrEngine.prototype as any).recognizeScreen = () =>
+        new Promise(r => setTimeout(() => r({ elements: [], fullText: '', durationMs: 9000 }), 9000));
+      let result;
+      try {
+        result = await smartClick.handler(
+          // 200ms deadline (was 50ms — too tight under CI event-loop jitter);
+          // still fires well before the 5000ms slow a11y invoke above.
+          { target: 'NeverGonnaMatchAnythingInOcr', timeout: 200 },
+          ctx,
+        );
+      } finally {
+        (OcrEngine.prototype as any).recognizeScreen = origRecognize;
+      }
       expect(result.isError).toBe(true);
       const parsed = JSON.parse(result.text);
       expect(parsed.error).toBe('deadline_exceeded');
@@ -603,6 +745,26 @@ describe('Smart Tools', () => {
       // Should click at coordinates directly (no a11yToMouse conversion)
       expect(mockMouseClick).toHaveBeenCalledWith(400, 250);
       expect(mockWriteClipboard).toHaveBeenCalledWith('test');
+    });
+
+    // B10: live macOS Save panel — smart_type {target:"Save As", text:"blind-note.txt"}
+    // gave "blind-note.txt.txt" (macOS preselects only the base name).
+    it('with a target, replaces the field content (select-all, then paste)', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      const result = await smartType.handler({ text: 'blind-note.txt', target: 'Save As' }, createCtx());
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+a', 'mod+v']);
+      expect(result.text).toMatch(/replaced/);
+    });
+
+    it('mode:"append" types at the cursor without clearing the field', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      await smartType.handler({ text: '.bak', target: 'Save As', mode: 'append' }, createCtx());
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+v']);
+    });
+
+    it('without a target, types at the cursor (never selects all of a document)', async () => {
+      await smartType.handler({ text: 'hi' }, createCtx());
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+v']);
     });
 
     it('returns error when target element cannot be found', async () => {

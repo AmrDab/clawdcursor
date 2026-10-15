@@ -15,6 +15,7 @@
 import type { ToolDefinition } from './types';
 import { OcrEngine } from '../platform/ocr-engine';
 import { getBrowserProcessNames } from '../llm/browser-config';
+import { windowOcrRegion } from './ocr';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -214,7 +215,7 @@ export function getSmartTools(): ToolDefinition[] {
         },
         processId: {
           type: 'number',
-          description: 'Limit search to a specific process',
+          description: 'Limit search to a specific process. OCR matches outside the window of that process are refused, never clicked.',
           required: false,
         },
         timeout: {
@@ -279,6 +280,20 @@ export function getSmartTools(): ToolDefinition[] {
         const isBrowser = getBrowserProcessNames().includes(appName);
         const emptyA11y = EMPTY_A11Y_APPS.has(appName);
 
+        // The window an OCR match must fall in: the caller's process when one is
+        // named (live macOS: processId=Calculator, yet the menu-bar clock was
+        // clicked), else the focused window.
+        let scopeWin: { bounds?: { x: number; y: number; width: number; height: number } } | null = activeWin;
+        if (processId && activeWin?.processId !== processId) {
+          const wins: Array<{ processId: number; isMinimized?: boolean; bounds: { x: number; y: number; width: number; height: number } }> =
+            await Promise.resolve(ctx.a11y.getWindows?.(true)).catch(() => []) ?? [];
+          scopeWin = wins
+            .filter(w => w.processId === processId && !w.isMinimized && w.bounds?.width > 0 && w.bounds?.height > 0)
+            .sort((a, b) => b.bounds.width * b.bounds.height - a.bounds.width * a.bounds.height)[0] ?? null;
+        }
+        // Set when OCR matched only outside the caller's window and was refused.
+        let ocrRefused = false;
+
         // ── Step 1: OCR + a11y in parallel ──
         // OCR finds text coordinates, a11y tries invoke — whoever succeeds first wins.
 
@@ -305,6 +320,10 @@ export function getSmartTools(): ToolDefinition[] {
             const targetNorm = norm(target);
             const targetWords = targetNorm.split(' ').filter(Boolean);
             const targetWordSet = new Set(targetWords);
+            // A short or numeric target ("1", "OK", "50") is a whole token or
+            // nothing: "1" inside the menu-bar clock's "14" scored 0.45 and was
+            // clicked (live macOS 2026-10-15).
+            const wholeTokenOnly = targetNorm.length <= 2 || /^[\d ]+$/.test(targetNorm);
 
             const pickBest = (cands: typeof result.elements) => {
               // Group by OCR line index; sort each line left-to-right
@@ -323,6 +342,7 @@ export function getSmartTools(): ToolDefinition[] {
               const scorePhrase = (phrase: string, tokenCount: number) => {
                 if (!phrase) return 0;
                 if (phrase === targetNorm) return 1.0;
+                if (wholeTokenOnly) return 0;
                 // A single-character token can never claim a multi-char target.
                 // OCR routinely emits stray 1-char fragments ("O", "x", "|"),
                 // and the substring rule below scores "O" vs "OK" at
@@ -348,7 +368,16 @@ export function getSmartTools(): ToolDefinition[] {
                   const phraseWordSet = new Set(phraseWords);
                   const overlap = [...targetWordSet].filter(w => phraseWordSet.has(w)).length;
                   const cov = overlap / targetWordSet.size;
+                  // OCR dropped ONE word of a 3+ word label (live macOS: "Make
+                  // Plain Text" read as "Make … Text"): the rest present in
+                  // order, first and last words intact. Below a full match.
+                  let ti = 0;
+                  for (const w of phraseWords) { while (ti < targetWords.length && targetWords[ti] !== w) ti++; ti++; }
+                  const droppedOne = targetWords.length >= 3 && phraseWords.length === targetWords.length - 1
+                    && phraseWords[0] === targetWords[0] && phraseWords[phraseWords.length - 1] === targetWords[targetWords.length - 1]
+                    && ti <= targetWords.length;
                   if (cov >= 1) raw = 0.85;
+                  else if (droppedOne) raw = 0.6;
                   else if (cov >= 0.5) raw = 0.5 * cov;
                   else return 0;
                 }
@@ -425,11 +454,14 @@ export function getSmartTools(): ToolDefinition[] {
             // see text in background windows (e.g. Outlook visible behind a "Pick an
             // account" dialog showing the same email). Only widen to the full screen
             // when the foreground window has no match. See issue #71.
-            const winBounds = activeWin?.bounds;
+            // Window bounds are screen coordinates (points on macOS), OCR is
+            // physical pixels: compare in OCR space, or on a Retina Mac the
+            // window's own text never counts as inside it.
+            const winBounds = windowOcrRegion(scopeWin?.bounds, ctx.desktop.getDpiRatio?.() || 1, process.platform);
             let pick: { match: typeof result.elements[number]; score: number; sentence?: string } | null = null;
             let warning: string | undefined;
 
-            if (winBounds && winBounds.width > 0 && winBounds.height > 0) {
+            if (winBounds) {
               const inWindow = result.elements.filter(el => {
                 const cx = el.x + el.width / 2;
                 const cy = el.y + el.height / 2;
@@ -439,12 +471,24 @@ export function getSmartTools(): ToolDefinition[] {
               pick = pickBest(inWindow);
             }
 
+            // The caller scoped the click to a process: a match anywhere else is
+            // refused, never clicked with a warning.
+            if (!pick && processId) {
+              const outside = pickBest(result.elements) as { match: typeof result.elements[number] } | null;
+              ocrRefused = !!outside;
+              ocrDiag = !winBounds
+                ? `ocr: no visible window for process ${processId}, so no OCR click was made`
+                : outside
+                  ? `ocr: "${outside.match.text}" matched only outside the window of process ${processId}; refused, nothing clicked`
+                  : `ocr: read ${wordsRead} words, none matched inside the window of process ${processId}`;
+              return null;
+            }
             // Fall through to full-screen only if foreground produced nothing.
             // Annotate the response so the caller has a signal that the click may
             // have landed in a background window.
             if (!pick) {
               pick = pickBest(result.elements);
-              if (pick && winBounds && winBounds.width > 0) {
+              if (pick && winBounds) {
                 warning = 'matched outside focused window';
               }
             }
@@ -484,8 +528,11 @@ export function getSmartTools(): ToolDefinition[] {
             }
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
             return null;
-          } catch {
-            // Invocation threw (e.g. RPC error on UWP apps) — try to get bounds for coordinate fallback
+          } catch (err) {
+            // Invocation threw (e.g. RPC error on UWP apps) — try to get bounds for coordinate fallback.
+            // Not for a plain "not found": a second full-tree search finds
+            // nothing either and doubled the wait (live macOS: 24 s).
+            if (/not found/i.test(err instanceof Error ? err.message : String(err)) || remaining() < MIN_BUDGET_MS) return null;
             try {
               const elements = await ctx.a11y.findElement({
                 name: target,
@@ -513,10 +560,11 @@ export function getSmartTools(): ToolDefinition[] {
         // If both subsystems hang we abandon them at the deadline rather than
         // letting an outer race fire — but we keep the diagnostic state we've
         // already collected.
-        const parallelResult: { ocr: OcrHit | null; a11y: A11yHit | null; timedOut: boolean } = {
+        const parallelResult: { ocr: OcrHit | null; a11y: A11yHit | null; timedOut: boolean; ocrDone: boolean } = {
           ocr: null,
           a11y: null,
           timedOut: false,
+          ocrDone: false,
         };
         // The a11y invoke IS the click (it presses the element), so its outcome
         // is always awaited — it carries its own bridge timeout. Abandoning it
@@ -531,7 +579,7 @@ export function getSmartTools(): ToolDefinition[] {
             expired = true;
             check();
           }, remaining());
-          ocrPromise.then(r => { parallelResult.ocr = r; }, () => {}).finally(() => { ocrDone = true; check(); });
+          ocrPromise.then(r => { parallelResult.ocr = r; }, () => {}).finally(() => { ocrDone = true; parallelResult.ocrDone = true; check(); });
           a11yPromise.then(r => { parallelResult.a11y = r; }, () => {}).finally(() => { a11yDone = true; check(); });
           // Cancel the deadline timer once both settle so we don't keep the event loop alive
           Promise.allSettled([ocrPromise, a11yPromise]).then(() => clearTimeout(timer));
@@ -539,6 +587,9 @@ export function getSmartTools(): ToolDefinition[] {
         const ocrMatch = parallelResult.ocr;
         const a11yResult = parallelResult.a11y;
         const parallelTimedOut = parallelResult.timedOut;
+        // OCR finished inside the budget: its "no match" is the answer, even if
+        // the a11y search (always awaited) ran past the deadline.
+        const ocrCutOff = parallelTimedOut && !parallelResult.ocrDone;
 
         // a11y invoke succeeded — best outcome (OS-level click, most reliable)
         if (a11yResult && (a11yResult as any).method === 'invoke') {
@@ -638,8 +689,10 @@ export function getSmartTools(): ToolDefinition[] {
         }
 
         // Track what was attempted for diagnostics
-        if (parallelTimedOut) {
+        if (ocrCutOff) {
           attempted.push('deadline_exceeded_during_ocr_a11y_parallel');
+        } else if (parallelTimedOut) {
+          attempted.push(`UIA(invoke): search ran past the ${timeoutMs}ms budget`);
         }
         if (emptyA11y) {
           attempted.push(`UIA(skipped): app "${appName}" has known traits: emptyAxTree`);
@@ -694,10 +747,11 @@ export function getSmartTools(): ToolDefinition[] {
         // All methods failed. Choose the error code based on whether the
         // deadline ate any of our subsystems — if so the caller should retry
         // with a longer timeout; if not, the target is genuinely unfindable.
-        const deadlineHit = parallelTimedOut || remaining() < MIN_BUDGET_MS;
+        const deadlineHit = ocrCutOff || (cdpBudget < MIN_BUDGET_MS && isBrowser);
         if (deadlineHit) {
           return buildFailure('deadline_exceeded', 'deadline_exceeded');
         }
+        if (ocrRefused) return buildFailure('no_clickable_target', 'ocr_match_outside_target_window');
         return buildFailure('no_clickable_target', 'all_fallbacks_failed');
       },
     },
@@ -706,7 +760,9 @@ export function getSmartTools(): ToolDefinition[] {
     {
       name: 'smart_type',
       description:
-        'Type text into a UI element. If target is specified, finds and focuses the element first. ' +
+        'Type text into a UI element. With a target, finds and focuses the element, then REPLACES its whole ' +
+        'content (select-all, then paste) — pass mode:"append" to keep the content and type at the cursor. ' +
+        'Without a target, types at the cursor of the focused element. ' +
         'Uses clipboard paste for reliability (no dropped characters).',
       parameters: {
         text: {
@@ -729,6 +785,12 @@ export function getSmartTools(): ToolDefinition[] {
           description: 'Limit search to a specific process',
           required: false,
         },
+        mode: {
+          type: 'string',
+          description: '"replace" (default with a target): select all of the field, then type. "append": type at the cursor, keeping the content (default without a target).',
+          required: false,
+          enum: ['replace', 'append'],
+        },
       },
       category: 'keyboard',
       safetyTier: 1,
@@ -737,6 +799,9 @@ export function getSmartTools(): ToolDefinition[] {
         const text = params.text as string;
         const target = (params.target ?? params.name) as string | undefined;
         const processId = params.processId as number | undefined;
+        // Setting a field means replacing it: macOS preselects only a file's base
+        // name in a Save panel, so pasting there gave "name.txt.txt".
+        const replace = params.mode === 'replace' || (params.mode !== 'append' && !!target);
 
         // If target specified, find and focus it first
         if (target) {
@@ -801,13 +866,14 @@ export function getSmartTools(): ToolDefinition[] {
         // the OS difference without raw `process.platform` branching here.
         await ctx.a11y.writeClipboard(text);
         await new Promise(r => setTimeout(r, 50));
+        if (replace) await ctx.desktop.keyPress('mod+a');
         await ctx.desktop.keyPress('mod+v');
         await new Promise(r => setTimeout(r, 100));
         ctx.a11y.invalidateCache();
 
         const active = await ctx.a11y.getActiveWindow().catch(() => null);
         const activeInfo = active ? `[${active.processName}] "${active.title}"` : '(unknown)';
-        return { text: `Typed ${text.length} chars${target ? ` into "${target}"` : ''} in ${activeInfo}` };
+        return { text: `Typed ${text.length} chars${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}` };
       },
     },
 
