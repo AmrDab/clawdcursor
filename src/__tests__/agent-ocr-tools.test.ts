@@ -21,16 +21,19 @@ import type { AgentToolContext } from '../core/agent-loop/types';
 const el = (text: string, x: number, y: number, line: number, w = 60, h = 20) =>
   ({ text, x, y, width: w, height: h, confidence: 1, line });
 
-function ctx(clicks: any[]): AgentToolContext {
+function ctx(clicks: any[], opts: { platform?: string; dpiRatio?: number; windows?: any[]; targetWindow?: { title: string; processName: string } } = {}): AgentToolContext {
+  const r = opts.dpiRatio ?? 1;
   return {
+    ...(opts.targetWindow ? { targetWindow: opts.targetWindow } : {}),
     platform: {
-      platform: 'win32',
+      platform: opts.platform ?? 'win32',
+      listWindows: vi.fn(async () => opts.windows ?? []),
       getActiveWindow: vi.fn(async () => ({ title: 'Edge', processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })),
       focusWindow: vi.fn(async () => true),
       mouseClick: vi.fn(async (x: number, y: number) => { clicks.push({ x, y }); }),
     } as any,
     task: 't', mode: 'blind',
-    screen: { logicalWidth: 2560, logicalHeight: 1440, physicalWidth: 2560, physicalHeight: 1440, dpiRatio: 1 },
+    screen: { logicalWidth: 2560, logicalHeight: 1440, physicalWidth: 2560 * r, physicalHeight: 1440 * r, dpiRatio: r },
     screenshotsCaptured: { n: 0 },
   };
 }
@@ -90,5 +93,52 @@ describe('smart_click (OCR-locate + click by visible text)', () => {
     await tool('smart_click').execute({ target: 'Begin Exam' }, ctx(clicks));
     // Should hit the button row (y≈310), not the body "begin" (y≈40)
     expect(clicks[0].y).toBeGreaterThan(200);
+  });
+});
+
+// Live macOS blind test 2026-10-15: OCR reads PHYSICAL pixels; on a Retina Mac
+// the click (and the coordinates read_text reports) must be in screen points.
+describe('agent OCR tools on a Retina Mac', () => {
+  it('read_text reports screen coordinates (points), not physical pixels', async () => {
+    ocrState.elements = [el('Clock', 3874, 40, 0)];
+    const r = await tool('read_text').execute({}, ctx([], { platform: 'darwin', dpiRatio: 2 }));
+    expect(r.text).toContain('@1937,20 "Clock"');
+  });
+  it('smart_click clicks in screen points', async () => {
+    ocrState.elements = [el('Uptown', 200, 240, 0, 120, 40), el('Funk', 340, 240, 0, 120, 40)];
+    const clicks: any[] = [];
+    await tool('smart_click').execute({ target: 'Uptown Funk' }, ctx(clicks, { platform: 'darwin', dpiRatio: 2 }));
+    expect(clicks[0]).toEqual({ x: 165, y: 130 });
+  });
+});
+
+describe('agent smart_click B6 rules', () => {
+  it('a short / numeric target never matches inside a longer token ("1" is not "14")', async () => {
+    ocrState.elements = [el('14', 2154, 15, 0, 30, 20)];
+    const clicks: any[] = [];
+    const r = await tool('smart_click').execute({ target: '1' }, ctx(clicks));
+    expect(r.success).toBe(false);
+    expect(clicks).toHaveLength(0);
+  });
+  it('with a working window, refuses a match outside it', async () => {
+    ocrState.elements = [el('1', 1800, 5, 0, 12, 20)];
+    const clicks: any[] = [];
+    const r = await tool('smart_click').execute({ target: '1' }, ctx(clicks, {
+      targetWindow: { title: 'Calculator', processName: 'Calculator' },
+      windows: [{ title: 'Calculator', processName: 'Calculator', processId: 7, bounds: { x: 600, y: 300, width: 300, height: 400 }, isMinimized: false }],
+    }));
+    expect(r.success).toBe(false);
+    expect(clicks).toHaveLength(0);
+    expect(r.text).toMatch(/outside the working window/);
+  });
+  it('with a working window, clicks the match inside it over one outside', async () => {
+    ocrState.elements = [el('1', 1800, 5, 0, 12, 20), el('1', 700, 500, 3, 12, 20)];
+    const clicks: any[] = [];
+    const r = await tool('smart_click').execute({ target: '1' }, ctx(clicks, {
+      targetWindow: { title: 'Calculator', processName: 'Calculator' },
+      windows: [{ title: 'Calculator', processName: 'Calculator', processId: 7, bounds: { x: 600, y: 300, width: 300, height: 400 }, isMinimized: false }],
+    }));
+    expect(r.success).toBe(true);
+    expect(clicks[0]).toEqual({ x: 706, y: 510 });
   });
 });

@@ -22,12 +22,13 @@
 import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
-import { ensureTargetForeground } from './focus-guard';
+import { ensureTargetForeground, sameProcess } from './focus-guard';
 import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
 import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
+import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
@@ -1605,10 +1606,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         additionalProperties: false,
       },
       changesScreen: false,
-      async execute(args, _ctx) {
+      async execute(args, ctx) {
         const ocr = getAgentOcr();
         if (!ocr.isAvailable()) return { success: false, text: 'read_text: OCR not available on this platform — fall back to screenshot/vision.' };
-        const result = await ocr.recognizeScreen();
+        const raw = await ocr.recognizeScreen();
+        const result = { ...raw, elements: ocrToScreen(raw.elements, ctx) };
         if (result.elements.length === 0) return { success: true, text: '(read_text: OCR found no text — screen may be blank, or OCR unavailable.)' };
         const lineMap = new Map<number, OcrElement[]>();
         for (const el of result.elements) {
@@ -1712,12 +1714,37 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const button = args.button === 'right' ? 'right' : 'left';
         const ocr = getAgentOcr();
         if (!ocr.isAvailable()) return { success: false, text: 'smart_click: OCR not available — escalate to vision.' };
-        const result = await ocr.recognizeScreen();
-        if (result.elements.length === 0) return { success: false, text: 'smart_click: OCR found no text — escalate to vision.' };
-        const hit = locateByOcr(target, result.elements);
+        const raw = await ocr.recognizeScreen();
+        if (raw.elements.length === 0) return { success: false, text: 'smart_click: OCR found no text — escalate to vision.' };
+        // Screen coordinates — what mouseClick takes (points on macOS) — same
+        // as the `click` tool does with a11y coords (no imageScale; that's image-space only).
+        const elements = ocrToScreen(raw.elements, ctx);
+        // A working window is set: only its text may be clicked (live macOS:
+        // the menu-bar clock was clicked instead of Calculator's key).
+        const anchor = ctx.targetWindow;
+        let hit: ReturnType<typeof locateByOcr>;
+        if (anchor) {
+          const wins = ((await ctx.platform.listWindows?.().catch(() => [])) ?? [])
+            .filter(w => sameProcess(w.processName, anchor.processName) && !w.isMinimized && w.bounds.width > 0 && w.bounds.height > 0)
+            .sort((a, b) => Number(b.title === anchor.title) - Number(a.title === anchor.title)
+              || b.bounds.width * b.bounds.height - a.bounds.width * a.bounds.height);
+          const wb = wins[0]?.bounds;
+          const inside = wb ? elements.filter(el => {
+            const cx = el.x + el.width / 2, cy = el.y + el.height / 2;
+            return cx >= wb.x && cx < wb.x + wb.width && cy >= wb.y && cy < wb.y + wb.height;
+          }) : [];
+          hit = locateByOcr(target, inside);
+          if (!hit) {
+            const outside = locateByOcr(target, elements);
+            if (outside) {
+              return { success: false, text: `smart_click: "${outside.label}" matched only outside the working window `
+                + `(${anchor.processName}${wb ? '' : ': window not found'}) — not clicked. Focus that window, or read_text to find the target in it.` };
+            }
+          }
+        } else {
+          hit = locateByOcr(target, elements);
+        }
         if (!hit) return { success: false, text: `smart_click: no match for "${target}". Call read_text to see visible text, then retry with exact text.` };
-        // OCR coords are screen-space — pass straight to mouseClick, same as the
-        // `click` tool does with a11y coords (no imageScale; that's image-space only).
         const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
         const raised = await ensureTargetForeground(ctx, fg0);
         const before = await ctx.platform.getActiveWindow().catch(() => null);
@@ -2227,6 +2254,9 @@ function locateByOcr(
   const targetNorm = norm(target);
   const targetWords = targetNorm.split(' ').filter(Boolean);
   const targetWordSet = new Set(targetWords);
+  // A short or numeric target ("1", "OK", "50") is a whole token or nothing:
+  // "1" inside the clock's "14" was clicked (live macOS 2026-10-15).
+  const wholeTokenOnly = targetNorm.length <= 2 || /^[\d ]+$/.test(targetNorm);
   const lineMap = new Map<number, OcrElement[]>();
   for (const el of elements) {
     if (!el.text) continue;
@@ -2250,6 +2280,7 @@ function locateByOcr(
         const phrase = norm(span.map(t => t.text).join(' '));
         let score = 0;
         if (phrase === targetNorm) score = 1.0;
+        else if (wholeTokenOnly) continue;
         else if (phrase.includes(targetNorm) || targetNorm.includes(phrase)) {
           score = Math.min(phrase.length, targetNorm.length) / Math.max(phrase.length, targetNorm.length) * 0.9;
         } else {
@@ -2276,6 +2307,18 @@ function locateByOcr(
     }
   }
   return best && bestScore >= 0.4 ? best : null;
+}
+
+/** OCR elements (physical pixels) in SCREEN coordinates — points on macOS —
+ *  the same conversion the `ocr` tool and compile_ui apply. */
+function ocrToScreen(elements: OcrElement[], ctx: AgentToolContext): OcrElement[] {
+  const ratio = ctx.screen?.dpiRatio || 1;
+  const os = ctx.platform.platform;
+  return elements.map(el => {
+    const p = ocrPointToClickPoint(el.x, el.y, ratio, os);
+    const size = ocrPointToClickPoint(el.width, el.height, ratio, os);
+    return { ...el, x: p.x, y: p.y, width: size.x, height: size.y };
+  });
 }
 
 function sleep(ms: number): Promise<void> {
