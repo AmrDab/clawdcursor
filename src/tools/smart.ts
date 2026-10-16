@@ -531,15 +531,21 @@ export function getSmartTools(): ToolDefinition[] {
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
           try {
+            const aliases = KEY_NAME_ALIASES[target.trim().toLowerCase()] ?? [];
+            // The Windows bridge THROWS on "not found" (others return a miss):
+            // with key-name aliases to try, treat that as a miss, not the end.
             let result = await ctx.a11y.invokeElement({
               name: target,
               processId: processId || activeWin?.processId,
               action: 'click',
+            }).catch((err: unknown) => {
+              if (aliases.length && /not found/i.test(err instanceof Error ? err.message : String(err))) return { success: false } as { success: boolean; clickPoint?: { x: number; y: number } };
+              throw err;
             });
             // Calculator keys are named in words ("One", "Multiply by", AX
             // identifier "One" on macOS), and OCR rarely reads a lone digit on
             // a button: try the spoken names before giving up.
-            for (const alias of KEY_NAME_ALIASES[target.trim().toLowerCase()] ?? []) {
+            for (const alias of aliases) {
               if (result.success || result.clickPoint) break;
               result = await ctx.a11y.invokeElement({ name: alias, processId: processId || activeWin?.processId, action: 'click' })
                 .catch(() => result);
@@ -835,11 +841,14 @@ export function getSmartTools(): ToolDefinition[] {
             const appName = activeWin?.processName?.toLowerCase() || '';
 
             if (!EMPTY_A11Y_APPS.has(appName)) {
+              // The Windows bridge throws on "not found" — e.g. when the name
+              // matched only a label that can't take focus. Treat it as a miss
+              // so the editable-element fallback below still runs.
               const result = await ctx.a11y.invokeElement({
                 name: target,
                 processId: processId || activeWin?.processId,
                 action: 'focus',
-              });
+              }).catch(() => ({ success: false } as { success: boolean; clickPoint?: { x: number; y: number } }));
               if (result.success) {
                 focused = true;
               } else if (result.clickPoint) {

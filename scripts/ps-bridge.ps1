@@ -1093,14 +1093,17 @@ function Cmd-InvokeElement {
                 $labeled = Resolve-EditableTarget $element -LabeledOnly
                 if ($labeled) { $element = $labeled }
             }
+            $holdsText = $false   # a field that can hold a value (empty means empty)
             try {
                 $vp = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                $holdsText = $true
                 $v = $vp.Current.Value
                 if ($null -ne $v -and $v.Length -gt 0) { $val = $v; $method = "ValuePattern" }
             } catch { }
             if ($null -eq $val) {
                 try {
                     $tp = $element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+                    $holdsText = $true
                     $t = $tp.DocumentRange.GetText(-1)
                     if ($null -ne $t -and $t.Length -gt 0) { $val = $t; $method = "TextPattern" }
                 } catch { }
@@ -1113,6 +1116,10 @@ function Cmd-InvokeElement {
                     if ($sel.Length -gt 0 -and $sel[0].Current.Name) { $val = $sel[0].Current.Name; $method = "SelectionPattern" }
                 } catch { }
             }
+            # An EMPTY field reads "" — not its own name (an empty "First name"
+            # box read back as "First name"). Name is the value only for
+            # elements that hold no text at all (a label, a button).
+            if ($null -eq $val -and $holdsText) { $val = ""; $method = "ValuePattern" }
             if ($null -eq $val) { $val = $element.Current.Name; $method = "Name" }
             return @{ success=$true; action="get-value"; value=$val; method=$method }
         }

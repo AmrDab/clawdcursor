@@ -163,6 +163,27 @@ describe('Smart Tools', () => {
     expect(mockMouseClick).not.toHaveBeenCalled();
   });
 
+  it('Windows-style THROWN "not found" still tries the key name (live 01bb90b)', async () => {
+    mockInvokeElement.mockImplementation(async (q: any) => {
+      if (q.name === 'One') return { success: true };
+      throw new Error('Element not found: "1"');
+    });
+    const r = await withOcr([], () => smartClick.handler({ target: '1' }, createCtx()));
+    expect(r.isError).toBeFalsy();
+    expect(mockInvokeElement).toHaveBeenCalledWith(expect.objectContaining({ name: 'One' }));
+  });
+
+  it('Windows-style THROWN focus miss still falls back to the field (live 01bb90b)', async () => {
+    mockInvokeElement.mockRejectedValue(new Error('Element not found: "First name"'));
+    mockFindElement.mockResolvedValue([
+      { name: 'First name', controlType: 'Text', bounds: { x: 10, y: 10, width: 60, height: 14 } },
+      { name: 'First name', controlType: 'Edit', bounds: { x: 80, y: 6, width: 200, height: 22 } },
+    ]);
+    const r = await smartType.handler({ target: 'First name', text: 'Ada' }, createCtx());
+    expect(r.isError).toBeFalsy();
+    expect(mockMouseClick).toHaveBeenCalledWith(180, 17);
+  });
+
   it('registers all 4 smart tools', () => {
     expect(tools).toHaveLength(4);
     expect(tools.map(t => t.name)).toEqual(['smart_read', 'smart_click', 'smart_type', 'invoke_element']);
