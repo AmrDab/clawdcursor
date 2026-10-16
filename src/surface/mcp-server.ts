@@ -156,7 +156,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'background — re-call with the same instruction to keep waiting, task {action:"status"} ' +
       'to poll, task {action:"abort"} to stop. A timeout on your side is NOT a task failure. ' +
       'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs confirmation): call system {action:"pause_for_user", message} — ' +
-      'the user does it and clicks Resume on screen; never type or guess credentials. A paused task returns ' +
+      'the user does it and clicks Resume on screen; never type or guess credentials. A plan limit or upgrade wall is a roadblock too: ' +
+      'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. A paused task returns ' +
       '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +

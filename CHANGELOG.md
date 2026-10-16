@@ -345,6 +345,14 @@ M1 iMac, no screenshots):
   `find` reports that it cannot search by identifier there instead of "no elements
   found", and `clawdcursor doctor` shows the helper's state (built / builds on first
   use / needs the Command Line Tools / switched off).
+- **Upgrade walls are a roadblock (#239).** A click on `Upgrade`, `Subscribe`,
+  `Start (a / your) (free) trial`, `Billing`, a payment method or "Add credit
+  card" now needs confirmation, like Pay / Checkout. Page text such as
+  "Subscriber count", "Unsubscribe", "Upgrade guide" or Trello's "Add a card"
+  stays ungated, and typing the words is never gated. The agent prompt, the MCP
+  instructions, `pause_for_user` and the skill say it: at a plan limit or upgrade
+  wall, stop, quote the blocking text and ask the user; never click Upgrade /
+  Subscribe yourself.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

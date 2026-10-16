@@ -136,6 +136,37 @@ describe('SafetyLayer.evaluate', () => {
     });
   });
 
+  // #239: plan-limit / upgrade walls — a click that changes a plan or starts
+  // paying is the user's call, not the agent's.
+  describe('plan / payment labels (#239)', () => {
+    it.each([
+      'Upgrade', 'Upgrade to Pro', 'Upgrade now', 'Upgrade plan',
+      'Subscribe', 'Subscribe now',
+      'Start free trial', 'Start a free trial', 'Start your 14-day free trial', 'Start trial', 'Try free trial',
+      'Billing', 'Go to billing',
+      'Add payment method', 'Add a payment method', 'Add credit card', 'Update payment method',
+    ])('a click on %j needs confirmation', (label) => {
+      for (const tool of ['mouse_click', 'invoke_element', 'cdp_click']) {
+        const d = evaluate({ tool, args: {}, targetLabel: label });
+        expect(d.decision, `${tool} → ${label}`).toBe('confirm');
+        expect(d.tier).toBe('destructive');
+      }
+    });
+
+    it.each([
+      'Subscriber count', '1.2M subscribers', 'Unsubscribe', 'Subscriptions',
+      'Upgrade guide', 'Read the upgrade notes', 'Upgraded', 'Upgrades',
+      'Trial ended', 'Add a card', 'Add card', 'Free plan',
+    ])('a click on %j stays at input tier', (label) => {
+      expect(evaluate({ tool: 'mouse_click', args: {}, targetLabel: label }).decision).toBe('allow');
+    });
+
+    it('typing the words into a field is not gated', () => {
+      const text = 'Upgrade to the billing plan, subscribe and start a free trial';
+      expect(evaluate({ tool: 'type_text', args: { text }, targetLabel: text }).decision).toBe('allow');
+    });
+  });
+
   // #124: destructive-label patterns must NOT fire on the CONTENT typed by a
   // typing tool. The `targetLabel` for type_text/cdp_type is the text payload,
   // not a control label — typing a sentence containing "confirm"/"send" is

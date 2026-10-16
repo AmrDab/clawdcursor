@@ -173,6 +173,15 @@ const CONFIRM_LABEL_PATTERNS: RegExp[] = [
   /\btransfer\b/i,
   /\bpublish\b/i,
   /\bconfirm\b/i,          // confirm dialogs themselves — require user
+  // Plan changes and payment set-up (#239): an upgrade wall is the user's call.
+  // Kept narrow so page text doesn't trip it: "Subscriber count", "Unsubscribe",
+  // "Upgrade guide", Trello's "Add a card" stay ungated.
+  /\bupgrade\b(?!\s+(guide|notes?|docs?|documentation|instructions|faq|help)\b)/i,
+  /\bsubscribe\b/i,
+  /\b(start|begin|try)\s+(a\s+|your\s+|my\s+)?(\d+[- ]day\s+)?(free\s+)?trial\b/i,
+  /\bbilling\b/i,
+  /\bpayment\s+method\b/i,
+  /\badd\s+(a\s+|new\s+|your\s+)?(credit|debit)\s+card\b/i,
 ];
 
 // Canonical tools that type ARBITRARY TEXT. Their text payload is content,
