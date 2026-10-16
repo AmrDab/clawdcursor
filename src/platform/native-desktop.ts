@@ -86,6 +86,9 @@ export class NativeDesktop extends EventEmitter {
   private connected = false;
   private monitors: MonitorInfo[] = [];
   private helper = IS_MAC ? getNativeHelper() : null;
+  /** macOS: who owns the keyboard (see mac-keyboard.ts). Created on first use; the MCP tools type through THIS class. */
+  private macKeyboardGuard: import('./mac-keyboard').MacKeyboardGuard | null = null;
+  private inputWarning: string | null = null;
 
   /** Scale factor: LLM coordinates × scaleFactor = real screen coordinates */
   private scaleFactor = 1;
@@ -675,14 +678,13 @@ export class NativeDesktop extends EventEmitter {
     if (IS_MAC) {
       // Use System Events for typing — same reason as keyPress:
       // CGEvent from helper subprocess is silently blocked by TCC.
-      const { execFile } = await import('child_process');
-      const { promisify } = await import('util');
-      const execFileAsync = promisify(execFile);
+      // Ask who owns the keyboard FIRST and outside the try below: a refusal must not fall through to the CGEvent helper.
+      await this.guardMacKeys();
+      const { runAppleScript } = await import('./mac-keyboard');
       const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       try {
-        await execFileAsync('osascript', ['-e',
-          `tell application "System Events" to keystroke "${escaped}"`
-        ], { timeout: 10000 });
+        // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
+        await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 10000);
       } catch (err: any) {
         console.warn(`   ⌨️  macOS type failed: ${err.message?.substring(0, 100)}`);
         // Fallback: try helper anyway
@@ -754,12 +756,12 @@ export class NativeDesktop extends EventEmitter {
    * unlike CGEvent.post() from a spawned child process.
    */
   private async macKeyPress(keyCombo: string): Promise<void> {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
+    // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
+    await this.guardMacKeys(keyCombo);
+    const { runAppleScript } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
-      await execFileAsync('osascript', ['-e', 'tell application "System Events" to keystroke "+"']);
+      await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
       return;
     }
 
@@ -824,10 +826,30 @@ export class NativeDesktop extends EventEmitter {
     }
 
     try {
-      await execFileAsync('osascript', ['-e', script], { timeout: 5000 });
+      await runAppleScript(script, 5000);
     } catch (err: any) {
       console.warn(`   ⌨️  macOS key press failed: ${err.message?.substring(0, 100)}`);
     }
+  }
+
+  /**
+   * Ask the shared keyboard guard (macOS). Throws when a system dialog or the lock screen owns the keyboard; a modal dialog of
+   * another app is typed into, and its warning is kept for `takeInputWarning`.
+   */
+  private async guardMacKeys(combo?: string): Promise<void> {
+    if (!this.macKeyboardGuard) {
+      const [{ MacKeyboardGuard }, { defaultMacAx }] = await Promise.all([import('./mac-keyboard'), import('./mac-ax')]);
+      this.macKeyboardGuard = new MacKeyboardGuard(defaultMacAx());
+    }
+    const { warning } = await this.macKeyboardGuard.assert(combo);
+    if (warning) this.inputWarning = warning;
+  }
+
+  /** The warning from the keystrokes sent since it was last taken, or null. Tools call it right after typing / pressing keys. */
+  takeInputWarning(): string | null {
+    const w = this.inputWarning;
+    this.inputWarning = null;
+    return w;
   }
 
   async executeMouseAction(action: MouseAction): Promise<void> {

@@ -441,6 +441,22 @@ M1 iMac, no screenshots):
     request; a name or identifier of only spaces is no name; identifiers are
     compared byte for byte (NFC and NFD forms of an accented id are different ids,
     as in the caller's own filter); the older `smart_*` path can set a field to "".
+- **Typing on macOS: one keyboard guard for every path, and the typed text off `ps`.**
+  - `smart_type` and the older agent pipeline typed through a second macOS keyboard
+    (`NativeDesktop`) that never asked who owned the keyboard, so with a permission
+    prompt up a Return could still press "Allow" while the tool reported success.
+    Both keyboards now ask the same guard (`src/platform/mac-keyboard.ts`); checked
+    through the built MCP server against a dialog with the system-dialog role:
+    `type`, `key Tab` and `smart_type` are refused, a bare `Escape` goes through.
+  - The text being typed no longer appears in `osascript`'s arguments, where any
+    process on the Mac could read it with `ps` for as long as the call ran: the
+    AppleScript program is sent on stdin (typed text, single characters, held keys).
+  - When a modal dialog of another app has the keyboard (a launcher, a password
+    manager, an app's own "Delete everything?" box) the keys are still sent, as
+    before, but the tool result now says whose dialog got them instead of only
+    logging it.
+  - A refused paste (`type`, `type_text`, `smart_type`) puts the user's clipboard
+    back; the text that was to be typed — a password, say — used to stay on it.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

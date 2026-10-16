@@ -15,11 +15,17 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
-const execFileCalls: Array<{ cmd: string; args: string[] }> = [];
+const execFileCalls: Array<{ cmd: string; args: string[]; stdin?: string }> = [];
 vi.mock('child_process', () => ({
   execFile: (cmd: string, args: string[], _opts: unknown, cb: (e: unknown, r: unknown) => void) => {
-    execFileCalls.push({ cmd, args });
+    const call: { cmd: string; args: string[]; stdin?: string } = { cmd, args };
+    execFileCalls.push(call);
+    // Keyboard programs reach osascript on STDIN (argv is readable by every process); the others still use -e.
+    if (args.length === 0) {
+      return { stdin: { on: () => {}, end: (data?: string) => { call.stdin = data; queueMicrotask(() => cb(null, { stdout: '', stderr: '' })); } } };
+    }
     cb(null, { stdout: '10,20,800,600', stderr: '' });
+    return undefined;
   },
   spawn: vi.fn(),
 }));
@@ -27,7 +33,8 @@ vi.mock('child_process', () => ({
 import { MacOSAdapter } from '../platform/macos';
 
 const mac = new MacOSAdapter();
-const scripts = () => execFileCalls.filter(c => c.cmd === 'osascript').map(c => c.args[c.args.indexOf('-e') + 1]);
+/** Every AppleScript program sent to osascript, wherever it travelled (-e argument or stdin). */
+const scripts = () => execFileCalls.filter(c => c.cmd === 'osascript').map(c => c.stdin ?? c.args[c.args.indexOf('-e') + 1]);
 
 beforeEach(() => { execFileCalls.length = 0; });
 
@@ -64,5 +71,35 @@ describe('macOS window scripts coerce interpolated numbers', () => {
   it('setWindowBounds emits plain integers', async () => {
     await mac.setWindowBounds({ x: 10.6, y: 20, width: 800, height: 600 }, { processName: 'Notes' });
     expect(scripts().pop()).toContain('set position to {11, 20}');
+  });
+});
+
+describe('macOS keystrokes never put what is typed on argv', () => {
+  // `osascript -e '… keystroke "<text>"'` is visible to every process on the Mac (ps) for as long as osascript runs.
+  it('typeText sends the program on stdin and leaves argv empty', async () => {
+    await mac.typeText('my password is hunter2');
+    const call = execFileCalls.find(c => c.cmd === 'osascript')!;
+    expect(call.args).toEqual([]);
+    expect(call.stdin).toBe('tell application "System Events" to keystroke "my password is hunter2"');
+  });
+
+  it('quotes and backslashes are escaped exactly as before', async () => {
+    await mac.typeText('say "hi" \\ there');
+    expect(scripts()).toEqual(['tell application "System Events" to keystroke "say \\"hi\\" \\\\ there"']);
+  });
+
+  it('a single typed character through keyPress is not on argv either', async () => {
+    await mac.keyPress('q');
+    expect(execFileCalls.filter(c => c.cmd === 'osascript').every(c => c.args.length === 0)).toBe(true);
+  });
+
+  it('keyDown / keyUp programs go the same way', async () => {
+    await mac.keyDown('shift');
+    await mac.keyUp('shift');
+    expect(execFileCalls.filter(c => c.cmd === 'osascript').every(c => c.args.length === 0)).toBe(true);
+    expect(scripts()).toEqual([
+      'tell application "System Events" to key down shift',
+      'tell application "System Events" to key up shift',
+    ]);
   });
 });

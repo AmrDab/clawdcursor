@@ -907,16 +907,31 @@ export function getSmartTools(): ToolDefinition[] {
         // Type via clipboard paste. `mod+v` resolves to Cmd+V on macOS and
         // Ctrl+V everywhere else — the platform-portable key combo handles
         // the OS difference without raw `process.platform` branching here.
-        await ctx.a11y.writeClipboard(text);
-        await new Promise(r => setTimeout(r, 50));
-        if (replace) await ctx.desktop.keyPress('mod+a');
-        await ctx.desktop.keyPress('mod+v');
+        ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
+        // macOS only (the only OS where the keyboard can be refused): remember the clipboard so a refusal can put it back.
+        let prior: string | null = null;
+        if (process.platform === 'darwin') {
+          try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ }
+        }
+        try {
+          await ctx.a11y.writeClipboard(text);
+          await new Promise(r => setTimeout(r, 50));
+          if (replace) await ctx.desktop.keyPress('mod+a');
+          await ctx.desktop.keyPress('mod+v');
+        } catch (err) {
+          // The keys were refused (a system dialog owns the keyboard): nothing was typed, so the text must not stay on the
+          // user's clipboard. (A paste that worked leaves it there, as smart_type always has.)
+          if (prior !== null) await ctx.a11y.writeClipboard(prior).catch(() => {});
+          throw err;
+        }
         await new Promise(r => setTimeout(r, 100));
         ctx.a11y.invalidateCache();
 
         const active = await ctx.a11y.getActiveWindow().catch(() => null);
         const activeInfo = active ? `[${active.processName}] "${active.title}"` : '(unknown)';
-        return { text: `Typed ${text.length} chars${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}` };
+        // macOS: a modal dialog of another app may have had the keyboard — say where the text went.
+        const warn = ctx.desktop.takeInputWarning?.();
+        return { text: `Typed ${text.length} chars${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 

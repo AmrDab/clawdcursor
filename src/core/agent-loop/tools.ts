@@ -843,21 +843,26 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // single-line fields (address bar, search boxes), so press Return.
         const submit = /\r?\n$/.test(text);
         const body = submit ? text.replace(/\r?\n$/, '') : text;
+        ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
+        let prior: string | null = null;        // set while the typed text sits on the clipboard
         try {
           if (body) {
-            const prior = await ctx.platform.readClipboard().catch(() => '');
+            prior = await ctx.platform.readClipboard().catch(() => '');
             await ctx.platform.writeClipboard(body);
             await sleep(40);
             await ctx.platform.keyPress('mod+v');
             await sleep(150);
             await ctx.platform.writeClipboard(prior).catch(() => {});
+            prior = null;
           }
           if (submit) await ctx.platform.keyPress('Return');
-          return { success: true, text: `Typed ${text.length} chars (paste): "${truncate(text, 60)}"` };
+          return { success: true, text: `Typed ${text.length} chars (paste): "${truncate(text, 60)}"${inputWarningNote(ctx)}` };
         } catch {
+          // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
+          if (prior !== null) await ctx.platform.writeClipboard(prior).catch(() => {});
           await ctx.platform.typeText(text);
           await sleep(200);
-          return { success: true, text: `Typed ${text.length} chars: "${truncate(text, 60)}"` };
+          return { success: true, text: `Typed ${text.length} chars: "${truncate(text, 60)}"${inputWarningNote(ctx)}` };
         }
       },
     },
@@ -905,12 +910,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
             return { success: false, isError: true, text: `BLOCKED: "${c}" is a dangerous key combo.` };
           }
         }
+        ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (const c of combos) {
           await ctx.platform.keyPress(c);
           if (combos.length > 1) await sleep(50); // brief gap between sequence steps
         }
         await sleep(150);
-        return { success: true, text: `Pressed ${input}` };
+        return { success: true, text: `Pressed ${input}${inputWarningNote(ctx)}` };
       },
     },
 
@@ -2208,6 +2214,12 @@ async function editableTarget(
   const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
   if (!pick?.bounds) return null;
   return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
+}
+
+/** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */
+function inputWarningNote(ctx: AgentToolContext): string {
+  const w = ctx.platform.takeInputWarning?.();
+  return w ? ` ⚠ ${w}` : '';
 }
 
 function truncateTitle(s: string): string {

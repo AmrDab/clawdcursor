@@ -18,6 +18,7 @@ import * as path from 'path';
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process';
 import { getPackageRoot } from '../paths';
 import { macAxBinary } from '../platform/mac-ocr-binary';
+import { runAppleScript, MacKeyboardGuard } from '../platform/mac-keyboard';
 
 const isMac = process.platform === 'darwin';
 const fixturesEnabled = process.env.CLAWD_LIVE_MAC_TESTS === '1';
@@ -125,8 +126,8 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
   const extra: ChildProcess[] = [];
 
   /** Start the fixture app; resolves its pid once both windows are up. */
-  async function startFixture(mode: 'normal' | 'slow' | 'zoomed' | 'minimized' = 'normal', bin = fixtureBin): Promise<{ proc: ChildProcess; pid: number }> {
-    const proc = spawn(bin, [], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AXFIXTURE_MODE: mode } });
+  async function startFixture(mode: 'normal' | 'slow' | 'zoomed' | 'minimized' = 'normal', bin = fixtureBin, env: Record<string, string> = {}): Promise<{ proc: ChildProcess; pid: number }> {
+    const proc = spawn(bin, [], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AXFIXTURE_MODE: mode, ...env } });
     const p = await new Promise<number>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('fixture did not start')), 30_000);
       proc.stdout!.on('data', d => {
@@ -458,6 +459,89 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
         expect(after.bounds.width).toBe(before.bounds.width);
         expect(after.bounds.height).toBe(before.bounds.height);
       } finally { m.proc.kill('SIGKILL'); }
+    }, 25 * 60_000);
+  });
+
+  describe('the keyboard guard against a real dialog (MacKeyboardGuard on live NSWorkspace + AX data; no key is sent)', () => {
+    // The guard is the same class MacOSAdapter and NativeDesktop (the MCP route) ask; here it reads the helper's real `frontmost`.
+    // (tests/vitest.setup.ts sets CLAWD_NO_MAC_AX=1 for every test - that switch turns the guard off, so turn it back on here.)
+    const savedKillSwitch = process.env.CLAWD_NO_MAC_AX;
+    beforeAll(() => { process.env.CLAWD_NO_MAC_AX = '0'; });
+    afterAll(() => { if (savedKillSwitch === undefined) delete process.env.CLAWD_NO_MAC_AX; else process.env.CLAWD_NO_MAC_AX = savedKillSwitch; });
+    const guard = () => new MacKeyboardGuard({
+      frontmost: async () => { const r = await run(['frontmost']); return { locked: r.locked === true, app: r.frontmost ?? null }; },
+    });
+    /** Open the fixture's "Open modal" alert (it closes itself after 3 s) and wait until it is up. */
+    async function withAlert(env: Record<string, string>, fn: (alertPid: number) => Promise<void>) {
+      const f = await startFixture('normal', fixtureBin, env);
+      extra.push(f.proc);
+      try {
+        void run(['invoke', '--pid', String(f.pid), '--id', 'modalButton', '--action', 'click', '--ax-timeout-ms', '500']);
+        await new Promise(res => setTimeout(res, 900));
+        await fn(f.pid);
+      } finally { f.proc.kill('SIGKILL'); }
+    }
+
+    it('an app\'s own modal alert (AXDialog) is typed into, with a warning that names the app', async (ctx) => {
+      if (!usable) return ctx.skip();
+      await withAlert({}, async alertPid => {
+        const front = (await run(['frontmost'])).frontmost;
+        if (front?.processId !== alertPid) return ctx.skip();      // the alert did not take the front: nothing to judge
+        const r = await guard().assert('Return');
+        expect(r.warning).toMatch(/modal dialog/i);
+        expect(r.warning).toContain(String(alertPid));
+        // …but the launch plumbing does not type into it
+        await expect(guard().assert(undefined, { strict: true })).rejects.toThrow(/modal dialog/i);
+      });
+    });
+
+    it('a dialog with the system-dialog role is refused — Return, Tab and typing — while a bare Escape is let through', async (ctx) => {
+      if (!usable) return ctx.skip();
+      await withAlert({ AXFIXTURE_SYSTEMDIALOG: '1' }, async alertPid => {
+        const front = (await run(['frontmost'])).frontmost;
+        if (front?.processId !== alertPid) return ctx.skip();
+        expect(front.windows.some((w: any) => w.subrole === 'AXSystemDialog')).toBe(true);
+        const g = guard();
+        await expect(g.assert('Return')).rejects.toThrow(/system dialog/i);
+        await expect(g.assert('Tab')).rejects.toThrow(/system dialog/i);
+        await expect(g.assert()).rejects.toThrow(/system dialog/i);               // typing
+        await expect(g.assert('Escape')).resolves.toEqual({});
+      });
+    });
+
+    it('with no dialog up, an ordinary app has the keyboard: nothing to say', async (ctx) => {
+      if (!usable) return ctx.skip();
+      await expect(guard().assert('Return')).resolves.toBeTruthy();
+    });
+  });
+
+  describe('keystrokes whose program travels on stdin (src/platform/mac-keyboard.ts)', () => {
+    it('System Events types what the program says into the focused field of the frontmost app — nothing is on argv', async (ctx) => {
+      if (!usable) return ctx.skip();
+      if (!await waitUntilIdle()) return ctx.skip();          // the fixture is an ordinary app here: it takes the keyboard focus
+      const z = await startFixture('zoomed');
+      extra.push(z.proc);
+      try {
+        await new Promise(res => setTimeout(res, 1_500));    // the zoom animation, and the app coming to the front
+        // Bring the fixture to the front (an app started from a background process is not necessarily activated)…
+        await new Promise<void>(resolve => execFile('osascript', ['-e',
+          `tell application "System Events" to set frontmost of (first process whose unix id is ${z.pid}) to true`], () => resolve()));
+        await new Promise(res => setTimeout(res, 800));
+        // …and type ONLY if it really is frontmost now: keystrokes go to whatever is, and that must never be the user's own app.
+        const front = (await run(['frontmost'])).frontmost;
+        if (front?.processId !== z.pid) { console.warn(`[mac-ax-live] not typing: the fixture is not frontmost (${front?.name})`); return ctx.skip(); }
+        await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'set-value', '--args-stdin', '1'], 30_000, JSON.stringify({ value: '' }));
+        expect(await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'focus'])).toMatchObject({ ok: true, success: true });
+        await new Promise(res => setTimeout(res, 300));
+        // (ASCII on purpose: System Events' `keystroke` types "a" for every non-ASCII character on macOS 26.5, whether the
+        // program arrives via -e or stdin - measured side by side. type_text pastes, so it is unaffected.)
+        const typed = 'stdin "quoted" \\ 123';
+        const escaped = typed.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+        await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 10_000);
+        await new Promise(res => setTimeout(res, 500));
+        const got = await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'get-value']);
+        expect(got.value).toBe(typed);
+      } finally { z.proc.kill('SIGKILL'); }
     }, 25 * 60_000);
   });
 

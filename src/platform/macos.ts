@@ -35,9 +35,9 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
-import { logger } from '../core/observability/logger';
+import { MacKeyboardGuard, runAppleScript } from './mac-keyboard';
 import {
-  defaultMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner,
+  defaultMacAx, MacAxError,
   type AppState, type MacAx, type SkippedApp,
 } from './mac-ax';
 
@@ -47,10 +47,6 @@ const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
 // Tunables (kept here, not magic numbers)
 const OSASCRIPT_TIMEOUT_MS = 8_000;
 const SCREENSHOT_TIMEOUT_MS = 10_000;
-/** How long a "the keyboard is free" probe is trusted — a burst of keystrokes probes once. */
-const KEYBOARD_PROBE_TTL_MS = 250;
-/** A modal dialog of another app is warned about once per this long, not once per probe. */
-const KEYBOARD_WARN_EVERY_MS = 10_000;
 /** How long open_app waits for a launched app to show a window before calling it "still loading". */
 const LAUNCH_CONFIRM_MS = 4_000;
 const LAUNCH_POLL_MS = 250;
@@ -72,8 +68,8 @@ export class MacOSAdapter implements PlatformAdapter {
   private inputPermissionTested = false;
   private inputPermissionCached = false;
   private readonly ax: MacAx;
-  private keyboardFreeAt = 0;
-  private keyboardWarned: { text: string; at: number } | null = null;
+  private readonly keyboard: MacKeyboardGuard;
+  private inputWarning: string | null = null;
 
   /** Why the last findElements / getUiTree came back short (see PlatformAdapter). */
   lastFindScope: PlatformAdapter['lastFindScope'] = null;
@@ -83,6 +79,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   constructor(opts: { ax?: MacAx } = {}) {
     this.ax = opts.ax ?? defaultMacAx();
+    this.keyboard = new MacKeyboardGuard(this.ax);
   }
 
   async init(): Promise<void> {
@@ -683,67 +680,38 @@ export class MacOSAdapter implements PlatformAdapter {
   // ─── INPUT (keyboard) ─────────────────────────────────────────────
 
   /**
-   * Refuse to type while something other than the app being driven owns the
-   * keyboard. System Events names the last ORDINARY app "frontmost", so a TCC
-   * prompt, an auth dialog or the lock screen takes the keys while every
-   * "typed OK" still reads as success — and a stray Return can press Allow.
-   * NSWorkspace sees them. A failed probe never blocks input.
+   * Ask who owns the keyboard before sending keys (see MacKeyboardGuard). A refusal throws; a modal dialog of another app is
+   * typed into, and the warning is kept for `takeInputWarning` so the tool result can say whose dialog got the keystrokes.
    */
-  private async keyboardOwnerError(opts: { strict?: boolean } = {}): Promise<Error | null> {
-    if (process.env.CLAWD_NO_MAC_AX === '1') return null;
-    try {
-      const owner = classifyKeyboardOwner(await this.ax.frontmost());
-      if (owner.kind === 'app') {
-        if (!owner.warning) return null;
-        // `strict` is for plumbing (the Spotlight launch fallback): an agent may type into a modal dialog of another app when
-        // it asks to, but clawdcursor's own launch keystrokes — and a Return that presses the dialog's default button — must not.
-        if (opts.strict) return new Error(owner.warning);
-        this.warnKeyboard(owner.warning);
-        return null;
-      }
-      return new Error(describeKeyboardOwner(owner));
-    } catch {
-      return null;
-    }
+  private async guardKeys(combo?: string): Promise<void> {
+    const { warning } = await this.keyboard.assert(combo);
+    if (warning) this.inputWarning = warning;
   }
 
-  /** Say once (not once per keystroke burst) that a modal dialog of another app is taking the keys. */
-  private warnKeyboard(text: string): void {
-    const now = Date.now();
-    if (this.keyboardWarned?.text === text && now - this.keyboardWarned.at < KEYBOARD_WARN_EVERY_MS) return;
-    this.keyboardWarned = { text, at: now };
-    logger.warn('keyboard.modal-dialog', { warning: text });
-  }
-
-  private async assertKeyboardAvailable(opts: { strict?: boolean } = {}): Promise<void> {
-    // Trust a clean probe briefly so a burst of keystrokes costs one lookup; a
-    // blocked result is never cached — the dialog may be gone a moment later.
-    // A strict check never trusts the cache: a probe that merely warned was cached too.
-    if (!opts.strict && Date.now() - this.keyboardFreeAt < KEYBOARD_PROBE_TTL_MS) return;
-    const err = await this.keyboardOwnerError(opts);
-    if (err) throw err;
-    this.keyboardFreeAt = Date.now();
+  /** The warning from the keystrokes sent since it was last taken (or null). Tools call it right after typing / pressing keys. */
+  takeInputWarning(): string | null {
+    const w = this.inputWarning;
+    this.inputWarning = null;
+    return w;
   }
 
   async typeText(text: string): Promise<void> {
     if (!text) return;
-    await this.assertKeyboardAvailable();
+    await this.guardKeys();
     // Escape backslashes and quotes for AppleScript string literal.
     const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    await execFileAsync('osascript', ['-e',
-      `tell application "System Events" to keystroke "${escaped}"`,
-    ], { timeout: 15_000 });
+    // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
+    await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 15_000);
   }
 
   async keyPress(combo: PortableKeyCombo): Promise<void> {
     if (!combo) return;
-    // Escape cancels, it never grants: with a permission or Gatekeeper alert up it is the one key that is safe to send (a
-    // stray Return is what presses "Allow"), and refusing it left an agent unable to dismiss the very thing blocking it.
-    if (!/^(escape|esc)$/i.test(String(combo).trim())) await this.assertKeyboardAvailable();
+    // A bare Escape is never checked (see MacKeyboardGuard.assert).
+    await this.guardKeys(combo);
 
     // Literal "+" can't be split.
     if (combo === '+') {
-      await execFileAsync('osascript', ['-e', 'tell application "System Events" to keystroke "+"']);
+      await runAppleScript('tell application "System Events" to keystroke "+"', 6_000);
       return;
     }
 
@@ -773,7 +741,7 @@ export class MacOSAdapter implements PlatformAdapter {
       throw new Error(`Unknown key: "${key}"`);
     }
 
-    await execFileAsync('osascript', ['-e', script], { timeout: 6_000 });
+    await runAppleScript(script, 6_000);
   }
 
   private normalizeMod(mod: string): string {
@@ -793,20 +761,20 @@ export class MacOSAdapter implements PlatformAdapter {
     const asMod = this.modToAppleScript(lower);
     if (asMod) {
       const script = `tell application "System Events" to key down ${asMod}`;
-      await execFileAsync('osascript', ['-e', script], { timeout: 3_000 }).catch(() => {});
+      await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
     const code = MAC_KEY_CODES[lower];
     if (code !== undefined) {
       const script = `tell application "System Events" to key down (key code ${code})`;
-      await execFileAsync('osascript', ['-e', script], { timeout: 3_000 }).catch(() => {});
+      await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
     // Printable single char — no true "hold" semantics via keystroke; emit a tap.
     if (key.length === 1) {
       const escaped = key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       const script = `tell application "System Events" to keystroke "${escaped}"`;
-      await execFileAsync('osascript', ['-e', script], { timeout: 3_000 }).catch(() => {});
+      await runAppleScript(script, 3_000).catch(() => {});
     }
   }
 
@@ -815,13 +783,13 @@ export class MacOSAdapter implements PlatformAdapter {
     const asMod = this.modToAppleScript(lower);
     if (asMod) {
       const script = `tell application "System Events" to key up ${asMod}`;
-      await execFileAsync('osascript', ['-e', script], { timeout: 3_000 }).catch(() => {});
+      await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
     const code = MAC_KEY_CODES[lower];
     if (code !== undefined) {
       const script = `tell application "System Events" to key up (key code ${code})`;
-      await execFileAsync('osascript', ['-e', script], { timeout: 3_000 }).catch(() => {});
+      await runAppleScript(script, 3_000).catch(() => {});
     }
     // Printable single char: no-op — keystroke doesn't hold.
   }
@@ -965,7 +933,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
     // Nothing confirmed. A system dialog or the lock screen owning the keyboard
     // is the likeliest reason — say so instead of the generic "no window appeared".
-    const blocked = await this.keyboardOwnerError({ strict: true });
+    const { error: blocked } = await this.keyboard.owner({ strict: true });
     if (blocked) throw blocked;
     return {};
   }
@@ -1037,7 +1005,7 @@ export class MacOSAdapter implements PlatformAdapter {
     try {
       // Plumbing, not an agent request: with a system dialog up even the warm-up Escape stays unsent (keyPress lets Escape
       // through for an agent, but here it could answer "Don't Allow" to a permission prompt nobody asked to dismiss).
-      await this.assertKeyboardAvailable({ strict: true });
+      await this.keyboard.assert(undefined, { strict: true });
       await this.keyPress('Escape').catch(() => {});
       await this.delay(120);
       await this.keyPress('cmd+Space');

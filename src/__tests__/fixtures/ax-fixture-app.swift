@@ -18,6 +18,9 @@
 // AXFIXTURE_MODE=zoomed / minimized: the same windows, but "Fixture B" is zoomed to fill the screen /
 // minimized into the Dock — for checking that focusing a window leaves its size alone and brings a minimized one back.
 //
+// AXFIXTURE_SYSTEMDIALOG=1: the "Open modal" alert gets the AXSystemDialog subrole - what a permission prompt or an
+// authorization sheet looks like to the accessibility API - instead of the ordinary AXDialog of an app's own alert.
+//
 // AXFIXTURE_MODE=slow instead opens one window "Fixture Slow" with a "Save As…" button, a
 // status label and an element whose title takes 3 s to answer (the app's main thread is busy,
 // so every AX request behind it waits) — a hung subtree inside a live app.
@@ -58,6 +61,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         let alert = NSAlert()
         alert.messageText = "AXFixture modal"
         alert.addButton(withTitle: "OK")
+        if ProcessInfo.processInfo.environment["AXFIXTURE_SYSTEMDIALOG"] == "1" { alert.window.setAccessibilitySubrole(.systemDialog) }
         let timer = Timer(timeInterval: 3, repeats: false) { _ in NSApp.abortModal() }
         RunLoop.main.add(timer, forMode: .common)
         _ = alert.runModal()

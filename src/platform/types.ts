@@ -297,6 +297,11 @@ export interface PlatformAdapter {
    * windows are missing (the time budget ran out before they were read). Null/absent: the list is complete.
    */
   lastWindowListPartial?: string | null;
+  /**
+   * Optional (macOS): the warning, if any, from the keystrokes sent since it was last taken — e.g. that a modal dialog of
+   * another app had the keyboard, so the keys went there. Taking it clears it. Tools append it to what they report.
+   */
+  takeInputWarning?(): string | null;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Invoke an accessibility action on a named element. Action union
