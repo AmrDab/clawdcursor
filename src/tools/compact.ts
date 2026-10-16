@@ -33,6 +33,7 @@
  */
 
 import { getTool } from './registry';
+import { controlBanner } from '../core/banner';
 import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
@@ -146,6 +147,9 @@ const SYSTEM_ACTIONS: ActionRoute[] = [
   { action: 'shortcuts_list',  delegate: 'shortcuts_list' },
   { action: 'shortcuts_run',   delegate: 'shortcuts_execute' },
   { action: 'delegate',        delegate: 'delegate_to_agent' },
+  // Hand the desktop to the user at a roadblock (sign-in, 2FA, CAPTCHA) and
+  // continue when they click Resume on screen.
+  { action: 'pause_for_user',  delegate: 'pause_for_user' },
   // v0.8.2 — Electron/WebView2 bridge
   { action: 'detect_webview',  delegate: 'detect_webview_apps' },
   { action: 'relaunch_with_cdp', delegate: 'relaunch_with_cdp' },
@@ -176,6 +180,7 @@ const TASK_ACTIONS: ActionRoute[] = [
   { action: 'run',    delegate: 'delegate_to_agent', argRemap: { instruction: 'task' } },
   { action: 'status', delegate: 'agent_status' },
   { action: 'abort',  delegate: 'abort_task' },
+  { action: 'resume', delegate: 'resume_task' },
 ];
 
 const BROWSER_ACTIONS: ActionRoute[] = [
@@ -205,6 +210,7 @@ const BROWSER_ACTIONS: ActionRoute[] = [
 function buildCompoundSchema(
   routes: ActionRoute[],
 ): Record<string, import('./types').ParameterDef> {
+  const freeTextParams = new Set<string>(); // params already turned into free text
   const schema: Record<string, import('./types').ParameterDef> = {
     action: {
       type: 'string',
@@ -253,6 +259,16 @@ function buildCompoundSchema(
           if (merged.length !== existing.enum.length) {
             existing.enum = merged;
           }
+        } else if (Array.isArray(existing.enum) !== Array.isArray(pdef.enum) && !freeTextParams.has(targetName)) {
+          // One action takes FREE TEXT where another takes an enum (find_field's
+          // `purpose` vs compile_ui's). Keeping the enum made the free-text
+          // action uncallable ("expected one of general|find_text|act"), so
+          // publish free text and name the restricted values in the
+          // description; each granular tool still validates its own.
+          const values = (existing.enum ?? pdef.enum)!;
+          delete existing.enum;
+          freeTextParams.add(targetName);
+          existing.description = `${existing.description} (Where the action restricts it: one of ${values.join(' | ')}.)`;
         }
         continue;
       }
@@ -420,6 +436,11 @@ async function dispatchCompound(
     k => k !== 'expect' && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
   );
 
+  // Transparency: show the overlay for what the ACTION does, not the compound
+  // it came through — accessibility invoke/set_value act (the compound is tier
+  // 0, so blind-mode actions never lit it), while system ocr/clipboard reads
+  // don't. mcp-server leaves compounds to this check.
+  if ((granular.safetyTier ?? 0) >= 1) controlBanner.touch();
   const result = await granular.handler(forwarded, ctx);
 
   // Granular hints ("Call cdp_connect first") name tools that do not exist
@@ -490,7 +511,7 @@ export function getCompactTools(): ToolDefinition[] {
     {
       name: 'system',
       description:
-        'System integration — `copy_all_text` (exact text of the focused page/document; better than OCR), clipboard read/write, OCR screen-reading, system time, undo, named shortcuts, delegate to a sub-agent, `report` a bad session to the clawdcursor team. ' +
+        'System integration — `copy_all_text` (exact text of the focused page/document; better than OCR), clipboard read/write, OCR screen-reading, system time, undo, named shortcuts, delegate to a sub-agent, `pause_for_user` (hand the desktop to the user for a sign-in / 2FA / CAPTCHA, continue when they click Resume), `report` a bad session to the clawdcursor team. ' +
         `Pick an action: ${actionCatalog(SYSTEM_ACTIONS)}.`,
       parameters: buildCompoundSchema(SYSTEM_ACTIONS),
       category: 'orchestration',
@@ -516,14 +537,15 @@ export function getCompactTools(): ToolDefinition[] {
         'Hand clawdcursor a WHOLE natural-language task and let its internal agent loop execute it (accessibility first, screenshots when the screen has no readable structure). ' +
         'Use this when you don\'t want to micromanage every primitive — clawdcursor decomposes the task, picks the cheapest execution path, and returns a trace. ' +
         'BOUNDED-SYNC: waits up to `timeout` seconds (default 45) — a longer task returns {status:"running"} with progress while it CONTINUES in the background; re-call with the SAME instruction to keep waiting (re-attaches, never restarts), {action:"status"} to poll, {action:"abort"} to stop it. ' +
+        'At a roadblock (sign-in, 2FA, CAPTCHA, a step it may not take) the task PAUSES for the user and returns {status:"paused", waitingFor}: keep re-calling to wait, never restart; {action:"resume"} if the user tells you they finished. ' +
         'The `computer`/`accessibility`/`window`/`system`/`browser` compounds are for when you want step-level control yourself. ' +
         'If the daemon isn\'t running you get a clear error telling you how to start it.',
       parameters: {
         action: {
           type: 'string',
-          description: 'Default "run" (submit/continue the instruction). "status" → poll the running task (cheap, poll at 1–2 Hz). "abort" → stop the running task.',
+          description: 'Default "run" (submit/continue the instruction). "status" → poll the running task (cheap, poll at 1–2 Hz). "abort" → stop the running task. "resume" → continue a task paused for the user, when they tell you they finished.',
           required: false,
-          enum: ['run', 'status', 'abort'],
+          enum: ['run', 'status', 'abort', 'resume'],
         },
         instruction: {
           type: 'string',

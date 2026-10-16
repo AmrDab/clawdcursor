@@ -46,6 +46,8 @@ function makeCtx(opts: {
   cdpPageEvaluate?: any;
   activeWindowTitle?: string;
   cdpTitle?: string;
+  cdpBrowserPid?: number | null;
+  cdpMode?: 'dedicated' | 'attached';
 }): ToolContext {
   return {
     desktop: {} as any,
@@ -72,6 +74,8 @@ function makeCtx(opts: {
     cdp: {
       isConnected: vi.fn().mockResolvedValue(opts.cdpConnected ?? false),
       getTitle: vi.fn().mockResolvedValue(opts.cdpTitle ?? null),
+      getBrowserPid: vi.fn().mockResolvedValue(opts.cdpBrowserPid ?? null),
+      getConnectionMode: vi.fn().mockReturnValue(opts.cdpMode ?? 'dedicated'),
       getPage: vi.fn().mockReturnValue(
         opts.cdpPageEvaluate
           ? { evaluate: vi.fn().mockImplementation(opts.cdpPageEvaluate) }
@@ -236,5 +240,92 @@ describe('read_screen — CDP DOM digest', () => {
     expect(result.text).toContain('Document');
     expect(result.text).not.toContain('BROWSER DOM');
     expect(cdpEvaluate).not.toHaveBeenCalled();
+  });
+});
+
+// #235: the fallback ignored processId and the hint ignored the CDP browser.
+describe('find_element — scoped to the CDP browser by processId (#235)', () => {
+  const hit = [{ name: 'Upgrade', controlType: 'web.button', bounds: { x: 900, y: 20, width: 80, height: 30 } }];
+
+  it('answers from the CDP DOM when processId is the CDP browser, even with another app in front', async () => {
+    const cdpEvaluate = vi.fn().mockResolvedValue(hit);
+    const ctx = makeCtx({
+      processName: 'Terminal', activeWindowTitle: 'zsh',      // another app is frontmost
+      cdpTitle: 'Miro | Dashboard',
+      platformFindElements: [], cdpConnected: true, cdpPageEvaluate: cdpEvaluate, cdpBrowserPid: 4321,
+    });
+    const result = await findElement.handler({ name: 'Upgrade', processId: 4321 }, ctx);
+    expect(cdpEvaluate).toHaveBeenCalledTimes(1);
+    expect(result.text).toContain('Upgrade');
+    expect(result.text).toContain('CDP DOM');
+  });
+
+  it('never answers a query scoped to a DIFFERENT process from the CDP DOM', async () => {
+    const cdpEvaluate = vi.fn().mockResolvedValue(hit);
+    const ctx = makeCtx({
+      processName: 'msedge', activeWindowTitle: 'Checkout - Microsoft Edge', cdpTitle: 'Checkout',
+      platformFindElements: [], cdpConnected: true, cdpPageEvaluate: cdpEvaluate, cdpBrowserPid: 4321,
+    });
+    const result = await findElement.handler({ name: 'Upgrade', processId: 1234 }, ctx);
+    expect(cdpEvaluate).not.toHaveBeenCalled();
+    expect(result.text).toMatch(/^\(no elements found\)/);
+  });
+
+  it('macOS app names count as browsers for the unscoped fallback ("Google Chrome")', async () => {
+    const cdpEvaluate = vi.fn().mockResolvedValue(hit);
+    const ctx = makeCtx({
+      processName: 'Google Chrome', activeWindowTitle: 'Miro | Dashboard - Google Chrome', cdpTitle: 'Miro | Dashboard',
+      platformFindElements: [], cdpConnected: true, cdpPageEvaluate: cdpEvaluate,
+    });
+    const result = await findElement.handler({ name: 'Upgrade' }, ctx);
+    expect(cdpEvaluate).toHaveBeenCalledTimes(1);
+    expect(result.text).toContain('Upgrade');
+  });
+});
+
+describe('blind hint for the CDP browser (#235)', () => {
+  const empty = () => vi.fn().mockResolvedValue([]);
+
+  it("clawdcursor's own browser: lead with the browser tools, no restart advice", async () => {
+    const ctx = makeCtx({
+      processName: 'Google Chrome', activeWindowTitle: 'Other - Google Chrome', cdpTitle: 'Miro',
+      platformFindElements: [], cdpConnected: true, cdpPageEvaluate: empty(), cdpBrowserPid: 4321, cdpMode: 'dedicated',
+    });
+    const { text } = await findElement.handler({ name: 'Upgrade', processId: 4321 }, ctx);
+    const hint = text.slice(text.indexOf('→'));
+    expect(hint).toMatch(/^→ .*browser \{action:"page_context"\}/);
+    expect(hint).toContain('read_text');
+    expect(hint).toMatch(/own browser/);
+    expect(hint).not.toMatch(/Restarting it|--force-renderer-accessibility/);
+  });
+
+  it('a browser attached on the debug port: lead with the browser tools too', async () => {
+    const ctx = makeCtx({
+      processName: 'chrome', platformFindElements: [], cdpConnected: true, cdpPageEvaluate: empty(),
+      cdpBrowserPid: 1234, cdpMode: 'attached',
+    });
+    const { text } = await findElement.handler({ name: 'Upgrade', processId: 1234 }, ctx);
+    expect(text).toMatch(/→ .*browser \{action:"page_context"\}/);
+    expect(text).not.toMatch(/own browser/);
+  });
+
+  it('any other app keeps the generic advice', async () => {
+    const ctx = makeCtx({
+      processName: 'Slack', platformFindElements: [], cdpConnected: true, cdpPageEvaluate: empty(), cdpBrowserPid: 4321,
+    });
+    const { text } = await findElement.handler({ name: 'Upgrade', processId: 1234 }, ctx);
+    expect(text).not.toContain('page_context');
+    expect(text).toMatch(/copy_all_text/);
+  });
+
+  it('read_screen of the CDP browser uses the browser hint', async () => {
+    const ctx = makeCtx({
+      processName: 'Google Chrome', activeWindowTitle: 'Miro - Google Chrome', cdpTitle: 'Miro',
+      platformUiTree: [{ name: 'Address and search bar', controlType: 'Edit', bounds: { x: 0, y: 0, width: 800, height: 30 } }],
+      cdpConnected: true, cdpPageEvaluate: empty(), cdpBrowserPid: 1234, cdpMode: 'dedicated',
+    });
+    const { text } = await readScreen.handler({}, ctx);
+    expect(text).toMatch(/→ .*browser \{action:"page_context"\}/);
+    expect(text).not.toMatch(/Restarting it/);
   });
 });

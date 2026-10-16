@@ -39,6 +39,19 @@ export function getBrowserProcessNames(config?: ClawdConfig): string[] {
   return DEFAULT_BROWSER_PROCESSES;
 }
 
+/**
+ * Is this process a web browser? Matches the bare executable name ("chrome",
+ * "msedge.exe") and macOS's app display names ("Google Chrome", "Microsoft
+ * Edge", "Brave Browser"), which an exact match against the list missed.
+ */
+export function isBrowserProcess(name: string | undefined | null, config?: ClawdConfig): boolean {
+  const n = String(name ?? '').toLowerCase().replace(/\.exe$/, '').trim();
+  if (!n) return false;
+  const names = getBrowserProcessNames(config).map(s => s.toLowerCase());
+  if (names.includes(n)) return true;
+  return n.split(/\s+/).some(w => names.includes(w) || w === 'edge');
+}
+
 /** Get CDP debugging port */
 export function getCDPPort(config?: ClawdConfig): number {
   return config?.browser?.cdpPort || DEFAULT_CDP_PORT;

@@ -144,8 +144,14 @@ function searchWindow(win, targetName, targetRole, maxResults, results, deadline
     matches.sort(function (x, y) { return (Number(y.exact) - Number(x.exact)) || (x.depth - y.depth); });
     for (var i = 0; i < matches.length && results.length < maxResults; i++) {
         var m = matches[i];
-        var val = ''; try { val = m.el.value(); if (val === null || val === undefined) val = ''; } catch (e) {}
-        results.push({ name: m.name, role: m.role, value: val, bounds: getBounds(m.el) });
+        // A secure field's value never leaves the accessibility layer (audit M2): flag it, don't read it.
+        var secure = false;
+        try { secure = m.el.subrole() === 'AXSecureTextField'; } catch (e) {}
+        var val = '';
+        if (!secure) { try { val = m.el.value(); if (val === null || val === undefined) val = ''; } catch (e) {} }
+        var hit = { name: m.name, role: m.role, value: val, bounds: getBounds(m.el) };
+        if (secure) hit.secure = true;
+        results.push(hit);
     }
 }
 

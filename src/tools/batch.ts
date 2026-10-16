@@ -5,7 +5,8 @@
  * ORDERED LIST of tool calls that run in one shot — collapsing N round-trips
  * into one — WITHOUT a code sandbox. It is DECLARATIVE on purpose:
  *
- *   - Each step is `{ name, arguments, expect? }` — a normal tool call plus an
+ *   - Each step is `{ name, arguments, expect? }` (`args` is accepted for
+ *     `arguments`, matching the agent-loop batch) — a normal tool call plus an
  *     optional precondition guard. No arbitrary code → no injection-as-control-
  *     flow, no element-handle staleness (every step re-queries by name), no
  *     opaque partial-execution blob.
@@ -62,6 +63,9 @@ export interface BatchStep {
   /** Tool name — a compound (`computer`/`window`/…) with `arguments.action`, or a granular tool. */
   name: string;
   arguments?: Record<string, unknown>;
+  /** Alias of `arguments` — the agent-loop batch's spelling. A step written
+   *  with `args` used to run with no arguments at all. */
+  args?: Record<string, unknown>;
   /** Optional precondition; if it fails the batch halts here and reports back. */
   expect?: BatchGuard;
   /** Canonical alias for `expect` (matches the agent-loop batch). An `expect`
@@ -87,9 +91,13 @@ export interface BatchResult {
 
 const DEFAULT_MAX_STEPS = 12;
 
+function stepArgs(step: BatchStep): Record<string, unknown> {
+  return step.arguments ?? step.args ?? {};
+}
+
 function labelFor(step: BatchStep): string {
   if (step.label) return step.label;
-  const action = step.arguments?.action;
+  const action = stepArgs(step).action;
   return action ? `${step.name}.${String(action)}` : step.name;
 }
 
@@ -165,7 +173,7 @@ export async function executeBatch(
       }
     }
 
-    const args = step.arguments ?? {};
+    const args = stepArgs(step);
 
     // Safety — identical gate to a normal tools/call (incl. el_NN → label
     // resolution via the shared holder, same as the direct MCP path).
@@ -211,7 +219,7 @@ function dryRunScan(steps: BatchStep[]): { i: number; label: string; gate: strin
     const label = labelFor(step);
     const tool = resolveAnyTool(step.name);
     if (!tool) return { i, label, gate: 'unknown-tool' };
-    const err = evaluateToolCall(tool, step.arguments ?? {});
+    const err = evaluateToolCall(tool, stepArgs(step));
     const gate = !err ? 'allow' : (err.text.includes('safety confirm') ? 'confirm' : 'block');
     return { i, label, gate };
   });
@@ -231,7 +239,7 @@ export function getBatchTools(): ToolDefinition[] {
       name: 'batch',
       description:
         'Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is ' +
-        '{ name, arguments, expect? }. `name`+`arguments` is a normal tool call (compound like ' +
+        '{ name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like ' +
         '{"name":"computer","arguments":{"action":"type","text":"hi"}} or a granular tool). Optional `expect` ' +
         'is a precondition checked by RE-PERCEIVING before the step runs: {"window":"notepad"} (foreground ' +
         'window must match) or {"element":"Send"} (a11y element must be present). The batch HALTS on the first ' +
@@ -245,12 +253,13 @@ export function getBatchTools(): ToolDefinition[] {
         steps: {
           type: 'array',
           required: true,
-          description: 'Ordered steps to run. Each step is a normal tool call: { "name": "<tool>", "arguments": {...}, "expect"?: {"window"?,"element"?} }. (A JSON-encoded string of the same array is also accepted.)',
+          description: 'Ordered steps to run. Each step is a normal tool call: { "name": "<tool>", "arguments": {...}, "expect"?: {"window"?,"element"?} } ("args" is accepted for "arguments"). (A JSON-encoded string of the same array is also accepted.)',
           items: {
             type: 'object',
             properties: {
               name: { type: 'string', description: 'Tool to call — a compound ("computer"/"window"/...) or a granular tool.' },
               arguments: { type: 'object', description: 'Arguments for that tool, e.g. {"action":"type","text":"hi"}. May include an `expect` ASSERTION ARRAY (post-condition) — verified after the step by the tool itself.' },
+              args: { type: 'object', description: 'Alias of `arguments`.' },
               expect: { type: 'object', description: 'Optional precondition re-checked by perceiving before the step: {"window":"..."} or {"element":"..."}. (`precheck` is an accepted alias.)' },
             },
             required: ['name'],
@@ -306,7 +315,14 @@ export function getBatchTools(): ToolDefinition[] {
           allowConfirm: params.allowConfirm === true,
           maxSteps: typeof params.maxSteps === 'number' ? params.maxSteps : undefined,
         });
-        return { text: renderResult(result), isError: !result.allDone };
+        return {
+          text: renderResult(result),
+          isError: !result.allDone,
+          steps: result.steps.map(s => {
+            const a = stepArgs(steps[s.i]).action;
+            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text };
+          }),
+        };
       },
     },
   ];

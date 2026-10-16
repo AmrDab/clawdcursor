@@ -48,3 +48,13 @@ describe('buildSystemPrompt — batchability judgment + verify', () => {
     expect(p).toMatch(/AFTER any batch|verify the outcome/i);
   });
 });
+
+describe('buildSystemPrompt — plan limits are a roadblock (#239)', () => {
+  const p = buildSystemPrompt();
+  it('treats an upgrade wall as a roadblock: ask_user, never click Upgrade / Subscribe', () => {
+    const rule = p.slice(p.indexOf('ROADBLOCKS'), p.indexOf('COORDINATES'));
+    expect(rule).toMatch(/plan limit|upgrade wall/i);
+    expect(rule).toMatch(/ask_user/);
+    expect(rule).toMatch(/never click Upgrade \/ Subscribe/i);
+  });
+});

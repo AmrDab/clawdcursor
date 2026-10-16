@@ -424,6 +424,8 @@ clawdcursor consent         Manage desktop-control consent (--accept / --revoke 
 clawdcursor grant           Grant macOS permissions (interactive, macOS only)
 clawdcursor doctor          Configure the AI provider for `agent` mode (+ diagnostics)
 clawdcursor status          Readiness check (consent, permissions, AI config)
+clawdcursor versions        Every installed copy and its version (global, Claude Desktop extension, Claude Code plugin)
+clawdcursor resume          Continue a task paused for you (same as the on-screen Resume); --end to stop it
 clawdcursor mcp             stdio MCP server — editor hosts spawn this; you don't
 clawdcursor agent           Daemon: HTTP MCP on :3847, optional built-in thin loop
 clawdcursor agent --no-llm  Daemon, tool surface only (no built-in brain)

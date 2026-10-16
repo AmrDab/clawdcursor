@@ -112,6 +112,14 @@ export interface UiElement {
    * Added 0.9.4 for issue #101 bug 5.
    */
   description?: string;
+  /** Checkbox / toggle state when the element supports toggling (UIA TogglePattern). */
+  checked?: boolean | 'mixed';
+  /**
+   * Nesting depth in the tree getUiTree returned (0 = the window), when the
+   * adapter knows it. Lets callers recover parent/child structure from the
+   * flat list where geometry can't — e.g. scrolled-out elements with empty bounds.
+   */
+  depth?: number;
 }
 
 export interface PermissionStatus {
@@ -271,7 +279,11 @@ export interface PlatformAdapter {
 
   // ─── ACCESSIBILITY ──────────────────────────────────────────────
   getUiTree(processId?: number): Promise<UiElement[]>;
-  findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]>;
+  /**
+   * `automationId` (optional) matches the element's platform identifier exactly —
+   * UIA AutomationId, macOS AXIdentifier. Adapters without the concept ignore it.
+   */
+  findElements(query: { name?: string; controlType?: string; automationId?: string; processId?: number }): Promise<UiElement[]>;
   /** Optional: the window scope(s) the last findElements searched, in order,
    *  so a "(no elements found)" result can say where it looked. */
   lastFindScope?: Array<{ processId?: number; processName?: string; title?: string }> | null;
@@ -280,6 +292,16 @@ export interface PlatformAdapter {
    *  an empty-looking blind read is exactly when agents abandon a11y. */
   lastFindError?: 'timeout' | 'error' | null;
   lastTreeTruncated?: boolean;
+  /**
+   * Optional: set when the last `listWindows` came back incomplete — a ready-to-print one-line note naming the apps whose
+   * windows are missing (the time budget ran out before they were read). Null/absent: the list is complete.
+   */
+  lastWindowListPartial?: string | null;
+  /**
+   * Optional (macOS): the warning, if any, from the keystrokes sent since it was last taken — e.g. that a modal dialog of
+   * another app had the keyboard, so the keys went there. Taking it clears it. Tools append it to what they report.
+   */
+  takeInputWarning?(): string | null;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Invoke an accessibility action on a named element. Action union
@@ -289,6 +311,8 @@ export interface PlatformAdapter {
   invokeElement(query: {
     name?: string;
     controlType?: string;
+    /** Exact platform identifier (macOS AXIdentifier); adapters without it ignore it. */
+    automationId?: string;
     processId?: number;
     action?: InvokeAction;
     value?: string;

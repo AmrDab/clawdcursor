@@ -118,7 +118,9 @@ let result: [String: Any] = [
     "fullText": fullText
 ]
 
-if let data = try? JSONSerialization.data(withJSONObject: result),
+// Sorted keys: a Swift dictionary serializes in a random order per process, so two
+// runs with identical content differed byte-for-byte (verify-macos compared them).
+if let data = try? JSONSerialization.data(withJSONObject: result, options: [.sortedKeys]),
    let str = String(data: data, encoding: .utf8) {
     print(str)
 }

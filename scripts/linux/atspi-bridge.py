@@ -20,16 +20,19 @@ Commands:
         Find elements matching a name substring and/or role. Returns
         a flat list.
 
-    --cmd focused
+    --cmd focused [--process-id N]
         Return the currently-focused a11y element (or null).
 
     --cmd invoke --action A [--name N] [--role R] [--process-id N] [--value V]
-        Act on the first element matching name/role (exact name match
-        preferred over substring). A is one of click | focus | set-value |
-        get-value | toggle | select | expand | collapse. Always returns the
-        element's screen bounds (when found) so callers can fall back to a
-        coordinate click: {"success": bool, "bounds": {...}, "value"?,
-        "toggleState"?, "error"?}.
+        Act on the best element matching name/role (exact name match
+        preferred over substring, on-screen over hidden). A is one of click |
+        focus | set-value | get-value | toggle | select | expand | collapse.
+        Returns the element's screen bounds (when found and visible) so
+        callers can fall back to a coordinate click: {"success": bool,
+        "bounds": {...}, "value"?, "toggleState"?, "error"?, "notVisible"?}.
+
+    Every command also takes --window-title T in place of --process-id for
+    an active window that sets no _NET_WM_PID.
 
 Dependencies:
     python3 (3.6+) with:
@@ -82,12 +85,54 @@ INTERACTIVE_ROLES = {
 }
 
 
+INT_MIN = -2147483648   # AT-SPI extents of children scrolled out of a viewport
+NAMELESS_NOISE_ROLES = {'list item', 'table row'}
+
+
 def safe(fn, default=None):
     """Call fn(), return default if it raises (stale ref, perm denied, etc.)."""
     try:
         return fn()
     except Exception:
         return default
+
+
+def read_text(acc: Any, limit: Optional[int] = None) -> Optional[str]:
+    """Contents of the Text interface, or None when acc has none.
+
+    PyGObject's get_text_iface() hands back the Accessible itself, and on an
+    Accessible `.get_text` is the deprecated no-argument getter, not
+    Text.get_text(start, end) — so `txt.get_text(0, n)` raised and every text
+    view / entry read as empty. Call the interface functions explicitly."""
+    if not safe(lambda: acc.get_text_iface()):
+        return None
+    count = safe(lambda: Atspi.Text.get_character_count(acc), 0) or 0
+    if limit is not None:
+        count = min(count, limit)
+    if count <= 0:
+        return ''
+    return safe(lambda: Atspi.Text.get_text(acc, 0, count), '') or ''
+
+
+def is_showing(acc: Any) -> bool:
+    """On screen right now: SHOWING + VISIBLE (or an unknown/empty state set,
+    GTK4) and a non-zero size. Closed menus and hidden toolbars fail this."""
+    ss = safe(lambda: acc.get_state_set())
+    if ss is not None and not safe(lambda: ss.is_empty(), False):
+        if not (safe(lambda: ss.contains(Atspi.StateType.SHOWING), False)
+                and safe(lambda: ss.contains(Atspi.StateType.VISIBLE), False)):
+            return False
+    (_, _, w, h), _ = element_bounds(acc)
+    return w > 0 and h > 0
+
+
+def toplevels_active_first(app: Any) -> list:
+    """The app's toplevel windows, the ACTIVE one (the window the user is in,
+    e.g. a Save dialog over its main window) first."""
+    count = safe(lambda: app.get_child_count(), 0) or 0
+    kids = [k for k in (safe(lambda i=i: app.get_child_at_index(i)) for i in range(count)) if k is not None]
+    return ([k for k in kids if has_state(k, Atspi.StateType.ACTIVE)]
+            + [k for k in kids if not has_state(k, Atspi.StateType.ACTIVE)])
 
 
 def node_to_dict(acc: Any) -> Optional[dict]:
@@ -141,14 +186,10 @@ def node_to_dict(acc: Any) -> Optional[dict]:
     except Exception:
         pass
     if value is None:
-        try:
-            txt = acc.get_text_iface()
-            if txt:
-                char_count = txt.get_character_count()
-                if char_count > 0:
-                    value = txt.get_text(0, min(char_count, 512))
-        except Exception:
-            pass
+        # A label's text IS its name; repeating it as the value is noise.
+        value = read_text(acc, 512) or None
+        if value is not None and value == name:
+            value = None
 
     # Process id
     pid = None
@@ -183,22 +224,30 @@ def node_to_dict(acc: Any) -> Optional[dict]:
 
 def element_bounds(acc: Any):
     """(x, y, w, h), coord_type — SCREEN extents, falling back to WINDOW
-    extents when the toolkit answers all zeros for SCREEN (seen with GTK4
-    on X11). coord_type is 'screen' or 'window'."""
+    extents when the toolkit has no screen position (GTK4 on X11 answers
+    SCREEN as all zeros, or as 0,0 with the real size). coord_type is
+    'screen' or 'window'."""
     try:
         comp = acc.get_component_iface()
     except Exception:
         comp = None
     if not comp:
         return (0, 0, 0, 0), 'screen'
+    rects = {}
     for ct, label in ((Atspi.CoordType.SCREEN, 'screen'), (Atspi.CoordType.WINDOW, 'window')):
         try:
             e = comp.get_extents(ct)
-            rect = (int(e.x), int(e.y), int(e.width), int(e.height))
+            rects[label] = (int(e.x), int(e.y), int(e.width), int(e.height))
         except Exception:
-            continue
-        if any(rect):
-            return rect, label
+            pass
+    screen, window = rects.get('screen'), rects.get('window')
+    # A SCREEN origin of exactly 0,0 is GTK4 not knowing where its surface
+    # is; WINDOW extents plus the window origin are right either way (for a
+    # window really at the screen origin the offset is zero).
+    if screen and any(screen) and not (screen[0] == 0 and screen[1] == 0 and window and any(window)):
+        return screen, 'screen'
+    if window and any(window):
+        return window, 'window'
     return (0, 0, 0, 0), 'screen'
 
 
@@ -225,12 +274,18 @@ def walk(acc: Any, out: list, depth: int = 0) -> None:
         if len(out) > MAX_TREE_NODES: return
 
 
-def active_application(process_id: Optional[int] = None) -> Optional[Any]:
+def active_application(process_id: Optional[int] = None,
+                       window_title: Optional[str] = None,
+                       exclude_pids: Optional[set] = None) -> Optional[Any]:
     """Pick an Atspi.Accessible application root to walk.
 
-    Without process_id: prefer the app whose name matches the active
-    window title (heuristic — AT-SPI doesn't have a direct 'active app'
-    concept). Fall back to the first app.
+    process_id wins. Else window_title (the active window's title, for a
+    window that sets no _NET_WM_PID): the app owning a toplevel of that name,
+    else the app owning the ACTIVE toplevel, else None — never some other
+    app. With neither: the ACTIVE toplevel's app, then the legacy
+    focused-descendant heuristic, then the first app. exclude_pids: apps that
+    own a DIFFERENT window with the same title (xcalc and GNOME Calculator are
+    both "Calculator") — never chosen by title.
     """
     try:
         desktop = Atspi.get_desktop(0)
@@ -240,28 +295,38 @@ def active_application(process_id: Optional[int] = None) -> Optional[Any]:
         n = desktop.get_child_count()
     except Exception:
         return None
+    apps = [a for a in (safe(lambda i=i: desktop.get_child_at_index(i)) for i in range(n)) if a is not None]
 
     # If caller supplied a pid, match on it.
     if process_id is not None:
-        for i in range(n):
-            app = safe(lambda i=i: desktop.get_child_at_index(i))
-            if app is None:
-                continue
+        for app in apps:
             pid = safe(lambda app=app: app.get_process_id())
             if pid == process_id:
                 return app
         return None
 
+    if window_title:
+        if exclude_pids:
+            apps = [a for a in apps if safe(lambda a=a: a.get_process_id()) not in exclude_pids]
+        for app in apps:
+            for top in toplevels_active_first(app):
+                if (safe(lambda top=top: top.get_name(), '') or '') == window_title:
+                    return app
+
+    for app in apps:
+        tops = toplevels_active_first(app)
+        if tops and has_state(tops[0], Atspi.StateType.ACTIVE):
+            return app
+    if window_title:
+        return None
+
     # Heuristic: find the app that has a FOCUSED descendant.
-    for i in range(n):
-        app = safe(lambda i=i: desktop.get_child_at_index(i))
-        if app is None:
-            continue
+    for app in apps:
         if has_focused_descendant(app):
             return app
 
     # Fallback: first app.
-    return safe(lambda: desktop.get_child_at_index(0))
+    return apps[0] if apps else None
 
 
 def has_focused_descendant(acc: Any, depth: int = 0) -> bool:
@@ -284,18 +349,31 @@ def has_focused_descendant(acc: Any, depth: int = 0) -> bool:
     return False
 
 
-def focused_element() -> Optional[dict]:
-    try:
-        desktop = Atspi.get_desktop(0)
-        n = desktop.get_child_count()
-    except Exception:
-        return None
-    for i in range(n):
-        app = safe(lambda i=i: desktop.get_child_at_index(i))
-        if app is None: continue
-        hit = _find_focused(app, 0)
-        if hit is not None:
-            return node_to_dict(hit)
+def focused_element(process_id: Optional[int] = None,
+                    window_title: Optional[str] = None,
+                    exclude_pids: Optional[set] = None) -> Optional[dict]:
+    """The focused element of the active app (scoped by pid / window title
+    when given), searching its ACTIVE window first. Toolkits keep FOCUSED on
+    the last-focused widget of inactive windows and apps, so an unscoped
+    first-hit search answered with another app's element."""
+    if process_id is not None or window_title:
+        app = active_application(process_id, window_title, exclude_pids)
+        apps = [app] if app is not None else []
+    else:
+        try:
+            desktop = Atspi.get_desktop(0)
+            n = desktop.get_child_count()
+        except Exception:
+            return None
+        apps = [a for a in (safe(lambda i=i: desktop.get_child_at_index(i)) for i in range(n)) if a is not None]
+        active = active_application()
+        if active is not None and active in apps:
+            apps = [active] + [a for a in apps if a is not active]
+    for app in apps:
+        for top in toplevels_active_first(app):
+            hit = _find_focused(top, 1)
+            if hit is not None:
+                return node_to_dict(hit)
     return None
 
 
@@ -320,41 +398,64 @@ def _find_focused(acc: Any, depth: int) -> Optional[Any]:
 
 # ── Command dispatch ─────────────────────────────────────────────
 
-def cmd_get_tree(process_id: Optional[int]) -> dict:
-    app = active_application(process_id)
+def on_screen(el: dict) -> bool:
+    b = el.get("bounds") or {}
+    return (not el.get("offscreen") and b.get("width", 0) > 0 and b.get("height", 0) > 0
+            and b.get("x", 0) > INT_MIN and b.get("y", 0) > INT_MIN)
+
+
+def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
+                 exclude_pids: Optional[set] = None) -> dict:
+    app = active_application(process_id, window_title, exclude_pids)
     out: list = []
     if app is not None:
-        walk(app, out)
-    return {"elements": out, "truncated": len(out) > MAX_TREE_NODES}
+        root = node_to_dict(app)
+        if root is not None:
+            out.append(root)
+        # The active window (a dialog over its main window) is walked first.
+        for top in toplevels_active_first(app):
+            walk(top, out, 1)
+            if len(out) > MAX_TREE_NODES:
+                break
+    truncated = len(out) > MAX_TREE_NODES
+    # Useful elements first: on-screen ones in document order, then the hidden
+    # rest (closed menus and hidden toolbars report 0x0 and used to fill the
+    # top of the list). Nameless, valueless rows carry nothing to act on —
+    # their labelled children are kept.
+    out = [e for e in out if not (e.get("controlType") in NAMELESS_NOISE_ROLES
+                                  and not e.get("name") and not e.get("value"))]
+    shown = [e for e in out if on_screen(e)]
+    hidden = [e for e in out if not on_screen(e)]
+    return {"elements": shown + hidden, "truncated": truncated}
 
 
-def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]) -> dict:
+def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int],
+             window_title: Optional[str] = None, exclude_pids: Optional[set] = None) -> dict:
     # Implement find as a post-filter over the tree walk — simpler than
     # deep-diving the collection interface and more predictable.
-    tree = cmd_get_tree(process_id).get("elements", [])
+    tree = cmd_get_tree(process_id, window_title, exclude_pids).get("elements", [])
     if name is None and role is None:
         return {"elements": tree}
 
     name_l = name.lower() if name else None
-    role_l = role.lower() if role else None
+    roles = role_alternatives(role)
 
     def matches(el: dict) -> bool:
         if name_l is not None:
             el_name = (el.get("name") or "").lower()
             if name_l not in el_name:
                 return False
-        if role_l is not None:
-            el_role = (el.get("controlType") or "").lower()
-            if role_l not in el_role:
-                return False
+        if roles is not None and not role_matches(roles, (el.get("controlType") or "").lower()):
+            return False
         return True
 
     hits = [e for e in tree if matches(e)]
     return {"elements": hits}
 
 
-def cmd_focused() -> dict:
-    el = focused_element()
+def cmd_focused(process_id: Optional[int] = None, window_title: Optional[str] = None,
+                exclude_pids: Optional[set] = None) -> dict:
+    el = focused_element(process_id, window_title, exclude_pids)
     return {"element": el}
 
 
@@ -372,37 +473,65 @@ ACTION_NAMES = {
 }
 
 
-def find_target(app: Any, name: Optional[str], role: Optional[str]) -> Optional[Any]:
-    """First accessible under `app` matching name (exact, else substring,
-    case-insensitive) and role substring. Same depth/node caps as walk()."""
-    name_l = name.lower() if name else None
-    role_l = role.lower() if role else None
+def role_alternatives(role: Optional[str]) -> Optional[list]:
+    """--role "text|entry|password text" → ['text', 'entry', 'password text'].
+    One clawdcursor type maps to several AT-SPI roles (Edit: a GTK text view is
+    "text", a Chrome/GTK field is "entry"); a single substring missed some."""
+    if not role:
+        return None
+    alts = [a.strip() for a in role.lower().split('|') if a.strip()]
+    return alts or None
+
+
+def role_matches(alts: list, role_name: str) -> bool:
+    return any(a in role_name for a in alts)
+
+
+def find_target(app: Any, name: Optional[str], role: Optional[str]):
+    """(accessible, showing) for the best match under `app`: name exact
+    (case-insensitive, padding ignored) before substring, role substring;
+    ON-SCREEN matches before hidden ones, the ACTIVE window's before the
+    rest. A hidden 0x0 duplicate (a hidden toolbar's "Save" vs the Save
+    dialog's button) used to win just by coming first in the tree.
+    (None, False) when nothing matches."""
+    name_l = name.lower().strip() if name else None
+    roles = role_alternatives(role)
     exact: list = []
     partial: list = []
 
-    def visit(acc: Any, depth: int) -> None:
-        if acc is None or depth > MAX_TREE_DEPTH or exact or len(partial) > MAX_TREE_NODES:
-            return
-        n = (safe(lambda: acc.get_name(), '') or '').lower()
+    def visit(acc: Any, depth: int) -> bool:
+        """True once the best possible hit (exact + showing) is found."""
+        if acc is None or depth > MAX_TREE_DEPTH or len(partial) > MAX_TREE_NODES:
+            return False
+        n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
         r = (safe(lambda: acc.get_role_name(), '') or '').lower()
-        if (role_l is None or role_l in r) and name_l is not None:
+        if (roles is None or role_matches(roles, r)) and name_l is not None:
             if n == name_l:
                 exact.append(acc)
-                return
-            if name_l in n:
+                if is_showing(acc):
+                    return True
+            elif name_l in n:
                 partial.append(acc)
-        elif role_l is not None and name_l is None and role_l in r:
+        elif roles is not None and name_l is None and role_matches(roles, r):
             partial.append(acc)
         count = safe(lambda: acc.get_child_count(), 0) or 0
         for i in range(count):
-            visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
-            if exact:
-                return
+            if visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1):
+                return True
+        return False
 
-    visit(app, 0)
-    if exact:
-        return exact[0]
-    return partial[0] if partial else None
+    # Active window first, so document order already ranks it ahead.
+    for top in toplevels_active_first(app):
+        if visit(top, 1):
+            return exact[-1], True
+    for group in (exact, partial):
+        for acc in group:
+            if is_showing(acc):
+                return acc, True
+    for group in (exact, partial):
+        if group:
+            return group[0], False
+    return None, False
 
 
 def do_named_action(acc: Any, verb: str) -> Optional[str]:
@@ -478,10 +607,9 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         if vi:
             out["success"], out["value"] = True, str(safe(lambda: vi.get_current_value(), ''))
         else:
-            txt = safe(lambda: acc.get_text_iface())
-            if txt:
-                count = safe(lambda: txt.get_character_count(), 0) or 0
-                out["success"], out["value"] = True, (safe(lambda: txt.get_text(0, count), '') or '')
+            text = read_text(acc)
+            if text is not None:
+                out["success"], out["value"] = True, text
             else:
                 # Combo boxes / lists: the value is the selected item's name. GTK
                 # puts the Selection on the combo or on its popup-menu child.
@@ -535,15 +663,23 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
 
 
 def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[int],
-               action: str, value: Optional[str]) -> dict:
+               action: str, value: Optional[str], window_title: Optional[str] = None,
+               exclude_pids: Optional[set] = None) -> dict:
     if not name and not role:
         return {"success": False, "action": action, "error": "name or role required"}
-    app = active_application(process_id)
+    app = active_application(process_id, window_title, exclude_pids)
     if app is None:
         return {"success": False, "action": action, "error": "application not found"}
-    target = find_target(app, name, role)
+    target, showing = find_target(app, name, role)
     if target is None:
         return {"success": False, "action": action, "error": f"element not found: {name or role}"}
+    if not showing and action != 'get-value':
+        # Acting on a hidden element (closed menu, hidden toolbar, 0x0) and
+        # calling it a success is how a Save dialog went unsaved. No bounds:
+        # a coordinate fallback onto a hidden element is just as wrong.
+        return {"success": False, "action": action, "notVisible": True,
+                "error": f"element '{name or role}' exists but is not visible on screen "
+                         "(hidden or 0x0, e.g. in a closed menu) — nothing was done"}
     return perform_action(target, action, value)
 
 
@@ -553,20 +689,26 @@ def main() -> int:
     p.add_argument('--name', default=None)
     p.add_argument('--role', default=None)
     p.add_argument('--process-id', type=int, default=None)
+    # Scope for an active window that sets no _NET_WM_PID (no pid to pass).
+    p.add_argument('--window-title', default=None)
+    # With --window-title: pids of OTHER windows that carry the same title.
+    p.add_argument('--exclude-pids', default='')
     p.add_argument('--action', default='click',
                    choices=['click', 'focus', 'set-value', 'get-value', 'toggle', 'select', 'expand', 'collapse'])
     p.add_argument('--value', default=None)
     args = p.parse_args()
+    excl = {int(x) for x in args.exclude_pids.split(',') if x.strip().isdigit()}
 
     try:
         if args.cmd == 'get-tree':
-            result = cmd_get_tree(args.process_id)
+            result = cmd_get_tree(args.process_id, args.window_title, excl)
         elif args.cmd == 'find':
-            result = cmd_find(args.name, args.role, args.process_id)
+            result = cmd_find(args.name, args.role, args.process_id, args.window_title, excl)
         elif args.cmd == 'focused':
-            result = cmd_focused()
+            result = cmd_focused(args.process_id, args.window_title, excl)
         elif args.cmd == 'invoke':
-            result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value)
+            result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value,
+                                args.window_title, excl)
         else:
             result = {"error": f"unknown command: {args.cmd}"}
     except Exception as exc:

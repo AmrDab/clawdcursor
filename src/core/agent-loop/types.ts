@@ -32,6 +32,14 @@ export interface AgentInput {
    * this is undefined.
    */
   targetWindow?: { title: string; processName: string };
+  /**
+   * Hand the desktop to the human at a roadblock (sign-in, 2FA, CAPTCHA, a
+   * step the agent may not take) and wait for Resume / End task — the run is
+   * suspended, not ended. Resolves null when no human can be reached (no
+   * overlay / CLAWD_NO_PAUSE): the loop then keeps its old fail-fast
+   * behaviour. Wired by Agent.
+   */
+  pause?: (req: { message: string }) => Promise<'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | null>;
 }
 
 export interface AgentStep {

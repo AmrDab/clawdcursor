@@ -52,23 +52,30 @@ describe('P0-1 — getUiTree defaults to the active-window pid on every platform
   });
 
   it('macos getUiTree resolves getActiveWindow() when pid is omitted', () => {
-    const body = methodBody(read('platform', 'macos.ts'), 'async getUiTree(processId?: number)');
-    expect(body).toContain('getActiveWindow');
+    // The adapter hands the read to the AX client (src/platform/mac-ax.ts), which
+    // owns the foreground-pid default: the compiled helper reads the frontmost
+    // app when no --pid is given, and the osascript path resolves the active
+    // window's pid itself before passing -FocusedProcessId. (Behaviour tests:
+    // mac-ax.test.ts "without a pid …".) Follow the move, as linux did.
+    expect(methodBody(read('platform', 'macos.ts'), 'async getUiTree(processId?: number)')).toContain('this.ax.uiTree(processId)');
+    const body = methodBody(read('platform', 'mac-ax.ts'), 'async uiTree(processId?: number)');
+    expect(body).toContain('activeWindow');
     expect(body).toContain("'-FocusedProcessId'");
   });
 
   it('linux getUiTree resolves getActiveWindow() when pid is omitted', () => {
-    // 1.5.12: the foreground-pid lookup moved into resolveA11yPid so that
+    // 1.5.12: the foreground-pid lookup moved into a helper so that
     // findElements / invokeElement get the same default (L7 — find without a
-    // pid searched the wrong app). Follow the helper.
+    // pid searched the wrong app); it is now a11yScopeArgs, which also scopes
+    // a pid-less window by title and covers getFocusedElement. Follow it.
     const linux = read('platform', 'linux.ts');
     const body = methodBody(linux, 'async getUiTree(processId?: number)');
-    expect(body).toContain('resolveA11yPid');
-    expect(body).toContain("'--process-id'");
-    const helper = methodBody(linux, 'private async resolveA11yPid(processId?: number)');
+    expect(body).toContain('a11yScopeArgs');
+    const helper = methodBody(linux, 'private async a11yScopeArgs(processId?: number)');
     expect(helper).toContain('getActiveWindow');
-    for (const m of ['async findElements(query', 'async invokeElement(query']) {
-      expect(methodBody(linux, m), m).toContain('resolveA11yPid');
+    expect(helper).toContain("'--process-id'");
+    for (const m of ['async findElements(query', 'async invokeElement(query', 'async getFocusedElement()']) {
+      expect(methodBody(linux, m), m).toContain('a11yScopeArgs');
     }
   });
 });

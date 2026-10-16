@@ -12,6 +12,9 @@ function run(argv) {
   var pid = parseInt(argv[0], 10);
   if (!(pid > 0)) return JSON.stringify({ ok: false, error: 'usage: enable-accessibility.jxa <pid>' });
   var app = $.AXUIElementCreateApplication(pid);
-  var err = $.AXUIElementSetAttributeValue(app, $('AXManualAccessibility'), $.kCFBooleanTrue);
+  // `$.kCFBooleanTrue` reaches the bridge as an opaque Ref, not a CFBoolean: with
+  // it this call returned kAXErrorFailure (-25200) for every app and nothing ever
+  // woke. A boxed boolean is bridged as a CFBoolean and the set succeeds (0).
+  var err = $.AXUIElementSetAttributeValue(app, $('AXManualAccessibility'), $.NSNumber.numberWithBool(true));
   return JSON.stringify({ ok: err === 0, axError: err });
 }

@@ -170,3 +170,18 @@ describe('invoke_element — by-name bounds fallback when no pattern activates',
     expect(mouseClick).not.toHaveBeenCalled();
   });
 });
+
+describe('invoke_element — an invoke still running when the bridge answered', () => {
+  // Live Win11 2026-10-14: Save opened a modal "Confirm Save As" box; the
+  // Windows bridge now stops waiting and answers {pending:true}. The reply must
+  // say so, or the agent assumes the click finished and acts on a stale screen.
+  it('tells the agent a dialog probably opened and to re-read', async () => {
+    const invokeElement = vi.fn(async () => ({ success: true, data: { pending: true, note: 'invoked; still running' } }));
+    const adapter = { invokeElement, getActiveWindow: vi.fn(async () => null) } as unknown as PlatformAdapter;
+    const res = await findTool('invoke_element').execute({ name: 'Save' }, makeCtx(adapter));
+    expect(res.success).toBe(true);
+    expect(invokeElement).toHaveBeenCalledTimes(1);
+    expect(res.text).toMatch(/still running/i);
+    expect(res.text).toMatch(/re-read/i);
+  });
+});

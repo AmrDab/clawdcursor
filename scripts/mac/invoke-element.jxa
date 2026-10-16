@@ -291,6 +291,13 @@ function run(argv) {
                 break;
                 
             case 'get-value':
+                // A secure field's value is never read out (audit M2).
+                var isSecure = false;
+                try { isSecure = targetElement.subrole() === 'AXSecureTextField'; } catch (se) {}
+                if (isSecure) {
+                    result = { success: false, action: 'get-value', error: 'The element is a secure text field — its value is withheld' };
+                    break;
+                }
                 // Prefer AXValue, but fall back to the name property when AXValue
                 // is absent OR empty. Some controls expose an AXValue that reads
                 // "" while the real text is only in the title/name — returning the

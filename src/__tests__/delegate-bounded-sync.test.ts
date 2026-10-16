@@ -145,7 +145,7 @@ describe('compact task tool — status/abort routing', () => {
   it('exposes run/status/abort and routes them to the delegation family', async () => {
     const { getCompactTools } = await import('../tools/compact');
     const taskTool = getCompactTools().find(t => t.name === 'task')!;
-    expect(taskTool.parameters.action?.enum).toEqual(['run', 'status', 'abort']);
+    expect(taskTool.parameters.action?.enum).toEqual(['run', 'status', 'abort', 'resume']);
     // status routes to agent_status (works without instruction)
     const { ctx } = makeCtx({ state: { status: 'idle' } });
     const r = await taskTool.handler({ action: 'status' }, ctx);

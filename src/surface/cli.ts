@@ -563,7 +563,10 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     const { server: mcpServer, toolCount } = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
     mcpToolCount = toolCount;
     app.use('/mcp', requireAuth);
-    await startMcpHttp(mcpServer, app, '/mcp');
+    // A server per SDK-client session and per concurrent one-shot post —
+    // one shared server refused every request while another held it.
+    await startMcpHttp(mcpServer, app, '/mcp',
+      async () => (await createMcpServer({ compact: compactSurface, ctx: toolCtx })).server);
   } catch (err) {
     console.warn('MCP HTTP transport not loaded:', (err as Error).message);
   }
@@ -785,6 +788,15 @@ program
   });
 
 program
+  .command('versions')
+  .description('📦 List every copy of clawdcursor on this machine (global install, Claude Desktop extension, Claude Code plugin) and flag old ones')
+  .action(async () => {
+    const { findInstalledCopies, describeCopies } = await import('./installed-copies');
+    const { lines } = describeCopies(findInstalledCopies(), { latest: VERSION, running: getPackageRoot() });
+    for (const line of lines) console.log(`  ${line}`);
+  });
+
+program
   .command('grant')
   .description('🔐 Request macOS permissions (triggers system permission dialogs)')
   .action(async () => {
@@ -915,11 +927,47 @@ program
   });
 
 program
+  .command('resume')
+  .description('Continue a task paused for you (same as the on-screen Resume), or --end it')
+  .option('--end', 'End the paused task')
+  .option('--port <port>', 'API server port', '3847')
+  .action(async (opts) => {
+    const port = parseInt(opts.port, 10);
+    const answer = opts.end ? 'end' : 'resume';
+    if (!(await isClawdInstance(port))) {
+      console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/resume`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await res.json() as { outcome?: string; was?: string; error?: string };
+      if (res.ok) {
+        console.log(`${e('▶', '>')} ${data.outcome}${data.was ? `: ${data.was}` : ''}`);
+      } else {
+        console.error(`${e('❌', '[ERR]')} ${data.error ?? res.statusText}`);
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      console.error(`${e('❌', '[ERR]')} ${(err as Error).message}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command('task [text]')
   .description('Send a task to a running Clawd Cursor instance (interactive if no text given)')
   .option('--port <port>', 'API server port', '3847')
   .action(async (text, opts) => {
     const url = `http://127.0.0.1:${opts.port}/mcp`;
+    // A --compact daemon serves the `task` compound, not submit_task.
+    const { resolveTaskTool } = await import('./task-tool');
+    const tool = await resolveTaskTool(url, authHeaders());
 
     const sendTask = async (taskText: string) => {
       try {
@@ -935,7 +983,7 @@ program
             jsonrpc: '2.0',
             id: 1,
             method: 'tools/call',
-            params: { name: 'submit_task', arguments: { task: taskText } },
+            params: { name: tool.name, arguments: { [tool.key]: taskText } },
           }),
         });
         if (res.status === 401) {
@@ -1002,7 +1050,7 @@ while ($true) {
             jsonrpc = '2.0'
             id      = $rpcId
             method  = 'tools/call'
-            params  = @{ name = 'submit_task'; arguments = @{ task = $task } }
+            params  = @{ name = '${tool.name}'; arguments = @{ ${tool.key} = $task } }
         } | ConvertTo-Json -Depth 6 -Compress
         $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/mcp -Method POST -Headers $headers -Body $body
         if ($response.error) {
@@ -1046,7 +1094,7 @@ while true; do
     echo "> Sending: $task"
     RPC_ID=$((RPC_ID + 1))
     # JSON-encode the task by piping through python; falls back to naive escape if python missing
-    BODY=$(python3 -c "import json,sys; print(json.dumps({'jsonrpc':'2.0','id':$RPC_ID,'method':'tools/call','params':{'name':'submit_task','arguments':{'task':sys.argv[1]}}}))" "$task" 2>/dev/null) || BODY="{\\"jsonrpc\\":\\"2.0\\",\\"id\\":$RPC_ID,\\"method\\":\\"tools/call\\",\\"params\\":{\\"name\\":\\"submit_task\\",\\"arguments\\":{\\"task\\":\\"$task\\"}}}"
+    BODY=$(python3 -c "import json,sys; print(json.dumps({'jsonrpc':'2.0','id':$RPC_ID,'method':'tools/call','params':{'name':'${tool.name}','arguments':{'${tool.key}':sys.argv[1]}}}))" "$task" 2>/dev/null) || BODY="{\\"jsonrpc\\":\\"2.0\\",\\"id\\":$RPC_ID,\\"method\\":\\"tools/call\\",\\"params\\":{\\"name\\":\\"${tool.name}\\",\\"arguments\\":{\\"${tool.key}\\":\\"$task\\"}}}"
     curl -s -X POST http://127.0.0.1:${opts.port}/mcp \\
       -H "Content-Type: application/json" \\
       -H "Accept: application/json, text/event-stream"${token ? ' \\\n      -H "$AUTH_HEADER"' : ''} \\

@@ -1,6 +1,6 @@
 # Clawd Cursor Installer for Windows
 # Usage: powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
-# Specify version: $env:VERSION='v1.5.15'; irm https://clawdcursor.com/install.ps1 | iex
+# Specify version: $env:VERSION='v1.5.16'; irm https://clawdcursor.com/install.ps1 | iex
 #
 # Installs the published npm package globally (npm i -g clawdcursor) -- no git
 # clone, no local build toolchain. Windows needs no native build step.
@@ -38,13 +38,37 @@ if ($major -lt 20) {
 }
 Write-Host "  [OK] Node.js $nodeVersion" -ForegroundColor Green
 
-# ── 2. Install from npm ──────────────────────────────────────────────────────
+# ── 2. Install from npm (updates an existing global copy in place) ───────────
+# The version already installed, so we can say "updated X -> Y" afterwards.
+$before = $null
+try {
+    $ls = npm ls -g clawdcursor --depth=0 --json 2>$null | Out-String | ConvertFrom-Json
+    $before = $ls.dependencies.clawdcursor.version
+} catch {}
+
+# Windows refuses to replace files a running process has open (EBUSY): an
+# editor or Claude session that has clawdcursor running blocks the update.
+# Only processes running from the global copy hold its files open.
+$globalDir = $null
+try { $globalDir = (Join-Path (npm prefix -g 2>$null).Trim() 'node_modules\clawdcursor').ToLower() } catch {}
+$running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $globalDir -and $_.CommandLine -and $_.CommandLine.Replace('/', '\').ToLower().Contains($globalDir) })
+if ($before -and $running.Count -gt 0) {
+    Write-Host "  [!] clawdcursor is running in $($running.Count) session(s) (your editor or Claude app)." -ForegroundColor Yellow
+    Write-Host "      If the update fails with EBUSY, close those sessions or run 'clawdcursor stop', then re-run this." -ForegroundColor Yellow
+}
+
 Write-Host "  Installing $PKG (global)..." -ForegroundColor Cyan
 $output = npm install -g $PKG --loglevel error 2>&1 | Out-String
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  [X] npm install failed:" -ForegroundColor Red
     foreach ($line in ($output -split "`r?`n" | Where-Object { $_ })) { Write-Host "      $line" }
-    Write-Host "      Retry in an elevated terminal, or set a user-writable npm prefix." -ForegroundColor Yellow
+    if ($output -match 'EBUSY|EPERM') {
+        Write-Host "      A running clawdcursor has its files open. Close the editor / Claude sessions using it" -ForegroundColor Yellow
+        Write-Host "      (or run 'clawdcursor stop'), then re-run this command." -ForegroundColor Yellow
+    } else {
+        Write-Host "      Retry in an elevated terminal, or set a user-writable npm prefix." -ForegroundColor Yellow
+    }
     exit 1
 }
 
@@ -57,8 +81,20 @@ if ($npmPrefix) { $npmPrefix = $npmPrefix.Trim() }
 $exe = Get-Command clawdcursor -ErrorAction SilentlyContinue
 Write-Host ""
 if ($exe) {
-    $ver = & clawdcursor --version 2>$null
-    Write-Host "  [OK] Clawd Cursor $ver installed!" -ForegroundColor Green
+    $ver = (& clawdcursor --version 2>$null | Select-Object -Last 1)
+    if (-not $before) {
+        Write-Host "  [OK] Clawd Cursor $ver installed!" -ForegroundColor Green
+    } elseif ($before -eq $ver) {
+        Write-Host "  [OK] Clawd Cursor $ver is already the latest (reinstalled)." -ForegroundColor Green
+    } else {
+        Write-Host "  [OK] Clawd Cursor updated: $before -> $ver" -ForegroundColor Green
+        Write-Host "       Restart any editor or Claude session that uses clawdcursor so it picks up $ver." -ForegroundColor Gray
+    }
+    # The installer only updates this global copy. The Claude Desktop extension
+    # and the Claude Code plugin carry their own: list them so old ones show.
+    Write-Host ""
+    Write-Host "  Copies of clawdcursor on this machine:" -ForegroundColor Cyan
+    & clawdcursor versions 2>$null
 } elseif ($npmPrefix -and (-not ($env:Path -split ';' | Where-Object { $_ -eq $npmPrefix }))) {
     Write-Host "  [OK] Installed, but npm's bin folder is not in your PATH." -ForegroundColor Yellow
     Write-Host "       Add this to your PATH, then reopen your terminal:" -ForegroundColor Yellow

@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.16] - 2026-10-16 — pause for the user at a roadblock; blind mode on every OS
 
 ### Changed
 
@@ -26,6 +26,49 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Added
 
+- **Pause for the user at a roadblock, then continue.** A sign-in, a 2FA code,
+  a CAPTCHA, or a step the agent may not take no longer ends the task with the
+  agent confused. The run pauses, keeping its history: the glow turns blue and
+  the pill says what to do, with **Resume / End task**. After Resume the agent
+  re-reads the screen and carries on from where it is.
+  - Built-in agent: new `ask_user` tool. `give_up` and the repeat guard now
+    pause instead of failing. Paused time doesn't count toward the 12-minute
+    task limit. No answer in 15 min (`CLAWD_PAUSE_TIMEOUT_MIN`) ends the task.
+    Confirm-tier actions (Send, Delete…) are still refused as before; if that
+    blocks the task, the agent pauses so the user can do that step.
+  - Outside agents: `system pause_for_user` (bounded wait; re-call to keep
+    waiting). A delegated `task` reports `{status:"paused", waitingFor}`, and
+    `task {action:"resume"}` resumes it.
+  - Also answerable with `clawdcursor resume [--end]`, `POST /resume`, or the
+    dashboard, whose pause banner now has working Resume / End task buttons.
+  - `CLAWD_NO_PAUSE=1` restores the old fail-fast behaviour (CI, unattended
+    runs). Nothing reads the screen while paused.
+  - Only the person at the machine confirms a pause. An AI calling
+    `task {action:"resume"}` resumes it as unverified, and the agent is told
+    the user did not confirm it on screen. The pill shows the message as
+    "The agent says: …", so injected page text can't pass for clawdcursor's
+    own instructions.
+- **`clawdcursor versions`, and the same list in `clawdcursor doctor`:** every
+  copy of clawdcursor on the machine with its version: the global install,
+  Claude Desktop extensions (including the Microsoft Store build's folder), the
+  Claude Code plugin's pinned version and npx's cache. Old copies are flagged
+  with the fix for each. The website installer only updates the global copy, so
+  an old Desktop extension used to go unnoticed.
+- **The installers say what they did.** "Updated 1.5.12 → 1.5.15" (or
+  "installed", or "already the latest"), a reminder to restart editor and Claude
+  sessions, and the list of other copies. On Windows they warn when open
+  sessions are using the global copy (the cause of `EBUSY` failures) and explain
+  that error if it happens.
+- **The on-screen overlay (glow + pill) now works on macOS and Linux**, not
+  only Windows, and the glow covers every monitor, not just the primary one.
+  - macOS: `scripts/mac/overlay.swift`, compiled once into `~/.clawdcursor/bin`
+    (needs the Xcode Command Line Tools, like the OCR helper).
+  - Linux: `scripts/linux/overlay.py` (GTK 3 via python3-gi, already needed for
+    the accessibility bridge). X11, or Wayland through XWayland. With a
+    compositor the glow fades in from the edges; without one it is a thin solid
+    border. Clicks pass through the glow on every OS.
+  - Where the overlay can't run, nothing is drawn and pauses fall back to the
+    old fail-fast behaviour.
 - **`system ocr scope:"window"`** reads only the focused window: ~80% fewer
   words (39 vs 486 on the test screen), faster, and it does not read other
   apps' text. The default stays the whole screen — the focused window can be
@@ -43,6 +86,377 @@ All notable changes to Clawd Cursor will be documented in this file.
   `--force-renderer-accessibility` expose the whole page — required on Linux,
   where nothing enabled after launch (including AT-SPI's own switch) exposes
   a Chromium page.
+
+### Fixed
+
+Blind mode (accessibility first, no screenshots), from live tests on a Windows 11
+VM and an Ubuntu 24.04 VM:
+
+- **Windows: classic controls were reported as blank "Pane"s.** Windows' UIA
+  client loads the Edit/Button/ComboBox type providers once, on first need, and
+  that load failed when the bridge's first UIA call came from script code —
+  almost every start. Text boxes, buttons and combo boxes then had no type, no
+  value and no Invoke, so `set_value`, `invoke` and `smart_type` failed on them.
+  The bridge now registers the providers at startup.
+- **Windows: the open dialog is what gets read.** `compile_ui` / `read_tree`
+  read the app's main window even while a Save As or error box was in front;
+  they now read the foreground dialog of that app. `window list` includes owned
+  dialogs, and `window focus` finds them.
+- **Windows: no more 10 s stall** when invoking a button that opens a modal box
+  (Save → "replace?"): the press runs on a worker and the call returns after
+  ~1.2 s saying a dialog probably opened (Save-As flow: 10.5 s → 2.2 s).
+- **Windows: the right field by name.** "File name" no longer matches a column
+  header; value reads and writes prefer the edit over its label; the file-name
+  box is filled by typing so the dialog actually takes the new name; control
+  type filters accept any spelling (`MenuItem`, `menu item`…).
+- **`smart_click "Save"` clicks the Save button,** not the "Save as" title: a
+  standalone word beats the same word inside a longer phrase.
+- **Content below the fold is readable blind.** `read_tree` lists scrolled-out
+  elements after the visible ones (marked offscreen) and pages with
+  `offset`/`limit`; `compile_ui` shows them in an OFFSCREEN section;
+  `list_children` works when the parent has no on-screen bounds. Settings →
+  About now reads "Windows 11 Pro, 25H2" without guessing names.
+- **`copy_all_text` in Settings-style (UWP/XAML) windows:** 13.4 s and nothing
+  → 1.1 s, falling back to the window's accessibility text (and saying so).
+- **No false success from OCR clicks on running text.** When the only match is
+  a word inside a sentence and nothing changes after the click, `smart_click`
+  reports "not confirmed — that is text, not a control".
+- **`state` reports checked / unchecked** for checkboxes and toggles.
+- **`set_value` types into fields that have no settable value, on every OS**
+  (Chrome text fields on Linux, Win11 XAML composites), and only after the
+  field was focused or located. It never types into whatever has focus.
+- **`find_field` with a multi-word purpose** ("file name") prefers the whole
+  phrase ("File name:") over a field matching one word of it (the file list's
+  "Name" column). Trailing colons on labels no longer cost the exact match.
+- **`smart_click` says why OCR didn't help** (engine unavailable, failed, read
+  nothing, or read N words with no match), and a click on running text that
+  changed nothing is reported as performed but unconfirmed, not as an error,
+  so an agent doesn't click a toggle twice.
+- **Windows: an earlier still-running click that failed later** is reported
+  on the next invoke instead of being lost.
+- **Windows: focusing a window no longer un-maximizes it.** Every focus
+  (window focus, raising the target before a click) ran `ShowWindow(SW_RESTORE)`,
+  which shrinks a maximized window to its normal size. A maximized window is
+  now shown with `SW_SHOWMAXIMIZED`; normal and minimized windows behave as
+  before. The Alt-key fallback for Windows' foreground lock also loads the
+  library it needs, so it no longer fails silently.
+- **`get_value` reads the field, not a same-named label** ("City" = "City").
+- **OCR clicks never hit another app on a partial match.** `smart_click "1"`
+  in Calculator clicked the "14" of the menu-bar clock on a Mac and opened
+  Notification Center. Short and numeric targets now need a whole-token match,
+  and with a `processId` (or the agent's working window) a match outside that
+  window is refused, not clicked with a warning. The window check also compares
+  in the same coordinate space on Retina screens.
+- **Multi-word OCR targets survive one misread word** ("Make … Text"), and a
+  clear miss fails fast instead of a 24 s `deadline_exceeded`.
+- **`smart_type` replaces a field's text by default** (`mode: "append"` to
+  add); in the macOS Save panel it typed after the preselected base name
+  ("blind-note.txt.txt").
+- **`compile_ui` accepts `processId`** and reads that app's window; OCR
+  coordinates from it, and from the agent loop's `smart_click` / `read_text`,
+  are screen coordinates (points on macOS), not physical pixels.
+- **The overlay shows for what an action does.** `accessibility invoke` /
+  `set_value` (a tier-0 compound) never lit it, while reads on `system` / `task`
+  / `window` (tier-1 compounds) did, e.g. polling `task status`.
+- **HTTP `/mcp` works with standard MCP SDK clients.** Every request after the
+  first failed with "Already connected to a transport"; each SDK session now
+  gets its own server, and one-shot posts (dashboard, curl, CLI) still work.
+- **`clawdcursor task "…"` and the dashboard work against a `--compact`
+  daemon** (they called granular tool names it doesn't serve).
+- **The session log records refused and consent-blocked calls,** and counts
+  `batch` steps individually.
+- **`open_app Settings`: 10–17 s → ~5 s** (launched directly instead of after a
+  failing launcher and a Start-menu search).
+- **No false "FOCUS NOT CONFIRMED" warning** for clicks on clawdcursor's own
+  never-focused overlay.
+- **Linux: `invoke` by name picks what you can see.** It took the first match
+  in tree order — a hidden 0×0 toolbar "Save" instead of the dialog's — and
+  reported success. Visible matches in the active window now win; a match that
+  only exists hidden is refused.
+- **Linux: text fields and the Calculator display read empty.** PyGObject's
+  Text interface clashed with an old method name; text is now read through the
+  interface explicitly.
+- **Linux: `focused` returned another app's element,** and a window without a
+  process id made `read_tree` read a different app. Both are scoped to the
+  foreground app / window now.
+- **Linux: `smart_read` no longer claims accessibility is unavailable,** and
+  the tree lists visible elements first (closed menus and nameless rows last;
+  GTK4 positions corrected).
+- **`open_app` says what really happened.** "Opened" with the window, or
+  "Started … no window yet, do not launch it again" while a slow app loads, or
+  an error when nothing started — never "Launched" with nothing on screen.
+  Linux resolves app names through installed `.desktop` entries
+  (calculator → gnome-calculator).
+- **`batch` accepts `args` and `arguments`** for each step, on both the MCP
+  and the agent-loop batch.
+- **`accessibility find_field` works on the compact surface** (every OS). Its
+  free-text `purpose` had inherited `compile_ui`'s `purpose` enum, so every
+  call failed validation. A test now checks every compound action's params.
+- **Linux: window positions under openbox / framed WMs** come from the real
+  client geometry (wmctrl counted the frame twice), so element refs in dialogs
+  are no longer rejected as "off the active window".
+- **Linux: two windows with the same title** (e.g. xcalc and GNOME Calculator,
+  "Calculator") can't be confused: a window without a pid is never scoped to
+  another window's app.
+- **Linux: the agent's own Chrome is accessible** (`--force-renderer-
+  accessibility` on its launch; the user's browser is untouched) and shows as
+  `chrome`, not its rewritten command line.
+- **`open_app` recognises a new window without a pid** as the launched app
+  (xcalc: 8 s and "no window" → 0.3 s, opened).
+- **OCR click targets: rows no longer merge** (tesseract's sparse mode put every
+  word on "line 1", so a click could land between two rows) and a 2-letter
+  fragment no longer matches a longer target.
+
+- **macOS Retina: clicks landed 2× off again (#154), in `agent` and `mcp` modes
+  alike.** The NSScreen probe behind `getScreenSize()` used `size of frame`,
+  which throws on macOS 26 (an NSRect bridges into AppleScript as a nested
+  list, not a record). The error was swallowed, the logical width silently fell
+  back to the physical width, `dpiRatio` became 1 and the mouse scale was
+  physical/1280 (3.5 on a 4480×2520 panel) instead of logical/1280 (1.75).
+  Measured on a 2× MacBook display: `image (681,43) → screen (2384,151)`, past
+  the 2240-pt edge. The same bug made `list_displays` report `dpiRatio: 1`,
+  and `NativeDesktop` had a twin on its normal (screenshot-helper) path:
+  `connect()` returned before its DPI probe, so `getDpiRatio()` stayed 1 —
+  `system ocr` / `ocr_read_screen` returned physical pixels labelled as screen
+  coordinates (so `space:"screen"` clicks from OCR missed), `smart_click`'s OCR
+  fallback clicked physical pixels, and `scope:"window"` OCR cropped half the
+  window. One shared probe (`src/platform/mac-screen.ts`) now reads the frame
+  by list index plus `backingScaleFactor`, and is used by the adapter, the
+  helper path and the nut-js fallback alike. The v1.5.0 fix had only ever been
+  exercised against pinned fixtures;
+  `mac-screen.test.ts` runs the real script on a Mac and
+  `scripts/verify-macos.mjs` checks the resulting geometry.
+- **macOS `window list_displays` never enumerated monitors.** Its AppleScript
+  did not compile (`(s as any) = primaryScreen`, -2741), so it always fell back
+  to a single display. `NSScreen.screens` index 0 is the primary; each screen
+  now reports its own `backingScaleFactor`.
+- **The accessibility wake never fired on macOS.** `enable-accessibility.jxa`
+  passed `$.kCFBooleanTrue`, which the JXA bridge exposes as an opaque `Ref`,
+  so every `AXManualAccessibility` set returned `kAXErrorFailure` (-25200) —
+  on Claude Desktop and on a cold Discord alike. Passing an `NSNumber` works: a
+  cold Discord goes from 191 to 1,082 AX nodes within a second. Known
+  limitation, tracked separately: the JXA / System Events walk behind
+  `read_tree` still reads only a sliver of Chromium / Catalyst apps (Claude
+  Desktop 15 of 1,119 AX nodes in 11 s; Discord 13 of 1,082; Freeform 0 of
+  549) and hits its 12 s timeout, so a woken tree is mostly invisible to it.
+- **The wake budget is wall-clock.** It counted only the pauses between
+  re-reads, so on macOS, where that walk takes ~10 s per read, "up to 3 s"
+  became 41 s. Slow reads now count against the budget (one re-read is always
+  attempted).
+- **`scripts/verify-macos.mjs` reported false results.** The compiled-vs-
+  interpreted OCR check compared raw JSON — Swift dictionaries serialize in a
+  random key order per process, while the words and boxes were identical (the
+  Swift script now emits sorted keys as well); the Screen Recording probe
+  called `$.CGPreflightScreenCaptureAccess`, which JXA does not bridge, so it
+  threw and reported "not granted" on a Mac that has the permission, skipping
+  the live-OCR check; and the Electron-wake check passed on a set that had
+  failed. It now asks the native `permission-check` helper, counts AX nodes
+  through the AX C API before and after the wake
+  (`scripts/mac/ax-node-count.swift`) so the wake is judged independently of
+  the tree walk, and checks the Retina geometry and `listDisplays()`.
+
+macOS reads that failed and said nothing, from a blind test on a real Mac (macOS 26.5,
+M1 iMac, no screenshots):
+
+- **`window list` said "Windows (0)" with 15 windows open, and `read_tree` said
+  "empty a11y tree — app may be custom-canvas" for TextEdit, Calculator and
+  Safari.** Both were timeouts turned into empty answers: the osascript behind the
+  window list takes 9–11 s against an 8 s limit, a tree walk 12–25 s against 12 s,
+  and the adapter swallowed the error. Reads now go through a small compiled Swift
+  helper on the accessibility API (`scripts/mac/ax-helper.swift`, built once into
+  `~/.clawdcursor/bin` in about 3 s, only where the Command Line Tools exist; the
+  first call waits for the build, and a Mac without them is never shown the
+  "install developer tools" dialog). Same calls, same Mac, minutes apart:
+
+  | call | before | after |
+  |---|---|---|
+  | `window list` | 9.0–11.2 s, "Windows (0)" | 0.37 s, 22 windows |
+  | `read_tree` TextEdit | 24.9 s, "empty tree" | 0.07 s, 11 elements |
+  | `read_tree` a Safari page | 24.8 s, "empty tree" | 0.15 s, 403 elements |
+  | `find` buttons in TextEdit | 9.2 s, nothing | 0.1 s |
+  | `window active` | 1.0 s | 0.05 s |
+  | `read_tree` Calculator | 24.8 s, "empty tree" | 0.15 s, 35 named elements |
+
+  A timeout, a hung app or a locked screen is now an error that says so, never an
+  empty answer; an app that stalls shows as "(not responding)" and costs only its
+  own 1.5 s. WebKit and Electron helper processes (`Safari Web Content`, …) are not
+  apps and are not listed. Without the helper (no `swiftc`, or `CLAWD_NO_MAC_AX=1`)
+  the old osascript scripts still work, now with limits that fit their real speed
+  (window list 11.8 s → 17 windows, not zero).
+- **`window active` and `smart_click` used the wrong window.** The active window was
+  the biggest window of the frontmost app ("Untitled 4") while you typed in the
+  small main one ("Untitled 7"), and `smart_click`'s ctx.a11y path took the first
+  window of the frontmost *process* — hence the false "matched outside focused
+  window" warning on menu-bar items. It is now the app's focused (else main)
+  window, in the adapter, in the legacy `AccessibilityBridge` and in the osascript
+  fallback.
+- **SwiftUI controls with only an `AXIdentifier` could not be found or invoked.**
+  The identifier is now read as `automationId` (and names a control that has no
+  label), so `invoke {automationId:"One"}` and `find {automationId}` work on the
+  macOS 26 Calculator: `find` 73 ms, `invoke` 246 ms (they used to miss). `find_element`
+  passes `automationId` to the adapter instead of filtering a capped result afterwards.
+  `invoke` with nothing to aim at (no name, controlType or automationId) is refused;
+  `invoke-element.jxa` pressed the best-scoring button in the window.
+- **`open_app` said "Could not confirm … no window appeared" for apps that had
+  launched** (3 of 3 in the blind test, ~26 s each), then typed the app's name into
+  Spotlight. The launch is now confirmed from the process (NSWorkspace) and its
+  windows instead of a diff of the slow window list: a cold Calculator is
+  `Opened "Calculator" (pid=…, window="Calculator")` in 0.84 s; an app that is up
+  but has no window yet is reported as still loading. Spotlight is only used when
+  the app never appeared.
+- **A system dialog or the lock screen owned the keyboard while every tool said OK.**
+  System Events keeps naming the app behind a permission prompt, an auth sheet or
+  the lock screen as frontmost; NSWorkspace knows better. `type` and `key` now refuse
+  while one of those owns the keyboard (a stray Return could press "Allow"), naming
+  the dialog and how to answer it (read its buttons with `processId`), and
+  `window active` shows it. Spotlight, the Dock, Control Center and clawdcursor's
+  own overlay are not treated as dialogs. `CLAWD_NO_MAC_AX=1` switches the guard off
+  together with the helper.
+- `scripts/verify-macos.mjs` now compiles and times the helper, compares its window
+  list with the old script's (nothing missing, same geometry) and reads a live tree;
+  `mac-ax-live.test.ts` drives a throwaway AppKit app (identifier-only buttons, a
+  secure field, two windows, a frozen process) with `CLAWD_LIVE_MAC_TESTS=1`.
+- Hardening from an independent review of the helper, each reproduced on the Mac
+  first: every accessibility call is bounded by one timeout (the per-app setting
+  never reached a window's or a control's own calls); a button whose action opens a
+  modal panel is reported as *pending*, not as a failed click, so callers stop
+  clicking it again; a value that starts with `--` is a value (`set-value "--- notes"`
+  wrote an empty string and said success); `find` / `invoke` match the label the
+  tree shows (text that is a child of the control) and refuse to act on a partial
+  match like "Save As…" for "Save" when part of the window did not answer; a subtree
+  that did not answer is reported as PARTIAL instead of vanishing, an unreadable
+  window is an error, and a hung app is a timeout, not "no elements found". One
+  transient failure of the helper no longer pushes the whole session onto the slow
+  osascript path (retried after a minute); a launcher's panel (Raycast, Alfred) is
+  typed into, not mistaken for a system dialog. On the osascript path, secure-field
+  values are no longer returned by `find` / `invoke get-value` / the focused element,
+  the focused window (not the main one) is preferred like the helper does, and a
+  locked screen is reported instead of System Events' empty answers. `read_screen`
+  prints "(window list failed: …)" instead of "(no windows found)" when the list
+  failed.
+- **Focusing a window on macOS never changes its size, zoom or full-screen state**
+  (Windows' focus un-maximized windows; this was checked, pinned by a test, and
+  confirmed on a real zoomed window), **and now brings a minimized window back**
+  — clearing "minimized" returns it at the size it had. With no title given, focus
+  prefers a window that is on screen over one you put away.
+- **A Mac without the Xcode Command Line Tools** (no `swiftc`, so no fast helper)
+  keeps working through the osascript path, and says how to get the fast one: its
+  timeouts and errors end with "run `xcode-select --install`", an identifier-only
+  `find` reports that it cannot search by identifier there instead of "no elements
+  found", and `clawdcursor doctor` shows the helper's state (built / builds on first
+  use / needs the Command Line Tools / switched off).
+- **Upgrade walls are a roadblock (#239).** A click on `Upgrade`, `Subscribe`,
+  `Start (a / your) (free) trial`, `Billing`, a payment method or "Add credit
+  card" now needs confirmation, like Pay / Checkout. Page text such as
+  "Subscriber count", "Unsubscribe", "Upgrade guide" or Trello's "Add a card"
+  stays ungated, and typing the words is never gated. The agent prompt, the MCP
+  instructions, `pause_for_user` and the skill say it: at a plan limit or upgrade
+  wall, stop, quote the blocking text and ask the user; never click Upgrade /
+  Subscribe yourself.
+- **No "Sign in to Chrome?" bubble in the agent's browser (#236).** A fresh
+  agent profile could open with a focused sign-in bubble that swallowed
+  keystrokes, one click away from signing the automation profile in to your
+  Google account. Before launching its own browser, clawdcursor now writes
+  `signin.allowed` and `signin.allowed_on_next_startup` = false into
+  `~/.clawdcursor/cdp-profile/Default/Preferences` (other prefs are kept; the
+  second key is the one Chrome reads at startup). Checked on Chrome 155 and Edge:
+  both report sign-in disallowed after launch. Your own browser is never touched.
+- **macOS: the page of clawdcursor's own Chrome is visible to accessibility
+  (#234).** `read_tree` / `find` saw only the window's toolbar and tab strip:
+  Chromium on macOS builds the page tree only when asked, and the wake never
+  fired because a browser's own UI (~59 elements) is not a "thin" tree. The agent
+  browser now starts with `--force-renderer-accessibility` on macOS as on Linux
+  (Windows stays on demand: Chromium turns UIA on when a client asks). The wake
+  also treats a browser whose tree has no web area, or an empty one, as asleep,
+  so other Chromium browsers wake too. Browser detection now recognizes macOS app
+  names ("Google Chrome", "Microsoft Edge", "Brave Browser").
+- **The blind hint points at the browser tools for clawdcursor's browser (#235).**
+  An empty `accessibility find` / `read_tree` on the browser clawdcursor is
+  attached to over CDP used to suggest OCR and "restart it with
+  --force-renderer-accessibility". It now leads with `browser page_context` /
+  `read_text` / `click`, and for clawdcursor's own browser says not to restart
+  it. The CDP DOM fallback of `find` honours `processId`: scoped to the CDP
+  browser's process it answers even when another window is in front, and it
+  never answers for a different process. Unscoped queries keep the
+  focused-window title check, and now also work for macOS browser names.
+- **The pause prompt makes a sound, and its state is readable (#237).** A user
+  not looking at the screen never knew it was their turn. When the paused pill
+  appears it now plays a short system sound: Windows' Asterisk sound, macOS's
+  "Glass" (a beep if it's missing), and on Linux `canberra-gtk-play -i
+  dialog-information` or the display's beep. `CLAWD_PAUSE_SOUND=0` turns it off.
+  `task {action:"status"}` / `agent_status` documents its `pause` field and adds
+  `overlay`: `{mode:"hidden"|"running"}` or `{mode:"paused", message, since}`,
+  so a watcher no longer has to tell the two pill processes apart. The paused
+  pill also carries `--paused` in its command line.
+- Fixes from a second independent review of the helper, each reproduced on the Mac
+  first (and the tests failing against the old helper):
+  - **A slow Mac no longer makes healthy apps look hung.** When the window list's 4 s
+    budget ran out, the apps it had not reached were reported as bounds-0
+    "(not responding)" windows and their real windows vanished with no sign the list
+    was cut short. They are now named as not read: `window list` and `read_screen`
+    say the list is PARTIAL and which apps are missing, and a list that read nothing
+    is a timeout error. A real accessibility timeout still shows "(not responding)".
+  - **A click on an app that froze while the click ran is a timeout**, not "pending"
+    ("… stopped responding while the click was running — it may or may not have been
+    performed", and to look at the screen before retrying). "Pending" is kept for a
+    button that opens a modal panel, which keeps answering.
+  - **Typing into a launcher or password-manager popover works again** (Raycast,
+    Alfred, 1Password Quick Access are modal dialogs of an accessory app). Only
+    permission, Gatekeeper and authentication prompts — a known system bundle, or the
+    system-dialog role — still refuse `type` / `key`; a modal dialog of any other app
+    is typed into with a warning in the log. Escape is always sent: it cancels, it
+    never answers "Allow". `open_app`'s Spotlight fallback still leaves a system
+    dialog alone, Escape included.
+  - **`find {automationId}` is exact.** "savebutton" used to find "saveButton" and
+    then print nothing, because `find_element` filters the reply with `===`.
+  - **`invoke` by controlType alone no longer presses the first Button.** Click,
+    toggle, select, expand and collapse need a name or automationId;
+    `set-value` / `focus` / `get-value` by controlType alone act only when exactly one
+    element has that role, and otherwise list the candidates.
+  - clawdcursor's own overlay no longer appears in window lists.
+  - Typed text, names and identifiers go to the helper on stdin instead of argv,
+    where any process could read them with `ps` while the helper ran.
+  - `verify-macos.mjs`: on a Mac where the old osascript window list fails or takes
+    over 90 s, the helper's check no longer fails for lack of anything to compare
+    with; speed alone decides.
+- A review of those fixes found more, again reproduced first:
+  - **`open_app`'s Spotlight fallback typed into a modal dialog of another app.** Once
+    that case became a warning instead of a refusal, the fallback's own keystrokes
+    (Escape, Cmd+Space, the app name, Return — which presses the dialog's default
+    button) went into it. The launch fallback now refuses on any dialog that has the
+    keyboard and says whose it is; only an agent that asks to type there does.
+  - **A refusal is no longer routed around.** The osascript fallback now refuses an
+    aim with no name too (it cannot tell that a role is unique, so `set-value` wrote
+    into the first field); the helper marks its refusals (`refused`), and
+    `set_field_value` — both the MCP tool and the agent's — stops there instead of
+    clicking the widest field and typing into it.
+  - **The reason reaches the agent.** The agent loop shows `data.error`; the Mac
+    adapter returned it top-level only, so "matches 2 elements: …", "secure text
+    field" and the rest all read "element not found or not actionable".
+  - **"The action may already have happened" is said only when it may have.** A
+    timeout while still searching, or checking that a role is unique, pressed nothing.
+  - `focus_window` by process name works for an app the window list did not reach
+    (the old "(not responding)" placeholder made it work by accident).
+  - A lone surrogate in typed text no longer makes the helper reject the whole
+    request; a name or identifier of only spaces is no name; identifiers are
+    compared byte for byte (NFC and NFD forms of an accented id are different ids,
+    as in the caller's own filter); the older `smart_*` path can set a field to "".
+- **Typing on macOS: one keyboard guard for every path, and the typed text off `ps`.**
+  - `smart_type` and the older agent pipeline typed through a second macOS keyboard
+    (`NativeDesktop`) that never asked who owned the keyboard, so with a permission
+    prompt up a Return could still press "Allow" while the tool reported success.
+    Both keyboards now ask the same guard (`src/platform/mac-keyboard.ts`); checked
+    through the built MCP server against a dialog with the system-dialog role:
+    `type`, `key Tab` and `smart_type` are refused, a bare `Escape` goes through.
+  - The text being typed no longer appears in `osascript`'s arguments, where any
+    process on the Mac could read it with `ps` for as long as the call ran: the
+    AppleScript program is sent on stdin (typed text, single characters, held keys).
+  - When a modal dialog of another app has the keyboard (a launcher, a password
+    manager, an app's own "Delete everything?" box) the keys are still sent, as
+    before, but the tool result now says whose dialog got them instead of only
+    logging it.
+  - A refused paste (`type`, `type_text`, `smart_type`) puts the user's clipboard
+    back; the text that was to be typed — a password, say — used to stay on it.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

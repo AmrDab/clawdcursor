@@ -47,6 +47,8 @@ try {
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")]
         public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+        [DllImport("user32.dll")]
+        public static extern bool IsZoomed(IntPtr hWnd);
         // Additional constants for force-focus path:
         //   HWND_TOPMOST    = -1
         //   HWND_NOTOPMOST  = -2
@@ -58,6 +60,64 @@ try {
     }
 "@
 } catch { } # May already be defined in a long-running session
+
+# Register the managed UIA client-side proxies (Win32 Edit/Button/ComboBox/
+# ListView/... providers) from COMPILED code, before any UIA call. UIAutomation-
+# Client loads them lazily, ONCE, via a stack walk for the calling assembly; under
+# PowerShell's dynamic script frames that walk throws (NullReferenceException),
+# the load-once flag is already cleared, and every Win32 control then falls back
+# to the bare HWND provider: ControlType.Pane, no Value/Invoke pattern. Live
+# 2026-10-14: the Save-as dialog's File name edit (id 1001) and Save button
+# (id 1) came back as Pane, so set_value / invoke on them failed.
+try {
+    Add-Type -ReferencedAssemblies UIAutomationClient, UIAutomationTypes, WindowsBase @"
+    using System.Runtime.CompilerServices;
+    using System.Windows.Automation;
+    public static class UiaProxies {
+        // NoInlining: the stack walk must find THIS assembly as the caller; when
+        // the JIT inlined Register, the walk hit PowerShell's dynamic call site
+        // and threw the same NullReferenceException.
+        [MethodImpl(MethodImplOptions.NoInlining)]
+        public static void Register() {
+            var n = typeof(AutomationElement).Assembly.GetName();
+            n.Name = "UIAutomationClientsideProviders";
+            ClientSettings.RegisterClientSideProviderAssembly(n);
+        }
+    }
+    // InvokePattern.Invoke on a Win32 button returns only when the modal box
+    // it opened is dismissed (live 2026-10-14: Save -> "Confirm Save As" held
+    // the bridge ~10 s). Run it on a worker and stop waiting after waitMs: the
+    // bridge answers "pending" and serves the next command while the call
+    // finishes on its own. The worker never writes to stdout; a failure after
+    // the wait is kept for TakeLateError.
+    public static class UiaInvoker {
+        static readonly object Gate = new object();
+        static string _late;
+        class Call { public bool Done, Abandoned; public string Error; }
+        // "ok", "error:<message>" or "pending".
+        public static string Run(System.Action action, int waitMs) {
+            var call = new Call();
+            var t = new System.Threading.Thread(() => {
+                string err = null;
+                try { action(); } catch (System.Exception e) { err = (e.InnerException ?? e).Message; }
+                lock (Gate) { call.Done = true; call.Error = err; if (call.Abandoned && err != null) _late = err; }
+            });
+            t.IsBackground = true;
+            t.SetApartmentState(System.Threading.ApartmentState.MTA);
+            t.Start();
+            t.Join(waitMs);
+            lock (Gate) {
+                if (call.Done) return call.Error == null ? "ok" : "error:" + call.Error;
+                call.Abandoned = true;
+                return "pending";
+            }
+        }
+        public static string Invoke(InvokePattern p, int waitMs) { return Run(p.Invoke, waitMs); }
+        public static string TakeLateError() { lock (Gate) { var e = _late; _late = null; return e; } }
+    }
+"@
+    [UiaProxies]::Register()
+} catch { }
 
 $ErrorActionPreference = 'Continue'
 
@@ -216,6 +276,25 @@ function ConvertTo-UINode {
     return $node
 }
 
+# Owned top-level windows (Save as, message boxes, error dialogs) are UIA
+# children of their OWNER window, not of the desktop root, so a desktop
+# Children scan never sees them (live 2026-10-14: Notepad's Save as dialog was
+# missing from `window list` and `window focus`). Walk the Win32 z-order for
+# visible, uncloaked OWNED windows; $skip holds handles already listed.
+function Get-OwnedWindowElements {
+    param($skip)
+    $found = @()
+    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
+        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
+        if ([ScreenPM]::GetWindow($h, 4) -eq [IntPtr]::Zero) { continue }  # GW_OWNER: unowned = desktop child
+        if ($skip -and $skip.ContainsKey([int64]$h)) { continue }
+        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
+        if ($cloaked -ne 0) { continue }
+        try { $found += [System.Windows.Automation.AutomationElement]::FromHandle($h) } catch {}
+    }
+    return ,$found
+}
+
 # ── Command: get-screen-context ───────────────────────────────────────────────
 function Cmd-GetScreenContext {
     param($cmd)
@@ -230,10 +309,12 @@ function Cmd-GetScreenContext {
     $allWins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond)
 
     $windowList = @()
-    foreach ($win in $allWins) {
+    $listed = @{}
+    $winInfo = {
+        param($win)
         try {
             $c = $win.Current
-            if (-not $c.Name -or $c.Name.Trim().Length -eq 0) { continue }
+            if (-not $c.Name -or $c.Name.Trim().Length -eq 0) { return }
             $pName = "unknown"
             try { $pName = [System.Diagnostics.Process]::GetProcessById($c.ProcessId).ProcessName } catch {}
             $rect = $c.BoundingRectangle
@@ -244,11 +325,20 @@ function Cmd-GetScreenContext {
                 $wp = $win.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
                 if ($wp.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Minimized) { $isMin = $true }
             } catch {}
-            $windowList += [ordered]@{
+            return [ordered]@{
                 handle = $c.NativeWindowHandle; title = $c.Name; processName = $pName
                 processId = $c.ProcessId; bounds = $bounds; isMinimized = $isMin
             }
         } catch {}
+    }
+    foreach ($win in $allWins) {
+        try { $listed[[int64]$win.Current.NativeWindowHandle] = $true } catch {}
+        $w = & $winInfo $win
+        if ($null -ne $w) { $windowList += $w }
+    }
+    foreach ($win in (Get-OwnedWindowElements $listed)) {
+        $w = & $winInfo $win
+        if ($null -ne $w) { $windowList += $w }
     }
 
     $uiTree = $null
@@ -256,7 +346,23 @@ function Cmd-GetScreenContext {
         $pidCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $focusedPid
         )
-        $targetWin = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCond)
+        # Read the FOREGROUND window when it belongs to this process: a modal /
+        # owned dialog (Save as, an error box) is the window the user is looking
+        # at, but it is a UIA child of the owner, and the first top-level window
+        # of the pid is the owner — so the walk read the blocked main window and
+        # the dialog was only reachable via OCR (live 2026-10-14).
+        $targetWin = $null
+        try {
+            $fgH = [Win32UIA]::GetForegroundWindow()
+            $fgPid = 0
+            [void][Win32UIA]::GetWindowThreadProcessId($fgH, [ref]$fgPid)
+            if ($fgH -ne [IntPtr]::Zero -and $fgPid -eq $focusedPid) {
+                $targetWin = [System.Windows.Automation.AutomationElement]::FromHandle($fgH)
+            }
+        } catch { $targetWin = $null }
+        if ($null -eq $targetWin) {
+            $targetWin = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pidCond)
+        }
         if ($null -ne $targetWin) {
             $budgetMs = if ($cmd.budgetMs) { [int]$cmd.budgetMs } else { 8000 }
             $script:treeTruncated = $false
@@ -435,6 +541,13 @@ function Cmd-ActivateAtPoint {
     if ($root -eq [IntPtr]::Zero) { $root = $hwnd }
     $fg = [Win32UIA]::GetForegroundWindow()
     if ($root -eq $fg) { return @{ success=$true; action="noop"; reason="already-foreground" } }
+    # WS_EX_NOACTIVATE (0x08000000): the window takes clicks WITHOUT becoming
+    # foreground (clawdcursor's own pause pill, on-screen keyboards). Raising it
+    # always "fails" by design, which read as a focus theft (live 2026-10-15:
+    # "FOCUS NOT CONFIRMED" after clicking the pill's Resume).
+    if (([ScreenPM]::GetWindowLong($root, -20) -band 0x08000000) -ne 0) {
+        return @{ success=$true; action="noop"; reason="no-activate-window" }
+    }
 
     # Resolve identity BEFORE deciding whether to raise, so a denylisted
     # self/host window can be skipped without ever touching foreground.
@@ -533,7 +646,12 @@ function Cmd-FocusWindow {
         [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
         [System.Windows.Automation.ControlType]::Window
     )
-    $allWins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond)
+    $allWins = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $winCond))
+    # Owned dialogs too, AFTER the desktop children so a pid-only match still
+    # picks the main window.
+    $listed = @{}
+    foreach ($w in $allWins) { try { $listed[[int64]$w.Current.NativeWindowHandle] = $true } catch {} }
+    $allWins += Get-OwnedWindowElements $listed
 
     $target = $null
     # When BOTH pid and title are supplied, AND-match. Disambiguates tabbed
@@ -590,8 +708,15 @@ function Cmd-FocusWindow {
     # Try UIA SetFocus too (cheap, helps with some custom apps); ignore result.
     try { $target.SetFocus() } catch {}
 
-    # SW_RESTORE = 9. ShowWindow is a no-op when the window is already shown.
-    [Win32UIA]::ShowWindow($hwnd, 9) | Out-Null
+    # Show + activate without changing the window's size. SW_RESTORE (9) on a
+    # MAXIMIZED window restores it to its smaller normal size, so every focus
+    # used to shrink full-screen windows. A maximized window gets
+    # SW_SHOWMAXIMIZED (3): same activation, stays maximized. Others keep
+    # SW_RESTORE: no size change for a normal window, and a minimized one comes
+    # back in its previous state. (SW_SHOW was tried: it changes nothing on a
+    # visible window, so the activation the foreground lock needs never came.)
+    if ([Win32UIA]::IsZoomed($hwnd)) { [Win32UIA]::ShowWindow($hwnd, 3) | Out-Null }
+    else { [Win32UIA]::ShowWindow($hwnd, 9) | Out-Null }
     Start-Sleep -Milliseconds 30
 
     # Topmost toggle pushes the window to the top of the z-order without
@@ -634,6 +759,7 @@ function Cmd-FocusWindow {
     # Some Windows configurations require a key event to break the lock.
     if (-not $foreground) {
         try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue  # SendKeys lives here; not loaded yet
             [System.Windows.Forms.SendKeys]::SendWait('%') | Out-Null
             Start-Sleep -Milliseconds 30
             [Win32UIA]::AllowSetForegroundWindow(-1) | Out-Null
@@ -653,6 +779,9 @@ function Cmd-FocusWindow {
         title      = $c.Name
         processId  = $c.ProcessId
         handle     = $c.NativeWindowHandle
+        # An owned window (dialog / message box): callers must not "assert focus"
+        # with a click at its centre — that lands on one of its controls.
+        owned      = ([ScreenPM]::GetWindow($hwnd, 4) -ne [IntPtr]::Zero)
         # Rect.Empty (infinite X) for a window UIA deems not displayed: no bounds.
         bounds     = $(if ($c.BoundingRectangle.IsEmpty) { $null } else { @{ x = [int]$c.BoundingRectangle.X; y = [int]$c.BoundingRectangle.Y; width = [int]$c.BoundingRectangle.Width; height = [int]$c.BoundingRectangle.Height } })
     }
@@ -714,10 +843,17 @@ function Cmd-FindElement {
             $rect = $c.BoundingRectangle
             $bounds = if ([double]::IsInfinity($rect.X)) { @{x=0;y=0;width=0;height=0} }
                 else { @{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
-            $results += [ordered]@{
+            $r = [ordered]@{
                 name=$c.Name; automationId=$c.AutomationId; controlType=$c.ControlType.ProgrammaticName
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
             }
+            # Checkbox / toggle state, so `state` can say checked/unchecked.
+            try {
+                if ($el.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsTogglePatternAvailableProperty)) {
+                    $r.toggleState = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
+                }
+            } catch {}
+            $results += $r
         } catch {}
     }
     }
@@ -730,7 +866,9 @@ function Cmd-FindElement {
 # an Edit. Walk to the real editable target so set-value writes somewhere writable.
 # App-agnostic: relies only on UIA control types and the LabeledBy relationship.
 function Resolve-EditableTarget {
-    param($el)
+    # -LabeledOnly: resolve a label only to the control it LABELS (LabeledBy);
+    # no "first editable nearby" guess, $null when there is none.
+    param($el, [switch]$LabeledOnly)
     if ($null -eq $el) { return $null }
     $EDIT  = [System.Windows.Automation.ControlType]::Edit
     $DOC   = [System.Windows.Automation.ControlType]::Document
@@ -763,12 +901,13 @@ function Resolve-EditableTarget {
                     }
                 } catch {}
             }
-            if ($fallback) {
+            if ($fallback -and -not $LabeledOnly) {
                 if ($fallback.Current.ControlType -eq $COMBO) { try { $i = $fallback.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCond); if ($i) { return $i } } catch {} }
                 return $fallback
             }
         }
     } catch {}
+    if ($LabeledOnly) { return $null }
     return $el
 }
 
@@ -799,7 +938,6 @@ function Cmd-InvokeElement {
     }
 
     if ($null -eq $element -and $name -ne "") {
-        $nameLower = $name.ToLower()
         $ctCond = if ($controlType -ne "" -and $ctMap.ContainsKey($controlType)) {
             New-Object System.Windows.Automation.PropertyCondition(
                 [System.Windows.Automation.AutomationElement]::ControlTypeProperty, $ctMap[$controlType]
@@ -807,23 +945,41 @@ function Cmd-InvokeElement {
         } else { [System.Windows.Automation.Condition]::TrueCondition }
 
         $candidates = $window.FindAll([System.Windows.Automation.TreeScope]::Descendants, $ctCond)
-        # First pass: exact match after stripping shortcut suffix
+        # Names are compared without a shortcut suffix ("Save\tCtrl+S"), an
+        # access-key "&" ("&Help") or a label's trailing colon ("File name:").
+        $nameLower = ($name -replace '&', '').Trim().TrimEnd(':').Trim().ToLower()
+        $names = New-Object 'System.Collections.Generic.List[string]'
         foreach ($el in $candidates) {
-            try {
-                $elName = ($el.Current.Name -replace '\t.*$', '').Trim().ToLower()
-                if ($elName -eq $nameLower -and $elName.Length -gt 0) { $element = $el; break }
-            } catch {}
+            $n = ''
+            try { $n = ((($el.Current.Name -replace '\t.*$', '') -replace '&', '').Trim().TrimEnd(':').Trim()).ToLower() } catch {}
+            $names.Add($n)
         }
-        # Second pass: contains match
-        if ($null -eq $element) {
-            foreach ($el in $candidates) {
-                try {
-                    $elName = ($el.Current.Name -replace '\t.*$', '').Trim().ToLower()
-                    if ($elName.Length -gt 0 -and ($elName.Contains($nameLower) -or $nameLower.Contains($elName))) {
-                        $element = $el; break
-                    }
-                } catch {}
+        # Pass 1: exact. Pass 2: the element's name contains the query. Pass 3:
+        # the query contains the element's name. 2 and 3 used to be one pass, so
+        # "File name" took the first element named just "Name" (a list column
+        # header in the Save as dialog) and set_value typed into the file list
+        # (live 2026-10-14).
+        # A value read/write takes an EDITABLE match over the label that shares
+        # its name: the Save as dialog's "File name:" is a Text label, a ComboBox
+        # and an Edit, and get-value read the label's caption (live 2026-10-14).
+        $valueAction = ($action -eq 'get-value' -or $action -eq 'set-value')
+        $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox)
+        foreach ($pass in 1, 2, 3) {
+            $firstHit = $null
+            for ($k = 0; $k -lt $names.Count; $k++) {
+                $elName = $names[$k]
+                if ($elName.Length -eq 0) { continue }
+                if (($pass -eq 1 -and $elName -eq $nameLower) -or
+                    ($pass -eq 2 -and $elName.Contains($nameLower)) -or
+                    ($pass -eq 3 -and $nameLower.Contains($elName))) {
+                    if (-not $valueAction) { $element = $candidates[$k]; break }
+                    if ($null -eq $firstHit) { $firstHit = $candidates[$k] }
+                    $ct = $null; try { $ct = $candidates[$k].Current.ControlType } catch {}
+                    if ($EDITABLE -contains $ct) { $element = $candidates[$k]; break }
+                }
             }
+            if ($null -eq $element) { $element = $firstHit }
+            if ($null -ne $element) { break }
         }
     }
 
@@ -840,9 +996,17 @@ function Cmd-InvokeElement {
             # the agent never has to retry verbs or fall back to a coord-click
             # (which needs a screenshot). Live regression 2026-06-07: invoke
             # "Cool blue" (a ListItem) failed here because only SelectionItem fit.
+            $invokeErr = $null
             try {
                 $p = $element.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
-                $p.Invoke()
+                # Bounded: a button that opens a modal box would hold the bridge
+                # until the box closes (see UiaInvoker).
+                $r = if ('UiaInvoker' -as [type]) { [UiaInvoker]::Invoke($p, 1200) } else { $p.Invoke(); 'ok' }
+                if ($r -eq 'pending') {
+                    return @{ success=$true; action="click"; method="InvokePattern";
+                        data=@{ pending=$true; note="invoked; still running after 1.2 s - a dialog probably opened, re-read the screen" } }
+                }
+                if ($r -ne 'ok') { $invokeErr = $r.Substring(6); throw $invokeErr }
                 return @{ success=$true; action="click"; method="InvokePattern" }
             } catch {
                 try {
@@ -856,7 +1020,8 @@ function Cmd-InvokeElement {
                         return @{ success=$true; action="click"; method="SelectionItemPattern" }
                     } catch {
                         $rect = $element.Current.BoundingRectangle
-                        return @{ success=$false; action="click"; error="No invoke/toggle/select pattern";
+                        $why = if ($invokeErr) { "Invoke failed: $invokeErr" } else { "No invoke/toggle/select pattern" }
+                        return @{ success=$false; action="click"; error=$why;
                             clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)};
                             bounds=@{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
                     }
@@ -873,14 +1038,28 @@ function Cmd-InvokeElement {
             $readVal = { param($el) try { return $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { return $null } }
             $target = Resolve-EditableTarget $element
 
-            # 1) Writable ValuePattern on the resolved target, verified.
+            # The edit inside a Win32 combo box (the common file dialog's File
+            # name box) takes ValuePattern's WM_SETTEXT and reads it back, but the
+            # owner never gets CBN_EDITCHANGE: the dialog keeps its OLD name and
+            # Save writes that file (live 2026-10-14: the box read "blindtest2.txt",
+            # Save asked to overwrite the old name). Type into those instead.
+            $comboEdit = $false
             try {
-                $vp = $target.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                if (-not $vp.Current.IsReadOnly) {
-                    $vp.SetValue($value)
-                    if ((& $readVal $target) -eq $value) { return @{ success=$true; action="set-value"; value=$value; method="ValuePattern" } }
-                }
+                $tp = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($target)
+                $comboEdit = ($target.Current.FrameworkId -eq 'Win32') -and ($null -ne $tp) -and
+                    ($tp.Current.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox)
             } catch { }
+
+            # 1) Writable ValuePattern on the resolved target, verified.
+            if (-not $comboEdit) {
+                try {
+                    $vp = $target.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                    if (-not $vp.Current.IsReadOnly) {
+                        $vp.SetValue($value)
+                        if ((& $readVal $target) -eq $value) { return @{ success=$true; action="set-value"; value=$value; method="ValuePattern" } }
+                    }
+                } catch { }
+            }
 
             # 2) Keyboard fallback: focus the resolved target, select-all, type. Last
             #    resort for controls with no usable (writable) ValuePattern.
@@ -909,14 +1088,22 @@ function Cmd-InvokeElement {
             # Try ValuePattern, and if it yields nothing, fall through to
             # TextPattern, then Name. Prefer the first NON-EMPTY result.
             $val = $null; $method = $null
+            # Matched only a label ("File name:" Text): read the control it labels.
+            if ($element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Text) {
+                $labeled = Resolve-EditableTarget $element -LabeledOnly
+                if ($labeled) { $element = $labeled }
+            }
+            $holdsText = $false   # a field that can hold a value (empty means empty)
             try {
                 $vp = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                $holdsText = $true
                 $v = $vp.Current.Value
                 if ($null -ne $v -and $v.Length -gt 0) { $val = $v; $method = "ValuePattern" }
             } catch { }
             if ($null -eq $val) {
                 try {
                     $tp = $element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+                    $holdsText = $true
                     $t = $tp.DocumentRange.GetText(-1)
                     if ($null -ne $t -and $t.Length -gt 0) { $val = $t; $method = "TextPattern" }
                 } catch { }
@@ -929,6 +1116,10 @@ function Cmd-InvokeElement {
                     if ($sel.Length -gt 0 -and $sel[0].Current.Name) { $val = $sel[0].Current.Name; $method = "SelectionPattern" }
                 } catch { }
             }
+            # An EMPTY field reads "" — not its own name (an empty "First name"
+            # box read back as "First name"). Name is the value only for
+            # elements that hold no text at all (a label, a button).
+            if ($null -eq $val -and $holdsText) { $val = ""; $method = "ValuePattern" }
             if ($null -eq $val) { $val = $element.Current.Name; $method = "Name" }
             return @{ success=$true; action="get-value"; value=$val; method=$method }
         }
@@ -1123,6 +1314,12 @@ while ($true) {
             "ocr"                   { Cmd-Ocr $cmd }
             "ping"                  { @{ pong=$true } }
             default                 { @{ error="Unknown command: $($cmd.cmd)" } }
+        }
+        # An earlier invoke that outlived its wait and then failed: report it
+        # on the next invoke reply rather than dropping it.
+        if ($cmd.cmd -eq "invoke-element" -and $result -is [hashtable] -and ('UiaInvoker' -as [type])) {
+            $late = [UiaInvoker]::TakeLateError()
+            if ($late) { $result.lateInvokeError = $late }
         }
         # -InputObject (NOT pipe): piping an EMPTY array sends zero objects to
         # ConvertTo-Json, which then writes nothing → the bridge never answers

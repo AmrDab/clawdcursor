@@ -411,10 +411,36 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('wmctrl', ['-l', '-G', '-p'], {
         timeout: TOOL_TIMEOUT_MS,
       });
-      return this.parseWmctrlOutput(stdout);
+      return await this.withClientOrigins(this.parseWmctrlOutput(stdout));
     } catch {
       return [];
     }
+  }
+
+  /**
+   * wmctrl -G adds the window-manager frame offset to the origin a second
+   * time (openbox: a Save dialog whose client sits at 413,139 came back as
+   * 414,159), which pushed dialog elements "off the active window". One
+   * `xwininfo -root -tree` gives every window's real absolute origin.
+   */
+  private async withClientOrigins(windows: WindowInfo[]): Promise<WindowInfo[]> {
+    if (!windows.length || !(await this.hasBinary('xwininfo'))) return windows;
+    let tree: string;
+    try {
+      ({ stdout: tree } = await execFileAsync('xwininfo', ['-root', '-tree'], { timeout: TOOL_TIMEOUT_MS }));
+    } catch {
+      return windows;
+    }
+    const origin = new Map<number, { x: number; y: number }>();
+    for (const line of tree.split('\n')) {
+      const m = line.match(/^\s*(0x[0-9a-f]+)\s.*\s\d+x\d+[+-]-?\d+[+-]-?\d+\s+\+?(-?\d+)\+?(-?\d+)\s*$/i);
+      if (m) origin.set(parseInt(m[1], 16), { x: parseInt(m[2], 10), y: parseInt(m[3], 10) });
+    }
+    for (const w of windows) {
+      const o = typeof w.handle === 'number' ? origin.get(w.handle) : undefined;
+      if (o) w.bounds = { ...w.bounds, x: o.x, y: o.y };
+    }
+    return windows;
   }
 
   async getActiveWindow(): Promise<WindowInfo | null> {
@@ -597,12 +623,10 @@ export class LinuxAdapter implements PlatformAdapter {
   async getUiTree(processId?: number): Promise<UiElement[]> {
     if (!this.atspiAvailable) return [];
     try {
-      const args = ['--cmd', 'get-tree'];
-      // Default to the active window's pid when the caller omits it, so an
+      // Default to the active window when the caller omits a pid, so an
       // unscoped read_screen targets the focused app (parity with the Windows
       // adapter) instead of walking the whole desktop tree.
-      const pid = await this.resolveA11yPid(processId);
-      if (typeof pid === 'number') args.push('--process-id', String(pid));
+      const args = ['--cmd', 'get-tree', ...await this.a11yScopeArgs(processId)];
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
@@ -622,8 +646,7 @@ export class LinuxAdapter implements PlatformAdapter {
       // Without a pid the bridge guesses the app (focused-descendant
       // heuristic, else the first app on the bus) and searched the wrong
       // one. Scope to the foreground window like Windows / macOS do.
-      const pid = await this.resolveA11yPid(query.processId);
-      if (typeof pid === 'number') args.push('--process-id', String(pid));
+      args.push(...await this.a11yScopeArgs(query.processId));
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
@@ -645,11 +668,22 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
-  /** Caller-supplied pid, else the foreground window's pid (if known). */
-  private async resolveA11yPid(processId?: number): Promise<number | undefined> {
-    if (typeof processId === 'number') return processId;
+  /**
+   * Bridge scope: the caller's pid, else the foreground window's pid, else —
+   * for a window that sets no _NET_WM_PID (wmctrl reports pid 0) — its
+   * title. Left unscoped, the bridge guessed and read a different app.
+   */
+  private async a11yScopeArgs(processId?: number): Promise<string[]> {
+    if (typeof processId === 'number') return ['--process-id', String(processId)];
     const fg = await this.getActiveWindow().catch(() => null);
-    return fg?.processId || undefined;
+    if (fg?.processId) return ['--process-id', String(fg.processId)];
+    if (!fg?.title) return [];
+    // Another app's window with the same title (xcalc and GNOME Calculator
+    // are both "Calculator") must not be taken for this one: exclude it.
+    const others = (await this.listWindows().catch(() => [] as WindowInfo[]))
+      .filter(w => w.processId && w.title === fg.title && w.handle !== fg.handle)
+      .map(w => w.processId);
+    return ['--window-title', fg.title, ...(others.length ? ['--exclude-pids', [...new Set(others)].join(',')] : [])];
   }
 
   /**
@@ -678,11 +712,17 @@ export class LinuxAdapter implements PlatformAdapter {
   async getFocusedElement(): Promise<UiElement | null> {
     if (!this.atspiAvailable) return null;
     try {
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'focused'], {
+      // Scoped to the foreground app: toolkits keep FOCUSED on the last
+      // widget of inactive apps, so an unscoped search answered with another
+      // app's element.
+      const scope = await this.a11yScopeArgs();
+      const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'focused', ...scope], {
         timeout: A11Y_TIMEOUT_MS,
       });
       const data = JSON.parse(stdout) as { element?: any };
-      return data.element ? this.normalizeAtspiElement(data.element) : null;
+      if (!data.element) return null;
+      const [el] = await this.offsetWindowRelative([data.element], [this.normalizeAtspiElement(data.element)]);
+      return el;
     } catch {
       return null;
     }
@@ -704,8 +744,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const args = ['--cmd', 'invoke', '--action', query.action ?? 'click'];
       if (query.name) args.push('--name', query.name);
       if (query.controlType) args.push('--role', atspiRoleQuery(query.controlType));
-      const pid = await this.resolveA11yPid(query.processId);
-      if (typeof pid === 'number') args.push('--process-id', String(pid));
+      args.push(...await this.a11yScopeArgs(query.processId));
       if (query.value !== undefined) args.push('--value', query.value);
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
@@ -716,6 +755,8 @@ export class LinuxAdapter implements PlatformAdapter {
       const data: Record<string, unknown> = {};
       if (result?.value !== undefined) data.value = result.value;
       if (result?.toggleState !== undefined) data.toggleState = result.toggleState;
+      // e.g. "exists but is not visible on screen" — say why, not just "missed".
+      if (result?.success !== true && typeof result?.error === 'string') data.error = result.error;
       return {
         success: result?.success === true,
         ...(bounds ? { bounds } : {}),
@@ -1202,24 +1243,49 @@ export class LinuxAdapter implements PlatformAdapter {
     const directArgs: string[] = [];
     if (opts?.url) directArgs.push(opts.url);
     const direct = await this.spawnDetached(name, directArgs, opts?.cwd);
-    if (direct.ok) {
-      const match = await this.findSpawnedWindow(name, windowsBefore, direct.pid);
-      return match ?? { pid: direct.pid };
+    if (direct.ok) return this.verifySpawned(name, windowsBefore, direct.pid);
+
+    // 2) A desktop name: "calculator" → org.gnome.Calculator.desktop's Exec
+    // (gnome-calculator). xdg-open cannot launch an app by name, so this used
+    // to spawn xdg-open, wait out the 8 s poll and still report "Launched".
+    if (!opts?.url) {
+      const entry = resolveDesktopEntry(name);
+      if (entry) {
+        const viaEntry = await this.spawnDetached(entry.argv[0], entry.argv.slice(1), opts?.cwd);
+        if (viaEntry.ok) return this.verifySpawned(name, windowsBefore, viaEntry.pid);
+      }
     }
 
-    // 2) Fallback to xdg-open (handles desktop-file names, URLs, file paths).
+    // 3) Fallback to xdg-open — only for what it can open: URLs and paths.
     const target = opts?.url ?? name;
-    if (await this.hasBinary('xdg-open')) {
+    if ((opts?.url || /[/:]/.test(name)) && await this.hasBinary('xdg-open')) {
       const fallback = await this.spawnDetached('xdg-open', [target], opts?.cwd);
       if (fallback.ok) {
         // xdg-open's PID isn't the eventual app's PID — drop the spawn pid
-        // and rely on the predicate.
+        // and rely on the predicate. A URL may land in an existing browser
+        // window, so no window here is not proof of failure.
         const match = await this.findSpawnedWindow(name, windowsBefore);
         return match ?? {};
       }
     }
 
-    return {};
+    throw new Error(`launchApp: no executable or desktop entry named "${name}"`);
+  }
+
+  /**
+   * After spawning `pid`: its window, else `{ pid }` while the process is
+   * still starting, else an error — a process that exited without a window
+   * did not launch anything.
+   */
+  private async verifySpawned(
+    name: string,
+    windowsBefore: readonly WindowInfo[],
+    pid?: number,
+  ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
+    const match = await this.findSpawnedWindow(name, windowsBefore, pid);
+    if (match) return match;
+    if (pid && isProcessAlive(pid)) return { pid };
+    throw new Error(`launchApp: "${name}" exited and no window appeared`);
   }
 
   /**
@@ -1245,7 +1311,8 @@ export class LinuxAdapter implements PlatformAdapter {
       { spawnPid: pid },
     );
     return win
-      ? { pid: win.processId, title: win.title, handle: win.handle }
+      // A window with no _NET_WM_PID reports pid 0: the process we spawned is it.
+      ? { pid: win.processId || pid, title: win.title, handle: win.handle }
       : null;
   }
 
@@ -1365,15 +1432,97 @@ export class LinuxAdapter implements PlatformAdapter {
  * "gnome-calculato"), falling back to comm. '' when unreadable.
  */
 function processNameFromProc(pid: number): string {
+  let comm = '';
   try {
-    const argv0 = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0];
-    if (argv0) return path.posix.basename(argv0);
+    comm = fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
+  } catch { /* cmdline alone */ }
+  try {
+    const parts = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0').filter(Boolean);
+    if (parts.length === 1 && /\s/.test(parts[0])) {
+      // Chromium rewrites its cmdline into ONE space-joined string, so the
+      // basename of "/opt/google/chrome/chrome --user-data-dir=/x/cdp-profile
+      // --no-first-run" came out as "cdp-profile --no-first-run …". Take the
+      // first word when comm (truncated to 15 chars) confirms it, else comm.
+      const first = path.posix.basename(parts[0].split(/\s/)[0]);
+      if (comm) return first.startsWith(comm) ? first : comm;
+    }
+    if (parts[0]) return path.posix.basename(parts[0]);
   } catch { /* fall through to comm */ }
+  return comm;
+}
+
+function isProcessAlive(pid: number): boolean {
   try {
-    return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim();
-  } catch {
-    return '';
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException)?.code === 'EPERM';
   }
+}
+
+/** XDG application dirs, user first (a user entry shadows a system one). */
+function desktopEntryDirs(): string[] {
+  const home = process.env.HOME || '';
+  const dataHome = process.env.XDG_DATA_HOME || path.posix.join(home, '.local/share');
+  const dataDirs = (process.env.XDG_DATA_DIRS || '/usr/local/share:/usr/share').split(':').filter(Boolean);
+  return [
+    dataHome, ...dataDirs,
+    path.posix.join(home, '.local/share/flatpak/exports/share'), '/var/lib/flatpak/exports/share',
+    '/var/lib/snapd/desktop',
+  ].map(d => path.posix.join(d, 'applications'));
+}
+
+/**
+ * An app name → the argv of the .desktop entry it names: `Name=` equal to it
+ * (case-insensitive) first, else a desktop id equal to it or ending in
+ * `.<name>` ("calculator" → org.gnome.Calculator). Field codes (%U …) are
+ * dropped. null when nothing matches.
+ */
+function resolveDesktopEntry(name: string): { id: string; argv: string[] } | null {
+  const want = name.trim().toLowerCase();
+  if (!want) return null;
+  let byId: { id: string; argv: string[] } | null = null;
+  const seen = new Set<string>();
+  for (const dir of desktopEntryDirs()) {
+    let files: string[];
+    try {
+      files = fs.readdirSync(dir).filter(f => f.endsWith('.desktop'));
+    } catch {
+      continue;
+    }
+    for (const file of files) {
+      if (seen.has(file)) continue;
+      seen.add(file);
+      let text: string;
+      try {
+        text = fs.readFileSync(path.posix.join(dir, file), 'utf8');
+      } catch {
+        continue;
+      }
+      // Only the [Desktop Entry] group — [Desktop Action …] groups have their own Name/Exec.
+      const group = (text.split(/^\[Desktop Entry\][^\n]*$/m)[1] ?? '').split(/^\[/m)[0];
+      const key = (k: string) => group.match(new RegExp(`^${k}\\s*=\\s*(.*)$`, 'm'))?.[1].trim() ?? '';
+      if (key('Type') !== 'Application' || key('Hidden') === 'true') continue;
+      const argv = splitDesktopExec(key('Exec'));
+      if (!argv.length) continue;
+      const id = file.slice(0, -'.desktop'.length);
+      if (key('Name').toLowerCase() === want) return { id, argv };
+      const lid = id.toLowerCase();
+      if (!byId && (lid === want || lid.endsWith(`.${want}`))) byId = { id, argv };
+    }
+  }
+  return byId;
+}
+
+/** Desktop-entry Exec → argv: double-quote aware, field codes removed. */
+function splitDesktopExec(exec: string): string[] {
+  const argv: string[] = [];
+  for (const m of exec.matchAll(/"((?:[^"\\]|\\.)*)"|(\S+)/g)) {
+    const raw = m[1] !== undefined ? m[1].replace(/\\(.)/g, '$1') : m[2];
+    if (/^%[a-zA-Z]$/.test(raw)) continue;
+    argv.push(raw.replace(/%%/g, '%'));
+  }
+  return argv;
 }
 
 /** AT-SPI reports INT_MIN extents for children scrolled out of a viewport. */
@@ -1425,13 +1574,14 @@ function normalizeAtspiRole(rawRole: string): string {
  */
 function atspiRoleQuery(controlType: string): string {
   const want = controlType.replace(/^ControlType\./, '').toLowerCase();
-  // Shortest raw role that maps here ("button" for Button) keeps the
-  // substring match broad; fall back to the caller's own text.
+  // EVERY raw role that maps here, as "a|b|c" alternatives: Edit is "text"
+  // (GTK text view) AND "entry" (Chrome / GTK fields) AND "password text".
+  // Only the shortest used to be sent, so Edit never matched a Chrome field.
   const raws = Object.entries(ATSPI_ROLE_MAP)
     .filter(([, v]) => v.toLowerCase() === want)
     .map(([k]) => k)
     .sort((a, b) => a.length - b.length);
-  return raws[0] ?? want;
+  return raws.length ? raws.join('|') : want;
 }
 
 // Named-key table — lowercase lookup, maps to nut-js Key enum.

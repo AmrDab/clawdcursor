@@ -204,7 +204,7 @@
     },
     {
       "name": "agent_status",
-      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm), currentTask, currentStep, stepsCompleted, stepsTotal. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
+      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm | paused), currentTask, currentStep, stepsCompleted, stepsTotal; `pause` {id, message, since} while a pause for the user is up; and `overlay` — what the on-screen overlay shows: {mode:\"hidden\"|\"running\"} or {mode:\"paused\", message, since}. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -214,14 +214,14 @@
     },
     {
       "name": "batch",
-      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? }. `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
+      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
       "category": "orchestration",
       "parameters": {
         "type": "object",
         "properties": {
           "steps": {
             "type": "array",
-            "description": "Ordered steps to run. Each step is a normal tool call: { \"name\": \"<tool>\", \"arguments\": {...}, \"expect\"?: {\"window\"?,\"element\"?} }. (A JSON-encoded string of the same array is also accepted.)",
+            "description": "Ordered steps to run. Each step is a normal tool call: { \"name\": \"<tool>\", \"arguments\": {...}, \"expect\"?: {\"window\"?,\"element\"?} } (\"args\" is accepted for \"arguments\"). (A JSON-encoded string of the same array is also accepted.)",
             "items": {
               "type": "object",
               "properties": {
@@ -232,6 +232,10 @@
                 "arguments": {
                   "type": "object",
                   "description": "Arguments for that tool, e.g. {\"action\":\"type\",\"text\":\"hi\"}. May include an `expect` ASSERTION ARRAY (post-condition) — verified after the step by the tool itself."
+                },
+                "args": {
+                  "type": "object",
+                  "description": "Alias of `arguments`."
                 },
                 "expect": {
                   "type": "object",
@@ -545,6 +549,10 @@
               "ocr_ok",
               "vision_ok"
             ]
+          },
+          "processId": {
+            "type": "number",
+            "description": "Optional: compile this app's window (its tree, and OCR of its window only) instead of the focused one"
           }
         }
       },
@@ -733,7 +741,7 @@
     },
     {
       "name": "find_element",
-      "description": "Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached, falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a \"via CDP DOM\" header and use viewport-relative coords).",
+      "description": "Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached (the focused one, or `processId` of the CDP browser), falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a \"via CDP DOM\" header and use viewport-relative coords).",
       "category": "window",
       "parameters": {
         "type": "object",
@@ -846,7 +854,7 @@
     },
     {
       "name": "get_element_state",
-      "description": "Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded).",
+      "description": "Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded, and checked for checkboxes/toggles).",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -1704,7 +1712,7 @@
     },
     {
       "name": "open_app",
-      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, gtk-launch / xdg-open on Linux).",
+      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -1775,6 +1783,28 @@
       "costClass": "act"
     },
     {
+      "name": "pause_for_user",
+      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping or asking them to come back to this chat. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
+      "category": "orchestration",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "description": "Exactly what the user should do, e.g. \"Sign in to GitHub, then click Resume\"."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Max seconds to wait for the answer before returning {status:\"waiting\"} (default 45, clamped 1–50). The prompt stays up."
+          }
+        },
+        "required": [
+          "message"
+        ]
+      },
+      "costClass": "act"
+    },
+    {
       "name": "read_clipboard",
       "description": "Read the current text content of the OS clipboard.",
       "category": "clipboard",
@@ -1794,6 +1824,14 @@
           "processId": {
             "type": "number",
             "description": "Optional: limit to a specific process"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip this many elements — page past \"… +N more\" (default 0)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "How many elements to list (default 60)"
           }
         }
       },
@@ -1889,6 +1927,16 @@
             "description": "Optional title-substring match"
           }
         }
+      },
+      "costClass": "act"
+    },
+    {
+      "name": "resume_task",
+      "description": "Resume after a pause for the user when the user tells YOU they finished (normally they click Resume on screen).",
+      "category": "orchestration",
+      "parameters": {
+        "type": "object",
+        "properties": {}
       },
       "costClass": "act"
     },
@@ -2127,7 +2175,7 @@
           },
           "processId": {
             "type": "number",
-            "description": "Limit search to a specific process"
+            "description": "Limit search to a specific process. OCR matches outside the window of that process are refused, never clicked."
           },
           "timeout": {
             "type": "number",
@@ -2171,7 +2219,7 @@
     },
     {
       "name": "smart_type",
-      "description": "Type text into a UI element. If target is specified, finds and focuses the element first. Uses clipboard paste for reliability (no dropped characters).",
+      "description": "Type text into a UI element. With a target, finds and focuses the element, then REPLACES its whole content (select-all, then paste) — pass mode:\"append\" to keep the content and type at the cursor. Without a target, types at the cursor of the focused element. Uses clipboard paste for reliability (no dropped characters).",
       "category": "keyboard",
       "parameters": {
         "type": "object",
@@ -2191,6 +2239,14 @@
           "processId": {
             "type": "number",
             "description": "Limit search to a specific process"
+          },
+          "mode": {
+            "type": "string",
+            "description": "\"replace\" (default with a target): select all of the field, then type. \"append\": type at the cursor, keeping the content (default without a target).",
+            "enum": [
+              "replace",
+              "append"
+            ]
           }
         },
         "required": [

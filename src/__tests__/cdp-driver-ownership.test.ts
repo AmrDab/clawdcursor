@@ -19,6 +19,7 @@ const state = {
   livePorts: new Set<number>(),
   userPage: null as any,
   newPages: [] as any[],
+  cdpCalls: [] as string[],
 };
 
 function fakePage(url: string) {
@@ -44,12 +45,19 @@ vi.mock('playwright', () => ({
           newPage: async () => { const p = fakePage('about:blank'); state.newPages.push(p); return p; },
         }],
         isConnected: () => true,
+        newBrowserCDPSession: async () => ({
+          send: async (method: string) => {
+            state.cdpCalls.push(method);
+            return { processInfo: [{ type: 'renderer', id: 77 }, { type: 'browser', id: 4321 }] };
+          },
+          detach: async () => {},
+        }),
       };
     }),
   },
 }));
 
-import { CDPDriver } from '../platform/cdp-driver';
+import { CDPDriver, agentBrowserArgs } from '../platform/cdp-driver';
 import { AGENT_CDP_PORT, DEFAULT_CDP_PORT } from '../llm/browser-config';
 
 beforeEach(() => {
@@ -121,5 +129,36 @@ describe('CDPDriver — attached mode never navigates the user\'s tab', () => {
     await d.navigate('https://example.com');
     expect(state.newPages.length).toBe(0);
     expect(state.userPage._gotos).toEqual(['https://example.com']);
+  });
+});
+
+describe('agent-owned browser launch flags', () => {
+  it('Linux: the agent browser exposes its page to AT-SPI (--force-renderer-accessibility)', () => {
+    const args = agentBrowserArgs('/home/u/.clawdcursor/cdp-profile', 'linux');
+    expect(args).toContain('--force-renderer-accessibility');
+    expect(args).toContain(`--remote-debugging-port=${AGENT_CDP_PORT}`);
+    expect(args).toContain('--user-data-dir=/home/u/.clawdcursor/cdp-profile');
+    expect(args[args.length - 1]).toBe('about:blank');
+  });
+
+  it('macOS: the page is exposed from launch too — Chromium builds it only when asked, and the wake never fired (#234)', () => {
+    expect(agentBrowserArgs('/Users/u/.clawdcursor/cdp-profile', 'darwin')).toContain('--force-renderer-accessibility');
+  });
+
+  it('Windows: not forced — Chromium turns UIA on when a UIA client asks', () => {
+    expect(agentBrowserArgs('p', 'win32')).not.toContain('--force-renderer-accessibility');
+  });
+});
+
+describe('getBrowserPid (#235)', () => {
+  it("reports the browser process's pid from SystemInfo.getProcessInfo, once per connection", async () => {
+    state.livePorts.add(AGENT_CDP_PORT);
+    state.cdpCalls.length = 0;
+    const d = new CDPDriver();
+    expect(await d.getBrowserPid()).toBeNull();            // not connected yet
+    await d.ensureConnected();
+    expect(await d.getBrowserPid()).toBe(4321);             // the browser process, not a renderer
+    expect(await d.getBrowserPid()).toBe(4321);
+    expect(state.cdpCalls).toEqual(['SystemInfo.getProcessInfo']);
   });
 });

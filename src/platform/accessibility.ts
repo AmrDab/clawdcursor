@@ -15,6 +15,7 @@ import * as path from 'path';
 import { promisify } from 'util';
 import { psRunner } from './ps-runner';
 import { getPackageRoot } from '../paths';
+import { defaultMacAx } from './mac-ax';
 import type { PlatformAdapter, UiElement } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,20 @@ function toLegacyElement(el: UiElement): UIElement {
     isEnabled: el.enabled,
     bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
   };
+}
+
+/** Rebuild parent/child nesting from a flat, depth-tagged list (parents precede their children). */
+function nestByDepth(flat: UiElement[]): UIElement[] {
+  const roots: UIElement[] = [];
+  const stack: Array<{ depth: number; node: UIElement }> = [];
+  for (const el of flat) {
+    const node: UIElement = { ...toLegacyElement(el), children: [] };
+    const depth = el.depth ?? 0;
+    while (stack.length && stack[stack.length - 1].depth >= depth) stack.pop();
+    (stack.length ? stack[stack.length - 1].node.children! : roots).push(node);
+    stack.push({ depth, node });
+  }
+  return roots;
 }
 
 function toLegacyWindow(w: import('./types').WindowInfo): WindowInfo {
@@ -243,7 +258,8 @@ export class AccessibilityBridge {
       // Update screen context cache timestamp so we don't double-fetch
       this.windowCache = { windows, timestamp: Date.now() };
     } else if (IS_MAC) {
-      windows = await this.runMacScript('get-windows.jxa');
+      // Same source as MacOSAdapter.listWindows: the AX client (fast helper, honest errors).
+      windows = (await defaultMacAx().listWindows()).map(toLegacyWindow);
       this.windowCache = { windows, timestamp: Date.now() };
     } else {
       // Linux: wmctrl listing (with /proc process names) via the adapter.
@@ -287,12 +303,11 @@ export class AccessibilityBridge {
       return Array.isArray(result) ? result : [];
     }
     if (IS_MAC) {
-      const args: string[] = [];
-      if (opts.name)         args.push('-Name', opts.name);
-      if (opts.automationId) args.push('-AutomationId', opts.automationId);
-      if (opts.controlType)  args.push('-ControlType', opts.controlType);
-      if (processId)         args.push('-ProcessId', String(processId));
-      return this.runMacScript('find-element.jxa', args);
+      const hits = await defaultMacAx().find({
+        name: opts.name, controlType: opts.controlType, automationId: opts.automationId, processId,
+      });
+      // Callers also read the owning pid and the value off a hit.
+      return hits.map(el => Object.assign(toLegacyElement(el), { processId: el.processId, value: el.value }));
     }
     try {
       const hits = await (await linuxAdapter()).findElements({
@@ -362,12 +377,20 @@ export class AccessibilityBridge {
       return result;
     }
     if (IS_MAC) {
-      const args: string[] = ['-Action', opts.action, '-ProcessId', String(processId)];
-      if (opts.name)         args.push('-Name', opts.name);
-      if (opts.automationId) args.push('-AutomationId', opts.automationId);
-      if (opts.controlType)  args.push('-ControlType', opts.controlType);
-      if (opts.value)        args.push('-Value', opts.value);
-      return this.runMacScript('invoke-element.jxa', args);
+      const res = await defaultMacAx().invoke({
+        name: opts.name, controlType: opts.controlType, automationId: opts.automationId,
+        // '' is a value (it clears the field) — `|| undefined` made the legacy path unable to.
+        processId, action: opts.action, value: opts.value,
+      });
+      const value = typeof res.data?.value === 'string' ? res.data.value : undefined;
+      const b = res.bounds;
+      return {
+        success: res.success,
+        ...(value !== undefined ? { value } : {}),
+        ...(res.error ? { error: res.error } : {}),
+        // A refused action hands back where the element is, so the caller can click it instead.
+        ...(!res.success && b ? { clickPoint: { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) } } : {}),
+      };
     }
     try {
       const res = await (await linuxAdapter()).invokeElement({
@@ -388,7 +411,8 @@ export class AccessibilityBridge {
           clickPoint: { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) },
         };
       }
-      return { success: false, error: `Element not found or not actionable: ${opts.name ?? opts.automationId}` };
+      const why = res.data && typeof (res.data as any).error === 'string' ? ` (${(res.data as any).error})` : '';
+      return { success: false, error: `Element not found or not actionable: ${opts.name ?? opts.automationId}${why}` };
     } catch (err) {
       return { success: false, error: String(err) };
     }
@@ -397,7 +421,7 @@ export class AccessibilityBridge {
   async focusWindow(
     title?: string,
     processId?: number,
-  ): Promise<{ success: boolean; title?: string; processId?: number; error?: string }> {
+  ): Promise<{ success: boolean; title?: string; processId?: number; error?: string; owned?: boolean }> {
     try {
       let result: any;
       if (IS_WIN) {
@@ -437,7 +461,12 @@ export class AccessibilityBridge {
       if (IS_WIN) {
         fg = await this.winCmd({ cmd: 'get-foreground-window' });
       } else if (IS_MAC) {
-        fg = await this.runMacScript('get-foreground-window.jxa');
+        // The frontmost app's FOCUSED window (per NSWorkspace). The old route took the
+        // frontmost pid and then the first window of that pid from the list — the wrong
+        // document, and bounds that made smart_click warn "outside focused window".
+        // A failed lookup is null, never a window picked from the list to look plausible.
+        const active = await defaultMacAx().activeWindow().catch(() => null);
+        return active ? toLegacyWindow(active) : null;
       } else {
         const active = await (await linuxAdapter()).getActiveWindow();
         return active ? toLegacyWindow(active) : null;
@@ -507,21 +536,17 @@ export class AccessibilityBridge {
     }
     if (IS_MAC) {
       try {
-        const script = path.join(MAC_SCRIPTS_DIR, 'get-focused-element.jxa');
-        const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', script], {
-          timeout: MAC_SCRIPT_TIMEOUT,
-        });
-        const result = JSON.parse(stdout.trim());
-        if (!result) return null;
+        const el = await defaultMacAx().focusedElement();
+        if (!el) return null;
         return {
-          name: result.name ?? '',
-          automationId: result.automationId ?? '',
-          controlType: result.controlType ?? '',
-          className: result.className ?? '',
-          processId: result.processId ?? 0,
-          isEnabled: result.isEnabled ?? true,
-          bounds: result.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-          value: result.value ?? '',
+          name: el.name ?? '',
+          automationId: el.automationId ?? '',
+          controlType: el.controlType ?? '',
+          className: '',
+          processId: el.processId ?? 0,
+          isEnabled: el.enabled !== false,
+          bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
+          value: el.value ?? '',
         };
       } catch {
         return null;
@@ -667,18 +692,39 @@ export class AccessibilityBridge {
           context += '\n';
         }
         if (focusedProcessId) {
-          try {
-            const result = await this.runMacScript('get-screen-context.jxa', [
-              '-FocusedProcessId', String(focusedProcessId),
-              '-MaxDepth', String(MAX_DEPTH),
-            ]);
-            const tree = result?.uiTree ? [result.uiTree] : [];
-            context += `\nFOCUSED WINDOW UI TREE (pid:${focusedProcessId}):\n`;
-            context += this.formatTree(tree, '  ');
-          } catch { /* skip */ }
+          // A failure lands in the "[A11y tree unavailable: …]" note below instead of vanishing.
+          const { elements, truncated } = await defaultMacAx().uiTree(focusedProcessId);
+          context += `\nFOCUSED WINDOW UI TREE (pid:${focusedProcessId})${truncated ? ' — PARTIAL (the walk hit its time budget)' : ''}:\n`;
+          context += this.formatTree(nestByDepth(elements), '  ');
         }
       } else {
-        context += '(Accessibility unavailable on Linux — browser CDP and OCR remain available)';
+        // Linux: the LinuxAdapter's AT-SPI bridge — the same source read_tree uses.
+        const adapter = await linuxAdapter();
+        const perms = await adapter.checkPermissions().catch(() => null);
+        if (!perms?.accessibility) {
+          context += '(Accessibility unavailable on Linux — the AT-SPI bridge needs python3-gi + gir1.2-atspi-2.0 and a running at-spi bus; browser CDP and OCR remain available)';
+        } else {
+          const windows = await adapter.listWindows().catch(() => []);
+          if (windows.length) {
+            context += 'WINDOWS:\n';
+            for (const w of windows) {
+              context += `  🟢 [${w.processName}] "${w.title}" pid:${w.processId} at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}\n`;
+            }
+          }
+          // On-screen elements only: closed menus / hidden toolbars report 0x0.
+          const tree = (await adapter.getUiTree(focusedProcessId))
+            .filter(el => !el.offscreen && el.bounds.width > 0 && el.bounds.height > 0);
+          context += `\nFOCUSED WINDOW UI TREE${focusedProcessId ? ` (pid:${focusedProcessId})` : ''}:\n`;
+          for (const el of tree) {
+            if (!el.name?.trim() && !el.value && !el.focused) continue;
+            context += `  [${el.controlType}] "${el.name ?? ''}" @${el.bounds.x},${el.bounds.y}` +
+              `${el.value ? ` value="${el.value.substring(0, 100)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}\n`;
+            if (context.length > AccessibilityBridge.MAX_CONTEXT_CHARS) {
+              context += '  ... (truncated)\n';
+              break;
+            }
+          }
+        }
       }
     } catch (err) {
       context += `\n[A11y tree unavailable: ${err}]\n`;

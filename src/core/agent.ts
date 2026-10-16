@@ -15,6 +15,7 @@ import { loadPipelineConfig } from '../surface/doctor';
 import { runAgent } from './agent-loop/agent';
 import { getPlatform } from '../platform';
 import { controlBanner } from './banner';
+import { pauseGate, type PauseOutcome } from './pause-gate';
 import type { ClawdConfig, AgentState, TaskResult, StepResult } from '../types';
 import type { ResolvedConfig } from '../llm/config';
 
@@ -50,6 +51,9 @@ export class Agent {
   /** The in-flight task promise — lets /stop wait for the abort to settle. */
   private currentRun: Promise<TaskResult> | null = null;
   private taskExecutionLocked = false;
+  /** Time spent paused for the user this task — excluded from the task cap. */
+  private pausedMs = 0;
+  private pausedSince: number | null = null;
 
   constructor(config: ClawdConfig, resolvedConfig?: ResolvedConfig) {
     this.config = config;
@@ -100,10 +104,17 @@ export class Agent {
     this.abortCtl = new AbortController();
     const startTime = Date.now();
 
-    // Wrap the entire task with a global wall-clock timeout.
+    // Wrap the entire task with a global wall-clock timeout. Time the user
+    // spends on a pause (signing in, solving a CAPTCHA) does not count against it.
+    this.pausedMs = 0;
+    this.pausedSince = null;
+    const deadline = () => startTime + Agent.TASK_TIMEOUT_MS + this.pausedMs
+      + (this.pausedSince !== null ? Date.now() - this.pausedSince : 0);
     let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
     const timeoutPromise = new Promise<TaskResult>((resolve) => {
-      timeoutHandle = setTimeout(() => {
+      const arm = () => { timeoutHandle = setTimeout(fire, Math.max(1000, deadline() - Date.now())); };
+      const fire = () => {
+        if (Date.now() < deadline()) return arm(); // a pause moved the deadline
         this.aborted = true;
         console.warn(`\n⏱ Task timed out after ${Agent.TASK_TIMEOUT_MS / 60000} minutes`);
         resolve({
@@ -111,7 +122,8 @@ export class Agent {
           steps: [{ action: 'error', description: `Task timed out after ${Agent.TASK_TIMEOUT_MS / 60000} minutes`, success: false, timestamp: Date.now() }],
           duration: Date.now() - startTime,
         });
-      }, Agent.TASK_TIMEOUT_MS);
+      };
+      arm();
     });
 
     // Transparency: the on-screen banner stays up for the WHOLE task so a
@@ -205,6 +217,7 @@ export class Agent {
         task,
         isAborted: () => this.aborted,
         abortSignal: this.abortCtl?.signal,
+        pause: req => this.pauseForUser(req.message),
       },
       {
         adapter,
@@ -243,6 +256,25 @@ export class Agent {
     };
     this.state = { ...this.state, status: 'idle', lastResult: taskResult };
     return taskResult;
+  }
+
+  /**
+   * Hand the desktop to the user and wait for their answer (pause-gate.ts).
+   * Null when nobody can see the prompt — the loop then fails fast as before.
+   */
+  private async pauseForUser(message: string): Promise<PauseOutcome | null> {
+    if (!pauseGate.available() || this.aborted) return null;
+    this.pausedSince = Date.now();
+    this.state = { ...this.state, status: 'paused', currentStep: message };
+    console.log(`
+⏸ Paused for the user: ${message}`);
+    try {
+      return await pauseGate.request({ message }, { signal: this.abortCtl?.signal });
+    } finally {
+      this.pausedMs += Date.now() - this.pausedSince;
+      this.pausedSince = null;
+      if (!this.aborted) this.state = { ...this.state, status: 'thinking', currentStep: undefined };
+    }
   }
 
   abort(): void {

@@ -91,7 +91,7 @@ optional autonomous daemon.
 - computer — mouse, keyboard, screenshot (raw I/O)
 - accessibility — drive UI by element name; compile a fused el_NN UI map and act on {element_id, snapshot_id} (survives layout shifts)
 - window — launch, focus, resize apps
-- system — clipboard, OCR, shortcuts, webview detection
+- system — clipboard, OCR, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
 - browser — Chrome DevTools Protocol for Electron / WebView2 apps
 - task — hand a whole task to the built-in autonomous loop
 - batch — run a guarded, safety-gated sequence of the above in one call
@@ -106,6 +106,10 @@ Every tool call routes through one `safety.evaluate()` chokepoint regardless of
 transport (stdio or HTTP). Sensitive actions auto-elevate to Confirm. HTTP requires
 a bearer token. Local-only by default. An on-screen "desktop control in progress"
 indicator shows whenever an agent is driving — double-click it to stop.
+At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
+glow turns blue, the prompt says what to do, and the task continues when the
+user clicks Resume. Outside agents use
+`system pause_for_user`; `clawdcursor resume` answers from a terminal.
 
 ## Links
 

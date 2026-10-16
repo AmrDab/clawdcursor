@@ -60,12 +60,25 @@ export function expandTerms(intent: string, table: Record<string, string[]>): Ex
 /** Raw 0..1 match of a label against the term sets (no confidence yet).
  *  Literal exact → 1.0; synonym exact / literal substring → 0.9; token overlap → ≤0.5. */
 export function scoreLabel(label: string, { literals, synonyms }: ExpandedTerms, intentTokens: string[]): number {
-  const L = normText(label);
+  // Field labels often end in a colon ("File name:"): compare without it.
+  const L = normText(label).replace(/\s*[:：]$/, '');
   if (!L) return 0;
-  // Exact literal match (highest tier)
-  if (literals.has(L)) return 1.0;
+  const phrase = intentTokens.join(' ');
+  if (L === phrase) return 1.0;
   const lTokens = L.split(' ').filter(Boolean);
   const lSet = new Set(lTokens);
+  if (intentTokens.length > 1) {
+    // Multi-word intent ("file name"): the whole phrase beats any single word of
+    // it — a "Name" column must not outrank the "File name:" box.
+    if (` ${L} `.includes(` ${phrase} `)) return 0.95;
+    for (const t of synonyms) {
+      if (lSet.has(t) || (t.length > 2 && L.includes(t))) return 0.9;
+    }
+    const overlap = intentTokens.filter(t => lSet.has(t)).length;
+    return overlap > 0 ? 0.5 + 0.4 * (overlap / intentTokens.length) : 0;
+  }
+  // Exact literal match (highest tier)
+  if (literals.has(L)) return 1.0;
   // Synonym exact match or literal term as whole word / substring in label
   for (const t of synonyms) {
     if (lSet.has(t)) return 0.9;
@@ -87,6 +100,7 @@ export function runFinder(
   table: Record<string, string[]>,
   isCandidate: (e: UIElement) => boolean,
   labelOf: (e: UIElement, all: UIElement[]) => string,
+  mergeNested = false,
 ): FindResult {
   const terms = expandTerms(intent, table);
   const intentTokens = normText(intent).split(' ').filter(Boolean);
@@ -99,6 +113,22 @@ export function runFinder(
     scored.push({ element_id: e.id, label, role: e.role, score: raw * e.confidence, confidence: e.confidence });
   }
   scored.sort((a, b) => b.score - a.score);
+  // One field, two elements: a combo box and the edit nested inside it carry
+  // the same label ("File name:") and would tie as "ambiguous". Keep the first
+  // (best-scored) of any same-label pair where one's bounds contain the other's.
+  const byId = new Map(elements.map(e => [e.id, e]));
+  const contains = (a: UIElement, b: UIElement) => {
+    const [ax, ay, aw, ah] = a.bounds; const [bx, by, bw, bh] = b.bounds;
+    return bx >= ax && by >= ay && bx + bw <= ax + aw && by + bh <= ay + ah;
+  };
+  for (let i = scored.length - 1; mergeNested && i > 0; i--) {
+    const e = byId.get(scored[i].element_id)!;
+    const dup = scored.slice(0, i).some(c => {
+      const o = byId.get(c.element_id)!;
+      return normText(c.label) === normText(scored[i].label) && (contains(o, e) || contains(e, o));
+    });
+    if (dup) scored.splice(i, 1);
+  }
   const candidates = scored.slice(0, MAX_CANDIDATES);
   const best = scored[0];
   if (!best || best.score < MATCH_THRESHOLD) {
@@ -172,5 +202,6 @@ export function findInputField(elements: UIElement[], snapshotId: string, purpos
     (e, all) => {
       const own = e.normalized_text ?? '';
       return own !== '' ? own : associateLabel(e, all);
-    });
+    },
+    true); // a field's box and the edit nested in it are one field
 }

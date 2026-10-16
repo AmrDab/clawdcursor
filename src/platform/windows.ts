@@ -78,13 +78,21 @@ const UIA_CONTROL_TYPES: ReadonlySet<string> = new Set([
  * bidirectional substring name matching, so asking for a CheckBox named
  * "Allow npm publish" could return a Text element named "npm".
  *
+ * Spelling is matched case- and space-insensitively: UIA itself reports a role
+ * as "ControlType.MenuItem" (ProgrammaticName) AND "menu item"
+ * (LocalizedControlType), and agents copy whichever they saw. Only the exact
+ * PascalCase bare name used to pass, so `controlType:"menu item"` failed closed
+ * on a menu item the unfiltered invoke found (live 2026-10-14).
+ *
  * Returns null for a type the bridge cannot honor, so callers can fail closed
  * rather than silently searching without the filter they asked for.
  */
+const UIA_CONTROL_TYPE_BY_KEY: ReadonlyMap<string, string> =
+  new Map([...UIA_CONTROL_TYPES].map(t => [t.toLowerCase(), t]));
 function normalizeControlType(raw: string | undefined): string | null | undefined {
   if (raw === undefined) return undefined;          // no filter requested
-  const bare = raw.replace(/^ControlType\./, '');
-  return UIA_CONTROL_TYPES.has(bare) ? bare : null; // null = unhonorable
+  const key = raw.replace(/^ControlType\./i, '').replace(/\s+/g, '').toLowerCase();
+  return UIA_CONTROL_TYPE_BY_KEY.get(key) ?? null;  // null = unhonorable
 }
 
 export class WindowsAdapter implements PlatformAdapter {
@@ -1477,6 +1485,9 @@ export class WindowsAdapter implements PlatformAdapter {
       expanded: raw?.expanded,
       automationId: raw?.automationId,
       processId: raw?.processId ?? raw?.pid,
+      ...(raw?.toggleState === 'On' ? { checked: true }
+        : raw?.toggleState === 'Off' ? { checked: false }
+        : raw?.toggleState === 'Indeterminate' ? { checked: 'mixed' as const } : {}),
     };
   };
 
@@ -1484,17 +1495,18 @@ export class WindowsAdapter implements PlatformAdapter {
    * Flatten the UIA tree into a single list, matching the macOS adapter's
    * contract. Drops purely structural unnamed nodes to keep the list useful.
    */
-  private flattenTree(node: any, acc: UiElement[]): void {
+  private flattenTree(node: any, acc: UiElement[], depth = 0): void {
     if (!node) return;
     // ConvertTo-UINode may return an array of children when it skipped an
-    // unnamed container — just recurse through those.
+    // unnamed container — just recurse through those (same depth: the
+    // container was flattened out).
     if (Array.isArray(node)) {
-      for (const n of node) this.flattenTree(n, acc);
+      for (const n of node) this.flattenTree(n, acc, depth);
       return;
     }
-    if (node.controlType || node.name) acc.push(this.normalizeElement(node));
+    if (node.controlType || node.name) acc.push({ ...this.normalizeElement(node), depth });
     if (Array.isArray(node.children)) {
-      for (const child of node.children) this.flattenTree(child, acc);
+      for (const child of node.children) this.flattenTree(child, acc, depth + 1);
     }
   }
 

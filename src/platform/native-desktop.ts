@@ -20,6 +20,7 @@ import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen'
 import { llmScale, llmSize } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
+import { readMainScreenInfo } from './mac-screen';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
 
@@ -85,6 +86,9 @@ export class NativeDesktop extends EventEmitter {
   private connected = false;
   private monitors: MonitorInfo[] = [];
   private helper = IS_MAC ? getNativeHelper() : null;
+  /** macOS: who owns the keyboard (see mac-keyboard.ts). Created on first use; the MCP tools type through THIS class. */
+  private macKeyboardGuard: import('./mac-keyboard').MacKeyboardGuard | null = null;
+  private inputWarning: string | null = null;
 
   /** Scale factor: LLM coordinates × scaleFactor = real screen coordinates */
   private scaleFactor = 1;
@@ -189,6 +193,23 @@ export class NativeDesktop extends EventEmitter {
   }
 
   /**
+   * macOS: dpiRatio = physical pixels / logical points (2 on Retina), read from
+   * NSScreen through mac-screen.ts — the inline `frame()'s size's width` that
+   * lived here threw on macOS 26 (#154). Runs on BOTH connect() paths: the
+   * screenshot-helper path used to return before it, so getDpiRatio() stayed 1
+   * on every Mac that had the helper, and the OCR → screen-coordinate
+   * conversion (ocr.ts, smart.ts) silently reported physical pixels.
+   * An unreadable NSScreen leaves the ratio at 1.
+   * TODO: multi-monitor — mainScreen only.
+   */
+  private async detectMacDpiRatio(): Promise<void> {
+    const main = await readMainScreenInfo();
+    if (main && main.logicalWidth > 0 && main.logicalWidth < this.screenWidth) {
+      this.dpiRatio = this.screenWidth / main.logicalWidth;
+    }
+  }
+
+  /**
    * "Connect" to the native desktop — detects screen size and configures nut-js.
    * No actual network connection; just initializes the local screen interface.
    */
@@ -204,10 +225,16 @@ export class NativeDesktop extends EventEmitter {
           this.scaleFactor = llmScale(this.screenWidth, this.screenHeight);
           // Clean up the temp file from connect probe
           try { fs.unlinkSync(result.path); } catch { /* ignore */ }
+          // The helper reports physical pixels; OCR → screen coordinates divide by
+          // this. Returning before the probe left it at 1 on every Mac (#154).
+          await this.detectMacDpiRatio();
           this.connected = true;
           console.log(`🐾 Native desktop connected (macOS screenshot-helper)`);
           console.log(`   Screen: ${this.screenWidth}x${this.screenHeight}`);
           console.log(`   LLM scale factor: ${this.scaleFactor.toFixed(2)}x`);
+          if (this.dpiRatio > 1) {
+            console.log(`   DPI ratio: ${this.dpiRatio.toFixed(2)}x (physical/logical)`);
+          }
           return;
         } catch (err: any) {
           console.warn(`⚠️  macOS screenshot-helper failed, falling back to nut-js: ${err?.message || err}`);
@@ -255,19 +282,7 @@ export class NativeDesktop extends EventEmitter {
           }
         } catch { /* non-fatal — dpiRatio stays 1 */ }
       } else if (process.platform === 'darwin') {
-        try {
-          const { execFileSync } = await import('child_process');
-          // NSScreen reports in logical (point) dimensions — compare with physical pixels from screen.grab()
-          // TODO: Multi-monitor support — currently uses mainScreen only. For multi-monitor,
-          // enumerate NSScreen.screens and sum widths to get the full virtual canvas size.
-          const result = execFileSync('osascript', ['-e',
-            'use framework "AppKit"\nreturn (current application\'s NSScreen\'s mainScreen\'s frame()\'s size\'s width) as integer',
-          ], { timeout: 5000, encoding: 'utf-8' }).trim();
-          const logicalW = parseInt(result);
-          if (logicalW > 0 && logicalW < this.screenWidth) {
-            this.dpiRatio = this.screenWidth / logicalW;
-          }
-        } catch { /* non-fatal — dpiRatio stays 1 */ }
+        await this.detectMacDpiRatio();
       } else if (process.platform === 'linux') {
         try {
           // Check common DE scale environment variables first — Wayland only.
@@ -663,14 +678,13 @@ export class NativeDesktop extends EventEmitter {
     if (IS_MAC) {
       // Use System Events for typing — same reason as keyPress:
       // CGEvent from helper subprocess is silently blocked by TCC.
-      const { execFile } = await import('child_process');
-      const { promisify } = await import('util');
-      const execFileAsync = promisify(execFile);
+      // Ask who owns the keyboard FIRST and outside the try below: a refusal must not fall through to the CGEvent helper.
+      await this.guardMacKeys();
+      const { runAppleScript } = await import('./mac-keyboard');
       const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       try {
-        await execFileAsync('osascript', ['-e',
-          `tell application "System Events" to keystroke "${escaped}"`
-        ], { timeout: 10000 });
+        // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
+        await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 10000);
       } catch (err: any) {
         console.warn(`   ⌨️  macOS type failed: ${err.message?.substring(0, 100)}`);
         // Fallback: try helper anyway
@@ -742,12 +756,12 @@ export class NativeDesktop extends EventEmitter {
    * unlike CGEvent.post() from a spawned child process.
    */
   private async macKeyPress(keyCombo: string): Promise<void> {
-    const { execFile } = await import('child_process');
-    const { promisify } = await import('util');
-    const execFileAsync = promisify(execFile);
+    // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
+    await this.guardMacKeys(keyCombo);
+    const { runAppleScript } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
-      await execFileAsync('osascript', ['-e', 'tell application "System Events" to keystroke "+"']);
+      await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
       return;
     }
 
@@ -812,10 +826,30 @@ export class NativeDesktop extends EventEmitter {
     }
 
     try {
-      await execFileAsync('osascript', ['-e', script], { timeout: 5000 });
+      await runAppleScript(script, 5000);
     } catch (err: any) {
       console.warn(`   ⌨️  macOS key press failed: ${err.message?.substring(0, 100)}`);
     }
+  }
+
+  /**
+   * Ask the shared keyboard guard (macOS). Throws when a system dialog or the lock screen owns the keyboard; a modal dialog of
+   * another app is typed into, and its warning is kept for `takeInputWarning`.
+   */
+  private async guardMacKeys(combo?: string): Promise<void> {
+    if (!this.macKeyboardGuard) {
+      const [{ MacKeyboardGuard }, { defaultMacAx }] = await Promise.all([import('./mac-keyboard'), import('./mac-ax')]);
+      this.macKeyboardGuard = new MacKeyboardGuard(defaultMacAx());
+    }
+    const { warning } = await this.macKeyboardGuard.assert(combo);
+    if (warning) this.inputWarning = warning;
+  }
+
+  /** The warning from the keystrokes sent since it was last taken, or null. Tools call it right after typing / pressing keys. */
+  takeInputWarning(): string | null {
+    const w = this.inputWarning;
+    this.inputWarning = null;
+    return w;
   }
 
   async executeMouseAction(action: MouseAction): Promise<void> {

@@ -26,6 +26,9 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+
+const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 
@@ -152,6 +155,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '`task` waits up to 45s; longer tasks return {status:"running"} and CONTINUE in the ' +
       'background — re-call with the same instruction to keep waiting, task {action:"status"} ' +
       'to poll, task {action:"abort"} to stop. A timeout on your side is NOT a task failure. ' +
+      'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs confirmation): call system {action:"pause_for_user", message} — ' +
+      'the user does it and clicks Resume on screen; never type or guess credentials. A plan limit or upgrade wall is a roadblock too: ' +
+      'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. A paused task returns ' +
+      '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
@@ -273,6 +280,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // consent --accept` takes effect immediately, with no restart. A host
         // that supports elicitation asks the user in-app first.
         if (!hasConsent() && !(await askConsentInHost())) {
+          sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
+            undefined, clientInfo(), { outcome: 'consent_required' });
           return {
             content: [{ type: 'text', text:
               'clawdcursor needs one-time consent before it can control the desktop. ' +
@@ -287,13 +296,16 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // the destructive-label rule (Send/Delete/Pay) on the MCP route too.
         const safetyError = evaluateToolCall(tool, params ?? {}, { uiMaps: ctx.uiMaps });
         if (safetyError) {
+          sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
+            safetyError.text, clientInfo(), { outcome: 'refused' });
           return { content: [{ type: 'text', text: safetyError.text }], isError: true };
         }
         // Transparency: any consequential (mutating) tool call from an
         // EXTERNAL agent pokes the on-screen control banner — it shows on the
         // first poke and auto-hides after ~30s of inactivity. Read-only
         // perception (tier 0) stays silent.
-        if ((tool.safetyTier ?? 0) >= 1) controlBanner.touch();
+        // Compound tools (compact surface) decide per action in dispatchCompound.
+        if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
         const started = Date.now();
         let result;
@@ -310,7 +322,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         }
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
-          { outcome: outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined });
+          { outcome: outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
+            // A batch: one row per step class, not one act-other row. Steps the
+            // cap skipped never ran.
+            steps: result.steps?.filter(s => s.status !== 'skipped').map(s => ({
+              tool: s.tool, action: s.action, ok: s.status === 'ok',
+              outcome: s.status === 'blocked' || s.status === 'needs_confirm' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
+            })) });
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
         // 3 screenshots with no text/a11y read in between (and every 5th
@@ -384,92 +402,148 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
 /**
  * Mount the streamable HTTP MCP transport on an Express app at /mcp.
  *
- * Mounts both POST (JSON-RPC requests) and GET (SSE notifications), plus
- * DELETE for session termination. Returns the underlying transport so the
- * caller can close it on shutdown.
+ * Two kinds of caller share the endpoint:
+ *   - MCP SDK clients (editor hosts, agents) send `initialize`, then reuse the
+ *     Mcp-Session-Id they get back and open a long-lived GET stream. Each such
+ *     session gets its OWN server (from `createServer`) and a stateful
+ *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern.
+ *   - One-shot JSON-RPC posts with no initialize and no session (the
+ *     dashboard, `clawdcursor task`, curl) get a fresh stateless transport on
+ *     an idle server: `server` when it is free, another from `createServer`
+ *     while it is busy (a 45 s `task` call must not block a status poll).
  *
- * Auth — the caller must apply Bearer-token middleware before this route
- * (mirrors the REST surface's requireAuth). We don't apply auth here so
- * tests and agent-mode can share the same mount with their own gate.
+ * Previously ONE server was connected to a fresh transport per request. An SDK
+ * client's GET stream (or any in-flight call) kept that server connected, so
+ * every other request failed with "Already connected to a transport" (live,
+ * Ubuntu VM 2026-10-15).
+ *
+ * `enableJsonResponse: true` keeps POST replies as one plain JSON-RPC body
+ * instead of SSE (`event: message\ndata: …`), which single-JSON clients
+ * (Claude Code's among them) need.
+ *
+ * Auth — the caller must apply Bearer-token middleware before this route.
  */
 export async function startMcpHttp(
   server: McpServerLike,
   app: express.Express,
   mountPath: string = '/mcp',
+  createServer?: () => Promise<McpServerLike>,
 ): Promise<{ close: () => Promise<void> }> {
-  const sdkHttp = await import(
+  type HttpTransport = Omit<McpTransportLike, 'close'> & { sessionId?: string; onclose?: () => void; close: () => Promise<void> };
+  const { StreamableHTTPServerTransport } = await import(
     '@modelcontextprotocol/sdk/server/streamableHttp.js' as string
   ) as {
     StreamableHTTPServerTransport: new (opts: {
-      sessionIdGenerator: undefined;
+      sessionIdGenerator: (() => string) | undefined;
       enableJsonResponse: boolean;
-    }) => McpTransportLike;
+      onsessioninitialized?: (sessionId: string) => void;
+    }) => HttpTransport;
   };
-  const { StreamableHTTPServerTransport } = sdkHttp;
+  const { isInitializeRequest } = await import('@modelcontextprotocol/sdk/types.js' as string) as {
+    isInitializeRequest: (value: unknown) => boolean;
+  };
+  const { randomUUID } = await import('crypto');
 
-  // Stateless mode: each POST is independent — no session init handshake
-  // required. This makes the dashboard, `clawdcursor task` CLI, and
-  // delegate_to_agent tool work as one-shot JSON-RPC clients without
-  // needing to initialize and track an Mcp-Session-Id per call.
-  //
-  // CRITICAL: in stateless mode the SDK requires a FRESH transport per
-  // HTTP request — a single shared transport accumulates per-request
-  // state (response writers, in-flight message correlation) and
-  // returns 500 on every call after the first. The pattern we use
-  // here matches the MCP SDK's stateless example:
-  //   for each request:
-  //     1) construct a new transport
-  //     2) server.connect(transport)
-  //     3) transport.handleRequest(req, res, req.body)
-  //     4) on response close → transport.close()
-  //
-  // This is per-request boilerplate, not per-connection — there's
-  // still one McpServer (and one tool registry) for the whole daemon.
-  // `enableJsonResponse: true` makes the SDK serialize tools/call results as
-  // plain JSON-RPC instead of SSE (`event: message\ndata: {...}`). Without
-  // this, MCP clients that expect a single JSON body (Claude Code's MCP
-  // client among them) blow up with `Unexpected token 'e', "event: mes"...`
-  // because the SDK defaults to text/event-stream for everything. We don't
-  // need streaming progress here — `submit_task` is the only long-running
-  // call, and even there a single final JSON response is the cleaner
-  // contract for callers. Editor hosts that DO want streaming use stdio
-  // MCP which has its own framing.
-  const newTransport = () => new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-    enableJsonResponse: true,
-  });
+  const jsonError = (res: express.Response, status: number, code: number, message: string) => {
+    if (!res.headersSent) res.status(status).json({ jsonrpc: '2.0', error: { code, message }, id: null });
+  };
 
-  const handle = async (req: express.Request, res: express.Response, body?: unknown) => {
-    const transport = newTransport();
-    res.on('close', () => {
-      // Best-effort cleanup whenever the response ends, errors out, or the
-      // client disconnects mid-stream.
-      try { void transport.close?.(); } catch { /* swallow */ }
-    });
+  // ── One-shot posts: stateless transport on an idle server ──
+  const idleServers: McpServerLike[] = [server];
+  const oneShot = async (req: express.Request, res: express.Response, body: unknown) => {
+    const srv = idleServers.pop() ?? (createServer ? await createServer() : undefined);
+    if (!srv) { jsonError(res, 503, -32000, 'MCP server busy — retry'); return; }
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    let released = false;
+    const release = async () => {
+      if (released) return;
+      released = true;
+      try { await transport.close(); } catch { /* already closed */ }
+      idleServers.push(srv);
+    };
+    res.on('close', () => { void release(); });
     try {
-      await server.connect(transport);
+      await srv.connect(transport);
       await transport.handleRequest?.(req, res, body);
     } catch (err) {
-      if (!res.headersSent) {
-        res.status(500).json({ error: `MCP transport error: ${(err as Error).message}` });
-      }
+      jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
+      void release();
     }
   };
 
-  // POST /mcp — JSON-RPC requests. Express has already parsed the body
-  // via express.json(); pass it through so the SDK doesn't re-read req.
-  app.post(mountPath, (req, res) => { void handle(req, res, req.body); });
+  // ── Sessions: a server + stateful transport per initialized client ──
+  const IDLE_MS = 30 * 60_000;
+  const sessions = new Map<string, { transport: HttpTransport; open: number; lastActive: number }>();
+  const track = (s: { open: number; lastActive: number }, res: express.Response) => {
+    s.open++;
+    res.on('close', () => { s.open--; s.lastActive = Date.now(); });
+  };
+  const sweep = setInterval(() => {
+    const cutoff = Date.now() - IDLE_MS;
+    for (const s of sessions.values()) {
+      if (s.open === 0 && s.lastActive < cutoff) void s.transport.close().catch(() => { /* gone */ });
+    }
+  }, 60_000);
+  sweep.unref?.();
 
-  // GET /mcp — SSE channel for server-initiated notifications.
-  app.get(mountPath, (req, res) => { void handle(req, res); });
+  const openSession = async (req: express.Request, res: express.Response, body: unknown) => {
+    const transport: HttpTransport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+      onsessioninitialized: id => { sessions.set(id, { transport, open: 0, lastActive: Date.now() }); },
+    });
+    transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
+    await (await createServer!()).connect(transport);
+    await transport.handleRequest?.(req, res, body);
+  };
 
-  // DELETE /mcp — explicit session termination (no-op in stateless).
-  app.delete(mountPath, (req, res) => { void handle(req, res); });
+  /** The request's session, or a 404 already sent for an unknown id. undefined = no session header. */
+  const sessionOf = (req: express.Request, res: express.Response) => {
+    const id = req.header('mcp-session-id');
+    if (!id) return undefined;
+    const s = sessions.get(id);
+    if (!s) jsonError(res, 404, -32001, 'Session not found');
+    return s ?? null;
+  };
+
+  // POST /mcp — JSON-RPC requests. Express has already parsed the body.
+  app.post(mountPath, (req, res) => {
+    void (async () => {
+      try {
+        const s = sessionOf(req, res);
+        if (s === null) return;
+        if (s) { track(s, res); await s.transport.handleRequest?.(req, res, req.body); return; }
+        if (createServer && isInitializeRequest(req.body)) { await openSession(req, res, req.body); return; }
+        await oneShot(req, res, req.body);
+      } catch (err) {
+        jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
+      }
+    })();
+  });
+
+  // GET /mcp — a session's server-to-client SSE stream. Stateless has none.
+  // DELETE /mcp — end a session.
+  const sessionOnly = (req: express.Request, res: express.Response) => {
+    void (async () => {
+      try {
+        const s = sessionOf(req, res);
+        if (s === null) return;
+        if (!s) { res.status(405).set('Allow', 'POST').send('Method Not Allowed'); return; }
+        track(s, res);
+        await s.transport.handleRequest?.(req, res);
+      } catch (err) {
+        jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
+      }
+    })();
+  };
+  app.get(mountPath, sessionOnly);
+  app.delete(mountPath, sessionOnly);
 
   return {
     close: async () => {
-      // Per-request transports clean themselves up on response close;
-      // nothing global to tear down.
+      clearInterval(sweep);
+      await Promise.all([...sessions.values()].map(s => s.transport.close().catch(() => { /* gone */ })));
+      sessions.clear();
     },
   };
 }

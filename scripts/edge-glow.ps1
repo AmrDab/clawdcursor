@@ -23,7 +23,9 @@
 # For a manual DEMO, pass -DurationSec so it self-closes, e.g.:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File edge-glow.ps1 -DurationSec 12
 #
-# Windows-only today, same as the banner. macOS/Linux overlays are a follow-up.
+# The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and
+# scripts/linux/overlay.py with the same arguments.
+# Covers every display (one layered window each), not just the primary.
 
 param(
     [string]$Color       = '#f59e0b',  # glow color (amber — "in progress")
@@ -114,48 +116,50 @@ $cr  = [Convert]::ToInt32($hex.Substring(0,2),16)
 $cg  = [Convert]::ToInt32($hex.Substring(2,2),16)
 $cb  = [Convert]::ToInt32($hex.Substring(4,2),16)
 
-# ── Cover the primary screen ──
-$scr = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-$W   = $scr.Width
-$H   = $scr.Height
-$T   = [Math]::Min($Thickness, [Math]::Min([int]($W/2), [int]($H/2)))
-
-# ── Render the edge glow into an ARGB bitmap once ──
-$bmp = New-Object System.Drawing.Bitmap($W, $H, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-$g   = [System.Drawing.Graphics]::FromImage($bmp)
-$g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
-$g.Clear([System.Drawing.Color]::FromArgb(0,0,0,0))
-
-$edge = [System.Drawing.Color]::FromArgb($PeakAlpha, $cr, $cg, $cb)
-$fade = [System.Drawing.Color]::FromArgb(0,           $cr, $cg, $cb)
-$P    = [System.Drawing.Point]
-function New-Band($p1, $p2, $colorAt1, $colorAt2, $rect) {
+# ── One glow window per display (every monitor shows the same state) ──
+$edgeTpl = [System.Drawing.Color]::FromArgb($PeakAlpha, $cr, $cg, $cb)
+$fadeTpl = [System.Drawing.Color]::FromArgb(0,           $cr, $cg, $cb)
+$P       = [System.Drawing.Point]
+function New-Band($g, $p1, $p2, $colorAt1, $colorAt2, $rect) {
     $br = New-Object System.Drawing.Drawing2D.LinearGradientBrush($p1, $p2, $colorAt1, $colorAt2)
     $br.WrapMode = [System.Drawing.Drawing2D.WrapMode]::TileFlipXY
     $g.FillRectangle($br, $rect)
     $br.Dispose()
 }
-# Corners deliberately overlap (additive glow pooling).
-New-Band (New-Object $P 0,0)        (New-Object $P 0,$T)        $edge $fade (New-Object Drawing.Rectangle 0,0,$W,$T)          # top
-New-Band (New-Object $P 0,($H-$T))  (New-Object $P 0,$H)        $fade $edge (New-Object Drawing.Rectangle 0,($H-$T),$W,$T)    # bottom
-New-Band (New-Object $P 0,0)        (New-Object $P $T,0)        $edge $fade (New-Object Drawing.Rectangle 0,0,$T,$H)          # left
-New-Band (New-Object $P ($W-$T),0)  (New-Object $P $W,0)        $fade $edge (New-Object Drawing.Rectangle ($W-$T),0,$T,$H)    # right
-$g.Dispose()
 
-# ── Build the overlay window ──
-$form = New-Object GlowOverlay
-$form.FormBorderStyle = 'None'
-$form.ShowInTaskbar   = $false
-$form.TopMost         = $true
-$form.StartPosition   = 'Manual'
-$form.Bounds          = $scr
+$forms = @()
+foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
+    $scr = $screen.Bounds
+    $W   = $scr.Width
+    $H   = $scr.Height
+    $T   = [Math]::Min($Thickness, [Math]::Min([int]($W/2), [int]($H/2)))
+
+    # Render the edge glow into an ARGB bitmap once.
+    $bmp = New-Object System.Drawing.Bitmap($W, $H, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    $g   = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+    $g.Clear([System.Drawing.Color]::FromArgb(0,0,0,0))
+    # Corners deliberately overlap (additive glow pooling).
+    New-Band $g (New-Object $P 0,0)        (New-Object $P 0,$T)        $edgeTpl $fadeTpl (New-Object Drawing.Rectangle 0,0,$W,$T)          # top
+    New-Band $g (New-Object $P 0,($H-$T))  (New-Object $P 0,$H)        $fadeTpl $edgeTpl (New-Object Drawing.Rectangle 0,($H-$T),$W,$T)    # bottom
+    New-Band $g (New-Object $P 0,0)        (New-Object $P $T,0)        $edgeTpl $fadeTpl (New-Object Drawing.Rectangle 0,0,$T,$H)          # left
+    New-Band $g (New-Object $P ($W-$T),0)  (New-Object $P $W,0)        $fadeTpl $edgeTpl (New-Object Drawing.Rectangle ($W-$T),0,$T,$H)    # right
+    $g.Dispose()
+
+    $f = New-Object GlowOverlay
+    $f.FormBorderStyle = 'None'
+    $f.ShowInTaskbar   = $false
+    $f.TopMost         = $true
+    $f.StartPosition   = 'Manual'
+    $f.Bounds          = $scr
+    $f.Tag             = $bmp
+    $f.Add_Shown({ param($sender, $e) $sender.SetBitmap([System.Drawing.Bitmap]$sender.Tag); $sender.Push([byte]$MinAlpha) })
+    $forms += $f
+}
+$form = $forms[0]
+foreach ($f in $forms) { if ($f -ne $form) { $f.Show() } }
 
 $startTicks = [Environment]::TickCount
-
-$form.Add_Shown({
-    $form.SetBitmap($bmp)
-    $form.Push([byte]$MinAlpha)
-})
 
 # Pulse: cosine ease between MinAlpha and 255 (smooth dim<->bright).
 $pulse = New-Object System.Windows.Forms.Timer
@@ -164,7 +168,7 @@ $pulse.Add_Tick({
     $elapsed = [Environment]::TickCount - $startTicks
     if ($DurationSec -gt 0 -and $elapsed -ge ($DurationSec * 1000)) {
         $pulse.Stop()
-        $form.Cleanup()
+        foreach ($f in $forms) { $f.Cleanup() }
         $form.Close()
         return
     }
@@ -172,9 +176,9 @@ $pulse.Add_Tick({
     $wave  = (1 - [Math]::Cos($phase * 2 * [Math]::PI)) / 2     # 0->1->0
     $alpha = [int]($MinAlpha + ($wave * (255 - $MinAlpha)))
     if ($alpha -lt 0) { $alpha = 0 } elseif ($alpha -gt 255) { $alpha = 255 }
-    $form.Push([byte]$alpha)
+    foreach ($f in $forms) { $f.Push([byte]$alpha) }
 })
 $pulse.Start()
 
 [System.Windows.Forms.Application]::Run($form)
-$bmp.Dispose()
+foreach ($f in $forms) { ([System.Drawing.Bitmap]$f.Tag).Dispose() }

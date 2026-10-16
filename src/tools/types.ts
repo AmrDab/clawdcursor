@@ -32,6 +32,8 @@ export interface ToolResult {
   image?: { data: string; mimeType: string };
   /** Whether this result represents an error */
   isError?: boolean;
+  /** batch only: each step that ran (or was stopped), for the session log — never shown to the model. */
+  steps?: Array<{ tool: string; action?: string; status: string; text: string }>;
 }
 
 /** Shared context passed to tool handlers — initialized subsystems */

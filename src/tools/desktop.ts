@@ -361,25 +361,33 @@ export function getDesktopTools(): ToolDefinition[] {
         // single-line fields (address bar, search boxes), so press Return.
         const submit = /\r?\n$/.test(text);
         const body = submit ? text.replace(/\r?\n$/, '') : text;
-        if (body) {
-          await ctx.a11y.writeClipboard(body);
-          await new Promise(r => setTimeout(r, 50));
-          // Paste combo is platform-specific
-          await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
-          await new Promise(r => setTimeout(r, 100));
-        }
-        if (submit) await ctx.desktop.keyPress('Return');
-
-        // Restore clipboard. Best-effort — if the read failed (no clipboard
-        // available) or the restore throws, we don't surface the error;
-        // type_text's contract is about typing, not clipboard ops.
-        if (saved !== null) {
-          try { await ctx.a11y.writeClipboard(saved); } catch { /* best-effort */ }
+        // A warning left by some earlier keystrokes is not this call's.
+        ctx.desktop.takeInputWarning?.();
+        try {
+          if (body) {
+            await ctx.a11y.writeClipboard(body);
+            await new Promise(r => setTimeout(r, 50));
+            // Paste combo is platform-specific
+            await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
+            await new Promise(r => setTimeout(r, 100));
+          }
+          if (submit) await ctx.desktop.keyPress('Return');
+        } finally {
+          // Restore clipboard. Best-effort — if the read failed (no clipboard
+          // available) or the restore throws, we don't surface the error;
+          // type_text's contract is about typing, not clipboard ops.
+          // Also when the paste was refused (a system dialog owns the keyboard): what the user asked to type — a password,
+          // say — must not be left on their clipboard.
+          if (saved !== null) {
+            try { await ctx.a11y.writeClipboard(saved); } catch { /* best-effort */ }
+          }
         }
 
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
-        return { text: `Typed ${text.length} chars into ${activeInfo}` };
+        // macOS: a modal dialog of another app may have had the keyboard — the agent should know where its text went.
+        const warn = ctx.desktop.takeInputWarning?.();
+        return { text: `Typed ${text.length} chars into ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 
@@ -413,12 +421,14 @@ export function getDesktopTools(): ToolDefinition[] {
           }
         }
         const activeInfo = await activeWindowLabel(ctx);
+        ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (const combo of combos) {
           await ctx.desktop.keyPress(combo);
         }
         ctx.a11y.invalidateCache();
         ctx.uiMaps?.invalidate();
-        return { text: `Key pressed: ${key} in ${activeInfo}` };
+        const warn = ctx.desktop.takeInputWarning?.();
+        return { text: `Key pressed: ${key} in ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
   ];

@@ -25,6 +25,7 @@ import { mountDashboard } from './dashboard';
 import { VERSION } from './version';
 import { DATA_DIR } from '../paths';
 import { e } from './format';
+import { pauseGate, type PauseAnswer } from '../core/pause-gate';
 
 const TOKEN_PATH = join(DATA_DIR, 'token');
 
@@ -317,6 +318,26 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     res.json({ aborted: true });
   });
 
+  // POST /resume — Bearer-gated, localhost-only: answer a pause for the user
+  // (pause-gate.ts). Body {answer: "resume" | "end"}.
+  // Used by `clawdcursor resume` and the dashboard buttons.
+  app.post('/resume', requireAuth, (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || '';
+    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+    if (!isLocal) {
+      return res.status(403).json({ error: 'Resume is only allowed from localhost' });
+    }
+    const answer = (req.body?.answer ?? 'resume') as string;
+    if (!['resume', 'end'].includes(answer)) {
+      return res.status(400).json({ error: 'answer must be "resume" or "end"' });
+    }
+    const pause = pauseGate.current();
+    const r = pauseGate.answer(answer as PauseAnswer);
+    if (!r.ok) return res.status(409).json({ error: r.error, pause });
+    console.log(`\n${e('▶', '>')} Pause answered: ${r.outcome}`);
+    res.json({ ok: true, outcome: r.outcome, was: pause?.message });
+  });
+
   // POST /stop — Bearer-gated, localhost-only graceful shutdown.
   app.post('/stop', requireAuth, (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || '';
@@ -356,7 +377,7 @@ export function mountJson404(app: express.Express): void {
   app.use((req, res) => {
     res.status(404).json({
       error: `No such endpoint: ${req.method} ${req.path}`,
-      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'POST /abort', 'POST /stop'],
+      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'POST /abort', 'POST /resume', 'POST /stop'],
     });
   });
 }

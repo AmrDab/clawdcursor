@@ -86,8 +86,12 @@ export function isProcessAlive(pid: number): boolean {
  * Implementation is a one-shot shell-out per call. The lock check runs at
  * most a handful of times across the whole lifetime of a clawdcursor
  * process (startup + sweep), so per-call latency is not a hot path.
+ *
+ * `timeoutMs` bounds the shell-out; on expiry the lookup returns null.
+ * Tests raise it because a cold PowerShell + WMI query can exceed 5 s when
+ * the machine is saturated (e.g. a full parallel vitest run).
  */
-export function getProcessStartTime(pid: number): number | null {
+export function getProcessStartTime(pid: number, timeoutMs = 5000): number | null {
   try {
     if (process.platform === 'win32') {
       // Windows CreationDate is a CIM datetime: yyyymmddHHMMSS.ffffff±UUU.
@@ -103,7 +107,7 @@ export function getProcessStartTime(pid: number): number | null {
           '-Command',
           `try { (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop).CreationDate.ToFileTimeUtc() } catch { '' }`,
         ],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 },
+        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: timeoutMs },
       ).trim();
       if (!out) return null;
       const fileTime = BigInt(out);
@@ -119,7 +123,7 @@ export function getProcessStartTime(pid: number): number | null {
     const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: 5000,
+      timeout: timeoutMs,
     }).trim();
     if (!out) return null;
     const t = Date.parse(out);

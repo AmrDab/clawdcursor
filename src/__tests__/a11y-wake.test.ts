@@ -31,7 +31,7 @@ describe('getUiTreeWithWake', () => {
 
   it('a thin tree is re-read until the page appears (the sleeping-Electron case: 6, 6, 6, then 14)', async () => {
     const p = platformWith(els(6), els(6), els(6), els(14));
-    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3 });
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, now: () => 0 });   // frozen clock: this counts polls, not time
     expect(r.woke).toBe(true);
     expect(r.tree).toHaveLength(14);
     expect(p.getUiTree).toHaveBeenCalledTimes(4);     // stops as soon as it is dense: no wasted reads
@@ -46,9 +46,19 @@ describe('getUiTreeWithWake', () => {
 
   it('still thin after the whole budget: keeps the first, reports not woken, and stops', async () => {
     const p = platformWith(els(3));
-    const r = await getUiTreeWithWake(p, 7, { pollMs: 1, budgetMs: 4 });
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 1, budgetMs: 4, now: () => 0 });   // frozen clock: this counts polls, not time
     expect(r.woke).toBe(false);
     expect(p.getUiTree).toHaveBeenCalledTimes(1 + 4);  // first read + budget/poll polls, no more
+  });
+
+  it('slow reads count against the budget (wall-clock): 2 s per read cannot turn a 3 s budget into a 40 s wait', async () => {
+    let t = 0;
+    const getUiTree = vi.fn(async () => { t += 2000; return els(3); });   // each read costs 2 s of wall-clock (a System Events walk of a Chromium app takes ~10 s)
+    const p = { getUiTree, getActiveWindow: vi.fn(async () => ({ processId: 1 })) } as any;
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3000, now: () => t });
+    expect(r.woke).toBe(false);
+    // first read, then re-reads starting at +0 s and +2 s of budget; the next would start at +4 s > 3 s → stop (not 3000 polls)
+    expect(getUiTree).toHaveBeenCalledTimes(3);
   });
 
   it('the default wait is about 3 s, not 3 s plus a poll (4 polls of 700 ms)', async () => {
@@ -111,6 +121,54 @@ describe('getUiTreeWithWake', () => {
     const r = await getUiTreeWithWake(p, 9, { pollMs: 0, budgetMs: 1 });
     expect(r.tree).toHaveLength(4);
     expect(r.woke).toBe(false);
+  });
+});
+
+// #234: a Chrome window's own UI (tab strip, toolbar, address bar) is ~59
+// elements, so a browser whose PAGE is asleep was never "thin" and never woke.
+describe('getUiTreeWithWake — a browser whose page is missing (#234)', () => {
+  const chromeUi = () => els(59).map((e, i) => ({ ...e, bounds: { x: i * 10, y: 5, width: 8, height: 20 } }));
+  const webArea = (children: number) => [
+    { name: 'Dashboard', controlType: 'Document', bounds: { x: 0, y: 100, width: 1200, height: 800 } },
+    ...Array.from({ length: children }, (_, i) => ({ name: `page${i}`, controlType: 'Button', bounds: { x: 20 + i, y: 200, width: 80, height: 30 } })),
+  ] as any[];
+
+  it('wakes and re-reads when the tree is only browser chrome — no web area', async () => {
+    const p = platformWith(chromeUi(), chromeUi(), [...chromeUi(), ...webArea(12)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, now: () => 0, isBrowser: () => true });
+    expect(r.woke).toBe(true);
+    expect(r.tree.some(e => e.name === 'page0')).toBe(true);
+    expect(p.getUiTree).toHaveBeenCalledTimes(3);
+  });
+
+  it('an empty web area counts as missing too', async () => {
+    const p = platformWith([...chromeUi(), ...webArea(0)], [...chromeUi(), ...webArea(3)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 2, now: () => 0, isBrowser: () => true });
+    expect(r.woke).toBe(true);
+    expect(r.tree.some(e => e.name === 'page2')).toBe(true);
+  });
+
+  it('a browser whose page is there is returned as read — one read, no wake', async () => {
+    const isBrowser = vi.fn(() => true);
+    const p = platformWith([...chromeUi(), ...webArea(5)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, isBrowser });
+    expect(r.woke).toBe(false);
+    expect(p.getUiTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('a dense tree of an app that is not a browser never waits, web area or not', async () => {
+    const p = platformWith(chromeUi(), [...chromeUi(), ...webArea(4)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, isBrowser: () => false });
+    expect(r.woke).toBe(false);
+    expect(p.getUiTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('a page that stays missing: keeps the first read after the budget', async () => {
+    const p = platformWith(chromeUi());
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 2, now: () => 0, isBrowser: () => true });
+    expect(r.woke).toBe(false);
+    expect(r.tree).toHaveLength(59);
+    expect(p.getUiTree).toHaveBeenCalledTimes(1 + 2);
   });
 });
 

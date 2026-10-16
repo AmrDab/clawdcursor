@@ -7,6 +7,7 @@ import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../llm/browser-config';
 import { resolveAlias } from '../core/router/aliases';
+import { pauseGate } from '../core/pause-gate';
 
 const execFileAsync = promisify(execFile);
 
@@ -158,6 +159,22 @@ export function getOrchestrationTools(): ToolDefinition[] {
         // Still running — return a receipt instead of blowing the caller's
         // MCP timeout. NOT an error: the task is alive and progressing.
         const st = ctx.agent.getState?.() ?? {};
+        const pause = pauseGate.current();
+        if (pause && st.status === 'paused') {
+          // Paused for the user at the machine — the caller must wait, not
+          // restart or abort (that is what confused agents before).
+          return {
+            text: JSON.stringify({
+              status: 'paused',
+              task: entry.task,
+              waitingFor: pause.message,
+              pausedFor: `${((Date.now() - pause.since) / 1000).toFixed(0)}s`,
+              next: 'The agent is waiting for the user at the computer (on-screen prompt with Resume / End task). ' +
+                'Do NOT restart or abort the task. Re-call this tool with the SAME task text to keep waiting. ' +
+                'If the user tells you here that they are done, call task {action:"resume"}.',
+            }, null, 2),
+          };
+        }
         return {
           text: JSON.stringify({
             status: 'running',
@@ -177,7 +194,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
 
     {
       name: 'open_app',
-      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, gtk-launch / xdg-open on Linux).',
+      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).',
       parameters: {
         name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")', required: true },
       },
@@ -221,11 +238,14 @@ export function getOrchestrationTools(): ToolDefinition[] {
                 ?? (process.platform === 'darwin' ? alias?.macOSAppName : undefined),
             });
             ctx.a11y.invalidateCache();
-            return {
-              text: res?.title
-                ? `Opened "${rawName}" (pid=${res.pid}, window="${res.title}")`
-                : `Launched "${rawName}" (no window surfaced yet)`,
-            };
+            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window="${res.title}")` };
+            // Running but no window yet: a slow app still loading (Outlook, IDEs).
+            // Not an error — an error invites a second launch.
+            if (res?.pid) {
+              return { text: `Started "${rawName}" (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+            }
+            // No process and no window is not a launch: say so instead of "Launched".
+            return { text: `Could not confirm "${rawName}" opened — no window appeared. Check list_windows before acting on it.`, isError: true };
           } catch (err: any) {
             return { text: `Failed to launch "${rawName}": ${err?.message ?? err}`, isError: true };
           }

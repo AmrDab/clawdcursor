@@ -22,16 +22,17 @@
 import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
-import { ensureTargetForeground } from './focus-guard';
+import { ensureTargetForeground, sameProcess } from './focus-guard';
 import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
 import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
+import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
-import { getBrowserProcessNames } from '../../llm/browser-config';
+import { isBrowserProcess } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
@@ -135,15 +136,27 @@ export function buildUnifiedTools(): UnifiedTool[] {
         type: 'object',
         properties: {
           processId: { type: 'number', description: 'Optional: limit to a specific process' },
+          offset: { type: 'number', description: 'Skip this many elements — page past "… +N more" (default 0)' },
+          limit: { type: 'number', description: 'How many elements to list (default 60)' },
         },
         additionalProperties: false,
       },
       changesScreen: false,
       async execute(args, ctx) {
         const pid = typeof args.processId === 'number' ? args.processId : undefined;
+        const offset = typeof args.offset === 'number' && args.offset > 0 ? Math.floor(args.offset) : 0;
+        const limit = typeof args.limit === 'number' && args.limit > 0 ? Math.floor(args.limit) : 60;
         // A thin tree is often a sleeping one (Electron / Chromium build their
         // page tree on first request): wake the app and read once more.
-        const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid);
+        // A browser whose page is asleep is not thin (its own UI is ~59
+        // elements), so say which process it is when that matters (#234).
+        const isBrowser = async () => {
+          const win = pid === undefined
+            ? await ctx.platform.getActiveWindow().catch(() => null)
+            : (await ctx.platform.listWindows().catch(() => [])).find(w => w.processId === pid);
+          return isBrowserProcess(win?.processName);
+        };
+        const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid, { isBrowser });
         // Never a dead end: a thin tree (or a browser, whose page content UIA
         // often omits) says what to do next, in the caller's own tool names.
         const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
@@ -151,15 +164,24 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return { success: true, text: `(empty a11y tree — app may be custom-canvas)\n${nextStep}` };
         }
         const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
-        const isBrowser = !!active && getBrowserProcessNames().includes(String(active.processName ?? '').toLowerCase());
+        const activeIsBrowser = !!active && isBrowserProcess(active.processName);
         const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
-        const lines = tree.slice(0, 60).map(el =>
-          `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
+        // Below-the-fold elements come back with empty (0×0) bounds: list them
+        // AFTER the on-screen ones, marked, instead of interleaved at @0,0 where
+        // they read as noise (live 2026-10-15: Settings → About's "Windows 11
+        // Pro" / "25H2" sat past the 60-element cap).
+        const isOff = (el: typeof tree[number]) => el.offscreen === true || (el.bounds.width <= 0 && el.bounds.height <= 0);
+        const ordered = [...tree.filter(el => !isOff(el)), ...tree.filter(isOff)];
+        const page = ordered.slice(offset, offset + limit);
+        const lines = page.map(el => isOff(el)
+          ? `[${el.controlType || 'Element'}] "${el.name || ''}"${el.value ? ` value="${el.value.slice(0, 40)}"` : ''} (offscreen — scroll to see)`
+          : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
         );
-        const more = tree.length > 60 ? `\n… +${tree.length - 60} more` : '';
-        const hint = tree.length < 5 || isBrowser ? `\n${nextStep}` : '';
+        const rest = ordered.length - (offset + page.length);
+        const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
+        const hint = tree.length < 5 || activeIsBrowser ? `\n${nextStep}` : '';
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
-        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n') + more)}${hint}` };
+        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
       },
     },
 
@@ -176,7 +198,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return `${isActive ? '→' : ' '} [${w.processName}] "${w.title}" pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
         });
         const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
-        return { success: true, text: `Windows (${windows.length}):\n${lines.join('\n')}${more}` };
+        const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
+        return { success: true, text: `Windows (${windows.length}):\n${lines.join('\n')}${more}${partial}` };
       },
     },
 
@@ -283,13 +306,21 @@ export function buildUnifiedTools(): UnifiedTool[] {
           if (fallback) return fallback;
         }
         await sleep(150);
+        // The Windows bridge stops waiting on an Invoke that opened a modal box
+        // and answers {pending:true}; the screen has changed under the agent.
+        const pending = (res.data as { pending?: unknown } | undefined)?.pending === true;
+        // An EARLIER still-running invoke that failed after the bridge stopped
+        // waiting reports its error on the next invoke reply.
+        const late = (res.data as { lateInvokeError?: unknown } | undefined)?.lateInvokeError;
+        const lateNote = typeof late === 'string' && late ? ` Note: an earlier action that was still running later failed: ${late}.` : '';
         return {
           success: res.success,
-          text: res.success
+          text: (res.success
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
-                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}.`)
-            : `a11y invoke "${name}" missed — element not found or not actionable.`,
+                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}.`
+                  + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
+            : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
           targetLabel: name,
         };
       },
@@ -328,9 +359,12 @@ export function buildUnifiedTools(): UnifiedTool[] {
           }
           const [bx, by, bw, bh] = plan.bounds;
           await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
+          // Replace, don't append: a set_value that types after the old text
+          // left "old textnew" in the Save-As box (live Windows check).
+          await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(fillValue);
           await sleep(150);
-          return { success: true, text: `Filled ${plan.element.id} via bounds + type (${fillValue.length} chars).`, targetLabel: plan.element.id };
+          return { success: true, text: `Filled ${plan.element.id} via bounds + select-all + type (${fillValue.length} chars).`, targetLabel: plan.element.id };
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -338,11 +372,24 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const processId = typeof args.processId === 'number' ? args.processId : undefined;
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'set-value', value });
         await sleep(150);
-        return {
-          success: res.success,
-          text: res.success ? `Set "${name}" = ${value.length} chars` : `Set "${name}" failed.`,
-          targetLabel: name,
-        };
+        if (res.success) return { success: true, text: `Set "${name}" = ${value.length} chars`, targetLabel: name };
+        // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
+        if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
+          const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
+          return { success: false, text: `Set "${name}" refused — ${why}.`, targetLabel: name };
+        }
+        // No settable value (a Chrome field on Linux exposes neither EditableText
+        // nor Value; Win11 XAML composites): type into the INPUT — never its
+        // same-named label, never into whatever happens to have focus.
+        const target = await editableTarget(ctx, name, controlType, processId);
+        if (!target) {
+          return { success: false, text: `Set "${name}" failed: no settable value and no editable field named "${name}" to type into.`, targetLabel: name };
+        }
+        await ctx.platform.mouseClick(target.x, target.y);
+        await ctx.platform.keyPress('mod+a');
+        await ctx.platform.typeText(value);
+        await sleep(150);
+        return { success: true, text: `Set "${name}" = ${value.length} chars (keyboard fallback: no settable value).`, targetLabel: name };
       },
     },
 
@@ -490,12 +537,18 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: false,
       async execute(args, ctx) {
         const name = String(args.name ?? '');
-        const res = await ctx.platform.invokeElement({
-          name,
-          controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
-          processId: await resolveAgentPid(args, ctx),
-          action: 'get-value',
-        });
+        const processId = await resolveAgentPid(args, ctx);
+        let controlType = typeof args.controlType === 'string' ? args.controlType : undefined;
+        if (!controlType) {
+          // A label and its field often share the name ("City" + "City"); the
+          // label came first and its own text was returned as the value. Read
+          // the editable one when both exist.
+          const found = await ctx.platform.findElements({ name, processId }).catch(() => []);
+          const types = found.map(el => String(el.controlType ?? ''));
+          const editable = types.find(t => EDITABLE_ROLE.test(t) && !/^text$/i.test(t));
+          if (editable && types.some(t => !EDITABLE_ROLE.test(t) || /^text$/i.test(t))) controlType = editable;
+        }
+        const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'get-value' });
         if (!res.success) return { success: false, text: `"${name}" has no readable value.` };
         const value = (res.data as any)?.value ?? '';
         return { success: true, text: wrapUntrustedScreenContent(`"${name}" = "${truncate(String(value), 120)}"`) };
@@ -534,7 +587,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'get_element_state',
-      description: 'Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded).',
+      description: 'Get state flags of a named element (focused/enabled/disabled/selected/busy/offscreen/expandable/expanded, and checked for checkboxes/toggles).',
       inputSchema: {
         type: 'object',
         properties: {
@@ -568,6 +621,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
             offscreen: el.offscreen ?? false,
             expandable: el.expandable ?? false,
             expanded: el.expanded ?? false,
+            // Checkbox / toggle: only when the platform read it (TogglePattern).
+            ...(el.checked !== undefined ? { checked: el.checked } : {}),
           }),
         };
       },
@@ -788,21 +843,26 @@ export function buildUnifiedTools(): UnifiedTool[] {
         // single-line fields (address bar, search boxes), so press Return.
         const submit = /\r?\n$/.test(text);
         const body = submit ? text.replace(/\r?\n$/, '') : text;
+        ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
+        let prior: string | null = null;        // set while the typed text sits on the clipboard
         try {
           if (body) {
-            const prior = await ctx.platform.readClipboard().catch(() => '');
+            prior = await ctx.platform.readClipboard().catch(() => '');
             await ctx.platform.writeClipboard(body);
             await sleep(40);
             await ctx.platform.keyPress('mod+v');
             await sleep(150);
             await ctx.platform.writeClipboard(prior).catch(() => {});
+            prior = null;
           }
           if (submit) await ctx.platform.keyPress('Return');
-          return { success: true, text: `Typed ${text.length} chars (paste): "${truncate(text, 60)}"` };
+          return { success: true, text: `Typed ${text.length} chars (paste): "${truncate(text, 60)}"${inputWarningNote(ctx)}` };
         } catch {
+          // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
+          if (prior !== null) await ctx.platform.writeClipboard(prior).catch(() => {});
           await ctx.platform.typeText(text);
           await sleep(200);
-          return { success: true, text: `Typed ${text.length} chars: "${truncate(text, 60)}"` };
+          return { success: true, text: `Typed ${text.length} chars: "${truncate(text, 60)}"${inputWarningNote(ctx)}` };
         }
       },
     },
@@ -850,12 +910,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
             return { success: false, isError: true, text: `BLOCKED: "${c}" is a dangerous key combo.` };
           }
         }
+        ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (const c of combos) {
           await ctx.platform.keyPress(c);
           if (combos.length > 1) await sleep(50); // brief gap between sequence steps
         }
         await sleep(150);
-        return { success: true, text: `Pressed ${input}` };
+        return { success: true, text: `Pressed ${input}${inputWarningNote(ctx)}` };
       },
     },
 
@@ -896,21 +957,30 @@ export function buildUnifiedTools(): UnifiedTool[] {
           }
         }
 
-        const res = await ctx.platform.launchApp(launchName, {
-          alwaysNewInstance: alias?.alwaysNewInstance,
-          uwpAppId: alias?.uwpAppId,
-          // Pick the searchTerm that gives the OS native launcher (Start
-          // Menu / Spotlight) the best chance of resolving to the right
-          // app — alias.searchTerm wins when present, mac falls back to
-          // the bundle name.
-          searchTerm: alias?.searchTerm
-            ?? (platform === 'darwin' ? alias?.macOSAppName : undefined),
-        });
+        let res: Awaited<ReturnType<typeof ctx.platform.launchApp>>;
+        try {
+          res = await ctx.platform.launchApp(launchName, {
+            alwaysNewInstance: alias?.alwaysNewInstance,
+            uwpAppId: alias?.uwpAppId,
+            // Pick the searchTerm that gives the OS native launcher (Start
+            // Menu / Spotlight) the best chance of resolving to the right
+            // app — alias.searchTerm wins when present, mac falls back to
+            // the bundle name.
+            searchTerm: alias?.searchTerm
+              ?? (platform === 'darwin' ? alias?.macOSAppName : undefined),
+          });
+        } catch (err) {
+          return { success: false, text: `Failed to launch "${name}": ${err instanceof Error ? err.message : String(err)}` };
+        }
         await sleep(800);
-        return {
-          success: true,
-          text: res.title ? `Opened "${name}" (pid=${res.pid}, window="${res.title}")` : `Launched "${name}" (no window surfaced yet)`,
-        };
+        if (res.title) return { success: true, text: `Opened "${name}" (pid=${res.pid}, window="${res.title}")` };
+        // Running but no window yet: a slow app still loading. Not a failure —
+        // a failure invites a second launch.
+        if (res.pid) {
+          return { success: true, text: `Started "${name}" (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+        }
+        // No process and no window is not a launch: say so instead of "Launched".
+        return { success: false, text: `Could not confirm "${name}" opened — no window appeared. Check list_windows before acting on it.` };
       },
     },
 
@@ -1556,10 +1626,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         additionalProperties: false,
       },
       changesScreen: false,
-      async execute(args, _ctx) {
+      async execute(args, ctx) {
         const ocr = getAgentOcr();
         if (!ocr.isAvailable()) return { success: false, text: 'read_text: OCR not available on this platform — fall back to screenshot/vision.' };
-        const result = await ocr.recognizeScreen();
+        const raw = await ocr.recognizeScreen();
+        const result = { ...raw, elements: ocrToScreen(raw.elements, ctx) };
         if (result.elements.length === 0) return { success: true, text: '(read_text: OCR found no text — screen may be blank, or OCR unavailable.)' };
         const lineMap = new Map<number, OcrElement[]>();
         for (const el of result.elements) {
@@ -1590,6 +1661,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           purpose: { type: 'string', enum: ['general', 'find_text', 'act'], description: 'What the compile is for' },
           target_text: { type: 'string', description: 'If set and absent from a11y, pull OCR to find it' },
           max_cost: { type: 'string', enum: ['cheap', 'ocr_ok', 'vision_ok'], description: 'Hard ceiling on perception cost (default ocr_ok)' },
+          processId: { type: 'number', description: 'Optional: compile this app\'s window (its tree, and OCR of its window only) instead of the focused one' },
         },
         additionalProperties: false,
       },
@@ -1597,6 +1669,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const holder = ctx.uiMaps;
         if (!holder) return { success: false, text: 'compile_ui: no UIMap holder on this context.' };
+        const processId = typeof args.processId === 'number' ? args.processId : undefined;
         const now = Date.now();
         const id = holder.nextId();
         const hints = {
@@ -1604,7 +1677,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           target_text: typeof args.target_text === 'string' ? args.target_text : undefined,
           max_cost: typeof args.max_cost === 'string' ? args.max_cost as 'cheap' | 'ocr_ok' | 'vision_ok' : undefined,
         };
-        const map = await compileUIMap(defaultCompileDeps(ctx.platform, now, id), hints);
+        const map = await compileUIMap(defaultCompileDeps(ctx.platform, now, id, undefined, processId), hints);
         holder.put(map, now, hints.max_cost ?? 'ocr_ok');
         return { success: true, text: wrapUntrustedScreenContent(renderUIMap(map)) };
       },
@@ -1661,12 +1734,37 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const button = args.button === 'right' ? 'right' : 'left';
         const ocr = getAgentOcr();
         if (!ocr.isAvailable()) return { success: false, text: 'smart_click: OCR not available — escalate to vision.' };
-        const result = await ocr.recognizeScreen();
-        if (result.elements.length === 0) return { success: false, text: 'smart_click: OCR found no text — escalate to vision.' };
-        const hit = locateByOcr(target, result.elements);
+        const raw = await ocr.recognizeScreen();
+        if (raw.elements.length === 0) return { success: false, text: 'smart_click: OCR found no text — escalate to vision.' };
+        // Screen coordinates — what mouseClick takes (points on macOS) — same
+        // as the `click` tool does with a11y coords (no imageScale; that's image-space only).
+        const elements = ocrToScreen(raw.elements, ctx);
+        // A working window is set: only its text may be clicked (live macOS:
+        // the menu-bar clock was clicked instead of Calculator's key).
+        const anchor = ctx.targetWindow;
+        let hit: ReturnType<typeof locateByOcr>;
+        if (anchor) {
+          const wins = ((await ctx.platform.listWindows?.().catch(() => [])) ?? [])
+            .filter(w => sameProcess(w.processName, anchor.processName) && !w.isMinimized && w.bounds.width > 0 && w.bounds.height > 0)
+            .sort((a, b) => Number(b.title === anchor.title) - Number(a.title === anchor.title)
+              || b.bounds.width * b.bounds.height - a.bounds.width * a.bounds.height);
+          const wb = wins[0]?.bounds;
+          const inside = wb ? elements.filter(el => {
+            const cx = el.x + el.width / 2, cy = el.y + el.height / 2;
+            return cx >= wb.x && cx < wb.x + wb.width && cy >= wb.y && cy < wb.y + wb.height;
+          }) : [];
+          hit = locateByOcr(target, inside);
+          if (!hit) {
+            const outside = locateByOcr(target, elements);
+            if (outside) {
+              return { success: false, text: `smart_click: "${outside.label}" matched only outside the working window `
+                + `(${anchor.processName}${wb ? '' : ': window not found'}) — not clicked. Focus that window, or read_text to find the target in it.` };
+            }
+          }
+        } else {
+          hit = locateByOcr(target, elements);
+        }
         if (!hit) return { success: false, text: `smart_click: no match for "${target}". Call read_text to see visible text, then retry with exact text.` };
-        // OCR coords are screen-space — pass straight to mouseClick, same as the
-        // `click` tool does with a11y coords (no imageScale; that's image-space only).
         const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
         const raised = await ensureTargetForeground(ctx, fg0);
         const before = await ctx.platform.getActiveWindow().catch(() => null);
@@ -1915,8 +2013,25 @@ export function buildUnifiedTools(): UnifiedTool[] {
     },
 
     {
+      name: 'ask_user',
+      description: 'Pause and hand the desktop to the user for a step only they can do: sign in, a password or 2FA code, a CAPTCHA, a choice only they can make. Say exactly what to do. The run waits, then continues where it left off.',
+      inputSchema: {
+        type: 'object',
+        properties: { message: { type: 'string', description: 'Instruction shown on screen, e.g. "Sign in to GitHub, then click Resume".' } },
+        required: ['message'],
+        additionalProperties: false,
+      },
+      changesScreen: false,
+      // The loop handles ask_user itself when a human can be reached; this
+      // only runs when nobody can see the on-screen prompt.
+      async execute() {
+        return { success: false, text: 'ask_user: no human can be reached on this machine right now (no on-screen prompt). Use give_up with the reason instead.' };
+      },
+    },
+
+    {
       name: 'give_up',
-      description: 'Abandon the task when it\'s impossible from here (credentials missing, captcha, destructive action needs user confirm, stuck after retries).',
+      description: 'Abandon the task when it\'s impossible from here (stuck after retries). When a human is at the machine this pauses for them first; for sign-in, 2FA or CAPTCHA prefer ask_user.',
       inputSchema: {
         type: 'object',
         properties: { reason: { type: 'string' } },
@@ -2080,6 +2195,33 @@ function focusBreadcrumb(
   return ` · focus "${truncateTitle(b)}"→"${truncateTitle(a)}"`;
 }
 
+/** Roles that take typed text, across UIA / AX / AT-SPI names. */
+const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
+
+/**
+ * The on-screen centre of the editable element called `name` — the input, not
+ * a label that shares its name ("City" label + "City" field). Null when none is
+ * found: the caller must then NOT type anything.
+ */
+async function editableTarget(
+  ctx: AgentToolContext, name: string, controlType: string | undefined, processId: number | undefined,
+): Promise<{ x: number; y: number } | null> {
+  const found = await ctx.platform.findElements({ name, controlType, processId }).catch(() => []);
+  const onScreen = found.filter(el => el.bounds && el.bounds.width > 0 && el.bounds.height > 0);
+  // Types are normalized per platform: a label is "Text" everywhere (UIA Text,
+  // AT-SPI label) and an editable text view is "Edit" (AT-SPI "text"/"entry").
+  const editable = onScreen.filter(el => EDITABLE_ROLE.test(String(el.controlType ?? '')) && !/^text$/i.test(String(el.controlType ?? '')));
+  const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
+  if (!pick?.bounds) return null;
+  return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
+}
+
+/** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */
+function inputWarningNote(ctx: AgentToolContext): string {
+  const w = ctx.platform.takeInputWarning?.();
+  return w ? ` ⚠ ${w}` : '';
+}
+
 function truncateTitle(s: string): string {
   return s.length > 32 ? s.slice(0, 31) + '…' : s;
 }
@@ -2138,6 +2280,9 @@ function locateByOcr(
   const targetNorm = norm(target);
   const targetWords = targetNorm.split(' ').filter(Boolean);
   const targetWordSet = new Set(targetWords);
+  // A short or numeric target ("1", "OK", "50") is a whole token or nothing:
+  // "1" inside the clock's "14" was clicked (live macOS 2026-10-15).
+  const wholeTokenOnly = targetNorm.length <= 2 || /^[\d ]+$/.test(targetNorm);
   const lineMap = new Map<number, OcrElement[]>();
   for (const el of elements) {
     if (!el.text) continue;
@@ -2161,6 +2306,7 @@ function locateByOcr(
         const phrase = norm(span.map(t => t.text).join(' '));
         let score = 0;
         if (phrase === targetNorm) score = 1.0;
+        else if (wholeTokenOnly) continue;
         else if (phrase.includes(targetNorm) || targetNorm.includes(phrase)) {
           score = Math.min(phrase.length, targetNorm.length) / Math.max(phrase.length, targetNorm.length) * 0.9;
         } else {
@@ -2187,6 +2333,18 @@ function locateByOcr(
     }
   }
   return best && bestScore >= 0.4 ? best : null;
+}
+
+/** OCR elements (physical pixels) in SCREEN coordinates — points on macOS —
+ *  the same conversion the `ocr` tool and compile_ui apply. */
+function ocrToScreen(elements: OcrElement[], ctx: AgentToolContext): OcrElement[] {
+  const ratio = ctx.screen?.dpiRatio || 1;
+  const os = ctx.platform.platform;
+  return elements.map(el => {
+    const p = ocrPointToClickPoint(el.x, el.y, ratio, os);
+    const size = ocrPointToClickPoint(el.width, el.height, ratio, os);
+    return { ...el, x: p.x, y: p.y, width: size.x, height: size.y };
+  });
 }
 
 function sleep(ms: number): Promise<void> {

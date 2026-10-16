@@ -65,10 +65,11 @@ import { TOOL_META } from '../core/agent-loop/tool-meta';
 // ── Exclusion sets ────────────────────────────────────────────────────────────
 
 /**
- * Terminal actions — never projected to the MCP surface.
- * These tools tell the AGENT to stop; MCP clients use ToolResult.isError instead.
+ * Terminal / loop-control actions — never projected to the MCP surface.
+ * These tools tell the AGENT to stop (or, ask_user, to pause for the user —
+ * MCP clients have pause_for_user); MCP clients use ToolResult.isError instead.
  */
-const TERMINAL_ACTIONS = new Set(['done', 'give_up', 'cannot_read']);
+const TERMINAL_ACTIONS = new Set(['done', 'give_up', 'cannot_read', 'ask_user']);
 
 /**
  * Vision compound tool names — collapsed from many granulars, no 1:1 MCP counterpart.

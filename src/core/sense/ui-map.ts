@@ -15,6 +15,8 @@ import { normalizeRole, normText } from './ui-map-normalize';
 import { iou } from './ui-map-geom';
 import { captureSnapshot } from './snapshot';
 import { OcrEngine } from '../../platform/ocr-engine';
+import { ocrPointToClickPoint } from '../../tools/smart';
+import { windowOcrRegion } from '../../tools/ocr';
 
 const SPARSE_A11Y_MAX = 0;          // ≤ this many named a11y elements ⇒ "sparse"
 const LOW_CONFIDENCE = 0.5;         // below this on a needed element ⇒ vision-worthy
@@ -120,6 +122,11 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
     compiled_at: String(deps.now),
     sources_used: sourcesUsed,
     elements,
+    // Scrolled out of view: text only — no bounds to click, so never ranked,
+    // anchored or addressable by element_id.
+    ...(snap.offscreen?.length
+      ? { offscreen: snap.offscreen.map((se, i) => ({ ...a11yToUI(se, `off_${i}`), clickable: false, editable: false, actionable: false })) }
+      : {}),
     anchors: computeAnchors(elements, deps.prevAnchors),
     truncation: { total_elements: elements.length, returned_elements: elements.length },
   };
@@ -129,13 +136,40 @@ let _ocr: OcrEngine | null = null;
 function ocrEngine(): OcrEngine { return (_ocr ??= new OcrEngine()); }
 
 /** Production deps wired to a real adapter. now/snapshotId are caller-passed
- *  (the agent loop owns the clock + the obs_N counter). */
+ *  (the agent loop owns the clock + the obs_N counter). `processId` scopes the
+ *  map to that app's window: its a11y tree, and OCR of its window only. */
 export function defaultCompileDeps(
-  adapter: PlatformAdapter, now: number, snapshotId: string, prevAnchors?: UIMap['anchors'],
+  adapter: PlatformAdapter, now: number, snapshotId: string, prevAnchors?: UIMap['anchors'], processId?: number,
 ): CompileDeps {
+  let scopedWindow: Snapshot['activeWindow'];
   return {
-    captureSnapshot: () => captureSnapshot(adapter),
-    ocr: () => ocrEngine().recognizeScreen(),
+    captureSnapshot: async () => {
+      const snap = await captureSnapshot(adapter, processId);
+      scopedWindow = snap.activeWindow;
+      return snap;
+    },
+    // OCR reads physical pixels; the map is in screen coordinates (points on
+    // macOS — live: a word at x=3874 on a 2240-pt screen).
+    ocr: async () => {
+      const ratio = (await adapter.getScreenSize().catch(() => null))?.dpiRatio || 1;
+      let res: OcrResult;
+      if (processId) {
+        const region = windowOcrRegion(scopedWindow?.processId === processId ? scopedWindow.bounds : undefined, ratio, adapter.platform);
+        // Never the whole screen for a scoped map: that is other apps' text.
+        if (!region) return { elements: [], fullText: '', durationMs: 0 };
+        res = await ocrEngine().recognizeRegion(region.x, region.y, region.width, region.height);
+      } else {
+        res = await ocrEngine().recognizeScreen();
+      }
+      return {
+        ...res,
+        elements: res.elements.map(el => {
+          const p = ocrPointToClickPoint(el.x, el.y, ratio, adapter.platform);
+          const size = ocrPointToClickPoint(el.width, el.height, ratio, adapter.platform);
+          return { ...el, x: p.x, y: p.y, width: size.x, height: size.y };
+        }),
+      };
+    },
     vision: () => adapter.screenshot({ maxWidth: 1280 }),
     getScreenSize: () => adapter.getScreenSize(),
     getFocusedElement: () => adapter.getFocusedElement(),

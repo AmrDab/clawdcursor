@@ -27,6 +27,7 @@ const h = vi.hoisted(() => ({
   exec: null as null | ((cmd: string, args: string[]) => ExecResult | Promise<ExecResult>),
   spawn: null as null | ((cmd: string, args: string[], opts: unknown) => unknown),
   proc: {} as Record<string, string | Error>,
+  files: {} as Record<string, string>,
   keyboard: {
     config: {} as Record<string, unknown>,
     type: null as unknown,
@@ -70,8 +71,19 @@ vi.mock('fs', async () => {
   const actual = await vi.importActual<typeof import('fs')>('fs');
   return {
     ...actual,
+    // .desktop entries under the XDG application dirs come from h.files.
+    readdirSync: (p: unknown, ...rest: unknown[]) => {
+      const dir = String(p);
+      if (dir.endsWith('/applications')) {
+        const names = Object.keys(h.files).filter(f => f.startsWith(dir + '/')).map(f => f.slice(dir.length + 1));
+        if (!names.length) throw Object.assign(new Error(`ENOENT ${dir}`), { code: 'ENOENT' });
+        return names;
+      }
+      return (actual.readdirSync as any)(p, ...rest);
+    },
     readFileSync: (p: unknown, ...rest: unknown[]) => {
       const key = String(p);
+      if (key in h.files) return h.files[key];
       if (key.startsWith('/proc/')) {
         const v = h.proc[key];
         if (v === undefined) throw Object.assign(new Error(`ENOENT ${key}`), { code: 'ENOENT' });
@@ -111,7 +123,7 @@ function defaultExec(python: (args: string[]) => unknown = () => ({ elements: []
   };
 }
 
-const ENV_KEYS = ['GDK_SCALE', 'QT_SCALE_FACTOR', 'XDG_SESSION_TYPE', 'WAYLAND_DISPLAY'];
+const ENV_KEYS = ['GDK_SCALE', 'QT_SCALE_FACTOR', 'XDG_SESSION_TYPE', 'WAYLAND_DISPLAY', 'XDG_DATA_HOME', 'XDG_DATA_DIRS'];
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
@@ -119,6 +131,7 @@ beforeEach(() => {
   h.exec = defaultExec();
   h.spawn = () => { throw new Error('spawn not expected'); };
   h.proc = {};
+  h.files = {};
   h.keyboard.type = vi.fn(async () => {});
   h.keyboard.pressKey = vi.fn(async () => {});
   h.keyboard.releaseKey = vi.fn(async () => {});
@@ -183,6 +196,17 @@ describe('L4 — listWindows resolves processName from /proc', () => {
     const adapter = new LinuxAdapter();
     const wins = await adapter.listWindows();
     expect(wins.map(w => w.processName)).toEqual(['gnome-calculator', 'mousepad']);
+  });
+
+  it('a cmdline rewritten into one space-joined string (Chromium) yields the binary name', async () => {
+    h.proc['/proc/4242/cmdline'] = '/opt/google/chrome/chrome --remote-debugging-port=9333 --user-data-dir=/home/c/.clawdcursor/cdp-profile --no-first-run\0';
+    h.proc['/proc/4242/comm'] = 'chrome\n';
+    // A path with a space and no rewrite still trusts comm over a half path.
+    h.proc['/proc/5555/cmdline'] = '/opt/My App/myapp\0';
+    h.proc['/proc/5555/comm'] = 'myapp\n';
+    const adapter = new LinuxAdapter();
+    const wins = await adapter.listWindows();
+    expect(wins.map(w => w.processName)).toEqual(['chrome', 'myapp']);
   });
 
   it('focusWindow({processName}) now matches', async () => {
@@ -438,5 +462,194 @@ describe('L9 — AT-SPI roles normalize to the shared vocabulary; bad bounds are
     const by = await tree();
     expect(by('Unknown-state').enabled).toBeUndefined();
     expect(by('Unknown-state').disabled).toBeUndefined();
+  });
+});
+
+// ─── Blind-mode batch (live blind test, Ubuntu 24.04) ─────────────────────────
+describe('B4/B5 — a11y calls are scoped to the foreground window, even without a pid', () => {
+  it('getFocusedElement passes the active window pid to the bridge', async () => {
+    h.exec = defaultExec(() => ({ element: { name: 'x', controlType: 'text', bounds: { x: 1, y: 2, width: 3, height: 4 }, processId: 4242 } }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const el = await adapter.getFocusedElement();
+    expect(el?.processId).toBe(4242);
+    const args = bridgeCalls()[0];
+    expect(args.slice(0, 2)).toEqual(['--cmd', 'focused']);
+    expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
+  });
+
+  it('a window without _NET_WM_PID (wmctrl pid 0) is scoped by its title, not left to a guess', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'wmctrl' && args[0] === '-l') {
+        return { stdout: WMCTRL + '0x03c00005  0 0   10 10 300 200  box xcalc\n' };
+      }
+      if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: String(0x3c00005) + '\n' };
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.getUiTree();
+    await adapter.findElements({ name: '7' });
+    await adapter.invokeElement({ name: '7', action: 'click' });
+    await adapter.getFocusedElement();
+    for (const args of bridgeCalls()) {
+      expect(args).not.toContain('--process-id');
+      expect(args[args.indexOf('--window-title') + 1]).toBe('xcalc');
+    }
+    expect(bridgeCalls()).toHaveLength(4);
+  });
+});
+
+describe('B1 — a hidden-element invoke failure says why', () => {
+  it('surfaces the bridge error in data and reports no bounds', async () => {
+    h.exec = defaultExec(() => ({ success: false, notVisible: true, error: "element 'Save' exists but is not visible on screen" }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const res = await adapter.invokeElement({ name: 'Save', action: 'click' });
+    expect(res.success).toBe(false);
+    expect(res.bounds).toBeUndefined();
+    expect(String(res.data?.error)).toMatch(/not visible/);
+  });
+});
+
+describe('B6 — open_app resolves desktop names and never claims a launch it did not see', () => {
+  const MOUSEPAD_ONLY = '0x03c00004  0 5555   50 60 640 480  box Untitled - Mousepad\n';
+  const CALC_WIN = '0x03c00009  0 777   100 200 360 499  box Calculator\n';
+
+  function setup(opts: { windowAppears: boolean; alive: boolean }) {
+    process.env.XDG_DATA_HOME = '/home/t/.local/share';
+    process.env.XDG_DATA_DIRS = '/usr/share';
+    h.files['/usr/share/applications/org.gnome.Calculator.desktop'] =
+      '[Desktop Entry]\nName=Calculator\nExec=gnome-calculator %U\nType=Application\n\n[Desktop Action x]\nName=Other\nExec=nope\n';
+    h.files['/usr/share/applications/org.xfce.mousepad.desktop'] =
+      '[Desktop Entry]\nName=Mousepad\nExec=mousepad %U\nType=Application\n';
+    let spawned = false;
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'wmctrl' && args[0] === '-l') {
+        return { stdout: MOUSEPAD_ONLY + (spawned && opts.windowAppears ? CALC_WIN : '') };
+      }
+      return base(cmd, args);
+    };
+    const spawns: Array<{ cmd: string; args: string[] }> = [];
+    h.spawn = (cmd: string, args: string[]) => {
+      spawns.push({ cmd, args });
+      const proc = Object.assign(new EventEmitter(), { pid: undefined as number | undefined, unref: () => {} });
+      if (cmd === 'gnome-calculator') { proc.pid = 777; spawned = true; }
+      else setImmediate(() => proc.emit('error', Object.assign(new Error('ENOENT'), { code: 'ENOENT' })));
+      return proc;
+    };
+    vi.spyOn(process, 'kill').mockImplementation(((pid: number) => {
+      if (pid === 777 && opts.alive) return true;
+      throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    }) as typeof process.kill);
+    return spawns;
+  }
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
+  /** Advance the faked launch-poll clock until `p` settles (spawn steps use real setImmediate). */
+  async function runOutLaunchPoll(p: Promise<unknown>) {
+    let done = false;
+    p.then(() => { done = true; }, () => { done = true; });
+    for (let i = 0; i < 100 && !done; i++) {
+      await vi.advanceTimersByTimeAsync(500);
+      await new Promise(r => setImmediate(r));
+    }
+  }
+
+  it('"calculator" launches the desktop entry\'s Exec (gnome-calculator) and returns its window', async () => {
+    const spawns = setup({ windowAppears: true, alive: true });
+    const adapter = new LinuxAdapter();
+    const res = await adapter.launchApp('calculator');
+    expect(spawns.map(s => s.cmd)).toEqual(['calculator', 'gnome-calculator']);
+    expect(spawns[1].args).toEqual([]); // %U field code dropped
+    expect(res).toMatchObject({ pid: 777, title: 'Calculator' });
+  });
+
+  it('an unknown bare name fails at once instead of xdg-open + an 8 s wait + "Launched"', async () => {
+    const spawns = setup({ windowAppears: false, alive: false });
+    const adapter = new LinuxAdapter();
+    await expect(adapter.launchApp('nosuchapp')).rejects.toThrow(/nosuchapp/);
+    expect(spawns.map(s => s.cmd)).toEqual(['nosuchapp']);
+  });
+
+  it('a process that exits without a window is a failure, not a launch', async () => {
+    setup({ windowAppears: false, alive: false });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    const adapter = new LinuxAdapter();
+    const p = adapter.launchApp('calculator');
+    const settled = expect(p).rejects.toThrow(/no window/i);
+    await runOutLaunchPoll(p);
+    await settled;
+  });
+
+  it('a still-running process with no window yet returns its pid but no title', async () => {
+    setup({ windowAppears: false, alive: true });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+    const adapter = new LinuxAdapter();
+    const p = adapter.launchApp('calculator');
+    await runOutLaunchPoll(p);
+    const res = await p;
+    expect(res).toEqual({ pid: 777 });
+  });
+});
+
+describe('B7 — a GTK4 focused element gets the same window offset as the tree', () => {
+  it('window-relative focused bounds are offset by the owning window origin', async () => {
+    h.exec = defaultExec(() => ({ element: { name: '', controlType: 'text', coordType: 'window', processId: 4242, bounds: { x: 0, y: 165, width: 360, height: 42 } } }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const el = await adapter.getFocusedElement();
+    // wmctrl says pid 4242's window sits at (100,200)
+    expect(el?.bounds).toEqual({ x: 100, y: 365, width: 360, height: 42 });
+  });
+});
+
+describe('R1 — window bounds are the client window\'s real position, not wmctrl\'s', () => {
+  it('wmctrl adds the frame extents (openbox); xwininfo absolute origin wins', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'xwininfo') {
+        return { stdout: [
+          'xwininfo: Window id: 0x1d8 (the root window) (has no name)',
+          '     0x3c00001 "frame": ()  802x625+99+180  +99+180',
+          '        0x3c00003 "gnome-calculator": ("x" "X")  800x600+1+20  +99+180',
+          '     0x3c00004 "Untitled - Mousepad": ("m" "M")  640x480+0+0  +50+60',
+          '',
+        ].join('\n') };
+      }
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    const wins = await adapter.listWindows();
+    expect(wins[0].bounds).toEqual({ x: 99, y: 180, width: 800, height: 600 });
+    expect(wins[1].bounds).toEqual({ x: 50, y: 60, width: 640, height: 480 });
+  });
+
+  it('without xwininfo output the wmctrl geometry is kept', async () => {
+    const adapter = new LinuxAdapter();
+    const wins = await adapter.listWindows();
+    expect(wins[0].bounds).toEqual({ x: 100, y: 200, width: 800, height: 600 });
+  });
+});
+
+describe('R2 — a pid-less window whose title another app also uses is never scoped to that app', () => {
+  it('passes the other window\'s pid as --exclude-pids', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'wmctrl' && args[0] === '-l') {
+        // gnome-calculator (pid 4242) and xcalc (no pid) are both "Calculator".
+        return { stdout: '0x03c00003  0 4242   100 200 800 600  box Calculator\n0x03c00005  0 0   2 40 226 394  box Calculator\n' };
+      }
+      if (cmd === 'xdotool' && args[0] === 'getactivewindow') return { stdout: String(0x3c00005) + '\n' };
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.findElements({ name: '=' });
+    const args = bridgeCalls()[0];
+    expect(args[args.indexOf('--window-title') + 1]).toBe('Calculator');
+    expect(args[args.indexOf('--exclude-pids') + 1]).toBe('4242');
   });
 });
