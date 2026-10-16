@@ -255,6 +255,97 @@ VM and an Ubuntu 24.04 VM:
   (`scripts/mac/ax-node-count.swift`) so the wake is judged independently of
   the tree walk, and checks the Retina geometry and `listDisplays()`.
 
+macOS reads that failed and said nothing, from a blind test on a real Mac (macOS 26.5,
+M1 iMac, no screenshots):
+
+- **`window list` said "Windows (0)" with 15 windows open, and `read_tree` said
+  "empty a11y tree — app may be custom-canvas" for TextEdit, Calculator and
+  Safari.** Both were timeouts turned into empty answers: the osascript behind the
+  window list takes 9–11 s against an 8 s limit, a tree walk 12–25 s against 12 s,
+  and the adapter swallowed the error. Reads now go through a small compiled Swift
+  helper on the accessibility API (`scripts/mac/ax-helper.swift`, built once into
+  `~/.clawdcursor/bin` in about 3 s, only where the Command Line Tools exist; the
+  first call waits for the build, and a Mac without them is never shown the
+  "install developer tools" dialog). Same calls, same Mac, minutes apart:
+
+  | call | before | after |
+  |---|---|---|
+  | `window list` | 9.0–11.2 s, "Windows (0)" | 0.37 s, 22 windows |
+  | `read_tree` TextEdit | 24.9 s, "empty tree" | 0.07 s, 11 elements |
+  | `read_tree` a Safari page | 24.8 s, "empty tree" | 0.15 s, 403 elements |
+  | `find` buttons in TextEdit | 9.2 s, nothing | 0.1 s |
+  | `window active` | 1.0 s | 0.05 s |
+  | `read_tree` Calculator | 24.8 s, "empty tree" | 0.15 s, 35 named elements |
+
+  A timeout, a hung app or a locked screen is now an error that says so, never an
+  empty answer; an app that stalls shows as "(not responding)" and costs only its
+  own 1.5 s. WebKit and Electron helper processes (`Safari Web Content`, …) are not
+  apps and are not listed. Without the helper (no `swiftc`, or `CLAWD_NO_MAC_AX=1`)
+  the old osascript scripts still work, now with limits that fit their real speed
+  (window list 11.8 s → 17 windows, not zero).
+- **`window active` and `smart_click` used the wrong window.** The active window was
+  the biggest window of the frontmost app ("Untitled 4") while you typed in the
+  small main one ("Untitled 7"), and `smart_click`'s ctx.a11y path took the first
+  window of the frontmost *process* — hence the false "matched outside focused
+  window" warning on menu-bar items. It is now the app's focused (else main)
+  window, in the adapter, in the legacy `AccessibilityBridge` and in the osascript
+  fallback.
+- **SwiftUI controls with only an `AXIdentifier` could not be found or invoked.**
+  The identifier is now read as `automationId` (and names a control that has no
+  label), so `invoke {automationId:"One"}` and `find {automationId}` work on the
+  macOS 26 Calculator: `find` 73 ms, `invoke` 246 ms (they used to miss). `find_element`
+  passes `automationId` to the adapter instead of filtering a capped result afterwards.
+  `invoke` with nothing to aim at (no name, controlType or automationId) is refused;
+  `invoke-element.jxa` pressed the best-scoring button in the window.
+- **`open_app` said "Could not confirm … no window appeared" for apps that had
+  launched** (3 of 3 in the blind test, ~26 s each), then typed the app's name into
+  Spotlight. The launch is now confirmed from the process (NSWorkspace) and its
+  windows instead of a diff of the slow window list: a cold Calculator is
+  `Opened "Calculator" (pid=…, window="Calculator")` in 0.84 s; an app that is up
+  but has no window yet is reported as still loading. Spotlight is only used when
+  the app never appeared.
+- **A system dialog or the lock screen owned the keyboard while every tool said OK.**
+  System Events keeps naming the app behind a permission prompt, an auth sheet or
+  the lock screen as frontmost; NSWorkspace knows better. `type` and `key` now refuse
+  while one of those owns the keyboard (a stray Return could press "Allow"), naming
+  the dialog and how to answer it (read its buttons with `processId`), and
+  `window active` shows it. Spotlight, the Dock, Control Center and clawdcursor's
+  own overlay are not treated as dialogs. `CLAWD_NO_MAC_AX=1` switches the guard off
+  together with the helper.
+- `scripts/verify-macos.mjs` now compiles and times the helper, compares its window
+  list with the old script's (nothing missing, same geometry) and reads a live tree;
+  `mac-ax-live.test.ts` drives a throwaway AppKit app (identifier-only buttons, a
+  secure field, two windows, a frozen process) with `CLAWD_LIVE_MAC_TESTS=1`.
+- Hardening from an independent review of the helper, each reproduced on the Mac
+  first: every accessibility call is bounded by one timeout (the per-app setting
+  never reached a window's or a control's own calls); a button whose action opens a
+  modal panel is reported as *pending*, not as a failed click, so callers stop
+  clicking it again; a value that starts with `--` is a value (`set-value "--- notes"`
+  wrote an empty string and said success); `find` / `invoke` match the label the
+  tree shows (text that is a child of the control) and refuse to act on a partial
+  match like "Save As…" for "Save" when part of the window did not answer; a subtree
+  that did not answer is reported as PARTIAL instead of vanishing, an unreadable
+  window is an error, and a hung app is a timeout, not "no elements found". One
+  transient failure of the helper no longer pushes the whole session onto the slow
+  osascript path (retried after a minute); a launcher's panel (Raycast, Alfred) is
+  typed into, not mistaken for a system dialog. On the osascript path, secure-field
+  values are no longer returned by `find` / `invoke get-value` / the focused element,
+  the focused window (not the main one) is preferred like the helper does, and a
+  locked screen is reported instead of System Events' empty answers. `read_screen`
+  prints "(window list failed: …)" instead of "(no windows found)" when the list
+  failed.
+- **Focusing a window on macOS never changes its size, zoom or full-screen state**
+  (Windows' focus un-maximized windows; this was checked, pinned by a test, and
+  confirmed on a real zoomed window), **and now brings a minimized window back**
+  — clearing "minimized" returns it at the size it had. With no title given, focus
+  prefers a window that is on screen over one you put away.
+- **A Mac without the Xcode Command Line Tools** (no `swiftc`, so no fast helper)
+  keeps working through the osascript path, and says how to get the fast one: its
+  timeouts and errors end with "run `xcode-select --install`", an identifier-only
+  `find` reports that it cannot search by identifier there instead of "no elements
+  found", and `clawdcursor doctor` shows the helper's state (built / builds on first
+  use / needs the Command Line Tools / switched off).
+
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 
 ### Added

@@ -48,12 +48,15 @@ function run() {
     }
 
     // Extract properties safely
-    let name = '', role = '', value = '';
+    let name = '', role = '', value = '', subrole = '';
     let bounds = { x: 0, y: 0, width: 0, height: 0 };
 
     try { name = focused.name() || ''; } catch (_) {}
     try { role = focused.role() || ''; } catch (_) {}
-    try { value = String(focused.value() || ''); } catch (_) {}
+    try { subrole = focused.subrole() || ''; } catch (_) {}
+    // A secure field's value never leaves the accessibility layer (audit M2): not even read.
+    const secure = subrole === 'AXSecureTextField';
+    if (!secure) { try { value = String(focused.value() || ''); } catch (_) {} }
 
     try {
       const pos = focused.position();
@@ -94,7 +97,8 @@ function run() {
       processId: pid,
       isEnabled: true,
       bounds: bounds,
-      value: value
+      value: value,
+      secure: secure || undefined
     });
   } catch (e) {
     return JSON.stringify(null);

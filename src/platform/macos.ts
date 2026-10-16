@@ -35,14 +35,22 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
+import {
+  defaultMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner,
+  type AppState, type MacAx,
+} from './mac-ax';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
 
 // Tunables (kept here, not magic numbers)
 const OSASCRIPT_TIMEOUT_MS = 8_000;
-const A11Y_TREE_TIMEOUT_MS = 12_000;
 const SCREENSHOT_TIMEOUT_MS = 10_000;
+/** How long a "the keyboard is free" probe is trusted — a burst of keystrokes probes once. */
+const KEYBOARD_PROBE_TTL_MS = 250;
+/** How long open_app waits for a launched app to show a window before calling it "still loading". */
+const LAUNCH_CONFIRM_MS = 4_000;
+const LAUNCH_POLL_MS = 250;
 
 export class MacOSAdapter implements PlatformAdapter {
   readonly platform = 'darwin' as const;
@@ -52,11 +60,26 @@ export class MacOSAdapter implements PlatformAdapter {
   private permissionCheckPath: string | null = null;
   private inputPermissionTested = false;
   private inputPermissionCached = false;
+  private readonly ax: MacAx;
+  private keyboardFreeAt = 0;
+
+  /** Why the last findElements / getUiTree came back short (see PlatformAdapter). */
+  lastFindScope: PlatformAdapter['lastFindScope'] = null;
+  lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastTreeTruncated = false;
+
+  constructor(opts: { ax?: MacAx } = {}) {
+    this.ax = opts.ax ?? defaultMacAx();
+  }
 
   async init(): Promise<void> {
     // Find the helper binaries shipped with the app bundle.
     this.screenshotHelperPath = this.findHelper('screenshot-helper');
     this.permissionCheckPath = this.findHelper('permission-check');
+
+    // Build the accessibility helper in the background now, so the first window
+    // list / tree read already has it (until then the osascript scripts answer).
+    this.ax.prepare();
 
     // Pre-warm screen size so first capture is fast.
     await this.getScreenSize().catch(() => null);
@@ -278,30 +301,21 @@ export class MacOSAdapter implements PlatformAdapter {
 
   // ─── WINDOWS ──────────────────────────────────────────────────────
 
+  /**
+   * Every titled window. A failure (timeout, locked screen) THROWS: it used to
+   * be swallowed into `[]`, which the `window list` tool printed as "Windows (0)"
+   * with fifteen windows open.
+   */
   async listWindows(): Promise<WindowInfo[]> {
-    try {
-      const scriptPath = path.join(SCRIPTS_DIR, 'get-windows.jxa');
-      const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', scriptPath], {
-        timeout: OSASCRIPT_TIMEOUT_MS,
-      });
-      const raw = JSON.parse(stdout);
-      return Array.isArray(raw) ? raw.map(this.normalizeWindow) : [];
-    } catch {
-      return [];
-    }
+    return this.ax.listWindows();
   }
 
+  /**
+   * The window that has the keyboard: the frontmost app's focused window (per
+   * NSWorkspace, so a system dialog counts), not "window 1" or the largest one.
+   */
   async getActiveWindow(): Promise<WindowInfo | null> {
-    try {
-      const scriptPath = path.join(SCRIPTS_DIR, 'get-foreground-window.jxa');
-      const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', scriptPath], {
-        timeout: OSASCRIPT_TIMEOUT_MS,
-      });
-      const raw = JSON.parse(stdout);
-      return raw ? this.normalizeWindow(raw) : null;
-    } catch {
-      return null;
-    }
+    return this.ax.activeWindow();
   }
 
   async focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean> {
@@ -319,7 +333,8 @@ export class MacOSAdapter implements PlatformAdapter {
     let processId = query.processId;
     if (processId === undefined && query.processName) {
       const target = query.processName.toLowerCase();
-      const windows = await this.listWindows();
+      // A failed list cannot resolve the name; fall through to "nothing to match on".
+      const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
       const hit = windows.find(w => w.processName.toLowerCase() === target)
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
       if (hit) processId = hit.processId;
@@ -454,107 +469,72 @@ export class MacOSAdapter implements PlatformAdapter {
 
   // ─── ACCESSIBILITY ────────────────────────────────────────────────
 
+  /**
+   * The key window's tree (the frontmost app's when `processId` is omitted).
+   * A walk that hit its budget sets `lastTreeTruncated`; a timeout THROWS — it
+   * used to come back as `[]`, which read_tree reported as "empty a11y tree —
+   * app may be custom-canvas" for a perfectly ordinary Cocoa app.
+   */
   async getUiTree(processId?: number): Promise<UiElement[]> {
-    try {
-      const args = ['-l', 'JavaScript', path.join(SCRIPTS_DIR, 'get-screen-context.jxa')];
-      // Match the Windows adapter's depth (8). The JXA default is 2, which only
-      // reaches window → group → child — far too shallow for real apps (Mail,
-      // Safari chrome, System Settings nest controls deeper), so compile_ui/
-      // el_NN saw a near-empty tree and named targets went missing on macOS
-      // (audit 2026-06-11, M4). The legacy AccessibilityManager already drives
-      // this same script at depth 8.
-      const scriptArgs = ['-MaxDepth', '8'];
-      // Default to the frontmost app's pid when the caller omits it, so an
-      // unscoped read_screen targets the active window (parity with the Windows
-      // adapter) instead of relying on the script's default scope.
-      let pid = processId;
-      if (pid === undefined) {
-        const fg = await this.getActiveWindow().catch(() => null);
-        if (fg?.processId) pid = fg.processId;
-      }
-      if (pid !== undefined) scriptArgs.push('-FocusedProcessId', String(pid));
-      args.push('--', ...scriptArgs);
-      const { stdout } = await execFileAsync('osascript', args, { timeout: A11Y_TREE_TIMEOUT_MS });
-      const data = JSON.parse(stdout);
-      return this.flattenTree(data?.uiTree);
-    } catch {
-      return [];
-    }
+    const { elements, truncated } = await this.ax.uiTree(processId);
+    this.lastTreeTruncated = truncated;
+    return elements;
   }
 
-  async findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]> {
+  async findElements(query: { name?: string; controlType?: string; automationId?: string; processId?: number }): Promise<UiElement[]> {
+    this.lastFindError = null;
+    // Scope an unscoped query to the active window (as the Windows adapter and
+    // invokeElement do) — otherwise a name that exists in every app matches
+    // whichever the walk reaches first.
+    let processId = query.processId;
+    let scope: { processId?: number; processName?: string; title?: string } = { processId };
+    if (processId === undefined) {
+      const fg = await this.getActiveWindow().catch(() => null);
+      if (fg?.processId) {
+        processId = fg.processId;
+        scope = { processId: fg.processId, processName: fg.processName, title: fg.title };
+      }
+    }
+    this.lastFindScope = [scope];
     try {
-      const args = ['-l', 'JavaScript', path.join(SCRIPTS_DIR, 'find-element.jxa'), '--'];
-      // find-element.jxa parses '-ProcessId' (NOT '-FocusedProcessId' — that name
-      // is only understood by get-screen-context.jxa). Passing the wrong flag
-      // silently dropped pid scoping (review 2026-06-11).
-      if (query.processId !== undefined) args.push('-ProcessId', String(query.processId));
-      if (query.name) args.push('-Name', query.name);
-      if (query.controlType) args.push('-ControlType', query.controlType);
-      const { stdout } = await execFileAsync('osascript', args, { timeout: A11Y_TREE_TIMEOUT_MS });
-      const raw = JSON.parse(stdout);
-      return Array.isArray(raw) ? raw.map(this.normalizeElement) : [];
-    } catch {
+      return await this.ax.find({ ...query, processId });
+    } catch (err) {
+      // A locked screen or a missing permission is not "nothing found" — say so.
+      if (err instanceof MacAxError && (err.kind === 'locked' || err.kind === 'permission')) throw err;
+      // A timeout is reported through lastFindError so the find tool can say
+      // "TIMED OUT" instead of "(no elements found)" (parity with Windows).
+      this.lastFindError = err instanceof MacAxError && err.kind === 'timeout' ? 'timeout' : 'error';
       return [];
     }
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
+    // Optional context for callers; a failed read is "nothing focused", as it always was.
     try {
-      const scriptPath = path.join(SCRIPTS_DIR, 'get-focused-element.jxa');
-      const { stdout } = await execFileAsync('osascript', ['-l', 'JavaScript', scriptPath], {
-        timeout: OSASCRIPT_TIMEOUT_MS,
-      });
-      const raw = JSON.parse(stdout);
-      return raw ? this.normalizeElement(raw) : null;
+      return await this.ax.focusedElement();
     } catch {
       return null;
     }
   }
 
   async invokeElement(query: {
-    name?: string; controlType?: string; processId?: number;
+    name?: string; controlType?: string; automationId?: string; processId?: number;
     action?: InvokeAction; value?: string;
   }): Promise<{
     success: boolean;
     bounds?: { x: number; y: number; width: number; height: number };
     data?: Record<string, unknown>;
   }> {
-    try {
-      // invoke-element.jxa requires a process; scope an unscoped call to the
-      // foreground app like the Windows and Linux adapters (without this every
-      // invoke / set_value by name failed on a live Mac).
-      if (query.processId === undefined) {
-        const fg = await this.getActiveWindow().catch(() => null);
-        if (fg?.processId) query = { ...query, processId: fg.processId };
-      }
-      const args = ['-l', 'JavaScript', path.join(SCRIPTS_DIR, 'invoke-element.jxa'), '--'];
-      // invoke-element.jxa parses '-ProcessId' (NOT '-FocusedProcessId' — that
-      // name belongs to get-screen-context.jxa). The wrong flag made the JXA
-      // fail its required-processId check, breaking every pid-scoped invoke /
-      // get-value on macOS (review 2026-06-11). The '--' is always present so
-      // later flags are never eaten by osascript when processId is omitted.
-      if (query.processId !== undefined) args.push('-ProcessId', String(query.processId));
-      if (query.name) args.push('-Name', query.name);
-      if (query.controlType) args.push('-ControlType', query.controlType);
-      if (query.action) args.push('-Action', query.action);
-      if (query.value !== undefined) args.push('-Value', query.value);
-      const { stdout } = await execFileAsync('osascript', args, { timeout: OSASCRIPT_TIMEOUT_MS });
-      const result = JSON.parse(stdout);
-      return {
-        success: result?.success === true,
-        // A click() miss reports the element's rect / centre so the caller
-        // can coordinate-fallback (parity with the Windows adapter).
-        bounds: result?.bounds
-          ?? (result?.clickPoint ? { x: result.clickPoint.x, y: result.clickPoint.y, width: 1, height: 1 } : undefined),
-        // get-value returns its payload at the TOP level ({success, action,
-        // value, method}); consumers read res.data?.value — surface it
-        // (review 2026-06-11; parity with the Windows adapter).
-        data: result?.data ?? (result?.value !== undefined ? { value: result.value } : undefined),
-      };
-    } catch {
-      return { success: false };
+    // The target needs a process; scope an unscoped call to the foreground app
+    // like the Windows and Linux adapters (without this every invoke / set_value
+    // by name failed on a live Mac).
+    if (query.processId === undefined) {
+      const fg = await this.getActiveWindow().catch(() => null);
+      if (fg?.processId) query = { ...query, processId: fg.processId };
     }
+    // A miss is `{success:false}`; a timeout / locked screen THROWS, because
+    // "timed out" is not "element not found or not actionable".
+    return this.ax.invoke({ ...query, action: query.action ?? 'click' });
   }
 
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
@@ -676,8 +656,35 @@ export class MacOSAdapter implements PlatformAdapter {
 
   // ─── INPUT (keyboard) ─────────────────────────────────────────────
 
+  /**
+   * Refuse to type while something other than the app being driven owns the
+   * keyboard. System Events names the last ORDINARY app "frontmost", so a TCC
+   * prompt, an auth dialog or the lock screen takes the keys while every
+   * "typed OK" still reads as success — and a stray Return can press Allow.
+   * NSWorkspace sees them. A failed probe never blocks input.
+   */
+  private async keyboardOwnerError(): Promise<Error | null> {
+    if (process.env.CLAWD_NO_MAC_AX === '1') return null;
+    try {
+      const owner = classifyKeyboardOwner(await this.ax.frontmost());
+      return owner.kind === 'app' ? null : new Error(describeKeyboardOwner(owner));
+    } catch {
+      return null;
+    }
+  }
+
+  private async assertKeyboardAvailable(): Promise<void> {
+    // Trust a clean probe briefly so a burst of keystrokes costs one lookup; a
+    // blocked result is never cached — the dialog may be gone a moment later.
+    if (Date.now() - this.keyboardFreeAt < KEYBOARD_PROBE_TTL_MS) return;
+    const err = await this.keyboardOwnerError();
+    if (err) throw err;
+    this.keyboardFreeAt = Date.now();
+  }
+
   async typeText(text: string): Promise<void> {
     if (!text) return;
+    await this.assertKeyboardAvailable();
     // Escape backslashes and quotes for AppleScript string literal.
     const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     await execFileAsync('osascript', ['-e',
@@ -687,6 +694,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async keyPress(combo: PortableKeyCombo): Promise<void> {
     if (!combo) return;
+    await this.assertKeyboardAvailable();
 
     // Literal "+" can't be split.
     if (combo === '+') {
@@ -838,34 +846,49 @@ export class MacOSAdapter implements PlatformAdapter {
       throw new Error('launchApp: illegal characters in app name');
     }
 
-    // Snapshot windows BEFORE any spawn so the post-launch diff-and-poll
-    // helper can ignore them. Reused for the idempotency check below to
-    // save a redundant Apple Events round-trip.
+    // Ask NSWorkspace first: is the app already running, and does it have a
+    // window? The old flow learned the pid only from a diff of the window list
+    // (9 s on a busy Mac, and an 8 s timeout read as "no windows"), so launches
+    // that had worked were reported as "Could not confirm … no window appeared",
+    // and the Spotlight fallback then typed the name into Spotlight for an app
+    // that was already up (live blind test, 2026-10-15). `undefined` means the
+    // lookup itself failed — only then is the window-list diff the fallback.
+    const before: AppState | null | undefined = await this.ax.appState(name).catch(() => undefined);
+
     let windowsBefore: readonly WindowInfo[] = [];
-    try {
-      windowsBefore = await this.listWindows();
-    } catch {
-      // Non-fatal — empty before-set is a safe default.
-    }
+    if (before === undefined) windowsBefore = await this.listWindows().catch(() => [] as WindowInfo[]);
 
     // v0.8.3 — idempotency. On macOS `open -a AppName` is generally smart
     // about not spawning duplicates (it activates the existing app), but
     // we want a stable cross-OS contract: check first, focus-if-running,
     // launch only when needed. Prevents the "Outlook keeps opening" class
     // of bug from any retry loop in the pipeline.
+    // Without the helper the process is known (lsappinfo) but its windows are not: ask the window list for them.
+    let beforeWindows = before?.windows ?? [];
+    if (before && !before.windowsKnown) {
+      beforeWindows = (await this.listWindows().catch(() => [] as WindowInfo[]))
+        .filter(w => w.processId === before.processId && !w.isMinimized);
+    }
     if (!opts?.alwaysNewInstance && !opts?.url) {
-      const target = name.toLowerCase();
-      const existing = windowsBefore.find(w =>
-        w.processName.toLowerCase() === target ||
-        w.processName.toLowerCase().includes(target) ||
-        w.title.toLowerCase().includes(target),
-      );
-      if (existing) {
-        await this.focusWindow({ processId: existing.processId }).catch(() => {});
-        return { pid: existing.processId, title: existing.title, handle: existing.handle };
+      if (before && beforeWindows.length > 0) {
+        await this.focusWindow({ processId: before.processId }).catch(() => {});
+        return this.launchResult(before, beforeWindows[0]);
+      }
+      if (before === undefined) {
+        const target = name.toLowerCase();
+        const existing = windowsBefore.find(w =>
+          w.processName.toLowerCase() === target ||
+          w.processName.toLowerCase().includes(target) ||
+          w.title.toLowerCase().includes(target),
+        );
+        if (existing) {
+          await this.focusWindow({ processId: existing.processId }).catch(() => {});
+          return { pid: existing.processId, title: existing.title, handle: existing.handle };
+        }
       }
     }
 
+    let opened = true;
     try {
       const args = ['-a', name];
       if (opts?.alwaysNewInstance) args.unshift('-n');
@@ -874,19 +897,17 @@ export class MacOSAdapter implements PlatformAdapter {
         timeout: 5_000,
         cwd: opts?.cwd,
       });
-      // Diff-and-poll the window list with a tighter primary budget, so the
-      // Spotlight fallback below has time if `open -a` didn't surface a
-      // window (e.g., bundle name typo, name-not-found at App registry).
-      const win = await waitForLaunchedWindow(
-        windowsBefore,
-        () => this.listWindows(),
-        buildAppPredicate(name),
-        { timeoutMs: 4_000 },
-      );
-      if (win) return { pid: win.processId, title: win.title, handle: win.handle };
     } catch {
       // open -a failed outright — Spotlight fallback below is still worth
       // trying for apps the user can find by name.
+      opened = false;
+    }
+    if (opened) {
+      // Tighter primary budget, so the Spotlight fallback below has time if
+      // `open -a` didn't surface the app (bundle name typo, name-not-found at
+      // the App registry).
+      const found = await this.confirmLaunch(name, before, windowsBefore, opts);
+      if (found) return found;
     }
 
     // Spotlight fallback — universal launcher for anything macOS can find.
@@ -894,7 +915,57 @@ export class MacOSAdapter implements PlatformAdapter {
     // shape the router's zero-LLM fast path already proves. Keyboard goes
     // through the platform's internal primitives; not gated by the safety
     // layer because this is an internal launch detail.
-    return this.launchViaSpotlight(name, opts?.searchTerm, windowsBefore);
+    const viaSpotlight = await this.launchViaSpotlight(name, opts?.searchTerm, before, windowsBefore, opts);
+    if (viaSpotlight) return viaSpotlight;
+
+    // Nothing confirmed. A system dialog or the lock screen owning the keyboard
+    // is the likeliest reason — say so instead of the generic "no window appeared".
+    const blocked = await this.keyboardOwnerError();
+    if (blocked) throw blocked;
+    return {};
+  }
+
+  private launchResult(app: AppState, win: WindowInfo): { pid: number; title: string; handle: number | string } {
+    // Some windows (Calculator's) have no title; the app's own name is the honest label.
+    return { pid: app.processId, title: win.title || app.name, handle: win.handle ?? app.processId };
+  }
+
+  /**
+   * After `open -a` / Spotlight: wait for the app to register with NSWorkspace
+   * and show a window. Running with no window yet is a launch in progress
+   * ({pid} only — the tool says "still loading", not "failed"); null means it
+   * never appeared at all.
+   */
+  private async confirmLaunch(
+    name: string,
+    before: AppState | null | undefined,
+    windowsBefore: readonly WindowInfo[],
+    opts: { alwaysNewInstance?: boolean } | undefined,
+  ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
+    if (before === undefined) {
+      // Process state is unreadable: the window-list diff is all there is.
+      const win = await waitForLaunchedWindow(windowsBefore, () => this.listWindows(), buildAppPredicate(name), { timeoutMs: LAUNCH_CONFIRM_MS });
+      return win ? { pid: win.processId, title: win.title, handle: win.handle } : null;
+    }
+    const deadline = Date.now() + LAUNCH_CONFIRM_MS;
+    let running: AppState | null = null;
+    for (;;) {
+      const st = await this.ax.appState(name).catch(() => null);
+      // With -n only a process other than the one we started from counts.
+      if (st && (!opts?.alwaysNewInstance || st.processId !== before?.processId)) {
+        running = st;
+        let windows = st.windows;
+        if (!st.windowsKnown) {
+          // No helper: the process is known, its windows are not. Ask the list for this pid.
+          windows = (await this.listWindows().catch(() => [] as WindowInfo[]))
+            .filter(w => w.processId === st.processId && !w.isMinimized);
+        }
+        if (windows.length > 0) return this.launchResult(st, windows[0]);
+      }
+      if (Date.now() >= deadline) break;
+      await this.delay(LAUNCH_POLL_MS);
+    }
+    return running ? { pid: running.processId } : null;
   }
 
   /**
@@ -907,8 +978,10 @@ export class MacOSAdapter implements PlatformAdapter {
   private async launchViaSpotlight(
     name: string,
     searchTermHint: string | undefined,
+    before: AppState | null | undefined,
     windowsBefore: readonly WindowInfo[],
-  ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
+    opts: { alwaysNewInstance?: boolean } | undefined,
+  ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     // Prefer the alias's curated `searchTerm` (or `macOSAppName`); fall back
     // to the stripped bundle name. Keeps the launcher app-agnostic — adding
     // apps still means a row in `aliases.ts`, not platform code.
@@ -928,18 +1001,11 @@ export class MacOSAdapter implements PlatformAdapter {
       await this.delay(500);
       await this.keyPress('Return');
     } catch {
-      // Keyboard layer flaky — fall through to the empty result.
+      // The keyboard is unavailable (a dialog owns it) or flaky: nothing was
+      // launched, so there is nothing to wait for.
+      return null;
     }
-
-    const win = await waitForLaunchedWindow(
-      windowsBefore,
-      () => this.listWindows(),
-      buildAppPredicate(name),
-      { timeoutMs: 4_000 },
-    );
-    return win
-      ? { pid: win.processId, title: win.title, handle: win.handle }
-      : {};
+    return this.confirmLaunch(name, before, windowsBefore, opts);
   }
 
   // ─── INTERNAL HELPERS ─────────────────────────────────────────────
@@ -952,51 +1018,6 @@ export class MacOSAdapter implements PlatformAdapter {
       path.join(os.homedir(), '.clawdcursor', 'ClawdCursor.app', 'Contents', 'MacOS', name),
     ];
     return candidates.find(p => fs.existsSync(p)) ?? null;
-  }
-
-  private normalizeWindow = (raw: any): WindowInfo => ({
-    title: raw.title ?? '',
-    processName: raw.processName ?? '',
-    processId: raw.processId ?? 0,
-    bounds: raw.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-    isMinimized: raw.isMinimized ?? false,
-    handle: raw.handle ?? raw.processId,
-  });
-
-  private normalizeElement = (raw: any): UiElement => {
-    const enabled = raw.enabled;
-    // AX secure fields (subrole AXSecureTextField) carry secure=true from the
-    // JXA helper. Never surface their value — the helper already blanked it, but
-    // drop it here too so a future helper change can't leak it (M2).
-    const secure = raw.secure === true;
-    return {
-      name: raw.name ?? '',
-      controlType: (raw.controlType ?? '').replace('AX', ''),
-      subrole: raw.subrole,
-      secure,
-      bounds: raw.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
-      value: secure ? undefined : raw.value,
-      enabled,
-      focused: raw.focused,
-      // Tranche 1A: state fields — the JXA helper surfaces these when set.
-      selected: raw.selected,
-      disabled: enabled === false ? true : undefined,
-      busy: raw.busy,
-      offscreen: raw.offscreen,
-      expandable: raw.expandable,
-      expanded: raw.expanded,
-      automationId: raw.identifier ?? raw.automationId,
-      processId: raw.processId,
-    };
-  };
-
-  private flattenTree(node: any, acc: UiElement[] = []): UiElement[] {
-    if (!node) return acc;
-    if (node.controlType || node.name) acc.push(this.normalizeElement(node));
-    if (Array.isArray(node.children)) {
-      for (const child of node.children) this.flattenTree(child, acc);
-    }
-    return acc;
   }
 
   private delay(ms: number): Promise<void> {

@@ -19,6 +19,7 @@ import { promisify } from 'util';
 import pc from 'picocolors';
 import { NativeDesktop } from '../platform/native-desktop';
 import { AccessibilityBridge } from '../platform/accessibility';
+import { macAxStatus } from '../platform/mac-ax';
 import {
   PROVIDERS,
   PROVIDER_ENV_VARS,
@@ -299,6 +300,12 @@ export async function runDoctor(opts: {
       if (perms.bundleId) {
         console.log(`   ℹ  Checked process: ${perms.bundleId}`);
       }
+
+      // The fast accessibility helper (window list / trees in tens of ms). Missing Command Line Tools is not a
+      // failure — the osascript path still works — but it is slower, and the fix is one command.
+      const helper = await macAxStatus();
+      results.push({ name: 'macOS accessibility helper', ok: true, detail: helper.detail });
+      console.log(`   ${helper.state === 'no-devtools' ? '⚠️ ' : '✅'} Accessibility helper: ${helper.detail}`);
     } catch (err) {
       results.push({ name: 'macOS Accessibility permission', ok: false, detail: `Could not query: ${err}` });
       results.push({ name: 'macOS Screen Recording permission', ok: false, detail: `Could not query: ${err}` });

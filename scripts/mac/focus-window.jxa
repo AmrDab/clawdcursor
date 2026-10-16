@@ -5,6 +5,9 @@
  *
  * Brings a window to the front by title substring or process ID.
  *
+ * Focusing never changes a window's size, zoom or full-screen state; the only state it changes is
+ * minimized (a minimized window is brought back). macos-focus-preserves-window-state.test.ts pins this.
+ *
  * Parameters:
  *   -title <string>      - Substring match against window titles (case-insensitive)
  *   -processId <number>  - Process ID to focus
@@ -65,11 +68,18 @@ function isLikelyTrayTitle(title) {
            t === 'inspector' || t === 'activity';
 }
 
+function isMinimizedWin(win) {
+    try { return win.attributes.byName('AXMinimized').value() === true; } catch (e) { return false; }
+}
+
 function scoreWindow(win, index) {
     var bounds = getWinBounds(win);
     var area = bounds.width * bounds.height;
     if (area <= 0) return -Infinity;
     var score = area;
+    // With no title to go by, prefer a window that is on screen: do not resurrect one the user put away
+    // (a minimized window is still chosen when it is the only one).
+    if (isMinimizedWin(win)) score -= 100000000;
     var subrole = getWinSubrole(win);
     if (subrole === 'AXStandardWindow') score += 2000000;
     else if (subrole === 'AXFloatingWindow') score -= 5000000;
@@ -127,7 +137,7 @@ function run(argv) {
             } else if ((a === '-processId' || a === '-ProcessId') && hasNext) {
                 params.processId = parseInt(argv[++i], 10);
             }
-            // -Restore has no direct macOS equivalent; silently ignore
+            // -Restore: focusing on macOS always brings a minimized window back (see below); no other state is touched
         }
 
         // Validate parameters
@@ -210,6 +220,15 @@ function run(argv) {
                 success: false,
                 error: 'Window not found matching title="' + (params.title || '') + '" processId=' + (params.processId || 0)
             });
+        }
+
+        // A minimized window cannot take focus. Clearing AXMinimized puts it back exactly as it was — size, zoom and
+        // full-screen state are never touched (Windows' SW_RESTORE also un-maximized a maximized window; this does not).
+        try {
+            var minimizedAttr = targetWindow.attributes.byName('AXMinimized');
+            if (minimizedAttr.value() === true) minimizedAttr.value = false;
+        } catch (e) {
+            // Not every window exposes it; nothing to restore.
         }
 
         // Bring window to front

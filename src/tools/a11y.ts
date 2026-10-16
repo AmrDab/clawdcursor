@@ -172,8 +172,13 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         let baseText: string;
         if (ctx.platform) {
+          // A failed list is not an empty desktop: say it failed (a timeout used to print "(no windows found)").
+          let windowListError: string | null = null;
           const [windows, activeWindow, focused] = await Promise.all([
-            ctx.platform.listWindows().catch(() => []),
+            ctx.platform.listWindows().catch((err: unknown) => {
+              windowListError = err instanceof Error ? err.message : String(err);
+              return [];
+            }),
             ctx.platform.getActiveWindow().catch(() => null),
             ctx.platform.getFocusedElement().catch(() => null),
           ]);
@@ -184,7 +189,7 @@ export function getA11yTools(): ToolDefinition[] {
           const isBrowser = !!activeWindow && getBrowserProcessNames().includes(String(activeWindow.processName ?? '').toLowerCase());
           baseText = [
             'WINDOWS',
-            windows.length ? windows.map(formatWindow).join('\n') : '(no windows found)',
+            windows.length ? windows.map(formatWindow).join('\n') : windowListError ? `(window list failed: ${windowListError})` : '(no windows found)',
             '',
             `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
             tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : '(no elements found)',
@@ -467,7 +472,7 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         let uiaHits: UiElement[];
         if (ctx.platform) {
-          const elements = await ctx.platform.findElements({ name, controlType, processId });
+          const elements = await ctx.platform.findElements({ name, controlType, automationId, processId });
           uiaHits = automationId
             ? elements.filter((el: UiElement) => el.automationId === automationId)
             : elements;
