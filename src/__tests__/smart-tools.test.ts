@@ -136,6 +136,33 @@ describe('Smart Tools', () => {
   const smartType = tools.find(t => t.name === 'smart_type')!;
   const invokeEl = tools.find(t => t.name === 'invoke_element')!;
 
+  it('smart_click "1" falls back to the calculator key name "One" (live Windows Calculator)', async () => {
+    mockInvokeElement.mockImplementation(async (q: any) => q.name === 'One' ? { success: true } : { success: false });
+    const r = await withOcr([], () => smartClick.handler({ target: '1' }, createCtx()));
+    expect(mockInvokeElement).toHaveBeenCalledWith(expect.objectContaining({ name: 'One', action: 'click' }));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toMatch(/UI Automation/);
+  });
+
+  it('smart_type focuses the FIELD when a same-named label comes first (live: "First name")', async () => {
+    mockInvokeElement.mockResolvedValue({ success: false });   // focus by name hit the label
+    mockFindElement.mockResolvedValue([
+      { name: 'First name', controlType: 'Text', bounds: { x: 10, y: 10, width: 60, height: 14 } },
+      { name: 'First name', controlType: 'Edit', bounds: { x: 80, y: 6, width: 200, height: 22 } },
+    ]);
+    const r = await smartType.handler({ target: 'First name', text: 'Ada' }, createCtx());
+    expect(r.isError).toBeFalsy();
+    expect(mockMouseClick).toHaveBeenCalledWith(180, 17);
+  });
+
+  it('smart_type still refuses when no editable element has the name', async () => {
+    mockInvokeElement.mockResolvedValue({ success: false });
+    mockFindElement.mockResolvedValue([{ name: 'First name', controlType: 'Text', bounds: { x: 10, y: 10, width: 60, height: 14 } }]);
+    const r = await smartType.handler({ target: 'First name', text: 'Ada' }, createCtx());
+    expect(r.isError).toBe(true);
+    expect(mockMouseClick).not.toHaveBeenCalled();
+  });
+
   it('registers all 4 smart tools', () => {
     expect(tools).toHaveLength(4);
     expect(tools.map(t => t.name)).toEqual(['smart_read', 'smart_click', 'smart_type', 'invoke_element']);

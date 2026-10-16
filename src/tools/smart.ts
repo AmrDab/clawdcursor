@@ -26,6 +26,20 @@ function getOcr(): OcrEngine {
 
 // ── Known apps with empty accessibility trees ──
 // These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
+/** Spoken names of calculator keys (Windows names, macOS AX identifiers). */
+const KEY_NAME_ALIASES: Record<string, string[]> = {
+  '0': ['Zero'], '1': ['One'], '2': ['Two'], '3': ['Three'], '4': ['Four'],
+  '5': ['Five'], '6': ['Six'], '7': ['Seven'], '8': ['Eight'], '9': ['Nine'],
+  '+': ['Plus', 'Add'], '-': ['Minus', 'Subtract'], '−': ['Minus', 'Subtract'],
+  '*': ['Multiply by', 'Multiply'], '×': ['Multiply by', 'Multiply'], 'x': ['Multiply by', 'Multiply'],
+  '/': ['Divide by', 'Divide'], '÷': ['Divide by', 'Divide'],
+  '=': ['Equals'], '.': ['Decimal separator', 'Decimal'], ',': ['Decimal separator', 'Decimal'],
+  '%': ['Percent'],
+};
+
+/** Control types that take typed text, across UIA / AX / AT-SPI names. */
+const EDITABLE_TYPE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
+
 const EMPTY_A11Y_APPS = new Set([
   'windowsterminal', 'terminal', 'wt', 'alacritty', 'wezterm',
   'hyper', 'mintty', 'conhost',
@@ -517,11 +531,19 @@ export function getSmartTools(): ToolDefinition[] {
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
           try {
-            const result = await ctx.a11y.invokeElement({
+            let result = await ctx.a11y.invokeElement({
               name: target,
               processId: processId || activeWin?.processId,
               action: 'click',
             });
+            // Calculator keys are named in words ("One", "Multiply by", AX
+            // identifier "One" on macOS), and OCR rarely reads a lone digit on
+            // a button: try the spoken names before giving up.
+            for (const alias of KEY_NAME_ALIASES[target.trim().toLowerCase()] ?? []) {
+              if (result.success || result.clickPoint) break;
+              result = await ctx.a11y.invokeElement({ name: alias, processId: processId || activeWin?.processId, action: 'click' })
+                .catch(() => result);
+            }
             if (result.success) {
               const data = (result as any).data;
               return { method: 'invoke', pending: data?.pending === true, lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined };
@@ -826,6 +848,18 @@ export function getSmartTools(): ToolDefinition[] {
                 await ctx.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
                 await new Promise(r => setTimeout(r, 100));
                 focused = true;
+              } else {
+                // A label and its field often share the name ("First name"):
+                // the first match was the label, which can't take focus. Click
+                // the EDITABLE element of that name instead.
+                const found = await ctx.a11y.findElement({ name: target, processId: processId || activeWin?.processId }).catch(() => []);
+                const field = (found ?? []).filter((el: any) => EDITABLE_TYPE.test(String(el.controlType ?? '')) && !/^text$/i.test(String(el.controlType ?? ''))
+                  && el.bounds?.width > 0 && el.bounds?.height > 0)[0];
+                if (field) {
+                  await ctx.desktop.mouseClick(field.bounds.x + Math.floor(field.bounds.width / 2), field.bounds.y + Math.floor(field.bounds.height / 2));
+                  await new Promise(r => setTimeout(r, 100));
+                  focused = true;
+                }
               }
             }
           } catch { /* fall through */ }
