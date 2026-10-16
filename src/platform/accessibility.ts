@@ -379,7 +379,8 @@ export class AccessibilityBridge {
     if (IS_MAC) {
       const res = await defaultMacAx().invoke({
         name: opts.name, controlType: opts.controlType, automationId: opts.automationId,
-        processId, action: opts.action, value: opts.value || undefined,
+        // '' is a value (it clears the field) — `|| undefined` made the legacy path unable to.
+        processId, action: opts.action, value: opts.value,
       });
       const value = typeof res.data?.value === 'string' ? res.data.value : undefined;
       const b = res.bounds;

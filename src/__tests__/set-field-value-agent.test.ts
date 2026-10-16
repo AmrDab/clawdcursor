@@ -45,6 +45,23 @@ describe('agent-loop set_field_value', () => {
     expect(p.typeText).not.toHaveBeenCalled();
   });
 
+  // Mac review of 4ee6279: a refusal is not "no settable value" — the widest-Edit-field heuristic must not route around it.
+  it('a REFUSAL is final: no field is guessed, nothing is clicked or typed, and the reason reaches the agent', async () => {
+    const reason = 'role="AXTextField" matches 2 elements — "nameField", "secretField" — add a name or id to pick one';
+    const { ctx, p } = ctxWith('darwin', false, [
+      { name: 'nameField', controlType: 'Edit', bounds: { x: 0, y: 0, width: 300, height: 20 } },
+      { name: 'secretField', controlType: 'Edit', bounds: { x: 0, y: 40, width: 100, height: 20 } },
+    ]);
+    p.invokeElement = vi.fn(async () => ({ success: false, data: { refused: true, error: reason } })) as any;
+    const r = await tool.execute({ controlType: 'Edit', value: 'typed by mistake' }, ctx);
+    expect(r.success).toBe(false);
+    expect(r.text).toContain('matches 2 elements');
+    expect(p.findElements).not.toHaveBeenCalled();
+    expect(p.mouseClick).not.toHaveBeenCalled();
+    expect(p.keyPress).not.toHaveBeenCalled();
+    expect(p.typeText).not.toHaveBeenCalled();
+  });
+
   it('a settable value is set directly, with no typing', async () => {
     const { ctx, p } = ctxWith('win32', true, []);
     const r = await tool.execute({ name: 'File name', value: 'a.txt' }, ctx);

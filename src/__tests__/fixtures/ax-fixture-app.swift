@@ -9,6 +9,7 @@
 //     (no title)        button whose label is a CHILD static text "Peeked"   id peekButton
 //     "Open modal"      button whose action runs a modal alert for 3 s       id modalButton
 //     "Hang"            button whose action BLOCKS the main thread for 4 s   id hangButton  (the app stops answering AX)
+//     "Cafe"            button whose id is non-ASCII, precomposed (NFC)      id "caf\u{E9}"
 //     "hello world"     text field            id nameField
 //     "hunter2"         secure text field     id secretField
 //     "Enable"          checkbox              id enableBox
@@ -110,6 +111,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
             peek.addSubview(peekLabel)
             _ = place(NSButton(title: "Open modal", target: self, action: #selector(openModal(_:))), id: "modalButton", y: 186)
             _ = place(NSButton(title: "Hang", target: self, action: #selector(hang(_:))), id: "hangButton", y: 186, w: 90, x: 240)
+            _ = place(NSButton(title: "Cafe", target: self, action: #selector(pressed(_:))), id: "caf\u{E9}", y: 262, w: 90, x: 240)
             _ = place(NSTextField(string: "hello world"), id: "nameField", y: 148)
             _ = place(NSSecureTextField(string: "hunter2"), id: "secretField", y: 110)
             _ = place(NSButton(checkboxWithTitle: "Enable", target: nil, action: nil), id: "enableBox", y: 72)

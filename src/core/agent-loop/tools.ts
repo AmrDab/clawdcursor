@@ -373,6 +373,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'set-value', value });
         await sleep(150);
         if (res.success) return { success: true, text: `Set "${name}" = ${value.length} chars`, targetLabel: name };
+        // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
+        if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
+          const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
+          return { success: false, text: `Set "${name}" refused — ${why}.`, targetLabel: name };
+        }
         // No settable value (a Chrome field on Linux exposes neither EditableText
         // nor Value; Win11 XAML composites): type into the INPUT — never its
         // same-named label, never into whatever happens to have focus.

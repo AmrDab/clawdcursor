@@ -351,6 +351,19 @@ describe('launchApp (B2 — confirm the launch from the process, not the window 
     expect(osascripts()).toHaveLength(0);
   });
 
+  // Review of 4ee6279, finding 4: a modal dialog of a non-system app is typed into when an AGENT asks (a warning), but the
+  // launch fallback is plumbing — Escape, Cmd+Space, the app's name and Return all went into that dialog, Return pressing its
+  // default button.
+  it('the Spotlight fallback does not type into a modal dialog of another app either — and the error names it', async () => {
+    const ax = fakeAx({
+      appState: vi.fn(async () => null),
+      listWindows: vi.fn(async () => []),
+      frontmost: vi.fn(async () => FRONT({ name: 'SomeAgent', bundleId: 'com.example.agent', processId: 9, activationPolicy: 'accessory', windows: [{ title: 'Delete everything?', subrole: 'AXDialog', modal: true }] })),
+    });
+    await expect(settle(new MacOSAdapter({ ax }).launchApp('Nope'))).rejects.toThrow(/SomeAgent/);
+    expect(osascripts()).toHaveLength(0);
+  });
+
   it('rejects control characters in the name before anything runs', async () => {
     const ax = fakeAx();
     await expect(new MacOSAdapter({ ax }).launchApp('Text\nEdit')).rejects.toThrow(/illegal characters/);
@@ -473,6 +486,70 @@ describe('keyboard guard (B11)', () => {
   });
 });
 
+
+// Review of 4ee6279, finding 3: the agent loop reads `res.data?.error`; this adapter returned the reason top-level only (Linux
+// copies it into data.error), so every refusal — ambiguous role, secure field, the candidate list — read "element not found
+// or not actionable".
+describe('invokeElement — the reason a call failed reaches the caller', () => {
+  it('a failure puts its reason in data.error, next to the refusal flag', async () => {
+    const ax = fakeAx({ invoke: vi.fn(async () => ({ success: false, error: 'role="AXTextField" matches 2 elements — "a", "b"', data: { refused: true } })) });
+    const res = await new MacOSAdapter({ ax }).invokeElement({ processId: 7, controlType: 'Edit', action: 'set-value', value: 'x' });
+    expect(res.success).toBe(false);
+    expect(res.data).toMatchObject({ error: 'role="AXTextField" matches 2 elements — "a", "b"', refused: true });
+  });
+
+  it('keeps the bounds a refused click hands back', async () => {
+    const bounds = { x: 1, y: 2, width: 3, height: 4 };
+    const ax = fakeAx({ invoke: vi.fn(async () => ({ success: false, error: 'does not support AXPress', bounds })) });
+    const res = await new MacOSAdapter({ ax }).invokeElement({ processId: 7, name: 'Switch', action: 'click' });
+    expect(res.bounds).toEqual(bounds);
+    expect(res.data).toMatchObject({ error: 'does not support AXPress' });
+  });
+
+  it('a success carries no error and its data is untouched', async () => {
+    const ax = fakeAx({ invoke: vi.fn(async () => ({ success: true, data: { value: 'abc' } })) });
+    const res = await new MacOSAdapter({ ax }).invokeElement({ processId: 7, name: 'Display', action: 'get-value' });
+    expect(res).toEqual({ success: true, data: { value: 'abc' } });
+  });
+});
+
+// Review of 4ee6279, finding 5: the old placeholder "(not responding)" window made `focus_window processName:X` work for an app
+// the window list had not reached. With no placeholder the lookup found nothing, and said so without a hint.
+describe('focusWindow by process name when the window list is partial or failed', () => {
+  const slowApp = APP({ name: 'Slow App', processId: 9, windows: [] });
+
+  it('an app the list skipped is found through NSWorkspace instead', async () => {
+    const ax = fakeAx({
+      listWindowsDetailed: vi.fn(async () => ({ windows: [WIN()], skipped: [{ processId: 9, processName: 'Slow App' }] })),
+      appState: vi.fn(async () => slowApp),
+    });
+    await new MacOSAdapter({ ax }).focusWindow({ processName: 'Slow App' });
+    expect(ax.appState).toHaveBeenCalledWith('Slow App');
+    const focus = osascripts().find(c => c.args.some(a => /focus-window\.jxa$/.test(a)));
+    expect(focus?.args).toEqual(expect.arrayContaining(['-processId', '9']));
+  });
+
+  it('a window list that failed outright does not stop the lookup either', async () => {
+    const ax = fakeAx({
+      listWindows: vi.fn(async () => { throw new MacAxError('timeout', 'window list timed out'); }),
+      appState: vi.fn(async () => slowApp),
+    });
+    await new MacOSAdapter({ ax }).focusWindow({ processName: 'Slow App' });
+    expect(osascripts().find(c => c.args.includes('9'))).toBeTruthy();
+  });
+
+  it('an app found in the list is not looked up twice', async () => {
+    const ax = fakeAx({ listWindows: vi.fn(async () => [WIN({ processName: 'TextEdit', processId: 4242 })]) });
+    await new MacOSAdapter({ ax }).focusWindow({ processName: 'TextEdit' });
+    expect(ax.appState).not.toHaveBeenCalled();
+  });
+
+  it('unknown to both: false, and no script is run', async () => {
+    const ax = fakeAx({ listWindows: vi.fn(async () => []), appState: vi.fn(async () => null) });
+    await expect(new MacOSAdapter({ ax }).focusWindow({ processName: 'Nope' })).resolves.toBe(false);
+    expect(osascripts()).toHaveLength(0);
+  });
+});
 
 describe('getFocusedElement', () => {
   it('is the client\'s focused element', async () => {

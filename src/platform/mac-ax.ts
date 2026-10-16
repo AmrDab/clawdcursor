@@ -108,11 +108,15 @@ const BUILD_WAIT_MS = 20_000;
 const NOT_EMPTY = 'This is NOT an empty result — not "no windows", not a custom-canvas app. Retry, or fall back to a screenshot / OCR.';
 /** After a timed-out ACTION a blind retry could do it twice (a second click): look first. */
 const ACTION_TIMED_OUT = 'Look at the screen before retrying — the action may already have happened.';
+/** A timeout while an action was still SEARCHING for its target (or checking the aim): nothing was pressed, retrying is safe. */
+const NOTHING_DONE = 'Nothing was pressed or changed — retry, or fall back to a screenshot / OCR.';
 
 interface HelperFailure {
   ok: false;
   kind?: string;
   error?: string;
+  /** The app froze while an action was running: it may have been performed. Absent for every other timeout. */
+  acted?: boolean;
 }
 
 const isTimeout = (err: unknown): boolean =>
@@ -126,7 +130,9 @@ function helperError(reply: HelperFailure, what: string, act = false): MacAxErro
     case 'timeout':
       // The helper says which app stopped answering and what that means for the action: more use than the generic line.
       return new MacAxError('timeout',
-        `${what} timed out — ${reply.error ? `${reply.error}. ` : 'the accessibility service did not answer in time (an app may be hung or busy). '}${act ? ACTION_TIMED_OUT : NOT_EMPTY}`);
+        `${what} timed out — ${reply.error ? `${reply.error}. ` : 'the accessibility service did not answer in time (an app may be hung or busy). '}` +
+        // Only the helper knows whether the press had started: it says so with `acted`.
+        `${reply.acted === true ? ACTION_TIMED_OUT : act ? NOTHING_DONE : NOT_EMPTY}`);
     case 'locked':
       return new MacAxError('locked',
         `${what} failed: the screen is locked — the lock screen (loginwindow) owns the display and keyboard. ` +
@@ -153,10 +159,18 @@ function timeoutError(what: string, ms: number, act = false): MacAxError {
  * is a value (it clears a field), `undefined` is "not given".
  */
 function viaStdin(fields: Record<string, string | undefined>): { args: string[]; input?: string } {
-  const present = Object.entries(fields).filter(([, v]) => v !== undefined);
+  const present = Object.entries(fields).filter((e): e is [string, string] => e[1] !== undefined);
   if (!present.length) return { args: [] };
-  return { args: ['--args-stdin', '1'], input: JSON.stringify(Object.fromEntries(present)) };
+  // JSON.stringify writes a lone surrogate as "\ud83d"; Foundation's JSONSerialization rejects the WHOLE object for it, where
+  // argv would have carried U+FFFD. Make the text well-formed first.
+  return { args: ['--args-stdin', '1'], input: JSON.stringify(Object.fromEntries(present.map(([k, v]) => [k, wellFormed(v)]))) };
 }
+
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+const wellFormed = (s: string): string => s.replace(LONE_SURROGATE, '\uFFFD');
+
+/** A name or identifier counts only if it says something: "   " would substring-match the first control with a space in its label. */
+const given = (s: string | undefined): string | undefined => (s !== undefined && s.trim() !== '' ? s : undefined);
 
 /** Actions that press or change something: aimed at a role alone they would act on whichever match ranks first. */
 const PRESSING_ACTIONS: ReadonlySet<InvokeAction> = new Set<InvokeAction>(['click', 'toggle', 'select', 'expand', 'collapse']);
@@ -489,8 +503,11 @@ function toInvokeResult(r: any): InvokeResult {
     success: r?.success === true,
     // A refused click reports the element's rect / centre so the caller can fall back to coordinates.
     bounds: r?.bounds ?? (r?.clickPoint ? { x: r.clickPoint.x, y: r.clickPoint.y, width: 1, height: 1 } : undefined),
-    // get-value reports its payload at the top level; consumers read res.data?.value.
-    data: r?.data ?? (r?.value !== undefined ? { value: r.value } : undefined),
+    // get-value reports its payload at the top level; consumers read res.data?.value. `refused`: the helper declined to
+    // act (ambiguous role, secure field) — callers must not route around that with a guess.
+    data: r?.refused === true
+      ? { ...(r?.data ?? (r?.value !== undefined ? { value: r.value } : {})), refused: true }
+      : r?.data ?? (r?.value !== undefined ? { value: r.value } : undefined),
     error: typeof r?.error === 'string' ? r.error : undefined,
   };
 }
@@ -730,7 +747,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
 
     async find(q: ElementQuery): Promise<UiElement[]> {
       const what = 'element search';
-      const text = viaStdin({ name: q.name || undefined, id: q.automationId || undefined });
+      const text = viaStdin({ name: given(q.name), id: given(q.automationId) });
       const reply = await viaHelper(
         ['find', ...(q.processId ? ['--pid', String(q.processId)] : []),
           ...(q.controlType ? ['--role', axRoleFor(q.controlType)] : []),
@@ -760,21 +777,24 @@ export function createMacAx(deps: MacAxDeps): MacAx {
 
     async invoke(q: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult> {
       const what = 'accessibility invoke';
+      const name = given(q.name);
+      const automationId = given(q.automationId);
       // With nothing to aim at, a search matches every element and "best" is arbitrary —
       // invoke-element.jxa used to press whichever button came first.
-      if (!q.name && !q.controlType && !q.automationId) {
-        return { success: false, error: 'invoke needs a name, controlType or automationId to aim at — refusing to act on an arbitrary element' };
+      if (!name && !q.controlType && !automationId) {
+        return { success: false, error: 'invoke needs a name, controlType or automationId to aim at — refusing to act on an arbitrary element', data: { refused: true } };
       }
       // A role IS something to aim at, but not enough to press: there is rarely only one Button in a window, and both engines
       // would press whichever ranks first. (set-value / focus / get-value by role alone are left to the helper, which acts only
       // when exactly one element has the role.)
-      if (PRESSING_ACTIONS.has(q.action) && !q.name && !q.automationId) {
+      if (PRESSING_ACTIONS.has(q.action) && !name && !automationId) {
         return {
           success: false,
           error: `${q.action} needs a name or automationId to aim at — controlType "${q.controlType}" alone would act on whichever ${q.controlType} comes first`,
+          data: { refused: true },
         };
       }
-      const text = viaStdin({ name: q.name || undefined, id: q.automationId || undefined, value: q.value });
+      const text = viaStdin({ name, id: automationId, value: q.value });
       const reply = await viaHelper(
         ['invoke', ...(q.processId ? ['--pid', String(q.processId)] : []),
           '--action', q.action,
@@ -785,17 +805,21 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         { input: text.input, act: true },
       );
       if (reply) return toInvokeResult(reply);
-      if (!q.name && !q.controlType) {
-        // The script has no AXIdentifier matching; run unaimed it would act on an arbitrary element.
+      // No helper. invoke-element.jxa matches by name only: it has no AXIdentifier, and it cannot tell that a role is unique —
+      // run without a name it writes into (or reads, or focuses) the FIRST element of that role.
+      if (!name) {
         return {
           success: false,
-          error: `matching by AXIdentifier needs the accessibility helper, which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'} — aim by name or controlType instead`,
+          data: { refused: true },
+          error: automationId
+            ? `matching by AXIdentifier needs the accessibility helper, which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'} — aim by name instead`
+            : `aiming by controlType alone needs the accessibility helper (it checks that exactly one element has the role), which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'} — aim by name instead`,
         };
       }
       const out = await viaJxa(
         'invoke-element.jxa',
         [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
-          ...(q.name ? ['-Name', q.name] : []),
+          '-Name', name,
           ...(q.controlType ? ['-ControlType', q.controlType] : []),
           '-Action', q.action,
           ...(q.value !== undefined ? ['-Value', q.value] : [])],

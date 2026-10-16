@@ -47,8 +47,11 @@ describe('windowListVerdict', () => {
     expect(windowListVerdict({ old: null, helperMs: 3500, lost: null }).pass).toBe(false);
   });
 
-  it('an old list that is genuinely empty compares like any other', async () => {
+  it('an old list that is genuinely empty compares like any other (it is NOT "could not compare")', async () => {
     const { windowListVerdict } = await load();
-    expect(windowListVerdict({ old: [], helperMs: 400, lost: 0 }).pass).toBe(true);
+    const v = windowListVerdict({ old: [], helperMs: 400, lost: 0 });
+    expect(v.pass).toBe(true);
+    expect(v.note).toBe('');                       // a real comparison, with nothing to report…
+    expect(v.note).not.toMatch(/not compared/i);   // …unlike the old list being unavailable
   });
 });

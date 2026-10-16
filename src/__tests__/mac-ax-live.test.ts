@@ -271,7 +271,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
   it('get-value on a secure field is refused', async (ctx) => {
     if (!usable) return ctx.skip();
     const r = await run(['invoke', '--pid', String(pid), '--id', 'secretField', '--action', 'get-value']);
-    expect(r).toMatchObject({ ok: true, success: false });
+    expect(r).toMatchObject({ ok: true, success: false, refused: true });
     expect(JSON.stringify(r)).not.toContain('hunter2');
     expect(r.error).toMatch(/secure/i);
   });
@@ -288,6 +288,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     const r = await run(['invoke', '--pid', String(pid), '--id', 'doesNotExist', '--action', 'click']);
     expect(r).toMatchObject({ ok: true, success: false });
     expect(r.error).toMatch(/not found/i);
+    expect(r.refused).toBeUndefined();                     // it looked, and there was nothing: not a refusal
   });
 
   it('invoke refuses to act with nothing to aim at', async (ctx) => {
@@ -351,7 +352,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     // the timeout exactly as for the modal button, but the app then answers nothing. Reported as "pending" the caller
     // would carry on against an app that is frozen; a second timeout on a cheap read tells the two apart.
     const r = await run(['invoke', '--pid', String(pid), '--id', 'hangButton', '--action', 'click', '--ax-timeout-ms', '600']);
-    expect(r).toMatchObject({ ok: false, kind: 'timeout' });
+    expect(r).toMatchObject({ ok: false, kind: 'timeout', acted: true });     // the one timeout that may have changed something
     expect(r.error).toMatch(/respond/i);
     expect(r.error).toMatch(/may or may not|might|unknown/i);       // the click itself did happen
     await new Promise(res => setTimeout(res, 4_500));               // the fixture is busy for 4 s
@@ -406,6 +407,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       const r = await run(['invoke', '--pid', String(slowPid), '--name', 'Save', '--action', 'click', '--ax-timeout-ms', '700', '--timeout-ms', '4000']);
       expect(r.success === true).toBe(false);
       expect(r.kind === 'timeout' || r.ok === true).toBe(true);
+      expect(r.acted).toBeUndefined();                     // it only searched: nothing was pressed
       // wait the stall out (a long per-call limit, so the read queues behind it instead of failing), then look
       const status = await run(['find', '--pid', String(slowPid), '--id', 'status', '--ax-timeout-ms', '8000', '--timeout-ms', '15000']);
       expect(status.elements[0].value).toBe('idle');         // nothing was pressed
@@ -509,7 +511,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     const before = await status();
     for (const action of ['click', 'toggle', 'select']) {
       const r = await run(['invoke', '--pid', String(pid), '--role', 'AXButton', '--action', action]);
-      expect(r, action).toMatchObject({ ok: true, success: false });
+      expect(r, action).toMatchObject({ ok: true, success: false, refused: true });
       expect(r.error).toMatch(/name or id/i);
     }
     expect(await status()).toBe(before);
@@ -520,7 +522,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     const value = async () => (await run(['invoke', '--pid', String(pid), '--id', 'nameField', '--action', 'get-value'])).value;
     const before = await value();
     const r = await run(['invoke', '--pid', String(pid), '--role', 'AXTextField', '--action', 'set-value', '--value', 'overwritten by mistake']);
-    expect(r).toMatchObject({ ok: true, success: false });
+    expect(r).toMatchObject({ ok: true, success: false, refused: true });
     expect(r.error).toMatch(/2 elements|matches 2/i);
     expect(r.error).toContain('nameField');
     expect(await value()).toBe(before);
@@ -550,6 +552,32 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     if (!usable) return ctx.skip();
     expect(await run(['find', '--pid', String(pid), '--args-stdin', '1'], 30_000, 'this is not json')).toMatchObject({ ok: false, kind: 'failed' });
     expect(await run(['find', '--pid', String(pid), '--args-stdin', '1'], 30_000, '')).toMatchObject({ ok: false, kind: 'failed' });
+  });
+
+  // ─── Review of 4ee6279 ───────────────────────────────────────────────────────
+
+  it('review of 4ee6279 #7: a name of only spaces is no name — it cannot make a role-only click pass the guard', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const status = async () => (await run(['find', '--pid', String(pid), '--id', 'status'])).elements[0].value;
+    const before = await status();
+    for (const blank of [' ', '   ', '\t']) {
+      const viaArgv = await run(['invoke', '--pid', String(pid), '--role', 'AXButton', '--name', blank, '--action', 'click']);
+      expect(viaArgv, `argv ${JSON.stringify(blank)}`).toMatchObject({ ok: true, success: false, refused: true });
+      const viaStdin = await run(['invoke', '--pid', String(pid), '--role', 'AXButton', '--action', 'click', '--args-stdin', '1'], 30_000, JSON.stringify({ name: blank }));
+      expect(viaStdin, `stdin ${JSON.stringify(blank)}`).toMatchObject({ ok: true, success: false, refused: true });
+      expect(viaStdin.error).toMatch(/name or id/i);
+    }
+    expect(await status()).toBe(before);
+  });
+
+  it('review of 4ee6279 #8: ids are compared byte for byte — NFC "café" is not NFD "café"', async (ctx) => {
+    if (!usable) return ctx.skip();
+    // Swift\'s == calls canonically equivalent strings equal; the caller\'s === (find_element\'s own filter) does not.
+    const nfc = 'caf\u00e9', nfd = 'cafe\u0301';
+    expect((await run(['find', '--pid', String(pid), '--id', nfc])).elements).toHaveLength(1);
+    expect((await run(['find', '--pid', String(pid), '--id', nfd])).elements).toEqual([]);
+    const press = await run(['invoke', '--pid', String(pid), '--id', nfd, '--action', 'click']);
+    expect(press).toMatchObject({ ok: true, success: false });
   });
 
   it('review 8: clawdcursor\'s own processes (clawd-overlay-<hash>) are never in the window list', async (ctx) => {

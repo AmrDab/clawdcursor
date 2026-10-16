@@ -419,6 +419,28 @@ M1 iMac, no screenshots):
   - `verify-macos.mjs`: on a Mac where the old osascript window list fails or takes
     over 90 s, the helper's check no longer fails for lack of anything to compare
     with; speed alone decides.
+- A review of those fixes found more, again reproduced first:
+  - **`open_app`'s Spotlight fallback typed into a modal dialog of another app.** Once
+    that case became a warning instead of a refusal, the fallback's own keystrokes
+    (Escape, Cmd+Space, the app name, Return — which presses the dialog's default
+    button) went into it. The launch fallback now refuses on any dialog that has the
+    keyboard and says whose it is; only an agent that asks to type there does.
+  - **A refusal is no longer routed around.** The osascript fallback now refuses an
+    aim with no name too (it cannot tell that a role is unique, so `set-value` wrote
+    into the first field); the helper marks its refusals (`refused`), and
+    `set_field_value` — both the MCP tool and the agent's — stops there instead of
+    clicking the widest field and typing into it.
+  - **The reason reaches the agent.** The agent loop shows `data.error`; the Mac
+    adapter returned it top-level only, so "matches 2 elements: …", "secure text
+    field" and the rest all read "element not found or not actionable".
+  - **"The action may already have happened" is said only when it may have.** A
+    timeout while still searching, or checking that a role is unique, pressed nothing.
+  - `focus_window` by process name works for an app the window list did not reach
+    (the old "(not responding)" placeholder made it work by accident).
+  - A lone surrogate in typed text no longer makes the helper reject the whole
+    request; a name or identifier of only spaces is no name; identifiers are
+    compared byte for byte (NFC and NFD forms of an accented id are different ids,
+    as in the caller's own filter); the older `smart_*` path can set a field to "".
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

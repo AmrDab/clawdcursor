@@ -139,6 +139,15 @@ export function getA11yDepthTools(): ToolDefinition[] {
           return { text: `Set "${safeNameStr}" = "${preview}".` };
         }
 
+        // A refusal is final. "Nothing settable here" falls through to the keyboard below; "I will not pick a field for you"
+        // (a role that several fields share, a secure field) must not: that fallback clicks the widest match and types into it.
+        if (res.data?.refused === true) {
+          return {
+            text: `set_field_value refused for "${safeNameStr}": ${typeof res.data.error === 'string' ? res.data.error : 'the platform declined to act on it'}`,
+            isError: true,
+          };
+        }
+
         // No value pattern on this element (Win11 XAML composites such as the
         // Save As filename box; Chrome text fields on Linux, which expose
         // neither EditableText nor Value). Fall back on every OS: focus the

@@ -353,7 +353,14 @@ export class MacOSAdapter implements PlatformAdapter {
       const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
       const hit = windows.find(w => w.processName.toLowerCase() === target)
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
-      if (hit) processId = hit.processId;
+      if (hit) {
+        processId = hit.processId;
+      } else {
+        // The list is the slow, fallible way to learn a pid: it can miss an app its time budget never reached (or fail
+        // outright). The app is still a running process, and NSWorkspace names it in milliseconds.
+        const app = await this.ax.appState(query.processName).catch(() => null);
+        if (app) processId = app.processId;
+      }
     }
 
     const args: string[] = [];
@@ -550,7 +557,10 @@ export class MacOSAdapter implements PlatformAdapter {
     }
     // A miss is `{success:false}`; a timeout / locked screen THROWS, because
     // "timed out" is not "element not found or not actionable".
-    return this.ax.invoke({ ...query, action: query.action ?? 'click' });
+    const res = await this.ax.invoke({ ...query, action: query.action ?? 'click' });
+    // The agent loop reads the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
+    // so a refusal's explanation — "matches 2 elements: …" — used to read as "element not found or not actionable".
+    return !res.success && res.error ? { ...res, data: { ...res.data, error: res.error } } : res;
   }
 
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
@@ -679,12 +689,16 @@ export class MacOSAdapter implements PlatformAdapter {
    * "typed OK" still reads as success — and a stray Return can press Allow.
    * NSWorkspace sees them. A failed probe never blocks input.
    */
-  private async keyboardOwnerError(): Promise<Error | null> {
+  private async keyboardOwnerError(opts: { strict?: boolean } = {}): Promise<Error | null> {
     if (process.env.CLAWD_NO_MAC_AX === '1') return null;
     try {
       const owner = classifyKeyboardOwner(await this.ax.frontmost());
       if (owner.kind === 'app') {
-        if (owner.warning) this.warnKeyboard(owner.warning);
+        if (!owner.warning) return null;
+        // `strict` is for plumbing (the Spotlight launch fallback): an agent may type into a modal dialog of another app when
+        // it asks to, but clawdcursor's own launch keystrokes — and a Return that presses the dialog's default button — must not.
+        if (opts.strict) return new Error(owner.warning);
+        this.warnKeyboard(owner.warning);
         return null;
       }
       return new Error(describeKeyboardOwner(owner));
@@ -701,11 +715,12 @@ export class MacOSAdapter implements PlatformAdapter {
     logger.warn('keyboard.modal-dialog', { warning: text });
   }
 
-  private async assertKeyboardAvailable(): Promise<void> {
+  private async assertKeyboardAvailable(opts: { strict?: boolean } = {}): Promise<void> {
     // Trust a clean probe briefly so a burst of keystrokes costs one lookup; a
     // blocked result is never cached — the dialog may be gone a moment later.
-    if (Date.now() - this.keyboardFreeAt < KEYBOARD_PROBE_TTL_MS) return;
-    const err = await this.keyboardOwnerError();
+    // A strict check never trusts the cache: a probe that merely warned was cached too.
+    if (!opts.strict && Date.now() - this.keyboardFreeAt < KEYBOARD_PROBE_TTL_MS) return;
+    const err = await this.keyboardOwnerError(opts);
     if (err) throw err;
     this.keyboardFreeAt = Date.now();
   }
@@ -950,7 +965,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
     // Nothing confirmed. A system dialog or the lock screen owning the keyboard
     // is the likeliest reason — say so instead of the generic "no window appeared".
-    const blocked = await this.keyboardOwnerError();
+    const blocked = await this.keyboardOwnerError({ strict: true });
     if (blocked) throw blocked;
     return {};
   }
@@ -1022,7 +1037,7 @@ export class MacOSAdapter implements PlatformAdapter {
     try {
       // Plumbing, not an agent request: with a system dialog up even the warm-up Escape stays unsent (keyPress lets Escape
       // through for an agent, but here it could answer "Don't Allow" to a permission prompt nobody asked to dismiss).
-      await this.assertKeyboardAvailable();
+      await this.assertKeyboardAvailable({ strict: true });
       await this.keyPress('Escape').catch(() => {});
       await this.delay(120);
       await this.keyPress('cmd+Space');

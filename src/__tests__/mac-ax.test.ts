@@ -608,6 +608,127 @@ describe('invoke — a role alone never presses (review finding 6)', () => {
   });
 });
 
+// Review of 4ee6279, finding 1: "exactly one match" lives in the helper. The osascript script has no such check and wrote into
+// (or read) the FIRST match of a role, so on a Mac where the helper is not available a controlType alone was still an
+// arbitrary pick.
+describe('invoke without the helper — a name-less aim is refused', () => {
+  it.each(['set-value', 'get-value', 'focus'] as const)('%s by controlType alone is refused, and no script is run', async action => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Edit', action, value: action === 'set-value' ? 'x' : undefined });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/accessibility helper/i);
+    expect(res.error).toMatch(/name/i);
+    expect(calls.filter(c => c.file === 'osascript')).toHaveLength(0);
+  });
+
+  it('a controlType plus an identifier (no name) is refused too: the script ignores identifiers, so it would be role-only', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Edit', automationId: 'nameField', action: 'set-value', value: 'x' });
+    expect(res.success).toBe(false);
+    expect(calls.filter(c => c.file === 'osascript')).toHaveLength(0);
+  });
+
+  it('a name still goes to the script, as before', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    await ax.invoke({ processId: 7, name: 'City', controlType: 'Edit', action: 'set-value', value: 'x' });
+    expect(calls.filter(c => c.file === 'osascript')).toHaveLength(1);
+  });
+
+  it('the helper being in its 60 s retry window after a failure is the same situation', async () => {
+    let n = 0;
+    const { ax, calls } = harness({ reply: (file) => (file === '/fake/ax-helper' ? (++n === 1 ? new Error('spawn EAGAIN') : '{}') : JSON.stringify({ success: true })) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Edit', action: 'set-value', value: 'x' });
+    expect(res.success).toBe(false);
+    expect(calls.filter(c => c.file === 'osascript')).toHaveLength(0);
+  });
+});
+
+// Review of 4ee6279, finding 3: refusals are flagged so the callers that fall back to a keyboard heuristic (set_field_value
+// clicks the widest Edit field and types) can tell "this element has no settable value" from "I will not pick one for you".
+describe('invoke — refusals are flagged as refusals', () => {
+  it('a role-only click refused on our side carries refused:true', async () => {
+    const { ax } = harness({ reply: '{}' });
+    const res = await ax.invoke({ processId: 7, controlType: 'Button', action: 'click' });
+    expect(res).toMatchObject({ success: false, data: { refused: true } });
+  });
+
+  it('so does "nothing to aim at"', async () => {
+    const { ax } = harness({ reply: '{}' });
+    expect(await ax.invoke({ processId: 7, action: 'click' })).toMatchObject({ success: false, data: { refused: true } });
+  });
+
+  it('a helper reply that says refused (ambiguous role, secure field) keeps the flag, next to its value payload', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: true, success: false, action: 'set-value', refused: true, error: 'role="AXTextField" matches 2 elements — "a", "b" — add a name or id to pick one' }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Edit', action: 'set-value', value: 'x' });
+    expect(res).toMatchObject({ success: false, data: { refused: true }, error: expect.stringMatching(/matches 2 elements/) });
+  });
+
+  it('an ordinary miss is not flagged', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: true, success: false, action: 'click', error: 'Element not found: name="Zzz"' }) });
+    const res = await ax.invoke({ processId: 7, name: 'Zzz', action: 'click' });
+    expect(res.data?.refused).toBeUndefined();
+  });
+
+  it('a value payload alone still arrives as data.value', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'get-value', value: 'abc' }) });
+    expect((await ax.invoke({ processId: 7, name: 'Display', action: 'get-value' })).data).toEqual({ value: 'abc' });
+  });
+});
+
+// Review of 4ee6279, finding 6: JSON.stringify writes a lone surrogate as "\ud83d"; Foundation's JSONSerialization rejects
+// the whole object, so the helper answered "stdin is not a JSON object" where argv would have given U+FFFD.
+describe('stdin payload — always well-formed', () => {
+  it('a lone high surrogate in a value becomes U+FFFD instead of poisoning the payload', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    await ax.invoke({ processId: 7, name: 'Notes', action: 'set-value', value: 'ok \ud83d tail' });
+    expect(calls[0].input).not.toMatch(/\\ud[89ab][0-9a-f]{2}/i);
+    expect(JSON.parse(calls[0].input!).value).toBe('ok \ufffd tail');
+  });
+
+  it('a lone low surrogate in a name too', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, elements: [] }) });
+    await ax.find({ processId: 7, name: 'x\ude00y' });
+    expect(JSON.parse(calls[0].input!).name).toBe('x\ufffdy');
+  });
+
+  it('a proper surrogate pair (an emoji) is left alone', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    await ax.invoke({ processId: 7, name: 'Notes', action: 'set-value', value: 'hi 🙂 日本語' });
+    expect(JSON.parse(calls[0].input!).value).toBe('hi 🙂 日本語');
+  });
+});
+
+// Review of 4ee6279, finding 7: the guard was syntactic. A name of " " passed "has a name" and then substring-matched the
+// shallowest control whose label contains a space.
+describe('a whitespace-only name is no name', () => {
+  it.each(['click', 'toggle'] as const)('%s aimed at a role plus name " " is refused like a role alone', async action => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Button', name: ' \t ', action });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/name or automationId/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('an identifier of only spaces is no identifier', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Button', automationId: '  ', action: 'click' });
+    expect(res.success).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('find with a name of only spaces sends no name filter', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, elements: [] }) });
+    await ax.find({ processId: 7, controlType: 'Button', name: '   ' });
+    expect(calls[0].input).toBeUndefined();
+  });
+
+  it('a real name keeps its inner and edge spaces exactly (it is a label)', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    await ax.invoke({ processId: 7, name: ' Save As ', action: 'click' });
+    expect(JSON.parse(calls[0].input!).name).toBe(' Save As ');
+  });
+});
+
 describe('invoke', () => {
   it('passes the target and the action to the helper', async () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'set-value', method: 'AXValue' }) });
@@ -646,15 +767,27 @@ describe('invoke', () => {
     expect(err.message).toContain('stopped responding while the click was running');
   });
 
-  // "Retry" is right advice for a read and wrong for an action that may already have happened (a second click).
-  it('a timed-out ACTION says to look at the screen before retrying — it does not suggest a blind retry', async () => {
-    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'timeout', error: 'Mail stopped responding while the click was running — it may or may not have been performed' }) });
+  // "Retry" is right advice for a read and wrong for an action that may already have happened (a second click). Only the
+  // helper knows which it was: it flags `acted` when the app froze WHILE the press ran. A timeout while it was still searching
+  // (or checking that a role is unique) did nothing, and saying otherwise tells the agent not to retry something safe.
+  it('a press the app froze in the middle of says to look at the screen before retrying — it does not suggest a blind retry', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'timeout', acted: true, error: 'Mail stopped responding while the click was running — it may or may not have been performed' }) });
     const err = await ax.invoke({ processId: 7, name: 'Send', action: 'click' }).then(() => null, e => e);
     expect(err.message).toMatch(/before retrying/i);
     expect(err.message).not.toMatch(/Retry, or fall back|NOT an empty result/);
   });
 
-  it('and so does an action whose helper process was killed at our timeout', async () => {
+  it('a timeout BEFORE anything was pressed does not claim the action may have happened', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'timeout', error: 'the search could not read the whole window (3 element(s) did not answer) — refusing to act on a partial match ("Save As…")' }) });
+    const err = await ax.invoke({ processId: 7, name: 'Save', action: 'click' }).then(() => null, e => e);
+    expect(err.kind).toBe('timeout');
+    expect(err.message).toContain('refusing to act on a partial match');
+    expect(err.message).toMatch(/nothing was (pressed|done|changed)/i);
+    expect(err.message).not.toMatch(/may already have happened|before retrying/i);
+    expect(err.message).not.toMatch(/NOT an empty result/);
+  });
+
+  it('an action whose helper process was killed at our timeout could have been mid-press: look first', async () => {
     const { ax } = harness({ reply: execTimeout() });
     const err = await ax.invoke({ processId: 7, name: 'Send', action: 'click' }).then(() => null, e => e);
     expect(err.kind).toBe('timeout');

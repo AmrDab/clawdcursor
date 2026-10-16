@@ -104,6 +104,19 @@ describe('findElement (B9)', () => {
 });
 
 describe('invokeElement (B9)', () => {
+  // Mac review of 4ee6279: `value || undefined` turned '' into "no value", so the legacy path could never clear a field.
+  it('an empty value is passed on: set-value "" clears the field', async () => {
+    fake.ax.invoke.mockResolvedValue({ success: true });
+    await bridge.invokeElement({ name: 'City', action: 'set-value', value: '', processId: 321 });
+    expect(fake.ax.invoke).toHaveBeenCalledWith(expect.objectContaining({ action: 'set-value', value: '' }));
+  });
+
+  it('no value stays no value', async () => {
+    fake.ax.invoke.mockResolvedValue({ success: true });
+    await bridge.invokeElement({ name: 'Save', action: 'click', processId: 321 });
+    expect(fake.ax.invoke.mock.calls[0][0].value).toBeUndefined();
+  });
+
   it('invoke by automationId alone goes to the client with it', async () => {
     fake.ax.invoke.mockResolvedValue({ success: true });
     const res = await bridge.invokeElement({ automationId: 'One', action: 'click', processId: 321 });

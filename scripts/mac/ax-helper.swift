@@ -463,11 +463,16 @@ struct Aim {
 }
 
 func currentAim() -> Aim {
-    func nonEmpty(_ k: String) -> String? { if let v = opts[k], !v.isEmpty { return v }; return nil }
+    // A name of only spaces is no name: it would substring-match the shallowest control whose label has a space in it.
+    func nonEmpty(_ k: String) -> String? { if let v = opts[k], !v.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return v }; return nil }
     return Aim(name: nonEmpty("name"), role: nonEmpty("role"), id: nonEmpty("id"))
 }
 
 let searchAttrs = ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXChildren"]
+
+/// Identifiers are compared byte for byte. Swift's `==` calls canonically equivalent strings equal (NFC "é" and NFD "e" + U+0301),
+/// while the caller's own `===` does not: such an id would be found here and dropped there.
+func sameId(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) }
 
 /// What a search collected, and how much of the window it could not read.
 struct SearchCtx {
@@ -507,8 +512,8 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
             if let id = aim.id {
                 // An identifier is exact, case included: find_element filters this reply with === afterwards, so a looser
                 // match here would be found and then silently dropped ("savebutton" finding "SaveButton" and printing nothing).
-                matches = matches && ident == id
-                exact = exact || ident == id
+                matches = matches && sameId(ident, id)
+                exact = exact || sameId(ident, id)
             }
             if let r = wantRole { matches = matches && normRole(role).contains(r) }
             if matches {
@@ -581,6 +586,14 @@ func miss(_ action: String, _ message: String, element el: AXUIElement? = nil) -
     return r
 }
 
+/// The helper declined to act and touched nothing — as opposed to trying and failing. Callers that fall back to guessing (a
+/// keyboard heuristic that picks the widest field) must not route around it.
+func refuse(_ action: String, _ message: String) -> [String: Any] {
+    var r = miss(action, message)
+    r["refused"] = true
+    return r
+}
+
 func settable(_ el: AXUIElement, _ attr: String) -> Bool {
     var s: DarwinBoolean = false
     return AXUIElementIsAttributeSettable(el, attr as CFString, &s) == .success && s.boolValue
@@ -609,7 +622,9 @@ func press(_ el: AXUIElement, _ action: String = "AXPress") -> (done: Bool, pend
 /// The app stopped answering while an action ran: whether the action happened is not known, and neither "pending" nor
 /// "could not click" would be true.
 func hungDuringAction(_ action: String, _ appName: String) -> Never {
-    fail("timeout", "\(appName) stopped responding while the \(action) was running — it may or may not have been performed")
+    // `acted`: the only timeout that may have changed something. A timeout while still searching did nothing.
+    emit(["ok": false, "kind": "timeout", "acted": true,
+          "error": "\(appName) stopped responding while the \(action) was running — it may or may not have been performed"])
 }
 
 func pressed(_ action: String, method: String, pending: Bool, extra: [String: Any] = [:]) -> [String: Any] {
@@ -633,12 +648,12 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         return r == .success ? ["ok": true, "success": true, "action": action] : miss(action, "could not focus the element (AXError \(r.rawValue))", element: el)
     case "set-value":
         guard let v = opts["value"] else { return miss(action, "set-value needs --value") }
-        if h.subrole == "AXSecureTextField" { return miss(action, "refusing to write to a secure text field") }
+        if h.subrole == "AXSecureTextField" { return refuse(action, "refusing to write to a secure text field") }
         if !settable(el, "AXValue") { return miss(action, "the element's value is not settable", element: el) }
         let r = AXUIElementSetAttributeValue(el, "AXValue" as CFString, v as CFString)
         return r == .success ? ["ok": true, "success": true, "action": action, "method": "AXValue", "value": v] : miss(action, "could not set the value (AXError \(r.rawValue))", element: el)
     case "get-value":
-        if h.subrole == "AXSecureTextField" { return miss(action, "the element is a secure text field — its value is withheld") }
+        if h.subrole == "AXSecureTextField" { return refuse(action, "the element is a secure text field — its value is withheld") }
         let a = multi(el, ["AXValue", "AXTitle", "AXDescription"])
         for (key, method) in [("AXValue", "AXValue"), ("AXTitle", "name"), ("AXDescription", "name")] {
             if let v = str(a[key]), !v.isEmpty { return ["ok": true, "success": true, "action": action, "value": v, "method": method] }
@@ -865,12 +880,12 @@ func cmdInvoke() -> Never {
     guard let action = opts["action"], !action.isEmpty else { emit(miss("", "invoke needs --action")) }
     let aim = currentAim()
     // With nothing to aim at every element matches and "best" is arbitrary — never act on that.
-    if aim.isEmpty { emit(miss(action, "invoke needs a name, role or id to aim at — refusing to act on an arbitrary element")) }
+    if aim.isEmpty { emit(refuse(action, "invoke needs a name, role or id to aim at — refusing to act on an arbitrary element")) }
     // A role is something, but not enough to press: there is rarely only one button.
     let byRoleOnly = aim.name == nil && aim.id == nil
     if byRoleOnly && pressingActions.contains(action) {
         let role = aim.role ?? ""
-        emit(miss(action, "\(action) needs a name or id to aim at — role=\"\(role)\" alone would act on whichever \(role) comes first"))
+        emit(refuse(action, "\(action) needs a name or id to aim at — role=\"\(role)\" alone would act on whichever \(role) comes first"))
     }
     let app = targetApplication()
     var found = SearchCtx()
@@ -896,7 +911,7 @@ func cmdInvoke() -> Never {
                 let label = h.name.isEmpty ? h.ident : h.name
                 return "\"\(label)\"" + (!h.name.isEmpty && !h.ident.isEmpty ? " (id \(h.ident))" : "")
             }.joined(separator: ", ")
-            emit(miss(action, "role=\"\(aim.role ?? "")\" matches \(found.hits.count) elements — \(who)\(ranked.count > 6 ? ", …" : "") — add a name or id to pick one"))
+            emit(refuse(action, "role=\"\(aim.role ?? "")\" matches \(found.hits.count) elements — \(who)\(ranked.count > 6 ? ", …" : "") — add a name or id to pick one"))
         }
         if timeUp() || found.unreadable > 0 {
             fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — cannot tell that only one element has this role")
