@@ -125,6 +125,32 @@ export function agentBrowserArgs(profileDir: string, platform: NodeJS.Platform =
   ];
 }
 
+/**
+ * Seed the agent's OWN profile before launch (never the user's browser): Chrome
+ * sign-in disallowed. On a fresh profile Chrome otherwise showed a focused
+ * "Sign in to Chrome?" bubble — it could swallow the agent's keystrokes, and
+ * "Continue as …" would sign the automation profile in to the user's Google
+ * account (#236). Chrome recomputes `signin.allowed` from
+ * `signin.allowed_on_next_startup` at every start, so both are written; with
+ * sign-in disallowed Chrome turns off the web sign-in interception that shows
+ * the bubble. Other prefs are kept; an unreadable file is left alone.
+ */
+export function seedAgentProfile(profileDir: string): void {
+  const file = path.join(profileDir, 'Default', 'Preferences');
+  let prefs: Record<string, any> = {};
+  try {
+    if (fs.existsSync(file)) prefs = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return; // not ours to repair
+  }
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return;
+  prefs.signin = { ...(prefs.signin ?? {}), allowed: false, allowed_on_next_startup: false };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(prefs));
+  } catch { /* best-effort: the browser still launches */ }
+}
+
 export class CDPDriver {
   private browser: Browser | null = null;
   private activePage: Page | null = null;
@@ -270,6 +296,7 @@ export class CDPDriver {
     // the user's running browser.
     const profileDir = path.join(os.homedir(), '.clawdcursor', 'cdp-profile');
     try { fs.mkdirSync(profileDir, { recursive: true }); } catch { /* best-effort */ }
+    seedAgentProfile(profileDir);
 
     try {
       const child = spawn(exe, agentBrowserArgs(profileDir), { stdio: 'ignore', detached: true });

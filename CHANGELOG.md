@@ -353,6 +353,14 @@ M1 iMac, no screenshots):
   instructions, `pause_for_user` and the skill say it: at a plan limit or upgrade
   wall, stop, quote the blocking text and ask the user; never click Upgrade /
   Subscribe yourself.
+- **No "Sign in to Chrome?" bubble in the agent's browser (#236).** A fresh
+  agent profile could open with a focused sign-in bubble that swallowed
+  keystrokes, one click away from signing the automation profile in to your
+  Google account. Before launching its own browser, clawdcursor now writes
+  `signin.allowed` and `signin.allowed_on_next_startup` = false into
+  `~/.clawdcursor/cdp-profile/Default/Preferences` (other prefs are kept; the
+  second key is the one Chrome reads at startup). Checked on Chrome 155 and Edge:
+  both report sign-in disallowed after launch. Your own browser is never touched.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 
