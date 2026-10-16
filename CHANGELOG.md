@@ -379,6 +379,15 @@ M1 iMac, no screenshots):
   browser's process it answers even when another window is in front, and it
   never answers for a different process. Unscoped queries keep the
   focused-window title check, and now also work for macOS browser names.
+- **The pause prompt makes a sound, and its state is readable (#237).** A user
+  not looking at the screen never knew it was their turn. When the paused pill
+  appears it now plays a short system sound: Windows' Asterisk sound, macOS's
+  "Glass" (a beep if it's missing), and on Linux `canberra-gtk-play -i
+  dialog-information` or the display's beep. `CLAWD_PAUSE_SOUND=0` turns it off.
+  `task {action:"status"}` / `agent_status` documents its `pause` field and adds
+  `overlay`: `{mode:"hidden"|"running"}` or `{mode:"paused", message, since}`,
+  so a watcher no longer has to tell the two pill processes apart. The paused
+  pill also carries `--paused` in its command line.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

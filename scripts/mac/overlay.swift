@@ -8,7 +8,8 @@
 //                  control in progress - double-click to stop" -> prints
 //                  BANNER_STOP. Paused (env CLAWD_BANNER_MODE=paused): blue
 //                  dot, the instruction from CLAWD_BANNER_MESSAGE, and Resume /
-//                  End task -> prints BANNER_RESUME / BANNER_END.
+//                  End task -> prints BANNER_RESUME / BANNER_END. Plays the
+//                  "Glass" system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
 //   overlay glow [--color #RRGGBB] [--duration SEC]
 //                  a pulsing glow on every edge of every display; clicks pass
 //                  straight through it.
@@ -112,6 +113,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
 
     var windows: [NSWindow] = []
     var timer: Timer?
+    var chime: NSSound?   // held so the sound isn't released mid-play
 
     @objc func answer(_ sender: FirstClickButton) {
         emit(sender.line)
@@ -191,6 +193,17 @@ final class Overlay: NSObject, NSApplicationDelegate {
         panel.contentView = content
         panel.orderFrontRegardless()
         windows.append(panel)
+
+        // A short system sound when the prompt appears, so a user who isn't
+        // looking hears it's their turn (#237). CLAWD_PAUSE_SOUND=0 turns it off.
+        if paused && ProcessInfo.processInfo.environment["CLAWD_PAUSE_SOUND"] != "0" {
+            if let sound = NSSound(named: "Glass") {
+                chime = sound
+                sound.play()
+            } else {
+                NSSound.beep()
+            }
+        }
 
         var bright = true
         timer = Timer.scheduledTimer(withTimeInterval: paused ? 0.9 : 0.6, repeats: true) { _ in

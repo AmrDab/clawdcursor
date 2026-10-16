@@ -8,7 +8,8 @@ by src/core/banner.ts:
                      control in progress - double-click to stop" -> prints
                      BANNER_STOP. Paused (env CLAWD_BANNER_MODE=paused): blue
                      dot, the instruction from CLAWD_BANNER_MESSAGE, and Resume
-                     / End task -> prints BANNER_RESUME / BANNER_END.
+                     / End task -> prints BANNER_RESUME / BANNER_END. Plays a
+                     short system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
   overlay.py glow [--color #RRGGBB] [--duration SEC]
                      a pulsing glow on every edge of every monitor; clicks pass
                      straight through it.
@@ -22,6 +23,8 @@ Wayland through XWayland (GDK_BACKEND=x11).
 """
 import math
 import os
+import shutil
+import subprocess
 import sys
 import time
 
@@ -92,6 +95,25 @@ button.resume:hover { background-color: #5b97f8; }
 button.end { background-color: #3c3c48; }
 button.end:hover { background-color: #4c4c5a; }
 """
+
+
+def pause_chime():
+    # A short system sound when the paused prompt appears, so a user who isn't
+    # looking hears it's their turn (#237). CLAWD_PAUSE_SOUND=0 turns it off.
+    # The player's output never reaches stdout: that is the answer channel.
+    if os.environ.get('CLAWD_PAUSE_SOUND') == '0':
+        return
+    player = shutil.which('canberra-gtk-play')
+    if player:
+        try:
+            subprocess.Popen([player, '-i', 'dialog-information'], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            pass
+    display = Gdk.Display.get_default()
+    if display is not None:
+        display.beep()
 
 
 def run_pill():
@@ -207,6 +229,8 @@ def run_pill():
     win.show_all()
     area = primary_geometry()
     win.move(area.x + (area.width - width) // 2, area.y + 8)
+    if paused:
+        pause_chime()
 
 
 def run_glow(color, thickness, period_ms, min_alpha, peak_alpha, duration):

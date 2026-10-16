@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
 import { pauseGate } from '../core/pause-gate';
+import { controlBanner } from '../core/banner';
 
 const PAUSE_WAIT_DEFAULT_MS = 45_000; // under common 60s MCP client timeouts
 const normMessage = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
@@ -98,8 +99,10 @@ export function getAgentTools(): ToolDefinition[] {
       name: 'agent_status',
       description:
         'Return the autonomous agent\'s current state: status (idle | thinking | ' +
-        'acting | waiting_confirm), currentTask, currentStep, stepsCompleted, ' +
-        'stepsTotal. Cheap (synchronous read) — safe to poll at 1–2 Hz.',
+        'acting | waiting_confirm | paused), currentTask, currentStep, stepsCompleted, ' +
+        'stepsTotal; `pause` {id, message, since} while a pause for the user is up; and ' +
+        '`overlay` — what the on-screen overlay shows: {mode:"hidden"|"running"} or ' +
+        '{mode:"paused", message, since}. Cheap (synchronous read) — safe to poll at 1–2 Hz.',
       parameters: {},
       category: 'orchestration',
       compactGroup: 'system',
@@ -114,10 +117,11 @@ export function getAgentTools(): ToolDefinition[] {
               stepsCompleted: 0,
               stepsTotal: 0,
               pause: pauseGate.current() ?? undefined,
+              overlay: controlBanner.state(),
             }),
           };
         }
-        return { text: JSON.stringify({ ...ctx.agent.getState(), pause: pauseGate.current() ?? undefined }) };
+        return { text: JSON.stringify({ ...ctx.agent.getState(), pause: pauseGate.current() ?? undefined, overlay: controlBanner.state() }) };
       },
     },
 

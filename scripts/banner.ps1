@@ -16,7 +16,8 @@
 #     via banner.ts): the agent handed the desktop to the user. Blue dot, the
 #     instruction from CLAWD_BANNER_MESSAGE, and two buttons: Resume
 #     (BANNER_RESUME) / End task (BANNER_END). The click prints that line on
-#     stdout and exits. No double-click stop here.
+#     stdout and exits. No double-click stop here. A short system sound plays
+#     when it appears (off with CLAWD_PAUSE_SOUND=0).
 #
 # CRITICAL: the window must NEVER steal focus — it appears WHILE the agent is
 # typing/clicking, and an activating window would redirect those keystrokes
@@ -159,6 +160,12 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         else                { $dot.ForeColor = [System.Drawing.Color]::FromArgb(25, 55, 110) }
     })
     $timer.Start()
+
+    # A short system sound when the prompt appears, so a user who isn't looking
+    # hears it's their turn (#237). CLAWD_PAUSE_SOUND=0 turns it off.
+    if ($env:CLAWD_PAUSE_SOUND -ne '0') {
+        $form.Add_Shown({ try { [System.Media.SystemSounds]::Asterisk.Play() } catch { } })
+    }
 
     [System.Windows.Forms.Application]::Run($form)
     exit 0

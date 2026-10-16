@@ -204,7 +204,7 @@
     },
     {
       "name": "agent_status",
-      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm), currentTask, currentStep, stepsCompleted, stepsTotal. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
+      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm | paused), currentTask, currentStep, stepsCompleted, stepsTotal; `pause` {id, message, since} while a pause for the user is up; and `overlay` — what the on-screen overlay shows: {mode:\"hidden\"|\"running\"} or {mode:\"paused\", message, since}. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
