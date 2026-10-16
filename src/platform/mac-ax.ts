@@ -19,7 +19,12 @@
  * Helper protocol (one JSON object on stdout, exit 0 even for logical failures):
  *   {"ok":false,"kind":"timeout|locked|permission|unavailable|failed","error":"…"}
  *   windows   {"ok":true,"windows":[{title,processName,processId,bounds,isMinimized}],
- *              "unresponsive":[{processId,processName}]}
+ *              "unresponsive":[{processId,processName}],   // answered nothing for a whole AX timeout: hung
+ *              "skipped":[{processId,processName}],        // the time budget never reached them (or cut them short)
+ *              "truncated":bool}                           // = skipped is not empty
+ *
+ * Text the caller typed or searches for (name / id / value) goes to the helper as one JSON object on STDIN
+ * (`--args-stdin 1`), not argv: argv is readable by every process on the Mac while the helper runs.
  */
 import * as path from 'path';
 import { execFile } from 'child_process';
@@ -41,8 +46,11 @@ export class MacAxError extends Error {
 }
 
 export interface MacAxDeps {
-  /** Run an executable and resolve its stdout. Rejects like `execFile` (a timeout sets `killed`). */
-  exec(file: string, args: string[], opts: { timeoutMs: number }): Promise<{ stdout: string }>;
+  /**
+   * Run an executable and resolve its stdout. Rejects like `execFile` (a timeout sets `killed`).
+   * `input` is written to the process's stdin, which is then closed.
+   */
+  exec(file: string, args: string[], opts: { timeoutMs: number; input?: string }): Promise<{ stdout: string }>;
   /** The compiled helper if it is built, else null (the JXA scripts are used meanwhile). */
   helper(): string | null;
   /**
@@ -98,6 +106,8 @@ const HELPER_RETRY_MS = 60_000;
 const BUILD_WAIT_MS = 20_000;
 
 const NOT_EMPTY = 'This is NOT an empty result — not "no windows", not a custom-canvas app. Retry, or fall back to a screenshot / OCR.';
+/** After a timed-out ACTION a blind retry could do it twice (a second click): look first. */
+const ACTION_TIMED_OUT = 'Look at the screen before retrying — the action may already have happened.';
 
 interface HelperFailure {
   ok: false;
@@ -110,12 +120,13 @@ const isTimeout = (err: unknown): boolean =>
 
 const msg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** Turn a helper `{ok:false}` reply into the error an agent should read. */
-function helperError(reply: HelperFailure, what: string): MacAxError {
+/** Turn a helper `{ok:false}` reply into the error an agent should read. `act`: the call did something (invoke), not just read. */
+function helperError(reply: HelperFailure, what: string, act = false): MacAxError {
   switch (reply.kind) {
     case 'timeout':
+      // The helper says which app stopped answering and what that means for the action: more use than the generic line.
       return new MacAxError('timeout',
-        `${what} timed out — the accessibility service did not answer in time (an app may be hung or busy). ${NOT_EMPTY}`);
+        `${what} timed out — ${reply.error ? `${reply.error}. ` : 'the accessibility service did not answer in time (an app may be hung or busy). '}${act ? ACTION_TIMED_OUT : NOT_EMPTY}`);
     case 'locked':
       return new MacAxError('locked',
         `${what} failed: the screen is locked — the lock screen (loginwindow) owns the display and keyboard. ` +
@@ -131,11 +142,24 @@ function helperError(reply: HelperFailure, what: string): MacAxError {
   }
 }
 
-function timeoutError(what: string, ms: number): MacAxError {
+function timeoutError(what: string, ms: number, act = false): MacAxError {
   return new MacAxError('timeout',
     `${what} timed out after ${Math.round(ms / 1000)}s — the accessibility service did not answer in time ` +
-    `(an app may be hung or busy). ${NOT_EMPTY}`);
+    `(an app may be hung or busy). ${act ? ACTION_TIMED_OUT : NOT_EMPTY}`);
 }
+
+/**
+ * The strings a caller typed or is searching for travel on stdin, not argv. Only defined values are sent: an empty string
+ * is a value (it clears a field), `undefined` is "not given".
+ */
+function viaStdin(fields: Record<string, string | undefined>): { args: string[]; input?: string } {
+  const present = Object.entries(fields).filter(([, v]) => v !== undefined);
+  if (!present.length) return { args: [] };
+  return { args: ['--args-stdin', '1'], input: JSON.stringify(Object.fromEntries(present)) };
+}
+
+/** Actions that press or change something: aimed at a role alone they would act on whichever match ranks first. */
+const PRESSING_ACTIONS: ReadonlySet<InvokeAction> = new Set<InvokeAction>(['click', 'toggle', 'select', 'expand', 'collapse']);
 
 const toWindow = (raw: any): WindowInfo => ({
   title: raw.title ?? '',
@@ -234,7 +258,8 @@ export interface FrontmostApp {
 export interface FrontmostInfo { locked: boolean; app: FrontmostApp | null }
 
 export type KeyboardOwner =
-  | { kind: 'app' }
+  /** `warning`: something modal of a non-system app is up — keys are sent, and the caller may want to say whose dialog it is. */
+  | { kind: 'app'; warning?: string }
   | { kind: 'locked' }
   | { kind: 'alert'; name: string; processId: number; bundleId?: string; title?: string };
 
@@ -265,12 +290,25 @@ export function classifyKeyboardOwner(info: FrontmostInfo): KeyboardOwner {
   // A regular app (even one showing its own sheet) is what the caller is driving.
   if (!a || a.activationPolicy === 'regular') return { kind: 'app' };
   if (KEYBOARD_OK_BUNDLES.has(a.bundleId ?? '') || KEYBOARD_OK_NAMES.test(a.name)) return { kind: 'app' };
-  // A system dialog, or a MODAL dialog: a launcher's panel (Raycast, Alfred) is an accessory app's AXDialog too, and is typed into.
-  const dialog = a.windows.find(w => w.subrole === 'AXSystemDialog' || (w.subrole === 'AXDialog' && w.modal === true) || w.role === 'AXSheet');
-  if (ALERT_OWNER_BUNDLES.has(a.bundleId ?? '') || dialog) {
+  const system = a.windows.find(w => w.subrole === 'AXSystemDialog');
+  const modal = a.windows.find(w => (w.subrole === 'AXDialog' && w.modal === true) || w.role === 'AXSheet');
+  // Refused: what is certainly a system prompt — a known alert owner's bundle, or the AXSystemDialog subrole. A stray
+  // Return there can press "Allow".
+  if (ALERT_OWNER_BUNDLES.has(a.bundleId ?? '') || system) {
     return {
       kind: 'alert', name: a.name, processId: a.processId, bundleId: a.bundleId,
-      title: (dialog ?? a.windows[0])?.title || undefined,
+      title: (system ?? modal ?? a.windows[0])?.title || undefined,
+    };
+  }
+  // Not refused: a MODAL dialog or sheet of some other accessory app. Launcher panels and password-manager popovers
+  // (Raycast, Alfred, 1Password Quick Access) are exactly that, and typing into them is the point; refusing every one of
+  // them broke those apps. Whose dialog it is gets said, not enforced.
+  if (modal) {
+    const title = modal.title ? ` — "${modal.title}"` : '';
+    return {
+      kind: 'app',
+      warning: `A modal dialog of "${a.name}"${title} (pid ${a.processId}) is frontmost, so keystrokes go to it. ` +
+        'If that is not the app you mean to drive, answer or close it first.',
     };
   }
   return { kind: 'app' };
@@ -376,9 +414,23 @@ async function lsappinfoFrontmost(exec: MacAxDeps['exec']): Promise<FrontmostInf
   }
 }
 
+/** An app the helper's time budget never reached (or cut short): not hung — its windows are just missing from the list. */
+export interface SkippedApp { processId: number; processName: string }
+
+export interface WindowListResult {
+  windows: WindowInfo[];
+  /** Empty when the list is complete. */
+  skipped: SkippedApp[];
+}
+
 export interface MacAx {
   /** Every titled window. Throws `MacAxError` on a timeout / locked screen — never returns `[]` for a failure. */
   listWindows(): Promise<WindowInfo[]>;
+  /**
+   * `listWindows` plus the apps whose windows are missing because the time budget ran out before they were read — a
+   * slow Mac, not a hung app. A list that read nothing at all is a timeout error.
+   */
+  listWindowsDetailed(): Promise<WindowListResult>;
   /**
    * The window that has the keyboard: the frontmost app's focused (else main)
    * window — not "window 1" or the biggest one. Null only when nothing is
@@ -476,7 +528,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
    * for failures the helper itself reported and for timeouts (a JXA retry
    * would only be slower).
    */
-  async function viaHelper(args: string[], timeoutMs: number, what: string, opts: { waitForBuild?: boolean } = {}): Promise<any | null> {
+  async function viaHelper(args: string[], timeoutMs: number, what: string, opts: { waitForBuild?: boolean; input?: string; act?: boolean } = {}): Promise<any | null> {
     if (!helperUsable()) return null;
     let bin = deps.helper();
     if (!bin) {
@@ -490,9 +542,9 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     if (!bin) return null;
     let stdout: string;
     try {
-      ({ stdout } = await deps.exec(bin, args, { timeoutMs }));
+      ({ stdout } = await deps.exec(bin, args, opts.input === undefined ? { timeoutMs } : { timeoutMs, input: opts.input }));
     } catch (err) {
-      if (isTimeout(err)) throw timeoutError(what, timeoutMs);
+      if (isTimeout(err)) throw timeoutError(what, timeoutMs, opts.act);
       helperFailed();
       return null;
     }
@@ -507,7 +559,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       helperFailed();
       return null;
     }
-    if (!reply.ok) throw helperError(reply, what);
+    if (!reply.ok) throw helperError(reply, what, opts.act);
     return reply;
   }
 
@@ -560,8 +612,34 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     return raw ? toWindow(raw) : null;
   }
 
+  async function listWindowsDetailed(): Promise<WindowListResult> {
+    const reply = await viaHelper(
+      ['windows', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
+      HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
+      'window list',
+    );
+    if (reply) {
+      const windows: WindowInfo[] = (reply.windows ?? []).map(toWindow);
+      // An app that answered nothing for a whole AX timeout IS hung, and the list says so…
+      for (const u of reply.unresponsive ?? []) {
+        windows.push(toWindow({ title: '(not responding)', processName: u.processName, processId: u.processId }));
+      }
+      // …but an app the time budget never reached is not: it gets no window of its own, only a place in `skipped`.
+      const skipped: SkippedApp[] = (reply.skipped ?? []).map((a: any) => ({ processId: a.processId ?? 0, processName: a.processName ?? 'unknown' }));
+      if (windows.length === 0 && skipped.length > 0) {
+        throw new MacAxError('timeout',
+          `window list ran out of its ${Math.round(HELPER_LIST_DEADLINE_MS / 1000)}s time budget before reading any app (the Mac is busy). ${NOT_EMPTY}`);
+      }
+      return { windows, skipped };
+    }
+    const raw = await viaJxa('get-windows.jxa', [], JXA_LIST_TIMEOUT_MS, 'window list');
+    if (!Array.isArray(raw)) throw new MacAxError('failed', 'window list failed: unexpected output from get-windows.jxa');
+    return { windows: raw.map(toWindow), skipped: [] };
+  }
+
   return {
     activeWindow,
+    listWindowsDetailed,
 
     prepare(): void {
       if (!helperUsable()) return;
@@ -569,21 +647,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     },
 
     async listWindows(): Promise<WindowInfo[]> {
-      const reply = await viaHelper(
-        ['windows', '--timeout-ms', String(HELPER_LIST_DEADLINE_MS)],
-        HELPER_LIST_DEADLINE_MS + HELPER_GRACE_MS,
-        'window list',
-      );
-      if (reply) {
-        const wins: WindowInfo[] = (reply.windows ?? []).map(toWindow);
-        for (const u of reply.unresponsive ?? []) {
-          wins.push(toWindow({ title: '(not responding)', processName: u.processName, processId: u.processId }));
-        }
-        return wins;
-      }
-      const raw = await viaJxa('get-windows.jxa', [], JXA_LIST_TIMEOUT_MS, 'window list');
-      if (!Array.isArray(raw)) throw new MacAxError('failed', 'window list failed: unexpected output from get-windows.jxa');
-      return raw.map(toWindow);
+      return (await listWindowsDetailed()).windows;
     },
 
     async uiTree(processId?: number): Promise<{ elements: UiElement[]; truncated: boolean }> {
@@ -666,14 +730,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
 
     async find(q: ElementQuery): Promise<UiElement[]> {
       const what = 'element search';
+      const text = viaStdin({ name: q.name || undefined, id: q.automationId || undefined });
       const reply = await viaHelper(
         ['find', ...(q.processId ? ['--pid', String(q.processId)] : []),
-          ...(q.name ? ['--name', q.name] : []),
           ...(q.controlType ? ['--role', axRoleFor(q.controlType)] : []),
-          ...(q.automationId ? ['--id', q.automationId] : []),
-          '--max-results', String(FIND_MAX_RESULTS), '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
+          '--max-results', String(FIND_MAX_RESULTS), '--timeout-ms', String(HELPER_FIND_DEADLINE_MS), ...text.args],
         HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
         what,
+        { input: text.input },
       );
       if (reply) return (reply.elements ?? []).map((el: any) => toUiElement(el, undefined, q.processId));
       // find-element.jxa cannot search by identifier: an unfiltered walk would come back as "no elements found".
@@ -701,16 +765,24 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       if (!q.name && !q.controlType && !q.automationId) {
         return { success: false, error: 'invoke needs a name, controlType or automationId to aim at — refusing to act on an arbitrary element' };
       }
+      // A role IS something to aim at, but not enough to press: there is rarely only one Button in a window, and both engines
+      // would press whichever ranks first. (set-value / focus / get-value by role alone are left to the helper, which acts only
+      // when exactly one element has the role.)
+      if (PRESSING_ACTIONS.has(q.action) && !q.name && !q.automationId) {
+        return {
+          success: false,
+          error: `${q.action} needs a name or automationId to aim at — controlType "${q.controlType}" alone would act on whichever ${q.controlType} comes first`,
+        };
+      }
+      const text = viaStdin({ name: q.name || undefined, id: q.automationId || undefined, value: q.value });
       const reply = await viaHelper(
         ['invoke', ...(q.processId ? ['--pid', String(q.processId)] : []),
           '--action', q.action,
-          ...(q.name ? ['--name', q.name] : []),
           ...(q.controlType ? ['--role', axRoleFor(q.controlType)] : []),
-          ...(q.automationId ? ['--id', q.automationId] : []),
-          ...(q.value !== undefined ? ['--value', q.value] : []),
-          '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
+          '--timeout-ms', String(HELPER_FIND_DEADLINE_MS), ...text.args],
         HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
         what,
+        { input: text.input, act: true },
       );
       if (reply) return toInvokeResult(reply);
       if (!q.name && !q.controlType) {
@@ -761,8 +833,15 @@ export async function helperStatusFrom(d: {
 /** A big window's tree is megabytes of JSON; node's 1 MB default would read that as a crash. */
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
-export async function defaultExec(file: string, args: string[], opts: { timeoutMs: number }): Promise<{ stdout: string }> {
-  const { stdout } = await execFileAsync(file, args, { timeout: opts.timeoutMs, maxBuffer: MAX_OUTPUT_BYTES });
+export async function defaultExec(file: string, args: string[], opts: { timeoutMs: number; input?: string }): Promise<{ stdout: string }> {
+  const run = execFileAsync(file, args, { timeout: opts.timeoutMs, maxBuffer: MAX_OUTPUT_BYTES });
+  if (opts.input !== undefined) {
+    const stdin = run.child.stdin;
+    // The process may exit (or be killed at the timeout) before it has read everything: a closed pipe is not our error.
+    stdin?.on('error', () => { /* EPIPE */ });
+    stdin?.end(opts.input);
+  }
+  const { stdout } = await run;
   return { stdout: String(stdout) };
 }
 

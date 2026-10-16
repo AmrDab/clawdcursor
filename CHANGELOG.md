@@ -388,6 +388,37 @@ M1 iMac, no screenshots):
   `overlay`: `{mode:"hidden"|"running"}` or `{mode:"paused", message, since}`,
   so a watcher no longer has to tell the two pill processes apart. The paused
   pill also carries `--paused` in its command line.
+- Fixes from a second independent review of the helper, each reproduced on the Mac
+  first (and the tests failing against the old helper):
+  - **A slow Mac no longer makes healthy apps look hung.** When the window list's 4 s
+    budget ran out, the apps it had not reached were reported as bounds-0
+    "(not responding)" windows and their real windows vanished with no sign the list
+    was cut short. They are now named as not read: `window list` and `read_screen`
+    say the list is PARTIAL and which apps are missing, and a list that read nothing
+    is a timeout error. A real accessibility timeout still shows "(not responding)".
+  - **A click on an app that froze while the click ran is a timeout**, not "pending"
+    ("… stopped responding while the click was running — it may or may not have been
+    performed", and to look at the screen before retrying). "Pending" is kept for a
+    button that opens a modal panel, which keeps answering.
+  - **Typing into a launcher or password-manager popover works again** (Raycast,
+    Alfred, 1Password Quick Access are modal dialogs of an accessory app). Only
+    permission, Gatekeeper and authentication prompts — a known system bundle, or the
+    system-dialog role — still refuse `type` / `key`; a modal dialog of any other app
+    is typed into with a warning in the log. Escape is always sent: it cancels, it
+    never answers "Allow". `open_app`'s Spotlight fallback still leaves a system
+    dialog alone, Escape included.
+  - **`find {automationId}` is exact.** "savebutton" used to find "saveButton" and
+    then print nothing, because `find_element` filters the reply with `===`.
+  - **`invoke` by controlType alone no longer presses the first Button.** Click,
+    toggle, select, expand and collapse need a name or automationId;
+    `set-value` / `focus` / `get-value` by controlType alone act only when exactly one
+    element has that role, and otherwise list the candidates.
+  - clawdcursor's own overlay no longer appears in window lists.
+  - Typed text, names and identifiers go to the helper on stdin instead of argv,
+    where any process could read them with `ps` while the helper ran.
+  - `verify-macos.mjs`: on a Mac where the old osascript window list fails or takes
+    over 90 s, the helper's check no longer fails for lack of anything to compare
+    with; speed alone decides.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

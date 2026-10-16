@@ -28,12 +28,13 @@ let tmp: string;
 let helper: string | null = null;
 
 /** Run the helper; it always exits 0 with one JSON object, even for logical failures. */
-function run(args: string[], timeoutMs = 30_000): Promise<any> {
+function run(args: string[], timeoutMs = 30_000, stdin?: string): Promise<any> {
   return new Promise((resolve, reject) => {
-    execFile(helper!, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
+    const child = execFile(helper!, args, { timeout: timeoutMs, maxBuffer: 64 * 1024 * 1024 }, (err, stdout) => {
       if (err && !stdout) return reject(err);
       try { resolve(JSON.parse(stdout)); } catch { reject(new Error(`not JSON: ${String(stdout).slice(0, 200)}`)); }
     });
+    if (stdin !== undefined) child.stdin!.end(stdin);
   });
 }
 
@@ -124,8 +125,8 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
   const extra: ChildProcess[] = [];
 
   /** Start the fixture app; resolves its pid once both windows are up. */
-  async function startFixture(mode: 'normal' | 'slow' | 'zoomed' | 'minimized' = 'normal'): Promise<{ proc: ChildProcess; pid: number }> {
-    const proc = spawn(fixtureBin, [], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AXFIXTURE_MODE: mode } });
+  async function startFixture(mode: 'normal' | 'slow' | 'zoomed' | 'minimized' = 'normal', bin = fixtureBin): Promise<{ proc: ChildProcess; pid: number }> {
+    const proc = spawn(bin, [], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AXFIXTURE_MODE: mode } });
     const p = await new Promise<number>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('fixture did not start')), 30_000);
       proc.stdout!.on('data', d => {
@@ -170,6 +171,8 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     expect(r.ok).toBe(true);
     const mine = r.windows.filter((w: any) => w.processId === pid);
     expect(mine.map((w: any) => w.title).sort()).toEqual(['Fixture A', 'Fixture B']);
+    expect(r.skipped).toEqual([]);          // every app was reached…
+    expect(r.truncated).toBe(false);        // …so the list is complete
     for (const w of mine) {
       expect(w.bounds.width).toBeGreaterThan(300);
       expect(w.bounds.height).toBeGreaterThan(200);
@@ -342,6 +345,20 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     expect(status.elements[0].value).toBe('modal: closed');
   });
 
+  it('review 2: an app that HANGS while the press runs is a timeout — only a modal loop (which keeps answering) is "pending"', async (ctx) => {
+    if (!usable) return ctx.skip();
+    // The Hang button blocks the app's main thread for 4 s inside its action: AXPress returns kAXErrorCannotComplete after
+    // the timeout exactly as for the modal button, but the app then answers nothing. Reported as "pending" the caller
+    // would carry on against an app that is frozen; a second timeout on a cheap read tells the two apart.
+    const r = await run(['invoke', '--pid', String(pid), '--id', 'hangButton', '--action', 'click', '--ax-timeout-ms', '600']);
+    expect(r).toMatchObject({ ok: false, kind: 'timeout' });
+    expect(r.error).toMatch(/respond/i);
+    expect(r.error).toMatch(/may or may not|might|unknown/i);       // the click itself did happen
+    await new Promise(res => setTimeout(res, 4_500));               // the fixture is busy for 4 s
+    const status = await run(['find', '--pid', String(pid), '--id', 'status', '--ax-timeout-ms', '3000']);
+    expect(status.elements[0].value).toBe('hang: over');
+  });
+
   it('find and invoke match the label the tree shows: a button named only by a child static text', async (ctx) => {
     if (!usable) return ctx.skip();
     const tree = await run(['tree', '--pid', String(pid)]);
@@ -450,6 +467,107 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     const r = await run(['windows']);
     expect(r.unresponsive).toEqual([]);
     expect(Date.now() - t0).toBeLessThan(3_000);
+  });
+
+  // ─── Review of 9c164b0…7042d75 (nine findings) ───────────────────────────────
+
+  it('review 1: running out of TIME is not a hung app — apps never reached are "skipped", the reply says truncated, nothing is "unresponsive"', async (ctx) => {
+    if (!usable) return ctx.skip();
+    // A 1 ms budget is over before the first app is read: every healthy app is merely not reached. They used to be
+    // reported as unresponsive, which became bounds-0 "(not responding)" windows for perfectly healthy apps.
+    const r = await run(['windows', '--timeout-ms', '1']);
+    expect(r.ok).toBe(true);
+    expect(r.truncated).toBe(true);
+    expect(r.unresponsive).toEqual([]);
+    expect(r.skipped.some((s: any) => s.processId === pid)).toBe(true);
+    const apps = await run(['apps', '--name', 'ax-fixture', '--timeout-ms', '1']);
+    expect(apps.truncated).toBe(true);
+    expect(apps.unresponsive).toEqual([]);
+    expect(apps.skipped.some((s: any) => s.processId === pid)).toBe(true);
+  });
+
+  it('review 5: --id is EXACT — "savebutton" is not "saveButton" (find_element filters with === afterwards)', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const status = async () => (await run(['find', '--pid', String(pid), '--id', 'status'])).elements[0].value;
+    const before = await status();
+    const exact = await run(['find', '--pid', String(pid), '--id', 'saveButton']);
+    expect(exact.elements).toHaveLength(1);
+    const wrongCase = await run(['find', '--pid', String(pid), '--id', 'savebutton']);
+    expect(wrongCase.ok).toBe(true);
+    expect(wrongCase.elements).toEqual([]);
+    const press = await run(['invoke', '--pid', String(pid), '--id', 'savebutton', '--action', 'click']);
+    expect(press).toMatchObject({ ok: true, success: false });
+    expect(press.error).toMatch(/not found/i);
+    expect(await status()).toBe(before);            // nothing was pressed
+    // --name stays a case-insensitive substring match
+    expect((await run(['find', '--pid', String(pid), '--name', 'SAVEBUT'])).elements.map((e: any) => e.automationId)).toContain('saveButton');
+  });
+
+  it('review 6: a role alone never presses — click at AXButton is refused and nothing was pressed', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const status = async () => (await run(['find', '--pid', String(pid), '--id', 'status'])).elements[0].value;
+    const before = await status();
+    for (const action of ['click', 'toggle', 'select']) {
+      const r = await run(['invoke', '--pid', String(pid), '--role', 'AXButton', '--action', action]);
+      expect(r, action).toMatchObject({ ok: true, success: false });
+      expect(r.error).toMatch(/name or id/i);
+    }
+    expect(await status()).toBe(before);
+  });
+
+  it('review 6: a role that matches several elements is ambiguous for set-value — refused, with the candidates, nothing written', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const value = async () => (await run(['invoke', '--pid', String(pid), '--id', 'nameField', '--action', 'get-value'])).value;
+    const before = await value();
+    const r = await run(['invoke', '--pid', String(pid), '--role', 'AXTextField', '--action', 'set-value', '--value', 'overwritten by mistake']);
+    expect(r).toMatchObject({ ok: true, success: false });
+    expect(r.error).toMatch(/2 elements|matches 2/i);
+    expect(r.error).toContain('nameField');
+    expect(await value()).toBe(before);
+  });
+
+  it('review 6: a role that matches exactly ONE element still works without a name', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const r = await run(['invoke', '--pid', String(pid), '--role', 'AXCheckBox', '--action', 'get-value']);
+    expect(r).toMatchObject({ ok: true, success: true });
+  });
+
+  it('review 9: --args-stdin takes name, id and value from stdin — argv is readable by every process', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const text = 'sent on stdin --and a flag-looking tail';
+    const set = await run(['invoke', '--pid', String(pid), '--action', 'set-value', '--args-stdin', '1'], 30_000, JSON.stringify({ id: 'nameField', value: text }));
+    expect(set).toMatchObject({ ok: true, success: true });
+    const got = await run(['invoke', '--pid', String(pid), '--action', 'get-value', '--args-stdin', '1'], 30_000, JSON.stringify({ id: 'nameField' }));
+    expect(got.value).toBe(text);
+    const found = await run(['find', '--pid', String(pid), '--args-stdin', '1'], 30_000, JSON.stringify({ name: 'Save' }));
+    expect(found.elements[0].automationId).toBe('saveButton');
+    // empty string is a value: it clears the field
+    await run(['invoke', '--pid', String(pid), '--action', 'set-value', '--args-stdin', '1'], 30_000, JSON.stringify({ id: 'nameField', value: '' }));
+    expect((await run(['invoke', '--pid', String(pid), '--action', 'get-value', '--args-stdin', '1'], 30_000, JSON.stringify({ id: 'nameField' }))).value).toBe('');
+  });
+
+  it('review 9: unreadable stdin is a failed reply, not a hang or a crash', async (ctx) => {
+    if (!usable) return ctx.skip();
+    expect(await run(['find', '--pid', String(pid), '--args-stdin', '1'], 30_000, 'this is not json')).toMatchObject({ ok: false, kind: 'failed' });
+    expect(await run(['find', '--pid', String(pid), '--args-stdin', '1'], 30_000, '')).toMatchObject({ ok: false, kind: 'failed' });
+  });
+
+  it('review 8: clawdcursor\'s own processes (clawd-overlay-<hash>) are never in the window list', async (ctx) => {
+    if (!usable) return ctx.skip();
+    const overlayBin = path.join(tmp, 'clawd-overlay-livetest');
+    fs.copyFileSync(fixtureBin, overlayBin);
+    fs.chmodSync(overlayBin, 0o755);
+    const o = await startFixture('normal', overlayBin);
+    extra.push(o.proc);
+    try {
+      // the process is up and readable by pid…
+      expect((await run(['tree', '--pid', String(o.pid)])).ok).toBe(true);
+      // …yet it is not an app to list (its windows are not something to drive)
+      const w = await run(['windows']);
+      expect(w.windows.some((x: any) => x.processId === o.pid)).toBe(false);
+      expect(w.windows.some((x: any) => x.processId === pid)).toBe(true);            // the ordinary fixture still is
+      expect((await run(['apps', '--name', 'clawd-overlay-livetest'])).apps).toEqual([]);
+    } finally { o.proc.kill('SIGKILL'); }
   });
 
   // Last on purpose: it freezes the fixture.

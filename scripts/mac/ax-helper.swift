@@ -24,7 +24,9 @@
 //   ax-helper tree      [--pid N] [--max-depth N] [--max-nodes N] [--timeout-ms N]
 //   ax-helper find      [--pid N] [--name S] [--role R] [--id S] [--max-results N] [--timeout-ms N]
 //   ax-helper invoke    [--pid N] --action A [--name S] [--role R] [--id S] [--value V] [--timeout-ms N]
-//   (every command also takes --ax-timeout-ms N: how long ONE call to ONE app may block)
+//   (every command also takes --ax-timeout-ms N: how long ONE call to ONE app may block, and
+//    --args-stdin 1: read name / id / value / … as one JSON object of strings from stdin instead of argv — argv is
+//    readable by every process on the Mac while this one runs)
 //
 // Secure text fields: their value is never read out of the process.
 import AppKit
@@ -61,6 +63,16 @@ do {
             if i + 1 < argv.count { opts[key] = argv[i + 1]; i += 2 } else { opts[key] = ""; i += 1 }
         } else { i += 1 }
     }
+}
+
+// --args-stdin 1: what the caller typed or searches for (name, id, value) arrives as ONE JSON object on stdin. Anything that
+// is not a string is ignored; unreadable input is a failed reply, never a guess.
+if opts["args-stdin"] != nil {
+    let data = FileHandle.standardInput.readDataToEndOfFile()
+    guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        fail("failed", "--args-stdin: stdin is not a JSON object")
+    }
+    for (key, value) in object { if let text = value as? String { opts[key] = text } }
 }
 
 let startedAt = Date()
@@ -181,9 +193,11 @@ func isRealApp(_ app: NSRunningApplication, allowLaunching: Bool) -> Bool {
     return Date().timeIntervalSince(started) < 30
 }
 
+/// clawdcursor's own processes (the overlay, cached as clawd-overlay-<hash>, and the native host) are not apps to list or drive.
 func candidateApps(allowLaunching: Bool = false) -> [NSRunningApplication] {
     NSWorkspace.shared.runningApplications.filter {
-        !$0.isTerminated && $0.activationPolicy != .prohibited && $0.processIdentifier != ownPid && isRealApp($0, allowLaunching: allowLaunching)
+        !$0.isTerminated && $0.activationPolicy != .prohibited && $0.processIdentifier != ownPid
+            && !isOwnProcessName($0.localizedName ?? "") && isRealApp($0, allowLaunching: allowLaunching)
     }
 }
 
@@ -244,8 +258,10 @@ func worthListing(_ w: [String: Any], _ app: NSRunningApplication) -> Bool {
     return realWindow && (b["width"] ?? 0) >= 40 && (b["height"] ?? 0) >= 40
 }
 
-/// Why one app could not be read: a call that waited out the whole messaging timeout means it is hung.
-enum AppRead { case windows([[String: Any]]), unresponsive }
+/// How one app read went. A call that waited out the whole messaging timeout means the app is hung (`unresponsive`). Running
+/// out of the overall time budget is NOT that: it leaves an app unread (never reached) or `partial` (cut short) — a sign the
+/// Mac was slow, not that anything is wrong with the app.
+enum AppRead { case windows([[String: Any]]), partial([[String: Any]]), unresponsive }
 
 func readWindows(of app: NSRunningApplication) -> AppRead {
     let el = appElement(app.processIdentifier)
@@ -258,7 +274,7 @@ func readWindows(of app: NSRunningApplication) -> AppRead {
     }
     var out: [[String: Any]] = []
     for w in (value as? [AXUIElement]) ?? [] {
-        if timeUp() { return .unresponsive }
+        if timeUp() { return .partial(out) }
         let t1 = Date()
         let d = windowDict(w, app)
         // Answered the list, then took a whole messaging timeout on one window: it is stalling.
@@ -268,25 +284,36 @@ func readWindows(of app: NSRunningApplication) -> AppRead {
     return .windows(out)
 }
 
-/// Fan out across apps: one hung app costs its own timeout, not everyone's.
-func readAllApps(_ apps: [NSRunningApplication]) -> (results: [Int: [[String: Any]]], unresponsive: [[String: Any]]) {
-    let lock = NSLock()
-    var results: [Int: [[String: Any]]] = [:]
+struct AppReads {
+    /// Windows read, by pid.
+    var windows: [Int: [[String: Any]]] = [:]
+    /// Apps that waited out a whole messaging timeout: hung.
     var unresponsive: [[String: Any]] = []
+    /// Apps the time budget never reached, or cut short. Nothing is wrong with them — the list is just incomplete.
+    var skipped: [[String: Any]] = []
+}
+
+/// Fan out across apps: one hung app costs its own timeout, not everyone's.
+func readAllApps(_ apps: [NSRunningApplication]) -> AppReads {
+    let lock = NSLock()
+    var reads = AppReads()
     DispatchQueue.concurrentPerform(iterations: apps.count) { i in
         let app = apps[i]
+        let who: [String: Any] = ["processId": Int(app.processIdentifier), "processName": app.localizedName ?? "unknown"]
         if timeUp() {
-            lock.lock(); unresponsive.append(["processId": Int(app.processIdentifier), "processName": app.localizedName ?? "unknown"]); lock.unlock()
+            lock.lock(); reads.skipped.append(who); lock.unlock()
             return
         }
-        switch readWindows(of: app) {
-        case .windows(let ws):
-            lock.lock(); results[Int(app.processIdentifier)] = ws; lock.unlock()
-        case .unresponsive:
-            lock.lock(); unresponsive.append(["processId": Int(app.processIdentifier), "processName": app.localizedName ?? "unknown"]); lock.unlock()
+        let read = readWindows(of: app)
+        lock.lock()
+        switch read {
+        case .windows(let ws): reads.windows[Int(app.processIdentifier)] = ws
+        case .partial(let ws): reads.windows[Int(app.processIdentifier)] = ws; reads.skipped.append(who)
+        case .unresponsive: reads.unresponsive.append(who)
         }
+        lock.unlock()
     }
-    return (results, unresponsive)
+    return reads
 }
 
 /// The window that has the keyboard: the app's focused window, else its main window, else the first one.
@@ -478,8 +505,9 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
                 exact = tl == w || dl == w || il == w || ll == w
             }
             if let id = aim.id {
-                let ok = ident == id || ident.lowercased() == id.lowercased()
-                matches = matches && ok
+                // An identifier is exact, case included: find_element filters this reply with === afterwards, so a looser
+                // match here would be found and then silently dropped ("savebutton" finding "SaveButton" and printing nothing).
+                matches = matches && ident == id
                 exact = exact || ident == id
             }
             if let r = wantRole { matches = matches && normRole(role).contains(r) }
@@ -561,12 +589,27 @@ func settable(_ el: AXUIElement, _ attr: String) -> Bool {
 /// AXUIElementPerformAction. The SDK: kAXErrorCannotComplete "does not necessarily mean that the function has failed" — an
 /// action that runs a modal loop (a button that opens a panel or an alert) does not return before the timeout. After a full
 /// timeout it was started and is still running: report it as pending, not as a failure to click (callers click again).
-func press(_ el: AXUIElement, _ action: String = "AXPress") -> (done: Bool, pending: Bool, code: Int32) {
+///
+/// A full timeout also looks like that when the app froze in the middle of the action. The two differ in what happens next: a
+/// modal loop keeps answering accessibility requests, a frozen app answers nothing. So after a full timeout, one cheap read of
+/// the same element: a second full timeout means `hung`.
+func press(_ el: AXUIElement, _ action: String = "AXPress") -> (done: Bool, pending: Bool, hung: Bool, code: Int32) {
     let t0 = Date()
     let r = AXUIElementPerformAction(el, action as CFString)
-    if r == .success { return (true, false, 0) }
-    if r == .cannotComplete && Date().timeIntervalSince(t0) >= Double(axTimeout) * 0.8 { return (true, true, r.rawValue) }
-    return (false, false, r.rawValue)
+    if r == .success { return (true, false, false, 0) }
+    if r == .cannotComplete && Date().timeIntervalSince(t0) >= Double(axTimeout) * 0.8 {
+        let t1 = Date()
+        let (_, probe) = copyAttr(el, "AXRole")
+        let hung = probe == .cannotComplete && Date().timeIntervalSince(t1) >= Double(axTimeout) * 0.8
+        return (!hung, !hung, hung, r.rawValue)
+    }
+    return (false, false, false, r.rawValue)
+}
+
+/// The app stopped answering while an action ran: whether the action happened is not known, and neither "pending" nor
+/// "could not click" would be true.
+func hungDuringAction(_ action: String, _ appName: String) -> Never {
+    fail("timeout", "\(appName) stopped responding while the \(action) was running — it may or may not have been performed")
 }
 
 func pressed(_ action: String, method: String, pending: Bool, extra: [String: Any] = [:]) -> [String: Any] {
@@ -577,11 +620,12 @@ func pressed(_ action: String, method: String, pending: Bool, extra: [String: An
     return r
 }
 
-func perform(_ action: String, _ h: Hit) -> [String: Any] {
+func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
     let el = h.element
     switch action {
     case "click":
         let p = press(el)
+        if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
         return miss(action, "the element does not support AXPress (AXError \(p.code)) — click its coordinates instead", element: el)
     case "focus":
@@ -607,11 +651,13 @@ func perform(_ action: String, _ h: Hit) -> [String: Any] {
         }
         if want {
             let p = press(el, "AXShowMenu")
+            if p.hung { hungDuringAction(action, appName) }
             if p.done { return pressed(action, method: "AXShowMenu", pending: p.pending) }
         }
         return miss(action, "the element does not support \(action) (no AXExpanded)", element: el)
     case "toggle":
         let p = press(el)
+        if p.hung { hungDuringAction(action, appName) }
         if !p.done { return miss(action, "the element does not support toggle (no AXPress; AXError \(p.code))", element: el) }
         if p.pending { return pressed(action, method: "AXPress", pending: true, extra: ["toggleState": "unknown"]) }
         Thread.sleep(forTimeInterval: 0.05)
@@ -623,6 +669,7 @@ func perform(_ action: String, _ h: Hit) -> [String: Any] {
             return ["ok": true, "success": true, "action": action, "method": "AXSelected"]
         }
         let p = press(el)
+        if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
         return miss(action, "the element does not support select (no AXSelected / AXPress)", element: el)
     default:
@@ -667,16 +714,17 @@ func cmdWindows() -> Never {
         if b.processIdentifier == front { return false }
         return a.processIdentifier < b.processIdentifier
     }
-    let (results, unresponsive) = readAllApps(apps)
+    let reads = readAllApps(apps)
     var windows: [[String: Any]] = []
     for app in apps {
-        for w in results[Int(app.processIdentifier)] ?? [] where worthListing(w, app) {
+        for w in reads.windows[Int(app.processIdentifier)] ?? [] where worthListing(w, app) {
             var d = w
             d.removeValue(forKey: "subrole")
             windows.append(d)
         }
     }
-    emit(["ok": true, "windows": windows, "unresponsive": unresponsive, "elapsedMs": elapsedMs()])
+    emit(["ok": true, "windows": windows, "unresponsive": reads.unresponsive, "skipped": reads.skipped,
+          "truncated": !reads.skipped.isEmpty, "elapsedMs": elapsedMs()])
 }
 
 func cmdActive() -> Never {
@@ -715,7 +763,7 @@ func cmdApps() -> Never {
     requireUsableSession()
     let want = (opts["name"] ?? "").lowercased()
     let apps = candidateApps(allowLaunching: true).filter { want.isEmpty || appNames($0).contains { $0.contains(want) } }
-    let (results, unresponsive) = readAllApps(apps)
+    let reads = readAllApps(apps)
     var out: [[String: Any]] = []
     for app in apps {
         var d: [String: Any] = [
@@ -724,7 +772,7 @@ func cmdApps() -> Never {
             "finishedLaunching": app.isFinishedLaunching,
             "active": app.isActive,
             "activationPolicy": policyName(app),
-            "windows": (results[Int(app.processIdentifier)] ?? []).filter { worthListing($0, app) }.map { w -> [String: Any] in
+            "windows": (reads.windows[Int(app.processIdentifier)] ?? []).filter { worthListing($0, app) }.map { w -> [String: Any] in
                 var x = w; x.removeValue(forKey: "subrole"); return x
             },
         ]
@@ -732,7 +780,8 @@ func cmdApps() -> Never {
         if let t = app.launchDate { d["launchDate"] = t.timeIntervalSince1970 }
         out.append(d)
     }
-    emit(["ok": true, "apps": out, "unresponsive": unresponsive, "elapsedMs": elapsedMs()])
+    emit(["ok": true, "apps": out, "unresponsive": reads.unresponsive, "skipped": reads.skipped,
+          "truncated": !reads.skipped.isEmpty, "elapsedMs": elapsedMs()])
 }
 
 func cmdTree() -> Never {
@@ -807,12 +856,22 @@ func cmdFind() -> Never {
     emit(["ok": true, "elements": ranked.map { hitDict($0, pid: app.processIdentifier) }, "truncated": timeUp() || found.unreadable > 0, "elapsedMs": elapsedMs()])
 }
 
+/// Actions that press or change something. Aimed at a role alone ("Button") they would act on whichever match ranks first —
+/// the shallowest button in the window.
+let pressingActions: Set<String> = ["click", "toggle", "select", "expand", "collapse"]
+
 func cmdInvoke() -> Never {
     requireUsableSession()
     guard let action = opts["action"], !action.isEmpty else { emit(miss("", "invoke needs --action")) }
     let aim = currentAim()
     // With nothing to aim at every element matches and "best" is arbitrary — never act on that.
     if aim.isEmpty { emit(miss(action, "invoke needs a name, role or id to aim at — refusing to act on an arbitrary element")) }
+    // A role is something, but not enough to press: there is rarely only one button.
+    let byRoleOnly = aim.name == nil && aim.id == nil
+    if byRoleOnly && pressingActions.contains(action) {
+        let role = aim.role ?? ""
+        emit(miss(action, "\(action) needs a name or id to aim at — role=\"\(role)\" alone would act on whichever \(role) comes first"))
+    }
     let app = targetApplication()
     var found = SearchCtx()
     let (windows, hung) = windowsToSearch(app)
@@ -829,12 +888,26 @@ func cmdInvoke() -> Never {
         if let i = aim.id { what += "id=\"\(i)\" " }
         emit(miss(action, "Element not found: \(what.trimmingCharacters(in: .whitespaces))"))
     }
+    // Aimed at a role alone (set-value / focus / get-value), the role must pick exactly one element.
+    if byRoleOnly {
+        if found.hits.count > 1 {
+            let ranked = rankHits(found.hits, action: action)
+            let who = ranked.prefix(6).map { h -> String in
+                let label = h.name.isEmpty ? h.ident : h.name
+                return "\"\(label)\"" + (!h.name.isEmpty && !h.ident.isEmpty ? " (id \(h.ident))" : "")
+            }.joined(separator: ", ")
+            emit(miss(action, "role=\"\(aim.role ?? "")\" matches \(found.hits.count) elements — \(who)\(ranked.count > 6 ? ", …" : "") — add a name or id to pick one"))
+        }
+        if timeUp() || found.unreadable > 0 {
+            fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — cannot tell that only one element has this role")
+        }
+    }
     // A name that is only a substring of the best hit ("Save As…" for "Save") may be hiding its exact match in the part of the
     // window that did not answer or past the deadline: acting on that would press the wrong control.
     if !best.exact && (aim.name != nil || aim.id != nil) && (timeUp() || found.unreadable > 0) {
         fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name)\")")
     }
-    emit(perform(action, best))
+    emit(perform(action, best, appName: app.localizedName ?? "the app"))
 }
 
 switch command {

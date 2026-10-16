@@ -292,6 +292,11 @@ export interface PlatformAdapter {
    *  an empty-looking blind read is exactly when agents abandon a11y. */
   lastFindError?: 'timeout' | 'error' | null;
   lastTreeTruncated?: boolean;
+  /**
+   * Optional: set when the last `listWindows` came back incomplete — a ready-to-print one-line note naming the apps whose
+   * windows are missing (the time budget ran out before they were read). Null/absent: the list is complete.
+   */
+  lastWindowListPartial?: string | null;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Invoke an accessibility action on a named element. Action union

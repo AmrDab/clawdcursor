@@ -198,7 +198,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return `${isActive ? '→' : ' '} [${w.processName}] "${w.title}" pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
         });
         const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
-        return { success: true, text: `Windows (${windows.length}):\n${lines.join('\n')}${more}` };
+        const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
+        return { success: true, text: `Windows (${windows.length}):\n${lines.join('\n')}${more}${partial}` };
       },
     },
 

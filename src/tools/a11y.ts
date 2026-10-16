@@ -235,7 +235,9 @@ export function getA11yTools(): ToolDefinition[] {
           const nextStep = tree.length < 5 || isBrowser ? await nextStepFor(ctx, active) : '';
           baseText = [
             'WINDOWS',
-            windows.length ? windows.map(formatWindow).join('\n') : windowListError ? `(window list failed: ${windowListError})` : '(no windows found)',
+            windows.length
+              ? [...windows.map(formatWindow), ...(ctx.platform.lastWindowListPartial ? [ctx.platform.lastWindowListPartial] : [])].join('\n')
+              : windowListError ? `(window list failed: ${windowListError})` : '(no windows found)',
             '',
             `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
             tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : treeError ? `(tree read failed: ${treeError})` : '(no elements found)',
@@ -277,8 +279,9 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (ctx.platform) {
           const windows = await ctx.platform.listWindows();
-          if (!windows?.length) return { text: '(no windows found)' };
-          return { text: windows.map(formatWindow).join('\n') };
+          const partial = ctx.platform.lastWindowListPartial;
+          if (!windows?.length) return { text: partial ? `(no windows found)\n${partial}` : '(no windows found)' };
+          return { text: windows.map(formatWindow).join('\n') + (partial ? `\n${partial}` : '') };
         }
         const windows = await ctx.a11y.getWindows(true);
         if (!windows?.length) return { text: '(no windows found)' };

@@ -15,6 +15,7 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { windowListVerdict } from './verify-macos-checks.mjs';
 
 if (process.platform !== 'darwin') { console.error('verify-macos: run this on a Mac.'); process.exit(1); }
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -213,9 +214,9 @@ const AX_HELPER = path.join(ROOT, 'scripts', 'mac', 'ax-helper.swift');
         const key = x => `${x.processId}\u0000${x.title}`;
         const mine = new Set(w.out.windows.map(key));
         const lost = old ? old.filter(x => !mine.has(key(x))).length : null;
-        const verdict = w.ms < 3000 && lost === 0 ? 'PASS' : 'FAIL';
-        line(verdict, 'ax-helper window list: fast, and nothing the old script saw is missing',
-          `${w.out.windows.length} windows in ${w.ms} ms${w.out.unresponsive.length ? ` (+${w.out.unresponsive.length} not responding)` : ''} · old osascript: ${old ? `${old.length} windows` : 'failed'} in ${oldMs} ms${lost ? ` · MISSING ${lost}` : ''}`);
+        const v = windowListVerdict({ old, helperMs: w.ms, lost });
+        line(v.pass ? 'PASS' : 'FAIL', 'ax-helper window list: fast, and nothing the old script saw is missing',
+          `${w.out.windows.length} windows in ${w.ms} ms${w.out.unresponsive.length ? ` (+${w.out.unresponsive.length} not responding)` : ''}${w.out.truncated ? ` · PARTIAL: ${w.out.skipped.length} app(s) not reached in the time budget` : ''} · old osascript: ${old ? `${old.length} windows` : 'failed'} in ${oldMs} ms${v.note ? ` · ${v.note}` : ''}`);
       }
       const a = ax(['active']);
       if (a.out.ok) {

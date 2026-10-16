@@ -23,14 +23,14 @@ type Reply = string | Error | ((file: string, args: string[]) => string | Error)
 
 /** A runner that records every call and answers from `reply`. */
 function harness(opts: { helper?: string | null; reply?: Reply } = {}) {
-  const calls: Array<{ file: string; args: string[]; timeoutMs: number }> = [];
+  const calls: Array<{ file: string; args: string[]; timeoutMs: number; input?: string }> = [];
   const ensureHelper = vi.fn<() => Promise<string | null> | void>();
   const deps: MacAxDeps = {
     helper: () => (opts.helper === undefined ? '/fake/ax-helper' : opts.helper),
     ensureHelper,
     scriptsDir: '/fake/scripts/mac',
     exec: async (file, args, o) => {
-      calls.push({ file, args, timeoutMs: o.timeoutMs });
+      calls.push({ file, args, timeoutMs: o.timeoutMs, input: o.input });
       const r = typeof opts.reply === 'function' ? opts.reply(file, args) : opts.reply;
       if (r instanceof Error) throw r;
       return { stdout: r ?? '{}' };
@@ -96,6 +96,50 @@ describe('listWindows — the compiled helper', () => {
     const wins = await ax.listWindows();
     expect(wins).toHaveLength(2);
     expect(wins[1]).toMatchObject({ processName: 'Hung App', processId: 99, title: '(not responding)' });
+  });
+
+  // Review finding 1: on a slow Mac the helper's time budget ran out before it reached every app, and the apps it never
+  // reached were reported as hung — healthy apps turned into bounds-0 "(not responding)" windows (which then leaked into
+  // focusWindow matching and the launch diff) and their real windows vanished with no sign the list was cut short.
+  describe('apps the time budget never reached are not hung apps', () => {
+    const SLOW = { processId: 55, processName: 'Healthy But Late' };
+
+    it('are NOT turned into "(not responding)" windows — that label is for a real AX timeout', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [WIN()], unresponsive: [], skipped: [SLOW], truncated: true }) });
+      const wins = await ax.listWindows();
+      expect(wins).toHaveLength(1);
+      expect(wins.some(w => w.processId === 55 || w.title === '(not responding)')).toBe(false);
+    });
+
+    it('listWindowsDetailed names them, so the caller can say the list is partial', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [WIN()], unresponsive: [], skipped: [SLOW], truncated: true }) });
+      const r = await ax.listWindowsDetailed();
+      expect(r.windows).toHaveLength(1);
+      expect(r.skipped).toEqual([SLOW]);
+    });
+
+    it('a hung app and a skipped app are told apart in the same answer', async () => {
+      const { ax } = harness({ reply: JSON.stringify({
+        ok: true, windows: [WIN()], unresponsive: [{ processId: 99, processName: 'Hung App' }], skipped: [SLOW], truncated: true,
+      }) });
+      const r = await ax.listWindowsDetailed();
+      expect(r.windows.map(w => w.title)).toEqual(['Untitled 7', '(not responding)']);
+      expect(r.skipped).toEqual([SLOW]);
+    });
+
+    it('a complete list reports nothing skipped', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [WIN()], unresponsive: [] }) });
+      await expect(ax.listWindowsDetailed()).resolves.toMatchObject({ skipped: [] });
+    });
+
+    it('a list that read NOTHING before the deadline is a timeout, not "no windows"', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [], unresponsive: [], skipped: [SLOW], truncated: true }) });
+      const err = await ax.listWindows().then(() => null, e => e);
+      expect(err).toBeInstanceOf(MacAxError);
+      expect(err.kind).toBe('timeout');
+      expect(err.message).toMatch(/window list/i);
+      expect(err.message).toMatch(/not .*no windows|not "no windows"/i);
+    });
   });
 
   it('a locked screen is reported as such (the AX tree behind it is empty shells)', async () => {
@@ -437,11 +481,19 @@ describe('find', () => {
     const args = calls[0].args;
     expect(args[0]).toBe('find');
     expect(args[args.indexOf('--pid') + 1]).toBe('7');
-    expect(args[args.indexOf('--name') + 1]).toBe('Save');
     expect(args[args.indexOf('--role') + 1]).toBe('AXButton');
-    expect(args[args.indexOf('--id') + 1]).toBe('saveButton');
+    // what the caller typed or read off the screen is not on argv (review finding 9): it goes on stdin
+    expect(args).toContain('--args-stdin');
+    expect(JSON.parse(calls[0].input!)).toEqual({ name: 'Save', id: 'saveButton' });
     expect(hits.map(h => h.name)).toEqual(['Save', 'Save As…']);
     expect(hits[0]).toMatchObject({ controlType: 'Button', automationId: 'saveButton', processId: 7 });
+  });
+
+  it('a find with no name or identifier sends no stdin at all', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, elements: [] }) });
+    await ax.find({ processId: 7, controlType: 'Button' });
+    expect(calls[0].args).not.toContain('--args-stdin');
+    expect(calls[0].input).toBeUndefined();
   });
 
   it.each([
@@ -523,6 +575,39 @@ describe('invoke — never acts without a selector', () => {
   });
 });
 
+describe('invoke — a role alone never presses (review finding 6)', () => {
+  // invoke {controlType:'Button'} with no name or id passed the "nothing to aim at" check (a role IS something) and then
+  // pressed the shallowest button in the window.
+  it.each(['click', 'toggle', 'select', 'expand', 'collapse'] as const)('%s aimed at a controlType only is refused, and nothing is run', async action => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Button', action });
+    expect(res.success).toBe(false);
+    expect(res.error).toMatch(/name or automationId/);
+    expect(res.error).toMatch(/Button/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('the same refusal on a Mac without the helper: the osascript script would press the first match too', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    const res = await ax.invoke({ processId: 7, controlType: 'Button', action: 'click' });
+    expect(res.success).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(['set-value', 'focus', 'get-value'] as const)('%s by controlType alone still reaches the helper — it acts only when exactly one element matches', async action => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    await ax.invoke({ processId: 7, controlType: 'Edit', action, value: action === 'set-value' ? 'x' : undefined });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args).toEqual(expect.arrayContaining(['--role', 'AXTextField', '--action', action]));
+  });
+
+  it('a controlType plus a name is a proper aim for a click', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    await ax.invoke({ processId: 7, controlType: 'Button', name: 'Save', action: 'click' });
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe('invoke', () => {
   it('passes the target and the action to the helper', async () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'set-value', method: 'AXValue' }) });
@@ -531,17 +616,62 @@ describe('invoke', () => {
     expect(a[0]).toBe('invoke');
     expect(a[a.indexOf('--pid') + 1]).toBe('7');
     expect(a[a.indexOf('--action') + 1]).toBe('set-value');
-    expect(a[a.indexOf('--name') + 1]).toBe('Name');
     expect(a[a.indexOf('--role') + 1]).toBe('AXTextField');
-    expect(a[a.indexOf('--id') + 1]).toBe('nameField');
-    expect(a[a.indexOf('--value') + 1]).toBe('a b');
     expect(res.success).toBe(true);
   });
 
-  it('B9: invoking by identifier alone reaches the helper as --id', async () => {
+  // Review finding 9: argv is readable by every process on the Mac (`ps`) for as long as the helper runs. The text being
+  // typed — and the labels being searched for, which can be document content — go on stdin instead.
+  it('the typed value, the name and the identifier travel on stdin, never on argv', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'set-value', method: 'AXValue' }) });
+    await ax.invoke({ processId: 7, name: 'Name', controlType: 'Edit', automationId: 'nameField', action: 'set-value', value: 'p4ssw0rd --not-a-flag' });
+    const { args, input } = calls[0];
+    expect(args).toContain('--args-stdin');
+    expect(JSON.parse(input!)).toEqual({ name: 'Name', id: 'nameField', value: 'p4ssw0rd --not-a-flag' });
+    for (const flag of ['--name', '--id', '--value']) expect(args).not.toContain(flag);
+    expect(args.join(' ')).not.toMatch(/p4ssw0rd|nameField/);
+  });
+
+  it('an empty value is still a value (it clears the field) and is sent', async () => {
+    const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
+    await ax.invoke({ processId: 7, name: 'Name', action: 'set-value', value: '' });
+    expect(JSON.parse(calls[0].input!)).toEqual({ name: 'Name', value: '' });
+  });
+
+  it('a timeout the helper explains keeps its explanation (the click may or may not have landed)', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'timeout', error: 'Mail stopped responding while the click was running — it may or may not have been performed' }) });
+    const err = await ax.invoke({ processId: 7, name: 'Send', action: 'click' }).then(() => null, e => e);
+    expect(err.kind).toBe('timeout');
+    expect(err.message).toMatch(/invoke/i);
+    expect(err.message).toContain('stopped responding while the click was running');
+  });
+
+  // "Retry" is right advice for a read and wrong for an action that may already have happened (a second click).
+  it('a timed-out ACTION says to look at the screen before retrying — it does not suggest a blind retry', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'timeout', error: 'Mail stopped responding while the click was running — it may or may not have been performed' }) });
+    const err = await ax.invoke({ processId: 7, name: 'Send', action: 'click' }).then(() => null, e => e);
+    expect(err.message).toMatch(/before retrying/i);
+    expect(err.message).not.toMatch(/Retry, or fall back|NOT an empty result/);
+  });
+
+  it('and so does an action whose helper process was killed at our timeout', async () => {
+    const { ax } = harness({ reply: execTimeout() });
+    const err = await ax.invoke({ processId: 7, name: 'Send', action: 'click' }).then(() => null, e => e);
+    expect(err.kind).toBe('timeout');
+    expect(err.message).toMatch(/before retrying/i);
+  });
+
+  it('a timed-out READ keeps the "this is not an empty result" line', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'timeout' }) });
+    const err = await ax.find({ processId: 7, name: 'Save' }).then(() => null, e => e);
+    expect(err.message).toMatch(/NOT an empty result/);
+    expect(err.message).not.toMatch(/before retrying/i);
+  });
+
+  it('B9: invoking by identifier alone reaches the helper as an id', async () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'click' }) });
     await ax.invoke({ processId: 7, automationId: 'One', action: 'click' });
-    expect(calls[0].args).toEqual(expect.arrayContaining(['--id', 'One']));
+    expect(JSON.parse(calls[0].input!)).toEqual({ id: 'One' });
     expect(calls[0].args).not.toContain('--name');
   });
 
@@ -719,12 +849,49 @@ describe('classifyKeyboardOwner (B11 — a system alert / lock screen that owns 
       .toEqual({ kind: 'app' });
   });
 
-  it('a modal dialog from an unknown accessory process owns the keyboard', () => {
+  // Review finding 4: any accessory app whose front window was a modal AXDialog counted as an alert — 1Password Quick
+  // Access and other launcher popovers are exactly that, and typing into them is the point. Only what is known to be a
+  // system prompt (its bundle, or the AXSystemDialog subrole) is refused; a modal dialog of an unknown app is typed into
+  // with a warning that says whose it is.
+  it('a modal dialog from an unknown accessory process is typed into — with a warning that names it', () => {
     const owner = classifyKeyboardOwner(app({
       name: 'SomeAgent', bundleId: 'com.example.agent', processId: 9, activationPolicy: 'accessory',
       windows: [{ title: 'Allow access?', subrole: 'AXDialog', modal: true }],
     }));
-    expect(owner).toMatchObject({ kind: 'alert', name: 'SomeAgent', title: 'Allow access?' });
+    expect(owner.kind).toBe('app');
+    expect((owner as { warning?: string }).warning).toMatch(/SomeAgent/);
+    expect((owner as { warning?: string }).warning).toMatch(/Allow access\?/);
+  });
+
+  it('a sheet on an unknown accessory process is a warning too, not a refusal', () => {
+    const owner = classifyKeyboardOwner(app({
+      name: 'SomeAgent', bundleId: 'com.example.agent', processId: 9, activationPolicy: 'accessory',
+      windows: [{ title: 'Export', subrole: '', role: 'AXSheet' }],
+    }));
+    expect(owner.kind).toBe('app');
+    expect((owner as { warning?: string }).warning).toMatch(/SomeAgent/);
+  });
+
+  it('a modal dialog from a KNOWN alert owner is still a refusal', () => {
+    expect(classifyKeyboardOwner(app({
+      name: 'SecurityAgent', bundleId: 'com.apple.SecurityAgent', processId: 12, activationPolicy: 'accessory',
+      windows: [{ title: 'Authentication', subrole: 'AXDialog', modal: true }],
+    }))).toMatchObject({ kind: 'alert', name: 'SecurityAgent', title: 'Authentication' });
+  });
+
+  it('1Password Quick Access (an accessory app, modal AXDialog) is not an alert', () => {
+    const owner = classifyKeyboardOwner(app({
+      name: '1Password', bundleId: 'com.1password.1password', activationPolicy: 'accessory',
+      windows: [{ title: '1Password Quick Access', subrole: 'AXDialog', modal: true }],
+    }));
+    expect(owner.kind).toBe('app');
+  });
+
+  it('an ordinary non-modal launcher panel carries no warning at all', () => {
+    expect(classifyKeyboardOwner(app({
+      name: 'Raycast', bundleId: 'com.raycast.macos', activationPolicy: 'accessory',
+      windows: [{ title: '', subrole: 'AXDialog', modal: false }],
+    }))).toEqual({ kind: 'app' });
   });
 
   it('a launcher panel (Raycast, Alfred: an accessory app with a NON-modal dialog-ish window) is typed into, not blocked', () => {
@@ -848,6 +1015,26 @@ describe('defaultExec — the real process runner', () => {
     const err = await defaultExec(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { timeoutMs: 300 }).then(() => null, e => e);
     expect(err).toBeTruthy();
     expect(err.killed).toBe(true);
+  });
+
+  // Review finding 9: the helper reads what the caller typed from stdin.
+  it('writes `input` to the process\'s stdin and closes it (a reader that waits for EOF is not left hanging)', async () => {
+    const { defaultExec } = await import('../platform/mac-ax');
+    const { stdout } = await defaultExec(process.execPath, ['-e', 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(d))'],
+      { timeoutMs: 10_000, input: '{"value":"héllo — wörld 🙂"}' });
+    expect(stdout).toBe('{"value":"héllo — wörld 🙂"}');
+  });
+
+  it('a process that exits without reading its stdin is not an error of ours (EPIPE is swallowed)', async () => {
+    const { defaultExec } = await import('../platform/mac-ax');
+    const { stdout } = await defaultExec(process.execPath, ['-e', 'process.stdout.write("done")'], { timeoutMs: 10_000, input: 'x'.repeat(8_000_000) });
+    expect(stdout).toBe('done');
+  });
+
+  it('without `input` nothing is written', async () => {
+    const { defaultExec } = await import('../platform/mac-ax');
+    const { stdout } = await defaultExec(process.execPath, ['-e', 'process.stdout.write("ok")'], { timeoutMs: 10_000 });
+    expect(stdout).toBe('ok');
   });
 });
 

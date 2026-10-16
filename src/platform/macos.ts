@@ -35,9 +35,10 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
+import { logger } from '../core/observability/logger';
 import {
   defaultMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner,
-  type AppState, type MacAx,
+  type AppState, type MacAx, type SkippedApp,
 } from './mac-ax';
 
 const execFileAsync = promisify(execFile);
@@ -48,9 +49,19 @@ const OSASCRIPT_TIMEOUT_MS = 8_000;
 const SCREENSHOT_TIMEOUT_MS = 10_000;
 /** How long a "the keyboard is free" probe is trusted — a burst of keystrokes probes once. */
 const KEYBOARD_PROBE_TTL_MS = 250;
+/** A modal dialog of another app is warned about once per this long, not once per probe. */
+const KEYBOARD_WARN_EVERY_MS = 10_000;
 /** How long open_app waits for a launched app to show a window before calling it "still loading". */
 const LAUNCH_CONFIRM_MS = 4_000;
 const LAUNCH_POLL_MS = 250;
+
+/** One line for the tools: which apps' windows a time-boxed window list is missing. */
+function partialWindowListNote(skipped: readonly SkippedApp[]): string {
+  const names = skipped.slice(0, 4).map(a => a.processName).join(', ');
+  const more = skipped.length > 4 ? `, … +${skipped.length - 4} more` : '';
+  return `(partial list: the time budget ran out before ${skipped.length} app${skipped.length === 1 ? '' : 's'} ` +
+    `(${names}${more}) ${skipped.length === 1 ? 'was' : 'were'} read, so their windows are missing — call again)`;
+}
 
 export class MacOSAdapter implements PlatformAdapter {
   readonly platform = 'darwin' as const;
@@ -62,11 +73,13 @@ export class MacOSAdapter implements PlatformAdapter {
   private inputPermissionCached = false;
   private readonly ax: MacAx;
   private keyboardFreeAt = 0;
+  private keyboardWarned: { text: string; at: number } | null = null;
 
   /** Why the last findElements / getUiTree came back short (see PlatformAdapter). */
   lastFindScope: PlatformAdapter['lastFindScope'] = null;
   lastFindError: PlatformAdapter['lastFindError'] = null;
   lastTreeTruncated = false;
+  lastWindowListPartial: string | null = null;
 
   constructor(opts: { ax?: MacAx } = {}) {
     this.ax = opts.ax ?? defaultMacAx();
@@ -307,7 +320,10 @@ export class MacOSAdapter implements PlatformAdapter {
    * with fifteen windows open.
    */
   async listWindows(): Promise<WindowInfo[]> {
-    return this.ax.listWindows();
+    this.lastWindowListPartial = null;
+    const { windows, skipped } = await this.ax.listWindowsDetailed();
+    if (skipped.length) this.lastWindowListPartial = partialWindowListNote(skipped);
+    return windows;
   }
 
   /**
@@ -667,10 +683,22 @@ export class MacOSAdapter implements PlatformAdapter {
     if (process.env.CLAWD_NO_MAC_AX === '1') return null;
     try {
       const owner = classifyKeyboardOwner(await this.ax.frontmost());
-      return owner.kind === 'app' ? null : new Error(describeKeyboardOwner(owner));
+      if (owner.kind === 'app') {
+        if (owner.warning) this.warnKeyboard(owner.warning);
+        return null;
+      }
+      return new Error(describeKeyboardOwner(owner));
     } catch {
       return null;
     }
+  }
+
+  /** Say once (not once per keystroke burst) that a modal dialog of another app is taking the keys. */
+  private warnKeyboard(text: string): void {
+    const now = Date.now();
+    if (this.keyboardWarned?.text === text && now - this.keyboardWarned.at < KEYBOARD_WARN_EVERY_MS) return;
+    this.keyboardWarned = { text, at: now };
+    logger.warn('keyboard.modal-dialog', { warning: text });
   }
 
   private async assertKeyboardAvailable(): Promise<void> {
@@ -694,7 +722,9 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async keyPress(combo: PortableKeyCombo): Promise<void> {
     if (!combo) return;
-    await this.assertKeyboardAvailable();
+    // Escape cancels, it never grants: with a permission or Gatekeeper alert up it is the one key that is safe to send (a
+    // stray Return is what presses "Allow"), and refusing it left an agent unable to dismiss the very thing blocking it.
+    if (!/^(escape|esc)$/i.test(String(combo).trim())) await this.assertKeyboardAvailable();
 
     // Literal "+" can't be split.
     if (combo === '+') {
@@ -990,6 +1020,9 @@ export class MacOSAdapter implements PlatformAdapter {
       : name.replace(/\.app$/i, '');
 
     try {
+      // Plumbing, not an agent request: with a system dialog up even the warm-up Escape stays unsent (keyPress lets Escape
+      // through for an agent, but here it could answer "Don't Allow" to a permission prompt nobody asked to dismiss).
+      await this.assertKeyboardAvailable();
       await this.keyPress('Escape').catch(() => {});
       await this.delay(120);
       await this.keyPress('cmd+Space');

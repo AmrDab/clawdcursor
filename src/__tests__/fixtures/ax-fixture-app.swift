@@ -8,6 +8,7 @@
 //     (no title)        button, id only       id One        <- what SwiftUI Calculator looks like
 //     (no title)        button whose label is a CHILD static text "Peeked"   id peekButton
 //     "Open modal"      button whose action runs a modal alert for 3 s       id modalButton
+//     "Hang"            button whose action BLOCKS the main thread for 4 s   id hangButton  (the app stops answering AX)
 //     "hello world"     text field            id nameField
 //     "hunter2"         secure text field     id secretField
 //     "Enable"          checkbox              id enableBox
@@ -62,6 +63,14 @@ final class Delegate: NSObject, NSApplicationDelegate {
         status.stringValue = "modal: closed"
     }
 
+    /// Blocks the main thread inside the action: unlike a modal loop (which keeps answering accessibility requests), the app
+    /// answers nothing until it is over — a hung app, hung while the press was running.
+    @objc func hang(_ sender: NSButton) {
+        status.stringValue = "hang: started"
+        Thread.sleep(forTimeInterval: 4)
+        status.stringValue = "hang: over"
+    }
+
     func window(_ title: String, _ frame: NSRect) -> NSWindow {
         let w = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         w.title = title
@@ -72,8 +81,8 @@ final class Delegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ note: Notification) {
         let slow = fixtureMode == "slow"
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 340))
-        func place<T: NSView>(_ v: T, id: String, y: CGFloat, w: CGFloat = 200) -> T {
-            v.frame = NSRect(x: 20, y: y, width: w, height: 28)
+        func place<T: NSView>(_ v: T, id: String, y: CGFloat, w: CGFloat = 200, x: CGFloat = 20) -> T {
+            v.frame = NSRect(x: x, y: y, width: w, height: 28)
             v.setAccessibilityIdentifier(id)
             view.addSubview(v)
             return v
@@ -100,6 +109,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
             peekLabel.frame = NSRect(x: 0, y: 0, width: 90, height: 28)
             peek.addSubview(peekLabel)
             _ = place(NSButton(title: "Open modal", target: self, action: #selector(openModal(_:))), id: "modalButton", y: 186)
+            _ = place(NSButton(title: "Hang", target: self, action: #selector(hang(_:))), id: "hangButton", y: 186, w: 90, x: 240)
             _ = place(NSTextField(string: "hello world"), id: "nameField", y: 148)
             _ = place(NSSecureTextField(string: "hunter2"), id: "secretField", y: 110)
             _ = place(NSButton(checkboxWithTitle: "Enable", target: nil, action: nil), id: "enableBox", y: 72)

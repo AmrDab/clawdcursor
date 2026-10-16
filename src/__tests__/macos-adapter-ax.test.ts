@@ -35,6 +35,7 @@ vi.mock('child_process', () => ({
 
 import { MacOSAdapter } from '../platform/macos';
 import { MacAxError, type MacAx, type AppState, type FrontmostInfo } from '../platform/mac-ax';
+import { logger } from '../core/observability/logger';
 import type { UiElement, WindowInfo } from '../platform/types';
 
 const RECT = { x: 0, y: 0, width: 600, height: 400 };
@@ -47,7 +48,7 @@ const FRONT = (over: Partial<NonNullable<FrontmostInfo['app']>> = {}): Frontmost
   ({ locked: false, app: { name: 'TextEdit', processId: 4242, activationPolicy: 'regular', windows: [], ...over } });
 
 function fakeAx(over: Partial<MacAx> = {}): MacAx & { [K in keyof MacAx]: ReturnType<typeof vi.fn> } {
-  return {
+  const ax = {
     listWindows: vi.fn(async () => [WIN()]),
     activeWindow: vi.fn(async () => WIN()),
     uiTree: vi.fn(async () => ({ elements: [EL()], truncated: false })),
@@ -58,7 +59,10 @@ function fakeAx(over: Partial<MacAx> = {}): MacAx & { [K in keyof MacAx]: Return
     focusedElement: vi.fn(async () => EL({ name: 'Body', controlType: 'Edit' })),
     prepare: vi.fn(),
     ...over,
-  } as never;
+  } as Record<string, unknown>;
+  // The adapter asks for the detailed list; a test that only fakes `listWindows` gets a complete list built from it.
+  ax.listWindowsDetailed ??= vi.fn(async () => ({ windows: await (ax.listWindows as () => Promise<WindowInfo[]>)(), skipped: [] }));
+  return ax as never;
 }
 
 /** Successive answers for a mocked call; the last one repeats. (`shift() ?? x` would turn a null answer into x.) */
@@ -120,6 +124,50 @@ describe('windows (B1, B3)', () => {
   it('focusWindow by process name survives a failed window list (resolves to false, not a throw)', async () => {
     const ax = fakeAx({ listWindows: vi.fn(async () => { throw new MacAxError('timeout', 'window list timed out'); }) });
     await expect(new MacOSAdapter({ ax }).focusWindow({ processName: 'TextEdit' })).resolves.toBe(false);
+  });
+
+  // Review finding 1: a list the time budget cut short is a partial list — and says so.
+  describe('a window list the time budget cut short', () => {
+    const slow = [{ processId: 9, processName: 'Slow App' }, { processId: 10, processName: 'Other Late App' }];
+
+    it('lastWindowListPartial names the apps that were not read', async () => {
+      const ax = fakeAx({ listWindowsDetailed: vi.fn(async () => ({ windows: [WIN()], skipped: slow })) });
+      const mac = new MacOSAdapter({ ax });
+      await expect(mac.listWindows()).resolves.toEqual([WIN()]);
+      expect(mac.lastWindowListPartial).toMatch(/partial/i);
+      expect(mac.lastWindowListPartial).toContain('Slow App');
+      expect(mac.lastWindowListPartial).toContain('Other Late App');
+    });
+
+    it('a following complete list clears it', async () => {
+      const detailed = vi.fn()
+        .mockResolvedValueOnce({ windows: [WIN()], skipped: slow })
+        .mockResolvedValueOnce({ windows: [WIN()], skipped: [] });
+      const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: detailed }) });
+      await mac.listWindows();
+      expect(mac.lastWindowListPartial).toBeTruthy();
+      await mac.listWindows();
+      expect(mac.lastWindowListPartial).toBeNull();
+    });
+
+    it('a failed list leaves no stale note behind', async () => {
+      const detailed = vi.fn()
+        .mockResolvedValueOnce({ windows: [WIN()], skipped: slow })
+        .mockRejectedValueOnce(new MacAxError('timeout', 'window list timed out'));
+      const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: detailed }) });
+      await mac.listWindows();
+      await expect(mac.listWindows()).rejects.toThrow(/timed out/);
+      expect(mac.lastWindowListPartial).toBeNull();
+    });
+
+    it('a long list of skipped apps stays one readable line', async () => {
+      const many = Array.from({ length: 30 }, (_, i) => ({ processId: 100 + i, processName: `App ${i}` }));
+      const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => ({ windows: [WIN()], skipped: many })) }) });
+      await mac.listWindows();
+      expect(mac.lastWindowListPartial).toContain('30');
+      expect(mac.lastWindowListPartial!.length).toBeLessThan(300);
+      expect(mac.lastWindowListPartial).not.toContain('\n');
+    });
   });
 });
 
@@ -292,6 +340,17 @@ describe('launchApp (B2 — confirm the launch from the process, not the window 
     await expect(settle(new MacOSAdapter({ ax }).launchApp('Nope'))).rejects.toThrow(/UserNotificationCenter/);
   });
 
+  it('the Spotlight fallback leaves a system dialog alone: not even its warm-up Escape is sent (that could answer "Don\'t Allow" for the user)', async () => {
+    // Escape is let through when an agent asks for it; the launch fallback is plumbing the user never asked to dismiss anything with.
+    const ax = fakeAx({
+      appState: vi.fn(async () => null),
+      listWindows: vi.fn(async () => []),
+      frontmost: vi.fn(async () => FRONT({ name: 'UserNotificationCenter', bundleId: 'com.apple.UserNotificationCenter', processId: 311, activationPolicy: 'accessory', windows: [{ title: 'Foo wants access', subrole: 'AXSystemDialog' }] })),
+    });
+    await expect(settle(new MacOSAdapter({ ax }).launchApp('Nope'))).rejects.toThrow();
+    expect(osascripts()).toHaveLength(0);
+  });
+
   it('rejects control characters in the name before anything runs', async () => {
     const ax = fakeAx();
     await expect(new MacOSAdapter({ ax }).launchApp('Text\nEdit')).rejects.toThrow(/illegal characters/);
@@ -317,6 +376,64 @@ describe('keyboard guard (B11)', () => {
   it('a locked screen refuses keys with an unlock hint', async () => {
     const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => ({ locked: true, app: null })) }) });
     await expect(mac.typeText('x')).rejects.toThrow(/unlock/i);
+  });
+
+  // Review finding 4: with a real permission / Gatekeeper alert up even Escape was refused, so the agent could not
+  // dismiss the very thing that blocked it. Escape cancels — it never grants (a stray Return is what presses "Allow").
+  it.each(['Escape', 'esc', 'ESCAPE'])('%s always goes through, even while a system dialog owns the keyboard', async key => {
+    const ax = fakeAx({ frontmost: vi.fn(async () => alert) });
+    const mac = new MacOSAdapter({ ax });
+    await mac.keyPress(key);
+    expect(osascripts()).toHaveLength(1);
+    expect(ax.frontmost).not.toHaveBeenCalled();
+  });
+
+  it('Escape goes through on a locked screen as well (nothing to protect there)', async () => {
+    const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => ({ locked: true, app: null })) }) });
+    await mac.keyPress('Escape');
+    expect(osascripts()).toHaveLength(1);
+  });
+
+  it('but Escape inside a combo is not the bare key: cmd+Escape is still guarded', async () => {
+    const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => alert) }) });
+    await expect(mac.keyPress('cmd+Escape')).rejects.toThrow(/system dialog/i);
+  });
+
+  it('and Return, Tab and typed text stay refused while the dialog is up', async () => {
+    const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => alert) }) });
+    for (const key of ['Return', 'Tab', 'space']) await expect(mac.keyPress(key)).rejects.toThrow(/system dialog/i);
+    await expect(mac.typeText('y')).rejects.toThrow(/system dialog/i);
+    expect(osascripts()).toHaveLength(0);
+  });
+
+  describe('a modal dialog of an unknown accessory app (1Password Quick Access, a launcher panel)', () => {
+    const modal = FRONT({ name: 'SomeAgent', bundleId: 'com.example.agent', processId: 9, activationPolicy: 'accessory', windows: [{ title: 'Allow access?', subrole: 'AXDialog', modal: true }] });
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { warn = vi.spyOn(logger, 'warn').mockImplementation(() => {}); });
+    afterEach(() => warn.mockRestore());
+
+    it('is typed into — and the warning names whose dialog it is', async () => {
+      const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => modal) }) });
+      await mac.typeText('hello');
+      await mac.keyPress('Return');
+      expect(osascripts().length).toBeGreaterThanOrEqual(2);
+      expect(warn).toHaveBeenCalled();
+      expect(JSON.stringify(warn.mock.calls[0])).toContain('SomeAgent');
+    });
+
+    it('warns once per dialog, not once per keystroke burst', async () => {
+      const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => modal) }) });
+      await mac.typeText('a');
+      await vi.advanceTimersByTimeAsync(300);        // past the 250 ms probe cache: a new probe, same dialog
+      await mac.typeText('b');
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('a system dialog is still refused, warning or not', async () => {
+      const mac = new MacOSAdapter({ ax: fakeAx({ frontmost: vi.fn(async () => alert) }) });
+      await expect(mac.typeText('hello')).rejects.toThrow(/system dialog/i);
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 
   it('a normal frontmost app lets keys through', async () => {
