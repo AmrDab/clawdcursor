@@ -12,6 +12,7 @@ import { isBrowserProcess } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
+import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep } from './blind-hints';
 
 /**
@@ -218,17 +219,26 @@ export function getA11yTools(): ToolDefinition[] {
             ctx.platform.getFocusedElement().catch(() => null),
           ]);
           const active = processId ?? activeWindow?.processId;
-          const tree = await ctx.platform.getUiTree(active);
-          const partial = ctx.platform.lastTreeTruncated
-            ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
           const isBrowser = !!activeWindow && isBrowserProcess(activeWindow.processName);
+          // Wake a sleeping Chromium/Electron tree (the agent loop already did;
+          // MCP read_tree didn't). A failed read is reported, not fatal: one
+          // hung app must not lose the WINDOWS and FOCUSED ELEMENT sections.
+          let treeError: string | null = null;
+          const { tree, woke } = await getUiTreeWithWake(ctx.platform, active, { isBrowser: () => isBrowser })
+            .catch((err: unknown) => {
+              treeError = err instanceof Error ? err.message : String(err);
+              return { tree: [] as UiElement[], woke: false };
+            });
+          const partial = (ctx.platform.lastTreeTruncated
+            ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '')
+            + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
           const nextStep = tree.length < 5 || isBrowser ? await nextStepFor(ctx, active) : '';
           baseText = [
             'WINDOWS',
             windows.length ? windows.map(formatWindow).join('\n') : windowListError ? `(window list failed: ${windowListError})` : '(no windows found)',
             '',
             `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
-            tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : '(no elements found)',
+            tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : treeError ? `(tree read failed: ${treeError})` : '(no elements found)',
             ...(nextStep ? [nextStep] : []),
             '',
             'FOCUSED ELEMENT',

@@ -45,3 +45,15 @@ describe('read_screen — the WINDOWS section', () => {
     expect(r.text).not.toContain('window list failed');
   });
 });
+
+describe('read_screen — the UI TREE section (Mac review finding 3)', () => {
+  it('a failed tree read is reported, and the WINDOWS / FOCUSED ELEMENT sections survive', async () => {
+    const ctx = ctxWith(async () => [win]);
+    (ctx.platform as any).getUiTree = vi.fn(async () => { throw new Error('AX tree read timed out after 12s'); });
+    const r = await tool.handler({}, ctx);
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('TextEdit');
+    expect(r.text).toContain('(tree read failed: AX tree read timed out after 12s)');
+    expect(r.text).toContain('FOCUSED ELEMENT');
+  });
+});
