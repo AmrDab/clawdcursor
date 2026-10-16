@@ -17,6 +17,7 @@
 
 <p align="center">
   <a href="#install">Quickstart</a> &middot;
+  <a href="#whats-new-in-1516">What's new</a> &middot;
   <a href="#why-its-different">Why it's different</a> &middot;
   <a href="#the-engine">The engine</a> &middot;
   <a href="#how-it-works">How it works</a> &middot;
@@ -36,6 +37,19 @@
     <br><em>Opening an app, finding a field by name, typing, and verifying the result — accessibility-first, locally.</em>
   </p>
 ─────────────────────────────────────────────────────────────────────────── -->
+
+---
+
+## What's new in 1.5.16
+
+- **It pauses for you at a roadblock, then carries on.** A sign-in, a 2FA code, a CAPTCHA, an upgrade page: instead of giving up, the agent pauses. The glow around the screen turns **blue** and an on-screen prompt says what it needs ("Sign in to Outlook, then click Resume"). Click **Resume** and it continues where it left off, or **End task** to stop. Your own agent can do the same over MCP with `system({ action: "pause_for_user", message })`; from a terminal, `clawdcursor resume` (or `--end`).
+- **The glow and banner on every OS.** macOS and Linux now get the same screen-edge glow and banner as Windows: amber while the agent works, blue while it waits for you. Double-click the banner to stop everything.
+- **Blind mode on macOS caught up with Windows.** A native accessibility helper lists windows in 0.3 s (was 11 s) and reads a window's tree in 0.06&ndash;0.2 s. Typing is refused while a system dialog owns the keyboard, and the agent is told when another app's dialog took its keys.
+- **Sharper blind mode on Windows and Linux.** Classic controls no longer read as blank panes, the open dialog is what gets read, no 10 s stall on buttons that open a modal, the right field is found by name, and focusing a window no longer un-maximizes it.
+- **Upgrade walls are a roadblock.** Clicks on `Upgrade`, `Subscribe` or `Start trial` need confirmation.
+- **Know what you're running.** `clawdcursor versions` lists every installed copy (global npm, Claude Desktop extension, Claude Code plugin), and the installers say what they updated.
+
+Everything else is in the [changelog](CHANGELOG.md).
 
 ---
 
@@ -70,7 +84,7 @@ Three things here are genuinely rare:
 2. **It verifies.** Pass `expect` on a consequential action and Clawd Cursor re-checks the live screen (with a short settle window for async UIs) and reports a **DEVIATION** instead of a hollow "success." A completed task can't be marked done on evidence that was already true before it acted.
 3. **One safety gate.** Every call &mdash; from an editor over stdio, an external agent over HTTP, or the built-in loop &mdash; routes through a single `safety.evaluate()` chokepoint (allow / confirm / block) before it touches the desktop. The agent cannot bypass it.
 
-Plus: an on-screen **"desktop control in progress" banner** with a blinking red dot whenever an agent is driving &mdash; **double-click it to stop.** A human at the machine always knows, and always has a kill switch.
+Plus: whenever an agent is driving, an on-screen **"desktop control in progress" banner** and an amber **glow around the screen edges**, on Windows, macOS and Linux &mdash; **double-click the banner to stop.** When the agent needs you (a sign-in, a 2FA code), the glow turns blue and the banner says what to do, with **Resume** and **End task**. A human at the machine always knows, and always has a kill switch.
 
 ---
 
@@ -313,9 +327,9 @@ Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with a
 | `computer` | `screenshot`, `click`, `double_click`, `right_click`, `triple_click`, `hover`, `move`, `scroll`, `scroll_horizontal`, `drag`, `drag_path`, `type`, `key`, `wait` |
 | `accessibility` | `read_tree`, `find`, `get_element`, `focused`, `invoke`, `focus`, `set_value`, `get_value`, `expand`, `collapse`, `toggle`, `select`, `state`, `list_children`, `wait_for`, `compile_ui`, `find_button`, `find_field`, `smart_click`, `smart_type`, `smart_read` |
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
-| `system` | `clipboard_read`, `clipboard_write`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `delegate`, `detect_webview`, `relaunch_with_cdp`, `system_prompt`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_app`, `app_guide`, `learn_app` |
+| `system` | `clipboard_read`, `clipboard_write`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `delegate`, `pause_for_user`, `detect_webview`, `relaunch_with_cdp`, `system_prompt`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_app`, `app_guide`, `learn_app` |
 | `browser` | `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
-| `task` | `run` (default; **bounded-sync** &mdash; waits up to `timeout`s, returns `{status:"running"}` + progress if longer, re-call to keep waiting), `status`, `abort`. Delegates to the built-in loop. Requires `clawdcursor agent` with an LLM. |
+| `task` | `run` (default; **bounded-sync** &mdash; waits up to `timeout`s, returns `{status:"running"}` + progress if longer, re-call to keep waiting), `status`, `abort`, `resume` (continue a task paused for the user). Delegates to the built-in loop. Requires `clawdcursor agent` with an LLM. |
 | `batch` | `{steps:[…]}` &mdash; collapse N calls into one round-trip; each step `{name, arguments, expect?}`, re-perceived and safety-gated, halts with a trace on any miss. |
 
 ```js
@@ -371,7 +385,7 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 | Platform | UI Automation | OCR | Browser (CDP) | Input |
 |---|---|---|---|---|
 | **Windows** 10/11 (x64 / ARM64) | UIA via PowerShell bridge | `Windows.Media.Ocr` | Chrome / Edge | nut-js |
-| **macOS** 12+ (Intel / Apple Silicon) | JXA + System Events (TCC-safe) | Apple Vision | Chrome / Edge | nut-js + System Events |
+| **macOS** 12+ (Intel / Apple Silicon) | Native AX helper (Swift), JXA fallback | Apple Vision | Chrome / Edge | nut-js + System Events |
 | **Linux** X11 | AT-SPI via `python3-gi` | Tesseract | Chrome / Edge | nut-js |
 | **Linux** Wayland | AT-SPI via `python3-gi` | Tesseract | Chrome / Edge | `ydotool` / `wtype` |
 
@@ -390,6 +404,7 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 | **Confirm** | Sends, deletes, purchases, transfers, close-window/quit-app & show-desktop key combos, sensitive apps | Pauses for approval (`batch({allowConfirm:true})` to authorize) |
 | **Block** | `Ctrl+Alt+Del`, lock / log-out / force-quit / shutdown key sequences | Refused outright (no path) |
 
+- **Pauses instead of pushing through.** At a sign-in, 2FA, CAPTCHA or plan-limit page the agent hands the desktop to you (blue glow, Resume / End task) instead of guessing. A pause times out after 15 minutes (`CLAWD_PAUSE_TIMEOUT_MIN`); `CLAWD_NO_PAUSE=1` turns pausing off.
 - **Network isolation.** Binds to `127.0.0.1`. Verify: `netstat -an | findstr 3847` (Windows) / `| grep 3847` (Unix).
 - **Bearer-token auth** on every HTTP request (`~/.clawdcursor/token`).
 - **Sensitive-app policy.** Email, banking, password managers, private messaging auto-elevate to Confirm.

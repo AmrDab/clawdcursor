@@ -31,7 +31,9 @@
       accessibility : drive UI by element name; compile a fused el_NN UI map
                       and act on {element_id, snapshot_id} (survives layout shifts)
       window        : launch, focus, resize apps
-      system        : clipboard, OCR, shortcuts, webview detection
+      system        : clipboard, OCR, shortcuts, webview detection,
+                      pause_for_user (hand the desktop to the user for a
+                      sign-in / 2FA / CAPTCHA; continue when they click Resume)
       browser       : Chrome DevTools Protocol for Electron/WebView2 apps
       task          : hand off a full task to the built-in autonomous loop
       batch         : run a guarded, safety-gated sequence of the above in one call
@@ -89,6 +91,9 @@
     Single safety.evaluate() chokepoint: every tool call routes through it
     regardless of transport. Sensitive actions auto-elevate to
     Confirm. Bearer token required on HTTP. Local-only by default.
+    While an agent drives, a banner and an amber screen-edge glow show it on
+    every OS (double-click to stop). At a roadblock the agent pauses: the glow
+    turns blue and the banner shows what to do, with Resume / End task.
 
     ── PLATFORMS ───────────────────────────────────────────────────────────────
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
@@ -440,7 +445,7 @@
 
   <!-- Hero -->
   <div class="hero">
-    <div class="hero-badge"><div class="pulse"></div> v1.5.16 latest stable</div>
+    <div class="hero-badge"><div class="pulse"></div> v1.5.16 &middot; now pauses for you at a sign-in</div>
     <h1>It sees. It acts. It verifies.<br><span class="gr">Desktop control for any AI agent</span></h1>
     <p>Your agent reads the screen as stable element ids, not pixels, verifies every action, and routes it through one safety gate. Local, any model.</p>
     <div class="hero-btns">
@@ -559,6 +564,68 @@
 
   </section>
 
+  <!-- vs computer use -->
+  <section class="sect" id="vs-computer-use">
+    <div class="sect-label">Efficiency</div>
+    <h2>Leaner than computer use.</h2>
+    <p class="sub">Screenshot-based computer use sends the model a picture of the screen every time it looks. clawdcursor sends text the model can act on by name.</p>
+
+    <div class="stats">
+      <div class="stat"><div class="stat-val">38</div><div class="stat-lbl">Tokens to find a button by name</div></div>
+      <div class="stat"><div class="stat-val">~1,000+</div><div class="stat-lbl">Tokens for one screenshot</div></div>
+      <div class="stat"><div class="stat-val">12&ndash;47&times;</div><div class="stat-lbl">Fewer tokens on a measured task</div></div>
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+        <thead>
+          <tr style="background:rgba(255,255,255,0.03);">
+            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);"></th>
+            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);">Screenshot-based computer use</th>
+            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--border);">clawdcursor</th>
+          </tr>
+        </thead>
+        <tbody>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">What the model reads per look</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A screenshot: ~1,000&ndash;1,800 tokens</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text: 38 tokens to find a button, 50 to read a field</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">How it clicks</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">x, y coordinates guessed from the picture</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">By name: <code>invoke "Equals"</code>. Coordinates are the fallback</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Did the click work?</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">Take another screenshot</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);"><code>expect</code> checks it in the same call and reports a DEVIATION</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Known steps in a row</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A model turn + a screenshot per step</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call, every step still safety-checked</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading text</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">Read off the pixels</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">The app's own text: tree values, <code>copy_all_text</code>, OCR</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Which model</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">One that can read screenshots and point at pixels</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Any model with tool calling, 13+ providers</td>
+            </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
+      Measured on Windows 11 (October 2026): 127 &times; 49 in Calculator took clawdcursor 3 tool calls and ~176 tokens of screen input, with 0 screenshots. A screenshot loop needs 2 to 8 screenshots for the same task (2,072&ndash;8,288 tokens at 1024&times;768). Screenshot cost from
+      <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool" target="_blank" rel="noopener" style="color:var(--accent2);">Anthropic's computer use docs</a>; clawdcursor tokens estimated as characters &divide; 3.5.
+    </p>
+  </section>
+
   <!-- Features -->
   <section class="sect">
     <div class="sect-label">Features</div>
@@ -578,6 +645,21 @@
         <div class="feat-icon">📦</div>
         <h4>batch: one round-trip</h4>
         <p>Collapse N deterministic tool calls into a single guarded, safety-gated batch. N calls &rarr; 1.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">⏸️</div>
+        <h4>Pauses for you</h4>
+        <p>At a sign-in, 2FA code or CAPTCHA the agent pauses instead of guessing. The glow turns blue; click Resume and it carries on.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🟠</div>
+        <h4>Always visible</h4>
+        <p>A banner and an amber screen-edge glow on Windows, macOS and Linux while an agent drives. Double-click to stop.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🍎</div>
+        <h4>Fast on macOS</h4>
+        <p>A native accessibility helper: 20 windows listed in 0.3 s, a window's tree read in 0.06&ndash;0.2 s.</p>
       </div>
     </div>
   </section>
@@ -619,7 +701,7 @@
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">system</code></td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Clipboard, OCR, shortcuts, undo, webview detection, CDP relaunch, task delegation. The meta surface for an external brain.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>clipboard_read</code> · <code>clipboard_write</code> · <code>system_time</code> · <code>ocr</code> · <code>undo</code> · <code>shortcuts_list</code> · <code>shortcuts_run</code> · <code>delegate</code> · <code>detect_webview</code> · <code>relaunch_with_cdp</code> · <code>system_prompt</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>clipboard_read</code> · <code>clipboard_write</code> · <code>system_time</code> · <code>ocr</code> · <code>undo</code> · <code>shortcuts_list</code> · <code>shortcuts_run</code> · <code>delegate</code> · <code>detect_webview</code> · <code>relaunch_with_cdp</code> · <code>system_prompt</code> · <code>pause_for_user</code></td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">browser</code></td>
@@ -629,7 +711,7 @@
             <tr>
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">task</code></td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Hand the whole task to the autonomous loop. <strong>Daemon mode only</strong>: needs <code>clawdcursor agent</code> with an LLM configured.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;">single arg: <code>{ instruction: string }</code>, no action enum</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>run</code> · <code>status</code> · <code>abort</code> · <code>resume</code></td>
             </tr>
           </tbody>
         </table>
@@ -659,12 +741,14 @@ clawdcursor consent          <span style="color:var(--text3)"># one-time desktop
 clawdcursor grant            <span style="color:var(--text3)"># macOS only: Accessibility + Screen Recording prompts. MCP setup ends here.</span>
 clawdcursor doctor           <span style="color:var(--text3)"># ONLY for `agent` mode: configures the daemon's built-in LLM (+ diagnostics)</span>
 clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions, AI config)</span>
+clawdcursor versions         <span style="color:var(--text3)"># every installed copy and its version</span>
 
 <span style="color:var(--text3)"># Run</span>
 clawdcursor mcp              <span style="color:var(--text3)"># stdio MCP server for editor hosts</span>
 clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with 7 compound tools (recommended)</span>
 clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP daemon at :3847/mcp, optional built-in LLM</span>
 clawdcursor agent --no-llm   <span style="color:var(--text3)"># tool surface only: your agent brings its own brain</span>
+clawdcursor resume           <span style="color:var(--text3)"># continue a task paused for you (--end to stop it)</span>
 clawdcursor stop             <span style="color:var(--text3)"># stop every running mode</span>
 clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawdcursor config and data</span></code></pre>
       </div>
