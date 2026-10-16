@@ -1,5 +1,5 @@
 // AXFixture — a throwaway AppKit app with KNOWN accessibility data, for
-// mac-ax-live.test.ts. It never takes focus (accessory policy) and quits by
+// mac-ax-live.test.ts. It never takes focus (accessory policy — except the zoomed / minimized modes) and quits by
 // itself after 3 minutes if a test run dies.
 //
 //   window "Fixture A"  big, behind
@@ -13,12 +13,17 @@
 //     "Enable"          checkbox              id enableBox
 //     "idle"            label                 id status     <- shows which button was pressed
 //
+// AXFIXTURE_MODE=zoomed / minimized: the same windows, but "Fixture B" is zoomed to fill the screen /
+// minimized into the Dock — for checking that focusing a window leaves its size alone and brings a minimized one back.
+//
 // AXFIXTURE_MODE=slow instead opens one window "Fixture Slow" with a "Save As…" button, a
 // status label and an element whose title takes 3 s to answer (the app's main thread is busy,
 // so every AX request behind it waits) — a hung subtree inside a live app.
 //
 // Prints "READY <pid>" on stdout once the windows are on screen.
 import AppKit
+
+let fixtureMode = ProcessInfo.processInfo.environment["AXFIXTURE_MODE"] ?? "normal"
 
 /// A control with the button role whose only label is a child AXStaticText — how some apps name their controls.
 final class PeekButton: NSView {
@@ -58,14 +63,14 @@ final class Delegate: NSObject, NSApplicationDelegate {
     }
 
     func window(_ title: String, _ frame: NSRect) -> NSWindow {
-        let w = NSWindow(contentRect: frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let w = NSWindow(contentRect: frame, styleMask: [.titled, .closable, .resizable, .miniaturizable], backing: .buffered, defer: false)
         w.title = title
         w.isReleasedWhenClosed = false
         return w
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
-        let slow = ProcessInfo.processInfo.environment["AXFIXTURE_MODE"] == "slow"
+        let slow = fixtureMode == "slow"
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 340))
         func place<T: NSView>(_ v: T, id: String, y: CGFloat, w: CGFloat = 200) -> T {
             v.frame = NSRect(x: 20, y: y, width: w, height: 28)
@@ -103,6 +108,9 @@ final class Delegate: NSObject, NSApplicationDelegate {
             a.orderFront(nil)
             b.orderFront(nil)
             b.makeMain()
+            // AXFIXTURE_MODE=zoomed / minimized: window B starts zoomed (fills the screen) or put away in the Dock
+            if fixtureMode == "zoomed" { b.zoom(nil) }
+            if fixtureMode == "minimized" { b.miniaturize(nil) }
         }
         print("READY \(ProcessInfo.processInfo.processIdentifier)")
         fflush(stdout)
@@ -111,7 +119,9 @@ final class Delegate: NSObject, NSApplicationDelegate {
 }
 
 let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
+// zoomed / minimized are driven through System Events (scripts/mac/focus-window.jxa), which only sees ordinary apps —
+// and an ordinary app takes the keyboard focus when it starts. The tests that use them wait for an idle machine.
+app.setActivationPolicy(fixtureMode == "zoomed" || fixtureMode == "minimized" ? .regular : .accessory)
 let delegate = Delegate()
 app.delegate = delegate
 app.run()

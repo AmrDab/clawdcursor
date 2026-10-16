@@ -328,6 +328,17 @@ M1 iMac, no screenshots):
   locked screen is reported instead of System Events' empty answers. `read_screen`
   prints "(window list failed: …)" instead of "(no windows found)" when the list
   failed.
+- **Focusing a window on macOS never changes its size, zoom or full-screen state**
+  (Windows' focus un-maximized windows; this was checked, pinned by a test, and
+  confirmed on a real zoomed window), **and now brings a minimized window back**
+  — clearing "minimized" returns it at the size it had. With no title given, focus
+  prefers a window that is on screen over one you put away.
+- **A Mac without the Xcode Command Line Tools** (no `swiftc`, so no fast helper)
+  keeps working through the osascript path, and says how to get the fast one: its
+  timeouts and errors end with "run `xcode-select --install`", an identifier-only
+  `find` reports that it cannot search by identifier there instead of "no elements
+  found", and `clawdcursor doctor` shows the helper's state (built / builds on first
+  use / needs the Command Line Tools / switched off).
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

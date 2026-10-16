@@ -15,7 +15,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFile, spawn, type ChildProcess } from 'child_process';
+import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process';
 import { getPackageRoot } from '../paths';
 import { macAxBinary } from '../platform/mac-ocr-binary';
 
@@ -45,6 +45,25 @@ beforeAll(async () => {
   helper = await macAxBinary.compile(HELPER_SRC, path.join(tmp, 'bin'));
 }, 240_000);
 afterAll(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
+
+/** Seconds since the last keyboard / mouse input (HID idle time). */
+function idleSeconds(): number {
+  try {
+    const out = execFileSync('ioreg', ['-c', 'IOHIDSystem'], { encoding: 'utf8' });
+    const m = /"HIDIdleTime"\s*=\s*(\d+)/.exec(out);
+    return m ? Number(m[1]) / 1e9 : Infinity;
+  } catch { return Infinity; }
+}
+
+/** The tests that start an ordinary app (it takes the keyboard focus) wait until nobody is at the machine. */
+async function waitUntilIdle(minIdleSeconds = 45, maxWaitMs = 20 * 60_000): Promise<boolean> {
+  const t0 = Date.now();
+  while (idleSeconds() < minIdleSeconds) {
+    if (Date.now() - t0 > maxWaitMs) return false;
+    await new Promise(r => setTimeout(r, 5_000));
+  }
+  return true;
+}
 
 describe.skipIf(!isMac)('ax-helper — protocol (macOS)', () => {
   it('compiles with swiftc', () => {
@@ -105,7 +124,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
   const extra: ChildProcess[] = [];
 
   /** Start the fixture app; resolves its pid once both windows are up. */
-  async function startFixture(mode: 'normal' | 'slow' = 'normal'): Promise<{ proc: ChildProcess; pid: number }> {
+  async function startFixture(mode: 'normal' | 'slow' | 'zoomed' | 'minimized' = 'normal'): Promise<{ proc: ChildProcess; pid: number }> {
     const proc = spawn(fixtureBin, [], { stdio: ['ignore', 'pipe', 'ignore'], env: { ...process.env, AXFIXTURE_MODE: mode } });
     const p = await new Promise<number>((resolve, reject) => {
       const t = setTimeout(() => reject(new Error('fixture did not start')), 30_000);
@@ -374,6 +393,53 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       const status = await run(['find', '--pid', String(slowPid), '--id', 'status', '--ax-timeout-ms', '8000', '--timeout-ms', '15000']);
       expect(status.elements[0].value).toBe('idle');         // nothing was pressed
     });
+  });
+
+  describe('focusing a window (scripts/mac/focus-window.jxa)', () => {
+    const FOCUS = path.join(getPackageRoot(), 'scripts', 'mac', 'focus-window.jxa');
+    const focus = (pid: number, title: string) => new Promise<any>((resolve, reject) =>
+      execFile('osascript', ['-l', 'JavaScript', FOCUS, '--', '-processId', String(pid), '-title', title], { timeout: 60_000 }, (err, stdout) => {
+        if (err) return reject(err);
+        try { resolve(JSON.parse(stdout)); } catch { reject(new Error(`not JSON: ${stdout}`)); }
+      }));
+    // (vitest's default test timeout would cut the wait for an idle machine short)
+    const windowB = async (p: number) => (await run(['windows'])).windows.find((w: any) => w.processId === p && w.title === 'Fixture B');
+
+    it('a zoomed window stays exactly as large as it was', async (ctx) => {
+      if (!usable) return ctx.skip();
+      if (!await waitUntilIdle()) return ctx.skip();          // an ordinary app takes the keyboard focus: not while someone is typing
+      const z = await startFixture('zoomed');
+      extra.push(z.proc);
+      try {
+        await new Promise(res => setTimeout(res, 800));      // the zoom animation
+        const before = await windowB(z.pid);
+        expect(before.bounds.width).toBeGreaterThan(900);    // it really is zoomed (the window was 440 wide)
+        const r = await focus(z.pid, 'Fixture B');
+        expect(r.success).toBe(true);
+        const after = await windowB(z.pid);
+        expect(after.bounds).toEqual(before.bounds);
+        expect(after.isMinimized).toBe(false);
+      } finally { z.proc.kill('SIGKILL'); }
+    }, 25 * 60_000);
+
+    it('a minimized window is brought back at the size it had', async (ctx) => {
+      if (!usable) return ctx.skip();
+      if (!await waitUntilIdle()) return ctx.skip();
+      const m = await startFixture('minimized');
+      extra.push(m.proc);
+      try {
+        await new Promise(res => setTimeout(res, 1_200));    // the minimize animation
+        const before = await windowB(m.pid);
+        expect(before.isMinimized).toBe(true);
+        const r = await focus(m.pid, 'Fixture B');
+        expect(r.success).toBe(true);
+        await new Promise(res => setTimeout(res, 1_200));
+        const after = await windowB(m.pid);
+        expect(after.isMinimized).toBe(false);
+        expect(after.bounds.width).toBe(before.bounds.width);
+        expect(after.bounds.height).toBe(before.bounds.height);
+      } finally { m.proc.kill('SIGKILL'); }
+    }, 25 * 60_000);
   });
 
   it('WebKit / Electron helper processes are not apps: a healthy desktop lists nothing as "not responding"', async (ctx) => {

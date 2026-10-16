@@ -15,7 +15,7 @@
 import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
-  createMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner, makeHelperBuilder,
+  createMacAx, MacAxError, classifyKeyboardOwner, describeKeyboardOwner, makeHelperBuilder, helperStatusFrom,
   type MacAxDeps, type FrontmostInfo,
 } from '../platform/mac-ax';
 
@@ -1065,5 +1065,97 @@ describe('osascript fallback behind the lock screen', () => {
     });
     await expect(ax.listWindows()).resolves.toHaveLength(1);
     expect(calls).toEqual(['osascript']);
+  });
+});
+
+
+describe('a Mac without the Command Line Tools (no swiftc → the osascript path)', () => {
+  const HINT = 'The fast accessibility helper needs the Xcode Command Line Tools — run `xcode-select --install`.';
+
+  function noTools(reply: (file: string) => string | Error) {
+    const calls: string[] = [];
+    const ax = createMacAx({
+      helper: () => null,
+      ensureHelper: async () => null,                       // swiftc missing: nothing gets built
+      helperUnavailableHint: () => HINT,
+      scriptsDir: '/fake/scripts/mac',
+      exec: async (file) => { calls.push(file); const r = reply(file); if (r instanceof Error) throw r; return { stdout: r }; },
+    });
+    return { ax, calls };
+  }
+
+  it('still answers, correctly, through osascript', async () => {
+    const { ax, calls } = noTools(() => JSON.stringify([WIN()]));
+    await expect(ax.listWindows()).resolves.toHaveLength(1);
+    expect(calls).toEqual(['osascript']);
+  });
+
+  it('a timeout on that path says how to get the fast one', async () => {
+    const { ax } = noTools(() => execTimeout());
+    const err = await ax.listWindows().then(() => null, e => e);
+    expect(err.kind).toBe('timeout');
+    expect(err.message).toContain('xcode-select --install');
+  });
+
+  it('so does a failure of the script', async () => {
+    const { ax } = noTools(() => JSON.stringify({ error: 'Application isn’t running' }));
+    const err = await ax.listWindows().then(() => null, e => e);
+    expect(err.kind).toBe('failed');
+    expect(err.message).toContain('xcode-select --install');
+  });
+
+  it('an identifier-only invoke is refused with the same pointer', async () => {
+    const { ax } = noTools(() => JSON.stringify({ success: true }));
+    const res = await ax.invoke({ processId: 7, automationId: 'One', action: 'click' });
+    expect(res.success).toBe(false);
+    expect(res.error).toContain('xcode-select --install');
+  });
+
+  it('an identifier-only find says it cannot search by identifier here — it is not "no elements found"', async () => {
+    const { ax, calls } = noTools(() => JSON.stringify([]));
+    const err = await ax.find({ processId: 7, automationId: 'One' }).then(() => null, e => e);
+    expect(err).toBeInstanceOf(MacAxError);
+    expect(err.kind).toBe('unavailable');
+    expect(err.message).toMatch(/AXIdentifier/);
+    expect(err.message).toContain('xcode-select --install');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a find that also gives a name is still searched (the identifier is then filtered by the caller)', async () => {
+    const { ax } = noTools(() => JSON.stringify([{ name: 'One', role: 'AXButton', bounds: { x: 0, y: 0, width: 1, height: 1 }, processId: 7 }]));
+    await expect(ax.find({ processId: 7, name: 'One', automationId: 'One' })).resolves.toHaveLength(1);
+  });
+
+  it('with the helper (or with no hint) the messages are unchanged', async () => {
+    const { ax } = harness({ helper: null, reply: execTimeout() });
+    const err = await ax.listWindows().then(() => null, e => e);
+    expect(err.message).not.toContain('xcode-select');
+  });
+});
+
+describe('helperStatusFrom (what `doctor` reports)', () => {
+  const tools = (yes: boolean) => async () => yes;
+
+  it('ready: the helper is built', async () => {
+    expect(await helperStatusFrom({ disabled: false, cached: true, devToolsInstalled: tools(false) })).toMatchObject({ state: 'ready' });
+  });
+
+  it('buildable: not built yet, swiftc is there — it builds on first use', async () => {
+    const st = await helperStatusFrom({ disabled: false, cached: false, devToolsInstalled: tools(true) });
+    expect(st.state).toBe('buildable');
+    expect(st.detail).toMatch(/first use/i);
+  });
+
+  it('no Command Line Tools: osascript is used, and the detail says how to fix it', async () => {
+    const st = await helperStatusFrom({ disabled: false, cached: false, devToolsInstalled: tools(false) });
+    expect(st.state).toBe('no-devtools');
+    expect(st.detail).toContain('xcode-select --install');
+    expect(st.detail).toMatch(/osascript/i);
+  });
+
+  it('switched off with CLAWD_NO_MAC_AX=1', async () => {
+    const st = await helperStatusFrom({ disabled: true, cached: true, devToolsInstalled: tools(true) });
+    expect(st.state).toBe('disabled');
+    expect(st.detail).toContain('CLAWD_NO_MAC_AX');
   });
 });

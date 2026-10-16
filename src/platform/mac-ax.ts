@@ -57,6 +57,11 @@ export interface MacAxDeps {
    * shells — so the osascript path asks first. Optional: a probe that is absent or fails never blocks a read.
    */
   screenLocked?(): Promise<boolean>;
+  /**
+   * Why the fast helper is not available, in words an agent or user can act on (the Command Line Tools are not
+   * installed), or null when there is nothing to say. Appended to errors from the slower osascript path.
+   */
+  helperUnavailableHint?(): string | null;
 }
 
 // ─── Budgets ────────────────────────────────────────────────────────────────
@@ -446,6 +451,9 @@ export function createMacAx(deps: MacAxDeps): MacAx {
   let helperRetryAt = 0;
   const helperUsable = (): boolean => process.env.CLAWD_NO_MAC_AX !== '1' && Date.now() >= helperRetryAt;
   const helperFailed = (): void => { helperRetryAt = Date.now() + HELPER_RETRY_MS; };
+  /** "…run `xcode-select --install`" when that is why the fast path is missing. */
+  const hint = (): string => { const h = deps.helperUnavailableHint?.(); return h ? ` ${h}` : ''; };
+  const withHint = (err: MacAxError): MacAxError => { err.message += hint(); return err; };
 
   /** Join the helper's build, up to BUILD_WAIT_MS. Null: not built (yet) — use the osascript path. */
   async function waitForBuild(): Promise<string | null> {
@@ -521,17 +529,17 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       // The '--' keeps osascript from reading the script's own -Flags as its options.
       ({ stdout } = await deps.exec('osascript', ['-l', 'JavaScript', path.join(deps.scriptsDir, script), ...(args.length ? ['--', ...args] : [])], { timeoutMs }));
     } catch (err) {
-      if (isTimeout(err)) throw timeoutError(what, timeoutMs);
-      throw new MacAxError('failed', `${what} failed: ${msg(err)}`);
+      if (isTimeout(err)) throw withHint(timeoutError(what, timeoutMs));
+      throw withHint(new MacAxError('failed', `${what} failed: ${msg(err)}`));
     }
     let out: any;
     try {
       out = JSON.parse(stdout);
     } catch {
-      throw new MacAxError('failed', `${what} failed: unreadable output from ${script}`);
+      throw withHint(new MacAxError('failed', `${what} failed: unreadable output from ${script}`));
     }
     if (!opts.errorJsonIsData && out && typeof out === 'object' && !Array.isArray(out) && out.error) {
-      throw new MacAxError('failed', `${what} failed: ${out.error}`);
+      throw withHint(new MacAxError('failed', `${what} failed: ${out.error}`));
     }
     return out;
   }
@@ -668,6 +676,11 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         what,
       );
       if (reply) return (reply.elements ?? []).map((el: any) => toUiElement(el, undefined, q.processId));
+      // find-element.jxa cannot search by identifier: an unfiltered walk would come back as "no elements found".
+      if (q.automationId && !q.name && !q.controlType) {
+        throw new MacAxError('unavailable',
+          `${what} by AXIdentifier needs the accessibility helper, which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'}`);
+      }
       const out = await viaJxa(
         'find-element.jxa',
         [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
@@ -702,7 +715,10 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       if (reply) return toInvokeResult(reply);
       if (!q.name && !q.controlType) {
         // The script has no AXIdentifier matching; run unaimed it would act on an arbitrary element.
-        return { success: false, error: 'matching by AXIdentifier needs the accessibility helper, which is not built yet (building in the background, or swiftc is unavailable) — aim by name or controlType instead' };
+        return {
+          success: false,
+          error: `matching by AXIdentifier needs the accessibility helper, which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'} — aim by name or controlType instead`,
+        };
       }
       const out = await viaJxa(
         'invoke-element.jxa',
@@ -720,6 +736,25 @@ export function createMacAx(deps: MacAxDeps): MacAx {
   };
 }
 
+
+// ─── Status (doctor) ────────────────────────────────────────────────────────
+
+export type HelperState = 'ready' | 'buildable' | 'no-devtools' | 'disabled';
+
+export const NO_DEVTOOLS_HINT =
+  'The fast accessibility helper needs the Xcode Command Line Tools to build — install them with `xcode-select --install`; until then the slower osascript path is used.';
+
+/** Where the fast accessibility helper stands, for `clawdcursor doctor`. */
+export async function helperStatusFrom(d: {
+  disabled: boolean;
+  cached: boolean;
+  devToolsInstalled: () => Promise<boolean>;
+}): Promise<{ state: HelperState; detail: string }> {
+  if (d.disabled) return { state: 'disabled', detail: 'switched off with CLAWD_NO_MAC_AX=1 — using the osascript paths' };
+  if (d.cached) return { state: 'ready', detail: 'built — windows, trees and element searches take tens of milliseconds' };
+  if (await d.devToolsInstalled()) return { state: 'buildable', detail: 'not built yet — it builds on first use (about 3 seconds)' };
+  return { state: 'no-devtools', detail: `Xcode Command Line Tools are missing, so the slower osascript path is used — run \`xcode-select --install\` for the fast helper` };
+}
 
 // ─── Default wiring ─────────────────────────────────────────────────────────
 
@@ -747,8 +782,18 @@ export function makeHelperBuilder(d: {
 }
 
 let devTools: Promise<boolean> | null = null;
+let devToolsKnown: boolean | null = null;
 const devToolsInstalled = (): Promise<boolean> =>
-  (devTools ??= execFileAsync('xcode-select', ['-p'], { timeout: 5_000 }).then(() => true, () => false));
+  (devTools ??= execFileAsync('xcode-select', ['-p'], { timeout: 5_000 }).then(() => true, () => false).then(ok => { devToolsKnown = ok; return ok; }));
+
+/** For `clawdcursor doctor`. */
+export function macAxStatus(): Promise<{ state: HelperState; detail: string }> {
+  return helperStatusFrom({
+    disabled: process.env.CLAWD_NO_MAC_AX === '1',
+    cached: macAxBinary.cached(AX_HELPER_SCRIPT) !== null,
+    devToolsInstalled,
+  });
+}
 
 let shared: MacAx | null = null;
 
@@ -761,5 +806,6 @@ export function defaultMacAx(): MacAx {
     ensureHelper: makeHelperBuilder({ devToolsInstalled, compile: () => macAxBinary.compile(AX_HELPER_SCRIPT) }),
     scriptsDir: SCRIPTS_DIR,
     screenLocked: async () => (await lsappinfoFrontmost(defaultExec)).locked,
+    helperUnavailableHint: () => (devToolsKnown === false ? NO_DEVTOOLS_HINT : null),
   }));
 }
