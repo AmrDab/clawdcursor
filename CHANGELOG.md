@@ -134,6 +134,12 @@ VM and an Ubuntu 24.04 VM:
   so an agent doesn't click a toggle twice.
 - **Windows: an earlier still-running click that failed later** is reported
   on the next invoke instead of being lost.
+- **Windows: focusing a window no longer un-maximizes it.** Every focus
+  (window focus, raising the target before a click) ran `ShowWindow(SW_RESTORE)`,
+  which shrinks a maximized window to its normal size. A maximized window is
+  now shown with `SW_SHOWMAXIMIZED`; normal and minimized windows behave as
+  before. The Alt-key fallback for Windows' foreground lock also loads the
+  library it needs, so it no longer fails silently.
 - **`get_value` reads the field, not a same-named label** ("City" = "City").
 - **OCR clicks never hit another app on a partial match.** `smart_click "1"`
   in Calculator clicked the "14" of the menu-bar clock on a Mac and opened

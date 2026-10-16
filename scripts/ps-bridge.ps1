@@ -47,6 +47,8 @@ try {
         public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
         [DllImport("user32.dll")]
         public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+        [DllImport("user32.dll")]
+        public static extern bool IsZoomed(IntPtr hWnd);
         // Additional constants for force-focus path:
         //   HWND_TOPMOST    = -1
         //   HWND_NOTOPMOST  = -2
@@ -706,8 +708,15 @@ function Cmd-FocusWindow {
     # Try UIA SetFocus too (cheap, helps with some custom apps); ignore result.
     try { $target.SetFocus() } catch {}
 
-    # SW_RESTORE = 9. ShowWindow is a no-op when the window is already shown.
-    [Win32UIA]::ShowWindow($hwnd, 9) | Out-Null
+    # Show + activate without changing the window's size. SW_RESTORE (9) on a
+    # MAXIMIZED window restores it to its smaller normal size, so every focus
+    # used to shrink full-screen windows. A maximized window gets
+    # SW_SHOWMAXIMIZED (3): same activation, stays maximized. Others keep
+    # SW_RESTORE: no size change for a normal window, and a minimized one comes
+    # back in its previous state. (SW_SHOW was tried: it changes nothing on a
+    # visible window, so the activation the foreground lock needs never came.)
+    if ([Win32UIA]::IsZoomed($hwnd)) { [Win32UIA]::ShowWindow($hwnd, 3) | Out-Null }
+    else { [Win32UIA]::ShowWindow($hwnd, 9) | Out-Null }
     Start-Sleep -Milliseconds 30
 
     # Topmost toggle pushes the window to the top of the z-order without
@@ -750,6 +759,7 @@ function Cmd-FocusWindow {
     # Some Windows configurations require a key event to break the lock.
     if (-not $foreground) {
         try {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue  # SendKeys lives here; not loaded yet
             [System.Windows.Forms.SendKeys]::SendWait('%') | Out-Null
             Start-Sleep -Milliseconds 30
             [Win32UIA]::AllowSetForegroundWindow(-1) | Out-Null
