@@ -370,6 +370,15 @@ M1 iMac, no screenshots):
   also treats a browser whose tree has no web area, or an empty one, as asleep,
   so other Chromium browsers wake too. Browser detection now recognizes macOS app
   names ("Google Chrome", "Microsoft Edge", "Brave Browser").
+- **The blind hint points at the browser tools for clawdcursor's browser (#235).**
+  An empty `accessibility find` / `read_tree` on the browser clawdcursor is
+  attached to over CDP used to suggest OCR and "restart it with
+  --force-renderer-accessibility". It now leads with `browser page_context` /
+  `read_text` / `click`, and for clawdcursor's own browser says not to restart
+  it. The CDP DOM fallback of `find` honours `processId`: scoped to the CDP
+  browser's process it answers even when another window is in front, and it
+  never answers for a different process. Unscoped queries keep the
+  focused-window title check, and now also work for macOS browser names.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

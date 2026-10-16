@@ -19,6 +19,7 @@ const state = {
   livePorts: new Set<number>(),
   userPage: null as any,
   newPages: [] as any[],
+  cdpCalls: [] as string[],
 };
 
 function fakePage(url: string) {
@@ -44,6 +45,13 @@ vi.mock('playwright', () => ({
           newPage: async () => { const p = fakePage('about:blank'); state.newPages.push(p); return p; },
         }],
         isConnected: () => true,
+        newBrowserCDPSession: async () => ({
+          send: async (method: string) => {
+            state.cdpCalls.push(method);
+            return { processInfo: [{ type: 'renderer', id: 77 }, { type: 'browser', id: 4321 }] };
+          },
+          detach: async () => {},
+        }),
       };
     }),
   },
@@ -139,5 +147,18 @@ describe('agent-owned browser launch flags', () => {
 
   it('Windows: not forced — Chromium turns UIA on when a UIA client asks', () => {
     expect(agentBrowserArgs('p', 'win32')).not.toContain('--force-renderer-accessibility');
+  });
+});
+
+describe('getBrowserPid (#235)', () => {
+  it("reports the browser process's pid from SystemInfo.getProcessInfo, once per connection", async () => {
+    state.livePorts.add(AGENT_CDP_PORT);
+    state.cdpCalls.length = 0;
+    const d = new CDPDriver();
+    expect(await d.getBrowserPid()).toBeNull();            // not connected yet
+    await d.ensureConnected();
+    expect(await d.getBrowserPid()).toBe(4321);             // the browser process, not a renderer
+    expect(await d.getBrowserPid()).toBe(4321);
+    expect(state.cdpCalls).toEqual(['SystemInfo.getProcessInfo']);
   });
 });

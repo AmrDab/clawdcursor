@@ -8,11 +8,11 @@
 import type { ToolDefinition, ToolContext } from './types';
 import { a11yToMouse } from './types';
 import type { UiElement, WindowInfo } from '../platform/types';
-import { getBrowserProcessNames } from '../llm/browser-config';
+import { isBrowserProcess } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep } from './blind-hints';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -29,19 +29,8 @@ import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP } from './blind-hints';
  */
 async function queryCdpDom(
   ctx: ToolContext,
-  query: { name?: string; limit?: number },
+  query: { name?: string; limit?: number; processId?: number },
 ): Promise<UiElement[] | null> {
-  let activeWin: any;
-  try {
-    activeWin = ctx.platform
-      ? await ctx.platform.getActiveWindow()
-      : await ctx.a11y.getActiveWindow();
-  } catch {
-    return null;
-  }
-  const appName = activeWin?.processName?.toLowerCase() || '';
-  if (!getBrowserProcessNames().includes(appName)) return null;
-
   let connected = false;
   try { connected = await ctx.cdp.isConnected(); } catch { /* not connected */ }
   if (!connected) return null;
@@ -49,24 +38,15 @@ async function queryCdpDom(
   const page = ctx.cdp.getPage?.();
   if (!page) return null;
 
-  // SCOPE CHECK: the CDP connection may be to a DIFFERENT browser than the
-  // focused window (e.g. the agent's own dedicated instance, or a relay
-  // Chrome). Answering a query about the focused Edge using another browser's
-  // DOM is actively misleading — it made an agent try to click "Continue with
-  // Google" buttons that existed only in a background Chrome (session
-  // 2026-06-11). Only use the CDP DOM as a fallback for THIS window when the
-  // connected page corresponds to the focused window's title.
-  try {
-    const cdpTitle = await ctx.cdp.getTitle?.();
-    const winTitle = activeWin?.title ?? '';
-    // A browser window title embeds the page title ("<page> - <profile> -
-    // <Browser>"). If we have a non-trivial page title and the focused window
-    // does NOT contain it, the CDP target is a different window — bail rather
-    // than return cross-browser results.
-    if (cdpTitle && cdpTitle.trim().length > 1 && !windowTextIncludes(winTitle, cdpTitle)) {
-      return null;
-    }
-  } catch { /* can't verify correspondence — fall through (best-effort) */ }
+  // Scoped to a process (#235): answer from the CDP page when that process IS
+  // the CDP browser — whatever window is in front — and never for another one.
+  if (typeof query.processId === 'number') {
+    const cdpPid = await cdpBrowserPid(ctx);
+    if (cdpPid !== null && query.processId !== cdpPid) return null;
+    if (cdpPid === null && !(await activeWindowIsCdpPage(ctx, query.processId))) return null;
+  } else if (!(await activeWindowIsCdpPage(ctx))) {
+    return null;
+  }
 
   const limit = query.limit ?? 50;
   const needle = query.name?.toLowerCase() || null;
@@ -121,6 +101,61 @@ async function queryCdpDom(
   } catch {
     return null;
   }
+}
+
+/** Pid of the browser clawdcursor is attached to over CDP, or null. Never throws. */
+async function cdpBrowserPid(ctx: ToolContext): Promise<number | null> {
+  try {
+    if (!(await ctx.cdp?.isConnected?.())) return null;
+    const pid = await ctx.cdp.getBrowserPid?.();
+    return typeof pid === 'number' ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The blind hint for a thin read of `pid`: the browser tools when it is the CDP browser. */
+async function nextStepFor(ctx: ToolContext, pid: number | undefined): Promise<string> {
+  if (pid === undefined) return SPARSE_NEXT_STEP;
+  const cdpPid = await cdpBrowserPid(ctx);
+  if (cdpPid === null || cdpPid !== pid) return SPARSE_NEXT_STEP;
+  let mode: string | undefined;
+  try { mode = ctx.cdp.getConnectionMode?.(); } catch { /* unknown */ }
+  return cdpBrowserNextStep(mode === 'dedicated' ? 'dedicated' : 'attached');
+}
+
+/**
+ * Unscoped fallback: is the FOCUSED window a browser showing the CDP page?
+ *
+ * The CDP connection may be to a DIFFERENT browser than the focused window
+ * (e.g. the agent's own dedicated instance, or a relay Chrome). Answering a
+ * query about the focused Edge using another browser's DOM is actively
+ * misleading — it made an agent try to click "Continue with Google" buttons
+ * that existed only in a background Chrome (session 2026-06-11). So the CDP
+ * DOM only stands in for THIS window when the connected page corresponds to
+ * the focused window's title. With `pid`, the focused window must also be
+ * that process.
+ */
+async function activeWindowIsCdpPage(ctx: ToolContext, pid?: number): Promise<boolean> {
+  let activeWin: any;
+  try {
+    activeWin = ctx.platform
+      ? await ctx.platform.getActiveWindow()
+      : await ctx.a11y.getActiveWindow();
+  } catch {
+    return false;
+  }
+  if (!isBrowserProcess(activeWin?.processName)) return false;
+  if (pid !== undefined && activeWin?.processId !== pid) return false;
+  try {
+    const cdpTitle = await ctx.cdp.getTitle?.();
+    const winTitle = activeWin?.title ?? '';
+    // A browser window title embeds the page title ("<page> - <profile> -
+    // <Browser>"). If we have a non-trivial page title and the focused window
+    // does NOT contain it, the CDP target is a different window.
+    if (cdpTitle && cdpTitle.trim().length > 1 && !windowTextIncludes(winTitle, cdpTitle)) return false;
+  } catch { /* can't verify correspondence — fall through (best-effort) */ }
+  return true;
 }
 
 function formatWindow(w: WindowInfo): string {
@@ -186,14 +221,15 @@ export function getA11yTools(): ToolDefinition[] {
           const tree = await ctx.platform.getUiTree(active);
           const partial = ctx.platform.lastTreeTruncated
             ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
-          const isBrowser = !!activeWindow && getBrowserProcessNames().includes(String(activeWindow.processName ?? '').toLowerCase());
+          const isBrowser = !!activeWindow && isBrowserProcess(activeWindow.processName);
+          const nextStep = tree.length < 5 || isBrowser ? await nextStepFor(ctx, active) : '';
           baseText = [
             'WINDOWS',
             windows.length ? windows.map(formatWindow).join('\n') : windowListError ? `(window list failed: ${windowListError})` : '(no windows found)',
             '',
             `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
             tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : '(no elements found)',
-            ...(tree.length < 5 || isBrowser ? [SPARSE_NEXT_STEP] : []),
+            ...(nextStep ? [nextStep] : []),
             '',
             'FOCUSED ELEMENT',
             focused ? formatElement(focused) : '(no focused element)',
@@ -207,7 +243,7 @@ export function getA11yTools(): ToolDefinition[] {
         // single-page apps that bypass MSAA, etc.) without escalating to a
         // screenshot. Viewport-relative coords are flagged in the section
         // header so callers don't accidentally treat them as screen-absolute.
-        const cdpHits = await queryCdpDom(ctx, { limit: 80 });
+        const cdpHits = await queryCdpDom(ctx, { limit: 80, processId });
         if (cdpHits) {
           const cdpLines = cdpHits.length
             ? cdpHits.map(formatElement).join('\n')
@@ -458,7 +494,7 @@ export function getA11yTools(): ToolDefinition[] {
 
     {
       name: 'find_element',
-      description: 'Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached, falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a "via CDP DOM" header and use viewport-relative coords).',
+      description: 'Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached (the focused one, or `processId` of the CDP browser), falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a "via CDP DOM" header and use viewport-relative coords).',
       parameters: {
         name: { type: 'string', description: 'Element name to search for', required: false },
         controlType: { type: 'string', description: 'UI Automation control type. Either form works: "Button" or "ControlType.Button". An unrecognized type returns no results rather than silently searching unfiltered.', required: false },
@@ -500,7 +536,7 @@ export function getA11yTools(): ToolDefinition[] {
         // surfaces canvas or in-page DOM elements. Without this fallback an
         // agent calling find_element on a web app sees "(no elements found)"
         // and either gives up or escalates straight to screenshots.
-        const cdpHits = await queryCdpDom(ctx, { name, limit: 20 });
+        const cdpHits = await queryCdpDom(ctx, { name, limit: 20, processId });
         if (cdpHits && cdpHits.length) {
           const lines = ['(no UIA matches — falling back to CDP DOM; coords are viewport-relative)'];
           lines.push(...cdpHits.map(formatElement));
@@ -513,7 +549,9 @@ export function getA11yTools(): ToolDefinition[] {
           .filter(s => s.processId !== undefined)
           .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` "${s.title}"` : ''}`);
         const where = searched.length ? `\nsearched: ${searched.join(', ')} — pass processId to target another window` : '';
-        return { text: `(no elements found)${where}\n${SPARSE_NEXT_STEP}` };
+        const searchedPid = typeof processId === 'number' ? processId
+          : scopes.length === 1 ? scopes[0].processId : undefined;
+        return { text: `(no elements found)${where}\n${await nextStepFor(ctx, searchedPid)}` };
       },
     },
 

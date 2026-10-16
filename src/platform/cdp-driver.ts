@@ -177,6 +177,33 @@ export class CDPDriver {
   /** How the live connection was established (see connectionMode). */
   getConnectionMode(): 'dedicated' | 'attached' | 'unknown' { return this.connectionMode; }
 
+  private pidCache: { browser: Browser; pid: number | null } | null = null;
+
+  /**
+   * OS process id of the connected browser (the process that owns its
+   * windows), from CDP's SystemInfo.getProcessInfo; null when not connected or
+   * the browser doesn't say. Lets the accessibility tools recognise the window
+   * this driver can read over CDP (#235). Cached per connection.
+   */
+  async getBrowserPid(): Promise<number | null> {
+    const browser = this.browser;
+    if (!browser || !this.connected) return null;
+    if (this.pidCache?.browser === browser) return this.pidCache.pid;
+    let pid: number | null = null;
+    try {
+      const session = await browser.newBrowserCDPSession();
+      try {
+        const info = await session.send('SystemInfo.getProcessInfo') as { processInfo?: Array<{ type: string; id: number }> };
+        const proc = info.processInfo?.find(p => p.type === 'browser');
+        pid = typeof proc?.id === 'number' && proc.id > 0 ? proc.id : null;
+      } finally {
+        await session.detach().catch(() => { /* already gone */ });
+      }
+    } catch { /* older browser / not Chromium: unknown */ }
+    this.pidCache = { browser, pid };
+    return pid;
+  }
+
   /**
    * @param cdpPort CDP debugging port (default 9223)
    */

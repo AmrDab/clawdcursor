@@ -741,7 +741,7 @@
     },
     {
       "name": "find_element",
-      "description": "Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached, falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a \"via CDP DOM\" header and use viewport-relative coords).",
+      "description": "Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached (the focused one, or `processId` of the CDP browser), falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a \"via CDP DOM\" header and use viewport-relative coords).",
       "category": "window",
       "parameters": {
         "type": "object",
