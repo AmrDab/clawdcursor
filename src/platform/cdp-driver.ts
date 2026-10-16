@@ -106,7 +106,11 @@ export interface CDPInteractionResult {
  * Launch flags for the agent's OWN dedicated browser (never the user's).
  * On Linux Chromium only builds its renderer accessibility tree for AT-SPI
  * when started with --force-renderer-accessibility; without it read_tree /
- * find / invoke saw no page content at all in the agent's browser.
+ * find / invoke saw no page content at all in the agent's browser. macOS is
+ * the same in practice (#234): the page tree is built only once an AX client
+ * asks, and read_tree / find saw only the window's toolbar and tab strip.
+ * Windows is left on demand: Chromium turns its UIA tree on when a UIA client
+ * asks for it, so every page doesn't pay for a tree nobody reads.
  */
 export function agentBrowserArgs(profileDir: string, platform: NodeJS.Platform = process.platform): string[] {
   return [
@@ -119,7 +123,7 @@ export function agentBrowserArgs(profileDir: string, platform: NodeJS.Platform =
     // window (session 2026-06-11). Start maximized so screenshots/coords have
     // the full viewport and the window is usable.
     '--start-maximized',
-    ...(platform === 'linux' ? ['--force-renderer-accessibility'] : []),
+    ...(platform === 'linux' || platform === 'darwin' ? ['--force-renderer-accessibility'] : []),
     '--new-window',
     'about:blank',
   ];

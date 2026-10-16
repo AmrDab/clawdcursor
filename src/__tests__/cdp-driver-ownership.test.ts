@@ -133,8 +133,11 @@ describe('agent-owned browser launch flags', () => {
     expect(args[args.length - 1]).toBe('about:blank');
   });
 
-  it('other OSes keep their flags unchanged', () => {
+  it('macOS: the page is exposed from launch too — Chromium builds it only when asked, and the wake never fired (#234)', () => {
+    expect(agentBrowserArgs('/Users/u/.clawdcursor/cdp-profile', 'darwin')).toContain('--force-renderer-accessibility');
+  });
+
+  it('Windows: not forced — Chromium turns UIA on when a UIA client asks', () => {
     expect(agentBrowserArgs('p', 'win32')).not.toContain('--force-renderer-accessibility');
-    expect(agentBrowserArgs('p', 'darwin')).not.toContain('--force-renderer-accessibility');
   });
 });

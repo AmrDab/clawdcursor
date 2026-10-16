@@ -361,6 +361,15 @@ M1 iMac, no screenshots):
   `~/.clawdcursor/cdp-profile/Default/Preferences` (other prefs are kept; the
   second key is the one Chrome reads at startup). Checked on Chrome 155 and Edge:
   both report sign-in disallowed after launch. Your own browser is never touched.
+- **macOS: the page of clawdcursor's own Chrome is visible to accessibility
+  (#234).** `read_tree` / `find` saw only the window's toolbar and tab strip:
+  Chromium on macOS builds the page tree only when asked, and the wake never
+  fired because a browser's own UI (~59 elements) is not a "thin" tree. The agent
+  browser now starts with `--force-renderer-accessibility` on macOS as on Linux
+  (Windows stays on demand: Chromium turns UIA on when a client asks). The wake
+  also treats a browser whose tree has no web area, or an empty one, as asleep,
+  so other Chromium browsers wake too. Browser detection now recognizes macOS app
+  names ("Google Chrome", "Microsoft Edge", "Brave Browser").
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 
