@@ -124,6 +124,54 @@ describe('getUiTreeWithWake', () => {
   });
 });
 
+// #234: a Chrome window's own UI (tab strip, toolbar, address bar) is ~59
+// elements, so a browser whose PAGE is asleep was never "thin" and never woke.
+describe('getUiTreeWithWake — a browser whose page is missing (#234)', () => {
+  const chromeUi = () => els(59).map((e, i) => ({ ...e, bounds: { x: i * 10, y: 5, width: 8, height: 20 } }));
+  const webArea = (children: number) => [
+    { name: 'Dashboard', controlType: 'Document', bounds: { x: 0, y: 100, width: 1200, height: 800 } },
+    ...Array.from({ length: children }, (_, i) => ({ name: `page${i}`, controlType: 'Button', bounds: { x: 20 + i, y: 200, width: 80, height: 30 } })),
+  ] as any[];
+
+  it('wakes and re-reads when the tree is only browser chrome — no web area', async () => {
+    const p = platformWith(chromeUi(), chromeUi(), [...chromeUi(), ...webArea(12)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, now: () => 0, isBrowser: () => true });
+    expect(r.woke).toBe(true);
+    expect(r.tree.some(e => e.name === 'page0')).toBe(true);
+    expect(p.getUiTree).toHaveBeenCalledTimes(3);
+  });
+
+  it('an empty web area counts as missing too', async () => {
+    const p = platformWith([...chromeUi(), ...webArea(0)], [...chromeUi(), ...webArea(3)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 2, now: () => 0, isBrowser: () => true });
+    expect(r.woke).toBe(true);
+    expect(r.tree.some(e => e.name === 'page2')).toBe(true);
+  });
+
+  it('a browser whose page is there is returned as read — one read, no wake', async () => {
+    const isBrowser = vi.fn(() => true);
+    const p = platformWith([...chromeUi(), ...webArea(5)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, isBrowser });
+    expect(r.woke).toBe(false);
+    expect(p.getUiTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('a dense tree of an app that is not a browser never waits, web area or not', async () => {
+    const p = platformWith(chromeUi(), [...chromeUi(), ...webArea(4)]);
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 3, isBrowser: () => false });
+    expect(r.woke).toBe(false);
+    expect(p.getUiTree).toHaveBeenCalledTimes(1);
+  });
+
+  it('a page that stays missing: keeps the first read after the budget', async () => {
+    const p = platformWith(chromeUi());
+    const r = await getUiTreeWithWake(p, 7, { pollMs: 0, budgetMs: 2, now: () => 0, isBrowser: () => true });
+    expect(r.woke).toBe(false);
+    expect(r.tree).toHaveLength(59);
+    expect(p.getUiTree).toHaveBeenCalledTimes(1 + 2);
+  });
+});
+
 describe('wakeAccessibility', () => {
   it('macOS: sets AXManualAccessibility for that process through the JXA script', async () => {
     await wakeAccessibility(321, 'darwin');

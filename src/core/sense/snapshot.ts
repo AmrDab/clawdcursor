@@ -13,6 +13,7 @@
 
 import type { PlatformAdapter } from '../../platform/types';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
+import { isBrowserProcess } from '../../llm/browser-config';
 import type { Snapshot, SnapshotElement, Platform } from './types';
 import { fingerprint } from './fingerprint';
 
@@ -73,7 +74,8 @@ export async function captureSnapshot(adapter: PlatformAdapter, processId?: numb
 
   try {
     // A thin tree may be a sleeping Electron / Chromium app: wake it, read again.
-    const { tree } = await getUiTreeWithWake(adapter, processId ?? activeWindow?.processId);
+    const { tree } = await getUiTreeWithWake(adapter, processId ?? activeWindow?.processId,
+      { isBrowser: () => isBrowserProcess(activeWindow?.processName) });
     if (tree && tree.length > 0) {
       sources.push('a11y');
       const toSnap = (el: typeof tree[number]): SnapshotElement => {

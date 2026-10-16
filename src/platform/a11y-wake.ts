@@ -14,6 +14,11 @@
  * Windows / Linux: the read itself is the wake-up) and keep reading for a few
  * seconds until the tree fills in.
  *
+ * A browser is not "thin" when its page is asleep: its own UI (tab strip,
+ * toolbar, address bar) is ~59 elements on macOS Chrome (#234). So for a
+ * browser the page counts too — no web area (Document) with anything inside
+ * it is a missing page, and wakes the same way.
+ *
  * Not everything wakes this way: Chromium on Linux exposes its page only when
  * launched with --force-renderer-accessibility (switching AT-SPI on afterwards,
  * or even before launch, did not help in testing) — callers say so in the hint.
@@ -55,18 +60,47 @@ export interface WokenTree {
   woke: boolean;
 }
 
+const hasArea = (el: UiElement) => el.bounds.width > 0 && el.bounds.height > 0;
+
 /**
- * Read the UI tree; if it is thin, wake the app and keep re-reading (up to the
- * budget) until it fills in, returning the richest read. At most one wait per
- * process per cooldown.
+ * Does the tree hold a web page: a web area (Document) with at least one other
+ * element inside it? The tree is flat, so "inside" is by position.
+ */
+export function hasWebContent(tree: UiElement[]): boolean {
+  const docs = tree.filter(el => el.controlType === 'Document' && hasArea(el));
+  if (!docs.length) return false;
+  return tree.some(el => {
+    if (el.controlType === 'Document' || !hasArea(el)) return false;
+    const cx = el.bounds.x + el.bounds.width / 2;
+    const cy = el.bounds.y + el.bounds.height / 2;
+    return docs.some(d => cx >= d.bounds.x && cx <= d.bounds.x + d.bounds.width
+      && cy >= d.bounds.y && cy <= d.bounds.y + d.bounds.height);
+  });
+}
+
+/**
+ * Read the UI tree; if it is thin — or, for a browser, its page is missing —
+ * wake the app and keep re-reading (up to the budget) until it fills in,
+ * returning the richest read. At most one wait per process per cooldown.
+ *
+ * `isBrowser` says whether the target is a web browser; it is asked only when
+ * the answer matters (the tree has no web content).
  */
 export async function getUiTreeWithWake(
   platform: Pick<PlatformAdapter, 'getUiTree' | 'getActiveWindow'>,
   pid?: number,
-  opts: { pollMs?: number; budgetMs?: number; now?: () => number } = {},
+  opts: { pollMs?: number; budgetMs?: number; now?: () => number; isBrowser?: () => boolean | Promise<boolean> } = {},
 ): Promise<WokenTree> {
   const first = await platform.getUiTree(pid);
-  if (first.length >= SPARSE_TREE_MAX) return { tree: first, woke: false };
+  const askBrowser = async () => {
+    if (!opts.isBrowser || hasWebContent(first)) return false;
+    try { return await opts.isBrowser(); } catch { return false; }
+  };
+  let browser = false;
+  if (first.length >= SPARSE_TREE_MAX) {
+    browser = await askBrowser();
+    if (!browser) return { tree: first, woke: false };
+  }
 
   const envBudget = Number(process.env.CLAWDCURSOR_WAKE_BUDGET_MS);
   const budgetMs = opts.budgetMs ?? (Number.isFinite(envBudget) && process.env.CLAWDCURSOR_WAKE_BUDGET_MS !== undefined ? envBudget : WAKE_BUDGET_MS);
@@ -78,6 +112,14 @@ export async function getUiTreeWithWake(
   const prev = lastTry.get(key);
   if (prev !== undefined && now - prev < RETRY_COOLDOWN_MS) return { tree: first, woke: false };
   lastTry.set(key, now);
+  if (first.length < SPARSE_TREE_MAX) browser = await askBrowser();
+
+  // A browser's read is better when it has the page; otherwise more is better.
+  const better = (a: UiElement[], b: UiElement[]) => {
+    if (browser && hasWebContent(a) !== hasWebContent(b)) return hasWebContent(a);
+    return a.length > b.length;
+  };
+  const filled = (t: UiElement[]) => t.length >= SPARSE_TREE_MAX && (!browser || hasWebContent(t));
 
   await wakeAccessibility(target);
   const pollMs = opts.pollMs ?? WAKE_POLL_MS;
@@ -93,10 +135,10 @@ export async function getUiTreeWithWake(
     if (i > 0 && nowFn() - started >= budgetMs) break;
     await new Promise(r => setTimeout(r, pollMs));
     const next = await platform.getUiTree(pid).catch(() => best);
-    if (next.length > best.length) best = next;
-    if (best.length >= SPARSE_TREE_MAX) break;
+    if (better(next, best)) best = next;
+    if (filled(best)) break;
   }
-  return best.length > first.length ? { tree: best, woke: true } : { tree: first, woke: false };
+  return best !== first ? { tree: best, woke: true } : { tree: first, woke: false };
 }
 
 /** Test hook. */

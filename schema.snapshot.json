@@ -204,7 +204,7 @@
     },
     {
       "name": "agent_status",
-      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm), currentTask, currentStep, stepsCompleted, stepsTotal. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
+      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm | paused), currentTask, currentStep, stepsCompleted, stepsTotal; `pause` {id, message, since} while a pause for the user is up; and `overlay` — what the on-screen overlay shows: {mode:\"hidden\"|\"running\"} or {mode:\"paused\", message, since}. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -741,7 +741,7 @@
     },
     {
       "name": "find_element",
-      "description": "Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached, falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a \"via CDP DOM\" header and use viewport-relative coords).",
+      "description": "Search for UI elements by name, control type, or automation ID within a process. Returns matching elements with bounds. For browser windows with CDP attached (the focused one, or `processId` of the CDP browser), falls back to a DOM query when UIA returns empty so canvas / SPA content is reachable too (results are flagged with a \"via CDP DOM\" header and use viewport-relative coords).",
       "category": "window",
       "parameters": {
         "type": "object",
@@ -1784,7 +1784,7 @@
     },
     {
       "name": "pause_for_user",
-      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make) instead of stopping or asking them to come back to this chat. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
+      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping or asking them to come back to this chat. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
       "category": "orchestration",
       "parameters": {
         "type": "object",

@@ -32,7 +32,7 @@ import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
-import { getBrowserProcessNames } from '../../llm/browser-config';
+import { isBrowserProcess } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
@@ -148,7 +148,15 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const limit = typeof args.limit === 'number' && args.limit > 0 ? Math.floor(args.limit) : 60;
         // A thin tree is often a sleeping one (Electron / Chromium build their
         // page tree on first request): wake the app and read once more.
-        const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid);
+        // A browser whose page is asleep is not thin (its own UI is ~59
+        // elements), so say which process it is when that matters (#234).
+        const isBrowser = async () => {
+          const win = pid === undefined
+            ? await ctx.platform.getActiveWindow().catch(() => null)
+            : (await ctx.platform.listWindows().catch(() => [])).find(w => w.processId === pid);
+          return isBrowserProcess(win?.processName);
+        };
+        const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid, { isBrowser });
         // Never a dead end: a thin tree (or a browser, whose page content UIA
         // often omits) says what to do next, in the caller's own tool names.
         const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
@@ -156,7 +164,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return { success: true, text: `(empty a11y tree — app may be custom-canvas)\n${nextStep}` };
         }
         const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
-        const isBrowser = !!active && getBrowserProcessNames().includes(String(active.processName ?? '').toLowerCase());
+        const activeIsBrowser = !!active && isBrowserProcess(active.processName);
         const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
         // Below-the-fold elements come back with empty (0×0) bounds: list them
         // AFTER the on-screen ones, marked, instead of interleaved at @0,0 where
@@ -171,7 +179,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         );
         const rest = ordered.length - (offset + page.length);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
-        const hint = tree.length < 5 || isBrowser ? `\n${nextStep}` : '';
+        const hint = tree.length < 5 || activeIsBrowser ? `\n${nextStep}` : '';
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
       },

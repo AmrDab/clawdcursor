@@ -250,7 +250,10 @@ OPERATING PRINCIPLES
 8. ROADBLOCKS. Sign-in, a password, a 2FA code, a CAPTCHA, or a choice only
    the user can make: call ask_user("<exactly what to do>"). The user does
    it and clicks Resume, and you continue from where the screen now is.
-   Never type or guess credentials yourself.
+   Never type or guess credentials yourself. A plan limit or upgrade wall
+   ("You've reached the limit", "Upgrade to continue") is a roadblock too:
+   stop and ask_user with the exact blocking text and the user's options;
+   never click Upgrade / Subscribe / Start trial yourself.
 
 COORDINATES
   • PREFER invoke_element(name) for any NAMED element — it needs no coordinates

@@ -345,6 +345,49 @@ M1 iMac, no screenshots):
   `find` reports that it cannot search by identifier there instead of "no elements
   found", and `clawdcursor doctor` shows the helper's state (built / builds on first
   use / needs the Command Line Tools / switched off).
+- **Upgrade walls are a roadblock (#239).** A click on `Upgrade`, `Subscribe`,
+  `Start (a / your) (free) trial`, `Billing`, a payment method or "Add credit
+  card" now needs confirmation, like Pay / Checkout. Page text such as
+  "Subscriber count", "Unsubscribe", "Upgrade guide" or Trello's "Add a card"
+  stays ungated, and typing the words is never gated. The agent prompt, the MCP
+  instructions, `pause_for_user` and the skill say it: at a plan limit or upgrade
+  wall, stop, quote the blocking text and ask the user; never click Upgrade /
+  Subscribe yourself.
+- **No "Sign in to Chrome?" bubble in the agent's browser (#236).** A fresh
+  agent profile could open with a focused sign-in bubble that swallowed
+  keystrokes, one click away from signing the automation profile in to your
+  Google account. Before launching its own browser, clawdcursor now writes
+  `signin.allowed` and `signin.allowed_on_next_startup` = false into
+  `~/.clawdcursor/cdp-profile/Default/Preferences` (other prefs are kept; the
+  second key is the one Chrome reads at startup). Checked on Chrome 155 and Edge:
+  both report sign-in disallowed after launch. Your own browser is never touched.
+- **macOS: the page of clawdcursor's own Chrome is visible to accessibility
+  (#234).** `read_tree` / `find` saw only the window's toolbar and tab strip:
+  Chromium on macOS builds the page tree only when asked, and the wake never
+  fired because a browser's own UI (~59 elements) is not a "thin" tree. The agent
+  browser now starts with `--force-renderer-accessibility` on macOS as on Linux
+  (Windows stays on demand: Chromium turns UIA on when a client asks). The wake
+  also treats a browser whose tree has no web area, or an empty one, as asleep,
+  so other Chromium browsers wake too. Browser detection now recognizes macOS app
+  names ("Google Chrome", "Microsoft Edge", "Brave Browser").
+- **The blind hint points at the browser tools for clawdcursor's browser (#235).**
+  An empty `accessibility find` / `read_tree` on the browser clawdcursor is
+  attached to over CDP used to suggest OCR and "restart it with
+  --force-renderer-accessibility". It now leads with `browser page_context` /
+  `read_text` / `click`, and for clawdcursor's own browser says not to restart
+  it. The CDP DOM fallback of `find` honours `processId`: scoped to the CDP
+  browser's process it answers even when another window is in front, and it
+  never answers for a different process. Unscoped queries keep the
+  focused-window title check, and now also work for macOS browser names.
+- **The pause prompt makes a sound, and its state is readable (#237).** A user
+  not looking at the screen never knew it was their turn. When the paused pill
+  appears it now plays a short system sound: Windows' Asterisk sound, macOS's
+  "Glass" (a beep if it's missing), and on Linux `canberra-gtk-play -i
+  dialog-information` or the display's beep. `CLAWD_PAUSE_SOUND=0` turns it off.
+  `task {action:"status"}` / `agent_status` documents its `pause` field and adds
+  `overlay`: `{mode:"hidden"|"running"}` or `{mode:"paused", message, since}`,
+  so a watcher no longer has to tell the two pill processes apart. The paused
+  pill also carries `--paused` in its command line.
 
 ## [1.5.15] - 2026-10-08 — multiple monitors in any layout; clicks hit the window you see
 

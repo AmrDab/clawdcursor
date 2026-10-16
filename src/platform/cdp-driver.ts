@@ -106,7 +106,11 @@ export interface CDPInteractionResult {
  * Launch flags for the agent's OWN dedicated browser (never the user's).
  * On Linux Chromium only builds its renderer accessibility tree for AT-SPI
  * when started with --force-renderer-accessibility; without it read_tree /
- * find / invoke saw no page content at all in the agent's browser.
+ * find / invoke saw no page content at all in the agent's browser. macOS is
+ * the same in practice (#234): the page tree is built only once an AX client
+ * asks, and read_tree / find saw only the window's toolbar and tab strip.
+ * Windows is left on demand: Chromium turns its UIA tree on when a UIA client
+ * asks for it, so every page doesn't pay for a tree nobody reads.
  */
 export function agentBrowserArgs(profileDir: string, platform: NodeJS.Platform = process.platform): string[] {
   return [
@@ -119,10 +123,36 @@ export function agentBrowserArgs(profileDir: string, platform: NodeJS.Platform =
     // window (session 2026-06-11). Start maximized so screenshots/coords have
     // the full viewport and the window is usable.
     '--start-maximized',
-    ...(platform === 'linux' ? ['--force-renderer-accessibility'] : []),
+    ...(platform === 'linux' || platform === 'darwin' ? ['--force-renderer-accessibility'] : []),
     '--new-window',
     'about:blank',
   ];
+}
+
+/**
+ * Seed the agent's OWN profile before launch (never the user's browser): Chrome
+ * sign-in disallowed. On a fresh profile Chrome otherwise showed a focused
+ * "Sign in to Chrome?" bubble — it could swallow the agent's keystrokes, and
+ * "Continue as …" would sign the automation profile in to the user's Google
+ * account (#236). Chrome recomputes `signin.allowed` from
+ * `signin.allowed_on_next_startup` at every start, so both are written; with
+ * sign-in disallowed Chrome turns off the web sign-in interception that shows
+ * the bubble. Other prefs are kept; an unreadable file is left alone.
+ */
+export function seedAgentProfile(profileDir: string): void {
+  const file = path.join(profileDir, 'Default', 'Preferences');
+  let prefs: Record<string, any> = {};
+  try {
+    if (fs.existsSync(file)) prefs = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return; // not ours to repair
+  }
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return;
+  prefs.signin = { ...(prefs.signin ?? {}), allowed: false, allowed_on_next_startup: false };
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(prefs));
+  } catch { /* best-effort: the browser still launches */ }
 }
 
 export class CDPDriver {
@@ -146,6 +176,33 @@ export class CDPDriver {
 
   /** How the live connection was established (see connectionMode). */
   getConnectionMode(): 'dedicated' | 'attached' | 'unknown' { return this.connectionMode; }
+
+  private pidCache: { browser: Browser; pid: number | null } | null = null;
+
+  /**
+   * OS process id of the connected browser (the process that owns its
+   * windows), from CDP's SystemInfo.getProcessInfo; null when not connected or
+   * the browser doesn't say. Lets the accessibility tools recognise the window
+   * this driver can read over CDP (#235). Cached per connection.
+   */
+  async getBrowserPid(): Promise<number | null> {
+    const browser = this.browser;
+    if (!browser || !this.connected) return null;
+    if (this.pidCache?.browser === browser) return this.pidCache.pid;
+    let pid: number | null = null;
+    try {
+      const session = await browser.newBrowserCDPSession();
+      try {
+        const info = await session.send('SystemInfo.getProcessInfo') as { processInfo?: Array<{ type: string; id: number }> };
+        const proc = info.processInfo?.find(p => p.type === 'browser');
+        pid = typeof proc?.id === 'number' && proc.id > 0 ? proc.id : null;
+      } finally {
+        await session.detach().catch(() => { /* already gone */ });
+      }
+    } catch { /* older browser / not Chromium: unknown */ }
+    this.pidCache = { browser, pid };
+    return pid;
+  }
 
   /**
    * @param cdpPort CDP debugging port (default 9223)
@@ -270,6 +327,7 @@ export class CDPDriver {
     // the user's running browser.
     const profileDir = path.join(os.homedir(), '.clawdcursor', 'cdp-profile');
     try { fs.mkdirSync(profileDir, { recursive: true }); } catch { /* best-effort */ }
+    seedAgentProfile(profileDir);
 
     try {
       const child = spawn(exe, agentBrowserArgs(profileDir), { stdio: 'ignore', detached: true });

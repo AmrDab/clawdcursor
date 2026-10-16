@@ -57,13 +57,29 @@ const linuxScript = () => path.join(getPackageRoot(), 'scripts', 'linux', 'overl
 
 // The paused text goes through the environment, not argv — no quoting of
 // arbitrary model-written text into a command line.
-const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...process.env,
   ...extra,
   // The message is model-written: say so on screen, so injected text can't pose
-  // as clawdcursor's own instructions.
-  ...(mode.paused ? { CLAWD_BANNER_MODE: 'paused', CLAWD_BANNER_MESSAGE: `The agent says: ${mode.paused.message}` } : {}),
+  // as clawdcursor's own instructions. The drawer plays a short system sound when
+  // the paused pill appears, so a user who isn't looking hears it's their turn
+  // (#237); CLAWD_PAUSE_SOUND=0 turns it off.
+  ...(mode.paused ? {
+    CLAWD_BANNER_MODE: 'paused',
+    CLAWD_BANNER_MESSAGE: `The agent says: ${mode.paused.message}`,
+    CLAWD_PAUSE_SOUND: process.env.CLAWD_PAUSE_SOUND === '0' ? '0' : '1',
+  } : {}),
 });
+
+/** The mode in argv as well as the env, so a process listing shows a paused
+ *  pill apart from the running one (#237). The drawers read the env. */
+export const pillArgs = (mode: OverlayMode): string[] => (mode.paused ? ['--paused'] : []);
+
+/** What the overlay shows right now (agent_status reports it). */
+export type OverlayState =
+  | { mode: 'hidden' }
+  | { mode: 'running' }
+  | { mode: 'paused'; message: string; since: number };
 
 let linuxReady: boolean | null = null;
 
@@ -112,13 +128,13 @@ class ControlBanner {
   private spawner: Spawner = (mode) => {
     const stdio: ['ignore', 'pipe', 'ignore'] = ['ignore', 'pipe', 'ignore'];
     if (process.platform === 'darwin') {
-      return spawn(macOverlayBinary.cached(macScript())!, ['pill'], { stdio, env: overlayEnv(mode) });
+      return spawn(macOverlayBinary.cached(macScript())!, ['pill', ...pillArgs(mode)], { stdio, env: overlayEnv(mode) });
     }
     if (process.platform === 'linux') {
-      return spawn('python3', [linuxScript(), 'pill'], { stdio, env: overlayEnv(mode, { GDK_BACKEND: 'x11' }) });
+      return spawn('python3', [linuxScript(), 'pill', ...pillArgs(mode)], { stdio, env: overlayEnv(mode, { GDK_BACKEND: 'x11' }) });
     }
     const script = path.join(getPackageRoot(), 'scripts', 'banner.ps1');
-    return spawn('powershell.exe', psArgs(script),
+    return spawn('powershell.exe', psArgs(script, pillArgs(mode)),
       // windowsHide: suppress the console/csc.exe compile flash so the pill spawn
       // can't briefly steal foreground from the app the agent is driving.
       { stdio, windowsHide: true, env: overlayEnv(mode) });
@@ -151,6 +167,12 @@ class ControlBanner {
 
   isVisible(): boolean {
     return this.child !== null;
+  }
+
+  /** The overlay's current mode; a pending pause is 'paused' with its message. */
+  state(): OverlayState {
+    if (this.paused) return { mode: 'paused', message: this.paused.message, since: this.paused.since };
+    return this.child ? { mode: 'running' } : { mode: 'hidden' };
   }
 
   /** True when the overlay can be drawn here — the pause gate's precondition. */
