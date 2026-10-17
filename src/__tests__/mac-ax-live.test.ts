@@ -543,6 +543,30 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
         expect(got.value).toBe(typed);
       } finally { z.proc.kill('SIGKILL'); }
     }, 25 * 60_000);
+
+    it('#242: the helper types text outside ASCII as itself (keystroke typed "a" for each such character)', async (ctx) => {
+      if (!usable) return ctx.skip();
+      if (!await waitUntilIdle()) return ctx.skip();
+      const z = await startFixture('zoomed');
+      extra.push(z.proc);
+      try {
+        await new Promise(res => setTimeout(res, 1_500));
+        await new Promise<void>(resolve => execFile('osascript', ['-e',
+          `tell application "System Events" to set frontmost of (first process whose unix id is ${z.pid}) to true`], () => resolve()));
+        await new Promise(res => setTimeout(res, 800));
+        // Type ONLY if the fixture really is frontmost: key events go to whatever is.
+        const front = (await run(['frontmost'])).frontmost;
+        if (front?.processId !== z.pid) { console.warn(`[mac-ax-live] not typing: the fixture is not frontmost (${front?.name})`); return ctx.skip(); }
+        await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'set-value', '--args-stdin', '1'], 30_000, JSON.stringify({ value: '' }));
+        expect(await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'focus'])).toMatchObject({ ok: true, success: true });
+        await new Promise(res => setTimeout(res, 300));
+        const typed = 'café 日本語 ñ ü 😀 "q" \\';
+        expect(await run(['type', '--args-stdin', '1'], 30_000, JSON.stringify({ text: typed }))).toMatchObject({ ok: true, typed: [...typed].length });
+        await new Promise(res => setTimeout(res, 500));
+        const got = await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'get-value']);
+        expect(got.value).toBe(typed);
+      } finally { z.proc.kill('SIGKILL'); }
+    }, 25 * 60_000);
   });
 
   it('WebKit / Electron helper processes are not apps: a healthy desktop lists nothing as "not responding"', async (ctx) => {

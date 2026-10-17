@@ -2,6 +2,20 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **macOS: text outside ASCII is typed as itself (#242).** System Events'
+  `keystroke` types key code 0 ("a") for any character the keyboard layout
+  has no key for, so "café 日本語" came out as "cafa aaa" — and every tool
+  reported success. Typing that does not paste (the `type` fallback,
+  `set_field_value`'s keyboard fallback, find-and-replace, the Spotlight
+  launch, `key_press "é"`) now sends such text through the accessibility
+  helper as Unicode key events. Without the helper it is refused with an
+  explanation instead of typed as "a"s; a non-ASCII key with modifiers
+  (`cmd+é`, which pressed ⌘A) is refused. ASCII typing is unchanged.
+
 ## [1.5.16] - 2026-10-16 — pause for the user at a roadblock; blind mode on every OS
 
 ### Changed

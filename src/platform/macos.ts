@@ -35,7 +35,7 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
-import { MacKeyboardGuard, runAppleScript } from './mac-keyboard';
+import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac } from './mac-keyboard';
 import {
   defaultMacAx, MacAxError,
   type AppState, type MacAx, type SkippedApp,
@@ -698,10 +698,9 @@ export class MacOSAdapter implements PlatformAdapter {
   async typeText(text: string): Promise<void> {
     if (!text) return;
     await this.guardKeys();
-    // Escape backslashes and quotes for AppleScript string literal.
-    const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-    // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
-    await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, 15_000);
+    // ASCII: System Events, its program on stdin (argv is readable by every process on the Mac). Anything else: the helper's
+    // Unicode key events — `keystroke` would type "a" for it (#242).
+    await typeTextMac(this.ax, text, 15_000);
   }
 
   async keyPress(combo: PortableKeyCombo): Promise<void> {
@@ -731,6 +730,12 @@ export class MacOSAdapter implements PlatformAdapter {
 
     // Special keys → key code; printable single chars → keystroke.
     const keyCode = MAC_KEY_CODES[key.toLowerCase()];
+    // One character outside ASCII ("é", "日", an emoji): typed as itself, never as `keystroke` — that presses "a" (#242).
+    if (keyCode === undefined && hasNonAscii(key) && [...key].length === 1) {
+      refuseNonAsciiChord(key, mods.length > 0);
+      await typeTextMac(this.ax, key, 6_000);
+      return;
+    }
     let script: string;
     if (keyCode !== undefined) {
       script = `tell application "System Events" to key code ${keyCode}${usingClause}`;
@@ -770,11 +775,9 @@ export class MacOSAdapter implements PlatformAdapter {
       await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
-    // Printable single char — no true "hold" semantics via keystroke; emit a tap.
-    if (key.length === 1) {
-      const escaped = key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      const script = `tell application "System Events" to keystroke "${escaped}"`;
-      await runAppleScript(script, 3_000).catch(() => {});
+    // Printable single char — no true "hold" semantics via keystroke; emit a tap (outside ASCII: as itself, #242).
+    if ([...key].length === 1) {
+      await typeTextMac(this.ax, key, 3_000).catch(() => {});
     }
   }
 

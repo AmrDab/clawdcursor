@@ -31,6 +31,35 @@ export function runAppleScript(script: string, timeoutMs: number): Promise<void>
   });
 }
 
+/** Anything outside ASCII: System Events' `keystroke` types key code 0 ("a") for a character it finds no key for (#242). */
+export const hasNonAscii = (text: string): boolean => /[\u0080-\uFFFF]/.test(text);
+
+/**
+ * Type text on macOS. ASCII goes through System Events as before; text with any other character goes through the accessibility
+ * helper's Unicode key events. Without the helper such text is refused rather than typed as "a"s. The keyboard guard is the
+ * caller's job (it runs first).
+ */
+export async function typeTextMac(ax: Pick<MacAx, 'typeUnicode'>, text: string, timeoutMs: number): Promise<void> {
+  if (!hasNonAscii(text)) {
+    const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    await runAppleScript(`tell application "System Events" to keystroke "${escaped}"`, timeoutMs);
+    return;
+  }
+  if (await ax.typeUnicode(text)) return;
+  throw new Error(
+    'Cannot type this text on macOS: it has characters outside ASCII, which System Events types as "a", and the accessibility ' +
+    'helper that types them as themselves is not available (it is built on first use and needs the Xcode Command Line Tools: ' +
+    '`xcode-select --install`; CLAWD_NO_MAC_AX=1 turns it off). Paste the text instead: `type` / `type_text` use the clipboard.',
+  );
+}
+
+/** A key with modifiers can only be a key of the keyboard layout: System Events would press ⌘A for ⌘é (#242). */
+export function refuseNonAsciiChord(key: string, hasModifiers: boolean): void {
+  if (hasModifiers && hasNonAscii(key)) {
+    throw new Error(`Cannot press "${key}" with modifiers on macOS: it is not a key of the keyboard layout (System Events would press "a" instead)`);
+  }
+}
+
 export interface KeyboardOwnerCheck {
   /** Something other than the app being driven owns the keyboard: the error to throw, worded for an agent. */
   error: Error | null;
