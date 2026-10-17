@@ -31,6 +31,13 @@ export function runAppleScript(script: string, timeoutMs: number): Promise<void>
   });
 }
 
+/**
+ * The environment for pbcopy / pbpaste. They encode and decode by the locale, and a process started by an app (the Claude
+ * desktop app, launchd) often has none — then they use MacRoman, so "café 日本語" is pasted as "caf√© Êó•Êú¨Ë™û" and a
+ * saved clipboard comes back with "?" for every CJK character.
+ */
+export const utf8ClipboardEnv = (): NodeJS.ProcessEnv => ({ ...process.env, LC_ALL: 'en_US.UTF-8' });
+
 /** Anything outside ASCII: System Events' `keystroke` types key code 0 ("a") for a character it finds no key for (#242). */
 export const hasNonAscii = (text: string): boolean => /[\u0080-\uFFFF]/.test(text);
 

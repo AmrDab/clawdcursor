@@ -16,6 +16,7 @@ import { promisify } from 'util';
 import { psRunner } from './ps-runner';
 import { getPackageRoot } from '../paths';
 import { defaultMacAx } from './mac-ax';
+import { utf8ClipboardEnv } from './mac-keyboard';
 import type { PlatformAdapter, UiElement } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -587,7 +588,7 @@ export class AccessibilityBridge {
         return Buffer.from((stdout ?? '').trim(), 'base64').toString('utf8').trim();
       }
       if (IS_MAC) {
-        const { stdout } = await execFileAsync('pbpaste', [], { timeout: 2000 });
+        const { stdout } = await execFileAsync('pbpaste', [], { timeout: 2000, env: utf8ClipboardEnv() });
         return stdout?.trim() ?? '';
       }
       if (IS_LINUX) {
@@ -620,7 +621,7 @@ export class AccessibilityBridge {
       } else if (IS_MAC) {
         // macOS: pipe to pbcopy via shell
         await new Promise<void>((resolve, reject) => {
-          const proc = execFile('pbcopy', [], { timeout: 2000 }, (err) => {
+          const proc = execFile('pbcopy', [], { timeout: 2000, env: utf8ClipboardEnv() }, (err) => {
             if (err) reject(err); else resolve();
           });
           proc.stdin?.write(text);

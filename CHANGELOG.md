@@ -15,6 +15,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   helper as Unicode key events. Without the helper it is refused with an
   explanation instead of typed as "a"s; a non-ASCII key with modifiers
   (`cmd+é`, which pressed ⌘A) is refused. ASCII typing is unchanged.
+- **macOS: pasted text outside ASCII no longer comes out garbled.**
+  `pbcopy` / `pbpaste` encode by the locale, and clawdcursor started by an
+  app (the Claude desktop app) has none, so they used MacRoman: `type`,
+  `type_text` and `smart_type` pasted "café 日本語" as "caf√© Êó•Êú¨Ë™û"
+  while reporting success, and restoring the user's clipboard turned CJK
+  into "?". Both now run with a UTF-8 locale.
 
 ## [1.5.16] - 2026-10-16 — pause for the user at a roadblock; blind mode on every OS
 

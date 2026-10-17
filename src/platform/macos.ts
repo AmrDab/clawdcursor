@@ -35,7 +35,7 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
-import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac } from './mac-keyboard';
+import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
 import {
   defaultMacAx, MacAxError,
   type AppState, type MacAx, type SkippedApp,
@@ -809,7 +809,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async readClipboard(): Promise<string> {
     try {
-      const { stdout } = await execFileAsync('pbpaste', [], { timeout: 3_000 });
+      const { stdout } = await execFileAsync('pbpaste', [], { timeout: 3_000, env: utf8ClipboardEnv() });
       return stdout;
     } catch {
       return '';
@@ -818,7 +818,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async writeClipboard(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const proc = spawn('pbcopy');
+      const proc = spawn('pbcopy', [], { env: utf8ClipboardEnv() });
       const timer = setTimeout(() => { proc.kill(); reject(new Error('pbcopy timeout')); }, 3_000);
       proc.on('close', (code) => {
         clearTimeout(timer);

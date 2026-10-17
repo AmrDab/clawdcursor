@@ -13,17 +13,31 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 const programs = vi.hoisted(() => [] as string[]);
+const pb = vi.hoisted(() => [] as Array<{ cmd: string; env?: NodeJS.ProcessEnv }>);
 vi.mock('child_process', () => ({
-  execFile: (_cmd: string, _args: string[], _opts: unknown, cb: (e: unknown, r?: unknown) => void) => ({
-    stdin: {
-      on: () => {},
-      end: (data?: string) => {
-        if (data !== undefined) programs.push(data);
-        queueMicrotask(() => cb(null, { stdout: '', stderr: '' }));
+  execFile: (cmd: string, _args: string[], opts: { env?: NodeJS.ProcessEnv }, cb: (e: unknown, r?: unknown) => void) => {
+    if (cmd === 'pbpaste') {
+      pb.push({ cmd, env: opts?.env });
+      queueMicrotask(() => cb(null, { stdout: 'café', stderr: '' }));
+      return undefined;
+    }
+    return {
+      stdin: {
+        on: () => {},
+        end: (data?: string) => {
+          if (data !== undefined) programs.push(data);
+          queueMicrotask(() => cb(null, { stdout: '', stderr: '' }));
+        },
       },
-    },
-  }),
-  spawn: vi.fn(),
+    };
+  },
+  spawn: (cmd: string, _args: string[], opts: { env?: NodeJS.ProcessEnv }) => {
+    pb.push({ cmd, env: opts?.env });
+    return {
+      on: (ev: string, fn: (code: number) => void) => { if (ev === 'close') queueMicrotask(() => fn(0)); },
+      stdin: { write: () => {}, end: () => {} },
+    };
+  },
 }));
 
 import { typeTextMac, hasNonAscii } from '../platform/mac-keyboard';
@@ -98,5 +112,23 @@ describe('MacOSAdapter', () => {
   it('keyPress of ASCII keys and combos is unchanged', async () => {
     await mac.keyPress('cmd+a');
     expect(programs).toEqual(['tell application "System Events" to keystroke "a" using {command down}']);
+  });
+});
+
+describe('the clipboard is read and written as UTF-8, whatever the locale of the process', () => {
+  // Started by an app (the Claude desktop app) the process has no LANG: pbcopy / pbpaste then use MacRoman, so a paste of
+  // "café 日本語" read "caf√© Êó•Êú¨Ë™û" and a saved clipboard came back with "?" for every CJK character.
+  it('pbcopy and pbpaste run with LC_ALL=en_US.UTF-8, and the rest of the environment is kept', async () => {
+    pb.length = 0;
+    process.env.CLAWD_TEST_MARKER = 'kept';
+    try {
+      await mac.writeClipboard('café 日本語');
+      expect(await mac.readClipboard()).toBe('café');
+      expect(pb.map(c => c.cmd)).toEqual(['pbcopy', 'pbpaste']);
+      for (const c of pb) {
+        expect(c.env?.LC_ALL).toBe('en_US.UTF-8');
+        expect(c.env?.CLAWD_TEST_MARKER).toBe('kept');
+      }
+    } finally { delete process.env.CLAWD_TEST_MARKER; }
   });
 });
