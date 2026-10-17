@@ -118,7 +118,7 @@ interface HelperFailure {
   ok: false;
   kind?: string;
   error?: string;
-  /** The app froze while an action was running: it may have been performed. Absent for every other timeout. */
+  /** The action may have been (partly) performed: an app froze while it ran, or a `type` ran out of time with some of its text typed. Absent for every other timeout. */
   acted?: boolean;
 }
 

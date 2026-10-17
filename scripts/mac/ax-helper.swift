@@ -951,7 +951,15 @@ func cmdType() -> Never {
     let total = text.count
     var typed = 0
     for ch in text {
-        if timeUp() { fail("timeout", "typed \(typed) of \(total) characters before the deadline") }
+        if timeUp() {
+            // `acted` when some of the text is already in the target: a caller that retries blind would type it twice. Out of
+            // time before the first key, nothing was typed and a retry is safe.
+            let partial = typed > 0
+            var reply: [String: Any] = ["ok": false, "kind": "timeout",
+                "error": "typed \(typed) of \(total) characters before the deadline" + (partial ? " — those \(typed) are already in the target" : "")]
+            if partial { reply["acted"] = true }
+            emit(reply)
+        }
         switch ch {
         case "\n", "\r", "\r\n": post(36, nil)   // Return
         case "\t": post(48, nil)                 // Tab

@@ -567,6 +567,47 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
         expect(got.value).toBe(typed);
       } finally { z.proc.kill('SIGKILL'); }
     }, 25 * 60_000);
+
+    it('#242: a type that runs out of time says whether any of its text was typed — a retry after "acted" would type it twice', async (ctx) => {
+      if (!usable) return ctx.skip();
+      if (!await waitUntilIdle()) return ctx.skip();
+      const z = await startFixture('zoomed');
+      extra.push(z.proc);
+      try {
+        await new Promise(res => setTimeout(res, 1_500));
+        await new Promise<void>(resolve => execFile('osascript', ['-e',
+          `tell application "System Events" to set frontmost of (first process whose unix id is ${z.pid}) to true`], () => resolve()));
+        await new Promise(res => setTimeout(res, 800));
+        // Type ONLY if the fixture really is frontmost: key events go to whatever is.
+        const front = (await run(['frontmost'])).frontmost;
+        if (front?.processId !== z.pid) { console.warn(`[mac-ax-live] not typing: the fixture is not frontmost (${front?.name})`); return ctx.skip(); }
+        const field = async (): Promise<string> => (await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'get-value'])).value;
+        const clear = async () => {
+          await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'set-value', '--args-stdin', '1'], 30_000, JSON.stringify({ value: '' }));
+          await run(['invoke', '--pid', String(z.pid), '--id', 'nameField', '--action', 'focus']);
+          await new Promise(res => setTimeout(res, 300));
+        };
+
+        // Out of time before the first key: nothing was typed, so retrying is safe and the reply must not say it may have happened.
+        await clear();
+        const none = await run(['type', '--args-stdin', '1', '--timeout-ms', '0'], 30_000, JSON.stringify({ text: 'abc' }));
+        expect(none).toMatchObject({ ok: false, kind: 'timeout' });
+        expect(none.acted).not.toBe(true);
+        expect(none.error).toContain('typed 0 of 3');
+        expect(await field()).toBe('');
+
+        // Out of time part-way: some of the text IS in the target. The reply says so, and how much.
+        await clear();
+        const text = 'x'.repeat(4_000);
+        const some = await run(['type', '--args-stdin', '1', '--timeout-ms', '600'], 30_000, JSON.stringify({ text }));
+        await new Promise(res => setTimeout(res, 400));
+        const typedSoFar = (await field()).length;
+        expect(typedSoFar).toBeGreaterThan(0);
+        expect(typedSoFar).toBeLessThan(text.length);
+        expect(some).toMatchObject({ ok: false, kind: 'timeout', acted: true });
+        expect(some.error).toContain(`typed ${typedSoFar} of ${text.length}`);
+      } finally { z.proc.kill('SIGKILL'); }
+    }, 25 * 60_000);
   });
 
   it('WebKit / Electron helper processes are not apps: a healthy desktop lists nothing as "not responding"', async (ctx) => {

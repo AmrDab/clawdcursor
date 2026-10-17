@@ -1510,4 +1510,20 @@ describe('typeUnicode: text outside ASCII typed as itself (#242)', () => {
     const { ax } = harness({ reply: '{"ok":false,"kind":"locked","error":"the screen is locked"}' });
     await expect(ax.typeUnicode('é')).rejects.toBeInstanceOf(MacAxError);
   });
+
+  it('a type that ran out of time part-way says its text is already there — a blind retry would type it twice', async () => {
+    const { ax } = harness({ reply: '{"ok":false,"kind":"timeout","acted":true,"error":"typed 51 of 2000 characters before the deadline — those 51 are already in the target"}' });
+    const err = await ax.typeUnicode('é'.repeat(2000)).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(MacAxError);
+    expect((err as Error).message).toContain('those 51 are already in the target');
+    expect((err as Error).message).toMatch(/may already have happened/);
+    expect((err as Error).message).not.toMatch(/Nothing was pressed/);
+  });
+
+  it('a type that ran out of time before its first key typed nothing: retrying is safe, and the error says so', async () => {
+    const { ax } = harness({ reply: '{"ok":false,"kind":"timeout","error":"typed 0 of 3 characters before the deadline"}' });
+    const err = await ax.typeUnicode('éèê').catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(MacAxError);
+    expect((err as Error).message).toMatch(/Nothing was pressed or changed/);
+  });
 });
