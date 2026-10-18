@@ -267,6 +267,15 @@ function run(argv) {
                             value: params.value
                         };
                     } catch (e) {
+                        // System Events' keystroke types "a" for a character outside ASCII (#242): refuse rather than type
+                        // a different string. (The accessibility helper types such text as itself.)
+                        if (/[^\x00-\x7F]/.test(params.value)) {
+                            result = {
+                                success: false,
+                                error: 'Failed to set value: ' + e.toString() + ' — and the text has characters outside ASCII, which keystroke would type as "a"'
+                            };
+                            break;
+                        }
                         // Try setting through focused property
                         try {
                             targetElement.focused = true;

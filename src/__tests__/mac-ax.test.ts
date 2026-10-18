@@ -1479,3 +1479,51 @@ describe('helperStatusFrom (what `doctor` reports)', () => {
     expect(st.detail).toContain('CLAWD_NO_MAC_AX');
   });
 });
+
+describe('typeUnicode: text outside ASCII typed as itself (#242)', () => {
+  it("runs the helper's type command with the text on stdin, never on argv", async () => {
+    const { ax, calls } = harness({ reply: '{"ok":true,"typed":10}' });
+    expect(await ax.typeUnicode('café 日本語')).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].args[0]).toBe('type');
+    expect(calls[0].args).toContain('--args-stdin');
+    expect(JSON.stringify(calls[0].args)).not.toContain('caf');
+    expect(JSON.parse(calls[0].input!)).toEqual({ text: 'café 日本語' });
+  });
+
+  it('gives the helper more time for longer text', async () => {
+    const { ax, calls } = harness({ reply: '{"ok":true,"typed":1}' });
+    await ax.typeUnicode('é');
+    await ax.typeUnicode('é'.repeat(500));
+    const budget = (i: number) => Number(calls[i].args[calls[i].args.indexOf('--timeout-ms') + 1]);
+    expect(budget(1)).toBeGreaterThan(budget(0));
+    expect(calls[1].timeoutMs).toBeGreaterThan(budget(1));
+  });
+
+  it('false when the helper is not available: the caller must not fall back to keystroke', async () => {
+    const { ax, calls } = harness({ helper: null });
+    expect(await ax.typeUnicode('é')).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('a refusal from the helper (locked screen) throws', async () => {
+    const { ax } = harness({ reply: '{"ok":false,"kind":"locked","error":"the screen is locked"}' });
+    await expect(ax.typeUnicode('é')).rejects.toBeInstanceOf(MacAxError);
+  });
+
+  it('a type that ran out of time part-way says its text is already there — a blind retry would type it twice', async () => {
+    const { ax } = harness({ reply: '{"ok":false,"kind":"timeout","acted":true,"error":"typed 51 of 2000 characters before the deadline — those 51 are already in the target"}' });
+    const err = await ax.typeUnicode('é'.repeat(2000)).catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(MacAxError);
+    expect((err as Error).message).toContain('those 51 are already in the target');
+    expect((err as Error).message).toMatch(/may already have happened/);
+    expect((err as Error).message).not.toMatch(/Nothing was pressed/);
+  });
+
+  it('a type that ran out of time before its first key typed nothing: retrying is safe, and the error says so', async () => {
+    const { ax } = harness({ reply: '{"ok":false,"kind":"timeout","error":"typed 0 of 3 characters before the deadline"}' });
+    const err = await ax.typeUnicode('éèê').catch((e: unknown) => e as Error);
+    expect(err).toBeInstanceOf(MacAxError);
+    expect((err as Error).message).toMatch(/Nothing was pressed or changed/);
+  });
+});

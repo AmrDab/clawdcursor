@@ -680,7 +680,14 @@ export class NativeDesktop extends EventEmitter {
       // CGEvent from helper subprocess is silently blocked by TCC.
       // Ask who owns the keyboard FIRST and outside the try below: a refusal must not fall through to the CGEvent helper.
       await this.guardMacKeys();
-      const { runAppleScript } = await import('./mac-keyboard');
+      const { runAppleScript, hasNonAscii, typeTextMac } = await import('./mac-keyboard');
+      if (hasNonAscii(text)) {
+        // `keystroke` types "a" for a character outside ASCII (#242): the accessibility helper's Unicode key events type it as
+        // itself, or this throws. Not the fallback below — that helper is the one TCC silently blocks.
+        const { defaultMacAx } = await import('./mac-ax');
+        await typeTextMac(defaultMacAx(), text, 10000);
+        return;
+      }
       const escaped = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
       try {
         // The program (which contains the text) goes to osascript on stdin: argv is readable by every process on the Mac.
@@ -758,7 +765,7 @@ export class NativeDesktop extends EventEmitter {
   private async macKeyPress(keyCombo: string): Promise<void> {
     // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
     await this.guardMacKeys(keyCombo);
-    const { runAppleScript } = await import('./mac-keyboard');
+    const { runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
       await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
@@ -804,6 +811,13 @@ export class NativeDesktop extends EventEmitter {
 
     let script: string;
     const special = specialKeys[key.toLowerCase()];
+    // A key outside ASCII ("é", "日"): typed as itself — `keystroke` would press "a", and with modifiers ⌘A (#242).
+    if (!special && hasNonAscii(key)) {
+      refuseNonAsciiChord(key, modUsing.length > 0);
+      const { defaultMacAx } = await import('./mac-ax');
+      await typeTextMac(defaultMacAx(), key, 5000);
+      return;
+    }
     if (special) {
       // Special key — use key code
       if (modUsing.length > 0) {

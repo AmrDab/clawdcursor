@@ -24,6 +24,7 @@
 //   ax-helper tree      [--pid N] [--max-depth N] [--max-nodes N] [--timeout-ms N]
 //   ax-helper find      [--pid N] [--name S] [--role R] [--id S] [--max-results N] [--timeout-ms N]
 //   ax-helper invoke    [--pid N] --action A [--name S] [--role R] [--id S] [--value V] [--timeout-ms N]
+//   ax-helper type      --text S [--timeout-ms N]   (types into whatever has the keyboard; send --text via --args-stdin)
 //   (every command also takes --ax-timeout-ms N: how long ONE call to ONE app may block, and
 //    --args-stdin 1: read name / id / value / … as one JSON object of strings from stdin instead of argv — argv is
 //    readable by every process on the Mac while this one runs)
@@ -925,6 +926,50 @@ func cmdInvoke() -> Never {
     emit(perform(action, best, appName: app.localizedName ?? "the app"))
 }
 
+// MARK: - type
+
+/// Types `text` into whatever has the keyboard, one character per key event, with the character itself attached to the event
+/// (CGEventKeyboardSetUnicodeString). System Events' `keystroke` maps each character to a key of the current layout and
+/// types key code 0 ("a") for any it cannot find, so "café 日本語" came out as "cafa aaa" (#242). Newline and tab are sent as
+/// the Return and Tab keys, which is what a text field expects.
+func cmdType() -> Never {
+    requireUsableSession()
+    guard let text = opts["text"], !text.isEmpty else { fail("failed", "type: no text given") }
+    if #available(macOS 10.15, *), !CGPreflightPostEventAccess() {
+        fail("permission", "the app running clawdcursor may not post keyboard events (System Settings → Privacy & Security → Accessibility)")
+    }
+    let source = CGEventSource(stateID: .hidSystemState)
+    func post(_ code: CGKeyCode, _ units: [UniChar]?) {
+        for down in [true, false] {
+            guard let ev = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { continue }
+            ev.flags = []   // a modifier the user happens to hold must not turn "a" into ⌘A
+            if var u = units { ev.keyboardSetUnicodeString(stringLength: u.count, unicodeString: &u) }
+            ev.post(tap: .cghidEventTap)
+        }
+        usleep(4_000)   // apps drop key events that arrive faster than they are read
+    }
+    let total = text.count
+    var typed = 0
+    for ch in text {
+        if timeUp() {
+            // `acted` when some of the text is already in the target: a caller that retries blind would type it twice. Out of
+            // time before the first key, nothing was typed and a retry is safe.
+            let partial = typed > 0
+            var reply: [String: Any] = ["ok": false, "kind": "timeout",
+                "error": "typed \(typed) of \(total) characters before the deadline" + (partial ? " — those \(typed) are already in the target" : "")]
+            if partial { reply["acted"] = true }
+            emit(reply)
+        }
+        switch ch {
+        case "\n", "\r", "\r\n": post(36, nil)   // Return
+        case "\t": post(48, nil)                 // Tab
+        default: post(0, Array(String(ch).utf16))
+        }
+        typed += 1
+    }
+    emit(["ok": true, "typed": typed])
+}
+
 switch command {
 case "frontmost": cmdFrontmost()
 case "windows": cmdWindows()
@@ -934,5 +979,6 @@ case "focused": cmdFocused()
 case "tree": cmdTree()
 case "find": cmdFind()
 case "invoke": cmdInvoke()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke [options] (got \"\(command)\")")
+case "type": cmdType()
+default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type [options] (got \"\(command)\")")
 }

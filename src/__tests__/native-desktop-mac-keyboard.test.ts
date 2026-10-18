@@ -48,8 +48,8 @@ vi.mock('child_process', () => ({
   spawn: vi.fn(),
 }));
 
-const fake = vi.hoisted(() => ({ frontmost: vi.fn() }));
-vi.mock('../platform/mac-ax', async (orig) => ({ ...(await orig<typeof import('../platform/mac-ax')>()), defaultMacAx: () => ({ frontmost: fake.frontmost }) }));
+const fake = vi.hoisted(() => ({ frontmost: vi.fn(), typeUnicode: vi.fn() }));
+vi.mock('../platform/mac-ax', async (orig) => ({ ...(await orig<typeof import('../platform/mac-ax')>()), defaultMacAx: () => ({ frontmost: fake.frontmost, typeUnicode: fake.typeUnicode }) }));
 
 import { NativeDesktop } from '../platform/native-desktop';
 import { logger } from '../core/observability/logger';
@@ -74,6 +74,8 @@ beforeEach(() => {
   helper.type.mockClear();
   fake.frontmost.mockReset();
   fake.frontmost.mockResolvedValue(front());
+  fake.typeUnicode.mockReset();
+  fake.typeUnicode.mockResolvedValue(true);
   process.env.CLAWD_NO_MAC_AX = '0';
 });
 afterEach(() => { process.env.CLAWD_NO_MAC_AX = '1'; vi.restoreAllMocks(); });
@@ -186,5 +188,34 @@ describe('a modal dialog of another app: typed into, and the agent is told', () 
     const d = desktop();
     await d.typeText('x');
     expect(d.takeInputWarning()).toBeNull();
+  });
+});
+
+describe('text outside ASCII is typed as itself, never as "a" (#242)', () => {
+  it('typeText sends it to the accessibility helper whole: no keystroke program, no CGEvent-helper fallback', async () => {
+    await desktop().typeText('café 日本語');
+    expect(fake.typeUnicode).toHaveBeenCalledWith('café 日本語');
+    expect(programs()).toEqual([]);
+    expect(helper.type).not.toHaveBeenCalled();
+  });
+
+  it('without the helper typeText refuses instead of typing a different string', async () => {
+    fake.typeUnicode.mockResolvedValue(false);
+    await expect(desktop().typeText('naïve')).rejects.toThrow(/outside ASCII/);
+    expect(programs()).toEqual([]);
+    expect(helper.type).not.toHaveBeenCalled();
+  });
+
+  it('the keyboard guard still comes first', async () => {
+    fake.frontmost.mockResolvedValue(ALERT);
+    await expect(desktop().typeText('café')).rejects.toThrow(/UserNotificationCenter/);
+    expect(fake.typeUnicode).not.toHaveBeenCalled();
+  });
+
+  it('keyPress é types the character; cmd+é is refused (it would be ⌘A)', async () => {
+    await desktop().keyPress('é');
+    expect(fake.typeUnicode).toHaveBeenCalledWith('é');
+    await expect(desktop().keyPress('cmd+é')).rejects.toThrow(/not a key of the keyboard layout/);
+    expect(programs()).toEqual([]);
   });
 });

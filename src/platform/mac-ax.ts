@@ -77,6 +77,9 @@ export interface MacAxDeps {
 const HELPER_LIST_DEADLINE_MS = 4_000;
 /** …and we only kill it if it is stuck well past that. */
 const HELPER_GRACE_MS = 3_000;
+/** Typing: the helper's deadline is this plus a little per character. */
+const HELPER_TYPE_BASE_MS = 3_000;
+const HELPER_TYPE_PER_CHAR_MS = 20;
 /**
  * osascript has no deadline of its own. The window list measured 9.4 s with 15
  * windows open on an M1 iMac, so the old 8 s limit turned a working call into a
@@ -115,7 +118,7 @@ interface HelperFailure {
   ok: false;
   kind?: string;
   error?: string;
-  /** The app froze while an action was running: it may have been performed. Absent for every other timeout. */
+  /** The action may have been (partly) performed: an app froze while it ran, or a `type` ran out of time with some of its text typed. Absent for every other timeout. */
   acted?: boolean;
 }
 
@@ -465,6 +468,12 @@ export interface MacAx {
   find(query: ElementQuery): Promise<UiElement[]>;
   /** Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws. */
   invoke(query: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult>;
+  /**
+   * Type `text` into whatever has the keyboard with Unicode key events, so any character arrives as itself (System Events'
+   * `keystroke` types "a" for a character the keyboard layout has no key for, #242). False when the helper is not available;
+   * a refusal (locked screen, no permission) or a timeout throws.
+   */
+  typeUnicode(text: string): Promise<boolean>;
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
   /**
@@ -828,6 +837,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         { errorJsonIsData: true },
       );
       return toInvokeResult(out);
+    },
+
+    async typeUnicode(text: string): Promise<boolean> {
+      const s = viaStdin({ text });
+      // ~4 ms per character in the helper, plus the time to start it.
+      const budget = HELPER_TYPE_BASE_MS + [...text].length * HELPER_TYPE_PER_CHAR_MS;
+      const reply = await viaHelper(['type', '--timeout-ms', String(budget), ...s.args], budget + HELPER_GRACE_MS, 'typing', { input: s.input, act: true });
+      return reply !== null;
     },
   };
 }
