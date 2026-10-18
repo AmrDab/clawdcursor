@@ -593,8 +593,10 @@ export function getA11yTools(): ToolDefinition[] {
       description:
         'Read ALL text of the focused window / web page EXACTLY: select-all + copy, return the text, ' +
         'then restore the clipboard. Exact characters (IDs, amounts, codes) — prefer it over OCR for ' +
-        'reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Leaves the ' +
-        'page text selected; focus the right window first.',
+        'reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Never presses ' +
+        'select-all while focus is in an editable field, an editor document or a list — it returns the ' +
+        'accessibility text then. After a select-all copy the content stays selected (the result says so); ' +
+        'focus the right window first.',
       parameters: {},
       category: 'clipboard',
       compactGroup: 'system',
@@ -606,7 +608,7 @@ export function getA11yTools(): ToolDefinition[] {
         if (!r.ok) return { text: r.text, isError: true };
         ctx.a11y.invalidateCache();
         // Page text is third-party data, not instructions.
-        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>` };
+        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${r.note ? `\n${r.note}` : ''}` };
       },
     },
 

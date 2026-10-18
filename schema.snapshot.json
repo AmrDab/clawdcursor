@@ -560,7 +560,7 @@
     },
     {
       "name": "copy_all_text",
-      "description": "Read ALL text of the focused window / web page EXACTLY: select-all + copy, return the text, then restore the clipboard. Exact characters (IDs, amounts, codes) — prefer it over OCR for reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Leaves the page text selected; focus the right window first.",
+      "description": "Read ALL text of the focused window / web page EXACTLY: select-all + copy, return the text, then restore the clipboard. Exact characters (IDs, amounts, codes) — prefer it over OCR for reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Never presses select-all while focus is in an editable field, an editor document or a list — it returns the accessibility text then. After a select-all copy the content stays selected (the result says so); focus the right window first.",
       "category": "clipboard",
       "parameters": {
         "type": "object",

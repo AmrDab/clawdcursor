@@ -4,7 +4,7 @@
  * as `K04Wn`; ctrl+A / ctrl+C / clipboard_read got every ID right.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { copyAllText, isTerminalWindow } from '../platform/copy-all-text';
+import { copyAllText, isTerminalWindow, selectAllHazard } from '../platform/copy-all-text';
 
 function fakePlatform(opts: { processName: string; pageText?: string | null; prior?: string }) {
   let clip = opts.prior ?? 'user clipboard';
@@ -94,6 +94,76 @@ describe('copyAllText', () => {
     expect(p.keys).toEqual(['mod+a', 'mod+c']);
     expect(r).toMatchObject({ ok: true, source: 'accessibility' });
     expect(r.text).toContain('Edition');
+  });
+
+  // #249: Ctrl+A acts on whatever has focus. In an editor it selected the whole document and left it selected, so the
+  // agent's next keystroke replaced all of it; in a mail list it selected every message.
+  const withFocus = (processName: string, focused: unknown) => ({
+    ...fakePlatform({ processName }),
+    getUiTree: vi.fn(async () => tree),
+    getFocusedElement: vi.fn(async () => focused as any),
+  });
+
+  it.each([
+    ['notepad', { controlType: 'Edit', name: 'Text editor' }, /editable field/],
+    ['notepad', { controlType: 'ControlType.Document', name: 'Text editor' }, /document/],
+    ['WINWORD', { controlType: 'Document', name: 'Report.docx' }, /document/],
+    ['msedge', { controlType: 'Edit', name: 'Address and search bar' }, /editable field/],
+    ['olk', { controlType: 'ListItem', name: 'Inbox message from Sarah' }, /every item/],
+    ['explorer', { controlType: 'DataItem', name: 'report.pdf' }, /every item/],
+  ])('%s with focus on %o: no select-all, accessibility text instead, and it says why', async (proc, focused, why) => {
+    const p = withFocus(proc, focused);
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(r).toMatchObject({ ok: true, source: 'accessibility' });
+    expect(r.text).toMatch(/not pressing Ctrl\+A/);
+    expect(r.text).toMatch(why);
+    expect(p.clip).toBe('user clipboard');
+  });
+
+  it('a hazard with an empty accessibility tree refuses rather than pressing Ctrl+A', async () => {
+    const p = { ...withFocus('notepad', { controlType: 'Edit', name: 'Text editor' }), getUiTree: vi.fn(async () => []) };
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/Not pressing Ctrl\+A/);
+  });
+
+  it('a web page (the browser document has focus) is still copied exactly, and the result says the page is now selected', async () => {
+    const p = withFocus('msedge', { controlType: 'Document', name: 'Glama' });
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual(['mod+a', 'mod+c']);
+    expect(r).toMatchObject({ ok: true, source: 'clipboard', text: 'page text' });
+    expect(r.note).toMatch(/now selected/);
+  });
+
+  it('unknown focus (no reading, or it failed) does not block the copy', async () => {
+    const p = { ...fakePlatform({ processName: 'msedge' }), getFocusedElement: vi.fn(async () => { throw new Error('bridge down'); }) };
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual(['mod+a', 'mod+c']);
+    expect(r.ok).toBe(true);
+  });
+
+  it('an Electron app that reports its focus as a bare Pane is not select-all\'d (live: the Claude app\'s prompt read as "Pane")', async () => {
+    const p = withFocus('claude', { controlType: 'Pane', name: '' });
+    p.getActiveWindow = vi.fn(async () => ({ processName: 'claude', title: 'Claude', processId: 9, className: 'Chrome_WidgetWin_1' } as any));
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(r.text).toMatch(/Electron app/);
+    // a browser with the same window class is a page, not an Electron app
+    expect(selectAllHazard({ controlType: 'Document', name: 'page' }, 'msedge', 'Chrome_WidgetWin_1')).toBeNull();
+    expect(selectAllHazard({ controlType: 'Pane', name: '' }, 'chrome', 'Chrome_WidgetWin_1')).toBeNull();
+    // an Electron app that DOES expose its focus is judged by the role, as everywhere else
+    expect(selectAllHazard({ controlType: 'Edit', name: 'Message' }, 'slack', 'Chrome_WidgetWin_1')).toMatch(/editable/);
+  });
+
+  it('selectAllHazard: page-like roles are safe', () => {
+    for (const role of ['Pane', 'Window', 'Group', 'Hyperlink', 'Button', 'Text', 'Custom']) {
+      expect(selectAllHazard({ controlType: role, name: 'x' }, 'someapp')).toBeNull();
+    }
+    expect(selectAllHazard({ controlType: 'Document', name: 'page' }, 'chrome.exe')).toBeNull();
+    expect(selectAllHazard({ controlType: 'Document', name: 'page' }, 'Google Chrome')).toBeNull();
+    expect(selectAllHazard(null, 'notepad')).toBeNull();
   });
 
   it('gives up on the clipboard within ~2 s even when each read is slow', async () => {
