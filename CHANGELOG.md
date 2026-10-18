@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.17] - 2026-10-18 — non-ASCII typing and pasting on macOS; copy_all_text never selects an editor
 
 ### Fixed
 
