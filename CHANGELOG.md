@@ -21,6 +21,16 @@ All notable changes to Clawd Cursor will be documented in this file.
   `type_text` and `smart_type` pasted "café 日本語" as "caf√© Êó•Êú¨Ë™û"
   while reporting success, and restoring the user's clipboard turned CJK
   into "?". Both now run with a UTF-8 locale.
+- **`copy_all_text` no longer selects an editor's content or a list (#249).**
+  It pressed Ctrl+A on whatever had focus and left it selected: in an
+  editor (Notepad, Word, VS Code, a form field) the agent's next keystroke
+  replaced the whole document; in a mail list or file view every item was
+  selected. It now presses select-all only on page content: with focus in
+  an editable field, an editor document, a list/tree/table, or an Electron
+  app that won't say what has focus, it returns the window's accessibility
+  text instead. After a select-all copy the result says the content is
+  selected. Verified live in Edge (caret in a text box: untouched; page:
+  copied exactly).
 
 ## [1.5.16] - 2026-10-16 — pause for the user at a roadblock; blind mode on every OS
 
