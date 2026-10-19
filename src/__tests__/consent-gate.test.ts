@@ -97,6 +97,7 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
       name: string,
       _description: string,
       _schema: Record<string, unknown>,
+      _annotations: Record<string, unknown>,
       handler: HandlerFn,
     ): void {
       capturedHandlers.set(name, handler);

@@ -26,7 +26,7 @@
     binds to 127.0.0.1. Bearer-token auth on every HTTP request.
 
     ── TOOL SURFACE (PUBLIC) ────────────────────────────────────────────────────
-    7 compact compound tools, ~1500 tokens of catalog. RECOMMENDED.
+    7 compact compound tools, ~7,000 tokens of catalog (granular: ~20,000). RECOMMENDED.
       computer      : mouse, keyboard, screenshot (raw I/O)
       accessibility : drive UI by element name; compile a fused el_NN UI map
                       and act on {element_id, snapshot_id} (survives layout shifts)
@@ -718,7 +718,7 @@
       </div>
 
       <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
-        <strong style="color:var(--text2);">Compact</strong> (~1,500 tokens): <code style="font-size:0.9em;color:var(--accent2);">computer({ "action": "key", "combo": "mod+s" })</code>.
+        <strong style="color:var(--text2);">Compact</strong> (~7,000 tokens of catalog, a third of granular): <code style="font-size:0.9em;color:var(--accent2);">computer({ "action": "key", "combo": "mod+s" })</code>.
         <strong style="color:var(--text2);">Granular:</strong> <code style="font-size:0.9em;color:var(--accent2);">key_press({ "key": "mod+s" })</code>.
         Both hit the same <code>safety.evaluate()</code> chokepoint. Pass <code style="color:var(--accent2);">--granular</code> for the granular surface.
         See <a href="https://github.com/AmrDab/clawdcursor/blob/main/schema.snapshot.json" target="_blank" rel="noopener" style="color:var(--accent2);">schema.snapshot.json</a> for every parameter.

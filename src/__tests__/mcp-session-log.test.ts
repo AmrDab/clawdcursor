@@ -35,7 +35,7 @@ type HandlerFn = (params: Record<string, unknown>) => Promise<{ isError?: boolea
 const handlers = new Map<string, HandlerFn>();
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
   McpServer: class {
-    tool(name: string, _d: string, _s: unknown, h: HandlerFn) { handlers.set(name, h); }
+    tool(name: string, _d: string, _s: unknown, _a: unknown, h: HandlerFn) { handlers.set(name, h); }
     async connect() {}
     server = { getClientCapabilities: () => undefined };
   },
