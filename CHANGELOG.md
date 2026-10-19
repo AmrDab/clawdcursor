@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.18] - 2026-10-19 — "Something else" on the pause prompt; copy_all_text without Ctrl+A; tool annotations
 
 ### Added
 
