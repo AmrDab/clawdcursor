@@ -204,7 +204,7 @@ function projectedMouseTools(): ToolDefinition[] {
       // MCP schema must see the accurate contract or it double-scales a11y coords.
       if (base.parameters.space) {
         base.parameters.space.description =
-          'Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass "screen" → a11y-snapshot coords (already physical, not scaled).';
+          'Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass "screen" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot\'s "real" size is twice the point size).';
       }
       const sysBHandler = base.handler;
       return {

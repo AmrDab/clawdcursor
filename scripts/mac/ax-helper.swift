@@ -636,10 +636,37 @@ func pressed(_ action: String, method: String, pending: Bool, extra: [String: An
     return r
 }
 
+/// A label inside a selectable row. SwiftUI sidebars (System Settings) accept AXPress on the label's text and do nothing: the
+/// selection lives on the ROW. Returns that row — only when it can be selected — or nil for any other element.
+func selectableRowAbove(_ el: AXUIElement) -> AXUIElement? {
+    guard let role = str(copyAttr(el, "AXRole").value), ["AXStaticText", "AXImage", "AXGroup", "AXCell"].contains(role) else { return nil }
+    var cur = el
+    for _ in 0..<4 {
+        guard let p = copyAttr(cur, "AXParent").value, isElement(p) else { return nil }
+        let parent = p as! AXUIElement
+        if str(copyAttr(parent, "AXRole").value) == "AXRow" { return settable(parent, "AXSelected") ? parent : nil }
+        cur = parent
+    }
+    return nil
+}
+
+/// Select the row and check that it took: the effect, not the call, is the answer. A press that "succeeded" on the label and
+/// changed nothing was reported as a click; now a selection that did not happen is a miss, and the caller clicks coordinates.
+func selectRow(_ row: AXUIElement, action: String) -> [String: Any] {
+    if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false, extra: ["alreadySelected": true]) }
+    AXUIElementSetAttributeValue(row, "AXSelected" as CFString, kCFBooleanTrue)
+    for _ in 0..<6 {
+        Thread.sleep(forTimeInterval: 0.05)
+        if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false) }
+    }
+    return miss(action, "selecting the row did not take effect — click its coordinates instead", element: row)
+}
+
 func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
     let el = h.element
     switch action {
     case "click":
+        if let row = selectableRowAbove(el) { return selectRow(row, action: action) }
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
@@ -681,6 +708,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         let state = after == nil ? "unknown" : (after == "0" ? "Off" : "On")
         return ["ok": true, "success": true, "action": action, "method": "AXPress", "data": ["toggleState": state]]
     case "select":
+        if let row = selectableRowAbove(el) { return selectRow(row, action: action) }
         if settable(el, "AXSelected"), AXUIElementSetAttributeValue(el, "AXSelected" as CFString, kCFBooleanTrue) == .success {
             return ["ok": true, "success": true, "action": action, "method": "AXSelected"]
         }
@@ -865,8 +893,11 @@ func cmdFind() -> Never {
         search(w, aim, maxDepth: 12, limit: limit * 4, stopAtExactId: idOnly, ctx: &found)
         if idOnly && found.hits.contains(where: { $0.exact }) { break }
     }
-    if found.hits.isEmpty && (timeUp() || found.unreadable > 0) {
-        fail("timeout", "the element search could not read part of the window (\(found.unreadable) element(s) did not answer) — not \"nothing found\"")
+    if found.hits.isEmpty && timeUp() {
+        fail("timeout", "the element search ran out of time before it had read the whole window (\(found.unreadable) element(s) did not answer) — not \"nothing found\"")
+    }
+    if found.hits.isEmpty && found.unreadable > 0 {
+        fail("partial", "not found in the readable part of the window (\(found.unreadable) element\(found.unreadable == 1 ? "" : "s") did not answer)")
     }
     let ranked = rankHits(found.hits, action: nil).prefix(limit)
     emit(["ok": true, "elements": ranked.map { hitDict($0, pid: app.processIdentifier) }, "truncated": timeUp() || found.unreadable > 0, "elapsedMs": elapsedMs()])
@@ -875,6 +906,9 @@ func cmdFind() -> Never {
 /// Actions that press or change something. Aimed at a role alone ("Button") they would act on whichever match ranks first —
 /// the shallowest button in the window.
 let pressingActions: Set<String> = ["click", "toggle", "select", "expand", "collapse"]
+
+/// What an agent can do when the helper declines to act on an incomplete read.
+let wayForward = " — read the tree (accessibility read_tree), then click the element's centre with computer click space:\"screen\""
 
 func cmdInvoke() -> Never {
     requireUsableSession()
@@ -915,13 +949,13 @@ func cmdInvoke() -> Never {
             emit(refuse(action, "role=\"\(aim.role ?? "")\" matches \(found.hits.count) elements — \(who)\(ranked.count > 6 ? ", …" : "") — add a name or id to pick one"))
         }
         if timeUp() || found.unreadable > 0 {
-            fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — cannot tell that only one element has this role")
+            fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — cannot tell that only one element has this role\(wayForward)")
         }
     }
     // A name that is only a substring of the best hit ("Save As…" for "Save") may be hiding its exact match in the part of the
     // window that did not answer or past the deadline: acting on that would press the wrong control.
     if !best.exact && (aim.name != nil || aim.id != nil) && (timeUp() || found.unreadable > 0) {
-        fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name)\")")
+        fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name.isEmpty ? best.ident : best.name)\")\(wayForward)")
     }
     emit(perform(action, best, appName: app.localizedName ?? "the app"))
 }
@@ -932,6 +966,81 @@ func cmdInvoke() -> Never {
 /// (CGEventKeyboardSetUnicodeString). System Events' `keystroke` maps each character to a key of the current layout and
 /// types key code 0 ("a") for any it cannot find, so "café 日本語" came out as "cafa aaa" (#242). Newline and tab are sent as
 /// the Return and Tab keys, which is what a text field expects.
+/// Bring one window of ONE process to the front, by pid. System Events names an app's windows by process NAME, so with two
+/// processes of one app (the user's Chrome and the agent's own) focus-window.jxa read the first one's windows: it raised the
+/// wrong window while saying "focused", and found no window for a title the other process had. This talks to the process it
+/// was given, looks a title up among ITS windows only, and checks who really is frontmost afterwards.
+/// A focus never changes a window's size, position, zoom or full-screen state; it only clears AXMinimized.
+func cmdFocus() -> Never {
+    requireUsableSession()
+    guard opts["pid"] != nil else { fail("failed", "focus: no --pid given") }
+    let app = targetApplication()
+    let name = app.localizedName ?? "unknown"
+    let pid = app.processIdentifier
+    let el = appElement(pid)
+    let t0 = Date()
+    let (value, err) = copyAttr(el, "AXWindows")
+    if err == .cannotComplete && Date().timeIntervalSince(t0) >= Double(axTimeout) * 0.8 { fail("timeout", "\(name) is not responding") }
+    let windows = (value as? [AXUIElement]) ?? []
+    let wanted = opts["title"] ?? ""
+    let needle = wanted.lowercased()
+
+    var target: AXUIElement? = nil
+    var best = Int.min
+    for w in windows {
+        let a = multi(w, windowAttrs)
+        let size = axSize(a["AXSize"]) ?? .zero
+        if size.width * size.height <= 0 { continue }                      // not a window that can be raised
+        let title = str(a["AXTitle"]) ?? ""
+        if !needle.isEmpty {
+            if title.lowercased().contains(needle) { target = w; break }
+            continue
+        }
+        // No title: the window to work in — a standard window beats a popover, an on-screen one beats a minimized one.
+        var score = Int(size.width * size.height)
+        if bool(a["AXMinimized"]) == true { score -= 100_000_000 }
+        switch str(a["AXSubrole"]) ?? "" {
+        case "AXStandardWindow": score += 2_000_000
+        case "AXFloatingWindow": score -= 5_000_000
+        case "AXDialog", "AXSystemDialog": score -= 3_000_000
+        default: break
+        }
+        if ["downloads", "notifications", "updates", "inspector", "activity"].contains(title.trimmingCharacters(in: .whitespaces).lowercased()) { score -= 1_500_000 }
+        if score > best { best = score; target = w }
+    }
+    if target == nil && !needle.isEmpty {
+        fail("failed", "\(name) (pid \(pid)) has no window with a title containing \"\(wanted)\"")
+    }
+
+    // A minimized window cannot take focus; clearing AXMinimized puts it back exactly as it was.
+    if let w = target, bool(copyAttr(w, "AXMinimized").value) == true {
+        AXUIElementSetAttributeValue(w, "AXMinimized" as CFString, kCFBooleanFalse)
+    }
+    // Frontmost through the accessibility API: it needs no activation handshake from a background process.
+    AXUIElementSetAttributeValue(el, "AXFrontmost" as CFString, kCFBooleanTrue)
+    if let w = target {
+        AXUIElementPerformAction(w, "AXRaise" as CFString)
+        AXUIElementSetAttributeValue(w, "AXMain" as CFString, kCFBooleanTrue)
+    }
+    func frontmostPid() -> pid_t? { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    func waitFront(_ tenths: Int) { var n = 0; while frontmostPid() != pid && n < tenths { usleep(100_000); n += 1 } }
+    waitFront(8)
+    if frontmostPid() != pid {
+        if #available(macOS 14.0, *) { app.activate() } else { app.activate(options: [.activateIgnoringOtherApps]) }
+        waitFront(5)
+    }
+    if let now = NSWorkspace.shared.frontmostApplication, now.processIdentifier != pid {
+        fail("failed", "focus went to \(now.localizedName ?? "another app") (pid \(now.processIdentifier)), not to \(name) (pid \(pid))")
+    }
+    var d: [String: Any] = target.map { windowDict($0, app) }
+        ?? ["title": "", "processName": name, "processId": Int(pid), "bounds": rect(nil, nil), "isMinimized": false, "subrole": ""]
+    d.removeValue(forKey: "isMinimized")
+    d["ok"] = true
+    d["success"] = true
+    d["elapsedMs"] = elapsedMs()
+    emit(d)
+}
+
 func cmdType() -> Never {
     requireUsableSession()
     guard let text = opts["text"], !text.isEmpty else { fail("failed", "type: no text given") }
@@ -980,5 +1089,6 @@ case "tree": cmdTree()
 case "find": cmdFind()
 case "invoke": cmdInvoke()
 case "type": cmdType()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type [options] (got \"\(command)\")")
+case "focus": cmdFocus()
+default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus [options] (got \"\(command)\")")
 }
