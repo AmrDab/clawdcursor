@@ -48,6 +48,35 @@ public class NoActivateBannerForm : Form {
         if (m.Msg == 0x0021 && !AllowActivate) { m.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE -> MA_NOACTIVATE
         base.WndProc(ref m);
     }
+    // stdin carries "HIDE <ms>" from the parent just before an agent's click: the pill steps aside so the click reaches
+    // the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
+    System.Windows.Forms.Timer reshow;
+    public void StartStdinCommands() {
+        var t = new System.Threading.Thread(() => {
+            try {
+                string line;
+                while ((line = Console.In.ReadLine()) != null) {
+                    line = line.Trim();
+                    int ms;
+                    if (line.StartsWith("HIDE ") && int.TryParse(line.Substring(5), out ms)) {
+                        try { BeginInvoke((Action)(() => HideFor(ms))); } catch { }
+                    }
+                }
+            } catch { }
+        });
+        t.IsBackground = true;
+        t.Start();
+    }
+    public void HideFor(int ms) {
+        if (reshow == null) {
+            reshow = new System.Windows.Forms.Timer();
+            reshow.Tick += (s, e) => { reshow.Stop(); if (!IsDisposed) Show(); };
+        }
+        reshow.Stop();
+        Hide();
+        reshow.Interval = Math.Max(50, Math.Min(ms, 10000));
+        reshow.Start();
+    }
     // The user chose to type: drop WS_EX_NOACTIVATE and take the keyboard. Only ever on the user's own click.
     public void TakeKeyboard() {
         AllowActivate = true;
@@ -219,6 +248,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $form.Add_Shown({ try { [System.Media.SystemSounds]::Asterisk.Play() } catch { } })
     }
 
+    $form.Add_Shown({ $form.StartStdinCommands() })
     [System.Windows.Forms.Application]::Run($form)
     exit 0
 }
@@ -267,4 +297,5 @@ $stopHandler = { Send-Line 'BANNER_STOP' }
 $form.Add_MouseDoubleClick($stopHandler)
 foreach ($c in @($dot, $text, $sub)) { $c.Add_MouseDoubleClick($stopHandler) }
 
+$form.Add_Shown({ $form.StartStdinCommands() })
 [System.Windows.Forms.Application]::Run($form)

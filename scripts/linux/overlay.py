@@ -277,6 +277,37 @@ def run_pill():
         events.connect('button-press-event', press)
         win.add(events)
 
+    # stdin carries "HIDE <ms>" from the parent just before an agent's click: the pill steps aside so the click reaches
+    # the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
+    hide_state = {'token': 0}
+
+    def reshow(token):
+        if hide_state['token'] == token:
+            win.show()
+        return False
+
+    def on_stdin(source, condition):
+        if condition & (GLib.IO_HUP | GLib.IO_ERR):
+            return False
+        line = sys.stdin.readline()
+        if not line:
+            return False  # EOF: the parent closed the pipe
+        line = line.strip()
+        if line.startswith('HIDE '):
+            try:
+                ms = max(50, min(int(line[5:]), 10000))
+            except ValueError:
+                return True
+            hide_state['token'] += 1
+            win.hide()
+            GLib.timeout_add(ms, reshow, hide_state['token'])
+        return True
+
+    try:
+        GLib.io_add_watch(sys.stdin.fileno(), GLib.PRIORITY_DEFAULT, GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_stdin)
+    except Exception:
+        pass  # no stdin: nothing to listen to
+
     # Fixed width; the paused pill's height follows its content (the message
     # may wrap), the running pill is a fixed 40 px like on Windows.
     win.set_size_request(width, -1 if paused else 40)

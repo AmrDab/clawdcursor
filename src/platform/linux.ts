@@ -17,6 +17,7 @@
  * are not installed the adapter still loads and methods return empty defaults.
  */
 
+import { beforePointerPress } from './pointer-guard';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -824,6 +825,7 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async mouseClick(x: number, y: number, opts?: { button?: MouseButton; count?: number }): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     const count = opts?.count ?? 1;
     const btn = opts?.button ?? 'left';
     // Wayland: ydotool handles both move + click.
@@ -894,6 +896,7 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async mouseDrag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (this.wayland.canMouse()) {
       // Wayland: absolute move to start, down, interpolated moves, up.
       await this.wayland.mouseMoveAbsolute(x1, y1);
@@ -932,6 +935,7 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async mouseScroll(x: number, y: number, direction: ScrollDirection, amount: number = 3): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (this.wayland.canMouse()) {
       await this.wayland.mouseMoveAbsolute(x, y);
       this.lastCursor = { x, y };
@@ -967,6 +971,7 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async mouseDown(button?: MouseButton): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (this.wayland.canMouse()) {
       await this.wayland.mouseDown(button ?? 'left');
       return;

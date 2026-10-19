@@ -13,6 +13,7 @@
  * Permissions: Windows has no TCC-style gate — returns all-true.
  */
 
+import { beforePointerPress } from './pointer-guard';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import sharp from 'sharp';
@@ -936,6 +937,7 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async mouseClick(x: number, y: number, opts?: { button?: MouseButton; count?: number }): Promise<FocusActivation | void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     // Convert ONCE per space from the same physical point — the foreground
     // check (DPI-unaware bridge) and the cursor move (nut-js) must agree or
     // activate-at-point promotes a different window than the click lands on.
@@ -1003,6 +1005,7 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async mouseDrag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     // Interpolate in PHYSICAL space so every waypoint is exact on any monitor.
     const a = { x: x1, y: y1 };
     const b = { x: x2, y: y2 };
@@ -1020,6 +1023,7 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async mouseScroll(x: number, y: number, direction: ScrollDirection, amount: number = 3): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await this.placeCursor(x, y);
     await this.delay(30);
     // nut-js only exposes scrollUp/scrollDown natively. For horizontal,
@@ -1039,6 +1043,7 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async mouseDown(button?: MouseButton): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.pressButton(this.toNutButton(button));
   }
 

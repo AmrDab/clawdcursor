@@ -2,6 +2,18 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **The "desktop control in progress" pill no longer blocks the agent's own
+  clicks.** It sits at the top centre — where browsers keep their tab strip
+  and address bar — and is a real window, so a click there landed on the
+  pill instead of the app (macOS live run: 0 clicks reached a target under
+  it; reproduced on Windows 11). Before every synthetic press, drag or scroll
+  the pill now steps aside (`HIDE <ms>` on its stdin) and comes back by
+  itself; double-click-to-stop is unchanged. Windows, macOS and Linux.
+
 ## [1.5.19] - 2026-10-19 — typing never pastes the user's own clipboard
 
 ### Security

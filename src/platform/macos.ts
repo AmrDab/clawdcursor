@@ -8,6 +8,7 @@
  *   - Accessibility: osascript JXA for tree queries + permission-check binary for TCC
  */
 
+import { beforePointerPress } from './pointer-guard';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -586,6 +587,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseClick(x: number, y: number, opts?: { button?: MouseButton; count?: number }): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
     await this.delay(40);
@@ -628,6 +630,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseDrag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.setPosition(new Point(x1, y1));
     this.lastCursor = { x: x1, y: y1 };
     await this.delay(50);
@@ -646,6 +649,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseScroll(x: number, y: number, direction: ScrollDirection, amount: number = 3): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
     await this.delay(30);
@@ -670,6 +674,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseDown(button?: MouseButton): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.pressButton(this.toNutButton(button));
   }
 

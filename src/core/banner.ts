@@ -37,9 +37,13 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
+import { setBeforePointerPress } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 
 const IDLE_HIDE_MS = 30_000;
+/** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
+const DODGE_MS = 1_500;
+const DODGE_SETTLE_MS = 90;
 const PAUSED_GLOW = '#3b82f6'; // blue — "your turn"
 
 /** Which form of the overlay to draw: running (default) or paused for the user. */
@@ -137,7 +141,8 @@ class ControlBanner {
   private paused: PauseInfo | null = null;
   private onAnswer: ((a: PauseAnswer, reply?: string) => void) | undefined;
   private spawner: Spawner = (mode) => {
-    const stdio: ['ignore', 'pipe', 'ignore'] = ['ignore', 'pipe', 'ignore'];
+    // stdin carries `HIDE <ms>` (dodge) to the pill; stdout carries its answers.
+    const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore'];
     if (process.platform === 'darwin') {
       return spawn(macOverlayBinary.cached(macScript())!, ['pill', ...pillArgs(mode)], { stdio, env: overlayEnv(mode) });
     }
@@ -163,6 +168,19 @@ class ControlBanner {
     return spawn('powershell.exe', psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
       { stdio, windowsHide: true });
   };
+
+  /**
+   * Hide the pill for a moment so an agent's click under it reaches the app instead (it comes back by itself after `ms`).
+   * The pill is a real window at the top centre — where browsers keep their tab strip and address bar. Called before every
+   * synthetic mouse press, drag or scroll (pointer-guard.ts). The glow is click-through and stays.
+   */
+  async dodge(ms = DODGE_MS): Promise<void> {
+    const c = this.child;
+    const stdin = c?.stdin;
+    if (!stdin || stdin.destroyed || !stdin.writable) return;
+    try { stdin.write(`HIDE ${ms}\n`); } catch { return; }
+    await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+  }
 
   /** Wire the double-click → stop callback (the `clawdcursor stop` flow). */
   configure(opts: { onStopRequested?: () => void }): void {
@@ -277,6 +295,8 @@ class ControlBanner {
       return; // cosmetic feature — never let it break control
     }
     this.child = child;
+    // A write to a pill that already exited is EPIPE on this stream — never an uncaught error.
+    child.stdin?.on?.('error', () => { /* the pill is gone */ });
     if (child.stdout) {
       const rl = readline.createInterface({ input: child.stdout });
       rl.on('line', line => {
@@ -368,3 +388,6 @@ class ControlBanner {
 
 /** Singleton — one banner per process (daemon or stdio MCP server). */
 export const controlBanner = new ControlBanner();
+
+// Every synthetic mouse press, drag or scroll first moves the pill out of the way (pointer-guard.ts).
+setBeforePointerPress(() => controlBanner.dodge());

@@ -151,6 +151,35 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc func somethingElse(_ sender: Any?) { showReply(true) }
 
+    /// stdin carries "HIDE <ms>" from the parent just before an agent's click: the pill steps aside so the click reaches
+    /// the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
+    var hideToken = 0
+    func listenForCommands() {
+        var pending = ""
+        FileHandle.standardInput.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            if data.isEmpty { handle.readabilityHandler = nil; return }   // EOF: the parent closed the pipe
+            pending += String(decoding: data, as: UTF8.self)
+            while let nl = pending.firstIndex(of: "\n") {
+                let line = pending[..<nl].trimmingCharacters(in: .whitespaces)
+                pending = String(pending[pending.index(after: nl)...])
+                guard line.hasPrefix("HIDE "), let ms = Int(line.dropFirst(5)) else { continue }
+                DispatchQueue.main.async { self?.hide(for: ms) }
+            }
+        }
+    }
+
+    func hide(for ms: Int) {
+        guard let panel = pillPanel else { return }
+        hideToken += 1
+        let token = hideToken
+        panel.orderOut(nil)
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(max(50, min(ms, 10_000)))) { [weak self] in
+            guard let self = self, self.hideToken == token else { return }   // a later HIDE extends the hiding
+            panel.orderFrontRegardless()
+        }
+    }
+
     /// Enter in the field or the Send button. One line on stdout: BANNER_REPLY <base64 of the UTF-8 text>.
     @objc func sendReply(_ sender: Any?) {
         let text = (replyField?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -268,6 +297,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.orderFrontRegardless()
         windows.append(panel)
         pillPanel = panel
+        listenForCommands()
 
         // A short system sound when the prompt appears, so a user who isn't
         // looking hears it's their turn (#237). CLAWD_PAUSE_SOUND=0 turns it off.
