@@ -69,7 +69,10 @@ const mockInvokeElement = vi.fn();
 const mockFindElement = vi.fn();
 const mockGetFocusedElement = vi.fn();
 const mockGetScreenContext = vi.fn();
-const mockWriteClipboard = vi.fn();
+// A real clipboard: what was written is what is read back (paste paths check that before pasting).
+let clipValue = '';
+const mockWriteClipboard = vi.fn(async (t: string) => { clipValue = t; });
+const mockReadClipboard = vi.fn(async () => clipValue);
 const mockGetWindows = vi.fn().mockResolvedValue([]);
 
 function createCtx(overrides?: Partial<ToolContext>): ToolContext {
@@ -85,6 +88,7 @@ function createCtx(overrides?: Partial<ToolContext>): ToolContext {
       getFocusedElement: mockGetFocusedElement,
       getScreenContext: mockGetScreenContext,
       writeClipboard: mockWriteClipboard,
+      readClipboard: mockReadClipboard,
       invalidateCache: mockInvalidateCache,
       getWindows: mockGetWindows,
     },
@@ -618,6 +622,7 @@ describe('Smart Tools', () => {
           getFocusedElement: mockGetFocusedElement,
           getScreenContext: mockGetScreenContext,
           writeClipboard: mockWriteClipboard,
+      readClipboard: mockReadClipboard,
           invalidateCache: mockInvalidateCache,
         } as any,
       });
@@ -641,6 +646,7 @@ describe('Smart Tools', () => {
           getFocusedElement: mockGetFocusedElement,
           getScreenContext: mockGetScreenContext,
           writeClipboard: mockWriteClipboard,
+      readClipboard: mockReadClipboard,
           invalidateCache: mockInvalidateCache,
         } as any,
       });

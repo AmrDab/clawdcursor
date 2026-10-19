@@ -12,6 +12,7 @@ import { toMouse, toImage } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
+import { writeClipboardVerified } from './paste-guard';
 
 const IS_MAC = os.platform() === 'darwin';
 
@@ -363,13 +364,19 @@ export function getDesktopTools(): ToolDefinition[] {
         const body = submit ? text.replace(/\r?\n$/, '') : text;
         // A warning left by some earlier keystrokes is not this call's.
         ctx.desktop.takeInputWarning?.();
+        let typedByKeys = false;
         try {
           if (body) {
-            await ctx.a11y.writeClipboard(body);
-            await new Promise(r => setTimeout(r, 50));
-            // Paste combo is platform-specific
-            await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
-            await new Promise(r => setTimeout(r, 100));
+            // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
+            if (await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), body)) {
+              await new Promise(r => setTimeout(r, 50));
+              // Paste combo is platform-specific
+              await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
+              await new Promise(r => setTimeout(r, 100));
+            } else {
+              await ctx.desktop.typeText(body);
+              typedByKeys = true;
+            }
           }
           if (submit) await ctx.desktop.keyPress('Return');
         } finally {
@@ -387,7 +394,8 @@ export function getDesktopTools(): ToolDefinition[] {
         ctx.uiMaps?.invalidate();
         // macOS: a modal dialog of another app may have had the keyboard — the agent should know where its text went.
         const warn = ctx.desktop.takeInputWarning?.();
-        return { text: `Typed ${text.length} chars into ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
+        const how = typedByKeys ? ' (typed key by key — the clipboard could not be written)' : '';
+        return { text: `Typed ${text.length} chars into ${activeInfo}${how}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 

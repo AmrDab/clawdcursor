@@ -20,9 +20,10 @@ const typeTool = () => buildUnifiedTools().find(t => t.name === 'type')!;
 describe('type tool — clipboard paste fast path', () => {
   it('pastes via clipboard (write + mod+v), NOT per-character typeText', async () => {
     const calls: string[] = [];
+    let clip = 'PRIOR';
     const platform = {
-      readClipboard: vi.fn(async () => 'PRIOR'),
-      writeClipboard: vi.fn(async (s: string) => { calls.push(`write:${s}`); }),
+      readClipboard: vi.fn(async () => clip),
+      writeClipboard: vi.fn(async (s: string) => { clip = s; calls.push(`write:${s}`); }),
       keyPress: vi.fn(async (c: string) => { calls.push(`key:${c}`); }),
       typeText: vi.fn(async () => { calls.push('typeText'); }),
     };
@@ -36,16 +37,31 @@ describe('type tool — clipboard paste fast path', () => {
 
   it('restores the prior clipboard after pasting (no clobber of a pending copy)', async () => {
     const writes: string[] = [];
+    let clip = 'COPIED SENTENCE';
     const platform = {
-      readClipboard: vi.fn(async () => 'COPIED SENTENCE'),
-      writeClipboard: vi.fn(async (s: string) => { writes.push(s); }),
+      readClipboard: vi.fn(async () => clip),
+      writeClipboard: vi.fn(async (s: string) => { clip = s; writes.push(s); }),
       keyPress: vi.fn(async () => {}),
       typeText: vi.fn(async () => {}),
     };
     await typeTool().execute({ text: 'a filename' }, ctxWith(platform));
     // write the text to paste, then restore the prior clipboard
-    expect(writes[0]).toBe('a filename');
-    expect(writes[writes.length - 1]).toBe('COPIED SENTENCE');
+    expect(writes).toEqual(['a filename', 'COPIED SENTENCE']);
+    expect(platform.typeText).not.toHaveBeenCalled();
+  });
+
+  it('never pastes when the clipboard did not take the text (it would paste the USER\'s clipboard) — types it instead', async () => {
+    const keys: string[] = [];
+    const platform = {
+      readClipboard: vi.fn(async () => 'password123 the user copied'),
+      writeClipboard: vi.fn(async () => { /* Set-Clipboard timed out: nothing written, no error */ }),
+      keyPress: vi.fn(async (c: string) => { keys.push(c); }),
+      typeText: vi.fn(async () => {}),
+    };
+    const r = await typeTool().execute({ text: 'https://glama.ai/x\n' }, ctxWith(platform));
+    expect(keys).not.toContain('mod+v');
+    expect(platform.typeText).toHaveBeenCalledWith('https://glama.ai/x\n');
+    expect(r.text).not.toMatch(/paste/);
   });
 
   it('falls back to per-character typeText when clipboard is unavailable', async () => {

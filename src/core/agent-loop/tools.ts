@@ -40,6 +40,7 @@ import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
+import { writeClipboardVerified } from '../../tools/paste-guard';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -848,7 +849,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         try {
           if (body) {
             prior = await ctx.platform.readClipboard().catch(() => '');
-            await ctx.platform.writeClipboard(body);
+            // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S
+            // clipboard. Not confirmed → the catch below types it key by key.
+            if (!await writeClipboardVerified(t => ctx.platform.writeClipboard(t), () => ctx.platform.readClipboard(), body)) {
+              throw new Error('the clipboard did not take the text');
+            }
             await sleep(40);
             await ctx.platform.keyPress('mod+v');
             await sleep(150);

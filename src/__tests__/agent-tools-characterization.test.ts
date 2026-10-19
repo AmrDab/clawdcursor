@@ -490,8 +490,9 @@ describe('7. type tool — paste fast-path', () => {
 
   it('type tool saves and restores the prior clipboard contents', async () => {
     const ctx = makeCtx();
-    // Mock prior clipboard content
-    (ctx.platform.readClipboard as any).mockResolvedValue('my-prior-content');
+    // Prior clipboard content
+    await ctx.platform.writeClipboard('my-prior-content');
+    (ctx.platform.writeClipboard as any).mockClear();
     const tools = buildUnifiedTools();
     const typeTool = findTool(tools, 'type');
     await typeTool.execute({ text: 'Hello' }, ctx);
@@ -511,6 +512,18 @@ describe('7. type tool — paste fast-path', () => {
     expect(result.text).toContain('0 chars');
     expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
     expect(ctx.platform.keyPress).not.toHaveBeenCalled();
+  });
+
+  it("a clipboard write that silently does nothing is never pasted: the user's clipboard would go into the field (live 2026-10-19)", async () => {
+    const ctx = makeCtx();
+    await ctx.platform.writeClipboard("the user's own clipboard");
+    (ctx.platform.writeClipboard as any).mockImplementation(async () => { /* Set-Clipboard timed out — nothing written */ });
+    const typeTool = findTool(buildUnifiedTools(), 'type');
+    const result = await typeTool.execute({ text: 'https://glama.ai/x\n' }, ctx);
+    const keys = (ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0]);
+    expect(keys).not.toContain('mod+v');
+    expect(ctx.platform.typeText).toHaveBeenCalledWith('https://glama.ai/x\n');
+    expect(result.text).not.toContain('(paste)');
   });
 
   it('type tool: falls back to typeText when clipboard write throws', async () => {

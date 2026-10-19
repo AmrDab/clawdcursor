@@ -54,6 +54,33 @@ async function onPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): P
 const typeText = getDesktopTools().find(t => t.name === 'type_text')!;
 const keyPress = getDesktopTools().find(t => t.name === 'key_press')!;
 
+describe('a clipboard that did not take the text is never pasted (live 2026-10-19: the user\'s clipboard was submitted as a web search)', () => {
+  function deafClipboard(initial: string) {
+    const clip = clipboardOf(initial);
+    clip.writeClipboard.mockImplementation(async (t: string) => { clip.state.writes.push(t); }); // Set-Clipboard timed out: nothing written
+    return clip;
+  }
+
+  it('MCP type_text types the text key by key instead, and says so', async () => {
+    const kb = keyboard();
+    const { ctx } = desktopCtx(kb, deafClipboard("the user's own clipboard"));
+    const r = await typeText.handler({ text: 'https://glama.ai/x\n' }, ctx);
+    const combos = kb.keyPress.mock.calls.map(c => c[0]);
+    expect(combos.some(c => /\+v$/.test(c))).toBe(false);
+    expect(kb.typeText).toHaveBeenCalledWith('https://glama.ai/x');
+    expect(combos).toEqual(['Return']);
+    expect(r.text).toMatch(/typed key by key/);
+  });
+
+  it('smart_type types it instead of pasting', async () => {
+    const kb = keyboard();
+    const { ctx } = desktopCtx(kb, deafClipboard("the user's own clipboard"));
+    await getSmartTools().find(t => t.name === 'smart_type')!.handler({ text: 'hello' }, ctx);
+    expect(kb.keyPress.mock.calls.map(c => c[0])).not.toContain('mod+v');
+    expect(kb.typeText).toHaveBeenCalledWith('hello');
+  });
+});
+
 describe('MCP type_text', () => {
   it('says so when a modal dialog of another app got the text', async () => {
     const { ctx } = desktopCtx(keyboard({ warning: WARNING }));
@@ -122,11 +149,11 @@ describe('MCP smart_type', () => {
     });
   });
 
-  it('on other OSes smart_type does not even read the clipboard (the guard is a macOS thing)', async () => {
+  it('on other OSes smart_type does not save/restore the clipboard (the guard is a macOS thing): one write, the text', async () => {
     await onPlatform('linux', async () => {
       const { ctx, clip } = desktopCtx(keyboard());
       await smartType.handler({ text: 'abc' }, ctx);
-      expect(clip.readClipboard).not.toHaveBeenCalled();
+      expect(clip.state.writes).toEqual(['abc']);
     });
   });
 
