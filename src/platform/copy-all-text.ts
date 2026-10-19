@@ -1,5 +1,7 @@
 /**
- * Read ALL text of the focused window exactly: select-all, copy, read the
+ * Read ALL text of the focused window exactly. First through accessibility
+ * (Windows: the document's UIA TextPattern — no keystrokes, nothing selected,
+ * clipboard untouched); where that can't be read: select-all, copy, read the
  * clipboard, put the user's clipboard back.
  *
  * Why: OCR garbles identifiers (l→1, o→0) and accessibility trees can be empty
@@ -34,7 +36,7 @@ export function isTerminalWindow(win: Pick<WindowInfo, 'processName' | 'classNam
 /** `source` says where the text came from: the clipboard (exact page text) or
  *  the accessibility tree (element names and values, when select-all/copy can't work).
  *  `note`: something the agent must know about the state the read left behind. */
-export interface CopyAllTextResult { ok: boolean; text: string; window?: string; source?: 'clipboard' | 'accessibility'; note?: string }
+export interface CopyAllTextResult { ok: boolean; text: string; window?: string; source?: 'document' | 'clipboard' | 'accessibility'; note?: string }
 
 /** Browsers: a focused "document" there is the page, not an editor. */
 const BROWSERS = /^(msedge|chrome|chromium|firefox|brave|opera|vivaldi|arc|safari|google chrome|microsoft edge|zen|librewolf|waterfox)(\.exe)?$/i;
@@ -81,7 +83,7 @@ const XAML_WINDOW_CLASSES = /^(ApplicationFrameWindow|Windows\.UI\.Core\.CoreWin
 const CLIPBOARD_WAIT_MS = 1500;
 
 type CopyPlatform = Pick<PlatformAdapter, 'getActiveWindow' | 'keyPress' | 'readClipboard' | 'writeClipboard'>
-  & Partial<Pick<PlatformAdapter, 'getUiTree' | 'getFocusedElement'>>;
+  & Partial<Pick<PlatformAdapter, 'getUiTree' | 'getFocusedElement' | 'getPageText'>>;
 
 /** The window's text from its accessibility tree: names (and values) in tree order. */
 async function accessibilityText(platform: CopyPlatform, pid: number | undefined): Promise<string> {
@@ -111,6 +113,13 @@ export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextRe
   if (XAML_WINDOW_CLASSES.test(String(win?.className ?? ''))) {
     const r = await fromTree(`(${label} is a UWP/XAML window with no select-all — this is its accessibility text: element names and values in tree order, not the exact page text)`);
     if (r) return r;
+  }
+
+  // First choice: the document's text through accessibility (Windows: UIA TextPattern) — the page or editor text with no
+  // keystrokes at all, so nothing is left selected and the clipboard is never touched.
+  if (platform.getPageText) {
+    const page = await platform.getPageText().catch(() => null);
+    if (page && page.text.trim()) return { ok: true, window: label, source: 'document', text: page.text };
   }
 
   // Ctrl+A acts on whatever has focus — never on an editor's content or a list of items (#249).

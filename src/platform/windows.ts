@@ -756,6 +756,17 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
+  /** The foreground window's document text through UIA TextPattern — no keystrokes, no selection, no clipboard. */
+  async getPageText(): Promise<{ text: string; name?: string } | null> {
+    try {
+      const result = await psRunner.run({ cmd: 'get-page-text' }) as any;
+      if (!result || result.success === false || typeof result.text !== 'string') return null;
+      return { text: result.text, name: typeof result.name === 'string' ? result.name : undefined };
+    } catch {
+      return null;
+    }
+  }
+
   async invokeElement(query: {
     name?: string;
     controlType?: string;

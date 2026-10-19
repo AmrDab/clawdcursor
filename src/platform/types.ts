@@ -304,6 +304,11 @@ export interface PlatformAdapter {
   takeInputWarning?(): string | null;
   getFocusedElement(): Promise<UiElement | null>;
   /**
+   * Optional: the whole text of the foreground window's document (a web page, an editor) read through accessibility
+   * (Windows: UIA TextPattern) — no keystrokes, nothing selected, clipboard untouched. Null when it can't be read.
+   */
+  getPageText?(): Promise<{ text: string; name?: string } | null>;
+  /**
    * Invoke an accessibility action on a named element. Action union
    * widened in Tranche 1A. Platforms that don't support a given action
    * return `{ success:false }` — no throw.
