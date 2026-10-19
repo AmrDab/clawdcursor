@@ -262,14 +262,15 @@ export class Agent {
    * Hand the desktop to the user and wait for their answer (pause-gate.ts).
    * Null when nobody can see the prompt — the loop then fails fast as before.
    */
-  private async pauseForUser(message: string): Promise<PauseOutcome | null> {
+  private async pauseForUser(message: string): Promise<Exclude<PauseOutcome, 'replied'> | { replied: string } | null> {
     if (!pauseGate.available() || this.aborted) return null;
     this.pausedSince = Date.now();
     this.state = { ...this.state, status: 'paused', currentStep: message };
     console.log(`
 ⏸ Paused for the user: ${message}`);
     try {
-      return await pauseGate.request({ message }, { signal: this.abortCtl?.signal });
+      const r = await pauseGate.requestWithReply({ message }, { signal: this.abortCtl?.signal });
+      return r.outcome === 'replied' ? { replied: r.reply ?? '' } : r.outcome;
     } finally {
       this.pausedMs += Date.now() - this.pausedSince;
       this.pausedSince = null;

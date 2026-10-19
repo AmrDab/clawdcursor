@@ -17,6 +17,10 @@
  * told "waiting" (markWaiting) — is handed over once to its next call; nothing
  * else is ever handed over, so a NEW pause with the same text asks again.
  *
+ * "Something else" on the pill lets the user type an answer instead of doing the
+ * step: the outcome is 'replied' with their text, and the agent continues from it
+ * (it may answer a question, give a code, or change the plan).
+ *
  * Who answered matters: the pill, CLI, dashboard and POST /resume are the
  * human ('resumed'); an AI calling task {action:"resume"} is 'resumed_unverified',
  * so the agent is told the user did NOT confirm it on screen.
@@ -27,8 +31,14 @@
 
 import { controlBanner } from './banner';
 
-export type PauseAnswer = 'resume' | 'end';
-export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout';
+export type PauseAnswer = 'resume' | 'end' | 'reply';
+export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | 'replied';
+
+/** The outcome, plus what the user typed when they answered with "Something else". */
+export interface PauseResult {
+  outcome: PauseOutcome;
+  reply?: string;
+}
 
 export interface PauseRequest {
   /** What the user should do. Shown on screen. */
@@ -46,11 +56,12 @@ export interface PauseInfo {
 interface Pending {
   info: PauseInfo;
   key?: string;
-  promise: Promise<PauseOutcome>;
-  settle: (o: PauseOutcome) => void;
+  promise: Promise<PauseResult>;
+  settle: (r: PauseResult) => void;
 }
 
 const MAX_MESSAGE = 300;
+const MAX_REPLY = 2000;
 const RECENT_TTL_MS = 5 * 60_000;
 
 function timeoutMs(): number {
@@ -61,7 +72,7 @@ function timeoutMs(): number {
 class PauseGate {
   private pending: Pending | null = null;
   private nextId = 1;
-  private recent = new Map<string, { outcome: PauseOutcome; at: number }>();
+  private recent = new Map<string, { result: PauseResult; at: number }>();
   /** Keys whose caller was answered "waiting" — only their outcome is handed over. */
   private waiting = new Set<string>();
 
@@ -74,9 +85,14 @@ class PauseGate {
     return this.pending ? { ...this.pending.info } : null;
   }
 
+  /** The outcome only. Callers that can act on a typed answer use requestWithReply. */
   async request(req: PauseRequest, opts: { signal?: AbortSignal } = {}): Promise<PauseOutcome> {
+    return (await this.requestWithReply(req, opts)).outcome;
+  }
+
+  async requestWithReply(req: PauseRequest, opts: { signal?: AbortSignal } = {}): Promise<PauseResult> {
     for (;;) {
-      if (opts.signal?.aborted) return 'ended';
+      if (opts.signal?.aborted) return { outcome: 'ended' };
       // Re-checked after every wait: a same-key call that queued behind another
       // pause must re-attach, not show the same prompt a second time.
       if (req.key) {
@@ -84,7 +100,7 @@ class PauseGate {
         const done = this.recent.get(req.key);
         if (done && Date.now() - done.at < RECENT_TTL_MS) {
           this.recent.delete(req.key);
-          return done.outcome;
+          return done.result;
         }
       }
       if (!this.pending) break;
@@ -99,33 +115,40 @@ class PauseGate {
       message: req.message.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_MESSAGE) || 'Your turn.',
       since: Date.now(),
     };
-    let settle!: (o: PauseOutcome) => void;
-    const promise = new Promise<PauseOutcome>(resolve => { settle = resolve; });
+    let settle!: (r: PauseResult) => void;
+    const promise = new Promise<PauseResult>(resolve => { settle = resolve; });
     const entry: Pending = { info, key: req.key, promise, settle };
     this.pending = entry;
 
-    const timer = setTimeout(() => this.finish(entry, 'timeout'), timeoutMs());
+    const timer = setTimeout(() => this.finish(entry, { outcome: 'timeout' }), timeoutMs());
     timer.unref?.();
-    const onAbort = () => this.finish(entry, 'ended');
+    const onAbort = () => this.finish(entry, { outcome: 'ended' });
     opts.signal?.addEventListener('abort', onAbort, { once: true });
     void promise.then(() => {
       clearTimeout(timer);
       opts.signal?.removeEventListener('abort', onAbort);
     });
 
-    controlBanner.showPaused(info, answer => { this.answer(answer); });
+    controlBanner.showPaused(info, (answer, reply) => { this.answer(answer, 'user', reply); });
     return promise;
   }
 
   /**
-   * Answer the pending pause: Resume continues the run, End task ends it.
-   * `by: 'agent'` (an AI calling task {action:"resume"}) resumes as unverified.
+   * Answer the pending pause: Resume continues the run, End task ends it, a reply (the pill's "Something else") continues
+   * it with what the user typed. `by: 'agent'` (an AI calling task {action:"resume"}) resumes as unverified.
    */
-  answer(a: PauseAnswer, by: 'user' | 'agent' = 'user'): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
+  answer(a: PauseAnswer, by: 'user' | 'agent' = 'user', reply?: string): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
     const p = this.pending;
     if (!p) return { ok: false, error: 'nothing is paused' };
+    if (a === 'reply') {
+      // eslint-disable-next-line no-control-regex -- control characters other than newline/tab are noise from a text box
+      const text = String(reply ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f]+/g, ' ').trim().slice(0, MAX_REPLY);
+      if (!text) return { ok: false, error: 'the reply is empty' };
+      this.finish(p, { outcome: 'replied', reply: text });
+      return { ok: true, outcome: 'replied' };
+    }
     const outcome: PauseOutcome = a === 'end' ? 'ended' : by === 'agent' ? 'resumed_unverified' : 'resumed';
-    this.finish(p, outcome);
+    this.finish(p, { outcome });
     return { ok: true, outcome };
   }
 
@@ -143,17 +166,17 @@ class PauseGate {
     this.waiting.delete(key);
   }
 
-  private finish(p: Pending, outcome: PauseOutcome): void {
+  private finish(p: Pending, result: PauseResult): void {
     if (this.pending !== p) return;
     this.pending = null;
-    if (p.key && this.waiting.delete(p.key)) this.recent.set(p.key, { outcome, at: Date.now() });
+    if (p.key && this.waiting.delete(p.key)) this.recent.set(p.key, { result, at: Date.now() });
     controlBanner.showRunning();
-    p.settle(outcome);
+    p.settle(result);
   }
 
   // ── test hooks ──
   __resetForTests(): void {
-    if (this.pending) this.finish(this.pending, 'ended');
+    if (this.pending) this.finish(this.pending, { outcome: 'ended' });
     this.recent.clear();
     this.waiting.clear();
   }

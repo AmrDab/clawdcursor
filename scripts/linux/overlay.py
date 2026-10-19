@@ -8,7 +8,10 @@ by src/core/banner.ts:
                      control in progress - double-click to stop" -> prints
                      BANNER_STOP. Paused (env CLAWD_BANNER_MODE=paused): blue
                      dot, the instruction from CLAWD_BANNER_MESSAGE, and Resume
-                     / End task -> prints BANNER_RESUME / BANNER_END. Plays a
+                     / Something else / End task -> prints BANNER_RESUME /
+                     BANNER_END; "Something else" opens a small text box under
+                     the pill and Enter / Send prints BANNER_REPLY <base64 of
+                     the UTF-8 text>. Plays a
                      short system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
   overlay.py glow [--color #RRGGBB] [--duration SEC]
                      a pulsing glow on every edge of every monitor; clicks pass
@@ -21,6 +24,7 @@ The parent kills the process to hide it. Every window is override-redirect
 the app being driven or the field the user is typing in. Runs on X11, and on
 Wayland through XWayland (GDK_BACKEND=x11).
 """
+import base64
 import math
 import os
 import shutil
@@ -181,14 +185,64 @@ def run_pill():
         end = Gtk.Button(label='End task')
         end.get_style_context().add_class('end')
         end.connect('clicked', lambda *_: answer('BANNER_END'))
-        for b in (resume, end):
+        other = Gtk.Button(label='Something else')
+        other.get_style_context().add_class('end')
+        other.connect('clicked', lambda *_: open_reply())
+        for b in (resume, other, end):
             b.set_can_focus(False)
+
+        def open_reply():
+            # "Something else": the user types an answer for the agent instead of doing the step. The pill is an
+            # override-redirect popup that can never take the keyboard, so the text box is a small normal window
+            # right under it — opened only on the user's own click.
+            box = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+            box.set_decorated(False)
+            box.set_keep_above(True)
+            box.set_skip_taskbar_hint(True)
+            box.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+            entry = Gtk.Entry()
+            entry.set_placeholder_text('Tell the agent what to do instead')
+            entry.set_width_chars(52)
+            send = Gtk.Button(label='Send')
+            send.get_style_context().add_class('resume')
+
+            def send_reply(*_):
+                text = entry.get_text().strip()
+                if not text:
+                    return
+                emit('BANNER_REPLY ' + base64.b64encode(text.encode('utf-8')).decode('ascii'))
+                Gtk.main_quit()
+
+            def key(_w, event):
+                if event.keyval == Gdk.KEY_Escape:
+                    box.destroy()
+                    return True
+                return False
+
+            entry.connect('activate', send_reply)
+            send.connect('clicked', send_reply)
+            box.connect('key-press-event', key)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            row.set_margin_start(10)
+            row.set_margin_end(10)
+            row.set_margin_top(8)
+            row.set_margin_bottom(8)
+            row.pack_start(entry, True, True, 0)
+            row.pack_start(send, False, False, 0)
+            box.add(row)
+            box.show_all()
+            x, y = win.get_position()
+            _w, h = win.get_size()
+            box.move(x, y + h + 6)
+            box.present()
+            entry.grab_focus()
 
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         head.pack_start(dot, False, False, 0)
         head.pack_start(title, False, False, 0)
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         buttons.pack_end(end, False, False, 0)
+        buttons.pack_end(other, False, False, 0)
         buttons.pack_end(resume, False, False, 0)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         body.set_margin_start(14)

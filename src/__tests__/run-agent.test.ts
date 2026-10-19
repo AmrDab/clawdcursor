@@ -1068,6 +1068,18 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(toolResultTexts()).toMatch(/USER RESUMED.*Do not restart it/s);
   });
 
+  it('the user replies instead of resuming ("Something else"): the run continues with their words', async () => {
+    const pause = vi.fn(async () => ({ replied: 'Use the test account in 1Password instead' }));
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in to Stripe, then click Resume' }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'signed in with the test account' }));
+
+    const result = await runAgent({ task: 'open the dashboard', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+
+    expect(result.exit).toBe('done');
+    expect(result.steps[0].result.text).toMatch(/replied/);
+    expect(toolResultTexts()).toMatch(/USER REPLIED.*Use the test account in 1Password instead.*follow it/s);
+  });
+
   it('give_up pauses first; after Resume the run continues instead of ending', async () => {
     const pause = vi.fn(async () => 'resumed' as const);
     llmTurnQueue.push(turnCall('give_up', { reason: 'login required' }));

@@ -48,6 +48,17 @@ type Spawner = (mode: OverlayMode) => ChildProcess;
 
 const ANSWER_LINES: Record<string, PauseAnswer> = { BANNER_RESUME: 'resume', BANNER_END: 'end' };
 
+/**
+ * "Something else" on the paused pill: `BANNER_REPLY <base64 of the UTF-8 text>` — base64 so a typed newline or
+ * a line that happens to read "BANNER_END" can't be mistaken for another answer.
+ */
+export function parseReplyLine(line: string): string | null {
+  const m = /^BANNER_REPLY ([A-Za-z0-9+/=]*)$/.exec(line);
+  if (!m) return null;
+  const text = Buffer.from(m[1], 'base64').toString('utf8').trim();
+  return text || null;
+}
+
 const psArgs = (script: string, extra: string[] = []) =>
   ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script, ...extra];
 
@@ -124,7 +135,7 @@ class ControlBanner {
   private glowEnabled = process.env.CLAWD_NO_GLOW !== '1';
   private onStopRequested: (() => void) | undefined;
   private paused: PauseInfo | null = null;
-  private onAnswer: ((a: PauseAnswer) => void) | undefined;
+  private onAnswer: ((a: PauseAnswer, reply?: string) => void) | undefined;
   private spawner: Spawner = (mode) => {
     const stdio: ['ignore', 'pipe', 'ignore'] = ['ignore', 'pipe', 'ignore'];
     if (process.platform === 'darwin') {
@@ -184,7 +195,7 @@ class ControlBanner {
    * Switch to the paused form (blue glow + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
-  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer) => void): void {
+  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string) => void): void {
     if (!this.enabled) return;
     this.paused = info;
     this.onAnswer = onAnswer;
@@ -271,8 +282,11 @@ class ControlBanner {
       rl.on('line', line => {
         const msg = line.trim();
         try {
-          if (msg === 'BANNER_STOP') this.onStopRequested?.();
-          else if (ANSWER_LINES[msg] && forPause !== undefined && this.paused?.id === forPause) this.onAnswer?.(ANSWER_LINES[msg]);
+          if (msg === 'BANNER_STOP') { this.onStopRequested?.(); return; }
+          if (forPause === undefined || this.paused?.id !== forPause) return;
+          const reply = parseReplyLine(msg);
+          if (reply) this.onAnswer?.('reply', reply);
+          else if (ANSWER_LINES[msg]) this.onAnswer?.(ANSWER_LINES[msg]);
         } catch { /* never throw into the rl loop */ }
       });
     }
