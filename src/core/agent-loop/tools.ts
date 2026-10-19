@@ -2185,6 +2185,10 @@ function coordBreadcrumb(
   space: string, scale: number, ctx: AgentToolContext,
 ): string {
   const scaled = scale !== 1 ? ` → screen (${sx},${sy})` : '';
+  // On macOS a click takes POINTS while the screenshot's "real" size is in pixels (Retina: twice the points): say which is which.
+  if ((ctx.platform as { platform?: string }).platform === 'darwin' && ctx.screen.dpiRatio > 1) {
+    return `${space} (${ix},${iy})${scaled} [×${scale}, points: screen ${ctx.screen.logicalWidth}×${ctx.screen.logicalHeight} pt = ${ctx.screen.physicalWidth}×${ctx.screen.physicalHeight} px]`;
+  }
   return `${space} (${ix},${iy})${scaled} [×${scale}, screen ${ctx.screen.physicalWidth}×${ctx.screen.physicalHeight}]`;
 }
 
