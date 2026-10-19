@@ -441,6 +441,21 @@ export interface WindowListResult {
   skipped: SkippedApp[];
 }
 
+/**
+ * The message to give when the screen is locked, or null. The AX helper and the keyboard guard already say it; the tools that
+ * read the screen (OCR, smart_click, smart_read) call this before they try anything, because behind the lock screen they read
+ * nothing and used to report that as "no_clickable_target" — as if the target were missing. A failed probe, an unlocked screen
+ * or another OS is null: never a reason to refuse.
+ */
+export async function screenLockedMessage(ax?: Pick<MacAx, 'frontmost'>, platform: NodeJS.Platform = process.platform): Promise<string | null> {
+  if (platform !== 'darwin') return null;
+  try {
+    if (!(await (ax ?? defaultMacAx()).frontmost()).locked) return null;
+  } catch { return null; }
+  return `${helperError({ ok: false, kind: 'locked' }, 'reading the screen').message} ` +
+    'For a long hands-off run, keep the display awake while it works (for example `caffeinate -d` in a terminal); no setting needs to change.';
+}
+
 /** The window `focusWindow` brought to the front. */
 export interface FocusedWindow {
   title: string;

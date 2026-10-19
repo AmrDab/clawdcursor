@@ -6,6 +6,7 @@
  */
 
 import { OcrEngine } from '../platform/ocr-engine';
+import { screenLockedMessage } from '../platform/mac-ax';
 import type { ToolDefinition } from './types';
 import { ocrPointToClickPoint } from './smart';
 
@@ -59,6 +60,9 @@ export function getOcrTools(): ToolDefinition[] {
             isError: true,
           };
         }
+
+        const lockedMsg = await screenLockedMessage();
+        if (lockedMsg) return { text: lockedMsg, isError: true };
 
         // Screen coordinates on every OS (what space:"screen" clicks take). OCR
         // reads physical pixels; on macOS a click takes logical points (Retina 2x).

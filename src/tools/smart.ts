@@ -14,6 +14,7 @@
 
 import type { ToolDefinition } from './types';
 import { OcrEngine } from '../platform/ocr-engine';
+import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
 import { writeClipboardVerified } from './paste-guard';
@@ -104,6 +105,8 @@ export function getSmartTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async (params, ctx) => {
         await ctx.ensureInitialized();
+        const lockedMsg = await screenLockedMessage();
+        if (lockedMsg) return { text: lockedMsg, isError: true };
         const scope = (params.scope as string) || 'window';
         const target = (params.target ?? params.name) as string | undefined;
         const processId = params.processId as number | undefined;
@@ -247,6 +250,9 @@ export function getSmartTools(): ToolDefinition[] {
         if (!target || typeof target !== 'string' || target.trim() === '') {
           return { text: 'smart_click: "target" (alias "name") is required — the element text to click, e.g. "Send".', isError: true };
         }
+        // A locked Mac reads as an empty screen to OCR and as "not found" to the tree: say what is wrong, don't search.
+        const lockedMsg = await screenLockedMessage();
+        if (lockedMsg) return { text: JSON.stringify({ error: 'screen_locked', reason: lockedMsg, target, tried: [] }), isError: true };
         const processId = params.processId as number | undefined;
         const timeoutMs = (params.timeout as number) || 10000; // default 10s, was 5s
         const attempted: string[] = [];
