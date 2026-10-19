@@ -773,8 +773,9 @@ export class MacOSAdapter implements PlatformAdapter {
 
     const usingClause = mods.length ? ` using {${mods.map(m => `${m} down`).join(', ')}}` : '';
 
-    // Special keys → key code; printable single chars → keystroke.
-    const keyCode = MAC_KEY_CODES[key.toLowerCase()];
+    // Special keys → key code; printable single chars → keystroke. A modifier on its own ("shift") is that modifier key, tapped.
+    const bareModifier = mods.length === 0 ? MAC_MODIFIER_KEY_CODES[this.normalizeMod(key)] : undefined;
+    const keyCode = bareModifier ?? MAC_KEY_CODES[key.toLowerCase()];
     // One character outside ASCII ("é", "日", an emoji): typed as itself, never as `keystroke` — that presses "a" (#242).
     if (keyCode === undefined && hasNonAscii(key) && [...key].length === 1) {
       refuseNonAsciiChord(key, mods.length > 0);
@@ -1090,6 +1091,9 @@ export class MacOSAdapter implements PlatformAdapter {
 }
 
 // macOS virtual keycodes for special keys (US ANSI keyboard).
+/** The left-hand modifier keys, for a modifier pressed on its own. */
+const MAC_MODIFIER_KEY_CODES: Record<string, number> = { shift: 56, command: 55, option: 58, control: 59 };
+
 const MAC_KEY_CODES: Record<string, number> = {
   'return': 36, 'enter': 36,
   'tab': 48,
