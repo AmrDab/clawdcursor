@@ -36,6 +36,17 @@ describe('the macOS focus path never changes a window\'s size, zoom or full-scre
     expect(violations(stripComments(read('scripts', 'mac', 'focus-window.jxa')))).toEqual([]);
   });
 
+  it('the accessibility helper\'s focus command (cmdFocus in ax-helper.swift)', () => {
+    const src = stripComments(read('scripts', 'mac', 'ax-helper.swift'));
+    const start = src.indexOf('func cmdFocus()');
+    const body = src.slice(start, src.indexOf('\nfunc ', start + 10));
+    expect(body.length).toBeGreaterThan(500);
+    for (const forbidden of ['AXZoom', 'AXFullScreen', 'zoom', 'fullScreen', 'setFrame']) expect(body, forbidden).not.toContain(forbidden);   // (reading AXSize / AXPosition is fine; the writes are listed below)
+    // the only window attribute it writes besides raising is AXMinimized, and only to false
+    const writes = [...body.matchAll(/AXUIElementSetAttributeValue\([^,]+,\s*"(\w+)" as CFString,\s*(\w+)\)/g)].map(m => `${m[1]}=${m[2]}`);
+    expect(writes.sort()).toEqual(['AXFrontmost=kCFBooleanTrue', 'AXMain=kCFBooleanTrue', 'AXMinimized=kCFBooleanFalse']);
+  });
+
   it('MacOSAdapter.focusWindow calls no state-changing helper', () => {
     const src = read('src', 'platform', 'macos.ts');
     const start = src.indexOf('async focusWindow(');

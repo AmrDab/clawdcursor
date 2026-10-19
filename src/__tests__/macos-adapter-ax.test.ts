@@ -56,6 +56,7 @@ function fakeAx(over: Partial<MacAx> = {}): MacAx & { [K in keyof MacAx]: Return
     invoke: vi.fn(async () => ({ success: true })),
     frontmost: vi.fn(async () => FRONT()),
     appState: vi.fn(async () => null),
+    focusWindow: vi.fn(async () => null),      // no helper: focus-window.jxa is the fallback
     focusedElement: vi.fn(async () => EL({ name: 'Body', controlType: 'Edit' })),
     prepare: vi.fn(),
     ...over,

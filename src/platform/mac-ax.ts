@@ -95,6 +95,7 @@ const JXA_TREE_TIMEOUT_MS = 30_000;
 /** Depth the original get-screen-context.jxa walk always used. */
 const JXA_TREE_DEPTH = 8;
 const HELPER_FIND_DEADLINE_MS = 6_000;
+const HELPER_FOCUS_DEADLINE_MS = 5_000;
 /** An unfiltered find returns the whole tree for the caller to filter (find {automationId} used to); keep it generous. */
 const FIND_MAX_RESULTS = 500;
 const JXA_FIND_TIMEOUT_MS = 12_000;
@@ -440,6 +441,13 @@ export interface WindowListResult {
   skipped: SkippedApp[];
 }
 
+/** The window `focusWindow` brought to the front. */
+export interface FocusedWindow {
+  title: string;
+  processId: number;
+  processName: string;
+}
+
 export interface MacAx {
   /** Every titled window. Throws `MacAxError` on a timeout / locked screen — never returns `[]` for a failure. */
   listWindows(): Promise<WindowInfo[]>;
@@ -474,6 +482,12 @@ export interface MacAx {
    * a refusal (locked screen, no permission) or a timeout throws.
    */
   typeUnicode(text: string): Promise<boolean>;
+  /**
+   * Bring a window of the process `pid` to the front — `title` (a substring, case-insensitive) picks one among THAT process's
+   * windows. Null when the helper is not available (the caller falls back). A refusal — no such window, or the focus went to
+   * another app, which the error names — throws `MacAxError`. System Events cannot do this when two processes share a name.
+   */
+  focusWindow(pid: number, title?: string): Promise<FocusedWindow | null>;
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
   /**
@@ -706,6 +720,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       if (reply) return { locked: reply.locked === true, app: reply.frontmost ? toFrontmostApp(reply.frontmost) : null };
       // No helper: LaunchServices answers in a few ms without any permission.
       return lsappinfoFrontmost(deps.exec);
+    },
+
+    async focusWindow(pid: number, title?: string): Promise<FocusedWindow | null> {
+      const s = viaStdin({ title });
+      const reply = await viaHelper(['focus', '--pid', String(pid), '--timeout-ms', String(HELPER_FOCUS_DEADLINE_MS), ...s.args],
+        HELPER_FOCUS_DEADLINE_MS + HELPER_GRACE_MS, 'focusing', { input: s.input, act: true });
+      if (reply === null) return null;
+      return { title: String(reply.title ?? ''), processId: Number(reply.processId ?? pid), processName: String(reply.processName ?? '') };
     },
 
     async appState(name: string): Promise<AppState | null> {

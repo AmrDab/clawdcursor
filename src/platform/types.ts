@@ -244,6 +244,11 @@ export interface PlatformAdapter {
   listWindows(): Promise<WindowInfo[]>;
   getActiveWindow(): Promise<WindowInfo | null>;
   focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean>;
+  /**
+   * Why the last `focusWindow` returned false, when the platform knows more than "no match" (macOS: the focus went to another
+   * app, which it names). Taken once: a second call is null.
+   */
+  takeFocusFailure?(): string | null;
 
   /**
    * Legacy shim — preserved for back-compat. New code should call

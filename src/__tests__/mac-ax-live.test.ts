@@ -462,6 +462,65 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     }, 25 * 60_000);
   });
 
+  // Two processes of ONE app — the user's Chrome and the agent's own are exactly that. System Events names an app's windows by
+  // process NAME, so focus-window.jxa raised (or failed to find) the first process's windows whatever pid it was given. The
+  // helper's focus command talks to the process it was given.
+  describe('focusing a window by pid, with two processes of the same app (the helper\'s focus command)', () => {
+    let twinBin = '';
+    beforeAll(() => {
+      if (!fixtureBin) return;
+      // The fixture again, inside a bundle: both instances then carry one name and one bundle id, like two Chromes.
+      const app = path.join(tmp, 'AxTwin.app', 'Contents');
+      fs.mkdirSync(path.join(app, 'MacOS'), { recursive: true });
+      twinBin = path.join(app, 'MacOS', 'ax-twin');
+      fs.copyFileSync(fixtureBin, twinBin);
+      fs.chmodSync(twinBin, 0o755);
+      fs.writeFileSync(path.join(app, 'Info.plist'),
+        '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleExecutable</key><string>ax-twin</string>' +
+        '<key>CFBundleIdentifier</key><string>dev.clawdcursor.test.axtwin</string><key>CFBundleName</key><string>AxTwin</string>' +
+        '<key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string></dict></plist>');
+    });
+    const frontPid = async (): Promise<number | undefined> => (await run(['frontmost'])).frontmost?.processId;
+    const raiseBySystemEvents = (pid: number) => new Promise<void>(resolve => execFile('osascript', ['-e',
+      `tell application "System Events" to set frontmost of (first process whose unix id is ${pid}) to true`], () => resolve()));
+
+    it('the process asked for comes to the front — not the first one of that name — and a window it does not have is an error', async (ctx) => {
+      if (!usable || !twinBin) return ctx.skip();
+      if (!await waitUntilIdle()) return ctx.skip();
+      const a = await startFixture('normal', twinBin);
+      extra.push(a.proc);
+      const b = await startFixture('normal', twinBin);
+      extra.push(b.proc);
+      try {
+        await new Promise(res => setTimeout(res, 800));
+        await raiseBySystemEvents(a.pid);
+        await new Promise(res => setTimeout(res, 800));
+        if (await frontPid() !== a.pid) { console.warn('[mac-ax-live] not focusing: the first twin is not frontmost'); return ctx.skip(); }
+
+        const toB = await run(['focus', '--pid', String(b.pid)]);
+        expect(toB).toMatchObject({ ok: true, success: true, processId: b.pid });
+        expect(await frontPid()).toBe(b.pid);
+
+        // back to the first, by title: the title is looked for among THAT process's windows only
+        const toA = await run(['focus', '--pid', String(a.pid), '--args-stdin', '1'], 30_000, JSON.stringify({ title: 'fixture a' }));
+        expect(toA).toMatchObject({ ok: true, success: true, processId: a.pid, title: 'Fixture A' });
+        expect(await frontPid()).toBe(a.pid);
+
+        const none = await run(['focus', '--pid', String(b.pid), '--args-stdin', '1'], 30_000, JSON.stringify({ title: 'No such window' }));
+        expect(none).toMatchObject({ ok: false, kind: 'failed' });
+        expect(none.error).toMatch(/no window/i);
+        expect(await frontPid()).toBe(a.pid);                   // nothing was raised for the miss
+      } finally { a.proc.kill('SIGKILL'); b.proc.kill('SIGKILL'); }
+    }, 25 * 60_000);
+
+    it('a pid that does not exist is a failed reply that says so', async (ctx) => {
+      if (!usable) return ctx.skip();
+      const r = await run(['focus', '--pid', '999999']);
+      expect(r).toMatchObject({ ok: false, kind: 'failed' });
+      expect(r.error).toMatch(/no such process/);
+    });
+  });
+
   describe('the keyboard guard against a real dialog (MacKeyboardGuard on live NSWorkspace + AX data; no key is sent)', () => {
     // The guard is the same class MacOSAdapter and NativeDesktop (the MCP route) ask; here it reads the helper's real `frontmost`.
     // (tests/vitest.setup.ts sets CLAWD_NO_MAC_AX=1 for every test - that switch turns the guard off, so turn it back on here.)

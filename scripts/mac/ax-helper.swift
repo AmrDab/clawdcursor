@@ -932,6 +932,81 @@ func cmdInvoke() -> Never {
 /// (CGEventKeyboardSetUnicodeString). System Events' `keystroke` maps each character to a key of the current layout and
 /// types key code 0 ("a") for any it cannot find, so "café 日本語" came out as "cafa aaa" (#242). Newline and tab are sent as
 /// the Return and Tab keys, which is what a text field expects.
+/// Bring one window of ONE process to the front, by pid. System Events names an app's windows by process NAME, so with two
+/// processes of one app (the user's Chrome and the agent's own) focus-window.jxa read the first one's windows: it raised the
+/// wrong window while saying "focused", and found no window for a title the other process had. This talks to the process it
+/// was given, looks a title up among ITS windows only, and checks who really is frontmost afterwards.
+/// A focus never changes a window's size, position, zoom or full-screen state; it only clears AXMinimized.
+func cmdFocus() -> Never {
+    requireUsableSession()
+    guard opts["pid"] != nil else { fail("failed", "focus: no --pid given") }
+    let app = targetApplication()
+    let name = app.localizedName ?? "unknown"
+    let pid = app.processIdentifier
+    let el = appElement(pid)
+    let t0 = Date()
+    let (value, err) = copyAttr(el, "AXWindows")
+    if err == .cannotComplete && Date().timeIntervalSince(t0) >= Double(axTimeout) * 0.8 { fail("timeout", "\(name) is not responding") }
+    let windows = (value as? [AXUIElement]) ?? []
+    let wanted = opts["title"] ?? ""
+    let needle = wanted.lowercased()
+
+    var target: AXUIElement? = nil
+    var best = Int.min
+    for w in windows {
+        let a = multi(w, windowAttrs)
+        let size = axSize(a["AXSize"]) ?? .zero
+        if size.width * size.height <= 0 { continue }                      // not a window that can be raised
+        let title = str(a["AXTitle"]) ?? ""
+        if !needle.isEmpty {
+            if title.lowercased().contains(needle) { target = w; break }
+            continue
+        }
+        // No title: the window to work in — a standard window beats a popover, an on-screen one beats a minimized one.
+        var score = Int(size.width * size.height)
+        if bool(a["AXMinimized"]) == true { score -= 100_000_000 }
+        switch str(a["AXSubrole"]) ?? "" {
+        case "AXStandardWindow": score += 2_000_000
+        case "AXFloatingWindow": score -= 5_000_000
+        case "AXDialog", "AXSystemDialog": score -= 3_000_000
+        default: break
+        }
+        if ["downloads", "notifications", "updates", "inspector", "activity"].contains(title.trimmingCharacters(in: .whitespaces).lowercased()) { score -= 1_500_000 }
+        if score > best { best = score; target = w }
+    }
+    if target == nil && !needle.isEmpty {
+        fail("failed", "\(name) (pid \(pid)) has no window with a title containing \"\(wanted)\"")
+    }
+
+    // A minimized window cannot take focus; clearing AXMinimized puts it back exactly as it was.
+    if let w = target, bool(copyAttr(w, "AXMinimized").value) == true {
+        AXUIElementSetAttributeValue(w, "AXMinimized" as CFString, kCFBooleanFalse)
+    }
+    // Frontmost through the accessibility API: it needs no activation handshake from a background process.
+    AXUIElementSetAttributeValue(el, "AXFrontmost" as CFString, kCFBooleanTrue)
+    if let w = target {
+        AXUIElementPerformAction(w, "AXRaise" as CFString)
+        AXUIElementSetAttributeValue(w, "AXMain" as CFString, kCFBooleanTrue)
+    }
+    func frontmostPid() -> pid_t? { NSWorkspace.shared.frontmostApplication?.processIdentifier }
+    func waitFront(_ tenths: Int) { var n = 0; while frontmostPid() != pid && n < tenths { usleep(100_000); n += 1 } }
+    waitFront(8)
+    if frontmostPid() != pid {
+        if #available(macOS 14.0, *) { app.activate() } else { app.activate(options: [.activateIgnoringOtherApps]) }
+        waitFront(5)
+    }
+    if let now = NSWorkspace.shared.frontmostApplication, now.processIdentifier != pid {
+        fail("failed", "focus went to \(now.localizedName ?? "another app") (pid \(now.processIdentifier)), not to \(name) (pid \(pid))")
+    }
+    var d: [String: Any] = target.map { windowDict($0, app) }
+        ?? ["title": "", "processName": name, "processId": Int(pid), "bounds": rect(nil, nil), "isMinimized": false, "subrole": ""]
+    d.removeValue(forKey: "isMinimized")
+    d["ok"] = true
+    d["success"] = true
+    d["elapsedMs"] = elapsedMs()
+    emit(d)
+}
+
 func cmdType() -> Never {
     requireUsableSession()
     guard let text = opts["text"], !text.isEmpty else { fail("failed", "type: no text given") }
@@ -980,5 +1055,6 @@ case "tree": cmdTree()
 case "find": cmdFind()
 case "invoke": cmdInvoke()
 case "type": cmdType()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type [options] (got \"\(command)\")")
+case "focus": cmdFocus()
+default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus [options] (got \"\(command)\")")
 }

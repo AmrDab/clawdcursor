@@ -1009,7 +1009,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (typeof args.title === 'string') q.title = args.title;
         const ok = await ctx.platform.focusWindow(q as any);
         await sleep(250);
-        return { success: ok, text: ok ? 'Focused matching window.' : 'No matching window found.' };
+        return { success: ok, text: ok ? 'Focused matching window.' : ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
       },
     },
 
