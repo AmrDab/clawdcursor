@@ -62,6 +62,7 @@ export interface McpServerLike {
     name: string,
     description: string,
     paramsSchema: Record<string, unknown>,
+    annotations: Record<string, unknown>,
     handler: (params: Record<string, unknown>) => Promise<McpToolResult>,
   ): void;
   connect(transport: McpTransportLike): Promise<void>;
@@ -273,6 +274,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       tool.name,
       description,
       hasParams ? zodParams : {},
+      toolAnnotations(tool),
       async (params: Record<string, unknown>): Promise<McpToolResult> => {
         // Consent gate (non-fatal): until the user accepts one-time consent,
         // every tool returns a clear, host-VISIBLE prompt instead of the server
@@ -370,6 +372,16 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
  * and nothing crashes. A wire-level test asserts `$schema` is absent, so such
  * an upgrade is caught by CI rather than silently re-breaking Gemini.
  */
+/**
+ * MCP tool annotations: the tool's own, else derived from its safety tier — tier 0 reads only; tier 2+ (closing windows,
+ * overwriting the clipboard, arbitrary JS) can destroy something.
+ */
+export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier'>): NonNullable<ToolDefinition['annotations']> {
+  if (tool.annotations) return tool.annotations;
+  const tier = tool.safetyTier ?? 1;
+  return tier === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tier >= 2 };
+}
+
 function stripRootSchemaDialect(server: McpServerLike): void {
   const handlers = (server as unknown as {
     server?: { _requestHandlers?: Map<string, (req: unknown, extra: unknown) => Promise<unknown>> };

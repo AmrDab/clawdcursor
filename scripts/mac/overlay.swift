@@ -8,7 +8,10 @@
 //                  control in progress - double-click to stop" -> prints
 //                  BANNER_STOP. Paused (env CLAWD_BANNER_MODE=paused): blue
 //                  dot, the instruction from CLAWD_BANNER_MESSAGE, and Resume /
-//                  End task -> prints BANNER_RESUME / BANNER_END. Plays the
+//                  Something else / End task -> prints BANNER_RESUME /
+//                  BANNER_END; "Something else" opens a text field (the panel
+//                  takes the keyboard only then) and Enter / Send prints
+//                  BANNER_REPLY <base64 of the UTF-8 text>. Plays the
 //                  "Glass" system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
 //   overlay glow [--color #RRGGBB] [--duration SEC]
 //                  a pulsing glow on every edge of every display; clicks pass
@@ -47,11 +50,16 @@ let blue = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 
 let blueDim = NSColor(srgbRed: 25 / 255, green: 55 / 255, blue: 110 / 255, alpha: 1)
 let background = NSColor(srgbRed: 18 / 255, green: 18 / 255, blue: 26 / 255, alpha: 0.97)
 
-/// A panel that never becomes key or main: clicking it leaves focus where it was.
+/// A panel that never becomes key or main: clicking it leaves focus where it was. The one exception is the user's own
+/// click on "Something else": then it may become key (a non-activating panel takes keystrokes without activating the app).
 final class PillPanel: NSPanel {
-    override var canBecomeKey: Bool { false }
+    var allowKey = false
+    override var canBecomeKey: Bool { allowKey }
     override var canBecomeMain: Bool { false }
 }
+
+/// Set while the user types an answer: focus is not handed back then.
+var typingReply = false
 
 /// Buttons in a non-key panel must act on the first click.
 final class FirstClickButton: NSButton {
@@ -83,13 +91,13 @@ func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false) ->
 var previousApp = NSWorkspace.shared.frontmostApplication
 
 func giveFocusBack() {
-    guard NSApp.isActive, let prev = previousApp,
+    guard !typingReply, NSApp.isActive, let prev = previousApp,
           prev.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
     NSApp.deactivate()
     if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
 }
 
-final class Overlay: NSObject, NSApplicationDelegate {
+final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     let mode: String
     init(mode: String) { self.mode = mode }
 
@@ -118,6 +126,49 @@ final class Overlay: NSObject, NSApplicationDelegate {
     @objc func answer(_ sender: FirstClickButton) {
         emit(sender.line)
         NSApp.terminate(nil)
+    }
+
+    // "Something else": the user types an answer for the agent instead of doing the step.
+    var pillPanel: PillPanel?
+    var choiceButtons: [NSView] = []
+    var replyField: NSTextField?
+    var sendButton: NSButton?
+
+    func showReply(_ on: Bool) {
+        choiceButtons.forEach { $0.isHidden = on }
+        replyField?.isHidden = !on
+        sendButton?.isHidden = !on
+        typingReply = on
+        if on, let panel = pillPanel, let field = replyField {
+            panel.allowKey = true
+            panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(field)
+        } else {
+            pillPanel?.allowKey = false
+            giveFocusBack()
+        }
+    }
+
+    @objc func somethingElse(_ sender: Any?) { showReply(true) }
+
+    /// Enter in the field or the Send button. One line on stdout: BANNER_REPLY <base64 of the UTF-8 text>.
+    @objc func sendReply(_ sender: Any?) {
+        let text = (replyField?.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        emit("BANNER_REPLY " + Data(text.utf8).base64EncodedString())
+        typingReply = false
+        giveFocusBack()
+        NSApp.terminate(nil)
+    }
+
+    /// Esc in the field: back to the buttons.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
+            replyField?.stringValue = ""
+            showReply(false)
+            return true
+        }
+        return false
     }
 
     func pill() {
@@ -161,9 +212,32 @@ final class Overlay: NSObject, NSApplicationDelegate {
                 return b
             }
             let gray = NSColor(srgbRed: 60 / 255, green: 60 / 255, blue: 72 / 255, alpha: 1)
-            [dot, title, msg,
-             button("Resume", "BANNER_RESUME", x: width - 250, color: blue),
-             button("End task", "BANNER_END", x: width - 130, color: gray)].forEach { content.addSubview($0) }
+            let resume = button("Resume", "BANNER_RESUME", x: width - 380, color: blue)
+            let other = button("Something else", "", x: width - 260, color: gray)
+            other.frame.size.width = 120
+            other.action = #selector(somethingElse(_:))
+            let end = button("End task", "BANNER_END", x: width - 130, color: gray)
+            choiceButtons = [resume, other, end]
+
+            let field = NSTextField(frame: NSRect(x: 40, y: 16, width: width - 40 - 100, height: 26))
+            field.font = NSFont.systemFont(ofSize: 13)
+            field.textColor = .white
+            field.backgroundColor = NSColor(srgbRed: 36 / 255, green: 36 / 255, blue: 48 / 255, alpha: 1)
+            field.isBezeled = true
+            field.bezelStyle = .squareBezel
+            field.placeholderString = "Tell the agent what to do instead"
+            field.target = self
+            field.action = #selector(sendReply(_:))
+            field.delegate = self
+            field.isHidden = true
+            replyField = field
+            let send = button("Send", "", x: width - 90, color: blue)
+            send.frame.size.width = 76
+            send.action = #selector(sendReply(_:))
+            send.isHidden = true
+            sendButton = send
+
+            [dot, title, msg, resume, other, end, field, send].forEach { content.addSubview($0) }
         } else {
             let brand = label("ClawdCursor", size: 13, color: .white, bold: true)
             let sub = label("desktop control in progress  -  double-click to stop", size: 12,
@@ -193,6 +267,7 @@ final class Overlay: NSObject, NSApplicationDelegate {
         panel.contentView = content
         panel.orderFrontRegardless()
         windows.append(panel)
+        pillPanel = panel
 
         // A short system sound when the prompt appears, so a user who isn't
         // looking hears it's their turn (#237). CLAWD_PAUSE_SOUND=0 turns it off.

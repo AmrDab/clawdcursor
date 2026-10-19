@@ -139,6 +139,17 @@ export interface ToolDefinition {
    */
   safetyTier?: 0 | 1 | 2 | 3;
   /**
+   * MCP tool annotations — hints for clients and directories about what the tool does to the world. When omitted the
+   * MCP server derives readOnlyHint / destructiveHint from `safetyTier`.
+   */
+  annotations?: {
+    title?: string;
+    readOnlyHint?: boolean;
+    destructiveHint?: boolean;
+    idempotentHint?: boolean;
+    openWorldHint?: boolean;
+  };
+  /**
    * Token-cost class — what kind of evidence this tool returns and how
    * expensive its response is for the calling LLM. See `ToolCostClass`.
    * `tools/list` exposes this so a tool-picking LLM can prefer cheaper

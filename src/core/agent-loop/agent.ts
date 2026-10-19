@@ -480,6 +480,17 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           const reason = String(call.args.message ?? call.args.reason ?? '').trim() || 'The agent needs your help to continue.';
           const outcome = await input.pause({ message: reason });
           if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
+          if (outcome && typeof outcome === 'object') {
+            log.info('agent.pause.replied', { turn, tool: call.name });
+            holder.invalidate();
+            toolResults.push({ id: call.id, text: repliedNote(reason, outcome.replied), isError: false });
+            steps.push({
+              turn, toolName: call.name, toolArgs: call.args,
+              result: { success: true, text: 'paused for the user → they replied' },
+              durationMs: Date.now() - turnStart, fingerprintChanged: false, thought: llmResult.text,
+            });
+            continue;
+          }
           if (outcome === 'resumed' || outcome === 'resumed_unverified') {
             log.info('agent.pause.resumed', { turn, tool: call.name, verified: outcome === 'resumed' });
             holder.invalidate(); // the user changed the screen — mint a fresh map
@@ -606,6 +617,11 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
             const outcome = await input.pause({ message: stuck });
             if (isAborted() || outcome === 'ended') {
               return finish('aborted', `ended by the user while paused: ${stuck}`, steps, llmCalls, screenshotsCaptured.n, startedAt);
+            }
+            if (outcome && typeof outcome === 'object') {
+              holder.invalidate();
+              toolResults.push({ id: call.id, text: `NOT EXECUTED (repeat guard). ${repliedNote(stuck, outcome.replied)} Do not repeat this exact call.`, isError: true });
+              continue;
             }
             if (outcome === 'resumed' || outcome === 'resumed_unverified') {
               holder.invalidate();
@@ -1068,6 +1084,13 @@ async function storeUIMap(
 }
 
 /** Fed back to the model after a pause was answered with Resume. */
+/** The user answered the pause by typing ("Something else" on the pill) instead of doing the step. */
+function repliedNote(what: string, reply: string): string {
+  return `USER REPLIED instead of doing "${truncate(what, 160)}". They wrote:\n"""\n${reply}\n"""\n` +
+    'This is the user speaking to you: follow it — it may answer your question, give you what you asked for, or change the plan. ' +
+    'If it still needs the user to act on screen, pause again with a clearer request. Read the fresh COMPILED UI below before acting.';
+}
+
 function resumedNote(what: string, byUser = true): string {
   const who = byUser
     ? `USER RESUMED: the user handled "${truncate(what, 160)}" and clicked Resume. `

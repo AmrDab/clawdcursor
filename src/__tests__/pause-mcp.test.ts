@@ -101,6 +101,22 @@ describe('pause_for_user', () => {
     expect(JSON.parse((await third).text).status).toBe('ended');
   });
 
+  it('"Something else" on the pill: {status:"replied", reply} with "follow it"', async () => {
+    const call = pauseForUser.handler({ message: 'Sign in to Stripe', timeout: 5 }, noCtx);
+    setTimeout(() => pauseGate.answer('reply', 'user', 'Use the test account instead'), 50);
+    const body = JSON.parse((await call).text);
+    expect(body.status).toBe('replied');
+    expect(body.reply).toBe('Use the test account instead');
+    expect(body.next).toMatch(/follow it/);
+  });
+
+  it('a reply that lands between calls is handed to the next call, text included', async () => {
+    await pauseForUser.handler({ message: 'Enter the code', timeout: 1 }, noCtx);
+    pauseGate.answer('reply', 'user', 'the code is 4821');
+    const body = JSON.parse((await pauseForUser.handler({ message: 'Enter the code', timeout: 1 }, noCtx)).text);
+    expect(body).toMatchObject({ status: 'replied', reply: 'the code is 4821' });
+  });
+
   it('a Resume that lands between calls is handed to the next call', async () => {
     await pauseForUser.handler({ message: 'Solve the CAPTCHA', timeout: 1 }, noCtx);
     pauseGate.answer('resume');

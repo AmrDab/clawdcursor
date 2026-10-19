@@ -89,6 +89,39 @@ describe('pauseGate', () => {
     await expect(p).resolves.toBe('ended');
   });
 
+  it('"Something else": the pill sends the typed text and the pause settles as replied, with it', async () => {
+    const p = pauseGate.requestWithReply({ message: 'Sign in to Stripe' });
+    const text = 'Use the test account instead — café ✓\nthen continue';
+    say(`BANNER_REPLY ${Buffer.from(text, 'utf8').toString('base64')}`);
+    await expect(p).resolves.toEqual({ outcome: 'replied', reply: text });
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('request() (outcome only) reports "replied" too', async () => {
+    const p = pauseGate.request({ message: 'Sign in' });
+    say(`BANNER_REPLY ${Buffer.from('no, skip it', 'utf8').toString('base64')}`);
+    await expect(p).resolves.toBe('replied');
+  });
+
+  it('an empty or garbled reply line does not settle the pause; a typed "BANNER_END" is just text', async () => {
+    const p = pauseGate.requestWithReply({ message: 'Sign in' });
+    say('BANNER_REPLY ');                                   // empty
+    say('BANNER_REPLY !!!not-base64');                      // not base64 → ignored
+    await flush();
+    expect(pauseGate.current()?.message).toBe('Sign in');
+    expect(pauseGate.answer('reply', 'user', '   ')).toEqual({ ok: false, error: 'the reply is empty' });
+    say(`BANNER_REPLY ${Buffer.from('BANNER_END', 'utf8').toString('base64')}`);
+    await expect(p).resolves.toEqual({ outcome: 'replied', reply: 'BANNER_END' });
+  });
+
+  it('a reply is capped and stripped of control characters (newlines and tabs kept)', async () => {
+    const p = pauseGate.requestWithReply({ message: 'x' });
+    pauseGate.answer('reply', 'user', `a\u0000b\tc\nd${'z'.repeat(5000)}`);
+    const r = await p;
+    expect(r.reply?.startsWith('a b\tc\nd')).toBe(true);
+    expect(r.reply?.length).toBe(2000);
+  });
+
   it('a pill from an EARLIER pause cannot answer a newer one', async () => {
     const p1 = pauseGate.request({ message: 'one' });
     const oldPill = livePill()[0].child;

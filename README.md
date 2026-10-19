@@ -320,14 +320,14 @@ flowchart TB
 
 ## The toolbox
 
-Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with an `action` enum covering ~10–20 verbs (~1,500 tokens total &mdash; about 12× smaller than granular, the `computer_20250124` shape editor hosts already know). The **granular** surface is the 98 underlying primitives, one schema per verb (for runtimes that need top-level tools, or for debugging). Both run through the same `safety.evaluate()` chokepoint; the full catalog is always visible via MCP `tools/list`.
+Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with an `action` enum covering ~10–20 verbs (about 7,000 tokens for the whole catalog, schemas included &mdash; about a third of the granular surface's ~20,000; the `computer_20250124` shape editor hosts already know). The **granular** surface is the 98 underlying primitives, one schema per verb (for runtimes that need top-level tools, or for debugging). Both run through the same `safety.evaluate()` chokepoint; the full catalog is always visible via MCP `tools/list`.
 
 | Toolbox | Actions |
 |---|---|
 | `computer` | `screenshot`, `click`, `double_click`, `right_click`, `triple_click`, `hover`, `move`, `scroll`, `scroll_horizontal`, `drag`, `drag_path`, `type`, `key`, `wait` |
 | `accessibility` | `read_tree`, `find`, `get_element`, `focused`, `invoke`, `focus`, `set_value`, `get_value`, `expand`, `collapse`, `toggle`, `select`, `state`, `list_children`, `wait_for`, `compile_ui`, `find_button`, `find_field`, `smart_click`, `smart_type`, `smart_read` |
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
-| `system` | `clipboard_read`, `clipboard_write`, `system_time`, `ocr`, `undo`, `shortcuts_list`, `shortcuts_run`, `delegate`, `pause_for_user`, `detect_webview`, `relaunch_with_cdp`, `system_prompt`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_app`, `app_guide`, `learn_app` |
+| `system` | `copy_all_text`, `ocr`, `clipboard_read`, `clipboard_write`, `shortcuts_list`, `shortcuts_run`, `undo`, `pause_for_user`, `report`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_webview`, `relaunch_with_cdp`, `delegate`, `system_time`, `system_prompt` |
 | `browser` | `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
 | `task` | `run` (default; **bounded-sync** &mdash; waits up to `timeout`s, returns `{status:"running"}` + progress if longer, re-call to keep waiting), `status`, `abort`, `resume` (continue a task paused for the user). Delegates to the built-in loop. Requires `clawdcursor agent` with an LLM. |
 | `batch` | `{steps:[…]}` &mdash; collapse N calls into one round-trip; each step `{name, arguments, expect?}`, re-perceived and safety-gated, halts with a trace on any miss. |

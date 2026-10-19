@@ -1197,6 +1197,46 @@ function Cmd-GetFocusedElement {
     }
 }
 
+# ── Command: get-page-text ────────────────────────────────────────────────────
+# The whole text of the foreground window's document (a web page, an editor) through UIA TextPattern — what a screen
+# reader reads. No keystrokes: nothing gets selected and the clipboard is not touched (copy_all_text used Ctrl+A / Ctrl+C,
+# which left every page it read highlighted, #249).
+function Cmd-GetPageText($cmd) {
+    $fgWin = [Win32UIA]::GetForegroundWindow()
+    if ($fgWin -eq [IntPtr]::Zero) { return @{ success=$false; error="No foreground window" } }
+    $max = 2000000
+    if ($cmd.maxChars) { $max = [int]$cmd.maxChars }
+    try {
+        $root = [System.Windows.Automation.AutomationElement]::FromHandle($fgWin)
+        if ($null -eq $root) { return @{ success=$false; error="foreground window has no UIA element" } }
+        $docType = [System.Windows.Automation.ControlType]::Document
+        # The document holding the focus (a browser has one per tab and frame; an editor IS one)…
+        $doc = $null
+        $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+        $el = $null
+        try { $el = [System.Windows.Automation.AutomationElement]::FocusedElement } catch {}
+        $hops = 0
+        while ($null -ne $el -and $hops -lt 60) {
+            if ($el.Current.ControlType -eq $docType) { $doc = $el; break }
+            $el = $walker.GetParent($el); $hops++
+        }
+        if ($null -ne $doc -and $doc.Current.ProcessId -ne $root.Current.ProcessId) { $doc = $null }
+        # …else the window's first document (focus in a browser's address bar, say).
+        if ($null -eq $doc) {
+            $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $docType)
+            $doc = $root.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $cond)
+        }
+        if ($null -eq $doc) { return @{ success=$false; error="no document in the foreground window" } }
+        $tp = $null
+        try { $tp = $doc.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern) } catch {}
+        if ($null -eq $tp) { return @{ success=$false; error="the document has no TextPattern" } }
+        $text = $tp.DocumentRange.GetText($max)
+        return @{ success=$true; text=$text; name=$doc.Current.Name; processId=$doc.Current.ProcessId }
+    } catch {
+        return @{ success=$false; error=$_.Exception.Message }
+    }
+}
+
 # ── Command: ocr (Windows.Media.Ocr, engine kept loaded) ──────────────────────
 # The one-shot scripts/ocr-recognize.ps1 spent ~95% of its time starting
 # PowerShell and loading WinRT; recognition itself is ~35 ms for a window and
@@ -1306,6 +1346,7 @@ while ($true) {
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }
             "get-focused-element"   { Cmd-GetFocusedElement }
+            "get-page-text"         { Cmd-GetPageText $cmd }
             "activate-at-point"     { Cmd-ActivateAtPoint $cmd }
             "list-displays"         { Cmd-ListDisplays }
             "move-cursor"           { Cmd-MoveCursor $cmd }

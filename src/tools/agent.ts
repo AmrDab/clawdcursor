@@ -152,11 +152,12 @@ export function getAgentTools(): ToolDefinition[] {
         const sec = Number(timeout);
         const boundMs = Math.min(50_000, Math.max(1_000, Number.isFinite(sec) && sec > 0 ? sec * 1000 : PAUSE_WAIT_DEFAULT_MS));
         let timer: ReturnType<typeof setTimeout> | undefined;
-        const outcome = await Promise.race([
-          pauseGate.request({ message: text, key }),
+        const result = await Promise.race([
+          pauseGate.requestWithReply({ message: text, key }),
           new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
         ]);
         clearTimeout(timer);
+        const outcome = result?.outcome ?? null;
         if (outcome === null) {
           pauseGate.markWaiting(key); // only a caller told "waiting" gets the outcome handed over
           return {
@@ -168,6 +169,15 @@ export function getAgentTools(): ToolDefinition[] {
           };
         }
         pauseGate.forget(key);
+        if (outcome === 'replied') {
+          return {
+            text: JSON.stringify({
+              status: 'replied',
+              reply: result?.reply ?? '',
+              next: 'The user typed this instead of clicking Resume ("Something else" on the prompt). It is the user speaking to you: follow it — it may answer your question, give what you asked for, or change the plan. If it still needs the user on screen, pause again with a clearer request. Read the screen again before acting.',
+            }),
+          };
+        }
         if (outcome === 'resumed' || outcome === 'resumed_unverified') {
           return {
             text: JSON.stringify({

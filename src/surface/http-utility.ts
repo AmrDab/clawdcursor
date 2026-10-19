@@ -327,12 +327,13 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     if (!isLocal) {
       return res.status(403).json({ error: 'Resume is only allowed from localhost' });
     }
-    const answer = (req.body?.answer ?? 'resume') as string;
-    if (!['resume', 'end'].includes(answer)) {
-      return res.status(400).json({ error: 'answer must be "resume" or "end"' });
+    const reply = typeof req.body?.reply === 'string' ? req.body.reply : undefined;
+    const answer = (req.body?.answer ?? (reply !== undefined ? 'reply' : 'resume')) as string;
+    if (!['resume', 'end', 'reply'].includes(answer)) {
+      return res.status(400).json({ error: 'answer must be "resume", "end" or "reply" (with a "reply" text)' });
     }
     const pause = pauseGate.current();
-    const r = pauseGate.answer(answer as PauseAnswer);
+    const r = pauseGate.answer(answer as PauseAnswer, 'user', reply);
     if (!r.ok) return res.status(409).json({ error: r.error, pause });
     console.log(`\n${e('▶', '>')} Pause answered: ${r.outcome}`);
     res.json({ ok: true, outcome: r.outcome, was: pause?.message });

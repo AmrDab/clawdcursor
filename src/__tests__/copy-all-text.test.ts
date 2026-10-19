@@ -157,6 +157,31 @@ describe('copyAllText', () => {
     expect(selectAllHazard({ controlType: 'Edit', name: 'Message' }, 'slack', 'Chrome_WidgetWin_1')).toMatch(/editable/);
   });
 
+  it('reads the document through accessibility first: no keystrokes, nothing selected, clipboard untouched', async () => {
+    const p = { ...withFocus('msedge', { controlType: 'Document', name: 'Stripe' }), getPageText: vi.fn(async () => ({ text: 'price_1TcLWT $29.99', name: 'Stripe' })) };
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(p.writeClipboard).not.toHaveBeenCalled();
+    expect(r).toMatchObject({ ok: true, source: 'document', text: 'price_1TcLWT $29.99' });
+    expect(r.note).toBeUndefined();
+  });
+
+  it('an editor read through its document needs no refusal: the full text, still no keys', async () => {
+    const p = { ...withFocus('notepad', { controlType: 'Document', name: 'Text editor' }), getPageText: vi.fn(async () => ({ text: 'line one\nline two' })) };
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(r).toMatchObject({ ok: true, source: 'document', text: 'line one\nline two' });
+  });
+
+  it('an empty or failing document read falls through to the guarded select-all path', async () => {
+    for (const getPageText of [vi.fn(async () => ({ text: '  ' })), vi.fn(async () => null), vi.fn(async () => { throw new Error('bridge down'); })]) {
+      const p = { ...withFocus('msedge', { controlType: 'Document', name: 'page' }), getPageText };
+      const r = await copyAllText(p as any);
+      expect(p.keys).toEqual(['mod+a', 'mod+c']);
+      expect(r.source).toBe('clipboard');
+    }
+  });
+
   it('selectAllHazard: page-like roles are safe', () => {
     for (const role of ['Pane', 'Window', 'Group', 'Hyperlink', 'Button', 'Text', 'Custom']) {
       expect(selectAllHazard({ controlType: role, name: 'x' }, 'someapp')).toBeNull();

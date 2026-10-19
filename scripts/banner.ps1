@@ -14,9 +14,11 @@
 #   - Parent kills this process to hide the banner.
 #   - PAUSED mode (env CLAWD_BANNER_MODE=paused, set by src/core/pause-gate.ts
 #     via banner.ts): the agent handed the desktop to the user. Blue dot, the
-#     instruction from CLAWD_BANNER_MESSAGE, and two buttons: Resume
-#     (BANNER_RESUME) / End task (BANNER_END). The click prints that line on
-#     stdout and exits. No double-click stop here. A short system sound plays
+#     instruction from CLAWD_BANNER_MESSAGE, and three buttons: Resume
+#     (BANNER_RESUME) / Something else / End task (BANNER_END). The click prints
+#     that line on stdout and exits. "Something else" opens a text box (the pill
+#     takes the keyboard only then, on the user's click); Enter / Send prints
+#     BANNER_REPLY <base64 of the UTF-8 text> and exits. No double-click stop here. A short system sound plays
 #     when it appears (off with CLAWD_PAUSE_SOUND=0).
 #
 # CRITICAL: the window must NEVER steal focus — it appears WHILE the agent is
@@ -36,11 +38,23 @@ using System.Windows.Forms;
 public class NoActivateBannerForm : Form {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    // Set while the user types an answer ("Something else"): the pill may then take the keyboard.
+    public bool AllowActivate = false;
     // A click must not activate the pill either: answer WM_MOUSEACTIVATE with
     // MA_NOACTIVATE (the click is still delivered).
     protected override void WndProc(ref Message m) {
-        if (m.Msg == 0x0021) { m.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE -> MA_NOACTIVATE
+        if (m.Msg == 0x0021 && !AllowActivate) { m.Result = (IntPtr)3; return; } // WM_MOUSEACTIVATE -> MA_NOACTIVATE
         base.WndProc(ref m);
+    }
+    // The user chose to type: drop WS_EX_NOACTIVATE and take the keyboard. Only ever on the user's own click.
+    public void TakeKeyboard() {
+        AllowActivate = true;
+        int ex = GetWindowLong(Handle, -20);           // GWL_EXSTYLE
+        SetWindowLong(Handle, -20, ex & ~0x08000000);  // clear WS_EX_NOACTIVATE
+        SetForegroundWindow(Handle);
+        Activate();
     }
     // Never take focus when shown…
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -137,17 +151,55 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $b.Location  = New-Object System.Drawing.Point($x, $y)
         $b.Cursor    = [System.Windows.Forms.Cursors]::Hand
         $b.Tag       = $line
-        $b.Add_MouseDown({ $script:userWindow = [NoActivateBannerForm]::GetForegroundWindow() })
-        $b.Add_Click({ param($sender, $e) Send-Line ([string]$sender.Tag) })
+        $b.Add_MouseDown({
+            # The user's own window — never the pill itself (it is foreground once the user typed an answer).
+            $fg = [NoActivateBannerForm]::GetForegroundWindow()
+            if ($fg -ne $form.Handle) { $script:userWindow = $fg }
+        })
+        if ($line) { $b.Add_Click({ param($sender, $e) Send-Line ([string]$sender.Tag) }) }
         return $b
     }
     $btnY  = 38 + $msgH + 12
     $gray  = [System.Drawing.Color]::FromArgb(60, 60, 72)
-    $yes   = New-PillButton 'Resume'   'BANNER_RESUME' ($form.Width - 250) $btnY $blue
+    $yes   = New-PillButton 'Resume'   'BANNER_RESUME' ($form.Width - 380) $btnY $blue
+    $other = New-PillButton 'Something else' '' ($form.Width - 260) $btnY $gray
+    $other.Size = New-Object System.Drawing.Size(120, 30)
     $no    = New-PillButton 'End task' 'BANNER_END'    ($form.Width - 130) $btnY $gray
 
+    # "Something else": the user types an answer for the agent instead of doing the step. The buttons give way to a
+    # text box + Send; Enter sends, Esc goes back. Sent as BANNER_REPLY <base64 UTF-8> (one line, whatever was typed).
+    $reply = New-Object System.Windows.Forms.TextBox
+    $reply.Font        = New-Object System.Drawing.Font('Segoe UI', 10)
+    $reply.BackColor   = [System.Drawing.Color]::FromArgb(36, 36, 48)
+    $reply.ForeColor   = [System.Drawing.Color]::White
+    $reply.BorderStyle = 'FixedSingle'
+    $reply.Location    = New-Object System.Drawing.Point(40, ($btnY + 3))
+    $reply.Size        = New-Object System.Drawing.Size(($form.Width - 40 - 100), 26)
+    $reply.Visible     = $false
+    $send = New-PillButton 'Send' '' ($form.Width - 90) $btnY $blue
+    $send.Size    = New-Object System.Drawing.Size(76, 30)
+    $send.Visible = $false
+    function Send-Reply {
+        $t = $reply.Text.Trim()
+        if ($t.Length -eq 0) { return }
+        Send-Line ('BANNER_REPLY ' + [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($t)))
+    }
+    function Show-ReplyBox([bool]$on) {
+        foreach ($b in @($yes, $other, $no)) { $b.Visible = -not $on }
+        $reply.Visible = $on; $send.Visible = $on
+        if ($on) { $form.TakeKeyboard(); [void]$reply.Focus() }
+        elseif ($script:userWindow -ne [IntPtr]::Zero) { [void][NoActivateBannerForm]::SetForegroundWindow($script:userWindow) }
+    }
+    $other.Add_Click({ Show-ReplyBox $true })
+    $send.Add_Click({ Send-Reply })
+    $reply.Add_KeyDown({
+        param($s, $e)
+        if ($e.KeyCode -eq 'Return') { $e.SuppressKeyPress = $true; Send-Reply }
+        elseif ($e.KeyCode -eq 'Escape') { $e.SuppressKeyPress = $true; $reply.Text = ''; Show-ReplyBox $false }
+    })
+
     $form.Height = $btnY + 30 + 14
-    $form.Controls.AddRange(@($dot, $title, $msg, $yes, $no))
+    $form.Controls.AddRange(@($dot, $title, $msg, $yes, $other, $no, $reply, $send))
     Set-PillShape $form 14
 
     # Slow blue pulse on the dot — calmer than the red "recording" blink.

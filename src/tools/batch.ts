@@ -237,6 +237,7 @@ export function getBatchTools(): ToolDefinition[] {
   return [
     {
       name: 'batch',
+      annotations: { title: 'Run several tool calls in one round trip', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
       description:
         'Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is ' +
         '{ name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like ' +

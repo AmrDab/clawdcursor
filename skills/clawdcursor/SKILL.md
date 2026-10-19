@@ -104,8 +104,8 @@ batch({steps})              Collapse N tool calls into one round-trip (see "Exec
 ```
 
 Pick a compound FIRST based on what kind of operation it is, then set the
-`action` enum, then supply the args. The catalog is ~1,500 tokens - ~12× smaller
-than the granular surface - so small models (Haiku, Kimi, Ollama) stay focused.
+`action` enum, then supply the args. The catalog is ~7,000 tokens - about a third
+of the granular surface's ~20,000 - so small models (Haiku, Kimi, Ollama) stay focused.
 
 ### Cost tier - always use the cheapest tier that works
 

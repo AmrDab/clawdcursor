@@ -591,8 +591,9 @@ export function getA11yTools(): ToolDefinition[] {
     {
       name: 'copy_all_text',
       description:
-        'Read ALL text of the focused window / web page EXACTLY: select-all + copy, return the text, ' +
-        'then restore the clipboard. Exact characters (IDs, amounts, codes) — prefer it over OCR for ' +
+        'Read ALL text of the focused window / web page EXACTLY. Reads the document through accessibility ' +
+        'first (no keystrokes, nothing selected); where that is unavailable, select-all + copy, then the ' +
+        'clipboard is restored. Exact characters (IDs, amounts, codes) — prefer it over OCR for ' +
         'reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Never presses ' +
         'select-all while focus is in an editable field, an editor document or a list — it returns the ' +
         'accessibility text then. After a select-all copy the content stays selected (the result says so); ' +
