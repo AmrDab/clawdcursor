@@ -2,6 +2,19 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Security
+
+- **Typing never pastes the user's own clipboard.** `type` / `type_text` /
+  `smart_type` type by writing the text to the clipboard and pressing
+  Ctrl+V. On Windows the clipboard write is a fresh PowerShell with a 2 s
+  budget whose failures were ignored, so on a busy machine Ctrl+V pasted
+  whatever the user had copied — seen live: typing a URL + Enter into
+  Edge's address bar submitted the user's clipboard as a web search, twice.
+  Every paste path now reads the clipboard back first and pastes only when
+  it holds the text; otherwise it types the text key by key and says so.
+
 ## [1.5.18] - 2026-10-19 — "Something else" on the pause prompt; copy_all_text without Ctrl+A; tool annotations
 
 ### Added

@@ -16,6 +16,7 @@ import type { ToolDefinition } from './types';
 import { OcrEngine } from '../platform/ocr-engine';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
+import { writeClipboardVerified } from './paste-guard';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -914,10 +915,12 @@ export function getSmartTools(): ToolDefinition[] {
           try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ }
         }
         try {
-          await ctx.a11y.writeClipboard(text);
+          // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
+          const onClipboard = await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), text);
           await new Promise(r => setTimeout(r, 50));
           if (replace) await ctx.desktop.keyPress('mod+a');
-          await ctx.desktop.keyPress('mod+v');
+          if (onClipboard) await ctx.desktop.keyPress('mod+v');
+          else await ctx.desktop.typeText(text);
         } catch (err) {
           // The keys were refused (a system dialog owns the keyboard): nothing was typed, so the text must not stay on the
           // user's clipboard. (A paste that worked leaves it there, as smart_type always has.)

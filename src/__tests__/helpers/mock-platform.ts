@@ -20,6 +20,7 @@ import type { PlatformAdapter } from '../../platform/types';
  * expected without `as any` casts.
  */
 export function makeMockPlatform(): PlatformAdapter {
+  const clip = { value: 'prior-clipboard' };
   return {
     platform: 'win32',
     getActiveWindow: vi.fn().mockResolvedValue({
@@ -59,8 +60,9 @@ export function makeMockPlatform(): PlatformAdapter {
     keyDown: vi.fn().mockResolvedValue(undefined),
     keyUp: vi.fn().mockResolvedValue(undefined),
     typeText: vi.fn().mockResolvedValue(undefined),
-    readClipboard: vi.fn().mockResolvedValue('prior-clipboard'),
-    writeClipboard: vi.fn().mockResolvedValue(undefined),
+    // A real clipboard: what was written is what is read back (paste paths check that before pasting).
+    readClipboard: vi.fn(async () => clip.value),
+    writeClipboard: vi.fn(async (t: string) => { clip.value = t; }),
     launchApp: vi.fn().mockResolvedValue({ pid: 99, title: 'App' }),
     openApp: vi.fn().mockResolvedValue({ pid: 99, title: 'App' }),
     setWindowState: vi.fn().mockResolvedValue(true),
