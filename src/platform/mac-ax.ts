@@ -35,7 +35,7 @@ import type { InvokeAction, UiElement, WindowInfo } from './types';
 
 const execFileAsync = promisify(execFile);
 
-export type MacAxErrorKind = 'timeout' | 'locked' | 'permission' | 'unavailable' | 'failed';
+export type MacAxErrorKind = 'timeout' | 'locked' | 'permission' | 'unavailable' | 'failed' | 'partial';
 
 /** A failed AX read — thrown instead of returning an empty result. */
 export class MacAxError extends Error {
@@ -147,6 +147,9 @@ function helperError(reply: HelperFailure, what: string, act = false): MacAxErro
         '(System Settings → Privacy & Security → Accessibility).');
     case 'unavailable':
       return new MacAxError('unavailable', `${what} failed: ${reply.error ?? 'the app does not expose accessibility'}`);
+    case 'partial':
+      // A miss next to elements that did not answer: not a timeout, and not "nothing there" either.
+      return new MacAxError('partial', `${what}: ${reply.error ?? 'not found in the readable part of the window'}`);
     default:
       return new MacAxError('failed', `${what} failed: ${reply.error ?? 'unknown error'}`);
   }
@@ -449,6 +452,7 @@ export interface WindowListResult {
  */
 export async function screenLockedMessage(ax?: Pick<MacAx, 'frontmost'>, platform: NodeJS.Platform = process.platform): Promise<string | null> {
   if (platform !== 'darwin') return null;
+  if (process.env.CLAWD_NO_MAC_AX === '1') return null;      // the kill switch turns the guards off with the helper, as for the keyboard
   try {
     if (!(await (ax ?? defaultMacAx()).frontmost()).locked) return null;
   } catch { return null; }

@@ -636,10 +636,37 @@ func pressed(_ action: String, method: String, pending: Bool, extra: [String: An
     return r
 }
 
+/// A label inside a selectable row. SwiftUI sidebars (System Settings) accept AXPress on the label's text and do nothing: the
+/// selection lives on the ROW. Returns that row — only when it can be selected — or nil for any other element.
+func selectableRowAbove(_ el: AXUIElement) -> AXUIElement? {
+    guard let role = str(copyAttr(el, "AXRole").value), ["AXStaticText", "AXImage", "AXGroup", "AXCell"].contains(role) else { return nil }
+    var cur = el
+    for _ in 0..<4 {
+        guard let p = copyAttr(cur, "AXParent").value, isElement(p) else { return nil }
+        let parent = p as! AXUIElement
+        if str(copyAttr(parent, "AXRole").value) == "AXRow" { return settable(parent, "AXSelected") ? parent : nil }
+        cur = parent
+    }
+    return nil
+}
+
+/// Select the row and check that it took: the effect, not the call, is the answer. A press that "succeeded" on the label and
+/// changed nothing was reported as a click; now a selection that did not happen is a miss, and the caller clicks coordinates.
+func selectRow(_ row: AXUIElement, action: String) -> [String: Any] {
+    if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false, extra: ["alreadySelected": true]) }
+    AXUIElementSetAttributeValue(row, "AXSelected" as CFString, kCFBooleanTrue)
+    for _ in 0..<6 {
+        Thread.sleep(forTimeInterval: 0.05)
+        if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false) }
+    }
+    return miss(action, "selecting the row did not take effect — click its coordinates instead", element: row)
+}
+
 func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
     let el = h.element
     switch action {
     case "click":
+        if let row = selectableRowAbove(el) { return selectRow(row, action: action) }
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
@@ -681,6 +708,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         let state = after == nil ? "unknown" : (after == "0" ? "Off" : "On")
         return ["ok": true, "success": true, "action": action, "method": "AXPress", "data": ["toggleState": state]]
     case "select":
+        if let row = selectableRowAbove(el) { return selectRow(row, action: action) }
         if settable(el, "AXSelected"), AXUIElementSetAttributeValue(el, "AXSelected" as CFString, kCFBooleanTrue) == .success {
             return ["ok": true, "success": true, "action": action, "method": "AXSelected"]
         }
@@ -865,8 +893,11 @@ func cmdFind() -> Never {
         search(w, aim, maxDepth: 12, limit: limit * 4, stopAtExactId: idOnly, ctx: &found)
         if idOnly && found.hits.contains(where: { $0.exact }) { break }
     }
-    if found.hits.isEmpty && (timeUp() || found.unreadable > 0) {
-        fail("timeout", "the element search could not read part of the window (\(found.unreadable) element(s) did not answer) — not \"nothing found\"")
+    if found.hits.isEmpty && timeUp() {
+        fail("timeout", "the element search ran out of time before it had read the whole window (\(found.unreadable) element(s) did not answer) — not \"nothing found\"")
+    }
+    if found.hits.isEmpty && found.unreadable > 0 {
+        fail("partial", "not found in the readable part of the window (\(found.unreadable) element\(found.unreadable == 1 ? "" : "s") did not answer)")
     }
     let ranked = rankHits(found.hits, action: nil).prefix(limit)
     emit(["ok": true, "elements": ranked.map { hitDict($0, pid: app.processIdentifier) }, "truncated": timeUp() || found.unreadable > 0, "elapsedMs": elapsedMs()])
@@ -875,6 +906,9 @@ func cmdFind() -> Never {
 /// Actions that press or change something. Aimed at a role alone ("Button") they would act on whichever match ranks first —
 /// the shallowest button in the window.
 let pressingActions: Set<String> = ["click", "toggle", "select", "expand", "collapse"]
+
+/// What an agent can do when the helper declines to act on an incomplete read.
+let wayForward = " — read the tree (accessibility read_tree), then click the element's centre with computer click space:\"screen\""
 
 func cmdInvoke() -> Never {
     requireUsableSession()
@@ -915,13 +949,13 @@ func cmdInvoke() -> Never {
             emit(refuse(action, "role=\"\(aim.role ?? "")\" matches \(found.hits.count) elements — \(who)\(ranked.count > 6 ? ", …" : "") — add a name or id to pick one"))
         }
         if timeUp() || found.unreadable > 0 {
-            fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — cannot tell that only one element has this role")
+            fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — cannot tell that only one element has this role\(wayForward)")
         }
     }
     // A name that is only a substring of the best hit ("Save As…" for "Save") may be hiding its exact match in the part of the
     // window that did not answer or past the deadline: acting on that would press the wrong control.
     if !best.exact && (aim.name != nil || aim.id != nil) && (timeUp() || found.unreadable > 0) {
-        fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name)\")")
+        fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name.isEmpty ? best.ident : best.name)\")\(wayForward)")
     }
     emit(perform(action, best, appName: app.localizedName ?? "the app"))
 }

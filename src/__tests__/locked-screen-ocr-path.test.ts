@@ -6,7 +6,7 @@
  * target were missing. The AX helper and the keyboard guard already say "the screen is locked"; the tools that read the screen
  * (smart_click, smart_read, ocr_read_screen) now say the same, before they try anything, and never "no_clickable_target".
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -107,6 +107,8 @@ describe('with the screen unlocked nothing changes', () => {
 });
 
 describe('screenLockedMessage', () => {
+  beforeEach(() => { process.env.CLAWD_NO_MAC_AX = '0'; });          // (the test setup switches the helper off globally)
+  afterEach(() => { process.env.CLAWD_NO_MAC_AX = '1'; });
   const lock = async () => (await vi.importActual<typeof import('../platform/mac-ax')>('../platform/mac-ax')).screenLockedMessage;
   const front = (locked: boolean) => ({ frontmost: vi.fn(async () => ({ locked, app: null })) });
 
@@ -115,6 +117,13 @@ describe('screenLockedMessage', () => {
     expect(msg).toContain('the screen is locked');
     expect(msg).toContain('Unlock the Mac');
     expect(msg).toMatch(/caffeinate/);
+  });
+
+  it('with the kill switch (CLAWD_NO_MAC_AX=1) it never asks, so a unit test run on a locked Mac is not affected', async () => {
+    process.env.CLAWD_NO_MAC_AX = '1';
+    const ax = front(true);
+    expect(await (await lock())(ax, 'darwin')).toBeNull();
+    expect(ax.frontmost).not.toHaveBeenCalled();
   });
 
   it('unlocked, a failed probe, or another OS: null — never a reason to refuse', async () => {

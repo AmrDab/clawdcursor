@@ -787,6 +787,16 @@ describe('invoke', () => {
     expect(err.message).not.toMatch(/NOT an empty result/);
   });
 
+  // Live blind run 2026-10-19: a find for text System Settings only holds as a StaticText VALUE came back in ~110 ms as
+  // "TIMED OUT on a very large window": a quick miss plus an element that did not answer, worded as a timeout.
+  it('a find that found nothing while part of the window did not answer is "partial" — and does not say it timed out', async () => {
+    const { ax } = harness({ reply: JSON.stringify({ ok: false, kind: 'partial', error: 'not found in the readable part of the window (1 element did not answer)' }) });
+    const err = await ax.find({ processId: 7, name: 'Tahoe' }).then(() => null, e => e);
+    expect(err.kind).toBe('partial');
+    expect(err.message).toContain('not found in the readable part of the window');
+    expect(err.message).not.toMatch(/timed out/i);
+  });
+
   it('an action whose helper process was killed at our timeout could have been mid-press: look first', async () => {
     const { ax } = harness({ reply: execTimeout() });
     const err = await ax.invoke({ processId: 7, name: 'Send', action: 'click' }).then(() => null, e => e);

@@ -374,6 +374,37 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     expect((await run(['find', '--pid', String(pid), '--id', 'status'])).elements[0].value).toBe('pressed: peekButton');
   });
 
+  // A SwiftUI sidebar accepts AXPress on the label of a row and does nothing: the selection lives on the ROW. The helper said
+  // "Invoked" (System Settings > General, live blind run of 2026-10-19) and the pane never changed.
+  describe('a label inside a selectable row (a settings-style sidebar)', () => {
+    let sidePid = 0;
+    let sideProc: ChildProcess | null = null;
+    beforeAll(async () => {
+      if (!usable) return;
+      const s = await startFixture('sidebar');
+      sideProc = s.proc;
+      extra.push(s.proc);
+      sidePid = s.pid;
+    }, 60_000);
+    afterAll(() => { sideProc?.kill('SIGKILL'); });
+    const status = async () => (await run(['invoke', '--pid', String(sidePid), '--id', 'status', '--action', 'get-value'])).value;
+    const click = (id: string) => run(['invoke', '--pid', String(sidePid), '--id', id, '--action', 'click']);
+
+    it('clicking the label selects the row it is in — success is claimed only because the selection really changed', async (ctx) => {
+      if (!usable) return ctx.skip();
+      expect(await status()).toBe('idle');
+      const r = await click('sidebar.General');
+      await new Promise(res => setTimeout(res, 400));
+      expect(await status()).toBe('selected: General');
+      expect(r).toMatchObject({ ok: true, success: true });
+      // the same row again is still a success; another row moves the selection
+      expect(await click('sidebar.General')).toMatchObject({ ok: true, success: true });
+      expect(await click('sidebar.Displays')).toMatchObject({ ok: true, success: true });
+      await new Promise(res => setTimeout(res, 400));
+      expect(await status()).toBe('selected: Displays');
+    });
+  });
+
   describe('inside a live app, one hung subtree', () => {
     let slowPid = 0;
     let slowProc: ChildProcess | null = null;
@@ -401,6 +432,17 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       expect(r.reason).toBe('unreadable');
     });
 
+    it('a miss while part of the window did not answer is "not found in the readable part", not a timeout', async (ctx) => {
+      if (!usable) return ctx.skip();
+      await new Promise(res => setTimeout(res, 3_500));     // let the previous stall drain
+      const t0 = Date.now();
+      const r = await run(['find', '--pid', String(slowPid), '--name', 'no element is called this', '--ax-timeout-ms', '400', '--timeout-ms', '6000']);
+      expect(Date.now() - t0).toBeLessThan(5_000);          // a quick miss, nowhere near the deadline
+      expect(r).toMatchObject({ ok: false, kind: 'partial' });
+      expect(r.error).toMatch(/not found in the readable part of the window \(\d+ elements? did not answer\)/);
+      await new Promise(res => setTimeout(res, 3_500));     // and let ITS stall drain before the next test
+    });
+
     it('refuses to press a partial match when part of the window could not be read', async (ctx) => {
       if (!usable) return ctx.skip();
       await new Promise(res => setTimeout(res, 3_500));     // let the previous stall drain
@@ -409,6 +451,7 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       expect(r.success === true).toBe(false);
       expect(r.kind === 'timeout' || r.ok === true).toBe(true);
       expect(r.acted).toBeUndefined();                     // it only searched: nothing was pressed
+      if (r.kind === 'timeout') expect(String(r.error)).toMatch(/read_tree.*space:"screen"/);   // and it says what to do instead
       // wait the stall out (a long per-call limit, so the read queues behind it instead of failing), then look
       const status = await run(['find', '--pid', String(slowPid), '--id', 'status', '--ax-timeout-ms', '8000', '--timeout-ms', '15000']);
       expect(status.elements[0].value).toBe('idle');         // nothing was pressed

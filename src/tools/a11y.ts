@@ -536,6 +536,14 @@ export function getA11yTools(): ToolDefinition[] {
         }
         // A timeout is not "nothing there" — say so, or the agent concludes
         // a11y is useless and switches to screenshots for the rest of the session.
+        if (ctx.platform?.lastFindError === 'partial') {
+          return {
+            text: `${ctx.platform.lastFindNote ?? 'Not found in the readable part of the window.'} — it may be in the part that did not answer; this is not "nothing found". ` +
+              'Read what did answer with read_tree (text that is only a value shows there even when find by name misses it), ' +
+              'or smart_click name:"…" / ocr for text you can see.',
+            isError: true,
+          };
+        }
         if (ctx.platform?.lastFindError === 'timeout') {
           return {
             text: 'accessibility search TIMED OUT on a very large window (this is not "nothing found"). ' +

@@ -75,6 +75,7 @@ export class MacOSAdapter implements PlatformAdapter {
   /** Why the last findElements / getUiTree came back short (see PlatformAdapter). */
   lastFindScope: PlatformAdapter['lastFindScope'] = null;
   lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastFindNote: string | null = null;
   lastTreeTruncated = false;
   lastWindowListPartial: string | null = null;
 
@@ -548,6 +549,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async findElements(query: { name?: string; controlType?: string; automationId?: string; processId?: number }): Promise<UiElement[]> {
     this.lastFindError = null;
+    this.lastFindNote = null;
     // Scope an unscoped query to the active window (as the Windows adapter and
     // invokeElement do) — otherwise a name that exists in every app matches
     // whichever the walk reaches first.
@@ -568,7 +570,8 @@ export class MacOSAdapter implements PlatformAdapter {
       if (err instanceof MacAxError && (err.kind === 'locked' || err.kind === 'permission')) throw err;
       // A timeout is reported through lastFindError so the find tool can say
       // "TIMED OUT" instead of "(no elements found)" (parity with Windows).
-      this.lastFindError = err instanceof MacAxError && err.kind === 'timeout' ? 'timeout' : 'error';
+      this.lastFindError = err instanceof MacAxError && err.kind === 'timeout' ? 'timeout' : err instanceof MacAxError && err.kind === 'partial' ? 'partial' : 'error';
+      if (this.lastFindError === 'partial') this.lastFindNote = (err as MacAxError).message;
       return [];
     }
   }
