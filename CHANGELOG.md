@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.19] - 2026-10-19 — typing never pastes the user's own clipboard
 
 ### Security
 
