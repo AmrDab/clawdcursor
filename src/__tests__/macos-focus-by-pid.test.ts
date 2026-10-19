@@ -77,6 +77,20 @@ describe('focusWindow by process id', () => {
   });
 });
 
+describe('focusWindow by process name AND title', () => {
+  it('the window that has both — not the first window of that name, which may belong to the user\'s other instance', async () => {
+    const ax = fakeAx();
+    await new MacOSAdapter({ ax }).focusWindow({ processName: 'Google Chrome', title: 'canvas only' });
+    expect(ax.focusWindow).toHaveBeenCalledWith(54172, 'canvas only');
+  });
+
+  it('a name alone still takes the first window of that name', async () => {
+    const ax = fakeAx();
+    await new MacOSAdapter({ ax }).focusWindow({ processName: 'Google Chrome' });
+    expect(ax.focusWindow).toHaveBeenCalledWith(935, undefined);
+  });
+});
+
 describe('focusWindow by title alone', () => {
   it('finds the window in the list, whichever process owns it, and focuses that pid (the user\'s Chrome has the same name)', async () => {
     const ax = fakeAx();

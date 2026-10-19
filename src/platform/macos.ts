@@ -359,7 +359,11 @@ export class MacOSAdapter implements PlatformAdapter {
       const target = query.processName.toLowerCase();
       // A failed list cannot resolve the name; fall through to "nothing to match on".
       const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
-      const hit = windows.find(w => w.processName.toLowerCase() === target)
+      // With a title as well, the window that has BOTH: the first window of that name may belong to another process of the app.
+      const titleNeedle = query.title?.toLowerCase();
+      const sameName = windows.filter(w => w.processName.toLowerCase() === target);
+      const hit = (titleNeedle ? sameName.find(w => w.title.toLowerCase().includes(titleNeedle)) : undefined)
+        ?? sameName[0]
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
       if (hit) {
         processId = hit.processId;
