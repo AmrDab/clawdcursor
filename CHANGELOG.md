@@ -13,6 +13,35 @@ All notable changes to Clawd Cursor will be documented in this file.
   it; reproduced on Windows 11). Before every synthetic press, drag or scroll
   the pill now steps aside (`HIDE <ms>` on its stdin) and comes back by
   itself; double-click-to-stop is unchanged. Windows, macOS and Linux.
+- **macOS: `window focus` focuses the process you asked for.** With two
+  instances of one app (the user's Chrome and the agent's), focusing by
+  pid, title or name could raise the USER's window and still say
+  "Focused matching window." It now focuses by pid, matches titles only
+  within that process, verifies what came to the front, and says which app
+  did when it is not the requested one.
+- **Esc in the pause prompt's reply box gives the keyboard back (#255).** On
+  macOS the first key typed after Esc was lost 4–10% of the time; the
+  prompt now asks clawdcursor to refocus the user's window through the
+  platform's own focus code (macOS and Linux; Windows already did).
+- **`copy_all_text` no longer highlights the page on Linux and macOS
+  either.** It reads the document through accessibility (AT-SPI Text /
+  AXStringForTextMarkerRange) — exact text, no keystrokes, nothing selected,
+  the clipboard untouched — as Windows does since 1.5.18.
+- **macOS:** a locked screen says so on the OCR path (it read as
+  "no_clickable_target"); a click on a sidebar label selects the row and is
+  verified (System Settings "General" reported success and did nothing);
+  incomplete reads are worded as such, not as timeouts; a modifier key on
+  its own (`shift`) is a key press; after `zoom`, the reply says clicks stay
+  in full-screenshot coordinates and gives the conversion; `space:"screen"`
+  is documented as points on macOS.
+
+### Security
+
+- **`find` results are wrapped as untrusted screen content (#248)** — they
+  were rewritten by the compact surface ("mouse_down" on a page read as a
+  tool call) and not marked as data.
+- **`smart_type` puts the user's clipboard back after pasting (#243)** — a
+  typed password stayed on the clipboard.
 
 ## [1.5.19] - 2026-10-19 — typing never pastes the user's own clipboard
 
