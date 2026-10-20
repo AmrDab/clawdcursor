@@ -281,28 +281,36 @@ def run_pill():
 
     # stdin carries "HIDE <ms>" from the parent just before an agent's click: the pill steps aside so the click reaches
     # the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
-    hide_state = {'token': 0}
+    hide_state = {'token': 0, 'buf': b''}
 
     def reshow(token):
         if hide_state['token'] == token:
             win.show()
         return False
 
-    def on_stdin(source, condition):
-        if condition & (GLib.IO_HUP | GLib.IO_ERR):
-            return False
-        line = sys.stdin.readline()
-        if not line:
-            return False  # EOF: the parent closed the pipe
-        line = line.strip()
+    def on_line(line):
         if line.startswith('HIDE '):
             try:
                 ms = max(50, min(int(line[5:]), 10000))
             except ValueError:
-                return True
+                return
             hide_state['token'] += 1
             win.hide()
             GLib.timeout_add(ms, reshow, hide_state['token'])
+
+    def on_stdin(fd, condition):
+        # Raw reads, split here: a buffered readline() could keep a second line that arrived in the same read until
+        # the NEXT write woke this watch, so that HIDE came one click late.
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            return False
+        if not chunk:
+            return False  # EOF: the parent closed the pipe
+        hide_state['buf'] += chunk
+        while b'\n' in hide_state['buf']:
+            raw, hide_state['buf'] = hide_state['buf'].split(b'\n', 1)
+            on_line(raw.decode('utf-8', 'replace').strip())
         return True
 
     try:

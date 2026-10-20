@@ -26,7 +26,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`copy_all_text` no longer highlights the page on Linux and macOS
   either.** It reads the document through accessibility (AT-SPI Text /
   AXStringForTextMarkerRange) — exact text, no keystrokes, nothing selected,
-  the clipboard untouched — as Windows does since 1.5.18.
+  the clipboard untouched — as Windows does since 1.5.18. With the caret in
+  a text box on a web page, the whole page is read, not just the box.
 - **macOS:** a locked screen says so on the OCR path (it read as
   "no_clickable_target"); a click on a sidebar label selects the row and is
   verified (System Settings "General" reported success and did nothing);
@@ -42,6 +43,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   tool call) and not marked as data.
 - **`smart_type` puts the user's clipboard back after pasting (#243)** — a
   typed password stayed on the clipboard.
+- **Pasting waits for the paste to land before the clipboard is put back**
+  (`type_text`, `smart_type`, the agent's `type`). The restore ran a fixed
+  100–150 ms after Ctrl/Cmd+V; a busy app that read the clipboard later
+  pasted the user's own clipboard instead. The focused field is now watched
+  for the text (up to 1 s; a field with no readable value gets 400 ms).
 
 ## [1.5.19] - 2026-10-19 — typing never pastes the user's own clipboard
 

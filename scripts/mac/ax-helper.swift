@@ -1090,15 +1090,10 @@ func cmdPageText() -> Never {
     let app = targetApplication()
     let appEl = appElement(app.processIdentifier)
     let maxChars = Int(opts["max-chars"] ?? "") ?? 2_000_000
-    guard let focusedRef = copyAttr(appEl, "AXFocusedUIElement").value, isElement(focusedRef) else {
-        fail("failed", "nothing has the focus in \(app.localizedName ?? "the app")")
-    }
-    let focused = focusedRef as! AXUIElement
-    let a = multi(focused, ["AXRole", "AXSubrole", "AXValue"])
-    if str(a["AXRole"]) == "AXTextArea", str(a["AXSubrole"]) != "AXSecureTextField",
-       let v = str(a["AXValue"]), !v.isEmpty {
-        emit(["ok": true, "text": String(v.prefix(maxChars)), "source": "AXTextArea", "elapsedMs": elapsedMs()])
-    }
+    let focusedRef = copyAttr(appEl, "AXFocusedUIElement").value
+    let focused: AXUIElement? = focusedRef.flatMap { isElement($0) ? ($0 as! AXUIElement) : nil }
+    // The page first, as on Windows and Linux: a text box on a web page (a comment box, a compose field) is part of the
+    // page, so its draft alone is not the page's text.
     var web: AXUIElement? = nil
     var cur: AXUIElement? = focused
     var hops = 0
@@ -1107,6 +1102,26 @@ func cmdPageText() -> Never {
         guard let p = copyAttr(c, "AXParent").value, isElement(p) else { break }
         cur = (p as! AXUIElement)
         hops += 1
+    }
+    // A native editor (TextEdit, Notes): its text is the document.
+    if web == nil, let f = focused {
+        let a = multi(f, ["AXRole", "AXSubrole", "AXValue"])
+        if str(a["AXRole"]) == "AXTextArea", str(a["AXSubrole"]) != "AXSecureTextField",
+           let v = str(a["AXValue"]), !v.isEmpty {
+            emit(["ok": true, "text": String(v.prefix(maxChars)), "source": "AXTextArea", "elapsedMs": elapsedMs()])
+        }
+    }
+    // The focus is outside the page (the address bar, a toolbar): the window's first web page.
+    if web == nil, let win = keyWindow(appEl).window {
+        var queue: [AXUIElement] = [win]
+        var seen = 0
+        while !queue.isEmpty, seen < 4000, !timeUp() {
+            let el = queue.removeFirst()
+            seen += 1
+            let a = multi(el, ["AXRole", "AXChildren"])
+            if str(a["AXRole"]) == "AXWebArea" { web = el; break }
+            if let kids = a["AXChildren"] as? [AXUIElement] { queue.append(contentsOf: kids) }
+        }
     }
     guard let area = web else { fail("failed", "no web page or text document has the focus") }
     var range: CFTypeRef?

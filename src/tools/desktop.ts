@@ -12,7 +12,7 @@ import { toMouse, toImage } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
-import { writeClipboardVerified } from './paste-guard';
+import { waitForPaste, writeClipboardVerified } from './paste-guard';
 
 const IS_MAC = os.platform() === 'darwin';
 
@@ -383,7 +383,8 @@ export function getDesktopTools(): ToolDefinition[] {
               await new Promise(r => setTimeout(r, 50));
               // Paste combo is platform-specific
               await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
-              await new Promise(r => setTimeout(r, 100));
+              // Before Return and before the clipboard is put back: a slow app would otherwise paste the restored one.
+              await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, body);
             } else {
               await ctx.desktop.typeText(body);
               typedByKeys = true;

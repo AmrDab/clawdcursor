@@ -26,3 +26,35 @@ export async function writeClipboardVerified(
   }
   return false;
 }
+
+/**
+ * After Ctrl/Cmd+V, wait until the paste has landed before the clipboard is put back. The keystroke is only posted: the
+ * app reads the clipboard when it gets to it, and a busy one (an Electron app, a loaded browser tab, a remote session)
+ * could otherwise read the RESTORED clipboard — typing the user's own clipboard where the text should go.
+ *
+ * Watches the focused field for the text, up to `maxMs`. A field that shows no value (a password box, a canvas) gets a
+ * longer fixed wait instead. Never throws.
+ */
+export async function waitForPaste(
+  readFocusedValue: () => Promise<string | null | undefined>,
+  text: string,
+  opts: { minMs?: number; blindMs?: number; maxMs?: number; stepMs?: number } = {},
+): Promise<void> {
+  const { minMs = 100, blindMs = 400, maxMs = 1000, stepMs = 50 } = opts;
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const want = text.replace(/\r\n/g, '\n').trim();
+  const t0 = Date.now();
+  await sleep(minMs);
+  let readable = false;
+  while (Date.now() - t0 < maxMs) {
+    let v: string | null | undefined = null;
+    try { v = await readFocusedValue(); } catch { /* unreadable */ }
+    if (typeof v === 'string') {
+      readable = true;
+      if (!want || v.replace(/\r\n/g, '\n').includes(want)) return;
+    } else if (!readable && Date.now() - t0 >= blindMs) {
+      return;
+    }
+    await sleep(stepMs);
+  }
+}

@@ -17,7 +17,7 @@ import { OcrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
-import { writeClipboardVerified } from './paste-guard';
+import { waitForPaste, writeClipboardVerified } from './paste-guard';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -932,9 +932,13 @@ export function getSmartTools(): ToolDefinition[] {
           if (prior !== null) await ctx.a11y.writeClipboard(prior).catch(() => {});
           throw err;
         }
-        await new Promise(r => setTimeout(r, 100));
-        // The paste has landed: put the user's clipboard back, as type_text does (#243).
-        if (prior !== null) await ctx.a11y.writeClipboard(prior).catch(() => {});
+        // Once the paste has landed, put the user's clipboard back, as type_text does (#243).
+        if (prior !== null) {
+          await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, text);
+          await ctx.a11y.writeClipboard(prior).catch(() => {});
+        } else {
+          await new Promise(r => setTimeout(r, 100));
+        }
         ctx.a11y.invalidateCache();
 
         const active = await ctx.a11y.getActiveWindow().catch(() => null);

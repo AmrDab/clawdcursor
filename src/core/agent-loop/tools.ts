@@ -40,7 +40,7 @@ import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { writeClipboardVerified } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified } from '../../tools/paste-guard';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -856,7 +856,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
             }
             await sleep(40);
             await ctx.platform.keyPress('mod+v');
-            await sleep(150);
+            // A slow app reads the clipboard late: restoring too early would paste the user's own clipboard.
+            await waitForPaste(async () => (await ctx.platform.getFocusedElement())?.value, body, { minMs: 150 });
             await ctx.platform.writeClipboard(prior).catch(() => {});
             prior = null;
           }
