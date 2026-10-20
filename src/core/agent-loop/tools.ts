@@ -371,6 +371,11 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const value = String(args.value ?? '');
         const controlType = typeof args.controlType === 'string' ? args.controlType : undefined;
         const processId = typeof args.processId === 'number' ? args.processId : undefined;
+        // No name, no ref: there is no field to set. The keyboard fallback below would otherwise pick the window's
+        // LARGEST editable — whatever it is — and type into it (seen live: an address bar, reported as success).
+        if (!name.trim()) {
+          return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
+        }
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'set-value', value });
         await sleep(150);
         if (res.success) return { success: true, text: `Set "${name}" = ${value.length} chars`, targetLabel: name };

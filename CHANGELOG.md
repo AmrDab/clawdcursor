@@ -2,6 +2,21 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **`set_value` with no field name types nothing.** It fell back to typing
+  into the window's largest editable field (seen live: the browser's
+  address bar) and reported `Set "" = … chars`. It now fails and says to
+  name the field, pass a `compile_ui` reference, or use `type`.
+- Preferences seeding for the agent's own browser profile no longer checks
+  for the file before reading it (CodeQL `js/file-system-race`).
+
+### Changed
+
+- Dependencies: vitest 5, playwright 1.64, ws 8.22, supertest 7.3.
+
 ## [1.5.20] - 2026-10-20
 
 ### Fixed
