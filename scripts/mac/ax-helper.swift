@@ -1115,7 +1115,7 @@ func cmdPageText() -> Never {
     if web == nil, let win = keyWindow(appEl).window {
         var queue: [AXUIElement] = [win]
         var seen = 0
-        while !queue.isEmpty, seen < 4000, !timeUp() {
+        while !queue.isEmpty, seen < 1500, !timeUp() {
             let el = queue.removeFirst()
             seen += 1
             let a = multi(el, ["AXRole", "AXChildren"])

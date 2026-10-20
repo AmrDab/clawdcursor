@@ -17,12 +17,27 @@ describe('waitForPaste', () => {
     expect(Date.now() - t0).toBeLessThan(1000);
   });
 
-  it('a field that never shows the text is waited on up to the limit, not forever', async () => {
+  it('a field that changes but never shows the text is waited on up to the limit, not forever', async () => {
+    let n = 0;
     const t0 = Date.now();
-    await waitForPaste(async () => 'something else', 'hello', { minMs: 10, stepMs: 10, maxMs: 200 });
+    await waitForPaste(async () => `typing ${n++}`, 'hello', { minMs: 10, stepMs: 10, blindMs: 50, maxMs: 200 });
     const took = Date.now() - t0;
     expect(took).toBeGreaterThanOrEqual(190);
     expect(took).toBeLessThan(1000);
+  });
+
+  it('a field whose value never changes (a code editor that does not report its text) gets only the blind wait', async () => {
+    const t0 = Date.now();
+    await waitForPaste(async () => '', 'hello', { minMs: 10, stepMs: 10, blindMs: 100, maxMs: 2000 });
+    const took = Date.now() - t0;
+    expect(took).toBeGreaterThanOrEqual(95);
+    expect(took).toBeLessThan(600);
+  });
+
+  it('a read that hangs (a slow AT-SPI call) cannot push the wait past the limit', async () => {
+    const t0 = Date.now();
+    await waitForPaste(() => new Promise<string>(() => {}), 'hello', { minMs: 10, maxMs: 150 });
+    expect(Date.now() - t0).toBeLessThan(600);
   });
 
   it('a field that exposes no value (a password box) gets the fixed blind wait', async () => {

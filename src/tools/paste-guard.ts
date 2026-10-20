@@ -32,8 +32,9 @@ export async function writeClipboardVerified(
  * app reads the clipboard when it gets to it, and a busy one (an Electron app, a loaded browser tab, a remote session)
  * could otherwise read the RESTORED clipboard — typing the user's own clipboard where the text should go.
  *
- * Watches the focused field for the text, up to `maxMs`. A field that shows no value (a password box, a canvas) gets a
- * longer fixed wait instead. Never throws.
+ * Watches the focused field for the text, up to `maxMs`. A field that shows no value (a password box), or whose value
+ * never changes (a canvas or code editor that does not report its text), gets the shorter `blindMs` instead. A slow
+ * read (AT-SPI spawns a process per read) cannot push the wait past `maxMs`. Never throws.
  */
 export async function waitForPaste(
   readFocusedValue: () => Promise<string | null | undefined>,
@@ -41,20 +42,24 @@ export async function waitForPaste(
   opts: { minMs?: number; blindMs?: number; maxMs?: number; stepMs?: number } = {},
 ): Promise<void> {
   const { minMs = 100, blindMs = 400, maxMs = 1000, stepMs = 50 } = opts;
-  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const sleep = (ms: number) => new Promise<null>(r => setTimeout(() => r(null), ms));
   const want = text.replace(/\r\n/g, '\n').trim();
   const t0 = Date.now();
   await sleep(minMs);
-  let readable = false;
-  while (Date.now() - t0 < maxMs) {
+  let first: string | undefined;
+  let changed = false;
+  for (;;) {
+    const left = maxMs - (Date.now() - t0);
+    if (left <= 0) return;
     let v: string | null | undefined = null;
-    try { v = await readFocusedValue(); } catch { /* unreadable */ }
+    try { v = await Promise.race([readFocusedValue(), sleep(left)]); } catch { /* unreadable */ }
     if (typeof v === 'string') {
-      readable = true;
-      if (!want || v.replace(/\r\n/g, '\n').includes(want)) return;
-    } else if (!readable && Date.now() - t0 >= blindMs) {
-      return;
+      const norm = v.replace(/\r\n/g, '\n');
+      if (!want || norm.includes(want)) return;
+      if (first === undefined) first = norm;
+      else if (norm !== first) changed = true;
     }
+    if (!changed && Date.now() - t0 >= blindMs) return;
     await sleep(stepMs);
   }
 }

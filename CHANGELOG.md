@@ -47,7 +47,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   (`type_text`, `smart_type`, the agent's `type`). The restore ran a fixed
   100–150 ms after Ctrl/Cmd+V; a busy app that read the clipboard later
   pasted the user's own clipboard instead. The focused field is now watched
-  for the text (up to 1 s; a field with no readable value gets 400 ms).
+  for the text (up to 1 s; a field that reports no value, or one that never
+  changes, gets 400 ms).
 
 ## [1.5.19] - 2026-10-19 — typing never pastes the user's own clipboard
 
