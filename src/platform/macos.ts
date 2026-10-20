@@ -581,6 +581,11 @@ export class MacOSAdapter implements PlatformAdapter {
     }
   }
 
+  /** The frontmost document's text through accessibility (AX) — no Cmd+A, nothing selected, clipboard untouched. */
+  async getPageText(): Promise<{ text: string; name?: string } | null> {
+    return (await this.ax.pageText?.().catch(() => null)) ?? null;
+  }
+
   async getFocusedElement(): Promise<UiElement | null> {
     // Optional context for callers; a failed read is "nothing focused", as it always was.
     try {

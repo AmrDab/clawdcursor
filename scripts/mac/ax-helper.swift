@@ -1079,6 +1079,49 @@ func cmdType() -> Never {
     emit(["ok": true, "typed": typed])
 }
 
+// MARK: - pagetext
+
+/// The whole text of the frontmost app's document — what VoiceOver reads — with no keystrokes: nothing is selected and
+/// the clipboard is not touched (copy_all_text pressed Cmd+A / Cmd+C, which left the page highlighted). An editor with the
+/// focus (AXTextArea): its value. A web page (AXWebArea holding the focus): AXStringForTextMarkerRange over the whole area.
+/// A password field is never read.
+func cmdPageText() -> Never {
+    requireUsableSession()
+    let app = targetApplication()
+    let appEl = appElement(app.processIdentifier)
+    let maxChars = Int(opts["max-chars"] ?? "") ?? 2_000_000
+    guard let focusedRef = copyAttr(appEl, "AXFocusedUIElement").value, isElement(focusedRef) else {
+        fail("failed", "nothing has the focus in \(app.localizedName ?? "the app")")
+    }
+    let focused = focusedRef as! AXUIElement
+    let a = multi(focused, ["AXRole", "AXSubrole", "AXValue"])
+    if str(a["AXRole"]) == "AXTextArea", str(a["AXSubrole"]) != "AXSecureTextField",
+       let v = str(a["AXValue"]), !v.isEmpty {
+        emit(["ok": true, "text": String(v.prefix(maxChars)), "source": "AXTextArea", "elapsedMs": elapsedMs()])
+    }
+    var web: AXUIElement? = nil
+    var cur: AXUIElement? = focused
+    var hops = 0
+    while let c = cur, hops < 60, !timeUp() {
+        if str(copyAttr(c, "AXRole").value) == "AXWebArea" { web = c; break }
+        guard let p = copyAttr(c, "AXParent").value, isElement(p) else { break }
+        cur = (p as! AXUIElement)
+        hops += 1
+    }
+    guard let area = web else { fail("failed", "no web page or text document has the focus") }
+    var range: CFTypeRef?
+    guard AXUIElementCopyParameterizedAttributeValue(area, "AXTextMarkerRangeForUIElement" as CFString, area, &range) == .success,
+          let markers = range else {
+        fail("failed", "the page does not expose its text range")
+    }
+    var out: CFTypeRef?
+    guard AXUIElementCopyParameterizedAttributeValue(area, "AXStringForTextMarkerRange" as CFString, markers, &out) == .success,
+          let text = out as? String, !text.isEmpty else {
+        fail("failed", "the page did not return its text")
+    }
+    emit(["ok": true, "text": String(text.prefix(maxChars)), "source": "AXWebArea", "elapsedMs": elapsedMs()])
+}
+
 switch command {
 case "frontmost": cmdFrontmost()
 case "windows": cmdWindows()
@@ -1090,5 +1133,6 @@ case "find": cmdFind()
 case "invoke": cmdInvoke()
 case "type": cmdType()
 case "focus": cmdFocus()
-default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus [options] (got \"\(command)\")")
+case "pagetext": cmdPageText()
+default: fail("failed", "usage: ax-helper windows|active|frontmost|apps|focused|tree|find|invoke|type|focus|pagetext [options] (got \"\(command)\")")
 }

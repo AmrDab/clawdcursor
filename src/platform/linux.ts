@@ -729,6 +729,23 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
+  /** The active window's document (or focused editor) text through AT-SPI — no keystrokes, no selection, no clipboard. */
+  async getPageText(): Promise<{ text: string; name?: string } | null> {
+    if (!this.atspiAvailable) return null;
+    try {
+      const scope = await this.a11yScopeArgs();
+      const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'page-text', ...scope], {
+        timeout: A11Y_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024,
+      });
+      const data = JSON.parse(stdout) as { text?: unknown; name?: unknown };
+      return typeof data.text === 'string' && data.text.trim()
+        ? { text: data.text, name: typeof data.name === 'string' ? data.name : undefined }
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
   async invokeElement(query: {
     name?: string;
     controlType?: string;

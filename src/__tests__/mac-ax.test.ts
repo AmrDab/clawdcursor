@@ -1537,3 +1537,22 @@ describe('typeUnicode: text outside ASCII typed as itself (#242)', () => {
     expect((err as Error).message).toMatch(/Nothing was pressed or changed/);
   });
 });
+
+describe('pageText: the document text with no keystrokes (copy_all_text without Cmd+A)', () => {
+  it("runs the helper's pagetext command and returns the text", async () => {
+    const { ax, calls } = harness({ reply: '{"ok":true,"text":"Page paragraph ABC-123","source":"AXWebArea"}' });
+    expect(await ax.pageText!()).toEqual({ text: 'Page paragraph ABC-123' });
+    expect(calls[0].args[0]).toBe('pagetext');
+  });
+
+  it('a page that cannot be read this way is null (the caller falls back), never an exception', async () => {
+    const { ax } = harness({ reply: '{"ok":false,"kind":"failed","error":"the page does not expose its text range"}' });
+    expect(await ax.pageText!()).toBeNull();
+  });
+
+  it('no helper yet: null at once — it does not wait for the build', async () => {
+    const { ax, calls } = harness({ helper: null });
+    expect(await ax.pageText!()).toBeNull();
+    expect(calls).toHaveLength(0);
+  });
+});

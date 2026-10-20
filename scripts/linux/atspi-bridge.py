@@ -396,6 +396,93 @@ def _find_focused(acc: Any, depth: int) -> Optional[Any]:
     return None
 
 
+# ── Command: page-text ───────────────────────────────────────────
+# The whole text of the active window's document — what a screen reader reads — with no keystrokes: nothing is
+# selected and the clipboard is not touched (copy_all_text used Ctrl+A / Ctrl+C, which left the page highlighted).
+
+EMBEDDED = '￼'
+BLOCK_ROLES = ('paragraph', 'heading', 'section', 'list item', 'table row', 'form', 'article', 'block quote',
+               'document web', 'document text', 'document frame', 'separator')
+
+
+def full_text(acc: Any, depth: int = 0, budget: Optional[list] = None) -> str:
+    """Text of `acc` with every embedded-object character replaced by its child's own text (Chromium and Gecko put
+    links, paragraphs and frames into the parent's text as U+FFFC)."""
+    if budget is None:
+        budget = [200_000]                       # nodes, so a huge page cannot run away
+    if acc is None or depth > 60 or budget[0] <= 0:
+        return ''
+    budget[0] -= 1
+    text = read_text(acc, 2_000_000)
+    n = safe(lambda: acc.get_child_count(), 0) or 0
+    children = [safe(lambda i=i: acc.get_child_at_index(i)) for i in range(n)]
+    if text is None:                              # no Text interface: concatenate the children
+        parts = [full_text(c, depth + 1, budget) for c in children]
+        return '\n'.join(p for p in parts if p)
+    if EMBEDDED not in text:
+        return text
+    out, k = [], 0
+    for ch in text:
+        if ch == EMBEDDED and k < len(children):
+            child = children[k]
+            k += 1
+            inner = full_text(child, depth + 1, budget)
+            role = safe(lambda: child.get_role_name(), '') or ''
+            out.append(f'\n{inner}\n' if role in BLOCK_ROLES else inner)
+        elif ch != EMBEDDED:
+            out.append(ch)
+    return ''.join(out)
+
+
+def _first_document(acc: Any, depth: int) -> Optional[Any]:
+    if acc is None or depth > 25:
+        return None
+    role = safe(lambda: acc.get_role_name(), '') or ''
+    if role.startswith('document') and safe(lambda: acc.get_text_iface()):
+        return acc
+    n = safe(lambda: acc.get_child_count(), 0) or 0
+    for i in range(n):
+        hit = _first_document(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
+        if hit is not None:
+            return hit
+    return None
+
+
+def cmd_page_text(process_id: Optional[int], window_title: Optional[str] = None,
+                  exclude_pids: Optional[set] = None) -> dict:
+    app = active_application(process_id, window_title, exclude_pids)
+    if app is None:
+        return {"error": "no active application"}
+    tops = toplevels_active_first(app)
+    if not tops:
+        return {"error": "the active application has no window"}
+    top = tops[0]
+    focused = _find_focused(top, 1)
+    # An editor or a text box with the focus: its own text.
+    if focused is not None and has_state(focused, Atspi.StateType.EDITABLE) \
+            and not has_state(focused, Atspi.StateType.SINGLE_LINE):
+        text = read_text(focused, 2_000_000)
+        if text:
+            return {"text": text, "name": safe(lambda: focused.get_name(), '') or ''}
+    # A page: the document holding the focus, else the window's first document.
+    doc, a, hops = None, focused, 0
+    while a is not None and hops < 60:
+        role = safe(lambda: a.get_role_name(), '') or ''
+        if role.startswith('document') and safe(lambda: a.get_text_iface()):
+            doc = a
+            break
+        a = safe(lambda: a.get_parent())
+        hops += 1
+    if doc is None:
+        doc = _first_document(top, 1)
+    if doc is None:
+        return {"error": "no document with text in the active window"}
+    text = full_text(doc)
+    if not text.strip():
+        return {"error": "the document has no text"}
+    return {"text": text.strip(), "name": safe(lambda: doc.get_name(), '') or ''}
+
+
 # ── Command dispatch ─────────────────────────────────────────────
 
 def on_screen(el: dict) -> bool:
@@ -685,7 +772,7 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
 
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument('--cmd', required=True, choices=['get-tree', 'find', 'focused', 'invoke'])
+    p.add_argument('--cmd', required=True, choices=['get-tree', 'find', 'focused', 'invoke', 'page-text'])
     p.add_argument('--name', default=None)
     p.add_argument('--role', default=None)
     p.add_argument('--process-id', type=int, default=None)
@@ -706,6 +793,8 @@ def main() -> int:
             result = cmd_find(args.name, args.role, args.process_id, args.window_title, excl)
         elif args.cmd == 'focused':
             result = cmd_focused(args.process_id, args.window_title, excl)
+        elif args.cmd == 'page-text':
+            result = cmd_page_text(args.process_id, args.window_title, excl)
         elif args.cmd == 'invoke':
             result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value,
                                 args.window_title, excl)

@@ -521,6 +521,11 @@ export interface MacAx {
    * when nothing has focus. Control types use the names get-focused-element.jxa used ("Edit").
    */
   focusedElement(processId?: number): Promise<UiElement | null>;
+  /**
+   * The frontmost app's document text — a focused editor's value, or the web page holding the focus — read through
+   * accessibility with no keystrokes. Null when it can't be read this way (the caller falls back).
+   */
+  pageText?(): Promise<{ text: string } | null>;
   /** Start building the helper now (background, once), so the first real call already has it. */
   prepare(): void;
 }
@@ -774,6 +779,20 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       } catch (err) {
         if (isTimeout(err)) throw timeoutError(what, LSAPPINFO_TIMEOUT_MS);
         return null;
+      }
+    },
+
+    async pageText(): Promise<{ text: string } | null> {
+      try {
+        const reply = await viaHelper(
+          ['pagetext', '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
+          HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
+          'page text',
+          { waitForBuild: false },
+        );
+        return reply && typeof reply.text === 'string' && reply.text.trim() ? { text: reply.text } : null;
+      } catch {
+        return null; // not readable this way: the caller falls back
       }
     },
 
