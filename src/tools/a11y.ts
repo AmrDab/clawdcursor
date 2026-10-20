@@ -14,6 +14,7 @@ import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep } from './blind-hints';
+import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -530,9 +531,9 @@ export function getA11yTools(): ToolDefinition[] {
           uiaHits = (elements || []).map((el: any) => ({ ...el, enabled: el.enabled ?? el.isEnabled }));
         }
         if (uiaHits.length) {
-          const lines = [SCREEN_COORDS_NOTE, ...uiaHits.slice(0, 20).map(formatElement)];
-          if (uiaHits.length > 20) lines.push(`... and ${uiaHits.length - 20} more`);
-          return { text: lines.join('\n') };
+          // Element names are what the screen said: data, never instructions — and never rewritten by the compact surface (#248).
+          const more = uiaHits.length > 20 ? `\n... and ${uiaHits.length - 20} more` : '';
+          return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(uiaHits.slice(0, 20).map(formatElement).join('\n'))}${more}` };
         }
         // A timeout is not "nothing there" — say so, or the agent concludes
         // a11y is useless and switches to screenshots for the rest of the session.
