@@ -46,6 +46,32 @@ describe('NativeDesktop.connect() on macOS with the screenshot-helper', () => {
     expect(d.getDpiRatio()).toBe(2);                     // OCR → screen coords divide by this
   });
 
+  it('no helper and a failed grab: connects anyway with the NSScreen size, so tools that never capture keep working (#244)', async () => {
+    const nut = await import('@nut-tree-fork/nut-js');
+    helper.capture.mockRejectedValueOnce(new Error('helper missing'));
+    (nut.screen.grab as any).mockRejectedValueOnce(new Error('Failed to capture screen'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const d = new NativeDesktop(config);
+    await expect(d.connect()).resolves.toBeUndefined();
+    expect(d.getDpiRatio()).toBe(2);
+    expect(warn.mock.calls.some(c => /Screen capture unavailable/.test(String(c[0])))).toBe(true);
+    // A screenshot itself then fails with what to do about it.
+    helper.capture.mockRejectedValueOnce(new Error('helper missing'));
+    (nut.screen.grab as any).mockRejectedValueOnce(new Error('Failed to capture screen'));
+    await expect(d.captureScreen()).rejects.toThrow(/Screen capture unavailable on macOS.*Screen Recording/);
+    warn.mockRestore();
+  });
+
+  it('a failed grab with NSScreen unreadable too still fails connect() (no size to work with)', async () => {
+    const nut = await import('@nut-tree-fork/nut-js');
+    nsScreen.value = null;
+    helper.capture.mockRejectedValueOnce(new Error('helper missing'));
+    (nut.screen.grab as any).mockRejectedValueOnce(new Error('Failed to capture screen'));
+    const quiet = [vi.spyOn(console, 'warn').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
+    await expect(new NativeDesktop(config).connect()).rejects.toThrow(/Failed to capture screen/);
+    quiet.forEach(s => s.mockRestore());
+  });
+
   it('keeps dpiRatio at 1 when NSScreen is unreadable, without failing connect()', async () => {
     nsScreen.value = null;
     const d = new NativeDesktop(config);

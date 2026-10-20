@@ -259,9 +259,21 @@ export class NativeDesktop extends EventEmitter {
         }
       } else {
         // Grab a screenshot to determine screen dimensions
-        const img = await screen.grab();
-        this.screenWidth = img.width;
-        this.screenHeight = img.height;
+        try {
+          const img = await screen.grab();
+          this.screenWidth = img.width;
+          this.screenHeight = img.height;
+        } catch (err: any) {
+          // macOS (#244): a failed grab (no Screen Recording grant, no screenshot-helper) took every tool down with it,
+          // even the ones that never look at the screen. NSScreen gives the exact physical size without a capture, so
+          // only screenshots and OCR fail — when they run. Elsewhere there is no capture-free size that is safe for
+          // the DPI math below, so a failed probe still fails here.
+          const main = IS_MAC ? await readMainScreenInfo() : null;
+          if (!main) throw err;
+          this.screenWidth = Math.round(main.logicalWidth * main.backingScaleFactor);
+          this.screenHeight = Math.round(main.logicalHeight * main.backingScaleFactor);
+          console.warn(`⚠️  Screen capture unavailable (${err?.message || err}): screenshots and OCR will fail until Screen Recording is granted to this app (System Settings → Privacy & Security). Everything else works.`);
+        }
       }
 
       // Calculate scale factor
@@ -356,7 +368,13 @@ export class NativeDesktop extends EventEmitter {
       }
     }
 
-    const img = await this.grab();
+    let img: GrabImage;
+    try {
+      img = await this.grab();
+    } catch (err: any) {
+      if (!IS_MAC) throw err;
+      throw new Error(`Screen capture unavailable on macOS (${err?.message || err}). Grant Screen Recording to the app running clawdcursor (System Settings → Privacy & Security → Screen Recording), or install the Xcode Command Line Tools so its screenshot helper builds. Tools that do not capture the screen still work.`, { cause: err });
+    }
 
     // Update screen dimensions in case of resolution change
     this.screenWidth = img.width;

@@ -10,6 +10,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   into the window's largest editable field (seen live: the browser's
   address bar) and reported `Set "" = … chars`. It now fails and says to
   name the field, pass a `compile_ui` reference, or use `type`.
+- **macOS: a failed screen capture at startup no longer breaks every tool
+  (#244).** With no screenshot helper and no Screen Recording grant, the
+  startup probe failed and took `window`, `key` and `accessibility` down
+  with it. The screen size now comes from NSScreen; only screenshots and OCR
+  fail, and they say how to fix it.
 - Preferences seeding for the agent's own browser profile no longer checks
   for the file before reading it (CodeQL `js/file-system-race`).
 
