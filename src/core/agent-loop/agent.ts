@@ -480,12 +480,16 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           const reason = String(call.args.message ?? call.args.reason ?? '').trim() || 'The agent needs your help to continue.';
           // done_when: the run continues the moment the user's step shows on screen. Already true = no pause needed.
           let doneWhen: (() => Promise<boolean>) | undefined;
+          let donePollMs: number | undefined;
           const rawDone = (call.args as Record<string, unknown>).done_when;
           if (call.name === 'ask_user' && rawDone !== undefined && rawDone !== null) {
             const parsed = parseAssertions(rawDone);
             const deps2 = { adapter: deps.adapter, ocrText: async () => (await reactiveOcr().recognizeScreen()).fullText ?? '' };
             const now = 'error' in parsed ? null : await checkAssertions(parsed.assertions, deps2).catch(() => null);
+            const selfMatch = 'error' in parsed ? undefined
+              : parsed.assertions.find(a => a.type === 'ocr_contains' && reason.toLowerCase().includes(a.value.toLowerCase()));
             const problem = 'error' in parsed ? `done_when rejected: ${parsed.error}`
+              : selfMatch ? `done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is part of your message, which the prompt shows on screen — OCR would find it there at once`
               : now?.ok ? `done_when is already true, so there is nothing to wait for — pick conditions that only become true after the user's step:
 ${renderReport(now)}` : null;
             if (problem) {
@@ -497,9 +501,12 @@ ${renderReport(now)}` : null;
               });
               continue;
             }
-            if (!('error' in parsed)) doneWhen = async () => (await checkAssertions(parsed.assertions, deps2)).ok;
+            if (!('error' in parsed)) {
+              doneWhen = async () => (await checkAssertions(parsed.assertions, deps2)).ok;
+              if (parsed.assertions.some(a => a.type === 'ocr_contains')) donePollMs = 5_000; // OCR per check is heavy
+            }
           }
-          const outcome = await input.pause({ message: reason, doneWhen });
+          const outcome = await input.pause({ message: reason, doneWhen, donePollMs });
           if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
           if (outcome && typeof outcome === 'object') {
             log.info('agent.pause.replied', { turn, tool: call.name });
@@ -512,11 +519,11 @@ ${renderReport(now)}` : null;
             });
             continue;
           }
-          if (outcome === 'resumed' || outcome === 'resumed_unverified') {
-            log.info('agent.pause.resumed', { turn, tool: call.name, verified: outcome === 'resumed' });
+          if (outcome === 'resumed' || outcome === 'resumed_unverified' || outcome === 'detected') {
+            log.info('agent.pause.resumed', { turn, tool: call.name, verified: outcome === 'resumed', detected: outcome === 'detected' });
             holder.invalidate(); // the user changed the screen — mint a fresh map
             const lead = call.name === 'give_up' ? 'Not given up: you were paused for the user. ' : '';
-            toolResults.push({ id: call.id, text: lead + resumedNote(reason, outcome === 'resumed'), isError: false });
+            toolResults.push({ id: call.id, text: lead + (outcome === 'detected' ? detectedNote(reason) : resumedNote(reason, outcome === 'resumed')), isError: false });
             steps.push({
               turn, toolName: call.name, toolArgs: call.args,
               result: { success: true, text: 'paused for the user → resumed' },
@@ -1112,9 +1119,15 @@ function repliedNote(what: string, reply: string): string {
     'If it still needs the user to act on screen, pause again with a clearer request. Read the fresh COMPILED UI below before acting.';
 }
 
+/** done_when came true: the step LOOKS done on screen — a page can write that, so it is not the user's confirmation. */
+function detectedNote(what: string): string {
+  return `STEP LOOKS DONE: your done_when for "${truncate(what, 160)}" came true (observed on screen, not a confirmation by the user). ` +
+    'Read the fresh COMPILED UI below and check the step really took, then continue the ORIGINAL task from where it now stands. Do not restart it.';
+}
+
 function resumedNote(what: string, byUser = true): string {
   const who = byUser
-    ? `USER RESUMED: the user handled "${truncate(what, 160)}" (they clicked Resume, or your done_when came true). `
+    ? `USER RESUMED: the user handled "${truncate(what, 160)}" and clicked Resume. `
     : `RESUMED BY AN AI, NOT CONFIRMED BY THE USER ON SCREEN: "${truncate(what, 160)}" may not be done. Check the screen; if it still needs the user, pause again. `;
   return who +
     'The screen may have changed (new page, dialog closed, focus moved): read the fresh COMPILED UI below before acting, ' +

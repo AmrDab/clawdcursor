@@ -335,3 +335,19 @@ describe('doneWhen', () => {
     expect(n).toBe(2);
   }, 10_000);
 });
+
+describe('doneWhen poll interval', () => {
+  it('checks at donePollMs, not the default', async () => {
+    vi.useFakeTimers();
+    try {
+      let n = 0;
+      const p = pauseGate.requestWithReply({ message: 'Sign in', donePollMs: 5000, doneWhen: async () => { n++; return n >= 2; } });
+      await vi.advanceTimersByTimeAsync(1600);
+      expect(n).toBe(0);                    // the 1.5 s default would have checked by now
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(n).toBe(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(await p).toEqual({ outcome: 'resumed', detected: true });
+    } finally { vi.useRealTimers(); }
+  });
+});

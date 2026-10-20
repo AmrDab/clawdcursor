@@ -2026,7 +2026,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
 
     {
       name: 'ask_user',
-      description: 'Pause and hand the desktop to the user for a step only they can do: sign in, a password or 2FA code, a CAPTCHA, a choice only they can make. Ask for that ONE step only and do everything before and after it yourself. Pass done_when (what shows on screen once they are done) so the run continues the moment they finish, with no Resume click. The run waits, then continues where it left off.',
+      description: 'Pause and hand the desktop to the user for a step only they can do: sign in, a password or 2FA code, a CAPTCHA, a choice only they can make. Ask for that ONE step only and do everything before and after it yourself. For a sign-in, a code or a CAPTCHA, pass done_when (what shows on screen once they are done) so the run continues the moment they finish, with no Resume click. Never use done_when for a confirmation or a choice: a page can make it true by itself. The run waits, then continues where it left off.',
       inputSchema: {
         type: 'object',
         properties: {

@@ -221,3 +221,52 @@ describe('pause_for_user done_when: the pause ends the moment the user\'s step i
     expect(body.confirmedByUser).toBe(true);
   });
 });
+
+describe('pause_for_user done_when — review fixes', () => {
+  function titled(initial: string) {
+    const state = { title: initial, calls: 0 };
+    const platform = {
+      getActiveWindow: vi.fn(async () => ({ title: state.title, processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+      listWindows: vi.fn(async () => { state.calls++; return [{ title: state.title, processName: 'msedge', processId: 1 }]; }),
+    };
+    return { state, ctx: { platform } as unknown as ToolContext };
+  }
+  const args = (extra: Record<string, unknown> = {}) => ({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], ...extra });
+
+  it('a detected resume is NOT reported as the user\'s confirmation (a page can make done_when true)', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    const call = pauseForUser.handler(args({ timeout: 10 }), ctx);
+    await new Promise(r => setTimeout(r, 50));
+    state.title = 'Dashboard | Glama';
+    const body = JSON.parse((await call).text);
+    expect(body.detected).toBe(true);
+    expect(body.confirmedByUser).toBe(false);
+    expect(body.next).toMatch(/not a confirmation/);
+  }, 10_000);
+
+  it('a re-call after the user finished re-attaches instead of calling it "already true" (no second prompt)', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    const first = JSON.parse((await pauseForUser.handler(args({ timeout: 1 }), ctx)).text);
+    expect(first.status).toBe('waiting');
+    state.title = 'Dashboard | Glama';                       // done, but the next 1.5 s check has not run yet
+    const again = await pauseForUser.handler(args({ timeout: 10 }), ctx);
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.text)).toMatchObject({ status: 'resumed', detected: true });
+  }, 15_000);
+
+  it('ocr_contains text that is part of the message is rejected — OCR would read it off the prompt itself', async () => {
+    const { ctx } = titled('x');
+    const r = await pauseForUser.handler({ message: 'Sign in, you will land on Dashboard', done_when: [{ type: 'ocr_contains', value: 'dashboard' }] }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/part of your message/);
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('nothing is checked when no prompt can be shown', async () => {
+    controlBanner.__setPlatformEnabledForTests(false);
+    const { state, ctx } = titled('x');
+    const r = await pauseForUser.handler(args(), ctx);
+    expect(r.isError).toBe(true);
+    expect(state.calls).toBe(0);
+  });
+});

@@ -1083,6 +1083,16 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(await seen!.doneWhen!()).toBe(true);
   });
 
+  it('a pause that ends by done_when is told to the model as "looks done", never as the user\'s confirmation', async () => {
+    const pause = vi.fn(async () => 'detected' as const);
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in to GitHub', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }] }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'signed in' }));
+    const result = await runAgent({ task: 't', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    expect(result.exit).toBe('done');
+    expect(toolResultTexts()).toMatch(/STEP LOOKS DONE.*not a confirmation by the user/s);
+    expect(toolResultTexts()).not.toMatch(/USER RESUMED/);
+  });
+
   it('ask_user whose done_when is already true does not pause: the model is told to pick a real condition', async () => {
     const pause = vi.fn(async () => 'resumed' as const);
     llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in', done_when: [{ type: 'window_title_contains', value: 'Notepad' }] }));

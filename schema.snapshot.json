@@ -1784,7 +1784,7 @@
     },
     {
       "name": "pause_for_user",
-      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping or asking them to come back to this chat. Ask for that ONE step only — e.g. \"Sign in to Glama\" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. Pass `done_when` (what is true on screen once their step is done, e.g. [{\"type\":\"window_title_contains\",\"value\":\"Dashboard\"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
+      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping or asking them to come back to this chat. Ask for that ONE step only — e.g. \"Sign in to Glama\" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{\"type\":\"element_exists\",\"name\":\"Sign out\"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user's click counts there. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -1795,7 +1795,7 @@
           },
           "done_when": {
             "type": "array",
-            "description": "Optional, recommended: conditions that become true once the user has done their step (same types as expect: window_title_contains, element_exists, element_value_contains, app_running, file_exists, ocr_contains, ...). Checked every 1.5 s; when all hold, the pause resumes by itself. Rejected if already true now.",
+            "description": "Optional, for sign-in / code / CAPTCHA steps: conditions that become true once the user has done their step (same types as expect: element_exists, element_value_contains, window_title_contains — any open window —, app_running, file_exists, ocr_contains). Checked every 1.5 s (ocr_contains: 5 s); when all hold, the pause resumes by itself. Rejected if already true now. Set on the first call; a re-call keeps the first one.",
             "items": {
               "type": "object",
               "properties": {

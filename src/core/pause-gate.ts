@@ -38,7 +38,10 @@ export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout
 export interface PauseResult {
   outcome: PauseOutcome;
   reply?: string;
-  /** Resumed because `doneWhen` came true — the user's step was seen done, no click needed. */
+  /**
+   * Resumed because `doneWhen` came true, not by a click. What it observed is screen state a page can write (a title,
+   * text), so it is NOT the user's confirmation — callers must not report it as one.
+   */
   detected?: boolean;
 }
 
@@ -48,10 +51,13 @@ export interface PauseRequest {
   /** Re-attach key (MCP callers). Same key → same pending pause. */
   key?: string;
   /**
-   * True once the user's step is done (signed in, code entered). Checked every few seconds while the pause is up; when
-   * it holds, the pause resumes by itself — the prompt goes back to amber the moment the user is done, without a click.
+   * True once the user's step is done (signed in, code entered). Checked every `donePollMs` (default 1.5 s) while the
+   * pause is up; when it holds, the pause resumes by itself — the prompt goes back to amber the moment the user is done,
+   * without a click.
    */
   doneWhen?: () => Promise<boolean>;
+  /** How often to check `doneWhen` (ms). Longer for expensive checks such as OCR. */
+  donePollMs?: number;
 }
 
 export interface PauseInfo {
@@ -112,6 +118,11 @@ class PauseGate {
     return process.env.CLAWD_NO_PAUSE !== '1' && controlBanner.canShow();
   }
 
+  /** Is the pause with this re-attach key the one on screen? (A re-call re-attaches instead of starting a new one.) */
+  isPending(key: string): boolean {
+    return this.pending?.key === key;
+  }
+
   current(): PauseInfo | null {
     return this.pending ? { ...this.pending.info } : null;
   }
@@ -160,7 +171,7 @@ class PauseGate {
       opts.signal?.removeEventListener('abort', onAbort);
     });
 
-    if (req.doneWhen) this.watchDone(entry, req.doneWhen);
+    if (req.doneWhen) this.watchDone(entry, req.doneWhen, req.donePollMs ?? DONE_POLL_MS);
 
     this.startWindow = null;
     void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
@@ -188,17 +199,17 @@ class PauseGate {
   }
 
   /** Poll `doneWhen` until it holds (resume, detected) or the pause settles some other way. Never overlaps itself. */
-  private watchDone(entry: Pending, doneWhen: () => Promise<boolean>): void {
+  private watchDone(entry: Pending, doneWhen: () => Promise<boolean>, pollMs: number): void {
     const tick = async (): Promise<void> => {
       if (this.pending !== entry) return;
       let done = false;
       try { done = await doneWhen(); } catch { /* not done */ }
       if (this.pending !== entry) return;
       if (done) { this.finish(entry, { outcome: 'resumed', detected: true }); return; }
-      const t = setTimeout(() => { void tick(); }, DONE_POLL_MS);
+      const t = setTimeout(() => { void tick(); }, pollMs);
       t.unref?.();
     };
-    const t = setTimeout(() => { void tick(); }, DONE_POLL_MS);
+    const t = setTimeout(() => { void tick(); }, pollMs);
     t.unref?.();
   }
 

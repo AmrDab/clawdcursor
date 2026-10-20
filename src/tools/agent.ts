@@ -136,7 +136,8 @@ export function getAgentTools(): ToolDefinition[] {
       description:
         'Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping or asking them to come back to this chat. ' +
         'Ask for that ONE step only — e.g. "Sign in to Glama" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. ' +
-        'Pass `done_when` (what is true on screen once their step is done, e.g. [{"type":"window_title_contains","value":"Dashboard"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. ' +
+        'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. ' +
+        'Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user\'s click counts there. ' +
         'Shows an on-screen prompt: blue glow, your message, Resume / End task. ' +
         'BOUNDED: waits up to `timeout` seconds (default 45). {status:"waiting"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). ' +
         '{status:"resumed"} → re-read the screen, then continue the task. {status:"ended"} → the user stopped it: report back.',
@@ -144,7 +145,7 @@ export function getAgentTools(): ToolDefinition[] {
         message: { type: 'string', description: 'The one thing only the user can do, short, e.g. "Sign in to GitHub". Say "then click Resume" only when you pass no done_when.', required: true },
         done_when: {
           type: 'array',
-          description: 'Optional, recommended: conditions that become true once the user has done their step (same types as expect: window_title_contains, element_exists, element_value_contains, app_running, file_exists, ocr_contains, ...). Checked every 1.5 s; when all hold, the pause resumes by itself. Rejected if already true now.',
+          description: 'Optional, for sign-in / code / CAPTCHA steps: conditions that become true once the user has done their step (same types as expect: element_exists, element_value_contains, window_title_contains — any open window —, app_running, file_exists, ocr_contains). Checked every 1.5 s (ocr_contains: 5 s); when all hold, the pause resumes by itself. Rejected if already true now. Set on the first call; a re-call keeps the first one.',
           required: false,
           items: { type: 'object', properties: { type: { type: 'string' } }, required: ['type'] },
         },
@@ -156,24 +157,6 @@ export function getAgentTools(): ToolDefinition[] {
       handler: async ({ message, timeout, done_when }, ctx) => {
         const text = String(message ?? '').trim();
         if (!text) return { text: 'pause_for_user: `message` is required (what the user should do).', isError: true };
-        // done_when: the pause ends by itself once the user's step shows on screen.
-        let doneWhen: (() => Promise<boolean>) | undefined;
-        if (done_when !== undefined && done_when !== null) {
-          const parsed = parseAssertions(done_when);
-          if ('error' in parsed) return { text: `pause_for_user: done_when rejected: ${parsed.error}`, isError: true };
-          const platform = ctx?.platform;
-          if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };
-          const deps = { adapter: platform, ocrText: async () => (await getPauseOcr().recognizeScreen()).fullText ?? '' };
-          const now = await checkAssertions(parsed.assertions, deps);
-          if (now.ok) {
-            return {
-              text: `pause_for_user: done_when is already true, so the pause would end at once. Pick conditions that only become true after the user's step (e.g. a title or element that appears once they are signed in):
-${renderReport(now)}`,
-              isError: true,
-            };
-          }
-          doneWhen = async () => (await checkAssertions(parsed.assertions, deps)).ok;
-        }
         if (!pauseGate.available()) {
           return {
             text: 'pause_for_user: no on-screen prompt is available on this machine (the overlay is off: --no-banner, CLAWD_NO_BANNER, CLAWD_NO_PAUSE, or not supported on this OS yet). Ask the user in your own chat instead.',
@@ -181,11 +164,38 @@ ${renderReport(now)}`,
           };
         }
         const key = `mcp:${normMessage(text)}`;
+        // done_when: the pause ends by itself once the user's step shows on screen. Only for a NEW pause — a re-call
+        // re-attaches to the one on screen and keeps its check (checking again here would call a just-finished step
+        // "already true" and start a second prompt).
+        let doneWhen: (() => Promise<boolean>) | undefined;
+        let donePollMs: number | undefined;
+        if (done_when !== undefined && done_when !== null && !pauseGate.isPending(key)) {
+          const parsed = parseAssertions(done_when);
+          if ('error' in parsed) return { text: `pause_for_user: done_when rejected: ${parsed.error}`, isError: true };
+          // The prompt shows the message; OCR would read it there and resume on the first check.
+          const selfMatch = parsed.assertions.find(a => a.type === 'ocr_contains' && normMessage(text).includes(normMessage(a.value)));
+          if (selfMatch) {
+            return { text: `pause_for_user: done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is part of your message, which the prompt shows on screen — OCR would find it there at once. Use text that only appears once the user is done.`, isError: true };
+          }
+          const platform = ctx?.platform;
+          if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };
+          const deps = { adapter: platform, ocrText: async () => (await getPauseOcr().recognizeScreen()).fullText ?? '' };
+          const now = await checkAssertions(parsed.assertions, deps);
+          if (now.ok) {
+            return {
+              text: `pause_for_user: done_when is already true, so the pause would end at once. Pick conditions that only become true after the user's step (e.g. an element that appears once they are signed in):\n${renderReport(now)}`,
+              isError: true,
+            };
+          }
+          doneWhen = async () => (await checkAssertions(parsed.assertions, deps)).ok;
+          // A screenshot + OCR per check is heavy; the rest are accessibility / file reads.
+          if (parsed.assertions.some(a => a.type === 'ocr_contains')) donePollMs = 5_000;
+        }
         const sec = Number(timeout);
         const boundMs = Math.min(50_000, Math.max(1_000, Number.isFinite(sec) && sec > 0 ? sec * 1000 : PAUSE_WAIT_DEFAULT_MS));
         let timer: ReturnType<typeof setTimeout> | undefined;
         const result = await Promise.race([
-          pauseGate.requestWithReply({ message: text, key, doneWhen }),
+          pauseGate.requestWithReply({ message: text, key, doneWhen, donePollMs }),
           new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
         ]);
         clearTimeout(timer);
@@ -214,10 +224,11 @@ ${renderReport(now)}`,
           return {
             text: JSON.stringify({
               status: 'resumed',
-              confirmedByUser: outcome === 'resumed',
+              // A detected resume is screen state a page can write, never the user's confirmation.
+              confirmedByUser: outcome === 'resumed' && !result?.detected,
               ...(result?.detected ? { detected: true } : {}),
               next: result?.detected
-                ? 'done_when came true: the user finished their step. Continue the task now; read the screen before acting.'
+                ? 'done_when came true, so the user\'s step looks done (observed on screen; not a confirmation by the user). Read the screen, check the step really took, then continue the task.'
                 : outcome === 'resumed'
                 ? 'The user finished and clicked Resume. The screen may have changed: read it again before acting, then continue the task.'
                 : 'Resumed by an AI (task resume), not by the user on screen: check the screen before assuming the step was done.',
