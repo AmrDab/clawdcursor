@@ -133,7 +133,7 @@ describe('pauseGate', () => {
     });
     afterEach(() => { pauseGate.__setFocusTrackerForTests(null); });
 
-    it('the pill names the app (macOS): that app, with its window title when it is the one the pause began in', async () => {
+    it('a pill that names the app (BANNER_REFOCUS <pid>): that app, with its window title when it is the one the pause began in', async () => {
       const p = pauseGate.request({ message: 'Sign in' });
       await flush();
       say('BANNER_REFOCUS 42');
