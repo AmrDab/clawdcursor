@@ -15,6 +15,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   startup probe failed and took `window`, `key` and `accessibility` down
   with it. The screen size now comes from NSScreen; only screenshots and OCR
   fail, and they say how to fix it.
+- **Windows: `copy_all_text` no longer returns lines of placeholder
+  characters.** UIA TextPattern marks each embedded object (an image, a
+  link, a frame) with U+FFFC; they are dropped, as on Linux.
 - Preferences seeding for the agent's own browser profile no longer checks
   for the file before reading it (CodeQL `js/file-system-race`).
 

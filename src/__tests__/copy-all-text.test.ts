@@ -173,6 +173,20 @@ describe('copyAllText', () => {
     expect(r).toMatchObject({ ok: true, source: 'document', text: 'line one\nline two' });
   });
 
+  it('embedded-object marks (U+FFFC) are dropped: TextPattern returned whole lines of them (live: GitHub in Edge)', async () => {
+    const raw = '￼\r\nSkip to content\r\n￼\r\n￼\r\n￼\r\nCongratulations, you\'re all set!\r\nYour device is now connected.';
+    const p = { ...withFocus('msedge', { controlType: 'Document', name: 'Device Activation' }), getPageText: vi.fn(async () => ({ text: raw })) };
+    const r = await copyAllText(p as any);
+    expect(r.text).not.toContain('￼');
+    expect(r.text).toBe('\nSkip to content\n\nCongratulations, you\'re all set!\nYour device is now connected.');
+  });
+
+  it('a page that is nothing but object marks counts as empty and falls through', async () => {
+    const p = { ...withFocus('msedge', { controlType: 'Document', name: 'page' }), getPageText: vi.fn(async () => ({ text: '￼\n￼' })) };
+    const r = await copyAllText(p as any);
+    expect(r.source).not.toBe('document');
+  });
+
   it('an empty or failing document read falls through to the guarded select-all path', async () => {
     for (const getPageText of [vi.fn(async () => ({ text: '  ' })), vi.fn(async () => null), vi.fn(async () => { throw new Error('bridge down'); })]) {
       const p = { ...withFocus('msedge', { controlType: 'Document', name: 'page' }), getPageText };
