@@ -25,7 +25,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 - Dependencies: vitest 5, playwright 1.64, ws 8.22, supertest 7.3.
 - Security: follow-redirects 1.16.1 (GHSA-q3jh-wrc6-jgq8, high), deep under
-  nut-js; clawdcursor never makes requests through it.
+  nut-js, reachable only through jimp's font loader, which clawdcursor does
+  not use.
 
 ## [1.5.20] - 2026-10-20
 
