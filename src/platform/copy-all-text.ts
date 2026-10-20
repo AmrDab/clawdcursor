@@ -85,6 +85,14 @@ const CLIPBOARD_WAIT_MS = 1500;
 type CopyPlatform = Pick<PlatformAdapter, 'getActiveWindow' | 'keyPress' | 'readClipboard' | 'writeClipboard'>
   & Partial<Pick<PlatformAdapter, 'getUiTree' | 'getFocusedElement' | 'getPageText'>>;
 
+/**
+ * Drop U+FFFC, the mark a document's text uses where an embedded object (an image, a link, a frame) sits. UIA TextPattern
+ * returns it as-is, so a Windows page read came back with lines of nothing but marks; AT-SPI text is expanded already.
+ */
+export function withoutObjectMarks(text: string): string {
+  return text.replace(/\r\n?/g, '\n').replace(/￼/g, '').replace(/^[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n');
+}
+
 /** The window's text from its accessibility tree: names (and values) in tree order. */
 async function accessibilityText(platform: CopyPlatform, pid: number | undefined): Promise<string> {
   if (!platform.getUiTree) return '';
@@ -119,7 +127,8 @@ export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextRe
   // keystrokes at all, so nothing is left selected and the clipboard is never touched.
   if (platform.getPageText) {
     const page = await platform.getPageText().catch(() => null);
-    if (page && page.text.trim()) return { ok: true, window: label, source: 'document', text: page.text };
+    const text = page ? withoutObjectMarks(page.text) : '';
+    if (text.trim()) return { ok: true, window: label, source: 'document', text };
   }
 
   // Ctrl+A acts on whatever has focus — never on an editor's content or a list of items (#249).
