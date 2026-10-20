@@ -7,7 +7,7 @@
  * window bounds by it. All three were 2× off on Retina (#154) even after the
  * mouse scale itself had been fixed.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from 'vitest';
 import type { ClawdConfig } from '../types';
 
 vi.mock('os', async (orig) => {
@@ -36,6 +36,10 @@ import { NativeDesktop } from '../platform/native-desktop';
 const config = {} as ClawdConfig;   // connect() reads nothing from it
 
 describe('NativeDesktop.connect() on macOS with the screenshot-helper', () => {
+  // connect()'s DPI step branches on process.platform (os.platform is mocked above): run as macOS on every CI runner.
+  const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  beforeAll(() => { Object.defineProperty(process, 'platform', { ...realPlatform, value: 'darwin' }); });
+  afterAll(() => { Object.defineProperty(process, 'platform', realPlatform); });
   beforeEach(() => { nsScreen.value = { logicalWidth: 2240, logicalHeight: 1260, backingScaleFactor: 2 }; helper.capture.mockClear(); });
 
   it('detects dpiRatio = physical / logical (2 on a 4480×2520 / 2240×1260 Retina panel)', async () => {
