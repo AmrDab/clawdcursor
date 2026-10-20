@@ -2,6 +2,23 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **A pause ends the moment the user's step is done.** `pause_for_user`
+  (MCP) and the built-in agent's `ask_user` take `done_when`: what is true
+  on screen once the user has done their part (the same checks as
+  `expect`). clawdcursor checks it every 1.5 s and continues by itself, so
+  the prompt goes from blue back to amber with no Resume click. A
+  `done_when` that is already true is rejected. Resume still works.
+
+### Changed
+
+- **Agents ask the user for one step only.** Tool descriptions, the MCP
+  instructions and SKILL.md now say: hand over only what the user must do
+  (a sign-in, a 2FA code) and do everything before and after it yourself.
+
 ## [1.5.21] - 2026-10-20
 
 ### Fixed
