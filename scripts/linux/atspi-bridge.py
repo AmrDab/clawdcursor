@@ -458,13 +458,7 @@ def cmd_page_text(process_id: Optional[int], window_title: Optional[str] = None,
         return {"error": "the active application has no window"}
     top = tops[0]
     focused = _find_focused(top, 1)
-    # An editor or a text box with the focus: its own text.
-    if focused is not None and has_state(focused, Atspi.StateType.EDITABLE) \
-            and not has_state(focused, Atspi.StateType.SINGLE_LINE):
-        text = read_text(focused, 2_000_000)
-        if text:
-            return {"text": text, "name": safe(lambda: focused.get_name(), '') or ''}
-    # A page: the document holding the focus, else the window's first document.
+    # The document holding the focus. A text box on a web page is part of the page: the page is what is read.
     doc, a, hops = None, focused, 0
     while a is not None and hops < 60:
         role = safe(lambda: a.get_role_name(), '') or ''
@@ -473,6 +467,12 @@ def cmd_page_text(process_id: Optional[int], window_title: Optional[str] = None,
             break
         a = safe(lambda: a.get_parent())
         hops += 1
+    # A native editor with the focus (not inside a page): its own text.
+    if doc is None and focused is not None and has_state(focused, Atspi.StateType.EDITABLE) \
+            and not has_state(focused, Atspi.StateType.SINGLE_LINE):
+        text = read_text(focused, 2_000_000)
+        if text:
+            return {"text": text, "name": safe(lambda: focused.get_name(), '') or ''}
     if doc is None:
         doc = _first_document(top, 1)
     if doc is None:
