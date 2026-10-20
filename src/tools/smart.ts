@@ -915,11 +915,10 @@ export function getSmartTools(): ToolDefinition[] {
         // Ctrl+V everywhere else — the platform-portable key combo handles
         // the OS difference without raw `process.platform` branching here.
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
-        // macOS only (the only OS where the keyboard can be refused): remember the clipboard so a refusal can put it back.
+        // Remember the user's clipboard: what we type — a password, say — must not stay on it afterwards (#243), and a
+        // refused paste must not leave it there either.
         let prior: string | null = null;
-        if (process.platform === 'darwin') {
-          try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ }
-        }
+        try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ }
         try {
           // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
           const onClipboard = await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), text);
@@ -929,11 +928,13 @@ export function getSmartTools(): ToolDefinition[] {
           else await ctx.desktop.typeText(text);
         } catch (err) {
           // The keys were refused (a system dialog owns the keyboard): nothing was typed, so the text must not stay on the
-          // user's clipboard. (A paste that worked leaves it there, as smart_type always has.)
+          // user's clipboard.
           if (prior !== null) await ctx.a11y.writeClipboard(prior).catch(() => {});
           throw err;
         }
         await new Promise(r => setTimeout(r, 100));
+        // The paste has landed: put the user's clipboard back, as type_text does (#243).
+        if (prior !== null) await ctx.a11y.writeClipboard(prior).catch(() => {});
         ctx.a11y.invalidateCache();
 
         const active = await ctx.a11y.getActiveWindow().catch(() => null);
