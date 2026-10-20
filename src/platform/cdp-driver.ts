@@ -143,9 +143,10 @@ export function seedAgentProfile(profileDir: string): void {
   const file = path.join(profileDir, 'Default', 'Preferences');
   let prefs: Record<string, any> = {};
   try {
-    if (fs.existsSync(file)) prefs = JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return; // not ours to repair
+    prefs = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    // A fresh profile has no file yet; anything else is not ours to repair.
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') return;
   }
   if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) return;
   prefs.signin = { ...(prefs.signin ?? {}), allowed: false, allowed_on_next_startup: false };

@@ -9,7 +9,7 @@ function writeJson(filePath: string, value: unknown) {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf-8');
 }
 
-describe.sequential('credential resolution', () => {
+describe('credential resolution', () => {
   const originalCwd = process.cwd();
   const originalHome = os.homedir();
 

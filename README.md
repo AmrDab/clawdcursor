@@ -42,6 +42,12 @@
 
 ## What's new
 
+**1.5.20**
+- **The on-screen pill no longer blocks the agent's own clicks.** It sits where browsers keep their tabs and address bar; it now steps aside for a moment before every click, drag or scroll, then comes back. Windows, macOS and Linux.
+- **Reading a page no longer highlights it on Linux and macOS either.** `copy_all_text` reads the document through accessibility, as on Windows: exact text, nothing selected, your clipboard untouched.
+- **Your clipboard is put back after typing** (`smart_type` too), and only once the paste has landed, so a slow app can't paste what you had copied.
+- **macOS:** `window focus` focuses the process you asked for, a locked screen says so, sidebar clicks are verified, and a bare modifier key (`shift`) works.
+
 **1.5.19** &mdash; **Typing never pastes your own clipboard.** clawdcursor types by pasting; on Windows a clipboard write could fail silently and the paste then sent whatever *you* had copied. Every paste now checks the clipboard first and types key by key when it doesn't hold the text.
 
 **1.5.18**
