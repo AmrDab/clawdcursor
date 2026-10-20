@@ -42,6 +42,11 @@
 
 ## What's new
 
+**1.5.21**
+- **`set_value` never guesses a field.** With no field name or role it used to type into the window's largest text box; it now asks you to name the field.
+- **macOS: no screen-recording permission no longer breaks everything.** Only screenshots and OCR fail, and they say how to fix it; windows, keys and accessibility keep working.
+- **Cleaner page text on Windows** (no placeholder characters), and a security update to a dependency.
+
 **1.5.20**
 - **The on-screen pill no longer blocks the agent's own clicks.** It sits where browsers keep their tabs and address bar; it now steps aside for a moment before every click, drag or scroll, then comes back. Windows, macOS and Linux.
 - **Reading a page no longer highlights it on Linux and macOS either.** `copy_all_text` reads the document through accessibility, as on Windows: exact text, nothing selected, your clipboard untouched.
