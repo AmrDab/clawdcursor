@@ -118,9 +118,14 @@ class PauseGate {
     return process.env.CLAWD_NO_PAUSE !== '1' && controlBanner.canShow();
   }
 
-  /** Is the pause with this re-attach key the one on screen? (A re-call re-attaches instead of starting a new one.) */
-  isPending(key: string): boolean {
-    return this.pending?.key === key;
+  /**
+   * Does a call with this re-attach key continue an existing pause — the one on screen, or one that settled while its
+   * caller was waiting and whose outcome is about to be handed over? Either way it is not a new pause.
+   */
+  continues(key: string): boolean {
+    if (this.pending?.key === key) return true;
+    const done = this.recent.get(key);
+    return !!done && Date.now() - done.at < RECENT_TTL_MS;
   }
 
   current(): PauseInfo | null {

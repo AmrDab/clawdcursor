@@ -258,7 +258,7 @@ describe('pause_for_user done_when — review fixes', () => {
     const { ctx } = titled('x');
     const r = await pauseForUser.handler({ message: 'Sign in, you will land on Dashboard', done_when: [{ type: 'ocr_contains', value: 'dashboard' }] }, ctx);
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/part of your message/);
+    expect(r.text).toMatch(/shown by the prompt itself/);
     expect(pauseGate.current()).toBeNull();
   });
 
@@ -269,4 +269,37 @@ describe('pause_for_user done_when — review fixes', () => {
     expect(r.isError).toBe(true);
     expect(state.calls).toBe(0);
   });
+});
+
+describe('pause_for_user done_when — second review', () => {
+  function titled(initial: string) {
+    const state = { title: initial };
+    const platform = {
+      getActiveWindow: vi.fn(async () => ({ title: state.title, processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+      listWindows: vi.fn(async () => [{ title: state.title, processName: 'msedge', processId: 1 }]),
+    };
+    return { state, ctx: { platform } as unknown as ToolContext };
+  }
+  const args = (extra: Record<string, unknown> = {}) => ({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], ...extra });
+
+  it('a re-call AFTER the pause ended by itself gets that outcome — not "already true", not a second prompt', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    expect(JSON.parse((await pauseForUser.handler(args({ timeout: 1 }), ctx)).text).status).toBe('waiting');
+    state.title = 'Dashboard | Glama';
+    await new Promise(r => setTimeout(r, 2000));           // one check has run: the pill is gone
+    expect(pauseGate.current()).toBeNull();
+    const again = await pauseForUser.handler(args({ timeout: 5 }), ctx);
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.text)).toMatchObject({ status: 'resumed', detected: true, confirmedByUser: false });
+    expect(pauseGate.current()).toBeNull();                 // no second prompt
+  }, 15_000);
+
+  for (const label of ['Resume', 'End task', 'Something else', 'the agent says']) {
+    it(`ocr_contains "${label}" is rejected — the prompt shows it itself`, async () => {
+      const { ctx } = titled('x');
+      const r = await pauseForUser.handler({ message: 'Sign in', done_when: [{ type: 'ocr_contains', value: label }] }, ctx);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/shown by the prompt itself/);
+    });
+  }
 });

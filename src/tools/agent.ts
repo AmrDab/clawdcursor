@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
 import { pauseGate } from '../core/pause-gate';
+import { pausePromptText } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { controlBanner } from '../core/banner';
 import { OcrEngine } from '../platform/ocr-engine';
@@ -169,13 +170,14 @@ export function getAgentTools(): ToolDefinition[] {
         // "already true" and start a second prompt).
         let doneWhen: (() => Promise<boolean>) | undefined;
         let donePollMs: number | undefined;
-        if (done_when !== undefined && done_when !== null && !pauseGate.isPending(key)) {
+        if (done_when !== undefined && done_when !== null && !pauseGate.continues(key)) {
           const parsed = parseAssertions(done_when);
           if ('error' in parsed) return { text: `pause_for_user: done_when rejected: ${parsed.error}`, isError: true };
-          // The prompt shows the message; OCR would read it there and resume on the first check.
-          const selfMatch = parsed.assertions.find(a => a.type === 'ocr_contains' && normMessage(text).includes(normMessage(a.value)));
+          // The prompt shows the message and its own labels; OCR would read them there and resume on the first check.
+          const shown = normMessage(pausePromptText(text));
+          const selfMatch = parsed.assertions.find(a => a.type === 'ocr_contains' && shown.includes(normMessage(a.value)));
           if (selfMatch) {
-            return { text: `pause_for_user: done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is part of your message, which the prompt shows on screen — OCR would find it there at once. Use text that only appears once the user is done.`, isError: true };
+            return { text: `pause_for_user: done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is shown by the prompt itself (your message or its buttons) — OCR would find it there at once. Use text that only appears once the user is done.`, isError: true };
           }
           const platform = ctx?.platform;
           if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };
