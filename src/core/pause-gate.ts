@@ -38,6 +38,8 @@ export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout
 export interface PauseResult {
   outcome: PauseOutcome;
   reply?: string;
+  /** Resumed because `doneWhen` came true — the user's step was seen done, no click needed. */
+  detected?: boolean;
 }
 
 export interface PauseRequest {
@@ -45,6 +47,11 @@ export interface PauseRequest {
   message: string;
   /** Re-attach key (MCP callers). Same key → same pending pause. */
   key?: string;
+  /**
+   * True once the user's step is done (signed in, code entered). Checked every few seconds while the pause is up; when
+   * it holds, the pause resumes by itself — the prompt goes back to amber the moment the user is done, without a click.
+   */
+  doneWhen?: () => Promise<boolean>;
 }
 
 export interface PauseInfo {
@@ -80,6 +87,8 @@ const defaultFocusTracker: FocusTracker = {
 };
 
 const MAX_MESSAGE = 300;
+/** How often `doneWhen` is checked while a pause is up. */
+const DONE_POLL_MS = 1500;
 const MAX_REPLY = 2000;
 const RECENT_TTL_MS = 5 * 60_000;
 
@@ -151,6 +160,8 @@ class PauseGate {
       opts.signal?.removeEventListener('abort', onAbort);
     });
 
+    if (req.doneWhen) this.watchDone(entry, req.doneWhen);
+
     this.startWindow = null;
     void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
     controlBanner.showPaused(info, (answer, reply) => { this.answer(answer, 'user', reply); }, pid => { this.refocus(pid); });
@@ -174,6 +185,21 @@ class PauseGate {
     const outcome: PauseOutcome = a === 'end' ? 'ended' : by === 'agent' ? 'resumed_unverified' : 'resumed';
     this.finish(p, { outcome });
     return { ok: true, outcome };
+  }
+
+  /** Poll `doneWhen` until it holds (resume, detected) or the pause settles some other way. Never overlaps itself. */
+  private watchDone(entry: Pending, doneWhen: () => Promise<boolean>): void {
+    const tick = async (): Promise<void> => {
+      if (this.pending !== entry) return;
+      let done = false;
+      try { done = await doneWhen(); } catch { /* not done */ }
+      if (this.pending !== entry) return;
+      if (done) { this.finish(entry, { outcome: 'resumed', detected: true }); return; }
+      const t = setTimeout(() => { void tick(); }, DONE_POLL_MS);
+      t.unref?.();
+    };
+    const t = setTimeout(() => { void tick(); }, DONE_POLL_MS);
+    t.unref?.();
   }
 
   /** A keyed caller was answered "waiting": hand its outcome over on its next call. */

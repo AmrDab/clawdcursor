@@ -109,7 +109,7 @@ indicator shows whenever an agent is driving — double-click it to stop.
 At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
 glow turns blue, the prompt says what to do, and the task continues when the
 user clicks Resume. Outside agents use
-`system pause_for_user`; `clawdcursor resume` answers from a terminal.
+`system pause_for_user` (ask for the one step only the user can do, and pass `done_when` so the pause ends as soon as they finish); `clawdcursor resume` answers from a terminal.
 
 ## Links
 

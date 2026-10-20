@@ -27,7 +27,7 @@ import { createHash } from 'node:crypto';
 import type { ScreenshotResult } from '../../platform/types';
 import { FingerprintHistory } from '../sense/fingerprint';
 import { captureSnapshot } from '../sense/snapshot';
-import { captureTaskBaseline } from '../verify/assertions';
+import { captureTaskBaseline, parseAssertions, checkAssertions, renderReport } from '../verify/assertions';
 import { UIMapHolder } from '../sense/ui-map-holder';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
@@ -478,7 +478,28 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
         // waits on the answer and continues with its history intact.
         if ((call.name === 'ask_user' || call.name === 'give_up') && input.pause) {
           const reason = String(call.args.message ?? call.args.reason ?? '').trim() || 'The agent needs your help to continue.';
-          const outcome = await input.pause({ message: reason });
+          // done_when: the run continues the moment the user's step shows on screen. Already true = no pause needed.
+          let doneWhen: (() => Promise<boolean>) | undefined;
+          const rawDone = (call.args as Record<string, unknown>).done_when;
+          if (call.name === 'ask_user' && rawDone !== undefined && rawDone !== null) {
+            const parsed = parseAssertions(rawDone);
+            const deps2 = { adapter: deps.adapter, ocrText: async () => (await reactiveOcr().recognizeScreen()).fullText ?? '' };
+            const now = 'error' in parsed ? null : await checkAssertions(parsed.assertions, deps2).catch(() => null);
+            const problem = 'error' in parsed ? `done_when rejected: ${parsed.error}`
+              : now?.ok ? `done_when is already true, so there is nothing to wait for — pick conditions that only become true after the user's step:
+${renderReport(now)}` : null;
+            if (problem) {
+              toolResults.push({ id: call.id, text: `ask_user: ${problem}`, isError: true });
+              steps.push({
+                turn, toolName: call.name, toolArgs: call.args,
+                result: { success: false, text: problem },
+                durationMs: Date.now() - turnStart, fingerprintChanged: false, thought: llmResult.text,
+              });
+              continue;
+            }
+            if (!('error' in parsed)) doneWhen = async () => (await checkAssertions(parsed.assertions, deps2)).ok;
+          }
+          const outcome = await input.pause({ message: reason, doneWhen });
           if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
           if (outcome && typeof outcome === 'object') {
             log.info('agent.pause.replied', { turn, tool: call.name });
@@ -1093,7 +1114,7 @@ function repliedNote(what: string, reply: string): string {
 
 function resumedNote(what: string, byUser = true): string {
   const who = byUser
-    ? `USER RESUMED: the user handled "${truncate(what, 160)}" and clicked Resume. `
+    ? `USER RESUMED: the user handled "${truncate(what, 160)}" (they clicked Resume, or your done_when came true). `
     : `RESUMED BY AN AI, NOT CONFIRMED BY THE USER ON SCREEN: "${truncate(what, 160)}" may not be done. Check the screen; if it still needs the user, pause again. `;
   return who +
     'The screen may have changed (new page, dialog closed, focus moved): read the fresh COMPILED UI below before acting, ' +

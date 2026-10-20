@@ -1068,6 +1068,30 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(toolResultTexts()).toMatch(/USER RESUMED.*Do not restart it/s);
   });
 
+  it('ask_user with done_when hands the pause a check that turns true once the user\'s step shows on screen', async () => {
+    let seen: { message: string; doneWhen?: () => Promise<boolean> } | undefined;
+    const pause = vi.fn(async (req: { message: string; doneWhen?: () => Promise<boolean> }) => { seen = req; return 'resumed' as const; });
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in to GitHub', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }] }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'signed in' }));
+    const adapter = makeAdapter();
+    const result = await runAgent({ task: 'star the repo', maxTurns: 6, pause }, { adapter, llm: LLM_CONFIG });
+    expect(result.exit).toBe('done');
+    expect(seen?.message).toBe('Sign in to GitHub');
+    expect(await seen!.doneWhen!()).toBe(false);                       // "Untitled - Notepad": not signed in yet
+    (adapter.listWindows as any).mockResolvedValue([{ processId: 100, processName: 'msedge', title: 'Dashboard', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false }]);
+    (adapter.getActiveWindow as any).mockResolvedValue({ processId: 100, processName: 'msedge', title: 'Dashboard', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false });
+    expect(await seen!.doneWhen!()).toBe(true);
+  });
+
+  it('ask_user whose done_when is already true does not pause: the model is told to pick a real condition', async () => {
+    const pause = vi.fn(async () => 'resumed' as const);
+    llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in', done_when: [{ type: 'window_title_contains', value: 'Notepad' }] }));
+    llmTurnQueue.push(turnCall('done', { evidence: 'x' }));
+    await runAgent({ task: 't', maxTurns: 6, pause }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    expect(pause).not.toHaveBeenCalled();
+    expect(toolResultTexts()).toMatch(/done_when is already true/);
+  });
+
   it('the user replies instead of resuming ("Something else"): the run continues with their words', async () => {
     const pause = vi.fn(async () => ({ replied: 'Use the test account in 1Password instead' }));
     llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in to Stripe, then click Resume' }));

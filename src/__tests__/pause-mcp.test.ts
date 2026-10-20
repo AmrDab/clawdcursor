@@ -169,3 +169,55 @@ describe('POST /resume', () => {
     }
   });
 });
+
+describe('pause_for_user done_when: the pause ends the moment the user\'s step is done (live 2026-10-20: the user signed in and waited on a Resume click)', () => {
+  /** A platform whose active window title the test changes, like a sign-in finishing. */
+  function titled(initial: string) {
+    const state = { title: initial };
+    const platform = {
+      getActiveWindow: vi.fn(async () => ({ title: state.title, processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+      listWindows: vi.fn(async () => [{ title: state.title, processName: 'msedge', processId: 1 }]),
+      getWindows: vi.fn(async () => [{ title: state.title, processName: 'msedge', processId: 1 }]),
+    };
+    return { state, ctx: { platform } as unknown as ToolContext };
+  }
+
+  it('resumes by itself once done_when holds, reported as detected (no Resume click)', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    const call = pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], timeout: 10 }, ctx);
+    await new Promise(r => setTimeout(r, 50));
+    expect(pauseGate.current()?.message).toBe('Sign in to Glama');
+    state.title = 'Dashboard | Glama';              // the user finished signing in
+    const body = JSON.parse((await call).text);
+    expect(body.status).toBe('resumed');
+    expect(body.detected).toBe(true);
+    expect(pauseGate.current()).toBeNull();          // the pill went back to amber
+  }, 10_000);
+
+  it('a done_when that is already true is rejected — it would end the pause at once', async () => {
+    const { ctx } = titled('Dashboard | Glama');
+    const r = await pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Glama' }] }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/already true/);
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('an invalid done_when is rejected before anything shows', async () => {
+    const { ctx } = titled('x');
+    const r = await pauseForUser.handler({ message: 'Sign in', done_when: [{ type: 'nonsense' }] }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/done_when rejected/);
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('Resume still works while done_when is false, and is reported as the user\'s click', async () => {
+    const { ctx } = titled('Sign in | Glama');
+    const call = pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], timeout: 10 }, ctx);
+    await new Promise(r => setTimeout(r, 50));
+    pauseGate.answer('resume');
+    const body = JSON.parse((await call).text);
+    expect(body.status).toBe('resumed');
+    expect(body.detected).toBeUndefined();
+    expect(body.confirmedByUser).toBe(true);
+  });
+});

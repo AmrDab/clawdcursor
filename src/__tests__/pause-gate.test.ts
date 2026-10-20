@@ -316,3 +316,22 @@ describe('controlBanner paused form', () => {
     expect(stop).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('doneWhen', () => {
+  it('stops checking once the pause is answered another way', async () => {
+    let checks = 0;
+    const p = pauseGate.requestWithReply({ message: 'Sign in', doneWhen: async () => { checks++; return false; } });
+    pauseGate.answer('end');
+    expect((await p).outcome).toBe('ended');
+    await new Promise(r => setTimeout(r, 1700));
+    expect(checks).toBe(0);
+  });
+
+  it('a check that throws counts as not done, and checking goes on', async () => {
+    let n = 0;
+    const p = pauseGate.requestWithReply({ message: 'Sign in', doneWhen: async () => { n++; if (n === 1) throw new Error('bridge down'); return true; } });
+    const r = await p;
+    expect(r).toEqual({ outcome: 'resumed', detected: true });
+    expect(n).toBe(2);
+  }, 10_000);
+});
