@@ -217,7 +217,7 @@ export class Agent {
         task,
         isAborted: () => this.aborted,
         abortSignal: this.abortCtl?.signal,
-        pause: req => this.pauseForUser(req.message),
+        pause: req => this.pauseForUser(req.message, req.doneWhen, req.donePollMs),
       },
       {
         adapter,
@@ -262,14 +262,15 @@ export class Agent {
    * Hand the desktop to the user and wait for their answer (pause-gate.ts).
    * Null when nobody can see the prompt — the loop then fails fast as before.
    */
-  private async pauseForUser(message: string): Promise<Exclude<PauseOutcome, 'replied'> | { replied: string } | null> {
+  private async pauseForUser(message: string, doneWhen?: () => Promise<boolean>, donePollMs?: number): Promise<Exclude<PauseOutcome, 'replied'> | 'detected' | { replied: string } | null> {
     if (!pauseGate.available() || this.aborted) return null;
     this.pausedSince = Date.now();
     this.state = { ...this.state, status: 'paused', currentStep: message };
     console.log(`
 ⏸ Paused for the user: ${message}`);
     try {
-      const r = await pauseGate.requestWithReply({ message }, { signal: this.abortCtl?.signal });
+      const r = await pauseGate.requestWithReply({ message, doneWhen, donePollMs }, { signal: this.abortCtl?.signal });
+      if (r.detected) return 'detected'; // done_when came true — observed, not the user's confirmation
       return r.outcome === 'replied' ? { replied: r.reply ?? '' } : r.outcome;
     } finally {
       this.pausedMs += Date.now() - this.pausedSince;

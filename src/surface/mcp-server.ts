@@ -156,8 +156,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '`task` waits up to 45s; longer tasks return {status:"running"} and CONTINUE in the ' +
       'background — re-call with the same instruction to keep waiting, task {action:"status"} ' +
       'to poll, task {action:"abort"} to stop. A timeout on your side is NOT a task failure. ' +
-      'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs confirmation): call system {action:"pause_for_user", message} — ' +
-      'the user does it and clicks Resume on screen; never type or guess credentials. A plan limit or upgrade wall is a roadblock too: ' +
+      'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
+      'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
+      '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. A plan limit or upgrade wall is a roadblock too: ' +
       'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. A paused task returns ' +
       '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +

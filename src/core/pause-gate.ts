@@ -38,6 +38,11 @@ export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout
 export interface PauseResult {
   outcome: PauseOutcome;
   reply?: string;
+  /**
+   * Resumed because `doneWhen` came true, not by a click. What it observed is screen state a page can write (a title,
+   * text), so it is NOT the user's confirmation — callers must not report it as one.
+   */
+  detected?: boolean;
 }
 
 export interface PauseRequest {
@@ -45,6 +50,14 @@ export interface PauseRequest {
   message: string;
   /** Re-attach key (MCP callers). Same key → same pending pause. */
   key?: string;
+  /**
+   * True once the user's step is done (signed in, code entered). Checked every `donePollMs` (default 1.5 s) while the
+   * pause is up; when it holds, the pause resumes by itself — the prompt goes back to amber the moment the user is done,
+   * without a click.
+   */
+  doneWhen?: () => Promise<boolean>;
+  /** How often to check `doneWhen` (ms). Longer for expensive checks such as OCR. */
+  donePollMs?: number;
 }
 
 export interface PauseInfo {
@@ -80,6 +93,8 @@ const defaultFocusTracker: FocusTracker = {
 };
 
 const MAX_MESSAGE = 300;
+/** How often `doneWhen` is checked while a pause is up. */
+const DONE_POLL_MS = 1500;
 const MAX_REPLY = 2000;
 const RECENT_TTL_MS = 5 * 60_000;
 
@@ -101,6 +116,16 @@ class PauseGate {
   /** True when a pause would reach a human (overlay can show, not opted out). */
   available(): boolean {
     return process.env.CLAWD_NO_PAUSE !== '1' && controlBanner.canShow();
+  }
+
+  /**
+   * Does a call with this re-attach key continue an existing pause — the one on screen, or one that settled while its
+   * caller was waiting and whose outcome is about to be handed over? Either way it is not a new pause.
+   */
+  continues(key: string): boolean {
+    if (this.pending?.key === key) return true;
+    const done = this.recent.get(key);
+    return !!done && Date.now() - done.at < RECENT_TTL_MS;
   }
 
   current(): PauseInfo | null {
@@ -151,6 +176,8 @@ class PauseGate {
       opts.signal?.removeEventListener('abort', onAbort);
     });
 
+    if (req.doneWhen) this.watchDone(entry, req.doneWhen, req.donePollMs ?? DONE_POLL_MS);
+
     this.startWindow = null;
     void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
     controlBanner.showPaused(info, (answer, reply) => { this.answer(answer, 'user', reply); }, pid => { this.refocus(pid); });
@@ -174,6 +201,21 @@ class PauseGate {
     const outcome: PauseOutcome = a === 'end' ? 'ended' : by === 'agent' ? 'resumed_unverified' : 'resumed';
     this.finish(p, { outcome });
     return { ok: true, outcome };
+  }
+
+  /** Poll `doneWhen` until it holds (resume, detected) or the pause settles some other way. Never overlaps itself. */
+  private watchDone(entry: Pending, doneWhen: () => Promise<boolean>, pollMs: number): void {
+    const tick = async (): Promise<void> => {
+      if (this.pending !== entry) return;
+      let done = false;
+      try { done = await doneWhen(); } catch { /* not done */ }
+      if (this.pending !== entry) return;
+      if (done) { this.finish(entry, { outcome: 'resumed', detected: true }); return; }
+      const t = setTimeout(() => { void tick(); }, pollMs);
+      t.unref?.();
+    };
+    const t = setTimeout(() => { void tick(); }, pollMs);
+    t.unref?.();
   }
 
   /** A keyed caller was answered "waiting": hand its outcome over on its next call. */

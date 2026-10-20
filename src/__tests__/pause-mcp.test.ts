@@ -169,3 +169,137 @@ describe('POST /resume', () => {
     }
   });
 });
+
+describe('pause_for_user done_when: the pause ends the moment the user\'s step is done (live 2026-10-20: the user signed in and waited on a Resume click)', () => {
+  /** A platform whose active window title the test changes, like a sign-in finishing. */
+  function titled(initial: string) {
+    const state = { title: initial };
+    const platform = {
+      getActiveWindow: vi.fn(async () => ({ title: state.title, processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+      listWindows: vi.fn(async () => [{ title: state.title, processName: 'msedge', processId: 1 }]),
+      getWindows: vi.fn(async () => [{ title: state.title, processName: 'msedge', processId: 1 }]),
+    };
+    return { state, ctx: { platform } as unknown as ToolContext };
+  }
+
+  it('resumes by itself once done_when holds, reported as detected (no Resume click)', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    const call = pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], timeout: 10 }, ctx);
+    await new Promise(r => setTimeout(r, 50));
+    expect(pauseGate.current()?.message).toBe('Sign in to Glama');
+    state.title = 'Dashboard | Glama';              // the user finished signing in
+    const body = JSON.parse((await call).text);
+    expect(body.status).toBe('resumed');
+    expect(body.detected).toBe(true);
+    expect(pauseGate.current()).toBeNull();          // the pill went back to amber
+  }, 10_000);
+
+  it('a done_when that is already true is rejected — it would end the pause at once', async () => {
+    const { ctx } = titled('Dashboard | Glama');
+    const r = await pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Glama' }] }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/already true/);
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('an invalid done_when is rejected before anything shows', async () => {
+    const { ctx } = titled('x');
+    const r = await pauseForUser.handler({ message: 'Sign in', done_when: [{ type: 'nonsense' }] }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/done_when rejected/);
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('Resume still works while done_when is false, and is reported as the user\'s click', async () => {
+    const { ctx } = titled('Sign in | Glama');
+    const call = pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], timeout: 10 }, ctx);
+    await new Promise(r => setTimeout(r, 50));
+    pauseGate.answer('resume');
+    const body = JSON.parse((await call).text);
+    expect(body.status).toBe('resumed');
+    expect(body.detected).toBeUndefined();
+    expect(body.confirmedByUser).toBe(true);
+  });
+});
+
+describe('pause_for_user done_when — review fixes', () => {
+  function titled(initial: string) {
+    const state = { title: initial, calls: 0 };
+    const platform = {
+      getActiveWindow: vi.fn(async () => ({ title: state.title, processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+      listWindows: vi.fn(async () => { state.calls++; return [{ title: state.title, processName: 'msedge', processId: 1 }]; }),
+    };
+    return { state, ctx: { platform } as unknown as ToolContext };
+  }
+  const args = (extra: Record<string, unknown> = {}) => ({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], ...extra });
+
+  it('a detected resume is NOT reported as the user\'s confirmation (a page can make done_when true)', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    const call = pauseForUser.handler(args({ timeout: 10 }), ctx);
+    await new Promise(r => setTimeout(r, 50));
+    state.title = 'Dashboard | Glama';
+    const body = JSON.parse((await call).text);
+    expect(body.detected).toBe(true);
+    expect(body.confirmedByUser).toBe(false);
+    expect(body.next).toMatch(/not a confirmation/);
+  }, 10_000);
+
+  it('a re-call after the user finished re-attaches instead of calling it "already true" (no second prompt)', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    const first = JSON.parse((await pauseForUser.handler(args({ timeout: 1 }), ctx)).text);
+    expect(first.status).toBe('waiting');
+    state.title = 'Dashboard | Glama';                       // done, but the next 1.5 s check has not run yet
+    const again = await pauseForUser.handler(args({ timeout: 10 }), ctx);
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.text)).toMatchObject({ status: 'resumed', detected: true });
+  }, 15_000);
+
+  it('ocr_contains text that is part of the message is rejected — OCR would read it off the prompt itself', async () => {
+    const { ctx } = titled('x');
+    const r = await pauseForUser.handler({ message: 'Sign in, you will land on Dashboard', done_when: [{ type: 'ocr_contains', value: 'dashboard' }] }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/shown by the prompt itself/);
+    expect(pauseGate.current()).toBeNull();
+  });
+
+  it('nothing is checked when no prompt can be shown', async () => {
+    controlBanner.__setPlatformEnabledForTests(false);
+    const { state, ctx } = titled('x');
+    const r = await pauseForUser.handler(args(), ctx);
+    expect(r.isError).toBe(true);
+    expect(state.calls).toBe(0);
+  });
+});
+
+describe('pause_for_user done_when — second review', () => {
+  function titled(initial: string) {
+    const state = { title: initial };
+    const platform = {
+      getActiveWindow: vi.fn(async () => ({ title: state.title, processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+      listWindows: vi.fn(async () => [{ title: state.title, processName: 'msedge', processId: 1 }]),
+    };
+    return { state, ctx: { platform } as unknown as ToolContext };
+  }
+  const args = (extra: Record<string, unknown> = {}) => ({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], ...extra });
+
+  it('a re-call AFTER the pause ended by itself gets that outcome — not "already true", not a second prompt', async () => {
+    const { state, ctx } = titled('Sign in | Glama');
+    expect(JSON.parse((await pauseForUser.handler(args({ timeout: 1 }), ctx)).text).status).toBe('waiting');
+    state.title = 'Dashboard | Glama';
+    await new Promise(r => setTimeout(r, 2000));           // one check has run: the pill is gone
+    expect(pauseGate.current()).toBeNull();
+    const again = await pauseForUser.handler(args({ timeout: 5 }), ctx);
+    expect(again.isError).toBeFalsy();
+    expect(JSON.parse(again.text)).toMatchObject({ status: 'resumed', detected: true, confirmedByUser: false });
+    expect(pauseGate.current()).toBeNull();                 // no second prompt
+  }, 15_000);
+
+  for (const label of ['Resume', 'End task', 'Something else', 'the agent says']) {
+    it(`ocr_contains "${label}" is rejected — the prompt shows it itself`, async () => {
+      const { ctx } = titled('x');
+      const r = await pauseForUser.handler({ message: 'Sign in', done_when: [{ type: 'ocr_contains', value: label }] }, ctx);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/shown by the prompt itself/);
+    });
+  }
+});

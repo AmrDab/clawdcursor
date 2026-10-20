@@ -40,7 +40,7 @@ export interface AgentInput {
    * overlay / CLAWD_NO_PAUSE): the loop then keeps its old fail-fast
    * behaviour. Wired by Agent.
    */
-  pause?: (req: { message: string }) => Promise<'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | { replied: string } | null>;
+  pause?: (req: { message: string; doneWhen?: () => Promise<boolean>; donePollMs?: number }) => Promise<'resumed' | 'resumed_unverified' | 'detected' | 'ended' | 'timeout' | { replied: string } | null>;
 }
 
 export interface AgentStep {
