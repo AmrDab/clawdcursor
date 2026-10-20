@@ -200,9 +200,10 @@ class PauseGate {
 
   /**
    * The user pressed Esc in the reply box: give the keyboard back to their window through the platform's own focus code
-   * (the macOS and Linux pills ask for it; the Windows pill does it itself, SetForegroundWindow). macOS left the first key typed after Esc nowhere 4–10% of the time — no window was key until something
-   * re-established it (#255). The pill names the app the user was last in when it knows (`pid`); else the window active
-   * when the pause began. Same app → that window's title too, so the right window of a multi-window app comes back.
+   * (the Linux pill asks for it; the Windows pill does it itself, SetForegroundWindow). The macOS pill does not ask yet:
+   * a key typed right after Esc is sometimes lost there (#255), and re-activating an app made it worse in tests, so it
+   * waits for a measured fix. The pill may name the app the user was last in (`pid`); else the window active when the
+   * pause began. Same app → that window's title too, so the right window of a multi-window app comes back.
    */
   refocus(pid?: number): void {
     const start = this.startWindow;

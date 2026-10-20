@@ -19,10 +19,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   "Focused matching window." It now focuses by pid, matches titles only
   within that process, verifies what came to the front, and says which app
   did when it is not the requested one.
-- **Esc in the pause prompt's reply box gives the keyboard back (#255).** On
-  macOS the first key typed after Esc was lost 4–10% of the time; the
-  prompt now asks clawdcursor to refocus the user's window through the
-  platform's own focus code (macOS and Linux; Windows already did).
+- **Linux: Esc in the pause prompt's reply box gives the keyboard back** to
+  the user's window (Windows already did). macOS is unchanged for now: a key
+  typed within milliseconds of Esc is sometimes lost there (#255, seen with
+  synthetic input), and a fix waits for a measurement at human typing speed.
 - **`copy_all_text` no longer highlights the page on Linux and macOS
   either.** It reads the document through accessibility (AT-SPI Text /
   AXStringForTextMarkerRange) — exact text, no keystrokes, nothing selected,

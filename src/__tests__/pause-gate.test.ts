@@ -122,7 +122,7 @@ describe('pauseGate', () => {
     expect(r.reply?.length).toBe(2000);
   });
 
-  describe('Esc in the reply box gives the keyboard back to the user\'s window (macOS and Linux pills; the Windows pill refocuses natively)', () => {
+  describe('Esc in the reply box gives the keyboard back to the user\'s window (the Linux pill asks; the Windows pill refocuses natively)', () => {
     const focused: Array<{ processId: number; title?: string }> = [];
     beforeEach(() => {
       focused.length = 0;
