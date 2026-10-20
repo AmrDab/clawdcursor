@@ -54,11 +54,18 @@ describe('NativeDesktop.connect() on macOS with the screenshot-helper', () => {
     const d = new NativeDesktop(config);
     await expect(d.connect()).resolves.toBeUndefined();
     expect(d.getDpiRatio()).toBe(2);
+    expect(d.getScreenSize()).toEqual({ width: 4480, height: 2520 });   // NSScreen 2240×1260 × backing 2
+    expect(d.getScaleFactor()).toBeCloseTo(3.5, 5);
     expect(warn.mock.calls.some(c => /Screen capture unavailable/.test(String(c[0])))).toBe(true);
-    // A screenshot itself then fails with what to do about it.
-    helper.capture.mockRejectedValueOnce(new Error('helper missing'));
-    (nut.screen.grab as any).mockRejectedValueOnce(new Error('Failed to capture screen'));
-    await expect(d.captureScreen()).rejects.toThrow(/Screen capture unavailable on macOS.*Screen Recording/);
+    // A screenshot then fails with what to do about it — through the path the screenshot tool uses, too.
+    for (const capture of [() => d.captureScreen(), () => d.captureForLLM()]) {
+      helper.capture.mockRejectedValue(new Error('helper missing'));
+      (nut.screen.grab as any).mockRejectedValue(new Error('Failed to capture screen'));
+      await expect(capture()).rejects.toThrow(/Screen capture unavailable on macOS.*Screen Recording/);
+    }
+    helper.capture.mockReset();
+    helper.capture.mockImplementation(async () => ({ path: '/nonexistent/clawdcursor-probe.png', width: 4480, height: 2520 }));
+    (nut.screen.grab as any).mockReset();
     warn.mockRestore();
   });
 

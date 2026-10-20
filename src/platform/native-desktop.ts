@@ -368,13 +368,7 @@ export class NativeDesktop extends EventEmitter {
       }
     }
 
-    let img: GrabImage;
-    try {
-      img = await this.grab();
-    } catch (err: any) {
-      if (!IS_MAC) throw err;
-      throw new Error(`Screen capture unavailable on macOS (${err?.message || err}). Grant Screen Recording to the app running clawdcursor (System Settings → Privacy & Security → Screen Recording), or install the Xcode Command Line Tools so its screenshot helper builds. Tools that do not capture the screen still work.`, { cause: err });
-    }
+    const img = await this.grab();
 
     // Update screen dimensions in case of resolution change
     this.screenWidth = img.width;
@@ -607,8 +601,14 @@ export class NativeDesktop extends EventEmitter {
    * Full-screen grab. nut-js on X11/Windows/macOS; grim on Wayland, where
    * nut-js would open X11 and take the process down (see wayland-screen.ts).
    */
-  private grab(): Promise<GrabImage> {
-    return isWaylandSession() ? grimGrab() : screen.grab();
+  private async grab(): Promise<GrabImage> {
+    try {
+      return await (isWaylandSession() ? grimGrab() : screen.grab());
+    } catch (err: any) {
+      if (!IS_MAC) throw err;
+      // Every capture path ends here when the screenshot helper is missing or fails (#244): say what fixes it.
+      throw new Error(`Screen capture unavailable on macOS (${err?.message || err}). Grant Screen Recording to the app running clawdcursor (System Settings → Privacy & Security → Screen Recording), or install the Xcode Command Line Tools so its screenshot helper builds. Tools that do not capture the screen still work.`, { cause: err });
+    }
   }
 
   /**
