@@ -216,6 +216,8 @@ def run_pill():
             def key(_w, event):
                 if event.keyval == Gdk.KEY_Escape:
                     box.destroy()
+                    # Ask the parent to give the keyboard back to the user's window (the one active when the pause began).
+                    emit('BANNER_REFOCUS')
                     return True
                 return False
 

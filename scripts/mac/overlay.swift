@@ -195,6 +195,13 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         if selector == #selector(NSResponder.cancelOperation(_:)) {
             replyField?.stringValue = ""
             showReply(false)
+            // Ask the parent to give the keyboard back too, through the platform's focus code: after Esc no window was key
+            // for a moment and the next key the user typed went nowhere, 4–10% of the time.
+            if let pid = previousApp?.processIdentifier, pid != ProcessInfo.processInfo.processIdentifier {
+                emit("BANNER_REFOCUS \(pid)")
+            } else {
+                emit("BANNER_REFOCUS")
+            }
             return true
         }
         return false

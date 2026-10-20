@@ -140,6 +140,7 @@ class ControlBanner {
   private onStopRequested: (() => void) | undefined;
   private paused: PauseInfo | null = null;
   private onAnswer: ((a: PauseAnswer, reply?: string) => void) | undefined;
+  private onRefocus: ((pid?: number) => void) | undefined;
   private spawner: Spawner = (mode) => {
     // stdin carries `HIDE <ms>` (dodge) to the pill; stdout carries its answers.
     const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore'];
@@ -213,10 +214,11 @@ class ControlBanner {
    * Switch to the paused form (blue glow + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
-  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string) => void): void {
+  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string) => void, onRefocus?: (pid?: number) => void): void {
     if (!this.enabled) return;
     this.paused = info;
     this.onAnswer = onAnswer;
+    this.onRefocus = onRefocus;
     this.clearIdleTimer();
     this.killChildren();
     this.show();
@@ -227,6 +229,7 @@ class ControlBanner {
     if (!this.paused) return;
     this.paused = null;
     this.onAnswer = undefined;
+    this.onRefocus = undefined;
     this.killChildren();
     if (this.pinned) this.show();
     else this.touch(); // external-agent session: running form, then the idle hide
@@ -304,6 +307,9 @@ class ControlBanner {
         try {
           if (msg === 'BANNER_STOP') { this.onStopRequested?.(); return; }
           if (forPause === undefined || this.paused?.id !== forPause) return;
+          // Esc in the reply box: give the keyboard back to the user's window (the pill names its app when it knows).
+          const refocus = /^BANNER_REFOCUS(?: (\d+))?$/.exec(msg);
+          if (refocus) { this.onRefocus?.(refocus[1] ? Number(refocus[1]) : undefined); return; }
           const reply = parseReplyLine(msg);
           if (reply) this.onAnswer?.('reply', reply);
           else if (ANSWER_LINES[msg]) this.onAnswer?.(ANSWER_LINES[msg]);
@@ -363,6 +369,7 @@ class ControlBanner {
     this.clearIdleTimer();
     this.paused = null;
     this.onAnswer = undefined;
+    this.onRefocus = undefined;
     this.killChildren();
   }
 
