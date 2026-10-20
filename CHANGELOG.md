@@ -6,7 +6,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
-- **`set_value` with no field name types nothing.** It fell back to typing
+- **`set_value` with no field name or role types nothing.** It fell back to typing
   into the window's largest editable field (seen live: the browser's
   address bar) and reported `Set "" = … chars`. It now fails and says to
   name the field, pass a `compile_ui` reference, or use `type`.

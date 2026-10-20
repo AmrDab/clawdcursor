@@ -126,8 +126,8 @@ export function getA11yDepthTools(): ToolDefinition[] {
         if (!ctx.platform) return needPlatform('set_field_value');
         const safeNameStr = String(name ?? '');
         const safeValue = String(value ?? '');
-        // No name: no field to set — the keyboard fallback would type into whichever field it found.
-        if (!safeNameStr.trim()) {
+        // No name and no role: no field to set — the keyboard fallback would type into whichever field it found.
+        if (!safeNameStr.trim() && !controlType) {
           return { text: 'set_field_value failed: name the field (its accessibility name). To type into the focused field, use type_text.', isError: true };
         }
         const pid = await resolveProcessId(ctx, processId);
