@@ -35,7 +35,7 @@ import type { InvokeAction, UiElement, WindowInfo } from './types';
 
 const execFileAsync = promisify(execFile);
 
-export type MacAxErrorKind = 'timeout' | 'locked' | 'permission' | 'unavailable' | 'failed';
+export type MacAxErrorKind = 'timeout' | 'locked' | 'permission' | 'unavailable' | 'failed' | 'partial';
 
 /** A failed AX read — thrown instead of returning an empty result. */
 export class MacAxError extends Error {
@@ -95,6 +95,7 @@ const JXA_TREE_TIMEOUT_MS = 30_000;
 /** Depth the original get-screen-context.jxa walk always used. */
 const JXA_TREE_DEPTH = 8;
 const HELPER_FIND_DEADLINE_MS = 6_000;
+const HELPER_FOCUS_DEADLINE_MS = 5_000;
 /** An unfiltered find returns the whole tree for the caller to filter (find {automationId} used to); keep it generous. */
 const FIND_MAX_RESULTS = 500;
 const JXA_FIND_TIMEOUT_MS = 12_000;
@@ -146,6 +147,9 @@ function helperError(reply: HelperFailure, what: string, act = false): MacAxErro
         '(System Settings → Privacy & Security → Accessibility).');
     case 'unavailable':
       return new MacAxError('unavailable', `${what} failed: ${reply.error ?? 'the app does not expose accessibility'}`);
+    case 'partial':
+      // A miss next to elements that did not answer: not a timeout, and not "nothing there" either.
+      return new MacAxError('partial', `${what}: ${reply.error ?? 'not found in the readable part of the window'}`);
     default:
       return new MacAxError('failed', `${what} failed: ${reply.error ?? 'unknown error'}`);
   }
@@ -440,6 +444,29 @@ export interface WindowListResult {
   skipped: SkippedApp[];
 }
 
+/**
+ * The message to give when the screen is locked, or null. The AX helper and the keyboard guard already say it; the tools that
+ * read the screen (OCR, smart_click, smart_read) call this before they try anything, because behind the lock screen they read
+ * nothing and used to report that as "no_clickable_target" — as if the target were missing. A failed probe, an unlocked screen
+ * or another OS is null: never a reason to refuse.
+ */
+export async function screenLockedMessage(ax?: Pick<MacAx, 'frontmost'>, platform: NodeJS.Platform = process.platform): Promise<string | null> {
+  if (platform !== 'darwin') return null;
+  if (process.env.CLAWD_NO_MAC_AX === '1') return null;      // the kill switch turns the guards off with the helper, as for the keyboard
+  try {
+    if (!(await (ax ?? defaultMacAx()).frontmost()).locked) return null;
+  } catch { return null; }
+  return `${helperError({ ok: false, kind: 'locked' }, 'reading the screen').message} ` +
+    'For a long hands-off run, keep the display awake while it works (for example `caffeinate -d` in a terminal); no setting needs to change.';
+}
+
+/** The window `focusWindow` brought to the front. */
+export interface FocusedWindow {
+  title: string;
+  processId: number;
+  processName: string;
+}
+
 export interface MacAx {
   /** Every titled window. Throws `MacAxError` on a timeout / locked screen — never returns `[]` for a failure. */
   listWindows(): Promise<WindowInfo[]>;
@@ -474,6 +501,12 @@ export interface MacAx {
    * a refusal (locked screen, no permission) or a timeout throws.
    */
   typeUnicode(text: string): Promise<boolean>;
+  /**
+   * Bring a window of the process `pid` to the front — `title` (a substring, case-insensitive) picks one among THAT process's
+   * windows. Null when the helper is not available (the caller falls back). A refusal — no such window, or the focus went to
+   * another app, which the error names — throws `MacAxError`. System Events cannot do this when two processes share a name.
+   */
+  focusWindow(pid: number, title?: string): Promise<FocusedWindow | null>;
   /** The frontmost app per NSWorkspace, plus whether the screen is locked. */
   frontmost(): Promise<FrontmostInfo>;
   /**
@@ -488,6 +521,11 @@ export interface MacAx {
    * when nothing has focus. Control types use the names get-focused-element.jxa used ("Edit").
    */
   focusedElement(processId?: number): Promise<UiElement | null>;
+  /**
+   * The frontmost app's document text — a focused editor's value, or the web page holding the focus — read through
+   * accessibility with no keystrokes. Null when it can't be read this way (the caller falls back).
+   */
+  pageText?(): Promise<{ text: string } | null>;
   /** Start building the helper now (background, once), so the first real call already has it. */
   prepare(): void;
 }
@@ -708,6 +746,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       return lsappinfoFrontmost(deps.exec);
     },
 
+    async focusWindow(pid: number, title?: string): Promise<FocusedWindow | null> {
+      const s = viaStdin({ title });
+      const reply = await viaHelper(['focus', '--pid', String(pid), '--timeout-ms', String(HELPER_FOCUS_DEADLINE_MS), ...s.args],
+        HELPER_FOCUS_DEADLINE_MS + HELPER_GRACE_MS, 'focusing', { input: s.input, act: true });
+      if (reply === null) return null;
+      return { title: String(reply.title ?? ''), processId: Number(reply.processId ?? pid), processName: String(reply.processName ?? '') };
+    },
+
     async appState(name: string): Promise<AppState | null> {
       const what = 'app state lookup';
       const want = appSearchName(name);
@@ -733,6 +779,20 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       } catch (err) {
         if (isTimeout(err)) throw timeoutError(what, LSAPPINFO_TIMEOUT_MS);
         return null;
+      }
+    },
+
+    async pageText(): Promise<{ text: string } | null> {
+      try {
+        const reply = await viaHelper(
+          ['pagetext', '--timeout-ms', String(HELPER_FIND_DEADLINE_MS)],
+          HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
+          'page text',
+          { waitForBuild: false },
+        );
+        return reply && typeof reply.text === 'string' && reply.text.trim() ? { text: reply.text } : null;
+      } catch {
+        return null; // not readable this way: the caller falls back
       }
     },
 

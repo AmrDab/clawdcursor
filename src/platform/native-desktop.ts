@@ -9,6 +9,7 @@
  * - Coordinate scaling handled transparently
  */
 
+import { beforePointerPress } from './pointer-guard';
 import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
@@ -622,6 +623,7 @@ export class NativeDesktop extends EventEmitter {
   // --- Input Methods ---
 
   async mouseClick(x: number, y: number, button: number = 1): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
     // On macOS: skip the Swift helper (CGEvent blocked by TCC), use nut-js directly.
     // nut-js mouse events ARE delivered on macOS (unlike CGEvent from child processes).
@@ -636,6 +638,7 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async mouseDoubleClick(x: number, y: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
     await this.placePointer(x, y);
     await this.delay(50);
@@ -644,6 +647,7 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async mouseRightClick(x: number, y: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
     await this.placePointer(x, y);
     await this.delay(50);
@@ -656,6 +660,7 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async mouseScroll(x: number, y: number, delta: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
     await this.placePointer(x, y);
     await this.delay(30);
@@ -939,6 +944,7 @@ export class NativeDesktop extends EventEmitter {
   // ─── Low-level pointer control (for Computer Use API) ────────────
 
   async mouseDown(x: number, y: number, button: number = 1): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
     console.log(`   🖱️  Mouse down at (${x}, ${y})`);
     await this.placePointer(x, y);
@@ -955,6 +961,7 @@ export class NativeDesktop extends EventEmitter {
   }
 
   async mouseDrag(sx: number, sy: number, ex: number, ey: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
     // nut-js drag works on all platforms including macOS
     console.log(`   🖱️  Drag (${sx},${sy}) → (${ex},${ey})`);

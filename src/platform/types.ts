@@ -244,6 +244,11 @@ export interface PlatformAdapter {
   listWindows(): Promise<WindowInfo[]>;
   getActiveWindow(): Promise<WindowInfo | null>;
   focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean>;
+  /**
+   * Why the last `focusWindow` returned false, when the platform knows more than "no match" (macOS: the focus went to another
+   * app, which it names). Taken once: a second call is null.
+   */
+  takeFocusFailure?(): string | null;
 
   /**
    * Legacy shim — preserved for back-compat. New code should call
@@ -290,7 +295,9 @@ export interface PlatformAdapter {
   /** Optional: why the last findElements / getUiTree came back short, so tools
    *  can say "timed out" / "partial" instead of a bare "(no elements found)" —
    *  an empty-looking blind read is exactly when agents abandon a11y. */
-  lastFindError?: 'timeout' | 'error' | null;
+  lastFindError?: 'timeout' | 'error' | 'partial' | null;
+  /** Optional: the wording for a `partial` find (macOS: not found in the readable part of the window, N elements did not answer). */
+  lastFindNote?: string | null;
   lastTreeTruncated?: boolean;
   /**
    * Optional: set when the last `listWindows` came back incomplete — a ready-to-print one-line note naming the apps whose

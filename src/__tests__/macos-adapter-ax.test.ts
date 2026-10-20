@@ -56,6 +56,7 @@ function fakeAx(over: Partial<MacAx> = {}): MacAx & { [K in keyof MacAx]: Return
     invoke: vi.fn(async () => ({ success: true })),
     frontmost: vi.fn(async () => FRONT()),
     appState: vi.fn(async () => null),
+    focusWindow: vi.fn(async () => null),      // no helper: focus-window.jxa is the fallback
     focusedElement: vi.fn(async () => EL({ name: 'Body', controlType: 'Edit' })),
     prepare: vi.fn(),
     ...over,
@@ -224,6 +225,18 @@ describe('findElements (B9)', () => {
     ax.find.mockResolvedValueOnce([EL()]);
     await mac.findElements({ name: 'x', processId: 1 });
     expect(mac.lastFindError).toBeNull();
+  });
+
+  it('a miss in a partly unreadable window is reported as "partial", with its own note — not as a timeout', async () => {
+    const ax = fakeAx({ find: vi.fn(async () => { throw new MacAxError('partial', 'element search: not found in the readable part of the window (2 elements did not answer)'); }) });
+    const mac = new MacOSAdapter({ ax });
+    await expect(mac.findElements({ name: 'x', processId: 1 })).resolves.toEqual([]);
+    expect(mac.lastFindError).toBe('partial');
+    expect(mac.lastFindNote).toMatch(/readable part of the window \(2 elements did not answer\)/);
+    ax.find.mockResolvedValueOnce([EL()]);
+    await mac.findElements({ name: 'x', processId: 1 });
+    expect(mac.lastFindError).toBeNull();
+    expect(mac.lastFindNote).toBeNull();
   });
 
   it('a locked screen is not "no elements found": it throws', async () => {

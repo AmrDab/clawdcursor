@@ -149,18 +149,18 @@ describe('MCP smart_type', () => {
     });
   });
 
-  it('on other OSes smart_type does not save/restore the clipboard (the guard is a macOS thing): one write, the text', async () => {
+  it('every OS: the text is pasted, then the user\'s clipboard is put back (#243)', async () => {
     await onPlatform('linux', async () => {
       const { ctx, clip } = desktopCtx(keyboard());
       await smartType.handler({ text: 'abc' }, ctx);
-      expect(clip.state.writes).toEqual(['abc']);
+      expect(clip.state.writes).toEqual(['abc', 'PRIOR']);
     });
   });
 
-  it('a successful paste still leaves the text on the clipboard, as it always did (its design: paste-typing)', async () => {
+  it('a successful paste no longer leaves the typed text (a password, say) on the clipboard (#243)', async () => {
     const { ctx, clip } = desktopCtx(keyboard());
-    await smartType.handler({ text: 'abc' }, ctx);
-    expect(clip.state.value).toBe('abc');
+    await smartType.handler({ text: 'hunter2' }, ctx);
+    expect(clip.state.value).toBe('PRIOR');
   });
 });
 

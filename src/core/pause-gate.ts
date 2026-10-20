@@ -60,6 +60,25 @@ interface Pending {
   settle: (r: PauseResult) => void;
 }
 
+/** A window to give the keyboard back to: a process, and the title of its window when known. */
+export interface FocusTarget { processId: number; title?: string }
+interface FocusTracker {
+  capture(): Promise<FocusTarget | null>;
+  focus(t: FocusTarget): Promise<void>;
+}
+/** Through the platform adapter, so the same code serves Windows, macOS and Linux. */
+const defaultFocusTracker: FocusTracker = {
+  async capture() {
+    const { getPlatform } = await import('../platform');
+    const w = await (await getPlatform()).getActiveWindow();
+    return w && w.processId ? { processId: w.processId, title: w.title || undefined } : null;
+  },
+  async focus(t) {
+    const { getPlatform } = await import('../platform');
+    await (await getPlatform()).focusWindow(t);
+  },
+};
+
 const MAX_MESSAGE = 300;
 const MAX_REPLY = 2000;
 const RECENT_TTL_MS = 5 * 60_000;
@@ -75,6 +94,9 @@ class PauseGate {
   private recent = new Map<string, { result: PauseResult; at: number }>();
   /** Keys whose caller was answered "waiting" — only their outcome is handed over. */
   private waiting = new Set<string>();
+  /** The window the user was in when the pause began — where the keyboard goes back after an Esc in the reply box. */
+  private startWindow: FocusTarget | null = null;
+  private focusTracker: FocusTracker = defaultFocusTracker;
 
   /** True when a pause would reach a human (overlay can show, not opted out). */
   available(): boolean {
@@ -129,7 +151,9 @@ class PauseGate {
       opts.signal?.removeEventListener('abort', onAbort);
     });
 
-    controlBanner.showPaused(info, (answer, reply) => { this.answer(answer, 'user', reply); });
+    this.startWindow = null;
+    void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
+    controlBanner.showPaused(info, (answer, reply) => { this.answer(answer, 'user', reply); }, pid => { this.refocus(pid); });
     return promise;
   }
 
@@ -174,7 +198,24 @@ class PauseGate {
     p.settle(result);
   }
 
+  /**
+   * The user pressed Esc in the reply box: give the keyboard back to their window through the platform's own focus code
+   * (the Linux pill asks for it; the Windows pill does it itself, SetForegroundWindow). The macOS pill does not ask yet:
+   * a key typed right after Esc is sometimes lost there (#255), and re-activating an app made it worse in tests, so it
+   * waits for a measured fix. The pill may name the app the user was last in (`pid`); else the window active when the
+   * pause began. Same app → that window's title too, so the right window of a multi-window app comes back.
+   */
+  refocus(pid?: number): void {
+    const start = this.startWindow;
+    const target: FocusTarget | null = pid
+      ? { processId: pid, title: start && start.processId === pid ? start.title : undefined }
+      : start;
+    if (target) void this.focusTracker.focus(target).catch(() => { /* best effort */ });
+  }
+
   // ── test hooks ──
+  __setFocusTrackerForTests(t: FocusTracker | null): void { this.focusTracker = t ?? defaultFocusTracker; }
+
   __resetForTests(): void {
     if (this.pending) this.finish(this.pending, { outcome: 'ended' });
     this.recent.clear();

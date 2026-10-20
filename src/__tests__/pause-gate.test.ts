@@ -122,6 +122,63 @@ describe('pauseGate', () => {
     expect(r.reply?.length).toBe(2000);
   });
 
+  describe('Esc in the reply box gives the keyboard back to the user\'s window (the Linux pill asks; the Windows pill refocuses natively)', () => {
+    const focused: Array<{ processId: number; title?: string }> = [];
+    beforeEach(() => {
+      focused.length = 0;
+      pauseGate.__setFocusTrackerForTests({
+        capture: async () => ({ processId: 42, title: 'Report.txt' }),
+        focus: async t => { focused.push(t); },
+      });
+    });
+    afterEach(() => { pauseGate.__setFocusTrackerForTests(null); });
+
+    it('a pill that names the app (BANNER_REFOCUS <pid>): that app, with its window title when it is the one the pause began in', async () => {
+      const p = pauseGate.request({ message: 'Sign in' });
+      await flush();
+      say('BANNER_REFOCUS 42');
+      await flush();
+      expect(focused).toEqual([{ processId: 42, title: 'Report.txt' }]);
+      expect(pauseGate.current()?.message).toBe('Sign in');      // Esc is not an answer
+      pauseGate.answer('resume');
+      await p;
+    });
+
+    it('another app than the one the pause began in: that app, without a title', async () => {
+      const p = pauseGate.request({ message: 'Sign in' });
+      await flush();
+      say('BANNER_REFOCUS 77');
+      await flush();
+      expect(focused).toEqual([{ processId: 77, title: undefined }]);
+      pauseGate.answer('end');
+      await p;
+    });
+
+    it('no app named (Linux): the window active when the pause began', async () => {
+      const p = pauseGate.request({ message: 'Sign in' });
+      await flush();
+      say('BANNER_REFOCUS');
+      await flush();
+      expect(focused).toEqual([{ processId: 42, title: 'Report.txt' }]);
+      pauseGate.answer('resume');
+      await p;
+    });
+
+    it('a pill from an earlier pause cannot move the focus', async () => {
+      const p1 = pauseGate.request({ message: 'one' });
+      const oldPill = livePill()[0].child;
+      pauseGate.answer('resume');
+      await p1;
+      const p2 = pauseGate.request({ message: 'two' });
+      await flush();
+      oldPill.stdout.write('BANNER_REFOCUS 42\n');
+      await flush();
+      expect(focused).toEqual([]);
+      pauseGate.answer('resume');
+      await p2;
+    });
+  });
+
   it('a pill from an EARLIER pause cannot answer a newer one', async () => {
     const p1 = pauseGate.request({ message: 'one' });
     const oldPill = livePill()[0].child;

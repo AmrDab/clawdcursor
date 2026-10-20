@@ -12,7 +12,7 @@ import { toMouse, toImage } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
-import { writeClipboardVerified } from './paste-guard';
+import { waitForPaste, writeClipboardVerified } from './paste-guard';
 
 const IS_MAC = os.platform() === 'darwin';
 
@@ -26,11 +26,22 @@ const IS_MAC = os.platform() === 'darwin';
  * ALWAYS image-scaled, so a caller passing a11y-snapshot (physical) coords got
  * them scaled a second time and the pointer landed on a different control.
  */
+/**
+ * What to tell the agent after a zoomed view: clicks never take coordinates from the zoomed image — they stay in the space of the
+ * full screenshot (or of the screen, for a screen-space region) — so the way back is arithmetic the reply spells out.
+ */
+function zoomNote(r: { x: number; y: number; width: number; height: number; space?: string }, outW: number, outH: number): string {
+  const conv = `x = ${r.x} + zx·${r.width}/${outW}, y = ${r.y} + zy·${r.height}/${outH}`;
+  return r.space === 'screen'
+    ? ` Clicks stay in full-screen coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} — click it with space:"screen".`
+    : ` Clicks stay in full-screenshot coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} in the screenshot's image space.`;
+}
+
 export const SPACE_PARAM = {
   type: 'string' as const,
   enum: ['screen', 'image'],
   required: false,
-  description: 'Coordinate space. Omit (default) → image-space coords from the latest screenshot (scaled to physical pixels). Pass "screen" → a11y-snapshot coords (already physical, not scaled).',
+  description: 'Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass "screen" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot\'s "real" size is twice the point size).',
 };
 
 
@@ -137,7 +148,7 @@ export function getDesktopTools(): ToolDefinition[] {
           const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
           if (shot) {
             return {
-              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.`,
+              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space }, shot.width, shot.height)}`,
               image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
             };
           }
@@ -145,7 +156,7 @@ export function getDesktopTools(): ToolDefinition[] {
         const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');
         return {
-          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.`,
+          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space }, frame.llmWidth, frame.llmHeight)}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },
@@ -372,7 +383,8 @@ export function getDesktopTools(): ToolDefinition[] {
               await new Promise(r => setTimeout(r, 50));
               // Paste combo is platform-specific
               await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
-              await new Promise(r => setTimeout(r, 100));
+              // Before Return and before the clipboard is put back: a slow app would otherwise paste the restored one.
+              await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, body);
             } else {
               await ctx.desktop.typeText(body);
               typedByKeys = true;

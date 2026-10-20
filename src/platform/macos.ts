@@ -8,6 +8,7 @@
  *   - Accessibility: osascript JXA for tree queries + permission-check binary for TCC
  */
 
+import { beforePointerPress } from './pointer-guard';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -38,7 +39,7 @@ import { readMainScreenInfo, readDisplayList } from './mac-screen';
 import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
 import {
   defaultMacAx, MacAxError,
-  type AppState, type MacAx, type SkippedApp,
+  type AppState, type FrontmostInfo, type MacAx, type SkippedApp,
 } from './mac-ax';
 
 const execFileAsync = promisify(execFile);
@@ -46,6 +47,7 @@ const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
 
 // Tunables (kept here, not magic numbers)
 const OSASCRIPT_TIMEOUT_MS = 8_000;
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const SCREENSHOT_TIMEOUT_MS = 10_000;
 /** How long open_app waits for a launched app to show a window before calling it "still loading". */
 const LAUNCH_CONFIRM_MS = 4_000;
@@ -74,6 +76,7 @@ export class MacOSAdapter implements PlatformAdapter {
   /** Why the last findElements / getUiTree came back short (see PlatformAdapter). */
   lastFindScope: PlatformAdapter['lastFindScope'] = null;
   lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastFindNote: string | null = null;
   lastTreeTruncated = false;
   lastWindowListPartial: string | null = null;
 
@@ -331,24 +334,37 @@ export class MacOSAdapter implements PlatformAdapter {
     return this.ax.activeWindow();
   }
 
+  /** Why the last focusWindow returned false, when more is known than "no match". Taken once. */
+  private focusFailure: string | null = null;
+  takeFocusFailure(): string | null {
+    const f = this.focusFailure;
+    this.focusFailure = null;
+    return f;
+  }
+
   async focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean> {
-    // focus-window.jxa accepts -processId <N> and/or -title <string>.
-    // The old implementation passed -FocusedProcessId / -ProcessName / -WindowTitle
-    // which the JXA run(argv) parser never matched, so ANY processId-only or
-    // processName-only query silently fell to "no match" and returned false.
+    // The process is named by its PID wherever possible. System Events names an app's windows by process NAME, so with two
+    // processes of one app (the user's Chrome and the agent's own) the script raised — or failed to find — the first one's
+    // windows whatever pid it was given (found by the live blind run of 2026-10-19). The accessibility helper talks to the pid.
     //
     // Resolution strategy (matches Windows adapter behaviour):
     //   1. If processId is given, use it directly.
     //   2. Else if processName is given, resolve it to a processId via listWindows
     //      (avoids conflating process names with window titles — e.g. "Safari" is
     //      process name "Safari" but window title could be "Apple - iPhone 16").
-    //   3. Pass title as the disambiguation hint when it is also provided.
+    //   3. Else a title alone: the window list names the owner (a visible window before a minimized one).
+    //   4. Pass title as the disambiguation hint when it is also provided.
+    this.focusFailure = null;
     let processId = query.processId;
     if (processId === undefined && query.processName) {
       const target = query.processName.toLowerCase();
       // A failed list cannot resolve the name; fall through to "nothing to match on".
       const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
-      const hit = windows.find(w => w.processName.toLowerCase() === target)
+      // With a title as well, the window that has BOTH: the first window of that name may belong to another process of the app.
+      const titleNeedle = query.title?.toLowerCase();
+      const sameName = windows.filter(w => w.processName.toLowerCase() === target);
+      const hit = (titleNeedle ? sameName.find(w => w.title.toLowerCase().includes(titleNeedle)) : undefined)
+        ?? sameName[0]
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
       if (hit) {
         processId = hit.processId;
@@ -358,13 +374,33 @@ export class MacOSAdapter implements PlatformAdapter {
         const app = await this.ax.appState(query.processName).catch(() => null);
         if (app) processId = app.processId;
       }
+    } else if (processId === undefined && query.title) {
+      const needle = query.title.toLowerCase();
+      const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
+      const matches = windows.filter(w => w.title.toLowerCase().includes(needle));
+      const hit = matches.find(w => !w.isMinimized) ?? matches[0];
+      if (!hit) {
+        this.focusFailure = `No window has a title containing "${query.title}".`;
+        return false;
+      }
+      processId = hit.processId;
+    }
+
+    if (processId === undefined && !query.title) return false; // nothing to match on
+
+    if (processId !== undefined) {
+      try {
+        if (await this.ax.focusWindow(processId, query.title)) return true;
+        // null: no helper (not built yet, or switched off) — the script below is the fallback
+      } catch (err) {
+        this.focusFailure = err instanceof Error ? err.message : String(err);
+        return false;
+      }
     }
 
     const args: string[] = [];
     if (processId !== undefined) args.push('-processId', String(processId));
     if (query.title) args.push('-title', query.title);
-
-    if (args.length === 0) return false; // nothing to match on
 
     try {
       const scriptPath = path.join(SCRIPTS_DIR, 'focus-window.jxa');
@@ -372,10 +408,25 @@ export class MacOSAdapter implements PlatformAdapter {
         timeout: OSASCRIPT_TIMEOUT_MS,
       });
       const result = JSON.parse(stdout);
-      return result?.success === true;
+      if (result?.success !== true) return false;
+      // The script says "focused" for whatever it raised; who really is frontmost decides.
+      if (processId !== undefined) return await this.frontmostIs(processId);
+      return true;
     } catch {
       return false;
     }
+  }
+
+  /** True when `processId` is frontmost within a moment (activation is not instant); otherwise records who is. */
+  private async frontmostIs(processId: number): Promise<boolean> {
+    let front: FrontmostInfo['app'] | null | undefined;
+    for (let i = 0; i < 4; i++) {
+      front = (await this.ax.frontmost().catch(() => null))?.app;
+      if (!front || front.processId === processId) return true;      // unknown counts as fine: the script said it worked
+      await sleep(120);
+    }
+    this.focusFailure = `Focus went to ${front!.name} (pid ${front!.processId}), not to pid ${processId}.`;
+    return false;
   }
 
   async maximizeWindow(): Promise<void> {
@@ -503,6 +554,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async findElements(query: { name?: string; controlType?: string; automationId?: string; processId?: number }): Promise<UiElement[]> {
     this.lastFindError = null;
+    this.lastFindNote = null;
     // Scope an unscoped query to the active window (as the Windows adapter and
     // invokeElement do) — otherwise a name that exists in every app matches
     // whichever the walk reaches first.
@@ -523,9 +575,15 @@ export class MacOSAdapter implements PlatformAdapter {
       if (err instanceof MacAxError && (err.kind === 'locked' || err.kind === 'permission')) throw err;
       // A timeout is reported through lastFindError so the find tool can say
       // "TIMED OUT" instead of "(no elements found)" (parity with Windows).
-      this.lastFindError = err instanceof MacAxError && err.kind === 'timeout' ? 'timeout' : 'error';
+      this.lastFindError = err instanceof MacAxError && err.kind === 'timeout' ? 'timeout' : err instanceof MacAxError && err.kind === 'partial' ? 'partial' : 'error';
+      if (this.lastFindError === 'partial') this.lastFindNote = (err as MacAxError).message;
       return [];
     }
+  }
+
+  /** The frontmost document's text through accessibility (AX) — no Cmd+A, nothing selected, clipboard untouched. */
+  async getPageText(): Promise<{ text: string; name?: string } | null> {
+    return (await this.ax.pageText?.().catch(() => null)) ?? null;
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
@@ -586,6 +644,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseClick(x: number, y: number, opts?: { button?: MouseButton; count?: number }): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
     await this.delay(40);
@@ -628,6 +687,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseDrag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.setPosition(new Point(x1, y1));
     this.lastCursor = { x: x1, y: y1 };
     await this.delay(50);
@@ -646,6 +706,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseScroll(x: number, y: number, direction: ScrollDirection, amount: number = 3): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.setPosition(new Point(x, y));
     this.lastCursor = { x, y };
     await this.delay(30);
@@ -670,6 +731,7 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseDown(button?: MouseButton): Promise<void> {
+    await beforePointerPress(); // clawdcursor's own pill must not be under the click
     await mouse.pressButton(this.toNutButton(button));
   }
 
@@ -728,8 +790,9 @@ export class MacOSAdapter implements PlatformAdapter {
 
     const usingClause = mods.length ? ` using {${mods.map(m => `${m} down`).join(', ')}}` : '';
 
-    // Special keys → key code; printable single chars → keystroke.
-    const keyCode = MAC_KEY_CODES[key.toLowerCase()];
+    // Special keys → key code; printable single chars → keystroke. A modifier on its own ("shift") is that modifier key, tapped.
+    const bareModifier = mods.length === 0 ? MAC_MODIFIER_KEY_CODES[this.normalizeMod(key)] : undefined;
+    const keyCode = bareModifier ?? MAC_KEY_CODES[key.toLowerCase()];
     // One character outside ASCII ("é", "日", an emoji): typed as itself, never as `keystroke` — that presses "a" (#242).
     if (keyCode === undefined && hasNonAscii(key) && [...key].length === 1) {
       refuseNonAsciiChord(key, mods.length > 0);
@@ -1045,6 +1108,9 @@ export class MacOSAdapter implements PlatformAdapter {
 }
 
 // macOS virtual keycodes for special keys (US ANSI keyboard).
+/** The left-hand modifier keys, for a modifier pressed on its own. */
+const MAC_MODIFIER_KEY_CODES: Record<string, number> = { shift: 56, command: 55, option: 58, control: 59 };
+
 const MAC_KEY_CODES: Record<string, number> = {
   'return': 36, 'enter': 36,
   'tab': 48,

@@ -21,6 +21,8 @@
 // AXFIXTURE_SYSTEMDIALOG=1: the "Open modal" alert gets the AXSystemDialog subrole - what a permission prompt or an
 // authorization sheet looks like to the accessibility API - instead of the ordinary AXDialog of an app's own alert.
 //
+// AXFIXTURE_MODE=sidebar instead opens one window "Fixture Sidebar": a list whose rows hold labels that accept AXPress and ignore it
+// (a SwiftUI sidebar), and a "status" label that says which row got selected.
 // AXFIXTURE_MODE=slow instead opens one window "Fixture Slow" with a "Save As…" button, a
 // status label and an element whose title takes 3 s to answer (the app's main thread is busy,
 // so every AX request behind it waits) — a hung subtree inside a live app.
@@ -48,8 +50,34 @@ final class SlowView: NSView {
     }
 }
 
+/// A label that, like a SwiftUI Text in a settings sidebar, accepts AXPress and does nothing: the selection lives on the ROW.
+final class InertLabel: NSTextField {
+    override func accessibilityActionNames() -> [NSAccessibility.Action] { [.press] }
+    override func accessibilityPerformPress() -> Bool { true }
+}
+
+/// A one-column sidebar (AXTable > AXRow > AXCell > AXStaticText) whose rows hold InertLabels; choosing a row reports it.
+final class SidebarSource: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    let names = ["Wi-Fi", "General", "Displays"]
+    var onSelect: ((String) -> Void)?
+    func numberOfRows(in tableView: NSTableView) -> Int { names.count }
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        let cell = NSTableCellView(frame: NSRect(x: 0, y: 0, width: 160, height: 28))
+        let label = InertLabel(labelWithString: names[row])
+        label.frame = NSRect(x: 8, y: 4, width: 140, height: 20)
+        label.setAccessibilityIdentifier("sidebar.\(names[row])")
+        cell.addSubview(label)
+        return cell
+    }
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard let tv = notification.object as? NSTableView, tv.selectedRow >= 0 else { return }
+        onSelect?(names[tv.selectedRow])
+    }
+}
+
 final class Delegate: NSObject, NSApplicationDelegate {
     var status: NSTextField!
+    let sidebar = SidebarSource()
 
     @objc func pressed(_ sender: NSButton) {
         status.stringValue = "pressed: \(sender.accessibilityIdentifier())"
@@ -85,6 +113,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ note: Notification) {
         let slow = fixtureMode == "slow"
+        let sidebarMode = fixtureMode == "sidebar"
         let view = NSView(frame: NSRect(x: 0, y: 0, width: 440, height: 340))
         func place<T: NSView>(_ v: T, id: String, y: CGFloat, w: CGFloat = 200, x: CGFloat = 20) -> T {
             v.frame = NSRect(x: x, y: y, width: w, height: 28)
@@ -93,7 +122,25 @@ final class Delegate: NSObject, NSApplicationDelegate {
             return v
         }
 
-        if slow {
+        if sidebarMode {
+            let w = window("Fixture Sidebar", NSRect(x: 160, y: 260, width: 440, height: 340))
+            let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 180, height: 150))
+            table.addTableColumn(NSTableColumn(identifier: NSUserInterfaceItemIdentifier("main")))
+            table.headerView = nil
+            table.rowHeight = 28
+            table.style = .sourceList
+            sidebar.onSelect = { [weak self] name in self?.status.stringValue = "selected: \(name)" }
+            table.dataSource = sidebar
+            table.delegate = sidebar
+            let scroll = NSScrollView(frame: NSRect(x: 20, y: 120, width: 200, height: 160))
+            scroll.documentView = table
+            scroll.setAccessibilityIdentifier("sidebarScroll")
+            view.addSubview(scroll)
+            status = place(NSTextField(labelWithString: "idle"), id: "status", y: 60, w: 300)
+            w.contentView = view
+            w.orderFront(nil)
+            w.makeMain()
+        } else if slow {
             let w = window("Fixture Slow", NSRect(x: 160, y: 260, width: 440, height: 340))
             _ = place(NSButton(title: "Save As…", target: self, action: #selector(pressed(_:))), id: "saveAsButton", y: 280)
             status = place(NSTextField(labelWithString: "idle"), id: "status", y: 240, w: 300)
