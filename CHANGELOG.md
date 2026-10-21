@@ -2,6 +2,17 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Windows: `find`, `wait_for` and `invoke` no longer match single
+  letters.** An element whose name sits inside the request matched however
+  short it was: a lone "C" from a PDF tab matched "User code 0" and "MCP
+  Registry". That reverse match now needs a real part of the request (3+
+  characters, at least half its length), close to macOS and Linux, which only
+  match the forward way.
+
 ## [1.5.22] - 2026-10-20
 
 ### Added

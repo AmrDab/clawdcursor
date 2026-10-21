@@ -788,6 +788,15 @@ function Cmd-FocusWindow {
 }
 
 # ── Command: find-element (fuzzy name match) ──────────────────────────────────
+# Does an element name match the requested name? Contains-match, as on macOS and Linux. The reverse (the element's
+# name inside the request: "File name" for "File name:") counts only for a real part of it: a lone "C" from a PDF
+# matched "User code 0" and "MCP Registry" (live, 2026-10-20).
+function Test-NameMatch([string]$elName, [string]$want) {
+    if ($elName.Length -eq 0) { return $false }
+    if ($elName.Contains($want)) { return $true }
+    return $want.Contains($elName) -and $elName.Length -ge [Math]::Max(3, [Math]::Ceiling($want.Length / 2))
+}
+
 function Cmd-FindElement {
     param($cmd)
     $name        = if ($cmd.name)        { $cmd.name }           else { "" }
@@ -837,7 +846,7 @@ function Cmd-FindElement {
             if ($name -ne "") {
                 # Fuzzy: strip keyboard shortcut suffix ("Save\tCtrl+S" → "save"), then contains-match
                 $elName = ($c.Name -replace '\t.*$', '').Trim().ToLower()
-                if (-not $elName.Contains($nameLower) -and -not $nameLower.Contains($elName)) { continue }
+                if (-not (Test-NameMatch $elName $nameLower)) { continue }
                 if ($elName.Length -eq 0) { continue }
             }
             $rect = $c.BoundingRectangle
@@ -971,7 +980,7 @@ function Cmd-InvokeElement {
                 if ($elName.Length -eq 0) { continue }
                 if (($pass -eq 1 -and $elName -eq $nameLower) -or
                     ($pass -eq 2 -and $elName.Contains($nameLower)) -or
-                    ($pass -eq 3 -and $nameLower.Contains($elName))) {
+                    ($pass -eq 3 -and (Test-NameMatch $elName $nameLower))) {
                     if (-not $valueAction) { $element = $candidates[$k]; break }
                     if ($null -eq $firstHit) { $firstHit = $candidates[$k] }
                     $ct = $null; try { $ct = $candidates[$k].Current.ControlType } catch {}
