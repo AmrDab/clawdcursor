@@ -42,6 +42,8 @@
 
 ## What's new
 
+**1.5.23** &mdash; **Windows: finding an element by name no longer matches stray letters.** A lone "C" on another page could match "User code 0", and "Don't Save" could match **Save**. A partial match now has to be a real part of the name you asked for.
+
 **1.5.22** &mdash; **Your turn is as short as possible.** When an agent needs you (a sign-in, a 2FA code), it asks for that one step and does the rest itself. With `done_when` (what shows on screen once you're done), the prompt turns from blue back to amber the moment you finish, with no Resume click.
 
 **1.5.21**

@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.23] - 2026-10-21
 
 ### Fixed
 
