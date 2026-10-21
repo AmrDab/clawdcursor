@@ -77,11 +77,11 @@ describe('ps-bridge — invoke-element name matching', () => {
 
   it('tries "element name contains query" before "query contains element name"', () => {
     const fwd = body.indexOf('$elName.Contains($nameLower)');
-    const rev = body.indexOf('$nameLower.Contains($elName)');
+    const rev = body.indexOf('Test-NameMatch $elName $nameLower');   // the reverse match, with its minimum length
     expect(fwd).toBeGreaterThan(-1);
     expect(rev).toBeGreaterThan(fwd);
     expect(body).toMatch(/\$pass -eq 2 -and \$elName\.Contains\(\$nameLower\)/);
-    expect(body).toMatch(/\$pass -eq 3 -and \$nameLower\.Contains\(\$elName\)/);
+    expect(body).toMatch(/\$pass -eq 3 -and \(Test-NameMatch \$elName \$nameLower\)/);
   });
 });
 
