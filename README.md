@@ -42,6 +42,8 @@
 
 ## What's new
 
+**1.5.22** &mdash; **Your turn is as short as possible.** When an agent needs you (a sign-in, a 2FA code), it asks for that one step and does the rest itself. With `done_when` (what shows on screen once you're done), the prompt turns from blue back to amber the moment you finish, with no Resume click.
+
 **1.5.21**
 - **`set_value` never guesses a field.** With no field name or role it used to type into the window's largest text box; it now asks you to name the field.
 - **macOS: no screen-recording permission no longer breaks everything.** Only screenshots and OCR fail, and they say how to fix it; windows, keys and accessibility keep working.
