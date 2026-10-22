@@ -31,6 +31,7 @@ import { captureTaskBaseline, parseAssertions, checkAssertions, renderReport } f
 import { UIMapHolder } from '../sense/ui-map-holder';
 import { reactiveCheck } from '../sense/reactive-check';
 import { pausePromptText } from '../pause-text';
+import { classifyResult, renderResultLine } from '../result-codes';
 import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
 import { compileUIMap } from '../sense/ui-map';
@@ -871,8 +872,11 @@ ${renderReport(now)}` : null;
       // 6a. tool_result blocks preserve the Anthropic contract and feed
       //     OpenAI's `tool` messages when we normalize in llm-client.
       for (const tr of toolResults) {
+        // An error says what kind it is, with a hint and a safe next call (result-codes.ts) — errors only, so a
+        // successful step costs the model no extra tokens.
+        const err = tr.isError ? classifyResult(tr.text, true, true, 'agent') : null;
         const content: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [
-          { type: 'text', text: tr.text },
+          { type: 'text', text: err ? `${tr.text}\n${renderResultLine(err)}` : tr.text },
         ];
         if (tr.screenshot) {
           content.push(shotToInnerBlock(tr.screenshot));

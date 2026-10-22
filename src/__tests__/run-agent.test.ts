@@ -1083,6 +1083,17 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(await seen!.doneWhen!()).toBe(true);
   });
 
+  it('an error result ends with its code, hint and a next call in the agent\'s own tool names; a success adds nothing', async () => {
+    llmTurnQueue.push(turnCall('wait_for_element', { name: 'Nope', timeoutMs: 1 }));
+    llmTurnQueue.push(turnCall('list_windows', {}));
+    llmTurnQueue.push(turnCall('done', { evidence: 'x' }));
+    await runAgent({ task: 't', maxTurns: 6 }, { adapter: makeAdapter(), llm: LLM_CONFIG });
+    const texts = toolResultTexts();
+    // The stub adapter has no waitForElement: the tool throws → an unclassified failure, still with a next call.
+    expect(texts).toMatch(/tool threw:[\s\S]*\n\[failed · UNKNOWN · hint: [^\]]*· next: compile_ui \{\}\]/);
+    expect(texts).not.toMatch(/\[unverified/);       // successes cost the model no extra tokens
+  });
+
   it('a pause that ends by done_when is told to the model as "looks done", never as the user\'s confirmation', async () => {
     const pause = vi.fn(async () => 'detected' as const);
     llmTurnQueue.push(turnCall('ask_user', { message: 'Sign in to GitHub', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }] }));
