@@ -20,7 +20,10 @@ import { rankElements } from '../sense/rank';
  * auditable. Callers feed this into the user message, not the system prompt.
  */
 export function wrapUntrustedScreenContent(text: string): string {
-  return `<untrusted-screen-content>\n${text}\n</untrusted-screen-content>`;
+  // The content cannot close (or reopen) the block itself: a page or field that contains the delimiter would otherwise
+  // end the "untrusted" part early and have what follows read as the tool's own words.
+  const safe = text.replace(/<(\/?)\s*untrusted-screen-content\s*>/gi, '‹$1untrusted-screen-content›');
+  return `<untrusted-screen-content>\n${safe}\n</untrusted-screen-content>`;
 }
 
 /**

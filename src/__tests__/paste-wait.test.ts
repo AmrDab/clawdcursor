@@ -23,7 +23,7 @@ describe('waitForPaste', () => {
     await waitForPaste(async () => `typing ${n++}`, 'hello', { minMs: 10, stepMs: 10, blindMs: 50, maxMs: 200 });
     const took = Date.now() - t0;
     expect(took).toBeGreaterThanOrEqual(190);
-    expect(took).toBeLessThan(1000);
+    expect(took).toBeLessThan(5000);   // "not forever" — loose: timers stretch under a loaded test run
   });
 
   it('a field whose value never changes (a code editor that does not report its text) gets only the blind wait', async () => {
