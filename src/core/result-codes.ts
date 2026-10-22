@@ -15,7 +15,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'DANGEROUS_KEY'
-  | 'INVALID_ARGS' | 'REPEATED' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -60,6 +60,10 @@ const RULES: Rule[] = [
     hint: 'this key combination is never sent; do the step another way' },
   { code: 'DEVIATION', outcome: 'failed', test: /\nDEVIATION: /, whole: true,
     hint: 'it ran but the expected effect was not seen; read the screen before retrying, it may have taken', next: REREAD },
+  { code: 'STALE_SCREENSHOT', outcome: 'refused',
+    test: /an older screenshot|none has been taken|was not on screenshot s\d+ is in front/i,
+    hint: 'the screen changed since the screenshot these coordinates came from; nothing was clicked',
+    next: { mcp: 'computer {"action":"screenshot"}', agent: 'screenshot {}' } },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
   { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,

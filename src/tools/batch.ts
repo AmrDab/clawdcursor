@@ -24,6 +24,7 @@ import { getTool, getCompactTools } from './registry';
 import { evaluateToolCall } from './safety-gate';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
+import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from './screen-guard';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -194,6 +195,16 @@ export async function executeBatch(
       }
     }
 
+    // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
+    const stepAction = typeof args.action === 'string' ? args.action : undefined;
+    if (isImagePointerCall(tool.name, stepAction, args)) {
+      const why = await imagePointerRefusal(ctx, args);
+      if (why) {
+        outcomes.push({ i, label, status: 'error', text: why.slice(0, 200) });
+        return halt(i, `step ${i} (${label}): ${why}`);
+      }
+    }
+
     // Execute via the real handler.
     let res: ToolResult;
     try {
@@ -206,7 +217,9 @@ export async function executeBatch(
       return halt(i, `step ${i} (${label}) errored`);
     }
 
-    outcomes.push({ i, label, status: 'ok', text: (res.text || '').slice(0, 160) });
+    // A screenshot step names its id first, so it survives the step text's truncation.
+    const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${(res.text || '').slice(0, 160)}` });
     completed++;
   }
 
