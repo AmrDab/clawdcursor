@@ -7,7 +7,8 @@
  *
  * Bringing a window that WAS on the screenshot to the front (clicking into it) is normal and allowed: a screenshot of
  * the desktop usually has the agent's own host in front. Limits: a page that changed inside the same window, or a sheet
- * attached to it (macOS), is the same window here.
+ * attached to it, is the same window here; where the platform gives no window handles (macOS today), windows are told
+ * apart by process only, so a new dialog of an app that was on the screenshot is not caught there.
  *
  * Pure state and logic — the caller supplies the windows through the platform adapter, the same on every OS.
  * Accessibility coordinates (`space:"screen"`) and actions by name never come here.
@@ -15,6 +16,11 @@
 
 export interface ShotWindow { processId?: number; title?: string; handle?: number | string }
 interface Shot { id: string; windows: ShotWindow[]; at: number }
+
+/** Whether the latest screenshot could record its windows (the list can fail, or be empty: Wayland). */
+export function latestShotGuardsWindows(): boolean {
+  return !!last && last.windows.length > 0;
+}
 
 let seq = 0;
 let last: Shot | null = null;
@@ -26,7 +32,10 @@ const hasHandle = (w: ShotWindow) => w.handle !== undefined && w.handle !== null
  * handle in its window list but not for the active window. Titles are never compared: they churn on their own.
  */
 function wasOnShot(front: ShotWindow, windows: ShotWindow[]): boolean {
-  return windows.some(w => (hasHandle(front) && hasHandle(w)) ? String(w.handle) === String(front.handle) : w.processId === front.processId);
+  if (windows.some(w => (hasHandle(front) && hasHandle(w)) ? String(w.handle) === String(front.handle) : w.processId === front.processId)) return true;
+  // An untitled window is never in a window list (frameless apps, picture-in-picture): one of an app that WAS on the
+  // screenshot counts as that app's. A titled new window (a dialog) still does not.
+  return !(front.title ?? '').trim() && windows.some(w => w.processId === front.processId);
 }
 
 /** Record a full screenshot just taken, with the windows that existed at that moment. Returns its id. */

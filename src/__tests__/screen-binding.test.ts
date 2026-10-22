@@ -54,6 +54,14 @@ describe('checkImagePointer', () => {
     expect(checkImagePointer(undefined, { processId: 11, title: 'whatever' })).toBeTruthy();
   });
 
+  it('an untitled window of an app that was on the screenshot (frameless, picture-in-picture) is that app\'s — allowed', () => {
+    recordShot([host, notepad]);
+    expect(checkImagePointer(undefined, { processId: 10, title: '', handle: 555 })).toBeNull();
+    // ...but a TITLED new window of that app (a dialog) is still caught, and an untitled one of a new app too
+    expect(checkImagePointer(undefined, { processId: 10, title: 'Save As', handle: 556 })).toBeTruthy();
+    expect(checkImagePointer(undefined, { processId: 42, title: '', handle: 557 })).toBeTruthy();
+  });
+
   it('window list unknown at capture, or the window in front unknown now → only the id is checked', () => {
     recordShot([]);
     expect(checkImagePointer(undefined, { processId: 99, handle: 9 })).toBeNull();

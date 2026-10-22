@@ -4,7 +4,7 @@
  * steps, so a batch of clicks read off one screenshot is checked step by step too.
  */
 import type { ToolContext } from './types';
-import { checkImagePointer, recordShot, type ShotWindow } from '../core/screen-binding';
+import { checkImagePointer, recordShot, latestShotGuardsWindows, type ShotWindow } from '../core/screen-binding';
 
 const POINTER_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move',
   'scroll', 'scroll_horizontal', 'drag', 'drag_path']);
@@ -50,5 +50,8 @@ export async function imagePointerRefusal(ctx: ToolContext, args: Record<string,
 export async function noteScreenshot(ctx: ToolContext): Promise<string> {
   const list = await bounded(ctx.platform?.listWindows());
   const id = recordShot((list ?? []).map(w => toShot(w as { processId?: number; title?: string; handle?: number | string })));
-  return `Screenshot id: ${id} — an image-space click is refused if a window it did not show comes to the front; computer clicks may pass shot:"${id}".`;
+  const guard = latestShotGuardsWindows()
+    ? 'an image-space click is refused if a window it did not show comes to the front'
+    : 'the window list was unavailable, so image-space clicks from it are checked by screenshot id only';
+  return `Screenshot id: ${id} — ${guard}; computer clicks may pass shot:"${id}".`;
 }
