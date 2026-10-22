@@ -384,7 +384,8 @@ async function dispatchCompound(
   // Strip the `action` key + apply any remapping before forwarding.
   const forwarded: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    if (k === 'action') continue;
+    // `shot` is checked by the MCP wrapper / batch (screen-guard.ts), not by the granular tool.
+    if (k === 'action' || k === 'shot') continue;
     const mapped = route.argRemap?.[k] ?? k;
     forwarded[mapped] = v;
   }
@@ -478,7 +479,10 @@ export function getCompactTools(): ToolDefinition[] {
         '(names + positions) or `system copy_all_text` (exact page text). Coordinates default to image-space pixels of ' +
         'the latest screenshot; pass space:"screen" to click a position reported by `accessibility`. ' +
         'Prefer `accessibility` for named targets; use `computer` only when you need pixel-level control.',
-      parameters: buildCompoundSchema(COMPUTER_ACTIONS),
+      parameters: {
+        ...buildCompoundSchema(COMPUTER_ACTIONS),
+        shot: { type: 'string', required: false, description: 'Optional, image-space pointer actions: the id of the screenshot the coordinates were read off (each screenshot reply names it, e.g. "s3"). Refused when it is not the latest screenshot.' },
+      },
       category: 'orchestration',
       safetyTier: 1,
       annotations: { title: 'Mouse, keyboard and screenshots', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },

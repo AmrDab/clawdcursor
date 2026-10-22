@@ -147,3 +147,59 @@ describe('MCP results carry an outcome line', () => {
   });
 });
 
+
+describe('screenshot-bound clicks through the MCP wrapper', () => {
+  beforeEach(async () => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+    mockSafety.mockReturnValue(undefined);
+    (await import('../core/screen-binding')).__resetShotsForTests();
+  });
+
+  function ctxWithFront(front: { processId: number; title: string }) {
+    const state = { front };
+    const ctx = { ...fakeCtx(), platform: { getActiveWindow: vi.fn(async () => state.front) } as any };
+    return { state, ctx };
+  }
+  const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
+
+  it('an image click with no screenshot is refused before anything moves', async () => {
+    const { ctx } = ctxWithFront({ processId: 1, title: 'App' });
+    await createMcpServer({ ctx, compact: true });
+    const r = await capturedHandlers.get('computer')!({ action: 'click', x: 10, y: 10 });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/none has been taken[\s\S]*\[refused · STALE_SCREENSHOT/);
+  });
+
+  it('a dialog opened after the screenshot → the next image click is refused; space:"screen" is not checked', async () => {
+    const { state, ctx } = ctxWithFront({ processId: 1, title: 'App' });
+    await createMcpServer({ ctx, compact: true });
+    (await import('../core/screen-binding')).recordShot({ processId: 1, title: 'App' });   // as computer screenshot does
+    state.front = { processId: 1, title: 'Delete file?' };
+    const refused = await capturedHandlers.get('computer')!({ action: 'click', x: 10, y: 10 });
+    expect(text(refused)).toMatch(/window in front changed since screenshot s1/);
+    const screen = await capturedHandlers.get('computer')!({ action: 'click', x: 10, y: 10, space: 'screen' });
+    expect(text(screen)).not.toMatch(/STALE_SCREENSHOT/);
+  });
+
+  it('a click naming an older screenshot is refused', async () => {
+    const { ctx } = ctxWithFront({ processId: 1, title: 'App' });
+    await createMcpServer({ ctx, compact: true });
+    const sb = await import('../core/screen-binding');
+    sb.recordShot({ processId: 1, title: 'App' });
+    sb.recordShot({ processId: 1, title: 'App' });
+    const r = await capturedHandlers.get('computer')!({ action: 'click', x: 1, y: 1, shot: 's1' });
+    expect(text(r)).toMatch(/older screenshot; the latest is s2/);
+  });
+
+  it('a batch stops at the image click whose screen changed under it', async () => {
+    const { state, ctx } = ctxWithFront({ processId: 1, title: 'App' });
+    await createMcpServer({ ctx, compact: true });
+    (await import('../core/screen-binding')).recordShot({ processId: 1, title: 'App' });
+    state.front = { processId: 2, title: 'Other' };
+    const r = await capturedHandlers.get('batch')!({ steps: [{ name: 'computer', arguments: { action: 'click', x: 1, y: 1 } }] });
+    expect(text(r)).toMatch(/window in front changed since screenshot s1/);
+  });
+});

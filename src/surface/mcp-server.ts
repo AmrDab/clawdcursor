@@ -32,6 +32,7 @@ const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 import { classifyResult, renderResultLine, isJsonText, isActingAction } from '../core/result-codes';
+import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from '../tools/screen-guard';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -332,6 +333,16 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // Compound tools (compact surface) decide per action in dispatchCompound.
         if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
+        // Screenshot-bound pointer actions: image coordinates from a screenshot of a screen that has since changed
+        // point at something else (screen-binding.ts).
+        if (isImagePointerCall(tool.name, action, params ?? {})) {
+          const why = await imagePointerRefusal(ctx, params ?? {});
+          if (why) {
+            const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
+            sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
+            return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
+          }
+        }
         const started = Date.now();
         let result;
         try {
@@ -344,6 +355,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           const msg = err instanceof Error ? err.message : String(err);
           sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg) });
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
+        }
+        if (!result.isError && isFullScreenshotCall(tool.name, action)) {
+          result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };
         }
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
