@@ -90,6 +90,9 @@ type CopyPlatform = Pick<PlatformAdapter, 'getActiveWindow' | 'keyPress' | 'read
  * returns it as-is, so a Windows page read came back with lines of nothing but marks; AT-SPI text is expanded already.
  */
 export function withoutObjectMarks(text: string): string {
+  // Text without marks is returned exactly as read: blank and space-only lines are the document's own (macOS run:
+  // TextEdit's three blank lines came back as one).
+  if (!text.includes('￼')) return text;
   return text.replace(/\r\n?/g, '\n').replace(/￼/g, '').replace(/^[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n');
 }
 

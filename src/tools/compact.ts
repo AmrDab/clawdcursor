@@ -434,7 +434,8 @@ async function dispatchCompound(
   // Making System A actions honor `expect` is separate work.
   const declared = new Set(Object.keys(granular.parameters));
   const ignored = Object.keys(forwarded).filter(
-    k => k !== 'expect' && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
+    // `expect` is fine where the delegate checks it; elsewhere it would be dropped while the caller thinks it ran.
+    k => !(k === 'expect' && granular.honorsExpect) && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
   );
 
   // Transparency: show the overlay for what the ACTION does, not the compound

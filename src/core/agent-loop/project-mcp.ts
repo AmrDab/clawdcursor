@@ -296,6 +296,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     safetyTier: meta.safetyTier,
     costClass: meta.costClass,
     cheaperAlternatives: meta.cheaperAlternatives,
+    honorsExpect: true,
     handler,
   };
 }

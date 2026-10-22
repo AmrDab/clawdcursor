@@ -101,7 +101,7 @@ export async function readBackTyped(
   focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
   text: string,
   opts: { maxMs?: number; stepMs?: number; submit?: boolean } = {},
-): Promise<{ result: ReadBack; value?: string }> {
+): Promise<{ result: ReadBack; value?: string; secure?: boolean }> {
   const { maxMs = 300, stepMs = 100, submit = false } = opts;
   const want = flat(text);
   if (!want) return { result: 'unknown' };
@@ -110,7 +110,7 @@ export async function readBackTyped(
   for (;;) {
     let el: { value?: string; secure?: boolean } | null | undefined = null;
     try { el = await focused(); } catch { /* unreadable */ }
-    if (el?.secure) return { result: 'unknown' };
+    if (el?.secure) return { result: 'unknown', secure: true };
     const raw = typeof el?.value === 'string' ? el.value : '';
     const v = raw.length >= READ_CAP ? '' : flat(raw);
     if (v) {

@@ -963,7 +963,7 @@ export function getSmartTools(): ToolDefinition[] {
         const readBack = rb.result === 'suffix' || rb.result === 'mismatch'
           ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
           : '';
-        return { text: `Typed ${text.length} chars (${how})${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}` };
+        return { text: `Typed ${[...text].length} chars (${how})${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 

@@ -303,3 +303,24 @@ describe('pause_for_user done_when — second review', () => {
     });
   }
 });
+
+describe('pause_for_user never queues behind another pause', () => {
+  it('a different message while a pause is on screen → busy at once, naming the one on screen; nothing queued', async () => {
+    const first = pauseGate.requestWithReply({ message: 'Sign in to A', key: 'mcp:sign in to a' });
+    const r = await pauseForUser.handler({ message: 'Sign in to B', timeout: 1 }, noCtx);
+    const body = JSON.parse(r.text);
+    expect(body.status).toBe('busy');
+    expect(body.waitingFor).toBe('Sign in to A');
+    pauseGate.answer('resume');
+    await first;
+    expect(pauseGate.current()).toBeNull();          // B never shows up later
+  });
+
+  it('the same message re-attaches as before (not busy)', async () => {
+    const first = pauseGate.requestWithReply({ message: 'Sign in to A', key: 'mcp:sign in to a' });
+    const call = pauseForUser.handler({ message: 'Sign in to A', timeout: 1 }, noCtx);
+    expect(JSON.parse((await call).text).status).toBe('waiting');
+    pauseGate.answer('resume');
+    await first;
+  });
+});
