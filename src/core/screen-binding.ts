@@ -1,24 +1,38 @@
 /**
- * Screenshot-bound pointer actions. Image-space coordinates only mean something on the screenshot they were read off;
- * once the screen behind them changed (a dialog opened, the page navigated, another app came to the front) the same
- * numbers point at something else. Each full screenshot gets an id and remembers the window in front; an image-space
- * click, drag or scroll is refused when it names an older screenshot, when there is no screenshot at all, or when a
- * different window is in front now.
+ * Screenshot-bound pointer actions. Image-space coordinates only mean something on the screenshot they were read off.
+ * Each full screenshot gets an id and remembers which windows existed when it was taken. An image-space click, drag or
+ * scroll is refused when it names an older screenshot, when there is no screenshot at all, or when the window in front
+ * now is one the screenshot did not have — a dialog, a popup or an app that opened since — because its coordinates
+ * would land on something the caller never saw.
  *
- * Pure state and logic — the caller supplies the window in front, through the platform adapter, so it is the same on
- * every OS. Accessibility coordinates (`space:"screen"`) and actions by name never come here.
+ * Bringing a window that WAS on the screenshot to the front (clicking into it) is normal and allowed: a screenshot of
+ * the desktop usually has the agent's own host in front. Limits: a page that changed inside the same window, or a sheet
+ * attached to it (macOS), is the same window here.
+ *
+ * Pure state and logic — the caller supplies the windows through the platform adapter, the same on every OS.
+ * Accessibility coordinates (`space:"screen"`) and actions by name never come here.
  */
 
 export interface ShotWindow { processId?: number; title?: string; handle?: number | string }
-interface Shot { id: string; window: ShotWindow | null; at: number }
+interface Shot { id: string; windows: ShotWindow[]; at: number }
 
 let seq = 0;
 let last: Shot | null = null;
 
-/** Record a full screenshot just taken, with the window in front at that moment. Returns its id. */
-export function recordShot(window: ShotWindow | null): string {
+const hasHandle = (w: ShotWindow) => w.handle !== undefined && w.handle !== null && w.handle !== '';
+
+/**
+ * Was this window on the screenshot? By handle when both sides have one; otherwise by process — an adapter may give a
+ * handle in its window list but not for the active window. Titles are never compared: they churn on their own.
+ */
+function wasOnShot(front: ShotWindow, windows: ShotWindow[]): boolean {
+  return windows.some(w => (hasHandle(front) && hasHandle(w)) ? String(w.handle) === String(front.handle) : w.processId === front.processId);
+}
+
+/** Record a full screenshot just taken, with the windows that existed at that moment. Returns its id. */
+export function recordShot(windows: ShotWindow[]): string {
   seq += 1;
-  last = { id: `s${seq}`, window, at: Date.now() };
+  last = { id: `s${seq}`, windows: windows.map(w => ({ processId: w.processId, handle: w.handle })), at: Date.now() };
   return last.id;
 }
 
@@ -27,25 +41,10 @@ export function latestShotId(): string | null {
 }
 
 /**
- * A title's own churn is not a different screen: an editor's unsaved marker ("*Untitled", "● file.ts") or an unread
- * count ("(3) Inbox"). A browser's title changing with the page is.
- */
-function sameTitle(a = '', b = ''): boolean {
-  const norm = (t: string) => t.replace(/^\s*[*•●]\s*/, '').replace(/^\(\d+\)\s*/, '').replace(/\s*[*•●]\s*$/, '').trim();
-  return norm(a) === norm(b);
-}
-
-function sameWindow(a: ShotWindow, b: ShotWindow): boolean {
-  if (a.processId !== b.processId) return false;
-  if (a.handle !== undefined && b.handle !== undefined && a.handle !== b.handle) return false;
-  return sameTitle(a.title, b.title);
-}
-
-/**
  * Null when the image-space action may go ahead; otherwise why not. `shot`: the id the caller says its coordinates came
- * from (optional). `now`: the window in front now (null when unknown — then only the id is checked).
+ * from (optional). `front`: the window in front now (null when unknown — then only the id is checked).
  */
-export function checkImagePointer(shot: unknown, now: ShotWindow | null): string | null {
+export function checkImagePointer(shot: unknown, front: ShotWindow | null): string | null {
   if (!last) {
     return 'image coordinates refer to a screenshot, and none has been taken. Take a screenshot first, '
       + 'or pass space:"screen" for coordinates from accessibility.';
@@ -54,10 +53,11 @@ export function checkImagePointer(shot: unknown, now: ShotWindow | null): string
     return `these coordinates are from screenshot ${shot}, an older screenshot; the latest is ${last.id}. `
       + 'Take a new screenshot, or use coordinates from the latest one.';
   }
-  if (last.window && now && !sameWindow(last.window, now)) {
+  // No windows recorded (the list failed): nothing to compare against.
+  if (front && last.windows.length > 0 && !wasOnShot(front, last.windows)) {
     // No titles in the message: they are screen content.
-    return `the window in front changed since screenshot ${last.id}, so its coordinates may point at something else. `
-      + 'Take a new screenshot, or act on the element by name.';
+    return `a window that was not on screenshot ${last.id} is in front now (a dialog or another app opened), so these `
+      + 'coordinates may land on something the screenshot did not show. Take a new screenshot, or act on the element by name.';
   }
   return null;
 }

@@ -217,8 +217,9 @@ export async function executeBatch(
       return halt(i, `step ${i} (${label}) errored`);
     }
 
-    if (isFullScreenshotCall(tool.name, stepAction)) await noteScreenshot(ctx);
-    outcomes.push({ i, label, status: 'ok', text: (res.text || '').slice(0, 160) });
+    // A screenshot step names its id first, so it survives the step text's truncation.
+    const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${(res.text || '').slice(0, 160)}` });
     completed++;
   }
 

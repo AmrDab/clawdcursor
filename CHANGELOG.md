@@ -7,10 +7,11 @@ All notable changes to Clawd Cursor will be documented in this file.
 ### Added
 
 - **Screenshot-bound clicks.** Each screenshot now has an id (`s3`), and
-  remembers the window in front. An image-space click, drag or scroll is
+  remembers which windows existed. An image-space click, drag or scroll is
   refused before anything moves when it names an older screenshot, when there
-  is no screenshot at all, or when a different window has come to the front
-  (a dialog opened, the page changed). The refusal says so
+  is no screenshot at all, or when a window the screenshot did not show is in
+  front (a dialog or another app opened). Clicking into a window that was on
+  it is fine. The refusal says so
   (`STALE_SCREENSHOT`) and suggests a fresh screenshot. This applies inside a
   `batch` too. Accessibility coordinates (`space:"screen"`) and actions by
   name are unaffected. `computer` takes an optional `shot` to name the

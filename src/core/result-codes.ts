@@ -61,7 +61,7 @@ const RULES: Rule[] = [
   { code: 'DEVIATION', outcome: 'failed', test: /\nDEVIATION: /, whole: true,
     hint: 'it ran but the expected effect was not seen; read the screen before retrying, it may have taken', next: REREAD },
   { code: 'STALE_SCREENSHOT', outcome: 'refused',
-    test: /an older screenshot|none has been taken|window in front changed since screenshot/i,
+    test: /an older screenshot|none has been taken|was not on screenshot s\d+ is in front/i,
     hint: 'the screen changed since the screenshot these coordinates came from; nothing was clicked',
     next: { mcp: 'computer {"action":"screenshot"}', agent: 'screenshot {}' } },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,

@@ -476,7 +476,7 @@ Per-OS setup notes:
 
 Every action result and every error ends with one line saying what happened: `[confirmed]` (an `expect` check saw the effect), `[unverified]` (it ran; nothing checked it — pass `expect` where the action takes it), `[refused · CODE · hint · next]` (it did not run: safety gate, consent, locked screen, a system dialog has the keyboard) or `[failed · CODE · hint · next]`. Codes are stable (`NOT_FOUND`, `TIMEOUT`, `STALE_REF`, `DEVIATION`, `INVALID_ARGS`, `NEEDS_CONFIRMATION`, …); `next` is a safe call to make next. A `DEVIATION` may have taken: read the screen before retrying.
 
-Image-space clicks are bound to the screenshot they came from: each screenshot reply names its id (`Screenshot id: s3`), and a click, drag or scroll is refused (`STALE_SCREENSHOT`, nothing moves) when the window in front has changed since, or when it passes an older `shot`. Take a fresh screenshot, or act by name.
+Image-space clicks are bound to the screenshot they came from: each screenshot reply names its id (`Screenshot id: s3`), and a click, drag or scroll is refused (`STALE_SCREENSHOT`, nothing moves) when a window the screenshot did not show (a dialog, another app) is in front now, or when it passes an older `shot`. Clicking into a window that was on the screenshot is fine. Take a fresh screenshot, or act by name.
 
 | Problem | Fix |
 |---|---|
