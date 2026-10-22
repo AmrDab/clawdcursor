@@ -63,3 +63,43 @@ export async function waitForPaste(
     await sleep(stepMs);
   }
 }
+
+/**
+ * Up to this many characters, typing is real keystrokes and the user's clipboard is never touched. Longer text is
+ * pasted (verified, restored): keystrokes run ~20 ms a character, so 2,000 would take 40 s.
+ */
+export const TYPE_KEYS_MAX = 120;
+
+export type ReadBack = 'match' | 'mismatch' | 'unknown';
+
+/** What a field's text looks like for comparison: line breaks and runs of spaces as one space. */
+const flat = (s: string): string => s.replace(/\s+/g, ' ').trim();
+
+/**
+ * Read the focused field after typing: does it show the text? 'unknown' when it cannot be told — no focused element,
+ * a password field (its value is withheld), or a field that exposes no text (empty value: many custom controls). A
+ * field that shows other text is a 'mismatch': autocomplete replaced it, the field reformatted it, or the keys went
+ * elsewhere. Polls briefly: a field can lag the keys. Never throws.
+ */
+export async function readBackTyped(
+  focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
+  text: string,
+  opts: { maxMs?: number; stepMs?: number } = {},
+): Promise<ReadBack> {
+  const { maxMs = 500, stepMs = 100 } = opts;
+  const want = flat(text);
+  if (!want) return 'unknown';
+  const t0 = Date.now();
+  let last: ReadBack = 'unknown';
+  for (;;) {
+    let el: { value?: string; secure?: boolean } | null | undefined = null;
+    try { el = await focused(); } catch { /* unreadable */ }
+    const v = el && !el.secure && typeof el.value === 'string' ? flat(el.value) : '';
+    if (v) {
+      if (v.includes(want)) return 'match';
+      last = 'mismatch';
+    }
+    if (Date.now() - t0 >= maxMs) return last;
+    await new Promise(r => setTimeout(r, stepMs));
+  }
+}

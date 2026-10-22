@@ -40,7 +40,7 @@ import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, TYPE_KEYS_MAX } from '../../tools/paste-guard';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -851,9 +851,15 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const submit = /\r?\n$/.test(text);
         const body = submit ? text.replace(/\r?\n$/, '') : text;
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
-        let prior: string | null = null;        // set while the typed text sits on the clipboard
-        try {
-          if (body) {
+        let how = 'keys';
+        if (body.length <= TYPE_KEYS_MAX) {
+          // Short text: real keystrokes, the user's clipboard never touched. A refusal (a system dialog owns the
+          // keyboard) throws: nothing was typed, and the caller is told so.
+          await ctx.platform.typeText(body);
+        } else {
+          how = 'paste';
+          let prior: string | null = null;        // set while the typed text sits on the clipboard
+          try {
             prior = await ctx.platform.readClipboard().catch(() => '');
             // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S
             // clipboard. Not confirmed → the catch below types it key by key.
@@ -866,16 +872,28 @@ export function buildUnifiedTools(): UnifiedTool[] {
             await waitForPaste(async () => (await ctx.platform.getFocusedElement())?.value, body, { minMs: 150 });
             await ctx.platform.writeClipboard(prior).catch(() => {});
             prior = null;
+          } catch {
+            // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
+            if (prior !== null) await ctx.platform.writeClipboard(prior).catch(() => {});
+            how = 'keys';
+            await ctx.platform.typeText(body);
           }
-          if (submit) await ctx.platform.keyPress('Return');
-          return { success: true, text: `Typed ${text.length} chars (paste): "${truncate(text, 60)}"${inputWarningNote(ctx)}` };
-        } catch {
-          // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
-          if (prior !== null) await ctx.platform.writeClipboard(prior).catch(() => {});
-          await ctx.platform.typeText(text);
-          await sleep(200);
-          return { success: true, text: `Typed ${text.length} chars: "${truncate(text, 60)}"${inputWarningNote(ctx)}` };
         }
+        // Read the field back: say whether it shows the text. Before Return — a field that shows something else
+        // (autocomplete swapped it, as a browser address bar does) must not be submitted.
+        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body) : 'unknown';
+        const shown = `Typed ${text.length} chars (${how}): "${truncate(text, 60)}"`;
+        if (rb === 'mismatch' && submit) {
+          return {
+            success: false,
+            text: `${shown}, but the field shows different text (autocomplete or the field may have changed it) — Return not pressed. Read the field, fix it, then press Return.${inputWarningNote(ctx)}`,
+          };
+        }
+        if (submit) await ctx.platform.keyPress('Return');
+        const note = rb === 'match' ? ' — read back ✓'
+          : rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on'
+          : '';
+        return { success: true, text: `${shown}${note}${inputWarningNote(ctx)}` };
       },
     },
 

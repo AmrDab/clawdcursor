@@ -17,7 +17,7 @@ import { OcrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
-import { waitForPaste, writeClipboardVerified } from './paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, TYPE_KEYS_MAX } from './paste-guard';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -915,11 +915,16 @@ export function getSmartTools(): ToolDefinition[] {
         // Ctrl+V everywhere else — the platform-portable key combo handles
         // the OS difference without raw `process.platform` branching here.
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
+        // Short text: real keystrokes, the user's clipboard never touched. Longer text is pasted (below).
+        const viaKeys = text.length <= TYPE_KEYS_MAX;
         // Remember the user's clipboard: what we type — a password, say — must not stay on it afterwards (#243), and a
         // refused paste must not leave it there either.
         let prior: string | null = null;
-        try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ }
-        try {
+        if (!viaKeys) { try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ } }
+        if (viaKeys) {
+          if (replace) await ctx.desktop.keyPress('mod+a');
+          await ctx.desktop.typeText(text);   // a refusal throws: nothing typed
+        } else try {
           // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
           const onClipboard = await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), text);
           await new Promise(r => setTimeout(r, 50));
@@ -936,16 +941,21 @@ export function getSmartTools(): ToolDefinition[] {
         if (prior !== null) {
           await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, text);
           await ctx.a11y.writeClipboard(prior).catch(() => {});
-        } else {
+        } else if (!viaKeys) {
           await new Promise(r => setTimeout(r, 100));
         }
+        // Read the field back: does it show what was typed?
+        const rb = await readBackTyped(() => ctx.a11y.getFocusedElement(), text);
         ctx.a11y.invalidateCache();
 
         const active = await ctx.a11y.getActiveWindow().catch(() => null);
         const activeInfo = active ? `[${active.processName}] "${active.title}"` : '(unknown)';
         // macOS: a modal dialog of another app may have had the keyboard — say where the text went.
         const warn = ctx.desktop.takeInputWarning?.();
-        return { text: `Typed ${text.length} chars${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
+        const readBack = rb === 'match' ? ' — read back ✓'
+          : rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on'
+          : '';
+        return { text: `Typed ${text.length} chars (${viaKeys ? 'keys' : 'paste'})${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 

@@ -444,98 +444,112 @@ describe('6. resolveAgentPid — active-window pid fallback', () => {
 // 7. type tool — paste fast-path
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('7. type tool — paste fast-path', () => {
+describe('7. type tool — keys for short text, verified paste for long text, read back', () => {
+  // Over TYPE_KEYS_MAX: keystrokes would take too long, so this is pasted.
+  const LONG = 'Lorem ipsum dolor sit amet, '.repeat(6);
 
-  it('type tool result text contains "(paste)" — not per-char', async () => {
+  it('short text is typed as keystrokes: the clipboard is never touched', async () => {
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const typeTool = findTool(tools, 'type');
+    const typeTool = findTool(buildUnifiedTools(), 'type');
     const result = await typeTool.execute({ text: 'Hello World' }, ctx);
     expect(result.success).toBe(true);
-    // Must mention the paste path
-    expect(result.text).toContain('(paste)');
-    // Must NOT say "per-char" or "character" (that would be the fallback)
-    expect(result.text).not.toMatch(/per.char|char by char/i);
+    expect(result.text).toContain('(keys)');
+    expect(ctx.platform.typeText).toHaveBeenCalledWith('Hello World');
+    expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
+    expect(ctx.platform.readClipboard).not.toHaveBeenCalled();
   });
 
-  it('type tool uses clipboard write + mod+v for paste (not typeText)', async () => {
-    const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const typeTool = findTool(tools, 'type');
-    await typeTool.execute({ text: 'Hello World' }, ctx);
-    // Should write to clipboard
-    expect(ctx.platform.writeClipboard).toHaveBeenCalledWith('Hello World');
-    // Should press mod+v
-    expect(ctx.platform.keyPress).toHaveBeenCalledWith('mod+v');
-    // typeText should NOT be called in the fast path
-    expect(ctx.platform.typeText).not.toHaveBeenCalled();
-  });
-
-  it('a trailing newline pastes the rest, then presses Return (single-line fields drop a pasted \\n)', async () => {
+  it('a trailing newline types the rest, then presses Return', async () => {
     const ctx = makeCtx();
     const typeTool = findTool(buildUnifiedTools(), 'type');
     await typeTool.execute({ text: 'dashboard.stripe.com/webhooks\n' }, ctx);
-    expect(ctx.platform.writeClipboard).toHaveBeenCalledWith('dashboard.stripe.com/webhooks');
-    const keys = (ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0]);
-    expect(keys).toEqual(['mod+v', 'Return']);
+    expect(ctx.platform.typeText).toHaveBeenCalledWith('dashboard.stripe.com/webhooks');
+    expect((ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0])).toEqual(['Return']);
   });
 
-  it('inner newlines are still pasted as text (multi-line editors unchanged)', async () => {
+  it('long text is pasted: clipboard write + mod+v, not typeText', async () => {
     const ctx = makeCtx();
     const typeTool = findTool(buildUnifiedTools(), 'type');
-    await typeTool.execute({ text: 'line1\nline2' }, ctx);
-    expect(ctx.platform.writeClipboard).toHaveBeenCalledWith('line1\nline2');
-    expect((ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0])).toEqual(['mod+v']);
+    const result = await typeTool.execute({ text: LONG }, ctx);
+    expect(result.text).toContain('(paste)');
+    expect(ctx.platform.writeClipboard).toHaveBeenCalledWith(LONG);
+    expect(ctx.platform.keyPress).toHaveBeenCalledWith('mod+v');
+    expect(ctx.platform.typeText).not.toHaveBeenCalled();
   });
 
-  it('type tool saves and restores the prior clipboard contents', async () => {
+  it('long text: the prior clipboard is put back', async () => {
     const ctx = makeCtx();
-    // Prior clipboard content
     await ctx.platform.writeClipboard('my-prior-content');
     (ctx.platform.writeClipboard as any).mockClear();
-    const tools = buildUnifiedTools();
-    const typeTool = findTool(tools, 'type');
-    await typeTool.execute({ text: 'Hello' }, ctx);
-    // First write = the text we want to type
+    await findTool(buildUnifiedTools(), 'type').execute({ text: LONG }, ctx);
     const writeCalls = (ctx.platform.writeClipboard as any).mock.calls;
-    expect(writeCalls[0][0]).toBe('Hello');
-    // Second write = restore the prior clipboard
+    expect(writeCalls[0][0]).toBe(LONG);
     expect(writeCalls[1][0]).toBe('my-prior-content');
   });
 
   it('type tool: empty text returns success without any I/O', async () => {
     const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const typeTool = findTool(tools, 'type');
-    const result = await typeTool.execute({ text: '' }, ctx);
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: '' }, ctx);
     expect(result.success).toBe(true);
     expect(result.text).toContain('0 chars');
     expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
     expect(ctx.platform.keyPress).not.toHaveBeenCalled();
   });
 
-  it("a clipboard write that silently does nothing is never pasted: the user's clipboard would go into the field (live 2026-10-19)", async () => {
+  it("long text, a clipboard write that silently does nothing: never pasted (the user's clipboard would go in) — typed instead", async () => {
     const ctx = makeCtx();
     await ctx.platform.writeClipboard("the user's own clipboard");
     (ctx.platform.writeClipboard as any).mockImplementation(async () => { /* Set-Clipboard timed out — nothing written */ });
-    const typeTool = findTool(buildUnifiedTools(), 'type');
-    const result = await typeTool.execute({ text: 'https://glama.ai/x\n' }, ctx);
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: LONG + '\n' }, ctx);
     const keys = (ctx.platform.keyPress as any).mock.calls.map((c: unknown[]) => c[0]);
     expect(keys).not.toContain('mod+v');
-    expect(ctx.platform.typeText).toHaveBeenCalledWith('https://glama.ai/x\n');
-    expect(result.text).not.toContain('(paste)');
+    expect(keys).toEqual(['Return']);
+    expect(ctx.platform.typeText).toHaveBeenCalledWith(LONG);
+    expect(result.text).toContain('(keys)');
   });
 
-  it('type tool: falls back to typeText when clipboard write throws', async () => {
+  it('long text: falls back to typeText when the clipboard write throws', async () => {
     const ctx = makeCtx();
     (ctx.platform.writeClipboard as any).mockRejectedValue(new Error('clipboard denied'));
-    const tools = buildUnifiedTools();
-    const typeTool = findTool(tools, 'type');
-    const result = await typeTool.execute({ text: 'Hello' }, ctx);
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: LONG }, ctx);
     expect(result.success).toBe(true);
-    // Fallback path: typeText is called, NOT "(paste)"
-    expect(ctx.platform.typeText).toHaveBeenCalledWith('Hello');
-    expect(result.text).not.toContain('(paste)');
+    expect(ctx.platform.typeText).toHaveBeenCalledWith(LONG);
+    expect(result.text).toContain('(keys)');
+  });
+
+  it('read back: the field shows the text → "read back ✓"', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Search', controlType: 'Edit', value: 'prefix Hello World', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'Hello World' }, ctx);
+    expect(result.text).toContain('— read back ✓');
+  });
+
+  it('read back: autocomplete swapped the text → Return is NOT pressed (live: an address bar)', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Address and search bar', controlType: 'Edit', value: 'https://glama.ai/mcp/servers/x', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'https://github.com/login/device\n' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.text).toMatch(/field shows different text.*Return not pressed/);
+    expect(ctx.platform.keyPress).not.toHaveBeenCalledWith('Return');
+    expect(result.text).not.toContain('glama');        // the field's content is not echoed
+  });
+
+  it('read back: a password field (value withheld) or an empty value is "unknown" — Return still pressed', async () => {
+    for (const el of [{ secure: true, value: '' }, { value: '' }, null]) {
+      const ctx = makeCtx();
+      (ctx.platform as any).getFocusedElement = vi.fn(async () => el);
+      const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2\n' }, ctx);
+      expect(result.success).toBe(true);
+      expect(ctx.platform.keyPress).toHaveBeenCalledWith('Return');
+      expect(result.text).not.toMatch(/read back/);
+    }
+  });
+
+  it('a refused keystroke (a system dialog owns the keyboard) throws: nothing typed, and the clipboard untouched', async () => {
+    const ctx = makeCtx();
+    (ctx.platform.typeText as any).mockRejectedValue(new Error('A system dialog owns the keyboard: "X"'));
+    await expect(findTool(buildUnifiedTools(), 'type').execute({ text: 'secret' }, ctx)).rejects.toThrow(/system dialog/);
+    expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
   });
 });
 
