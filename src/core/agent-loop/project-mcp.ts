@@ -279,7 +279,9 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     // was dispatched). A rejected el_NN ref / failed dispatch changed nothing
     // and must not stale a still-valid map (parity with the agent loop's
     // outcome-gated invalidation; audit finding E/A1).
-    if (t.changesScreen && executed) ctx.uiMaps?.invalidate();
+    // A typed-but-not-submitted result (read-back held Return) did change the field.
+    const typedNotSubmitted = !executed && /^Typed \d+ chars /.test(result.text) && / — Return not pressed\./.test(result.text);
+    if (t.changesScreen && (executed || typedNotSubmitted)) ctx.uiMaps?.invalidate();
     const out = unifiedToToolResult(result);
     out.text = rewriteOutsideData(out.text, toMcpNames);
     return out;
