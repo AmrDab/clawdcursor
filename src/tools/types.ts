@@ -169,6 +169,8 @@ export interface ToolDefinition {
    * Example: `read_screen.cheaperAlternatives = ['find_element']`.
    */
   cheaperAlternatives?: string[];
+  /** The handler checks an `expect` argument (projected agent-loop tools do). Others would silently ignore one. */
+  honorsExpect?: boolean;
   /** The handler function */
   handler: (params: Record<string, any>, ctx: ToolContext) => Promise<ToolResult>;
 }

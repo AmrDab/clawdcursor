@@ -535,6 +535,21 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     expect(result.text).toMatch(/It shows: <untrusted-screen-content>[\s\S]*glama/);
   });
 
+  it('a password field: what was typed is never echoed in the result (live macOS run echoed it)', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Password', controlType: 'Edit', secure: true, value: '', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 's3cret-PW\n' }, ctx);
+    expect(result.success).toBe(true);
+    expect(result.text).toMatch(/^Typed 10 chars \(keys\) into a password field \(not echoed\)/);
+    expect(result.text).not.toContain('s3cret');
+  });
+
+  it('chars are counted as a person counts them: an emoji is one', async () => {
+    const ctx = makeCtx();
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'café 日本語 😀' }, ctx);
+    expect(result.text).toMatch(/^Typed 10 chars/);
+  });
+
   it('read back: a password field (value withheld) or an empty value is "unknown" — Return still pressed', async () => {
     for (const el of [{ secure: true, value: '' }, { value: '' }, null]) {
       const ctx = makeCtx();

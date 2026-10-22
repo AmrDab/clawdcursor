@@ -886,8 +886,10 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit }) : { result: 'unknown' as const };
         // The verdict sits inside the leading "(…)", before any quoted text or window title, so content can never pose as
         // it (result-codes reads it from there).
-        const head = `Typed ${text.length} chars (${how}${rb.result === 'match' ? ', read back ✓' : ''})`;
-        const shown = `${head}: "${truncate(text, 60)}"`;
+        // Characters as a person counts them (an emoji is one), not UTF-16 units.
+        const head = `Typed ${[...text].length} chars (${how}${rb.result === 'match' ? ', read back ✓' : ''})`;
+        // A password field: never echo what was typed into it.
+        const shown = 'secure' in rb && rb.secure ? `${head} into a password field (not echoed)` : `${head}: "${truncate(text, 60)}"`;
         // What the field shows, as data, short: the evidence the caller needs.
         const fieldShows = rb.value !== undefined ? ` It shows: ${wrapUntrustedScreenContent(truncate(rb.value, 80))}` : '';
         if ((rb.result === 'suffix' || rb.result === 'mismatch') && submit) {

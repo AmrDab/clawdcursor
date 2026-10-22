@@ -429,12 +429,13 @@ async function dispatchCompound(
   // arriving IGNORED. Warn rather than error — callers passing a surplus arg
   // work today, and failing them would break a running agent mid-task.
   //
-  // `expect` is exempt: projected System B delegates honor it without
-  // declaring it (project-mcp.ts), so flagging it would be a false positive.
-  // Making System A actions honor `expect` is separate work.
+  // `expect` is exempt only where the delegate checks it (projected System B
+  // tools, honorsExpect — they take it without declaring it). On a System A
+  // delegate it would be dropped, so it is reported like any ignored argument.
   const declared = new Set(Object.keys(granular.parameters));
   const ignored = Object.keys(forwarded).filter(
-    k => k !== 'expect' && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
+    // `expect` is fine where the delegate checks it; elsewhere it would be dropped while the caller thinks it ran.
+    k => !(k === 'expect' && granular.honorsExpect) && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
   );
 
   // Transparency: show the overlay for what the ACTION does, not the compound

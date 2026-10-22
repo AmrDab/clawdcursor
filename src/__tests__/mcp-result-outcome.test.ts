@@ -218,3 +218,20 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
     expect(text(r)).not.toMatch(/STALE_SCREENSHOT/);
   });
 });
+
+describe('mac report fixes', () => {
+  beforeEach(() => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+    mockSafety.mockReturnValue(undefined);
+  });
+  const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
+
+  it('expect passed to a tool that does not check it is reported as ignored — not silently dropped', async () => {
+    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: [{ type: 'window_title_contains', value: 'x' }] });
+    expect(text(r)).toMatch(/ignored an argument it does not accept: expect/);
+  });
+});

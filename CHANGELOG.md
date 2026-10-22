@@ -4,6 +4,21 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Found in a live macOS test run:
+  - **A password field's text is never echoed.** Typing into one now
+    reports `into a password field (not echoed)`; the reply used to repeat
+    the secret.
+  - **No more queued, stale pause prompts.** A `pause_for_user` with a
+    different message while another is on screen returns `busy` right
+    away, instead of queuing a prompt that would surface later.
+  - **`expect` passed to a tool that does not check it is reported as
+    ignored,** instead of being dropped silently.
+  - **`copy_all_text` returns a document's text exactly** when there is
+    nothing to clean: blank and space-only lines are kept.
+  - Typed character counts count an emoji as one.
+
 ### Added
 
 - **Typing leaves your clipboard alone, and reads the field back.** Plain

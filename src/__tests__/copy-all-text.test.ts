@@ -173,6 +173,13 @@ describe('copyAllText', () => {
     expect(r).toMatchObject({ ok: true, source: 'document', text: 'line one\nline two' });
   });
 
+  it('text without object marks comes back exactly: blank and space-only lines kept (live macOS run: TextEdit)', async () => {
+    const doc = 'line one\n   \n\n\n\nline two';
+    const p = { ...withFocus('TextEdit', { controlType: 'Document', name: 'doc' }), getPageText: vi.fn(async () => ({ text: doc })) };
+    const r = await copyAllText(p as any);
+    expect(r.text).toBe(doc);
+  });
+
   it('embedded-object marks (U+FFFC) are dropped: TextPattern returned whole lines of them (live: GitHub in Edge)', async () => {
     const raw = '￼\r\nSkip to content\r\n￼\r\n￼\r\n￼\r\nCongratulations, you\'re all set!\r\nYour device is now connected.';
     const p = { ...withFocus('msedge', { controlType: 'Document', name: 'Device Activation' }), getPageText: vi.fn(async () => ({ text: raw })) };
