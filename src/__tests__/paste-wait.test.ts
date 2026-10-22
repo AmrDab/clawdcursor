@@ -84,3 +84,28 @@ describe('smart_type puts the clipboard back only once the field has the text', 
     expect(clip.value).toBe('PRIOR');
   });
 });
+
+describe('readBackTyped', () => {
+  it('a password field is unknown at once — no polling', async () => {
+    const { readBackTyped } = await import('../tools/paste-guard');
+    let calls = 0;
+    const r = await readBackTyped(async () => { calls++; return { secure: true, value: '••••' }; }, 'hunter2', { maxMs: 1000 });
+    expect(r.result).toBe('unknown');
+    expect(calls).toBe(1);
+  });
+
+  it('a value at the read cap (Windows TextPattern stops at 1000 chars) gives no verdict', async () => {
+    const { readBackTyped } = await import('../tools/paste-guard');
+    const r = await readBackTyped(async () => ({ value: 'x'.repeat(1000) }), 'not in there', { maxMs: 50 });
+    expect(r.result).toBe('unknown');
+  });
+
+  it('suffix vs mismatch vs match, with and without submit', async () => {
+    const { readBackTyped } = await import('../tools/paste-guard');
+    const f = (value: string) => async () => ({ value });
+    expect((await readBackTyped(f('github.com/login'), 'github.com', { submit: true, maxMs: 0 })).result).toBe('suffix');
+    expect((await readBackTyped(f('glama.ai'), 'github.com', { submit: true, maxMs: 0 })).result).toBe('mismatch');
+    expect((await readBackTyped(f('see github.com'), 'github.com', { submit: true, maxMs: 0 })).result).toBe('match');
+    expect((await readBackTyped(f('github.com/login'), 'github.com', { maxMs: 0 })).result).toBe('match');
+  });
+});

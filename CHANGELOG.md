@@ -6,17 +6,18 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Added
 
-- **Typing leaves your clipboard alone, and reads the field back.** Text up to
-  120 characters is typed as keystrokes; the clipboard is never read or
-  written. Longer text is still pasted (verified, clipboard restored), since
-  keystrokes run ~20 ms a character. After typing, the focused field is read
-  back. If it shows the text, the result says `(keys, read back ✓)` and counts
-  as `[confirmed]`. Before a submit (text ending in a newline), the field must
-  end with the typed text: if an autocomplete suggestion or the field changed
-  it, Return is not pressed (`READBACK_MISMATCH`). Password fields and fields
-  that expose no text are not judged. On Linux/Wayland, where the typing
-  helpers would show the text in the process list, text is pasted instead.
-
+- **Typing leaves your clipboard alone, and reads the field back.** Plain
+  text up to 120 characters is typed as keystrokes; the clipboard is never
+  read or written. Longer text, or text with a newline, tab or non-ASCII
+  character, is still pasted as literal text (verified, clipboard restored).
+  After typing, the focused field is read back. If it shows the text, the
+  result says `(keys, read back ✓)` and counts as `[confirmed]`. Before a
+  submit (text ending in a newline), Return is pressed only when the field
+  ends with the typed text; otherwise it is not pressed (`READBACK_MISMATCH`)
+  and the result shows what the field holds, as untrusted text, so the caller
+  can decide. Password fields and fields that expose no text are not judged.
+  On Linux/Wayland, where the typing helpers would show the text in the
+  process list, text is pasted, and a failed paste stops rather than types.
 - **Screenshot-bound clicks.** Each screenshot now has an id (`s3`), and
   remembers which windows existed. An image-space click, drag or scroll is
   refused before anything moves when it names an older screenshot, when there

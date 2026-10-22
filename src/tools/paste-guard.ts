@@ -70,36 +70,54 @@ export async function waitForPaste(
  */
 export const TYPE_KEYS_MAX = 120;
 
-export type ReadBack = 'match' | 'mismatch' | 'unknown';
+/**
+ * Whether `text` goes as keystrokes: short, and plain printable ASCII only. A newline or tab would be a KEY (Return sends
+ * a chat message half-typed, Tab moves to the next field), and non-ASCII needs a helper that is not on every machine
+ * (macOS without its accessibility helper refuses it) — those are pasted, as literal text, as before.
+ */
+export function typesAsKeys(text: string): boolean {
+  return text.length <= TYPE_KEYS_MAX && /^[\x20-\x7e]*$/.test(text);
+}
+
+/**
+ * 'match': the field shows the text. 'suffix': it shows the text with more after it — an inline autocomplete suggestion
+ * (an address bar), the case where Return would go somewhere else. 'mismatch': it shows other text (the field reformatted
+ * it — a phone number, an amount — or the keys went elsewhere). 'unknown': it cannot be told.
+ */
+export type ReadBack = 'match' | 'suffix' | 'mismatch' | 'unknown';
 
 /** What a field's text looks like for comparison: line breaks and runs of spaces as one space. */
 const flat = (s: string): string => s.replace(/\s+/g, ' ').trim();
 
+/** Windows reads a field without a value pattern through TextPattern, capped at 1000 characters: past that, no verdict. */
+const READ_CAP = 1000;
+
 /**
- * Read the focused field after typing: does it show the text? 'unknown' when it cannot be told — no focused element,
- * a password field (its value is withheld), or a field that exposes no text (empty value: many custom controls). A
- * field that shows other text is a 'mismatch': autocomplete replaced it, the field reformatted it, or the keys went
- * elsewhere. Polls briefly: a field can lag the keys. Never throws.
+ * Read the focused field after typing. 'unknown' when it cannot be told — no focused element, a password field (its
+ * value is withheld), a field that exposes no text (empty value: many custom controls), or a value at the read cap.
+ * Polls briefly: a field can lag the keys. `value` is what the field showed (for the caller to report). Never throws.
  */
 export async function readBackTyped(
   focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
   text: string,
   opts: { maxMs?: number; stepMs?: number; submit?: boolean } = {},
-): Promise<ReadBack> {
-  const { maxMs = 500, stepMs = 100, submit = false } = opts;
+): Promise<{ result: ReadBack; value?: string }> {
+  const { maxMs = 300, stepMs = 100, submit = false } = opts;
   const want = flat(text);
-  if (!want) return 'unknown';
+  if (!want) return { result: 'unknown' };
   const t0 = Date.now();
-  let last: ReadBack = 'unknown';
+  let last: { result: ReadBack; value?: string } = { result: 'unknown' };
   for (;;) {
     let el: { value?: string; secure?: boolean } | null | undefined = null;
     try { el = await focused(); } catch { /* unreadable */ }
-    const v = el && !el.secure && typeof el.value === 'string' ? flat(el.value) : '';
+    if (el?.secure) return { result: 'unknown' };
+    const raw = typeof el?.value === 'string' ? el.value : '';
+    const v = raw.length >= READ_CAP ? '' : flat(raw);
     if (v) {
-      // Before a submit the field must END with the text: an inline autocomplete leaves its suggestion after it
-      // (an address bar), and Return would go there. Otherwise the text anywhere in the field will do.
-      if (submit ? v.endsWith(want) : v.includes(want)) return 'match';
-      last = 'mismatch';
+      // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
+      // do — typing into the middle of a document.
+      if (submit ? v.endsWith(want) : v.includes(want)) return { result: 'match', value: v };
+      last = { result: v.includes(want) ? 'suffix' : 'mismatch', value: v };
     }
     if (Date.now() - t0 >= maxMs) return last;
     await new Promise(r => setTimeout(r, stepMs));

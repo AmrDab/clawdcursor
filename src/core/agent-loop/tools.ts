@@ -40,7 +40,7 @@ import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, TYPE_KEYS_MAX } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -851,12 +851,13 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const submit = /\r?\n$/.test(text);
         const body = submit ? text.replace(/\r?\n$/, '') : text;
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
+        const privateTyping = ctx.platform.typingIsPrivate?.() !== false;
         let how = 'keys';
-        if (body.length <= TYPE_KEYS_MAX && ctx.platform.typingIsPrivate?.() !== false) {
-          // Short text: real keystrokes, the user's clipboard never touched. A refusal (a system dialog owns the
+        if (typesAsKeys(body) && privateTyping) {
+          // Short plain text: real keystrokes, the user's clipboard never touched. A refusal (a system dialog owns the
           // keyboard) throws: nothing was typed, and the caller is told so.
           await ctx.platform.typeText(body);
-        } else {
+        } else if (body) {
           how = 'paste';
           let prior: string | null = null;        // set while the typed text sits on the clipboard
           try {
@@ -872,28 +873,38 @@ export function buildUnifiedTools(): UnifiedTool[] {
             await waitForPaste(async () => (await ctx.platform.getFocusedElement())?.value, body, { minMs: 150 });
             await ctx.platform.writeClipboard(prior).catch(() => {});
             prior = null;
-          } catch {
+          } catch (err) {
             // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
             if (prior !== null) await ctx.platform.writeClipboard(prior).catch(() => {});
+            // Typing it instead would show it to other processes here (it is why it was pasted): stop.
+            if (!privateTyping) throw err;
             how = 'keys';
             await ctx.platform.typeText(body);
           }
         }
-        // Read the field back: say whether it shows the text. Before Return — a field that shows something else
-        // (autocomplete swapped it, as a browser address bar does) must not be submitted.
-        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit }) : 'unknown';
-        // The read-back verdict sits inside the leading "(…)", before any quoted text or window title, so content can
-        // never pose as it (result-codes reads it from there).
-        const head = `Typed ${text.length} chars (${how}${rb === 'match' ? ', read back ✓' : ''})`;
+        // Read the field back: say whether it shows the text — before Return.
+        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit }) : { result: 'unknown' as const };
+        // The verdict sits inside the leading "(…)", before any quoted text or window title, so content can never pose as
+        // it (result-codes reads it from there).
+        const head = `Typed ${text.length} chars (${how}${rb.result === 'match' ? ', read back ✓' : ''})`;
         const shown = `${head}: "${truncate(text, 60)}"`;
-        if (rb === 'mismatch' && submit) {
+        // What the field shows, as data, short: the evidence the caller needs.
+        const fieldShows = rb.value !== undefined ? ` It shows: ${wrapUntrustedScreenContent(truncate(rb.value, 80))}` : '';
+        if ((rb.result === 'suffix' || rb.result === 'mismatch') && submit) {
+          // Return would submit what the field shows, not what was typed (live: an address bar's suggestion swapped the
+          // whole URL). Not pressed; the caller sees what the field shows and decides.
+          const what = rb.result === 'suffix'
+            ? 'the typed text with more after it (an autocomplete suggestion: Delete drops it)'
+            : 'different text (a suggestion took over, or the field reformatted it)';
           return {
             success: false,
-            text: `${shown}, but the field shows different text (an autocomplete suggestion, or the field changed it) — Return not pressed. Read the field, fix it (Delete drops a selected suggestion), then press Return.${inputWarningNote(ctx)}`,
+            text: `${shown}, but the field shows ${what} — Return not pressed. Check the field: if it is right, press Return; otherwise fix it first.${fieldShows}${inputWarningNote(ctx)}`,
           };
         }
         if (submit) await ctx.platform.keyPress('Return');
-        const note = rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on' : '';
+        const note = rb.result === 'suffix' || rb.result === 'mismatch'
+          ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
+          : '';
         return { success: true, text: `${shown}${note}${inputWarningNote(ctx)}` };
       },
     },

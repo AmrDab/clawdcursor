@@ -531,7 +531,8 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     expect(result.success).toBe(false);
     expect(result.text).toMatch(/field shows different text.*Return not pressed/);
     expect(ctx.platform.keyPress).not.toHaveBeenCalledWith('Return');
-    expect(result.text).not.toContain('glama');        // the field's content is not echoed
+    // what the field shows is reported — as untrusted screen content — so the caller can decide
+    expect(result.text).toMatch(/It shows: <untrusted-screen-content>[\s\S]*glama/);
   });
 
   it('read back: a password field (value withheld) or an empty value is "unknown" — Return still pressed', async () => {
@@ -566,6 +567,33 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2' }, ctx);
     expect(result.text).toContain('(paste');
     expect(ctx.platform.typeText).not.toHaveBeenCalled();
+  });
+
+  it('non-ASCII, newlines and tabs are pasted as literal text, even short (keys would press Return/Tab; some OSes refuse non-ASCII keys)', async () => {
+    for (const text of ['café 日本語', 'line1\nline2', 'a\tb', '😀']) {
+      const ctx = makeCtx();
+      const result = await findTool(buildUnifiedTools(), 'type').execute({ text }, ctx);
+      expect(result.text).toContain('(paste');
+      expect(ctx.platform.typeText).not.toHaveBeenCalled();
+      expect(ctx.platform.writeClipboard).toHaveBeenCalledWith(text);
+    }
+  });
+
+  it('where typing is not private, a failed paste stops — it never falls back to typing the text', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).typingIsPrivate = () => false;
+    (ctx.platform.writeClipboard as any).mockRejectedValue(new Error('wl-copy missing'));
+    await expect(findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2' }, ctx)).rejects.toThrow();
+    expect(ctx.platform.typeText).not.toHaveBeenCalled();
+  });
+
+  it('a reformatting field before a submit: Return not pressed, and the result says what the field shows', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Phone', controlType: 'Edit', value: '(555) 123-4567', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: '5551234567\n' }, ctx);
+    expect(result.success).toBe(false);
+    expect(result.text).toMatch(/if it is right, press Return/);
+    expect(result.text).toMatch(/\(555\) 123-4567/);
   });
 
   it('a refused keystroke (a system dialog owns the keyboard) throws: nothing typed, and the clipboard untouched', async () => {
