@@ -109,6 +109,8 @@ export interface FocusedElementInfo {
   isEnabled: boolean;
   bounds: { x: number; y: number; width: number; height: number };
   value: string;
+  /** A password field: its value is withheld (callers must not echo or compare it). */
+  secure?: boolean;
 }
 
 export interface WindowInfo {
@@ -530,6 +532,7 @@ export class AccessibilityBridge {
           isEnabled: result.isEnabled ?? true,
           bounds: result.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
           value: result.value ?? '',
+          ...(result.secure === true ? { secure: true } : {}),
         };
       } catch {
         return null;
@@ -548,6 +551,7 @@ export class AccessibilityBridge {
           isEnabled: el.enabled !== false,
           bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
           value: el.value ?? '',
+          ...(el.secure ? { secure: true } : {}),
         };
       } catch {
         return null;
@@ -565,6 +569,7 @@ export class AccessibilityBridge {
         isEnabled: el.enabled !== false,
         bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
         value: el.value ?? '',
+        ...(el.secure ? { secure: true } : {}),
       };
     } catch {
       return null;

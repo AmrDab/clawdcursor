@@ -173,7 +173,9 @@ export function getAgentTools(): ToolDefinition[] {
             text: JSON.stringify({
               status: 'busy',
               waitingFor: onScreen.message,
-              next: 'Another pause is already on screen. Wait for it (re-call pause_for_user with ITS message), or have it answered first; then ask again if you still need to.',
+              next: pauseGate.isTaskPause()
+                ? 'The running task is paused for the user (its own prompt is on screen). Poll it with task {action:"status"}; ask again once it has been answered.'
+                : 'Another pause is already on screen. Wait for it (re-call pause_for_user with ITS message), or have it answered first; then ask again if you still need to.',
             }),
           };
         }

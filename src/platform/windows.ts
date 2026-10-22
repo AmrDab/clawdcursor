@@ -1490,6 +1490,8 @@ export class WindowsAdapter implements PlatformAdapter {
       controlType: (raw?.controlType ?? '').replace(/^ControlType\./, ''),
       bounds: raw?.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
       value: raw?.value,
+      // A password field (UIA IsPassword): its value is withheld and must never be echoed.
+      ...(raw?.secure === true ? { secure: true } : {}),
       enabled,
       focused: raw?.focused,
       // Tranche 1A: richer state fields from ps-bridge.

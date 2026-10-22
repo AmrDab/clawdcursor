@@ -324,3 +324,14 @@ describe('pause_for_user never queues behind another pause', () => {
     await first;
   });
 });
+
+describe('busy while the running task itself is paused', () => {
+  it('points at task status — re-calling with its message could never re-attach (it has no key)', async () => {
+    const taskPause = pauseGate.requestWithReply({ message: 'Sign in to Stripe' });   // the daemon's own, keyless
+    const r = JSON.parse((await pauseForUser.handler({ message: 'Sign in to B', timeout: 1 }, noCtx)).text);
+    expect(r.status).toBe('busy');
+    expect(r.next).toMatch(/task \{action:"status"\}/);
+    pauseGate.answer('resume');
+    await taskPause;
+  });
+});

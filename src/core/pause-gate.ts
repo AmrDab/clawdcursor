@@ -128,6 +128,11 @@ class PauseGate {
     return !!done && Date.now() - done.at < RECENT_TTL_MS;
   }
 
+  /** The pause on screen belongs to the running task itself (no re-attach key) — no caller can re-attach to it. */
+  isTaskPause(): boolean {
+    return !!this.pending && this.pending.key === undefined;
+  }
+
   current(): PauseInfo | null {
     return this.pending ? { ...this.pending.info } : null;
   }

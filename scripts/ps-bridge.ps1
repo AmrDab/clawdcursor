@@ -1179,16 +1179,21 @@ function Cmd-GetFocusedElement {
             @{ x=[Math]::Round($rect.X); y=[Math]::Round($rect.Y); width=[Math]::Round($rect.Width); height=[Math]::Round($rect.Height) }
         }
         $typeName = if ($cur.ControlType) { $cur.ControlType.ProgrammaticName } else { "" }
+        # A password field: say so, and never read its value (browsers expose it as bullets; callers must not echo it).
+        $isPassword = $false
+        try { $isPassword = [bool]$cur.IsPassword } catch { }
         # Try to read current value if it's an editable element
         $value = ""
-        try {
-            $vp = $focused.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-            $value = $vp.Current.Value
-        } catch {
+        if (-not $isPassword) {
             try {
-                $tp = $focused.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-                $value = $tp.DocumentRange.GetText(1000)
-            } catch {}
+                $vp = $focused.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                $value = $vp.Current.Value
+            } catch {
+                try {
+                    $tp = $focused.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+                    $value = $tp.DocumentRange.GetText(1000)
+                } catch {}
+            }
         }
         return [ordered]@{
             success      = $true
@@ -1200,6 +1205,7 @@ function Cmd-GetFocusedElement {
             isEnabled    = $cur.IsEnabled
             bounds       = $bounds
             value        = $value
+            secure       = $isPassword
         }
     } catch {
         return @{ success=$false; error=$_.Exception.Message }
