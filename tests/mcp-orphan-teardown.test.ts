@@ -119,6 +119,8 @@ function waitForReady(proc: ChildProcessWithoutNullStreams, timeoutMs: number): 
 // genuine hang; the primary assertion (lockfile unlinked) runs and guards
 // the bug on Windows either way.
 const isHeadlessLinux = process.platform === 'linux' && !process.env.DISPLAY;
+// Starting the real CLI takes well over 10 s when the whole suite runs in parallel (seen locally, 2026-10-22).
+const READY_BUDGET_MS = 30_000;
 const EXIT_BUDGET_MS = process.platform === 'win32' ? 20_000 : 5_000;
 
 function seedHome(): NodeJS.ProcessEnv {
@@ -155,7 +157,7 @@ describe.skipIf(isHeadlessLinux)('mcp orphan-teardown stdin handler', () => {
   it('exits cleanly when stdin closes (the host went away)', async () => {
     child = startMcp(seedHome());
     // 10s is generous — local dev sees ~1s, cold CI runners 3-5s.
-    await waitForReady(child, 10_000);
+    await waitForReady(child, READY_BUDGET_MS);
     // The orphan path: the parent closes its end of the stdin pipe, the
     // handler in cli.ts fires and calls process.exit(0).
     child.stdin.end();
@@ -171,12 +173,12 @@ describe.skipIf(isHeadlessLinux)('mcp orphan-teardown stdin handler', () => {
     // parent watchdog), which is what the lock existed for.
     const env = seedHome();
     child = startMcp(env);
-    await waitForReady(child, 10_000);
+    await waitForReady(child, READY_BUDGET_MS);
     const second = startMcp(env);
     let secondErr = '';
     second.stderr.on('data', d => { secondErr += d.toString('utf-8'); });
     try {
-      await waitForReady(second, 10_000);
+      await waitForReady(second, READY_BUDGET_MS);
       expect(secondErr).not.toMatch(/already running/);
       expect(second.exitCode).toBeNull();
     } finally {
