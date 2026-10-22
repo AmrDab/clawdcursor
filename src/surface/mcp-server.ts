@@ -30,7 +30,8 @@ import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
-import { SessionLog, outcomeOf } from './session-log';
+import { SessionLog, outcomeOf, classifyCall } from './session-log';
+import { classifyResult, renderResultLine, isJsonText } from '../core/result-codes';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -164,7 +165,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
-      'reports a DEVIATION instead of a hollow success. clawdcursor is a FALLBACK layer — prefer ' +
+      'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
+      '[confirmed | unverified | refused | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
+      'clawdcursor is a FALLBACK layer — prefer ' +
       'a native API, CLI, or direct file edit when one exists; reach for it when the only surface ' +
       'is a GUI. Full usage guide: the `clawdcursor` skill registered in your agent, or ' +
       'https://clawdcursor.com/llms.txt.';
@@ -277,6 +280,16 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       hasParams ? zodParams : {},
       toolAnnotations(tool),
       async (params: Record<string, unknown>): Promise<McpToolResult> => {
+        // One line saying what the result means — confirmed / unverified / refused / failed, and for a failure a code, a
+        // hint and a safe next call (result-codes.ts). Not on JSON results (they carry their own status) or a batch
+        // (its report has a status per step).
+        const callAction = typeof params?.action === 'string' ? params.action : undefined;
+        const withOutcome = (text: string, isError: boolean): string => {
+          if (tool.name === 'batch' || isJsonText(text)) return text;
+          const cls = classifyCall(tool.name, callAction);
+          const c = classifyResult(text, isError, cls !== 'blind' && cls !== 'vision');
+          return c ? `${text}\n${renderResultLine(c)}` : text;
+        };
         // Consent gate (non-fatal): until the user accepts one-time consent,
         // every tool returns a clear, host-VISIBLE prompt instead of the server
         // dying with an opaque "failed". Re-checked per call so `clawdcursor
@@ -286,11 +299,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
             undefined, clientInfo(), { outcome: 'consent_required' });
           return {
-            content: [{ type: 'text', text:
+            content: [{ type: 'text', text: withOutcome(
               'clawdcursor needs one-time consent before it can control the desktop. ' +
               'Run `clawdcursor consent --accept` in a terminal once (or, if not installed globally — e.g. the npx-based plugin — ' +
               '`npx -y clawdcursor consent --accept`), then retry — no restart needed. ' +
-              '(This grants the agent full mouse/keyboard/screen control of this machine.)'
+              '(This grants the agent full mouse/keyboard/screen control of this machine.)', true),
             }],
             isError: true,
           };
@@ -301,7 +314,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         if (safetyError) {
           sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
             safetyError.text, clientInfo(), { outcome: 'refused' });
-          return { content: [{ type: 'text', text: safetyError.text }], isError: true };
+          return { content: [{ type: 'text', text: withOutcome(safetyError.text, true) }], isError: true };
         }
         // Transparency: any consequential (mutating) tool call from an
         // EXTERNAL agent pokes the on-screen control banner — it shows on the
@@ -321,7 +334,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           // stream. Convert to a clean isError result.
           const msg = err instanceof Error ? err.message : String(err);
           sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg) });
-          return { content: [{ type: 'text', text: `${tool.name}: ${msg}` }], isError: true };
+          return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
         }
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
@@ -344,7 +357,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         if (result.image) {
           content.push({ type: 'image', data: result.image.data, mimeType: result.image.mimeType });
         }
-        content.push({ type: 'text', text: result.text });
+        content.push({ type: 'text', text: withOutcome(result.text, !!result.isError) });
         return { content, isError: result.isError };
       },
     );

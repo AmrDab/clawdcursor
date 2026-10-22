@@ -2,6 +2,21 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- **Every action result and every error says what happened, in one line.**
+  `[confirmed]` (an `expect` check saw the effect), `[unverified]` (it ran,
+  nothing checked it), `[refused · CODE …]` (it did not run: safety gate,
+  consent, locked screen, a system dialog has the keyboard) or
+  `[failed · CODE · hint · next]`. The codes are stable (`NOT_FOUND`,
+  `TIMEOUT`, `STALE_REF`, `DEVIATION`, `INVALID_ARGS`,
+  `NEEDS_CONFIRMATION`, …), and `next` is a safe call in the caller's own
+  tool names. MCP results get it on every action; the built-in agent on
+  errors only, so successful steps cost its model nothing. JSON results and
+  batch reports are unchanged.
+
 ## [1.5.23] - 2026-10-21
 
 ### Fixed
