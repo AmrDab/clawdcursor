@@ -309,6 +309,12 @@ export interface PlatformAdapter {
    * another app had the keyboard, so the keys went there. Taking it clears it. Tools append it to what they report.
    */
   takeInputWarning?(): string | null;
+  /**
+   * Optional: false when typeText would expose the text outside this process — e.g. a typing helper that takes it as a
+   * command-line argument, visible in the process list. Callers then paste (verified, clipboard restored) instead of
+   * typing anything sensitive. Absent = private.
+   */
+  typingIsPrivate?(): boolean;
   getFocusedElement(): Promise<UiElement | null>;
   /**
    * Optional: the whole text of the foreground window's document (a web page, an editor) read through accessibility

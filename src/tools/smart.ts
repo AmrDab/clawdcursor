@@ -17,7 +17,8 @@ import { OcrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
-import { waitForPaste, writeClipboardVerified } from './paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from './paste-guard';
+import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -915,16 +916,24 @@ export function getSmartTools(): ToolDefinition[] {
         // Ctrl+V everywhere else — the platform-portable key combo handles
         // the OS difference without raw `process.platform` branching here.
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
+        // Short text: real keystrokes, the user's clipboard never touched. Longer text is pasted (below).
+        const privateTyping = ctx.platform?.typingIsPrivate?.() !== false;
+        const viaKeys = typesAsKeys(text) && privateTyping;
         // Remember the user's clipboard: what we type — a password, say — must not stay on it afterwards (#243), and a
         // refused paste must not leave it there either.
         let prior: string | null = null;
-        try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ }
-        try {
+        if (!viaKeys) { try { prior = await ctx.a11y.readClipboard(); } catch { /* unreadable: nothing to put back */ } }
+        if (viaKeys) {
+          if (replace) await ctx.desktop.keyPress('mod+a');
+          await ctx.desktop.typeText(text);   // a refusal throws: nothing typed
+        } else try {
           // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
           const onClipboard = await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), text);
           await new Promise(r => setTimeout(r, 50));
           if (replace) await ctx.desktop.keyPress('mod+a');
           if (onClipboard) await ctx.desktop.keyPress('mod+v');
+          // Typing it instead would show it to other processes here (it is why it was pasted): stop.
+          else if (!privateTyping) throw new Error('the clipboard did not take the text, and typing it here would expose it to other processes');
           else await ctx.desktop.typeText(text);
         } catch (err) {
           // The keys were refused (a system dialog owns the keyboard): nothing was typed, so the text must not stay on the
@@ -936,16 +945,25 @@ export function getSmartTools(): ToolDefinition[] {
         if (prior !== null) {
           await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, text);
           await ctx.a11y.writeClipboard(prior).catch(() => {});
-        } else {
+        } else if (!viaKeys) {
           await new Promise(r => setTimeout(r, 100));
         }
+        // Read the field back: does it show what was typed?
+        const rb = await readBackTyped(() => ctx.a11y.getFocusedElement(), text);
         ctx.a11y.invalidateCache();
 
         const active = await ctx.a11y.getActiveWindow().catch(() => null);
         const activeInfo = active ? `[${active.processName}] "${active.title}"` : '(unknown)';
         // macOS: a modal dialog of another app may have had the keyboard — say where the text went.
         const warn = ctx.desktop.takeInputWarning?.();
-        return { text: `Typed ${text.length} chars${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
+        // The verdict sits inside the leading "(…)", before the target name and window title: content cannot pose as it.
+        const how = `${viaKeys ? 'keys' : 'paste'}${rb.result === 'match' ? ', read back ✓' : ''}`;
+        const fieldShows = rb.value !== undefined
+          ? ` It shows: ${wrapUntrustedScreenContent(rb.value.length > 80 ? `${rb.value.slice(0, 79)}…` : rb.value)}` : '';
+        const readBack = rb.result === 'suffix' || rb.result === 'mismatch'
+          ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
+          : '';
+        return { text: `Typed ${text.length} chars (${how})${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 

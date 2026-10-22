@@ -1006,6 +1006,11 @@ export class LinuxAdapter implements PlatformAdapter {
 
   // ─── INPUT (keyboard) ─────────────────────────────────────────────
 
+  /** Wayland typing helpers (ydotool / wtype) take the text as an argument: visible to other processes. */
+  typingIsPrivate(): boolean {
+    return !this.wayland.canKeyboard();
+  }
+
   async typeText(text: string): Promise<void> {
     if (!text) return;
     if (this.wayland.canKeyboard()) {

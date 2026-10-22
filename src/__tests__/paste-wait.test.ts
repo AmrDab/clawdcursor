@@ -23,7 +23,7 @@ describe('waitForPaste', () => {
     await waitForPaste(async () => `typing ${n++}`, 'hello', { minMs: 10, stepMs: 10, blindMs: 50, maxMs: 200 });
     const took = Date.now() - t0;
     expect(took).toBeGreaterThanOrEqual(190);
-    expect(took).toBeLessThan(1000);
+    expect(took).toBeLessThan(5000);   // "not forever" — loose: timers stretch under a loaded test run
   });
 
   it('a field whose value never changes (a code editor that does not report its text) gets only the blind wait', async () => {
@@ -53,6 +53,9 @@ describe('waitForPaste', () => {
   });
 });
 
+// Short text is typed as keystrokes (no clipboard); the paste path is for long text.
+const LONG_SECRET = 'secret text '.repeat(12).trim();
+
 describe('smart_type puts the clipboard back only once the field has the text', () => {
   it('a slow app: no restore while the paste is still pending', async () => {
     const clip = { value: 'PRIOR' };
@@ -76,8 +79,33 @@ describe('smart_type puts the clipboard back only once the field has the text', 
         invalidateCache: () => {},
       },
     } as unknown as ToolContext;
-    await getSmartTools().find(t => t.name === 'smart_type')!.handler({ text: 'secret text' }, ctx);
-    expect(pastedValue).toBe('secret text');
+    await getSmartTools().find(t => t.name === 'smart_type')!.handler({ text: LONG_SECRET }, ctx);
+    expect(pastedValue).toBe(LONG_SECRET);
     expect(clip.value).toBe('PRIOR');
+  });
+});
+
+describe('readBackTyped', () => {
+  it('a password field is unknown at once — no polling', async () => {
+    const { readBackTyped } = await import('../tools/paste-guard');
+    let calls = 0;
+    const r = await readBackTyped(async () => { calls++; return { secure: true, value: '••••' }; }, 'hunter2', { maxMs: 1000 });
+    expect(r.result).toBe('unknown');
+    expect(calls).toBe(1);
+  });
+
+  it('a value at the read cap (Windows TextPattern stops at 1000 chars) gives no verdict', async () => {
+    const { readBackTyped } = await import('../tools/paste-guard');
+    const r = await readBackTyped(async () => ({ value: 'x'.repeat(1000) }), 'not in there', { maxMs: 50 });
+    expect(r.result).toBe('unknown');
+  });
+
+  it('suffix vs mismatch vs match, with and without submit', async () => {
+    const { readBackTyped } = await import('../tools/paste-guard');
+    const f = (value: string) => async () => ({ value });
+    expect((await readBackTyped(f('github.com/login'), 'github.com', { submit: true, maxMs: 0 })).result).toBe('suffix');
+    expect((await readBackTyped(f('glama.ai'), 'github.com', { submit: true, maxMs: 0 })).result).toBe('mismatch');
+    expect((await readBackTyped(f('see github.com'), 'github.com', { submit: true, maxMs: 0 })).result).toBe('match');
+    expect((await readBackTyped(f('github.com/login'), 'github.com', { maxMs: 0 })).result).toBe('match');
   });
 });

@@ -15,7 +15,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'DANGEROUS_KEY'
-  | 'INVALID_ARGS' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -66,6 +66,8 @@ const RULES: Rule[] = [
     next: { mcp: 'computer {"action":"screenshot"}', agent: 'screenshot {}' } },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
+  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /but the field shows .* — Return not pressed/i,
+    hint: 'the field does not show exactly what was typed, so it was not submitted; check it — press Return if it is right, fix it if not', next: REREAD },
   { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,
     hint: 'the same call kept repeating without progress; change the approach' },
   { code: 'INVALID_ARGS', outcome: 'failed',
@@ -118,7 +120,12 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // A success is never classified by its words: a page's text can say "not found" or "timed out" as content.
   if (!acting) return null;
   // The checks' own wording, at their own positions: a body that happens to contain "VERIFIED" on some line is not one.
-  if (/— verified \d+ check\(s\)/.test(text) || /^VERIFIED:/.test(text)) return { outcome: 'confirmed' };
+  // Only where the checks write them, so nothing inside a result (typed text, a page, a window title) can pose as one:
+  // `expect`'s verdict is appended at the very end; `verify` starts its reply; a typing read-back sits in the leading
+  // "Typed N chars (…)" before any quoted text.
+  if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)) {
+    return { outcome: 'confirmed' };
+  }
   // No hint: not every tool takes `expect`, and the server instructions already say how to confirm.
   return { outcome: 'unverified' };
 }

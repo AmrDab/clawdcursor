@@ -1,11 +1,11 @@
 /**
- * The agent `type` tool must paste via the clipboard (fast) instead of
- * per-character typing (slow, "letter by letter") — restoring the legacy
- * smart_type speed. It also restores the prior clipboard so a pending copy
- * isn't clobbered. Falls back to typeText if clipboard/paste fails.
+ * The agent `type` tool: short text is typed as keystrokes (the user's clipboard is never touched); text longer than
+ * TYPE_KEYS_MAX is pasted (one Ctrl/Cmd+V instead of ~20 ms a character), with the clipboard verified before and the
+ * prior clipboard restored after. Falls back to typeText if the clipboard or the paste fails.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { TYPE_KEYS_MAX } from '../tools/paste-guard';
 import type { AgentToolContext } from '../core/agent-loop/types';
 
 function ctxWith(platform: any): AgentToolContext {
@@ -16,23 +16,41 @@ function ctxWith(platform: any): AgentToolContext {
   };
 }
 const typeTool = () => buildUnifiedTools().find(t => t.name === 'type')!;
+const LONG = 'a'.repeat(TYPE_KEYS_MAX + 1);
 
-describe('type tool — clipboard paste fast path', () => {
+describe('type tool — keystrokes for short text', () => {
+  it('short text: keystrokes, and no clipboard read or write at all', async () => {
+    const platform = {
+      readClipboard: vi.fn(async () => 'PRIOR'),
+      writeClipboard: vi.fn(async () => {}),
+      keyPress: vi.fn(async () => {}),
+      typeText: vi.fn(async () => {}),
+    };
+    const r = await typeTool().execute({ text: 'adele songs' }, ctxWith(platform));
+    expect(r.success).toBe(true);
+    expect(platform.typeText).toHaveBeenCalledWith('adele songs');
+    expect(platform.readClipboard).not.toHaveBeenCalled();
+    expect(platform.writeClipboard).not.toHaveBeenCalled();
+    expect(r.text).toMatch(/\(keys\)/);
+  });
+});
+
+describe('type tool — clipboard paste for long text', () => {
   it('pastes via clipboard (write + mod+v), NOT per-character typeText', async () => {
     const calls: string[] = [];
     let clip = 'PRIOR';
     const platform = {
       readClipboard: vi.fn(async () => clip),
-      writeClipboard: vi.fn(async (s: string) => { clip = s; calls.push(`write:${s}`); }),
+      writeClipboard: vi.fn(async (s: string) => { clip = s; calls.push(`write:${s.length}`); }),
       keyPress: vi.fn(async (c: string) => { calls.push(`key:${c}`); }),
       typeText: vi.fn(async () => { calls.push('typeText'); }),
     };
-    const r = await typeTool().execute({ text: 'adele songs' }, ctxWith(platform));
+    const r = await typeTool().execute({ text: LONG }, ctxWith(platform));
     expect(r.success).toBe(true);
-    expect(platform.typeText).not.toHaveBeenCalled();          // NOT char-by-char
-    expect(calls).toContain('write:adele songs');               // wrote the text
-    expect(calls).toContain('key:mod+v');                       // pasted
-    expect(r.text).toMatch(/paste/);
+    expect(platform.typeText).not.toHaveBeenCalled();
+    expect(calls).toContain(`write:${LONG.length}`);
+    expect(calls).toContain('key:mod+v');
+    expect(r.text).toMatch(/\(paste\)/);
   });
 
   it('restores the prior clipboard after pasting (no clobber of a pending copy)', async () => {
@@ -44,9 +62,8 @@ describe('type tool — clipboard paste fast path', () => {
       keyPress: vi.fn(async () => {}),
       typeText: vi.fn(async () => {}),
     };
-    await typeTool().execute({ text: 'a filename' }, ctxWith(platform));
-    // write the text to paste, then restore the prior clipboard
-    expect(writes).toEqual(['a filename', 'COPIED SENTENCE']);
+    await typeTool().execute({ text: LONG }, ctxWith(platform));
+    expect(writes).toEqual([LONG, 'COPIED SENTENCE']);
     expect(platform.typeText).not.toHaveBeenCalled();
   });
 
@@ -58,21 +75,21 @@ describe('type tool — clipboard paste fast path', () => {
       keyPress: vi.fn(async (c: string) => { keys.push(c); }),
       typeText: vi.fn(async () => {}),
     };
-    const r = await typeTool().execute({ text: 'https://glama.ai/x\n' }, ctxWith(platform));
-    expect(keys).not.toContain('mod+v');
-    expect(platform.typeText).toHaveBeenCalledWith('https://glama.ai/x\n');
-    expect(r.text).not.toMatch(/paste/);
+    const r = await typeTool().execute({ text: LONG + '\n' }, ctxWith(platform));
+    expect(keys).toEqual(['Return']);
+    expect(platform.typeText).toHaveBeenCalledWith(LONG);
+    expect(r.text).toMatch(/\(keys\)/);
   });
 
-  it('falls back to per-character typeText when clipboard is unavailable', async () => {
+  it('falls back to per-character typeText when the clipboard is unavailable', async () => {
     const platform = {
       readClipboard: vi.fn(async () => { throw new Error('no clipboard'); }),
       writeClipboard: vi.fn(async () => { throw new Error('no clipboard'); }),
       keyPress: vi.fn(async () => {}),
       typeText: vi.fn(async () => {}),
     };
-    const r = await typeTool().execute({ text: 'hello' }, ctxWith(platform));
+    const r = await typeTool().execute({ text: LONG }, ctxWith(platform));
     expect(r.success).toBe(true);
-    expect(platform.typeText).toHaveBeenCalledWith('hello');
+    expect(platform.typeText).toHaveBeenCalledWith(LONG);
   });
 });

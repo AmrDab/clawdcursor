@@ -58,6 +58,7 @@ import type { ToolContext } from '../tools/types';
 
 const mockMouseClick = vi.fn();
 const mockKeyPress = vi.fn();
+const mockTypeText = vi.fn();
 const mockInvalidateCache = vi.fn();
 const mockGetActiveWindow = vi.fn().mockResolvedValue({
   title: 'Test App',
@@ -80,6 +81,7 @@ function createCtx(overrides?: Partial<ToolContext>): ToolContext {
     desktop: {
       mouseClick: mockMouseClick,
       keyPress: mockKeyPress,
+      typeText: mockTypeText,
     },
     a11y: {
       getActiveWindow: mockGetActiveWindow,
@@ -770,15 +772,21 @@ describe('Smart Tools', () => {
   // ── smart_type ──
 
   describe('smart_type', () => {
-    it('types into currently focused element when no target specified', async () => {
+    it('short text is typed as keystrokes into the focused element: the clipboard is never touched', async () => {
       const ctx = createCtx();
       const result = await smartType.handler({ text: 'Hello world' }, ctx);
-      expect(mockWriteClipboard).toHaveBeenCalledWith('Hello world');
-      // Portable key combo — `mod+v` resolves to Cmd+V on macOS and Ctrl+V
-      // elsewhere via the platform adapter, so smart_type stays
-      // OS-agnostic without `process.platform` branching.
+      expect(mockTypeText).toHaveBeenCalledWith('Hello world');
+      expect(mockWriteClipboard).not.toHaveBeenCalled();
+      expect(mockKeyPress).not.toHaveBeenCalledWith('mod+v');
+      expect(result.text).toContain('11 chars (keys');
+    });
+
+    it('long text is pasted with the portable mod+v (Cmd+V on macOS, Ctrl+V elsewhere)', async () => {
+      const long = 'x'.repeat(200);
+      await smartType.handler({ text: long }, createCtx());
+      expect(mockWriteClipboard).toHaveBeenCalledWith(long);
       expect(mockKeyPress).toHaveBeenCalledWith('mod+v');
-      expect(result.text).toContain('11 chars');
+      expect(mockTypeText).not.toHaveBeenCalled();
     });
 
     it('focuses target element via UIA before typing', async () => {
@@ -788,7 +796,7 @@ describe('Smart Tools', () => {
       expect(mockInvokeElement).toHaveBeenCalledWith(
         expect.objectContaining({ name: 'Search box', action: 'focus' })
       );
-      expect(mockWriteClipboard).toHaveBeenCalledWith('test');
+      expect(mockTypeText).toHaveBeenCalledWith('test');
       expect(result.text).toContain('into "Search box"');
     });
 
@@ -798,27 +806,30 @@ describe('Smart Tools', () => {
       await smartType.handler({ text: 'test', target: 'Input field' }, ctx);
       // Should click at coordinates directly (no a11yToMouse conversion)
       expect(mockMouseClick).toHaveBeenCalledWith(400, 250);
-      expect(mockWriteClipboard).toHaveBeenCalledWith('test');
+      expect(mockTypeText).toHaveBeenCalledWith('test');
     });
 
     // B10: live macOS Save panel — smart_type {target:"Save As", text:"blind-note.txt"}
     // gave "blind-note.txt.txt" (macOS preselects only the base name).
-    it('with a target, replaces the field content (select-all, then paste)', async () => {
+    it('with a target, replaces the field content (select-all, then type)', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
       const result = await smartType.handler({ text: 'blind-note.txt', target: 'Save As' }, createCtx());
-      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+a', 'mod+v']);
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+a']);
+      expect(mockTypeText).toHaveBeenCalledWith('blind-note.txt');
       expect(result.text).toMatch(/replaced/);
     });
 
     it('mode:"append" types at the cursor without clearing the field', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
       await smartType.handler({ text: '.bak', target: 'Save As', mode: 'append' }, createCtx());
-      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+v']);
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual([]);
+      expect(mockTypeText).toHaveBeenCalledWith('.bak');
     });
 
     it('without a target, types at the cursor (never selects all of a document)', async () => {
       await smartType.handler({ text: 'hi' }, createCtx());
-      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+v']);
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual([]);
+      expect(mockTypeText).toHaveBeenCalledWith('hi');
     });
 
     it('returns error when target element cannot be found', async () => {

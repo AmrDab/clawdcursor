@@ -149,12 +149,19 @@ describe('MCP smart_type', () => {
     });
   });
 
-  it('every OS: the text is pasted, then the user\'s clipboard is put back (#243)', async () => {
+  it('every OS: long text is pasted, then the user\'s clipboard is put back (#243)', async () => {
     await onPlatform('linux', async () => {
       const { ctx, clip } = desktopCtx(keyboard());
-      await smartType.handler({ text: 'abc' }, ctx);
-      expect(clip.state.writes).toEqual(['abc', 'PRIOR']);
+      const long = 'abc'.repeat(50);
+      await smartType.handler({ text: long }, ctx);
+      expect(clip.state.writes).toEqual([long, 'PRIOR']);
     });
+  });
+
+  it('short text is typed as keystrokes: the user\'s clipboard is never written', async () => {
+    const { ctx, clip } = desktopCtx(keyboard());
+    await smartType.handler({ text: 'abc' }, ctx);
+    expect(clip.state.writes).toEqual([]);
   });
 
   it('a successful paste no longer leaves the typed text (a password, say) on the clipboard (#243)', async () => {
