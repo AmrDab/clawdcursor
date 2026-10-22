@@ -54,12 +54,19 @@ describe('checkImagePointer', () => {
     expect(checkImagePointer(undefined, { processId: 11, title: 'whatever' })).toBeTruthy();
   });
 
-  it('an untitled window of an app that was on the screenshot (frameless, picture-in-picture) is that app\'s — allowed', () => {
+  it('a window not on the screenshot is refused even untitled and of a known app (no title-based exemption)', () => {
     recordShot([host, notepad]);
-    expect(checkImagePointer(undefined, { processId: 10, title: '', handle: 555 })).toBeNull();
-    // ...but a TITLED new window of that app (a dialog) is still caught, and an untitled one of a new app too
+    expect(checkImagePointer(undefined, { processId: 10, title: '', handle: 555 })).toBeTruthy();
     expect(checkImagePointer(undefined, { processId: 10, title: 'Save As', handle: 556 })).toBeTruthy();
-    expect(checkImagePointer(undefined, { processId: 42, title: '', handle: 557 })).toBeTruthy();
+  });
+
+  it('an untitled window that was in front at capture (frameless app: never in a window list) is on the screenshot', async () => {
+    const { noteScreenshot } = await import('../tools/screen-guard');
+    const frameless = { processId: 10, title: '', handle: 555 };
+    const ctx = { platform: { listWindows: async () => [host, notepad], getActiveWindow: async () => frameless } } as any;
+    await noteScreenshot(ctx);
+    expect(checkImagePointer(undefined, frameless)).toBeNull();
+    expect(checkImagePointer(undefined, { processId: 10, title: '', handle: 556 })).toBeTruthy();   // a popup after capture
   });
 
   it('window list unknown at capture, or the window in front unknown now → only the id is checked', () => {

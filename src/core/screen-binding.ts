@@ -32,10 +32,7 @@ const hasHandle = (w: ShotWindow) => w.handle !== undefined && w.handle !== null
  * handle in its window list but not for the active window. Titles are never compared: they churn on their own.
  */
 function wasOnShot(front: ShotWindow, windows: ShotWindow[]): boolean {
-  if (windows.some(w => (hasHandle(front) && hasHandle(w)) ? String(w.handle) === String(front.handle) : w.processId === front.processId)) return true;
-  // An untitled window is never in a window list (frameless apps, picture-in-picture): one of an app that WAS on the
-  // screenshot counts as that app's. A titled new window (a dialog) still does not.
-  return !(front.title ?? '').trim() && windows.some(w => w.processId === front.processId);
+  return windows.some(w => (hasHandle(front) && hasHandle(w)) ? String(w.handle) === String(front.handle) : w.processId === front.processId);
 }
 
 /** Record a full screenshot just taken, with the windows that existed at that moment. Returns its id. */

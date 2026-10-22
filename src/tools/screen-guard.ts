@@ -48,8 +48,12 @@ export async function imagePointerRefusal(ctx: ToolContext, args: Record<string,
 
 /** After a full screenshot: record it with the windows that exist now, and return the line naming it. */
 export async function noteScreenshot(ctx: ToolContext): Promise<string> {
-  const list = await bounded(ctx.platform?.listWindows());
-  const id = recordShot((list ?? []).map(w => toShot(w as { processId?: number; title?: string; handle?: number | string })));
+  // The window in front at capture is on the screenshot too: an untitled one (frameless app, picture-in-picture) is
+  // never in a window list, and without it every click on it would be refused, screenshot after screenshot.
+  const [list, front] = await Promise.all([bounded(ctx.platform?.listWindows()), frontWindow(ctx)]);
+  const windows = (list ?? []).map(w => toShot(w as { processId?: number; title?: string; handle?: number | string }));
+  if (front && windows.length > 0) windows.push(front);
+  const id = recordShot(windows);
   const guard = latestShotGuardsWindows()
     ? 'an image-space click is refused if a window it did not show comes to the front'
     : 'the window list was unavailable, so image-space clicks from it are checked by screenshot id only';
