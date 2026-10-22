@@ -135,6 +135,12 @@ describe('MCP results carry an outcome line', () => {
     expect(text(r)).toMatch(/\[failed · INVALID_ARGS · hint: fix the arguments; nothing ran\]$/);
   });
 
+  it('a value a caller will use (build_uri\'s URI) comes back exactly as built — no line appended', async () => {
+    const r = await (await handler('system'))({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com' });
+    expect(r.isError).toBeFalsy();
+    expect(text(r)).toBe('mailto:a@b.com');
+  });
+
   it('exactly one outcome line per result', async () => {
     const r = await (await handler('computer'))({ action: 'clik' });
     expect(text(r).match(/\n\[(?:failed|refused|confirmed|unverified)/g)?.length).toBe(1);

@@ -3,7 +3,7 @@
  * failure a stable code, a short hint and a safe next call.
  *
  *   confirmed  — the action ran and a check saw its effect (`expect` passed, `verify` passed)
- *   unverified — the action ran; nothing checked its effect (pass `expect` to confirm)
+ *   unverified — the action ran; nothing checked its effect
  *   refused    — it did not run: the safety gate, consent, a locked screen, a system dialog owning the keyboard
  *   failed     — it ran into an error, or ran without the expected effect (DEVIATION)
  *
@@ -15,7 +15,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'DANGEROUS_KEY'
-  | 'INVALID_ARGS' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'REPEATED' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -62,17 +62,41 @@ const RULES: Rule[] = [
     hint: 'it ran but the expected effect was not seen; read the screen before retrying, it may have taken', next: REREAD },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
+  { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,
+    hint: 'the same call kept repeating without progress; change the approach' },
   { code: 'INVALID_ARGS', outcome: 'failed',
     test: /unknown action|missing required field|is required|must be (?:a )?finite|expect rejected|done_when rejected|NOT EXECUTED|invalid (?:arguments|args|json)/i,
     hint: 'fix the arguments; nothing ran' },
   { code: 'TIMEOUT', outcome: 'failed', test: /timed out|PSRunner timeout|ETIMEDOUT/i,
     hint: 'the app may be busy; read the screen again, then retry once', next: REREAD },
+  // MCP's navigate attaches by itself; the built-in agent's needs browser_connect first.
   { code: 'NOT_CONNECTED', outcome: 'failed', test: /not connected|no browser (?:is )?connected|ECONNREFUSED/i,
-    hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_navigate {"url":"<url>"}' } },
+    hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
+  // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
-    test: /not found|missed —|no elements? (?:found|named)|no_clickable_target|could not find|no (?:editable )?field named|no option named/i,
+    test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)/i,
     hint: 'nothing matched; the name may differ or the element is off screen', next: REREAD },
 ];
+
+/**
+ * Calls that change something — the ones an outcome means anything for. An explicit list: reads, waits and calls that
+ * return a value (build_uri, evaluate) must not get a line appended to what they return.
+ */
+const ACTING: Record<string, ReadonlySet<string>> = {
+  computer: new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'drag', 'drag_path', 'scroll',
+    'scroll_horizontal', 'mouse_down', 'mouse_up', 'type', 'key', 'key_press', 'key_down', 'key_up']),
+  accessibility: new Set(['invoke', 'click', 'focus', 'set_value', 'set-value', 'expand', 'collapse', 'toggle', 'select',
+    'smart_click', 'smart_type']),
+  window: new Set(['focus', 'maximize', 'minimize', 'restore', 'close', 'resize', 'open_app', 'open_file', 'open_url',
+    'switch_tab', 'navigate']),
+  system: new Set(['clipboard_write', 'undo', 'shortcuts_run', 'open_uri', 'open_app', 'open_file', 'open_url', 'relaunch_with_cdp']),
+  browser: new Set(['navigate', 'click', 'type', 'select_option', 'switch_tab', 'scroll']),
+};
+
+/** Is (compound tool, action) a call that changes something? */
+export function isActingAction(compound: string, action: string | undefined): boolean {
+  return !!action && !!ACTING[compound]?.has(action);
+}
 
 const HEAD = 400;
 
@@ -89,8 +113,10 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   }
   // A success is never classified by its words: a page's text can say "not found" or "timed out" as content.
   if (!acting) return null;
-  if (/— verified \d+ check|^VERIFIED/m.test(text)) return { outcome: 'confirmed' };
-  return { outcome: 'unverified', hint: 'nothing checked its effect; pass expect to confirm' };
+  // The checks' own wording, at their own positions: a body that happens to contain "VERIFIED" on some line is not one.
+  if (/— verified \d+ check\(s\)/.test(text) || /^VERIFIED:/.test(text)) return { outcome: 'confirmed' };
+  // No hint: not every tool takes `expect`, and the server instructions already say how to confirm.
+  return { outcome: 'unverified' };
 }
 
 /** One line, appended to the result: `[failed · NOT_FOUND · hint: … · next: …]`. */
@@ -104,6 +130,7 @@ export function renderResultLine(c: ResultClass): string {
 
 /** Results that are JSON keep their own status fields; appending text would break a caller that parses them. */
 export function isJsonText(text: string): boolean {
-  const t = text.trimStart();
-  return t.startsWith('{') || t.startsWith('[{') || t.startsWith('[]');
+  const t = text.trim();
+  if (!t || !'{["0123456789-tfn'.includes(t[0])) return false;
+  try { JSON.parse(t); return true; } catch { return false; }
 }

@@ -51,10 +51,8 @@ describe('classifyResult — successes', () => {
     expect(classifyResult('VERIFIED:\n✓ window_title_contains("Saved")', false, true)).toEqual({ outcome: 'confirmed' });
   });
 
-  it('an action nothing checked is unverified, and says how to confirm it', () => {
-    const c = classifyResult('Pressed Return', false, true)!;
-    expect(c.outcome).toBe('unverified');
-    expect(c.hint).toMatch(/expect/);
+  it('an action nothing checked is plain [unverified] — no hint: not every tool takes expect', () => {
+    expect(classifyResult('Pressed Return', false, true)).toEqual({ outcome: 'unverified' });
   });
 
   it('a successful read gets no line at all — even when its content says "not found" or "timed out"', () => {
@@ -88,5 +86,50 @@ describe('surfaces and rendering', () => {
     const all = [true, false].flatMap(e => ['x', 'safety confirm - y', 'not found', 'timed out', 'screen is locked']
       .map(t => JSON.stringify(classifyResult(t, e, true, 'mcp')) + JSON.stringify(classifyResult(t, e, true, 'agent'))));
     expect(all.join(' ')).not.toMatch(/claude|anthropic|openai|gpt|gemini/i);
+  });
+});
+
+describe('review fixes', () => {
+  it('value-returning and read calls are not "acting", so nothing is appended to what they return', async () => {
+    const { isActingAction } = await import('../core/result-codes');
+    for (const [c, a] of [['system', 'build_uri'], ['browser', 'evaluate'], ['computer', 'wait'], ['system', 'report'],
+      ['system', 'pause_for_user'], ['browser', 'wait_for'], ['accessibility', 'get_value'], ['computer', 'screenshot'],
+      ['computer', 'hover'], ['window', 'list']] as const) {
+      expect(isActingAction(c, a)).toBe(false);
+    }
+    for (const [c, a] of [['computer', 'click'], ['accessibility', 'focus'], ['window', 'focus'], ['system', 'clipboard_write'],
+      ['browser', 'navigate'], ['accessibility', 'set_value']] as const) {
+      expect(isActingAction(c, a)).toBe(true);
+    }
+    expect(isActingAction('computer', undefined)).toBe(false);
+  });
+
+  it('JSON is detected by parsing: arrays of primitives, numbers, strings in quotes', () => {
+    for (const t of ['["a","b"]', '42', '"hello"', ' {"a":1} ', 'true', 'null']) expect(isJsonText(t)).toBe(true);
+    for (const t of ['[failed]', '{not json', 'mailto:a@b.com', 'Clicked']) expect(isJsonText(t)).toBe(false);
+  });
+
+  it('install problems are not NOT_FOUND ("helper not found" is not a missing element)', () => {
+    for (const t of ['screenshot-helper not found at /x — it was not built', 'native helper not found; run ./build.sh',
+      'Model not found (404)', 'tesseract not found']) {
+      expect(classifyResult(t, true, true)?.code).not.toBe('NOT_FOUND');
+    }
+    for (const t of ['Element not found: name=\'Save\'', 'Window not found', 'a11y invoke "X" missed — element not found']) {
+      expect(classifyResult(t, true, true)?.code).toBe('NOT_FOUND');
+    }
+  });
+
+  it('the repeat guard is REPEATED, not "fix the arguments"', () => {
+    expect(classifyResult('NOT EXECUTED (repeat guard). Do not repeat this exact call.', true, true, 'agent')?.code).toBe('REPEATED');
+    expect(classifyResult('NOT EXECUTED: arguments were not valid JSON', true, true, 'agent')?.code).toBe('INVALID_ARGS');
+  });
+
+  it('the built-in agent is told to connect, not to call the navigate that just failed', () => {
+    expect(classifyResult('browser_navigate: not connected — call browser_connect first', true, true, 'agent')?.next).toBe('browser_connect {}');
+  });
+
+  it('"VERIFIED" inside a body is not a confirmation', () => {
+    expect(classifyResult('result:\nVERIFIED by the page', false, true)?.outcome).toBe('unverified');
+    expect(classifyResult('VERIFIED:\n✓ x', false, true)?.outcome).toBe('confirmed');
   });
 });

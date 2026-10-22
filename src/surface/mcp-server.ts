@@ -30,8 +30,8 @@ import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
-import { SessionLog, outcomeOf, classifyCall } from './session-log';
-import { classifyResult, renderResultLine, isJsonText } from '../core/result-codes';
+import { SessionLog, outcomeOf } from './session-log';
+import { classifyResult, renderResultLine, isJsonText, isActingAction } from '../core/result-codes';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -103,6 +103,16 @@ export interface McpServerHandle {
  * The caller is responsible for connecting a transport via `server.connect(...)`.
  * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
  */
+/** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
+function isActingCall(toolName: string, action: string | undefined): boolean {
+  if (toolName in COMPOUND_ROUTE_INDEX) return isActingAction(toolName, action);
+  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
+    const route = routes.find(r => r.delegate === toolName);
+    if (route) return isActingAction(compound, route.action);
+  }
+  return false;
+}
+
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
   const { compact, ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
@@ -166,7 +176,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
       'reports a DEVIATION instead of a hollow success. Each action result and error ends with one line: ' +
-      '[confirmed | unverified | refused | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
+      '[confirmed | unverified | refused · CODE · hint · next | failed · CODE · hint · next] — follow its next call instead of guessing. ' +
       'clawdcursor is a FALLBACK layer — prefer ' +
       'a native API, CLI, or direct file edit when one exists; reach for it when the only surface ' +
       'is a GUI. Full usage guide: the `clawdcursor` skill registered in your agent, or ' +
@@ -286,8 +296,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const callAction = typeof params?.action === 'string' ? params.action : undefined;
         const withOutcome = (text: string, isError: boolean): string => {
           if (tool.name === 'batch' || isJsonText(text)) return text;
-          const cls = classifyCall(tool.name, callAction);
-          const c = classifyResult(text, isError, cls !== 'blind' && cls !== 'vision');
+          const c = classifyResult(text, isError, isActingCall(tool.name, callAction));
           return c ? `${text}\n${renderResultLine(c)}` : text;
         };
         // Consent gate (non-fatal): until the user accepts one-time consent,

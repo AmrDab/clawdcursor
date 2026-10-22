@@ -13,7 +13,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   `[failed · CODE · hint · next]`. The codes are stable (`NOT_FOUND`,
   `TIMEOUT`, `STALE_REF`, `DEVIATION`, `INVALID_ARGS`,
   `NEEDS_CONFIRMATION`, …), and `next` is a safe call in the caller's own
-  tool names. MCP results get it on every action; the built-in agent on
+  tool names. MCP results get it on every action (not on reads, or on
+  calls that return a value such as `build_uri`); the built-in agent on
   errors only, so successful steps cost its model nothing. JSON results and
   batch reports are unchanged.
 
