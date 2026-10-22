@@ -120,7 +120,12 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // A success is never classified by its words: a page's text can say "not found" or "timed out" as content.
   if (!acting) return null;
   // The checks' own wording, at their own positions: a body that happens to contain "VERIFIED" on some line is not one.
-  if (/— verified \d+ check\(s\)/.test(text) || /^VERIFIED:/.test(text) || / — read back ✓/.test(text)) return { outcome: 'confirmed' };
+  // Only where the checks write them, so nothing inside a result (typed text, a page, a window title) can pose as one:
+  // `expect`'s verdict is appended at the very end; `verify` starts its reply; a typing read-back sits in the leading
+  // "Typed N chars (…)" before any quoted text.
+  if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)) {
+    return { outcome: 'confirmed' };
+  }
   // No hint: not every tool takes `expect`, and the server instructions already say how to confirm.
   return { outcome: 'unverified' };
 }

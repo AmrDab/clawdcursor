@@ -84,9 +84,9 @@ const flat = (s: string): string => s.replace(/\s+/g, ' ').trim();
 export async function readBackTyped(
   focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
   text: string,
-  opts: { maxMs?: number; stepMs?: number } = {},
+  opts: { maxMs?: number; stepMs?: number; submit?: boolean } = {},
 ): Promise<ReadBack> {
-  const { maxMs = 500, stepMs = 100 } = opts;
+  const { maxMs = 500, stepMs = 100, submit = false } = opts;
   const want = flat(text);
   if (!want) return 'unknown';
   const t0 = Date.now();
@@ -96,7 +96,9 @@ export async function readBackTyped(
     try { el = await focused(); } catch { /* unreadable */ }
     const v = el && !el.secure && typeof el.value === 'string' ? flat(el.value) : '';
     if (v) {
-      if (v.includes(want)) return 'match';
+      // Before a submit the field must END with the text: an inline autocomplete leaves its suggestion after it
+      // (an address bar), and Return would go there. Otherwise the text anywhere in the field will do.
+      if (submit ? v.endsWith(want) : v.includes(want)) return 'match';
       last = 'mismatch';
     }
     if (Date.now() - t0 >= maxMs) return last;

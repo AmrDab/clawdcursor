@@ -852,7 +852,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const body = submit ? text.replace(/\r?\n$/, '') : text;
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         let how = 'keys';
-        if (body.length <= TYPE_KEYS_MAX) {
+        if (body.length <= TYPE_KEYS_MAX && ctx.platform.typingIsPrivate?.() !== false) {
           // Short text: real keystrokes, the user's clipboard never touched. A refusal (a system dialog owns the
           // keyboard) throws: nothing was typed, and the caller is told so.
           await ctx.platform.typeText(body);
@@ -881,18 +881,19 @@ export function buildUnifiedTools(): UnifiedTool[] {
         }
         // Read the field back: say whether it shows the text. Before Return — a field that shows something else
         // (autocomplete swapped it, as a browser address bar does) must not be submitted.
-        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body) : 'unknown';
-        const shown = `Typed ${text.length} chars (${how}): "${truncate(text, 60)}"`;
+        const rb = body ? await readBackTyped(() => ctx.platform.getFocusedElement(), body, { submit }) : 'unknown';
+        // The read-back verdict sits inside the leading "(…)", before any quoted text or window title, so content can
+        // never pose as it (result-codes reads it from there).
+        const head = `Typed ${text.length} chars (${how}${rb === 'match' ? ', read back ✓' : ''})`;
+        const shown = `${head}: "${truncate(text, 60)}"`;
         if (rb === 'mismatch' && submit) {
           return {
             success: false,
-            text: `${shown}, but the field shows different text (autocomplete or the field may have changed it) — Return not pressed. Read the field, fix it, then press Return.${inputWarningNote(ctx)}`,
+            text: `${shown}, but the field shows different text (an autocomplete suggestion, or the field changed it) — Return not pressed. Read the field, fix it (Delete drops a selected suggestion), then press Return.${inputWarningNote(ctx)}`,
           };
         }
         if (submit) await ctx.platform.keyPress('Return');
-        const note = rb === 'match' ? ' — read back ✓'
-          : rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on'
-          : '';
+        const note = rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on' : '';
         return { success: true, text: `${shown}${note}${inputWarningNote(ctx)}` };
       },
     },

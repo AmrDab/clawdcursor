@@ -916,7 +916,7 @@ export function getSmartTools(): ToolDefinition[] {
         // the OS difference without raw `process.platform` branching here.
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         // Short text: real keystrokes, the user's clipboard never touched. Longer text is pasted (below).
-        const viaKeys = text.length <= TYPE_KEYS_MAX;
+        const viaKeys = text.length <= TYPE_KEYS_MAX && ctx.platform?.typingIsPrivate?.() !== false;
         // Remember the user's clipboard: what we type — a password, say — must not stay on it afterwards (#243), and a
         // refused paste must not leave it there either.
         let prior: string | null = null;
@@ -952,10 +952,10 @@ export function getSmartTools(): ToolDefinition[] {
         const activeInfo = active ? `[${active.processName}] "${active.title}"` : '(unknown)';
         // macOS: a modal dialog of another app may have had the keyboard — say where the text went.
         const warn = ctx.desktop.takeInputWarning?.();
-        const readBack = rb === 'match' ? ' — read back ✓'
-          : rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on'
-          : '';
-        return { text: `Typed ${text.length} chars (${viaKeys ? 'keys' : 'paste'})${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}` };
+        // The verdict sits inside the leading "(…)", before the target name and window title: content cannot pose as it.
+        const how = `${viaKeys ? 'keys' : 'paste'}${rb === 'match' ? ', read back ✓' : ''}`;
+        const readBack = rb === 'mismatch' ? ' ⚠ read back: the field shows different text (autocomplete or the field may have changed it); check it before going on' : '';
+        return { text: `Typed ${text.length} chars (${how})${target ? ` into "${target}"` : ''}${replace ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
 

@@ -521,7 +521,7 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     const ctx = makeCtx();
     (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Search', controlType: 'Edit', value: 'prefix Hello World', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
     const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'Hello World' }, ctx);
-    expect(result.text).toContain('— read back ✓');
+    expect(result.text.startsWith('Typed 11 chars (keys, read back ✓): "Hello World"')).toBe(true);
   });
 
   it('read back: autocomplete swapped the text → Return is NOT pressed (live: an address bar)', async () => {
@@ -543,6 +543,29 @@ describe('7. type tool — keys for short text, verified paste for long text, re
       expect(ctx.platform.keyPress).toHaveBeenCalledWith('Return');
       expect(result.text).not.toMatch(/read back/);
     }
+  });
+
+  it('read back before a submit: an inline autocomplete suffix after the typed text blocks Return', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Address', controlType: 'Edit', value: 'github.com/login/device/extra-suggestion', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'github.com/login/device\n' }, ctx);
+    expect(result.success).toBe(false);
+    expect(ctx.platform.keyPress).not.toHaveBeenCalledWith('Return');
+  });
+
+  it('read back without a submit: the text anywhere in the field is a match (existing content is fine)', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).getFocusedElement = vi.fn(async () => ({ name: 'Doc', controlType: 'Document', value: 'before Hello World after', bounds: { x: 0, y: 0, width: 1, height: 1 } }));
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'Hello World' }, ctx);
+    expect(result.text).toMatch(/^Typed 11 chars \(keys, read back ✓\)/);
+  });
+
+  it('where typing is not private (the text would be visible to other processes) short text is pasted instead', async () => {
+    const ctx = makeCtx();
+    (ctx.platform as any).typingIsPrivate = () => false;
+    const result = await findTool(buildUnifiedTools(), 'type').execute({ text: 'hunter2' }, ctx);
+    expect(result.text).toContain('(paste');
+    expect(ctx.platform.typeText).not.toHaveBeenCalled();
   });
 
   it('a refused keystroke (a system dialog owns the keyboard) throws: nothing typed, and the clipboard untouched', async () => {

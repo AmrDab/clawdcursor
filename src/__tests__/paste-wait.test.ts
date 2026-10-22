@@ -53,6 +53,9 @@ describe('waitForPaste', () => {
   });
 });
 
+// Short text is typed as keystrokes (no clipboard); the paste path is for long text.
+const LONG_SECRET = 'secret text '.repeat(12).trim();
+
 describe('smart_type puts the clipboard back only once the field has the text', () => {
   it('a slow app: no restore while the paste is still pending', async () => {
     const clip = { value: 'PRIOR' };
@@ -76,8 +79,8 @@ describe('smart_type puts the clipboard back only once the field has the text', 
         invalidateCache: () => {},
       },
     } as unknown as ToolContext;
-    await getSmartTools().find(t => t.name === 'smart_type')!.handler({ text: 'secret text' }, ctx);
-    expect(pastedValue).toBe('secret text');
+    await getSmartTools().find(t => t.name === 'smart_type')!.handler({ text: LONG_SECRET }, ctx);
+    expect(pastedValue).toBe(LONG_SECRET);
     expect(clip.value).toBe('PRIOR');
   });
 });
