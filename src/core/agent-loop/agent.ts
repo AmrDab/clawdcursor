@@ -30,7 +30,7 @@ import { captureSnapshot } from '../sense/snapshot';
 import { captureTaskBaseline, parseAssertions, checkAssertions, renderReport } from '../verify/assertions';
 import { UIMapHolder } from '../sense/ui-map-holder';
 import { reactiveCheck } from '../sense/reactive-check';
-import { pausePromptText } from '../pause-text';
+import { promptSatisfies } from '../pause-text';
 import { classifyResult, renderResultLine } from '../result-codes';
 import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
@@ -40,6 +40,7 @@ import type { UIMap } from '../sense/ui-map-types';
 import { logger, EVENTS, beginSpan } from '../observability/logger';
 import { getCorrelationId } from '../observability/correlation';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
+import { ownUiRefusal, isPauseSafeCall } from '../own-ui-guard';
 import {
   callLLMWithTools,
   type LLMTool,
@@ -489,9 +490,9 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
             const deps2 = { adapter: deps.adapter, ocrText: async () => (await reactiveOcr().recognizeScreen()).fullText ?? '' };
             const now = 'error' in parsed ? null : await checkAssertions(parsed.assertions, deps2).catch(() => null);
             const selfMatch = 'error' in parsed ? undefined
-              : parsed.assertions.find(a => a.type === 'ocr_contains' && pausePromptText(reason).includes(a.value.toLowerCase().trim()));
+              : parsed.assertions.map(a => promptSatisfies(reason, a as { type: string; value?: string; name?: string })).find(Boolean);
             const problem = 'error' in parsed ? `done_when rejected: ${parsed.error}`
-              : selfMatch ? `done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is shown by the prompt itself (your message or its buttons) — OCR would find it there at once`
+              : selfMatch ? `done_when rejected: "${selfMatch}" is shown by the prompt itself (your message or its buttons) — the check would find it there at once`
               : now?.ok ? `done_when is already true, so there is nothing to wait for — pick conditions that only become true after the user's step:
 ${renderReport(now)}` : null;
             if (problem) {
@@ -589,6 +590,23 @@ ${renderReport(now)}` : null;
             toolName: call.name,
             toolArgs: call.args,
             result: { success: false, text: `safety_${decision.decision}: ${'reason' in decision ? decision.reason : decision.tier}` },
+            durationMs: Date.now() - turnStart,
+            fingerprintChanged: false,
+            thought: llmResult.text,
+          });
+          continue;
+        }
+
+        // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
+        const ownUi = ownUiRefusal(call.args as Record<string, unknown>, isPauseSafeCall(call.name));
+        if (ownUi) {
+          log.info('agent.tool.blocked', { turn, tool: call.name, decision: 'own_ui', reason: ownUi });
+          toolResults.push({ id: call.id, text: ownUi, isError: true });
+          steps.push({
+            turn,
+            toolName: call.name,
+            toolArgs: call.args,
+            result: { success: false, text: ownUi },
             durationMs: Date.now() - turnStart,
             fingerprintChanged: false,
             thought: llmResult.text,

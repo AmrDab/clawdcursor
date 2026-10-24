@@ -26,6 +26,7 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
+import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
@@ -342,6 +343,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
             return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
           }
+        }
+        // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
+        // Last before the handler: a pause that came up during the checks above still stops it.
+        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action));
+        if (ownUi) {
+          const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
+          sessionLog.record(tool.name, action, false, 0, ownUi, clientInfo(), { outcome: 'refused' });
+          return { content: [{ type: 'text', text: withOutcome(`${label}: ${ownUi}`, true) }], isError: true };
         }
         const started = Date.now();
         let result;

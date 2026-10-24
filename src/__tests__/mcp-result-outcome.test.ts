@@ -49,7 +49,7 @@ vi.mock('../tools/safety-gate', () => ({
 
 // ── Mock controlBanner so touch() is a no-op ────────────────────────────────
 vi.mock('../core/banner', () => ({
-  controlBanner: { touch: vi.fn(), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn() },
+  controlBanner: { touch: vi.fn(), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
 }));
 
 import { createMcpServer, type McpServerLike, type McpToolResult } from '../surface/mcp-server';
@@ -288,5 +288,25 @@ describe('expect is checked on every compound action (live macOS: window focus d
     expect(text(r)).toMatch(/ignored an argument/);
     // the verdict ends the text, so the outcome classifier's anchored ` — verified N check(s)` marker still matches
     expect(text(r)).toMatch(/ — verified 1 check\(s\)$/);
+  });
+});
+
+describe('the user\'s own controls are never a target (owner requirement, live macOS 2026-10-24)', () => {
+  beforeEach(() => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+    mockSafety.mockReturnValue(undefined);
+  });
+  const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
+
+  it('reading the pill\'s tree by its pid is refused before anything runs', async () => {
+    const ctx = fakeCtx();
+    await createMcpServer({ ctx, compact: true });
+    const r = await capturedHandlers.get('accessibility')!({ action: 'read_tree', processId: 4242 });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/pid 4242 is clawdcursor's own on-screen control/);
+    expect(text(r)).toMatch(/\[refused · OWN_UI · /);
   });
 });

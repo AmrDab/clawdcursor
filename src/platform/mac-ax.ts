@@ -32,6 +32,7 @@ import { promisify } from 'util';
 import { getPackageRoot } from '../paths';
 import { macAxBinary } from './mac-ocr-binary';
 import type { InvokeAction, UiElement, WindowInfo } from './types';
+import { isOwnUiPid } from './pointer-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -282,6 +283,8 @@ export type KeyboardOwner =
   /** `warning`: something modal of a non-system app is up — keys are sent, and the caller may want to say whose dialog it is. */
   | { kind: 'app'; warning?: string }
   | { kind: 'locked' }
+  /** clawdcursor's own overlay (the pause prompt's reply box) has the keyboard: it is the user's, never typed into. */
+  | { kind: 'own_ui'; processId: number }
   | { kind: 'alert'; name: string; processId: number; bundleId?: string; title?: string };
 
 /**
@@ -302,14 +305,17 @@ const KEYBOARD_OK_BUNDLES = new Set([
   'com.apple.Spotlight', 'com.apple.dock', 'com.apple.systemuiserver',
   'com.apple.controlcenter', 'com.apple.notificationcenterui',
 ]);
+/** Our window-less processes. The overlay is not one: it takes the keyboard only for the pause prompt's reply box. */
+const KEYBOARD_OK_NAMES = /^ClawdCursor(Host)?$/i;
 /** The overlay binary is cached as clawd-overlay-<hash>, so its process name carries the hash. */
-const KEYBOARD_OK_NAMES = /^(clawd-overlay(-[0-9a-f]+)?|ClawdCursor(Host)?)$/i;
+const OVERLAY_NAME = /^clawd-overlay(-[0-9a-f]+)?$/i;
 
 export function classifyKeyboardOwner(info: FrontmostInfo): KeyboardOwner {
   if (info.locked) return { kind: 'locked' };
   const a = info.app;
   // A regular app (even one showing its own sheet) is what the caller is driving.
   if (!a || a.activationPolicy === 'regular') return { kind: 'app' };
+  if (OVERLAY_NAME.test(a.name)) return { kind: 'own_ui', processId: a.processId };
   if (KEYBOARD_OK_BUNDLES.has(a.bundleId ?? '') || KEYBOARD_OK_NAMES.test(a.name)) return { kind: 'app' };
   const system = a.windows.find(w => w.subrole === 'AXSystemDialog');
   const modal = a.windows.find(w => (w.subrole === 'AXDialog' && w.modal === true) || w.role === 'AXSheet');
@@ -339,6 +345,10 @@ export function classifyKeyboardOwner(info: FrontmostInfo): KeyboardOwner {
 export function describeKeyboardOwner(owner: KeyboardOwner): string {
   if (owner.kind === 'locked') {
     return 'The screen is locked — the lock screen (loginwindow) owns the keyboard, so keystrokes cannot reach any app. Unlock the Mac, then retry.';
+  }
+  if (owner.kind === 'own_ui') {
+    return `The keyboard is in clawdcursor's pause prompt (pid ${owner.processId}): pid ${owner.processId} is clawdcursor's own on-screen control — ` +
+      'it is the user\'s, never typed into. Wait for the user to answer it.';
   }
   if (owner.kind === 'alert') {
     return `A system dialog owns the keyboard: "${owner.name}"${owner.title ? ` — "${owner.title}"` : ''} (pid ${owner.processId}) is frontmost per NSWorkspace, ` +
@@ -683,7 +693,8 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       'window list',
     );
     if (reply) {
-      const windows: WindowInfo[] = (reply.windows ?? []).map(toWindow);
+      // clawdcursor's own overlay is never a candidate (pointer-guard.ts); the helper skips it by name, this by pid.
+      const windows: WindowInfo[] = (reply.windows ?? []).map(toWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
       // An app that answered nothing for a whole AX timeout IS hung, and the list says so…
       for (const u of reply.unresponsive ?? []) {
         windows.push(toWindow({ title: '(not responding)', processName: u.processName, processId: u.processId }));
@@ -698,7 +709,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     }
     const raw = await viaJxa('get-windows.jxa', [], JXA_LIST_TIMEOUT_MS, 'window list');
     if (!Array.isArray(raw)) throw new MacAxError('failed', 'window list failed: unexpected output from get-windows.jxa');
-    return { windows: raw.map(toWindow), skipped: [] };
+    return { windows: raw.map(toWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId)), skipped: [] };
   }
 
   return {
@@ -764,14 +775,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         what,
         { waitForBuild: false },
       );
-      if (reply) return bestApp((reply.apps ?? []).map(toAppState), want);
+      if (reply) return bestApp((reply.apps ?? []).map(toAppState).filter((a: AppState) => !isOwnUiPid(a.processId)), want);
       try {
         const { stdout: found } = await deps.exec('lsappinfo', ['find', `name=${want}`], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
         const asn = found.trim().split('\n')[0]?.trim();
         if (!asn || !asn.startsWith('ASN:')) return null;
         const { stdout } = await deps.exec('lsappinfo', ['info', asn], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
         const app = parseLsappinfoApp(stdout);
-        if (!app) return null;
+        if (!app || isOwnUiPid(app.processId)) return null;
         return {
           name: app.name, bundleId: app.bundleId, processId: app.processId, activationPolicy: app.activationPolicy,
           finishedLaunching: true, active: app.inFront, windows: [], windowsKnown: false,

@@ -18,6 +18,7 @@ import { getPackageRoot } from '../paths';
 import { defaultMacAx } from './mac-ax';
 import { utf8ClipboardEnv } from './mac-keyboard';
 import type { PlatformAdapter, UiElement } from './types';
+import { isOwnUiPid } from './pointer-guard';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -257,7 +258,8 @@ export class AccessibilityBridge {
     let windows: WindowInfo[];
     if (IS_WIN) {
       const result = await this.winCmd({ cmd: 'get-screen-context', maxDepth: 0 }) as any;
-      windows = result.windows ?? [];
+      // clawdcursor's own overlay is never a candidate (pointer-guard.ts) — the pill runs as powershell here.
+      windows = (result.windows ?? []).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
       // Update screen context cache timestamp so we don't double-fetch
       this.windowCache = { windows, timestamp: Date.now() };
     } else if (IS_MAC) {

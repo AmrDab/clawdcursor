@@ -31,6 +31,7 @@
 import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
+import { isOwnUiPid } from '../../platform/pointer-guard';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -182,7 +183,8 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
         : { ok: false, detail: `no window belongs to a process matching "${a.name}"` };
     }
     case 'element_exists': {
-      const hits = await adapter.findElements({ name: a.name });
+      // clawdcursor's own pill is never evidence: its buttons would answer the pause they belong to.
+      const hits = (await adapter.findElements({ name: a.name })).filter(h => !isOwnUiPid(h.processId));
       return hits.length > 0
         ? { ok: true, detail: `${hits.length} element(s) named "${a.name}"` }
         : { ok: false, detail: `no accessibility element named "${a.name}" (sparse-tree app? try ocr_contains)` };

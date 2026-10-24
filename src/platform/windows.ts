@@ -13,7 +13,7 @@
  * Permissions: Windows has no TCC-style gate — returns all-true.
  */
 
-import { beforePointerPress } from './pointer-guard';
+import { beforePointerPress, isOwnUiPid } from './pointer-guard';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import sharp from 'sharp';
@@ -362,7 +362,7 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       const result = await psRunner.run({ cmd: 'get-screen-context', maxDepth: 0 }) as any;
       const raw = Array.isArray(result?.windows) ? result.windows : [];
-      return raw.map(this.normalizeWindow);
+      return raw.map(this.normalizeWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
     } catch {
       return [];
     }

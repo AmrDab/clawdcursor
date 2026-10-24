@@ -8,6 +8,7 @@ import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../llm/browser-config';
 import { resolveAlias } from '../core/router/aliases';
 import { pauseGate } from '../core/pause-gate';
+import { foreignOverlayState } from '../core/overlay-state';
 
 const execFileAsync = promisify(execFile);
 
@@ -144,6 +145,10 @@ export function getOrchestrationTools(): ToolDefinition[] {
               text: `delegate_to_agent: agent is busy (status=${state.status}) with a task started elsewhere (submit_task/scheduler). Poll agent_status or call abort_task first.`,
               isError: true,
             };
+          }
+          // Re-calling a paused task to keep waiting is allowed during a pause (own-ui-guard.ts); starting a new one is not.
+          if (pauseGate.current() || foreignOverlayState().paused) {
+            return { text: 'delegate_to_agent: a pause is waiting for the user on screen — no new task starts until they answer it. Keep waiting.', isError: true };
           }
           entry = startDelegation(ctx.agent, text);
           inflightDelegation = entry;

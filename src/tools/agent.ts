@@ -16,9 +16,10 @@ import * as fs from 'fs';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
 import { pauseGate } from '../core/pause-gate';
-import { pausePromptText } from '../core/pause-text';
+import { promptSatisfies } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { controlBanner } from '../core/banner';
+import { foreignOverlayState } from '../core/overlay-state';
 import { OcrEngine } from '../platform/ocr-engine';
 
 const PAUSE_WAIT_DEFAULT_MS = 45_000; // under common 60s MCP client timeouts
@@ -124,11 +125,12 @@ export function getAgentTools(): ToolDefinition[] {
               stepsCompleted: 0,
               stepsTotal: 0,
               pause: pauseGate.current() ?? undefined,
+              foreignPause: foreignOverlayState().paused || undefined,
               overlay: controlBanner.state(),
             }),
           };
         }
-        return { text: JSON.stringify({ ...ctx.agent.getState(), pause: pauseGate.current() ?? undefined, overlay: controlBanner.state() }) };
+        return { text: JSON.stringify({ ...ctx.agent.getState(), pause: pauseGate.current() ?? undefined, foreignPause: foreignOverlayState().paused || undefined, overlay: controlBanner.state() }) };
       },
     },
 
@@ -167,13 +169,17 @@ export function getAgentTools(): ToolDefinition[] {
         const key = `mcp:${normMessage(text)}`;
         // Another pause is on screen: do not queue this one behind it. Queued prompts surfaced one after another later,
         // long after anyone needed them (macOS run: ~90 stale prompts). Same message = re-attach (below).
-        const onScreen = pauseGate.current();
+        // Another clawdcursor process's pause counts too: a second prompt on top of the user's is never shown.
+        const foreign = foreignOverlayState();
+        const onScreen = pauseGate.current() ?? (foreign.paused ? { message: `a pause shown by clawdcursor process ${foreign.pausedBy ?? '?'}` } : null);
         if (onScreen && !pauseGate.continues(key)) {
           return {
             text: JSON.stringify({
               status: 'busy',
               waitingFor: onScreen.message,
-              next: pauseGate.isTaskPause()
+              next: !pauseGate.current()
+                ? 'Another clawdcursor process has a pause on screen for the user. Wait until it has been answered, then ask again if you still need to.'
+                : pauseGate.isTaskPause()
                 ? 'The running task is paused for the user (its own prompt is on screen). Poll it with task {action:"status"}; ask again once it has been answered.'
                 : 'Another pause is already on screen. Wait for it (re-call pause_for_user with ITS message), or have it answered first; then ask again if you still need to.',
             }),
@@ -187,11 +193,10 @@ export function getAgentTools(): ToolDefinition[] {
         if (done_when !== undefined && done_when !== null && !pauseGate.continues(key)) {
           const parsed = parseAssertions(done_when);
           if ('error' in parsed) return { text: `pause_for_user: done_when rejected: ${parsed.error}`, isError: true };
-          // The prompt shows the message and its own labels; OCR would read them there and resume on the first check.
-          const shown = normMessage(pausePromptText(text));
-          const selfMatch = parsed.assertions.find(a => a.type === 'ocr_contains' && shown.includes(normMessage(a.value)));
+          // The prompt shows the message and its own labels and buttons; OCR or a find by name would hit them there at once.
+          const selfMatch = parsed.assertions.map(a => promptSatisfies(text, a as { type: string; value?: string; name?: string })).find(Boolean);
           if (selfMatch) {
-            return { text: `pause_for_user: done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is shown by the prompt itself (your message or its buttons) — OCR would find it there at once. Use text that only appears once the user is done.`, isError: true };
+            return { text: `pause_for_user: done_when rejected: "${selfMatch}" is shown by the prompt itself (your message or its buttons) — the check would find it there at once. Use something that only appears once the user is done.`, isError: true };
           }
           const platform = ctx?.platform;
           if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };
