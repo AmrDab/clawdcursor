@@ -26,12 +26,13 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
-import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { ownUiRefusal } from '../core/own-ui-guard';
+import { COMPOUND_ROUTE_INDEX, isActingCall, actsOnDesktop } from '../tools/compact';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
-import { classifyResult, renderResultLine, isJsonText, isActingAction } from '../core/result-codes';
+import { classifyResult, renderResultLine, isJsonText } from '../core/result-codes';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from '../tools/screen-guard';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -104,16 +105,6 @@ export interface McpServerHandle {
  * The caller is responsible for connecting a transport via `server.connect(...)`.
  * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
  */
-/** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
-function isActingCall(toolName: string, action: string | undefined): boolean {
-  if (toolName in COMPOUND_ROUTE_INDEX) return isActingAction(toolName, action);
-  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
-    const route = routes.find(r => r.delegate === toolName);
-    if (route) return isActingAction(compound, route.action);
-  }
-  return false;
-}
-
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
   const { compact, ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
@@ -333,6 +324,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // Compound tools (compact surface) decide per action in dispatchCompound.
         if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
+        // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
+        const ownUi = ownUiRefusal(params, actsOnDesktop(tool, action));
+        if (ownUi) {
+          const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
+          sessionLog.record(tool.name, action, false, 0, ownUi, clientInfo(), { outcome: 'refused' });
+          return { content: [{ type: 'text', text: withOutcome(`${label}: ${ownUi}`, true) }], isError: true };
+        }
         // Screenshot-bound pointer actions: image coordinates from a screenshot of a screen that has since changed
         // point at something else (screen-binding.ts).
         if (isImagePointerCall(tool.name, action, params ?? {})) {

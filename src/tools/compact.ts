@@ -38,6 +38,7 @@ import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { reactiveCheck } from '../core/sense/reactive-check';
+import { isActingAction } from '../core/result-codes';
 import { validateExpect } from '../core/verify/assertions';
 import { OcrEngine } from '../platform/ocr-engine';
 
@@ -335,6 +336,21 @@ export const COMPOUND_ROUTE_INDEX: Record<string, ActionRoute[]> = {
   browser: BROWSER_ACTIONS,
   task: TASK_ACTIONS,
 };
+
+/** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
+export function isActingCall(toolName: string, action: string | undefined): boolean {
+  if (toolName in COMPOUND_ROUTE_INDEX) return isActingAction(toolName, action);
+  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
+    const route = routes.find(r => r.delegate === toolName);
+    if (route) return isActingAction(compound, route.action);
+  }
+  return false;
+}
+
+/** Any call that could press, type or change something: a compound decides per action, any other tool by its tier. */
+export function actsOnDesktop(tool: Pick<ToolDefinition, 'name' | 'safetyTier'>, action: string | undefined): boolean {
+  return isActingCall(tool.name, action) || (!(tool.name in COMPOUND_ROUTE_INDEX) && (tool.safetyTier ?? 0) >= 1);
+}
 
 /** Which other compound(s) expose `action`, excluding the one already tried. */
 function compoundsForAction(action: string, exclude: string): string[] {

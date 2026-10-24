@@ -23,7 +23,7 @@ vi.mock('../surface/onboarding', () => ({
   hasConsent: () => consent.given, writeConsentFile: vi.fn(), revokeConsent: vi.fn(), runOnboarding: vi.fn(),
 }));
 vi.mock('../core/banner', () => ({
-  controlBanner: { touch: vi.fn(), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn() },
+  controlBanner: { touch: vi.fn(), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
 }));
 // Refuse every `computer key` call — on the direct route and inside a batch.
 vi.mock('../tools/safety-gate', () => ({

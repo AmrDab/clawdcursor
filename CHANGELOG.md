@@ -12,6 +12,13 @@ All notable changes to Clawd Cursor will be documented in this file.
   `expect` said nothing). Every action except `batch` and `task` now publishes
   it. Actions that don't check it themselves get the same check after they
   run; a malformed `expect` is refused before anything runs.
+- **The pill is the user's: the agent never reads, presses or types into it.**
+  On a live Mac, `accessibility read_tree` with the pill's process id returned
+  its tree, and the pause prompt's Resume button could be found and invoked by
+  name, which would have faked the user's answer. Now any call aimed at an
+  overlay process is refused (`OWN_UI`), and while a pause waits for the user
+  every acting call is refused (`PAUSED`). On macOS, the pause prompt's reply
+  box is no longer counted as an app that may be typed into.
 - **A failed `window focus` says why, on every OS.** On macOS, focusing by name
   or title while the screen was locked said "No matching window found." (the
   lock error was swallowed). It now refuses with the locked-screen message.

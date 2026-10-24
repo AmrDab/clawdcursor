@@ -18,6 +18,9 @@ vi.mock('../tools/safety-gate', () => ({
   evaluateToolCall: (tool: any, args: any) => safetyFor(tool.name, args),
 }));
 
+let pausePending: null | { message: string } = null;
+vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pausePending } }));
+
 import { executeBatch, getBatchTools } from '../tools/batch';
 
 const tool = (name: string, handler: any) => ({ name, parameters: {}, safetyTier: 1, handler });
@@ -27,6 +30,20 @@ const ctx = {} as any;
 beforeEach(() => {
   for (const k of Object.keys(tools)) delete tools[k];
   safetyFor = () => null;
+  pausePending = null;
+});
+
+describe('executeBatch — a pause waiting for the user', () => {
+  it('halts before an acting step runs; a read step still runs', async () => {
+    tools.read_screen = { ...okTool('read_screen'), safetyTier: 0 };
+    tools.click = okTool('click');
+    pausePending = { message: 'Sign in' };
+    const r = await executeBatch([{ name: 'read_screen', arguments: {} }, { name: 'click', arguments: { x: 1, y: 2 } }], ctx);
+    expect(tools.read_screen.handler).toHaveBeenCalledTimes(1);
+    expect(tools.click.handler).not.toHaveBeenCalled();
+    expect(r.steps[1]).toMatchObject({ status: 'blocked' });
+    expect(r.steps[1].text).toMatch(/a pause is waiting for the user on screen/);
+  });
 });
 
 describe('executeBatch — happy path', () => {

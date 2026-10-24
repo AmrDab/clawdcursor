@@ -25,6 +25,8 @@ import { evaluateToolCall } from './safety-gate';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from './screen-guard';
+import { ownUiRefusal } from '../core/own-ui-guard';
+import { actsOnDesktop } from './compact';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -195,8 +197,15 @@ export async function executeBatch(
       }
     }
 
-    // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
     const stepAction = typeof args.action === 'string' ? args.action : undefined;
+    // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
+    const ownUi = ownUiRefusal(args, actsOnDesktop(tool, stepAction));
+    if (ownUi) {
+      outcomes.push({ i, label, status: 'blocked', text: ownUi });
+      return halt(i, `step ${i} (${label}): ${ownUi}`);
+    }
+
+    // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
     if (isImagePointerCall(tool.name, stepAction, args)) {
       const why = await imagePointerRefusal(ctx, args);
       if (why) {

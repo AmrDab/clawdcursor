@@ -14,7 +14,7 @@
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'DANGEROUS_KEY'
+  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
@@ -56,6 +56,10 @@ const RULES: Rule[] = [
     hint: 'a system dialog has the keyboard; answer or close it first', next: PAUSE('Close the system dialog that has the keyboard') },
   { code: 'SCREEN_LOCKED', outcome: 'refused', test: /screen is locked/i,
     hint: 'the screen is locked', next: PAUSE('Unlock the screen') },
+  { code: 'OWN_UI', outcome: 'refused', test: /is clawdcursor's own on-screen control/i,
+    hint: 'that is the user\'s pill; target the app instead', next: REREAD },
+  { code: 'PAUSED', outcome: 'refused', test: /a pause is waiting for the user on screen/i,
+    hint: 'the user has not answered the pause yet; wait, do not act' },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
     hint: 'this key combination is never sent; do the step another way' },
   { code: 'DEVIATION', outcome: 'failed', test: /\nDEVIATION: /, whole: true,

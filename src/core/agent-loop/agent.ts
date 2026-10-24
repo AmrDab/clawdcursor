@@ -40,6 +40,7 @@ import type { UIMap } from '../sense/ui-map-types';
 import { logger, EVENTS, beginSpan } from '../observability/logger';
 import { getCorrelationId } from '../observability/correlation';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
+import { ownUiRefusal } from '../own-ui-guard';
 import {
   callLLMWithTools,
   type LLMTool,
@@ -589,6 +590,23 @@ ${renderReport(now)}` : null;
             toolName: call.name,
             toolArgs: call.args,
             result: { success: false, text: `safety_${decision.decision}: ${'reason' in decision ? decision.reason : decision.tier}` },
+            durationMs: Date.now() - turnStart,
+            fingerprintChanged: false,
+            thought: llmResult.text,
+          });
+          continue;
+        }
+
+        // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
+        const ownUi = ownUiRefusal(call.args as Record<string, unknown>, tool.changesScreen);
+        if (ownUi) {
+          log.info('agent.tool.blocked', { turn, tool: call.name, decision: 'own_ui', reason: ownUi });
+          toolResults.push({ id: call.id, text: ownUi, isError: true });
+          steps.push({
+            turn,
+            toolName: call.name,
+            toolArgs: call.args,
+            result: { success: false, text: ownUi },
             durationMs: Date.now() - turnStart,
             fingerprintChanged: false,
             thought: llmResult.text,

@@ -199,6 +199,11 @@ class ControlBanner {
     return this.child !== null;
   }
 
+  /** Pids of the live overlay processes (pill, glow) — the user's controls, never a target (own-ui-guard.ts). */
+  overlayPids(): number[] {
+    return [this.child?.pid, this.glowChild?.pid].filter((p): p is number => typeof p === 'number');
+  }
+
   /** The overlay's current mode; a pending pause is 'paused' with its message. */
   state(): OverlayState {
     if (this.paused) return { mode: 'paused', message: this.paused.message, since: this.paused.since };

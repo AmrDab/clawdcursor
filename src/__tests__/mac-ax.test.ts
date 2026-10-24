@@ -981,7 +981,6 @@ describe('classifyKeyboardOwner (B11 — a system alert / lock screen that owns 
     ['the Dock (app switcher / Mission Control)', { name: 'Dock', bundleId: 'com.apple.dock' }],
     ['the menu-bar host', { name: 'SystemUIServer', bundleId: 'com.apple.systemuiserver' }],
     ['Control Center', { name: 'Control Center', bundleId: 'com.apple.controlcenter' }],
-    ['clawdcursor\'s own overlay', { name: 'clawd-overlay', bundleId: undefined }],
   ])('%s is not an alert, even with a dialog-looking window', (_label, who) => {
     const owner = classifyKeyboardOwner(app({ ...who, activationPolicy: 'accessory', windows: [{ title: 'x', subrole: 'AXSystemDialog' }] }));
     expect(owner).toEqual({ kind: 'app' });
@@ -1048,11 +1047,15 @@ describe('classifyKeyboardOwner (B11 — a system alert / lock screen that owns 
     }))).toEqual({ kind: 'app' });
   });
 
-  it('clawdcursor\'s own overlay is recognised under its cached name (clawd-overlay-<hash>)', () => {
-    expect(classifyKeyboardOwner(app({
-      name: 'clawd-overlay-815dcbe9955a', bundleId: undefined, activationPolicy: 'accessory',
-      windows: [{ title: '', subrole: 'AXSystemDialog' }],
-    }))).toEqual({ kind: 'app' });
+  // Owner requirement (2026-10-24): the pause prompt's reply box is the user's — keys are never sent into it.
+  it.each(['clawd-overlay', 'clawd-overlay-815dcbe9955a'])('clawdcursor\'s own overlay (%s) owning the keyboard is refused', (name) => {
+    const owner = classifyKeyboardOwner(app({ name, processId: 4242, bundleId: undefined, activationPolicy: 'accessory', windows: [{ title: '', subrole: 'AXSystemDialog' }] }));
+    expect(owner).toEqual({ kind: 'own_ui', processId: 4242 });
+    expect(describeKeyboardOwner(owner)).toMatch(/is clawdcursor's own on-screen control/);
+  });
+
+  it('the window-less host process is still fine', () => {
+    expect(classifyKeyboardOwner(app({ name: 'ClawdCursorHost', activationPolicy: 'accessory' }))).toEqual({ kind: 'app' });
   });
 
   it('a sheet on the app you are driving never blocks (you type your filename into it)', () => {
