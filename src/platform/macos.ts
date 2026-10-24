@@ -8,7 +8,7 @@
  *   - Accessibility: osascript JXA for tree queries + permission-check binary for TCC
  */
 
-import { beforePointerPress, isOwnUiPid } from './pointer-guard';
+import { beforePointerPress } from './pointer-guard';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -323,7 +323,7 @@ export class MacOSAdapter implements PlatformAdapter {
     this.lastWindowListPartial = null;
     const { windows, skipped } = await this.ax.listWindowsDetailed();
     if (skipped.length) this.lastWindowListPartial = partialWindowListNote(skipped);
-    return windows.filter(w => !isOwnUiPid(w.processId));
+    return windows;
   }
 
   /**

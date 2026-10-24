@@ -693,7 +693,8 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       'window list',
     );
     if (reply) {
-      const windows: WindowInfo[] = (reply.windows ?? []).map(toWindow);
+      // clawdcursor's own overlay is never a candidate (pointer-guard.ts); the helper skips it by name, this by pid.
+      const windows: WindowInfo[] = (reply.windows ?? []).map(toWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
       // An app that answered nothing for a whole AX timeout IS hung, and the list says so…
       for (const u of reply.unresponsive ?? []) {
         windows.push(toWindow({ title: '(not responding)', processName: u.processName, processId: u.processId }));
@@ -708,7 +709,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     }
     const raw = await viaJxa('get-windows.jxa', [], JXA_LIST_TIMEOUT_MS, 'window list');
     if (!Array.isArray(raw)) throw new MacAxError('failed', 'window list failed: unexpected output from get-windows.jxa');
-    return { windows: raw.map(toWindow), skipped: [] };
+    return { windows: raw.map(toWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId)), skipped: [] };
   }
 
   return {

@@ -32,6 +32,7 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
+import { AccessibilityBridge } from '../platform/accessibility';
 import { setOwnUiPids } from '../platform/pointer-guard';
 
 beforeEach(() => { runCalls.length = 0; setOwnUiPids(() => [PILL.processId]); });
@@ -46,5 +47,11 @@ describe('Windows: the pill is never a lookup candidate', () => {
     expect(await new WindowsAdapter().focusWindow({ processName: 'powershell' })).toBe(true);
     const focus = runCalls.find(c => c.cmd === 'focus-window');
     expect(focus?.processId).toBe(SHELL.processId);
+  });
+
+  // The focus_window tool resolves names through the a11y bridge, not the adapter: the filter sits at the source.
+  it.runIf(process.platform === 'win32')('the a11y bridge window list leaves the overlay out too', async () => {
+    const wins = await new AccessibilityBridge().getWindows(true);
+    expect(wins.map(w => w.processId)).toEqual([SHELL.processId]);
   });
 });

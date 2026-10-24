@@ -39,6 +39,7 @@ import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
+import { publishOverlayState, foreignOverlayState } from './overlay-state';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -303,6 +304,7 @@ class ControlBanner {
       return; // cosmetic feature — never let it break control
     }
     this.child = child;
+    this.publish();
     // A write to a pill that already exited is EPIPE on this stream — never an uncaught error.
     child.stdin?.on?.('error', () => { /* the pill is gone */ });
     if (child.stdout) {
@@ -321,7 +323,7 @@ class ControlBanner {
         } catch { /* never throw into the rl loop */ }
       });
     }
-    child.on('error', () => { if (this.child === child) this.child = null; });
+    child.on('error', () => { if (this.child === child) { this.child = null; this.publish(); } });
     // If the pill dies, take the glow down with it so the two never desync
     // into a half-on state (glow without the stop affordance).
     child.on('exit', () => { if (this.child === child) { this.child = null; this.killGlow(); } });
@@ -337,8 +339,9 @@ class ControlBanner {
       return; // cosmetic — never let it break control
     }
     this.glowChild = child;
-    child.on('error', () => { if (this.glowChild === child) this.glowChild = null; });
-    child.on('exit', () => { if (this.glowChild === child) this.glowChild = null; });
+    this.publish();
+    child.on('error', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
+    child.on('exit', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
   }
 
   // Neither overlay may outlive its owner — an orphaned "control in progress"
@@ -350,6 +353,7 @@ class ControlBanner {
     process.on('exit', () => {
       try { this.child?.kill(); } catch { /* gone */ }
       try { this.glowChild?.kill(); } catch { /* gone */ }
+      publishOverlayState({ pids: [], paused: false });
     });
   }
 
@@ -359,6 +363,12 @@ class ControlBanner {
     if (g) {
       try { g.kill(); } catch { /* already gone */ }
     }
+    this.publish();
+  }
+
+  /** Tell the other clawdcursor processes what is on screen (overlay-state.ts). */
+  private publish(): void {
+    publishOverlayState({ pids: this.overlayPids(), paused: this.paused !== null });
   }
 
   private killChildren(): void {
@@ -403,7 +413,7 @@ export const controlBanner = new ControlBanner();
 
 // Every synthetic mouse press, drag or scroll first moves the pill out of the way (pointer-guard.ts).
 setBeforePointerPress(() => controlBanner.dodge());
-setOwnUiPids(() => controlBanner.overlayPids());
+setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pids]);
 // Captures: the Windows and macOS overlays exclude themselves from capture (WDA_EXCLUDEFROMCAPTURE, sharingType none +
 // the helper's filter); the Linux one cannot, so it steps aside for the capture as it does for a click.
 if (process.platform === 'linux') setBeforeCapture(() => controlBanner.dodge());

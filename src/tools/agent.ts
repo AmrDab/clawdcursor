@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
 import { pauseGate } from '../core/pause-gate';
-import { pausePromptText } from '../core/pause-text';
+import { promptSatisfies } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { controlBanner } from '../core/banner';
 import { OcrEngine } from '../platform/ocr-engine';
@@ -187,11 +187,10 @@ export function getAgentTools(): ToolDefinition[] {
         if (done_when !== undefined && done_when !== null && !pauseGate.continues(key)) {
           const parsed = parseAssertions(done_when);
           if ('error' in parsed) return { text: `pause_for_user: done_when rejected: ${parsed.error}`, isError: true };
-          // The prompt shows the message and its own labels; OCR would read them there and resume on the first check.
-          const shown = normMessage(pausePromptText(text));
-          const selfMatch = parsed.assertions.find(a => a.type === 'ocr_contains' && shown.includes(normMessage(a.value)));
+          // The prompt shows the message and its own labels and buttons; OCR or a find by name would hit them there at once.
+          const selfMatch = parsed.assertions.map(a => promptSatisfies(text, a as { type: string; value?: string; name?: string })).find(Boolean);
           if (selfMatch) {
-            return { text: `pause_for_user: done_when rejected: ocr_contains "${(selfMatch as { value: string }).value}" is shown by the prompt itself (your message or its buttons) — OCR would find it there at once. Use text that only appears once the user is done.`, isError: true };
+            return { text: `pause_for_user: done_when rejected: "${selfMatch}" is shown by the prompt itself (your message or its buttons) — the check would find it there at once. Use something that only appears once the user is done.`, isError: true };
           }
           const platform = ctx?.platform;
           if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };

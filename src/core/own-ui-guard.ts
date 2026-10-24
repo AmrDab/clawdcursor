@@ -13,6 +13,7 @@
  */
 import { controlBanner } from './banner';
 import { pauseGate } from './pause-gate';
+import { foreignOverlayState } from './overlay-state';
 
 const PID_ARGS = ['processId', 'pid', 'process_id'];
 const NAME_ARGS = ['processName', 'process_name', 'app', 'appName'];
@@ -25,6 +26,11 @@ const PAUSE_SAFE = new Set([
   'system:pause_for_user', 'pause_for_user', 'ask_user',
   'task:status', 'agent_status', 'task:abort', 'abort_task', 'task:resume', 'resume_task',
   'done', 'give_up',
+  // Re-calling a paused delegated task with the same text is how a caller keeps waiting (orchestration.ts); it never
+  // starts a new run while a pause is up.
+  'task:run', 'delegate_to_agent',
+  // Waiting and reporting touch nothing on screen.
+  'computer:wait', 'wait', 'system:report',
 ]);
 
 export function isPauseSafeCall(toolName: string, action?: string): boolean {
@@ -34,7 +40,9 @@ export function isPauseSafeCall(toolName: string, action?: string): boolean {
 const OWN = (what: string) => `${what} is clawdcursor's own on-screen control — it is the user's, never read or acted on. Target the app instead.`;
 
 export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSafe: boolean): string | null {
-  const pids = controlBanner.overlayPids();
+  // This process's overlay, and every other live clawdcursor process's (a daemon's pause is the user's to a stdio server too).
+  const foreign = foreignOverlayState();
+  const pids = [...controlBanner.overlayPids(), ...foreign.pids];
   for (const k of PID_ARGS) {
     const v = Number(args?.[k]);
     if (Number.isInteger(v) && pids.includes(v)) return OWN(`pid ${v}`);
@@ -43,7 +51,7 @@ export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSaf
     const v = args?.[k];
     if (typeof v === 'string' && OVERLAY_NAME.test(v.trim())) return OWN(`"${v.trim()}"`);
   }
-  if (!pauseSafe && pauseGate.current()) {
+  if (!pauseSafe && (pauseGate.current() || foreign.paused)) {
     return 'paused — a pause is waiting for the user on screen, and nothing runs until they answer it. Keep waiting; do not read, press, type or click.';
   }
   return null;

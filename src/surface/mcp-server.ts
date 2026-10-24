@@ -334,13 +334,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // Compound tools (compact surface) decide per action in dispatchCompound.
         if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
-        // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
-        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action));
-        if (ownUi) {
-          const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
-          sessionLog.record(tool.name, action, false, 0, ownUi, clientInfo(), { outcome: 'refused' });
-          return { content: [{ type: 'text', text: withOutcome(`${label}: ${ownUi}`, true) }], isError: true };
-        }
         // Screenshot-bound pointer actions: image coordinates from a screenshot of a screen that has since changed
         // point at something else (screen-binding.ts).
         if (isImagePointerCall(tool.name, action, params ?? {})) {
@@ -350,6 +343,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
             return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
           }
+        }
+        // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
+        // Last before the handler: a pause that came up during the checks above still stops it.
+        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action));
+        if (ownUi) {
+          const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
+          sessionLog.record(tool.name, action, false, 0, ownUi, clientInfo(), { outcome: 'refused' });
+          return { content: [{ type: 'text', text: withOutcome(`${label}: ${ownUi}`, true) }], isError: true };
         }
         const started = Date.now();
         let result;
