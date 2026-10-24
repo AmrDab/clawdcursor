@@ -167,8 +167,12 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
       const wins = await adapter.listWindows();
       const hit = wins.find(w => containsCI(w.title ?? '', a.value));
       if (hit) return { ok: true, detail: `matched "${truncate(hit.title, 60)}"` };
-      const titles = wins.slice(0, 5).map(w => `"${truncate(w.title, 40)}"`).join(', ');
-      return { ok: false, detail: `no open window title contains "${a.value}" (open: ${titles || 'none'})` };
+      // Only the window being acted on, not every app's title: other windows' titles can carry private text (a document
+      // name, a token fragment) and are not the caller's business here.
+      const front = await adapter.getActiveWindow().catch(() => null);
+      const others = Math.max(0, wins.length - (front ? 1 : 0));
+      const inFront = front ? `the window in front is "${truncate(front.title ?? '', 60)}"` : 'no window is in front';
+      return { ok: false, detail: `no open window title contains "${a.value}" (${inFront}; ${others} other window${others === 1 ? '' : 's'} open)` };
     }
     case 'app_running': {
       const wins = await adapter.listWindows();

@@ -37,6 +37,8 @@ import { controlBanner } from '../core/banner';
 import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
+import { reactiveCheck } from '../core/sense/reactive-check';
+import { OcrEngine } from '../platform/ocr-engine';
 
 // ─── Action → granular-tool delegation table ────────────────────────
 
@@ -280,8 +282,30 @@ function buildCompoundSchema(
     }
   }
 
+  // Every compound takes `expect`, checked after the action whatever its delegate (dispatchCompound). Unpublished, the
+  // MCP layer stripped it before it arrived (live macOS: `window focus` with expect said nothing either way).
+  if (!('expect' in schema)) schema.expect = EXPECT_PARAM;
   return schema;
 }
+
+/** The `expect` post-condition list, as projected tools publish it (core/verify/assertions types). */
+const EXPECT_PARAM: import('./types').ParameterDef = {
+  type: 'array',
+  required: false,
+  description: 'Optional post-conditions to verify after this action (same assertion types as the verify tool: ' +
+    'window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, ' +
+    'file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must ' +
+    'adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.',
+  items: {
+    type: 'object',
+    properties: { type: { type: 'string', enum: ['window_title_contains', 'app_running', 'element_exists', 'element_value_contains',
+      'clipboard_contains', 'file_exists', 'file_contains', 'ocr_contains', 'file_changed_since_start'] } },
+    required: ['type'],
+  },
+};
+
+/** OCR for an `expect` with ocr_contains on a delegate that does not check expect itself — created on first use. */
+let expectOcr: OcrEngine | null = null;
 
 /** Human-readable one-line list of actions for the tool description. */
 function actionCatalog(routes: ActionRoute[]): string {
@@ -433,9 +457,11 @@ async function dispatchCompound(
   // tools, honorsExpect — they take it without declaring it). On a System A
   // delegate it would be dropped, so it is reported like any ignored argument.
   const declared = new Set(Object.keys(granular.parameters));
+  // `expect` is checked — by the delegate, or below after the action. Only with no platform to check it against is it
+  // reported as ignored, never dropped in silence.
   const ignored = Object.keys(forwarded).filter(
-    // `expect` is fine where the delegate checks it; elsewhere it would be dropped while the caller thinks it ran.
-    k => !(k === 'expect' && granular.honorsExpect) && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
+    k => (k !== 'expect' || (!granular.honorsExpect && !ctx.platform))
+      && !declared.has(k) && forwarded[k] !== undefined && forwarded[k] !== null,
   );
 
   // Transparency: show the overlay for what the ACTION does, not the compound
@@ -443,12 +469,27 @@ async function dispatchCompound(
   // 0, so blind-mode actions never lit it), while system ocr/clipboard reads
   // don't. mcp-server leaves compounds to this check.
   if ((granular.safetyTier ?? 0) >= 1) controlBanner.touch();
-  const result = await granular.handler(forwarded, ctx);
+  let result = await granular.handler(forwarded, ctx);
 
   // Granular hints ("Call cdp_connect first") name tools that do not exist
   // here — a compact caller cannot act on them. Rename to this surface's
   // vocabulary; the compound being called wins when an action is aliased.
   if (typeof result.text === 'string') result.text = rewriteOutsideData(result.text, prose => toCompactNames(prose, compoundName));
+
+  // `expect` is checked for every action: projected delegates check it themselves; for the rest the same check runs
+  // here, after the action — so it is never accepted and silently dropped.
+  if (args.expect !== undefined && args.expect !== null && !granular.honorsExpect && ctx.platform) {
+    const checked = await reactiveCheck({
+      expect: args.expect,
+      toolText: result.text ?? '',
+      toolSuccess: !result.isError,
+      changesScreen: true,
+      observedChange: true,
+      adapter: ctx.platform,
+      ocrText: async () => (await (expectOcr ??= new OcrEngine()).recognizeScreen()).fullText ?? '',
+    }).catch(() => null);
+    if (checked) result = { ...result, text: checked.text, isError: !checked.success };
+  }
 
   if (ignored.length) {
     const hints = ignored.map(pname => {

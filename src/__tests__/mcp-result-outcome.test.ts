@@ -235,3 +235,34 @@ describe('mac report fixes', () => {
     expect(text(r)).toMatch(/ignored an argument it does not accept: expect/);
   });
 });
+
+describe('expect is checked on every compound action (live macOS: window focus dropped it)', () => {
+  beforeEach(() => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+    mockSafety.mockReturnValue(undefined);
+  });
+  const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
+  const win = { processId: 1, title: 'Notes - Editor', processName: 'editor', bounds: { x: 0, y: 0, width: 10, height: 10 } };
+  const ctxWithWindows = () => ({ ...fakeCtx(), platform: { listWindows: vi.fn(async () => [win, { ...win, processId: 2, title: 'secret-doc rk_live_xyz' }]), getActiveWindow: vi.fn(async () => win) } as any });
+
+  it('a failing expect on a tool that does not check it itself → DEVIATION (no longer ignored)', async () => {
+    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: [{ type: 'window_title_contains', value: 'zzz' }] });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/DEVIATION/);
+    expect(text(r)).not.toMatch(/ignored an argument/);
+    // the failure detail names only the window in front, never other apps' titles
+    expect(text(r)).toMatch(/the window in front is "Notes - Editor"; 1 other window open/);
+    expect(text(r)).not.toMatch(/rk_live/);
+  });
+
+  it('a passing expect → verified', async () => {
+    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: [{ type: 'window_title_contains', value: 'Notes' }] });
+    expect(r.isError).toBeFalsy();
+    expect(text(r)).toMatch(/verified 1 check\(s\)/);
+  });
+});

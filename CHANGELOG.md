@@ -6,6 +6,18 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- **`expect` is checked on every action.** Only some tools checked it; on the
+  others (`window`, `system`, `browser`) the parameter wasn't even published,
+  so it was stripped before arriving (live macOS: `window focus` with a failing
+  `expect` said nothing). Every compound now publishes it, and the same check
+  runs after any action that doesn't do it itself.
+- **`computer drag_path` takes the array it is documented with.** The schema said
+  array, the code only accepted a JSON string, so every well-formed call failed
+  and nothing could be drawn. A new test fails if two actions of one tool ever
+  declare the same parameter with different types.
+- **A failed window-title check names only the window in front,** not every
+  open app's title (other titles can hold private text).
+
 - Security: zod 4.6.7 (GHSA-mrhx-c7xc-m3w5, high) and body-parser 2.4.0
   (GHSA-27r3-jxmh-p828, high; under express).
 
