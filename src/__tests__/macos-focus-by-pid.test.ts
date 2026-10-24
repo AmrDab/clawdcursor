@@ -173,8 +173,31 @@ describe('focusWindow says why a lookup failed (live macOS 2026-10-24: a locked 
       appState: vi.fn(async () => ({ processId: 954 })),
       frontmost: vi.fn(async () => FRONT('Finder', 954)),
     });
-    await expect(new MacOSAdapter({ ax }).focusWindow({ processName: 'Finder' })).resolves.toBe(true);
+    const mac = new MacOSAdapter({ ax });
+    await expect(mac.focusWindow({ processName: 'Finder' })).resolves.toBe(true);
     expect(ax.focusWindow).toHaveBeenCalledWith(954, undefined);
+    expect(mac.takeFocusFailure()).toBeNull();   // the list's timeout is not left behind on a success
+  });
+
+  it('a slow list plus "no such app" from NSWorkspace says no match, not "timed out" (a typo is not retried)', async () => {
+    const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => { throw new MacAxError('timeout', 'window list timed out'); }) }) });
+    await expect(mac.focusWindow({ processName: 'Finderr' })).resolves.toBe(false);
+    expect(mac.takeFocusFailure()).toBe('No window or running app matches "Finderr".');
+  });
+
+  it('a lock found after a slow list is still the answer', async () => {
+    const ax = fakeAx({ listWindowsDetailed: vi.fn(async () => { throw new MacAxError('timeout', 'window list timed out'); }), appState: vi.fn(async () => { throw locked(); }) });
+    const mac = new MacOSAdapter({ ax });
+    await expect(mac.focusWindow({ processName: 'Finder' })).resolves.toBe(false);
+    expect(mac.takeFocusFailure()).toMatch(/screen is locked/);
+    expect(ax.focusWindow).not.toHaveBeenCalled();
+  });
+
+  it('with no helper, a failed script says why', async () => {
+    jxaReply = '{"success":false,"error":"Window not found matching title=\\"x\\" processId=954"}';
+    const mac = new MacOSAdapter({ ax: fakeAx({ focusWindow: vi.fn(async () => null) }) });
+    await expect(mac.focusWindow({ processId: 954 })).resolves.toBe(false);
+    expect(mac.takeFocusFailure()).toMatch(/^Window not found matching/);
   });
 
   it('through the tool, the lock reaches the caller instead of "No matching window found."', async () => {
