@@ -6,6 +6,9 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- Security: zod 4.6.7 (GHSA-mrhx-c7xc-m3w5, high) and body-parser 2.4.0
+  (GHSA-27r3-jxmh-p828, high; under express).
+
 - **The pill and glow are no longer in screenshots or OCR.** They're for the
   person at the screen, but were real windows in every capture and sat over
   apps' toolbars. Now:
