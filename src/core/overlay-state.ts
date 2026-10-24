@@ -23,7 +23,7 @@ let last: OverlayState = { pids: [], paused: false };
 let dir: string | null = process.env.VITEST ? null : path.join(DATA_DIR, 'overlay');
 const own = () => (dir ? path.join(dir, `${process.pid}.json`) : null);
 
-export function __setOverlayStateDirForTests(d: string | null): void { dir = d; cache = null; }
+export function __setOverlayStateDirForTests(d: string | null): void { dir = d; }
 
 /** Never throws: a failed write leaves the other processes without this one's overlay, not this process broken. */
 export function publishOverlayState(s: OverlayState): void {
@@ -51,16 +51,10 @@ function write(s: OverlayState): void {
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
 
-// Every publish is a create, rename or delete in the directory, which moves its mtime: a cache keyed on it sees a new pause or
-// pill on the very next call. The age limit only re-checks that writers are still alive — staler means refusing longer, never less.
-let cache: { at: number; mtime: number; state: ForeignOverlayState } | null = null;
-const LIVENESS_MS = 2_000;
-
 /** The overlays of OTHER live clawdcursor processes, merged. */
+// Read on every call, never cached: a timestamp- or TTL-keyed cache hid a pause published in the same clock tick (NTFS ~2 ms,
+// HFS+ 1 s) for up to its lifetime. The directory holds a few tiny files; reading them costs microseconds.
 export function foreignOverlayState(): ForeignOverlayState {
-  let mtime = -1;
-  try { if (dir) mtime = fs.statSync(dir).mtimeMs; } catch { /* no overlays yet */ }
-  if (cache && cache.mtime === mtime && Date.now() - cache.at < LIVENESS_MS) return cache.state;
   const state: ForeignOverlayState = { pids: [], paused: false };
   if (dir) {
     let names: string[] = [];
@@ -76,6 +70,5 @@ export function foreignOverlayState(): ForeignOverlayState {
       } catch { /* half-written or gone */ }
     }
   }
-  cache = { at: Date.now(), mtime, state };
   return state;
 }
