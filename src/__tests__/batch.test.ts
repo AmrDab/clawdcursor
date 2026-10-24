@@ -34,15 +34,15 @@ beforeEach(() => {
 });
 
 describe('executeBatch — a pause waiting for the user', () => {
-  it('halts before an acting step runs; a read step still runs', async () => {
+  it('halts before the first step runs — reads too (deny by default)', async () => {
     tools.read_screen = { ...okTool('read_screen'), safetyTier: 0 };
     tools.click = okTool('click');
     pausePending = { message: 'Sign in' };
     const r = await executeBatch([{ name: 'read_screen', arguments: {} }, { name: 'click', arguments: { x: 1, y: 2 } }], ctx);
-    expect(tools.read_screen.handler).toHaveBeenCalledTimes(1);
+    expect(tools.read_screen.handler).not.toHaveBeenCalled();
     expect(tools.click.handler).not.toHaveBeenCalled();
-    expect(r.steps[1]).toMatchObject({ status: 'blocked' });
-    expect(r.steps[1].text).toMatch(/a pause is waiting for the user on screen/);
+    expect(r.steps[0]).toMatchObject({ status: 'blocked' });
+    expect(r.steps[0].text).toMatch(/a pause is waiting for the user on screen/);
   });
 });
 

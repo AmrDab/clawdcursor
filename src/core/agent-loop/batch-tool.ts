@@ -25,7 +25,7 @@
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import { buildUnifiedTools } from './tools';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
-import { ownUiRefusal } from '../own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall } from '../own-ui-guard';
 import { captureSnapshot } from '../sense/snapshot';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
@@ -200,7 +200,7 @@ export function buildBatchTool(): UnifiedTool {
           const why = 'reason' in decision ? decision.reason : decision.tier;
           return halt(`batch halted at step ${i}: safety ${decision.decision} (${why}).`);
         }
-        const ownUi = ownUiRefusal(a, tool.changesScreen === true);
+        const ownUi = ownUiRefusal(a, isPauseSafeCall(step.name));
         if (ownUi) {
           trace.push(`  ${i}. [blocked] ${label}`);
           return halt(`batch halted at step ${i} (${label}): ${ownUi}`);

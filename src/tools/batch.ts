@@ -25,8 +25,7 @@ import { evaluateToolCall } from './safety-gate';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from './screen-guard';
-import { ownUiRefusal } from '../core/own-ui-guard';
-import { actsOnDesktop } from './compact';
+import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -199,7 +198,7 @@ export async function executeBatch(
 
     const stepAction = typeof args.action === 'string' ? args.action : undefined;
     // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
-    const ownUi = ownUiRefusal(args, actsOnDesktop(tool, stepAction));
+    const ownUi = ownUiRefusal(args, isPauseSafeCall(tool.name, stepAction));
     if (ownUi) {
       outcomes.push({ i, label, status: 'blocked', text: ownUi });
       return halt(i, `step ${i} (${label}): ${ownUi}`);
