@@ -265,4 +265,28 @@ describe('expect is checked on every compound action (live macOS: window focus d
     expect(r.isError).toBeFalsy();
     expect(text(r)).toMatch(/verified 1 check\(s\)/);
   });
+
+  it('a malformed expect is refused before the action runs', async () => {
+    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', expect: 'window title has Notes' });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/^expect rejected \(nothing executed\)/);
+    expect(text(r)).not.toMatch(/mailto:a@b\.com/);
+  });
+
+  it('a failed action keeps its own error — not relabelled DEVIATION', async () => {
+    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: '9bad', expect: [{ type: 'window_title_contains', value: 'zzz' }] });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toMatch(/scheme must be lowercase/);
+    expect(text(r)).not.toMatch(/DEVIATION/);
+  });
+
+  it('an ignored argument does not hide the verified verdict from the outcome line', async () => {
+    await createMcpServer({ ctx: ctxWithWindows(), compact: true });
+    const r = await capturedHandlers.get('system')!({ action: 'build_uri', scheme: 'mailto', path: 'a@b.com', message: 'x', expect: [{ type: 'window_title_contains', value: 'Notes' }] });
+    expect(text(r)).toMatch(/ignored an argument/);
+    // the verdict ends the text, so the outcome classifier's anchored ` — verified N check(s)` marker still matches
+    expect(text(r)).toMatch(/ — verified 1 check\(s\)$/);
+  });
 });

@@ -16,7 +16,7 @@ describe('compact schema ↔ delegate contract', () => {
       const seen = new Map<string, { type: string; from: string }>();
       for (const route of routes) {
         const g = byName.get(route.delegate);
-        if (!g) continue;
+        if (!g) { conflicts.push(`${compound}.${route.action}: delegate ${route.delegate} is not registered`); continue; }
         for (const [pname, pdef] of Object.entries(g.parameters)) {
           const published = route.argRemap ? (Object.entries(route.argRemap).find(([, v]) => v === pname)?.[0] ?? pname) : pname;
           const prev = seen.get(published);

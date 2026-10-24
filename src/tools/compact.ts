@@ -38,6 +38,7 @@ import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { reactiveCheck } from '../core/sense/reactive-check';
+import { validateExpect } from '../core/verify/assertions';
 import { OcrEngine } from '../platform/ocr-engine';
 
 // ─── Action → granular-tool delegation table ────────────────────────
@@ -468,6 +469,14 @@ async function dispatchCompound(
   // it came through — accessibility invoke/set_value act (the compound is tier
   // 0, so blind-mode actions never lit it), while system ocr/clipboard reads
   // don't. mcp-server leaves compounds to this check.
+  // A malformed `expect` is refused before acting, as the projected delegates do — after the action, the caller is told
+  // "nothing ran" about an action that ran, and retries it.
+  const checkExpect = args.expect !== undefined && args.expect !== null && !granular.honorsExpect && !!ctx.platform;
+  if (checkExpect) {
+    const expectError = validateExpect(args.expect);
+    if (expectError) return { text: `expect rejected (nothing executed): ${expectError}`, isError: true };
+  }
+
   if ((granular.safetyTier ?? 0) >= 1) controlBanner.touch();
   let result = await granular.handler(forwarded, ctx);
 
@@ -475,21 +484,6 @@ async function dispatchCompound(
   // here — a compact caller cannot act on them. Rename to this surface's
   // vocabulary; the compound being called wins when an action is aliased.
   if (typeof result.text === 'string') result.text = rewriteOutsideData(result.text, prose => toCompactNames(prose, compoundName));
-
-  // `expect` is checked for every action: projected delegates check it themselves; for the rest the same check runs
-  // here, after the action — so it is never accepted and silently dropped.
-  if (args.expect !== undefined && args.expect !== null && !granular.honorsExpect && ctx.platform) {
-    const checked = await reactiveCheck({
-      expect: args.expect,
-      toolText: result.text ?? '',
-      toolSuccess: !result.isError,
-      changesScreen: true,
-      observedChange: true,
-      adapter: ctx.platform,
-      ocrText: async () => (await (expectOcr ??= new OcrEngine()).recognizeScreen()).fullText ?? '',
-    }).catch(() => null);
-    if (checked) result = { ...result, text: checked.text, isError: !checked.success };
-  }
 
   if (ignored.length) {
     const hints = ignored.map(pname => {
@@ -503,6 +497,21 @@ async function dispatchCompound(
     });
     result.text = `${result.text ?? ''}
 [!] ${compoundName} ${actionName} ignored ${ignored.length === 1 ? 'an argument' : 'arguments'} it does not accept: ${hints.join('; ')}`;
+  }
+
+  // `expect` is checked for every action: projected delegates check it themselves; for the rest the same check runs
+  // here, after the action — so it is never accepted and silently dropped. Last, so its verdict ends the text.
+  if (checkExpect) {
+    const checked = await reactiveCheck({
+      expect: args.expect,
+      toolText: result.text ?? '',
+      toolSuccess: !result.isError,
+      changesScreen: true,
+      observedChange: true,
+      adapter: ctx.platform!,
+      ocrText: async () => (await (expectOcr ??= new OcrEngine()).recognizeScreen()).fullText ?? '',
+    }).catch(() => null);
+    if (checked) result = { ...result, text: checked.text, isError: !checked.success };
   }
 
   return result;

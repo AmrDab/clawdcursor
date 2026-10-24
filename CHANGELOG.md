@@ -9,8 +9,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`expect` is checked on every action.** Only some tools checked it; on the
   others (`window`, `system`, `browser`) the parameter wasn't even published,
   so it was stripped before arriving (live macOS: `window focus` with a failing
-  `expect` said nothing). Every compound now publishes it, and the same check
-  runs after any action that doesn't do it itself.
+  `expect` said nothing). Every action except `batch` and `task` now publishes
+  it. Actions that don't check it themselves get the same check after they
+  run; a malformed `expect` is refused before anything runs.
+- **A failed action keeps its own error.** With an `expect`, a failure like
+  "window not found" used to wait 2 s and then be reported as a DEVIATION
+  ("it ran but the effect was not seen"), when nothing had run.
 - **`computer drag_path` takes the array it is documented with.** The schema said
   array, the code only accepted a JSON string, so every well-formed call failed
   and nothing could be drawn. A new test fails if two actions of one tool ever
