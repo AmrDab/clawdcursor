@@ -37,7 +37,7 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
-import { setBeforePointerPress, setBeforeCapture } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 
 const IDLE_HIDE_MS = 30_000;
@@ -403,6 +403,7 @@ export const controlBanner = new ControlBanner();
 
 // Every synthetic mouse press, drag or scroll first moves the pill out of the way (pointer-guard.ts).
 setBeforePointerPress(() => controlBanner.dodge());
+setOwnUiPids(() => controlBanner.overlayPids());
 // Captures: the Windows and macOS overlays exclude themselves from capture (WDA_EXCLUDEFROMCAPTURE, sharingType none +
 // the helper's filter); the Linux one cannot, so it steps aside for the capture as it does for a click.
 if (process.platform === 'linux') setBeforeCapture(() => controlBanner.dodge());

@@ -34,3 +34,20 @@ export async function beforeCapture(): Promise<void> {
   if (!captureHook) return;
   try { await captureHook(); } catch { /* cosmetic */ }
 }
+
+/**
+ * clawdcursor's own overlay processes (the pill, the glow) are the user's: never a window or app that a lookup by name, title
+ * or pid resolves to. Window lookups match process names by substring, and on Windows and Linux the overlay runs under a
+ * shared interpreter (powershell, python3), so `focus {processName:"powershell"}` could land on the pill. The banner
+ * registers its live pids; the platform layer filters them out of its window and app lists.
+ */
+let ownUiPids: () => readonly number[] = () => [];
+
+export function setOwnUiPids(f: () => readonly number[]): void {
+  ownUiPids = f;
+}
+
+export function isOwnUiPid(pid: number | undefined): boolean {
+  if (pid === undefined) return false;
+  try { return ownUiPids().includes(pid); } catch { return false; }
+}

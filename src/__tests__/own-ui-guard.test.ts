@@ -69,3 +69,16 @@ describe('isPauseSafeCall — deny by default', () => {
     }
   });
 });
+
+describe('overlay windows are never a lookup candidate (platform layer)', () => {
+  it('isOwnUiPid answers from what the banner registers', async () => {
+    const { setOwnUiPids, isOwnUiPid } = await vi.importActual<typeof import('../platform/pointer-guard')>('../platform/pointer-guard');
+    setOwnUiPids(() => [4242]);
+    expect(isOwnUiPid(4242)).toBe(true);
+    expect(isOwnUiPid(954)).toBe(false);
+    expect(isOwnUiPid(undefined)).toBe(false);
+    setOwnUiPids(() => { throw new Error('banner gone'); });
+    expect(isOwnUiPid(4242)).toBe(false);
+    setOwnUiPids(() => []);
+  });
+});

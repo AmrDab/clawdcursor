@@ -32,6 +32,7 @@ import { promisify } from 'util';
 import { getPackageRoot } from '../paths';
 import { macAxBinary } from './mac-ocr-binary';
 import type { InvokeAction, UiElement, WindowInfo } from './types';
+import { isOwnUiPid } from './pointer-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -773,14 +774,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         what,
         { waitForBuild: false },
       );
-      if (reply) return bestApp((reply.apps ?? []).map(toAppState), want);
+      if (reply) return bestApp((reply.apps ?? []).map(toAppState).filter((a: AppState) => !isOwnUiPid(a.processId)), want);
       try {
         const { stdout: found } = await deps.exec('lsappinfo', ['find', `name=${want}`], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
         const asn = found.trim().split('\n')[0]?.trim();
         if (!asn || !asn.startsWith('ASN:')) return null;
         const { stdout } = await deps.exec('lsappinfo', ['info', asn], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
         const app = parseLsappinfoApp(stdout);
-        if (!app) return null;
+        if (!app || isOwnUiPid(app.processId)) return null;
         return {
           name: app.name, bundleId: app.bundleId, processId: app.processId, activationPolicy: app.activationPolicy,
           finishedLaunching: true, active: app.inFront, windows: [], windowsKnown: false,

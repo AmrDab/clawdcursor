@@ -17,7 +17,7 @@
  * are not installed the adapter still loads and methods return empty defaults.
  */
 
-import { beforePointerPress, beforeCapture } from './pointer-guard';
+import { beforePointerPress, beforeCapture, isOwnUiPid } from './pointer-guard';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -413,7 +413,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('wmctrl', ['-l', '-G', '-p'], {
         timeout: TOOL_TIMEOUT_MS,
       });
-      return await this.withClientOrigins(this.parseWmctrlOutput(stdout));
+      return await this.withClientOrigins(this.parseWmctrlOutput(stdout).filter(w => !isOwnUiPid(w.processId)));
     } catch {
       return [];
     }
