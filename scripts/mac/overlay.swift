@@ -291,6 +291,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.hasShadow = true
         panel.level = .screenSaver
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // For the person at the screen only: never part of a screenshot or OCR capture (it sat over apps' toolbars).
+        panel.sharingType = .none
         panel.hidesOnDeactivate = false
         content.frame = NSRect(x: 0, y: 0, width: width, height: height)
         panel.contentView = content
@@ -336,6 +338,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             win.ignoresMouseEvents = true // click-through
             win.level = .screenSaver
             win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            win.sharingType = .none  // the glow is not captured either
             let view = NSView(frame: NSRect(origin: .zero, size: f.size))
             view.wantsLayer = true
             let root = CALayer()

@@ -17,3 +17,20 @@ export async function beforePointerPress(): Promise<void> {
   if (!hook) return;
   try { await hook(); } catch { /* cosmetic */ }
 }
+
+/**
+ * Runs before every screen capture (screenshot, OCR). The pill and glow are for the person at the screen, never part of
+ * what the agent sees: where the OS can exclude a window from capture (Windows, macOS) the overlay does so itself, and
+ * the banner registers no hook; elsewhere (Linux) the hook hides the pill for the moment of the capture.
+ */
+let captureHook: (() => Promise<void>) | null = null;
+
+export function setBeforeCapture(h: (() => Promise<void>) | null): void {
+  captureHook = h;
+}
+
+/** Never throws: a failed hide must not stop the capture. */
+export async function beforeCapture(): Promise<void> {
+  if (!captureHook) return;
+  try { await captureHook(); } catch { /* cosmetic */ }
+}

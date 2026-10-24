@@ -13,7 +13,7 @@ import { windowTextIncludes } from './window-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, nameMissHint } from './blind-hints';
 import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 
 /**
@@ -573,6 +573,14 @@ export function getA11yTools(): ToolDefinition[] {
         const where = searched.length ? `\nsearched: ${searched.join(', ')} — pass processId to target another window` : '';
         const searchedPid = typeof processId === 'number' ? processId
           : scopes.length === 1 ? scopes[0].processId : undefined;
+        // A miss in a window with real structure is a wrong name, not a blind app: say what it has and what is close.
+        // Only a thin window gets the "little or no accessibility structure" advice (live macOS: Freeform, 34 elements).
+        if (name && ctx.platform) {
+          let tree: Awaited<ReturnType<typeof ctx.platform.getUiTree>> = [];
+          try { tree = await ctx.platform.getUiTree(searchedPid); } catch { /* unreadable: keep the generic advice */ }
+          const miss = nameMissHint(String(name), tree, wrapUntrustedScreenContent);
+          if (miss) return { text: `(no elements found)${where}\n${miss}` };
+        }
         return { text: `(no elements found)${where}\n${await nextStepFor(ctx, searchedPid)}` };
       },
     },

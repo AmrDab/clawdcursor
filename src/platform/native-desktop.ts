@@ -9,7 +9,7 @@
  * - Coordinate scaling handled transparently
  */
 
-import { beforePointerPress } from './pointer-guard';
+import { beforePointerPress, beforeCapture } from './pointer-guard';
 import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
@@ -177,6 +177,7 @@ export class NativeDesktop extends EventEmitter {
         img = await grimGrab({ x: mon.x, y: mon.y, width: mon.width, height: mon.height });
       } else {
         const { Region } = await import('@nut-tree-fork/nut-js');
+        await beforeCapture();
         img = await screen.grabRegion(new Region(mon.x, mon.y, mon.width, mon.height));
       }
       const { scale: scaleFactor, width: llmW, height: llmH } = llmSize(mon.width, mon.height);
@@ -602,6 +603,7 @@ export class NativeDesktop extends EventEmitter {
    * nut-js would open X11 and take the process down (see wayland-screen.ts).
    */
   private async grab(): Promise<GrabImage> {
+    await beforeCapture(); // clawdcursor's own pill must not be in the capture
     try {
       return await (isWaylandSession() ? grimGrab() : screen.grab());
     } catch (err: any) {

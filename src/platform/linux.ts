@@ -17,7 +17,7 @@
  * are not installed the adapter still loads and methods return empty defaults.
  */
 
-import { beforePointerPress } from './pointer-guard';
+import { beforePointerPress, beforeCapture } from './pointer-guard';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import * as fs from 'fs';
@@ -392,6 +392,7 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   private async grabScreen(): Promise<GrabImage> {
+    await beforeCapture(); // clawdcursor's own pill must not be in the capture
     // Wayland: nut-js would open X11 and die (see wayland-screen.ts); grim or an honest error.
     if (this.environment === 'wayland') {
       return await this.withTimeout(grimGrab(), SCREENSHOT_TIMEOUT_MS, 'grim');
