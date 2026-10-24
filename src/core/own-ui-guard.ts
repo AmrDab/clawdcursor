@@ -51,8 +51,11 @@ export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSaf
     const v = args?.[k];
     if (typeof v === 'string' && OVERLAY_NAME.test(v.trim())) return OWN(`"${v.trim()}"`);
   }
-  if (!pauseSafe && (pauseGate.current() || foreign.paused)) {
-    return 'paused — a pause is waiting for the user on screen, and nothing runs until they answer it. Keep waiting; do not read, press, type or click.';
+  // An `expect` makes any call a screen read (the post-check OCRs and reads elements), so it is never pause-safe.
+  const safe = pauseSafe && (args?.expect === undefined || args?.expect === null);
+  if (!safe && (pauseGate.current() || foreign.paused)) {
+    const whose = !pauseGate.current() && foreign.pausedBy ? ` (shown by clawdcursor process ${foreign.pausedBy})` : '';
+    return `paused — a pause is waiting for the user on screen${whose}, and nothing runs until they answer it. Keep waiting; do not read, press, type or click.`;
   }
   return null;
 }

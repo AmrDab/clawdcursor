@@ -9,6 +9,15 @@ import * as path from 'path';
 import { DATA_DIR } from '../paths';
 
 export interface OverlayState { pids: number[]; paused: boolean }
+/** The merged view also names a process whose pause is up, for the refusal text. */
+export interface ForeignOverlayState extends OverlayState { pausedBy?: number }
+
+// A writer that died without its exit hook (force-kill, power loss) leaves its file behind, and its pid can be reused. While a
+// process has anything on screen it rewrites its file every HEARTBEAT_MS; readers ignore one older than STALE_MS.
+const HEARTBEAT_MS = 5_000;
+const STALE_MS = 15_000;
+let heartbeat: ReturnType<typeof setInterval> | null = null;
+let last: OverlayState = { pids: [], paused: false };
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
 let dir: string | null = process.env.VITEST ? null : path.join(DATA_DIR, 'overlay');
@@ -18,13 +27,24 @@ export function __setOverlayStateDirForTests(d: string | null): void { dir = d; 
 
 /** Never throws: a failed write leaves the other processes without this one's overlay, not this process broken. */
 export function publishOverlayState(s: OverlayState): void {
+  last = s;
+  const empty = !s.pids.length && !s.paused;
+  if (empty && heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+  if (!empty && !heartbeat && dir) {
+    heartbeat = setInterval(() => write(last), HEARTBEAT_MS);
+    heartbeat.unref?.();
+  }
+  write(s);
+}
+
+function write(s: OverlayState): void {
   const file = own();
   if (!file || !dir) return;
   try {
     if (!s.pids.length && !s.paused) { fs.rmSync(file, { force: true }); return; }
     fs.mkdirSync(dir, { recursive: true });
     const tmp = `${file}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(s));
+    fs.writeFileSync(tmp, JSON.stringify({ ...s, at: Date.now() }));
     fs.renameSync(tmp, file);
   } catch { /* best effort */ }
 }
@@ -33,15 +53,15 @@ const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catc
 
 // Every publish is a create, rename or delete in the directory, which moves its mtime: a cache keyed on it sees a new pause or
 // pill on the very next call. The age limit only re-checks that writers are still alive — staler means refusing longer, never less.
-let cache: { at: number; mtime: number; state: OverlayState } | null = null;
+let cache: { at: number; mtime: number; state: ForeignOverlayState } | null = null;
 const LIVENESS_MS = 2_000;
 
 /** The overlays of OTHER live clawdcursor processes, merged. */
-export function foreignOverlayState(): OverlayState {
+export function foreignOverlayState(): ForeignOverlayState {
   let mtime = -1;
   try { if (dir) mtime = fs.statSync(dir).mtimeMs; } catch { /* no overlays yet */ }
   if (cache && cache.mtime === mtime && Date.now() - cache.at < LIVENESS_MS) return cache.state;
-  const state: OverlayState = { pids: [], paused: false };
+  const state: ForeignOverlayState = { pids: [], paused: false };
   if (dir) {
     let names: string[] = [];
     try { names = fs.readdirSync(dir); } catch { /* no overlays yet */ }
@@ -49,9 +69,10 @@ export function foreignOverlayState(): OverlayState {
       const writer = Number(/^(\d+)\.json$/.exec(name)?.[1]);
       if (!writer || writer === process.pid || !alive(writer)) continue;
       try {
-        const s = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as Partial<OverlayState>;
+        const s = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8')) as Partial<OverlayState> & { at?: number };
+        if (typeof s.at !== 'number' || Date.now() - s.at > STALE_MS) continue;  // its writer stopped beating
         if (Array.isArray(s.pids)) state.pids.push(...s.pids.filter((p): p is number => Number.isInteger(p)));
-        if (s.paused === true) state.paused = true;
+        if (s.paused === true) { state.paused = true; state.pausedBy ??= writer; }
       } catch { /* half-written or gone */ }
     }
   }
