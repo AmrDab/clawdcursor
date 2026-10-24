@@ -232,12 +232,15 @@ export function getExtraTools(): ToolDefinition[] {
       name: 'mouse_drag_stepped',
       description:
         'Drag the mouse along a multi-point path in image-space. ' +
-        'Path is a JSON string of {x,y} points. Useful for Paint-style drawing ' +
+        'Path is an array of {x,y} points. Useful for Paint-style drawing ' +
         'or gesture input. Press occurs at the first point and release at the last.',
       parameters: {
+        // An array, like `drag`'s path: the compound publishes one type per name, and a JSON-string-only handler under
+        // an array schema failed every well-formed call (live macOS). A JSON string is still accepted.
         path: {
-          type: 'string', required: true,
-          description: 'JSON array of {"x":n, "y":n} points in image-space, min 2 points',
+          type: 'array', required: true,
+          description: 'Array of {"x":n, "y":n} points in image-space, min 2 points',
+          items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] },
         },
         space: SPACE_PARAM,
       },
@@ -248,8 +251,11 @@ export function getExtraTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_drag_stepped');
         let points: Array<{ x: number; y: number }>;
-        try { points = JSON.parse(String(path)); }
-        catch { return { text: 'mouse_drag_stepped: path must be a JSON array of {x,y}', isError: true }; }
+        try { points = Array.isArray(path) ? path : JSON.parse(String(path)); }
+        catch { return { text: 'mouse_drag_stepped: path must be an array of {x,y} points', isError: true }; }
+        if (Array.isArray(points) && points.some(p => !Number.isFinite(p?.x) || !Number.isFinite(p?.y))) {
+          return { text: 'mouse_drag_stepped: every point needs numeric x and y', isError: true };
+        }
         if (!Array.isArray(points) || points.length < 2) {
           return { text: 'mouse_drag_stepped: need at least 2 points', isError: true };
         }

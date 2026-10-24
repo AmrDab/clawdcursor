@@ -78,6 +78,13 @@ describe('reactiveCheck', () => {
     expect(r).toBeNull();
   });
 
+  it('a failed action with a failing expect keeps its own error — no settle wait, no DEVIATION', async () => {
+    const a = adapter();
+    const r = await reactiveCheck({ ...base, toolSuccess: false, expect: [{ type: 'app_running', name: 'photoshop' }], adapter: a });
+    expect(r).toBeNull();
+    expect(a.listWindows).not.toHaveBeenCalled();
+  });
+
   it('chip-safe: an outcome assertion (element_exists) passes regardless of typed text', async () => {
     const a = adapter({ findElements: vi.fn(async () => [{ name: 'Amr Dabbas', controlType: 'Text', bounds: { x: 1, y: 1, width: 10, height: 10 } }]) });
     const r = await reactiveCheck({ ...base, toolText: 'Typed amr@x.com', expect: [{ type: 'element_exists', name: 'Amr Dabbas' }], adapter: a });

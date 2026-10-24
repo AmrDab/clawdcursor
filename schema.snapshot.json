@@ -1395,14 +1395,29 @@
     },
     {
       "name": "mouse_drag_stepped",
-      "description": "Drag the mouse along a multi-point path in image-space. Path is a JSON string of {x,y} points. Useful for Paint-style drawing or gesture input. Press occurs at the first point and release at the last.",
+      "description": "Drag the mouse along a multi-point path in image-space. Path is an array of {x,y} points. Useful for Paint-style drawing or gesture input. Press occurs at the first point and release at the last.",
       "category": "mouse",
       "parameters": {
         "type": "object",
         "properties": {
           "path": {
-            "type": "string",
-            "description": "JSON array of {\"x\":n, \"y\":n} points in image-space, min 2 points"
+            "type": "array",
+            "description": "Array of {\"x\":n, \"y\":n} points in image-space, min 2 points",
+            "items": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ]
+            }
           },
           "space": {
             "type": "string",

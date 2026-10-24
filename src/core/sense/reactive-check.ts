@@ -42,7 +42,9 @@ export interface ReactiveOutcome { success: boolean; text: string; }
 export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutcome | null> {
   const hasExpect = input.expect !== undefined && input.expect !== null;
 
-  if (hasExpect) {
+  // A failed action keeps its own error: checking its expected effect would wait out the settle window and then relabel
+  // "not found" / "timed out" as a DEVIATION ("it ran but the effect was not seen") when nothing ran.
+  if (hasExpect && input.toolSuccess) {
     const parsed = parseAssertions(input.expect);
     if ('error' in parsed) {
       return { success: false, text: `${input.toolText}\nexpect rejected: ${parsed.error}` };
