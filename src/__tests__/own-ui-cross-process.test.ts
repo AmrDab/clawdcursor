@@ -28,6 +28,12 @@ describe('overlay state across processes', () => {
     expect(foreignOverlayState()).toEqual({ pids: [5555], paused: true });
   });
 
+  it('a pause another process shows right after a read is seen on the next call — no stale cache', () => {
+    expect(foreignOverlayState().paused).toBe(false);
+    writeForeign(process.ppid, { pids: [5555], paused: true });
+    expect(foreignOverlayState()).toEqual({ pids: [5555], paused: true });
+  });
+
   it('publishing writes this process\'s file, and an empty state removes it', () => {
     publishOverlayState({ pids: [4242], paused: true });
     const file = path.join(dir, `${process.pid}.json`);

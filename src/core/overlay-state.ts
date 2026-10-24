@@ -31,12 +31,16 @@ export function publishOverlayState(s: OverlayState): void {
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
 
-let cache: { at: number; state: OverlayState } | null = null;
-const TTL_MS = 500;
+// Every publish is a create, rename or delete in the directory, which moves its mtime: a cache keyed on it sees a new pause or
+// pill on the very next call. The age limit only re-checks that writers are still alive — staler means refusing longer, never less.
+let cache: { at: number; mtime: number; state: OverlayState } | null = null;
+const LIVENESS_MS = 2_000;
 
 /** The overlays of OTHER live clawdcursor processes, merged. */
 export function foreignOverlayState(): OverlayState {
-  if (cache && Date.now() - cache.at < TTL_MS) return cache.state;
+  let mtime = -1;
+  try { if (dir) mtime = fs.statSync(dir).mtimeMs; } catch { /* no overlays yet */ }
+  if (cache && cache.mtime === mtime && Date.now() - cache.at < LIVENESS_MS) return cache.state;
   const state: OverlayState = { pids: [], paused: false };
   if (dir) {
     let names: string[] = [];
@@ -51,6 +55,6 @@ export function foreignOverlayState(): OverlayState {
       } catch { /* half-written or gone */ }
     }
   }
-  cache = { at: Date.now(), state };
+  cache = { at: Date.now(), mtime, state };
   return state;
 }
