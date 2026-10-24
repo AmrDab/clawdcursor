@@ -222,6 +222,24 @@ describe('pause_for_user done_when: the pause ends the moment the user\'s step i
   });
 });
 
+describe('pause_for_user: a request queued behind another pause is cancelled when the call returns', () => {
+  it('returns busy, and no stale prompt surfaces once the other pause is answered', async () => {
+    let other: Promise<unknown> | undefined;
+    const platform = {
+      // another pause comes up while done_when is being read — after the busy check, before the request
+      listWindows: vi.fn(async () => { other ??= pauseGate.request({ message: 'Other step' }); return [{ title: 'Sign in', processName: 'msedge', processId: 1 }]; }),
+      getActiveWindow: vi.fn(async () => ({ title: 'Sign in', processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 10, height: 10 } })),
+    };
+    const r = await pauseForUser.handler({ message: 'Sign in to Glama', done_when: [{ type: 'window_title_contains', value: 'Dashboard' }], timeout: 1 }, { platform } as unknown as ToolContext);
+    expect(JSON.parse(r.text).status).toBe('busy');
+    expect(pauseGate.current()?.message).toBe('Other step');
+    pauseGate.answer('resume');
+    await other;
+    await new Promise(r2 => setTimeout(r2, 50));
+    expect(pauseGate.current()).toBeNull();   // the cancelled request never shows
+  }, 10_000);
+});
+
 describe('pause_for_user done_when — review fixes', () => {
   function titled(initial: string) {
     const state = { title: initial, calls: 0 };

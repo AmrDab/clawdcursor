@@ -215,11 +215,24 @@ export function getAgentTools(): ToolDefinition[] {
         const sec = Number(timeout);
         const boundMs = Math.min(50_000, Math.max(1_000, Number.isFinite(sec) && sec > 0 ? sec * 1000 : PAUSE_WAIT_DEFAULT_MS));
         let timer: ReturnType<typeof setTimeout> | undefined;
+        // A request still QUEUED (behind another pause, ours or another process's) when this call returns has no one
+        // waiting for it: cancel it, or it would surface later as a stale prompt. One already on screen is never cancelled.
+        const queued = new AbortController();
         const result = await Promise.race([
-          pauseGate.requestWithReply({ message: text, key, doneWhen, donePollMs }),
+          pauseGate.requestWithReply({ message: text, key, doneWhen, donePollMs }, { signal: queued.signal }),
           new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
         ]);
         clearTimeout(timer);
+        if (result === null && !pauseGate.continues(key)) {
+          queued.abort();
+          return {
+            text: JSON.stringify({
+              status: 'busy',
+              waitingFor: pauseGate.current()?.message ?? 'a pause shown by another clawdcursor process',
+              next: 'Another pause came up first and is still on screen, so yours was not shown. Ask again once it has been answered, if you still need to.',
+            }),
+          };
+        }
         const outcome = result?.outcome ?? null;
         if (outcome === null) {
           pauseGate.markWaiting(key); // only a caller told "waiting" gets the outcome handed over
