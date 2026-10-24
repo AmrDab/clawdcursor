@@ -579,7 +579,11 @@ export function getA11yTools(): ToolDefinition[] {
           let tree: Awaited<ReturnType<typeof ctx.platform.getUiTree>> = [];
           try { tree = await ctx.platform.getUiTree(searchedPid); } catch { /* unreadable: keep the generic advice */ }
           const miss = nameMissHint(String(name), tree, wrapUntrustedScreenContent);
-          if (miss) return { text: `(no elements found)${where}\n${miss}` };
+          // A browser's window always has its own chrome (tabs, Back, Reload) while the PAGE may expose nothing: there the
+          // browser advice (read the page over CDP / turn on renderer accessibility) still applies, after the names.
+          const searchedProc = scopes.find(s => s.processId === searchedPid)?.processName;
+          const browser = isBrowserProcess(searchedProc) || (searchedPid !== undefined && (await cdpBrowserPid(ctx)) === searchedPid);
+          if (miss) return { text: `(no elements found)${where}\n${miss}${browser ? `\n${await nextStepFor(ctx, searchedPid)}` : ''}` };
         }
         return { text: `(no elements found)${where}\n${await nextStepFor(ctx, searchedPid)}` };
       },

@@ -21,6 +21,7 @@ import { screen } from '@nut-tree-fork/nut-js';
 import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
 import { sharpFromGrab, type GrabImage } from './grab-image';
+import { beforeCapture } from './pointer-guard';
 import { isWaylandSession, grimGrab } from './wayland-screen';
 import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
@@ -297,7 +298,8 @@ export class OcrEngine {
   // ─── Private ──────────────────────────────────────────────────────────────
 
   /** Full-screen grab — grim on Wayland, where nut-js would crash the process (see wayland-screen.ts). */
-  private grab(): Promise<GrabImage> {
+  private async grab(): Promise<GrabImage> {
+    await beforeCapture(); // clawdcursor's own pill must not be read as screen text
     return isWaylandSession() ? grimGrab() : screen.grab();
   }
 

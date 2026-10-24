@@ -173,11 +173,11 @@ export class NativeDesktop extends EventEmitter {
 
     try {
       let img: GrabImage;
+      await beforeCapture(); // clawdcursor's own pill must not be in the capture (X11 and Wayland alike)
       if (isWaylandSession()) {
         img = await grimGrab({ x: mon.x, y: mon.y, width: mon.width, height: mon.height });
       } else {
         const { Region } = await import('@nut-tree-fork/nut-js');
-        await beforeCapture();
         img = await screen.grabRegion(new Region(mon.x, mon.y, mon.width, mon.height));
       }
       const { scale: scaleFactor, width: llmW, height: llmH } = llmSize(mon.width, mon.height);

@@ -15,7 +15,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   - **Windows:** excluded from capture (`SetWindowDisplayAffinity`).
   - **macOS:** `sharingType = .none`, and the screenshot helper filters the
     `clawd-overlay` app out.
-  - **Linux:** the pill steps aside for the capture.
+  - **Linux:** the pill steps aside for the capture (the glow stays; X11 and
+    Wayland cannot exclude a window).
+  Excluded windows still show on your own screen and take clicks. They are
+  also left out of your own screenshots and of screen sharing (Teams, Zoom).
 - **`find` that matches nothing says why.** In a window with real structure it
   now says "no element named X among N named elements" and lists the closest
   names (as untrusted screen content). It used to claim the app had "little or
