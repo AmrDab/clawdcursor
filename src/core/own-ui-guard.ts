@@ -16,6 +16,7 @@ import { pauseGate } from './pause-gate';
 import { foreignOverlayState } from './overlay-state';
 
 const PID_ARGS = ['processId', 'pid', 'process_id'];
+const READ_ARGS = ['expect', 'assertions'];
 const NAME_ARGS = ['processName', 'process_name', 'app', 'appName'];
 /** The macOS overlay's process name (cached as clawd-overlay-<hash>). On Windows and Linux it runs under a shared interpreter. */
 const OVERLAY_NAME = /^clawd-overlay(-[0-9a-f]+)?$/i;
@@ -51,8 +52,8 @@ export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSaf
     const v = args?.[k];
     if (typeof v === 'string' && OVERLAY_NAME.test(v.trim())) return OWN(`"${v.trim()}"`);
   }
-  // An `expect` makes any call a screen read (the post-check OCRs and reads elements), so it is never pause-safe.
-  const safe = pauseSafe && (args?.expect === undefined || args?.expect === null);
+  // An `expect` (the post-check) or `done`'s `assertions` make any call a screen read — OCR, element reads — so never pause-safe.
+  const safe = pauseSafe && READ_ARGS.every(k => args?.[k] === undefined || args?.[k] === null);
   if (!safe && (pauseGate.current() || foreign.paused)) {
     const whose = !pauseGate.current() && foreign.pausedBy ? ` (shown by clawdcursor process ${foreign.pausedBy})` : '';
     return `paused — a pause is waiting for the user on screen${whose}, and nothing runs until they answer it. Keep waiting; do not read, press, type or click.`;

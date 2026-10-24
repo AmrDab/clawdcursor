@@ -53,6 +53,7 @@ describe('overlay state across processes', () => {
     expect(ownUiRefusal({ name: 'Resume' }, false)).toMatch(/a pause is waiting for the user on screen \(shown by clawdcursor process \d+\)/);
     // an expect turns even a pause-safe call into a screen read
     expect(ownUiRefusal({ action: 'pause_for_user', expect: [{ type: 'ocr_contains', value: 'x' }] }, true)).toMatch(/a pause is waiting/);
+    expect(ownUiRefusal({ assertions: [{ type: 'element_exists', name: 'Saved' }] }, true)).toMatch(/a pause is waiting/);
     expect(ownUiRefusal({ processId: 5555 }, true)).toMatch(/is clawdcursor's own on-screen control/);
     expect(ownUiRefusal({}, true)).toBeNull();
   });

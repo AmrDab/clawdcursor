@@ -41,6 +41,7 @@ import { logger, EVENTS, beginSpan } from '../observability/logger';
 import { getCorrelationId } from '../observability/correlation';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
 import { ownUiRefusal, isPauseSafeCall } from '../own-ui-guard';
+import { untilNoForeignPause } from '../overlay-state';
 import {
   callLLMWithTools,
   type LLMTool,
@@ -486,6 +487,8 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
           let donePollMs: number | undefined;
           const rawDone = (call.args as Record<string, unknown>).done_when;
           if (call.name === 'ask_user' && rawDone !== undefined && rawDone !== null) {
+            // Its "already true" check reads the screen: never while another clawdcursor process's pause has the user.
+            await untilNoForeignPause(input.abortSignal);
             const parsed = parseAssertions(rawDone);
             const deps2 = { adapter: deps.adapter, ocrText: async () => (await reactiveOcr().recognizeScreen()).fullText ?? '' };
             const now = 'error' in parsed ? null : await checkAssertions(parsed.assertions, deps2).catch(() => null);

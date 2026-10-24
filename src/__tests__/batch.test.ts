@@ -44,6 +44,15 @@ describe('executeBatch — a pause waiting for the user', () => {
     expect(r.steps[0]).toMatchObject({ status: 'blocked' });
     expect(r.steps[0].text).toMatch(/a pause is waiting for the user on screen/);
   });
+
+  it('a step precondition (a screen read) is not run during a pause', async () => {
+    tools.click = okTool('click');
+    tools.get_active_window = okTool('get_active_window');
+    pausePending = { message: 'Sign in' };
+    const r = await executeBatch([{ name: 'click', arguments: { x: 1, y: 2 }, precheck: { window: 'Notepad' } } as any], ctx);
+    expect(tools.get_active_window.handler).not.toHaveBeenCalled();
+    expect(r.steps[0]).toMatchObject({ status: 'blocked' });
+  });
 });
 
 describe('executeBatch — happy path', () => {

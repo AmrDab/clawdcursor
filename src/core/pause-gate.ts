@@ -30,6 +30,7 @@
  */
 
 import { controlBanner } from './banner';
+import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
 
 export type PauseAnswer = 'resume' | 'end' | 'reply';
 export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | 'replied';
@@ -155,7 +156,12 @@ class PauseGate {
           return done.result;
         }
       }
-      if (!this.pending) break;
+      if (!this.pending) {
+        // Another clawdcursor process's pause is the user's too: queue behind it, as behind one of ours.
+        if (!foreignOverlayState().paused) break;
+        await untilNoForeignPause(opts.signal);
+        continue;
+      }
       await this.pending.promise;
     }
 
