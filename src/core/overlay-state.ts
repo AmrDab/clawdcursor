@@ -15,7 +15,8 @@ export interface ForeignOverlayState extends OverlayState { pausedBy?: number }
 // A writer that died without its exit hook (force-kill, power loss) leaves its file behind, and its pid can be reused. While a
 // process has anything on screen it rewrites its file every HEARTBEAT_MS; readers ignore one older than STALE_MS.
 const HEARTBEAT_MS = 5_000;
-const STALE_MS = 15_000;
+// Generous: a live writer whose event loop stalls (a long sync call, sleep/wake) must not have its real pause ignored.
+const STALE_MS = 45_000;
 let heartbeat: ReturnType<typeof setInterval> | null = null;
 let last: OverlayState = { pids: [], paused: false };
 
@@ -71,4 +72,9 @@ export function foreignOverlayState(): ForeignOverlayState {
     }
   }
   return state;
+}
+
+/** Resolves once no other clawdcursor process has a pause up (or the signal aborts): a second prompt never stacks on one. */
+export async function untilNoForeignPause(signal?: AbortSignal, pollMs = 500): Promise<void> {
+  while (foreignOverlayState().paused && !signal?.aborted) await new Promise(r => setTimeout(r, pollMs));
 }

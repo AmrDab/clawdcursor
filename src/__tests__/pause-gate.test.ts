@@ -351,3 +351,30 @@ describe('doneWhen poll interval', () => {
     } finally { vi.useRealTimers(); }
   });
 });
+
+describe('a pause never stacks on a pause of another clawdcursor process', () => {
+  it('queues behind it and shows once it is answered there', async () => {
+    const fs = await import('fs');
+    const os = await import('os');
+    const path = await import('path');
+    const { __setOverlayStateDirForTests } = await import('../core/overlay-state');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-overlay-'));
+    __setOverlayStateDirForTests(dir);
+    const foreign = path.join(dir, `${process.ppid}.json`);  // the runner's parent: a live other process
+    fs.writeFileSync(foreign, JSON.stringify({ pids: [5555], paused: true, at: Date.now() }));
+    try {
+      const outcome = pauseGate.request({ message: 'Sign in' });
+      await new Promise(r => setTimeout(r, 700));
+      expect(pauseGate.current()).toBeNull();          // still waiting behind the other process's pause
+      expect(livePill()).toHaveLength(0);
+      fs.rmSync(foreign);
+      await new Promise(r => setTimeout(r, 700));
+      expect(pauseGate.current()?.message).toBe('Sign in');
+      say('BANNER_RESUME');
+      await expect(outcome).resolves.toBe('resumed');
+    } finally {
+      __setOverlayStateDirForTests(null);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

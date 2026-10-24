@@ -19,7 +19,8 @@ All notable changes to Clawd Cursor will be documented in this file.
   overlay process (by pid, or by its process name) is refused (`OWN_UI`). While
   a pause waits for the user, every call is refused (`PAUSED`), reads included,
   except the ones that wait on, end or report the pause. This holds across
-  processes: a pause shown by the daemon also stops a separate MCP server. The
+  processes: a pause shown by the daemon also stops a separate MCP server, and
+  a new pause waits behind it rather than stacking a second prompt. The
   overlay never shows up in window lists, so a lookup by a shared name such as
   `powershell` cannot land on it. A `done_when` check that the prompt itself
   would satisfy (its text, or a button such as Resume) is rejected. On macOS,

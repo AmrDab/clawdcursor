@@ -167,6 +167,16 @@ export async function executeBatch(
     // `precheck` is the canonical name (parity with the agent-loop batch);
     // `expect` remains the documented MCP alias for back-compat.
     const guard = step.precheck ?? step.expect;
+    const args = stepArgs(step);
+    const stepAction = typeof args.action === 'string' ? args.action : undefined;
+    // The user's own controls are never a target, and nothing runs while a pause waits (own-ui-guard.ts) — checked before
+    // the precondition, which reads the screen; a step with one is never pause-safe.
+    const ownUi = ownUiRefusal(args, !guard && isPauseSafeCall(tool.name, stepAction));
+    if (ownUi) {
+      outcomes.push({ i, label, status: 'blocked', text: ownUi });
+      return halt(i, `step ${i} (${label}): ${ownUi}`);
+    }
+
     if (guard) {
       const g = await checkGuard(guard, ctx);
       if (!g.ok) {
@@ -174,8 +184,6 @@ export async function executeBatch(
         return halt(i, `precondition failed at step ${i} — re-plan from current state`);
       }
     }
-
-    const args = stepArgs(step);
 
     // Safety — identical gate to a normal tools/call (incl. el_NN → label
     // resolution via the shared holder, same as the direct MCP path).
@@ -194,14 +202,6 @@ export async function executeBatch(
           : `step ${i} needs confirmation (a confirm-tier step cannot run in a batch unless the operator enables CLAWD_BATCH_ALLOW_CONFIRM=1 AND you pass allowConfirm:true)`;
         return halt(i, isConfirm ? confirmHint : `step ${i} blocked by safety`);
       }
-    }
-
-    const stepAction = typeof args.action === 'string' ? args.action : undefined;
-    // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
-    const ownUi = ownUiRefusal(args, isPauseSafeCall(tool.name, stepAction));
-    if (ownUi) {
-      outcomes.push({ i, label, status: 'blocked', text: ownUi });
-      return halt(i, `step ${i} (${label}): ${ownUi}`);
     }
 
     // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
