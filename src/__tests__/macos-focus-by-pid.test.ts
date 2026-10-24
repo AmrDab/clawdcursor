@@ -143,6 +143,49 @@ describe('without the helper (the System Events script is the fallback)', () => 
   });
 });
 
+describe('focusWindow says why a lookup failed (live macOS 2026-10-24: a locked screen read as "No matching window found.")', () => {
+  const locked = () => new MacAxError('locked', 'window list failed: the screen is locked — the lock screen (loginwindow) owns the display and keyboard.');
+
+  it('by name: a locked screen is the answer, and nothing is focused', async () => {
+    const ax = fakeAx({ listWindowsDetailed: vi.fn(async () => { throw locked(); }), appState: vi.fn(async () => { throw locked(); }) });
+    const mac = new MacOSAdapter({ ax });
+    await expect(mac.focusWindow({ processName: 'Finder' })).resolves.toBe(false);
+    expect(mac.takeFocusFailure()).toMatch(/screen is locked/);
+    expect(ax.focusWindow).not.toHaveBeenCalled();
+    expect(osascripts()).toHaveLength(0);
+  });
+
+  it('by title: a locked screen is the answer, not "No window has a title containing"', async () => {
+    const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => { throw locked(); }) }) });
+    await expect(mac.focusWindow({ title: 'zzfindertest' })).resolves.toBe(false);
+    expect(mac.takeFocusFailure()).toMatch(/screen is locked/);
+  });
+
+  it('a name nothing matches says so', async () => {
+    const mac = new MacOSAdapter({ ax: fakeAx() });
+    await expect(mac.focusWindow({ processName: 'NoSuchApp' })).resolves.toBe(false);
+    expect(mac.takeFocusFailure()).toBe('No window or running app matches "NoSuchApp".');
+  });
+
+  it('a list that fails for another reason still resolves the name through the app list', async () => {
+    const ax = fakeAx({
+      listWindowsDetailed: vi.fn(async () => { throw new MacAxError('timeout', 'window list timed out'); }),
+      appState: vi.fn(async () => ({ processId: 954 })),
+      frontmost: vi.fn(async () => FRONT('Finder', 954)),
+    });
+    await expect(new MacOSAdapter({ ax }).focusWindow({ processName: 'Finder' })).resolves.toBe(true);
+    expect(ax.focusWindow).toHaveBeenCalledWith(954, undefined);
+  });
+
+  it('through the tool, the lock reaches the caller instead of "No matching window found."', async () => {
+    const tool = buildUnifiedTools().find(t => t.name === 'focus_window')!;
+    const platform = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => { throw locked(); }), appState: vi.fn(async () => { throw locked(); }) }) });
+    const r = await tool.execute({ processName: 'Finder' }, { platform } as never);
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/screen is locked/);
+  });
+});
+
 describe('the focus_window tool', () => {
   const tool = buildUnifiedTools().find(t => t.name === 'focus_window')!;
 

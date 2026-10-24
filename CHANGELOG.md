@@ -12,6 +12,13 @@ All notable changes to Clawd Cursor will be documented in this file.
   `expect` said nothing). Every action except `batch` and `task` now publishes
   it. Actions that don't check it themselves get the same check after they
   run; a malformed `expect` is refused before anything runs.
+- **A failed `window focus` says why, on every OS.** On macOS, focusing by name
+  or title while the screen was locked said "No matching window found." (the
+  lock error was swallowed). It now refuses with the locked-screen message.
+  Windows and Linux reported no reason at all: they now name the missing
+  window, a missing `wmctrl`, or a window Windows would not bring to the front.
+  Windows no longer sends a focus with nothing to aim at when no window
+  matches the name.
 - **A failed action keeps its own error.** With an `expect`, a failure like
   "window not found" used to wait 2 s and then be reported as a DEVIATION
   ("it ran but the effect was not seen"), when nothing had run.

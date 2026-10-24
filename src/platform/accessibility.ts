@@ -448,7 +448,7 @@ export class AccessibilityBridge {
           const active = await adapter.getActiveWindow().catch(() => null);
           result = { success: true, title: active?.title ?? title, processId: active?.processId ?? processId };
         } else {
-          result = { success: false, error: `No matching window for: ${title ?? processId}` };
+          result = { success: false, error: adapter.takeFocusFailure?.() ?? `No matching window for: ${title ?? processId}` };
         }
       }
       this.invalidateCache();
