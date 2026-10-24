@@ -412,9 +412,18 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
+  /** Why the last focusWindow returned false. Taken once. */
+  private focusFailure: string | null = null;
+  takeFocusFailure(): string | null {
+    const f = this.focusFailure;
+    this.focusFailure = null;
+    return f;
+  }
+
   async focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean> {
     // The PSRunner focus-window command takes title and/or processId. Look up by
     // processName first so callers can pass just that.
+    this.focusFailure = null;
     let processId = query.processId;
     let title = query.title;
 
@@ -424,6 +433,10 @@ export class WindowsAdapter implements PlatformAdapter {
       const hit = windows.find(w => w.processName.toLowerCase() === target)
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
       if (hit) processId = hit.processId;
+      else if (title === undefined) {
+        this.focusFailure = `No open window belongs to a process matching "${query.processName}".`;
+        return false;
+      }
     }
 
     try {
@@ -439,8 +452,14 @@ export class WindowsAdapter implements PlatformAdapter {
       // tools to land on the right app, so treat foreground=false as a focus
       // failure even if SetFocus succeeded. This is the difference between
       // "a11y-focused" and "will receive global SendInput keystrokes".
-      if (result?.success !== true) return false;
-      if (result?.foreground === false) return false;
+      if (result?.success !== true) {
+        this.focusFailure = typeof result?.error === 'string' ? result.error : null;
+        return false;
+      }
+      if (result?.foreground === false) {
+        this.focusFailure = `Found "${result.title ?? title ?? ''}" but Windows did not bring it to the front, so keys would land elsewhere.`;
+        return false;
+      }
       const focusedPid = typeof result.processId === 'number' ? result.processId : processId;
       if (focusedPid !== undefined) {
         this.lastFocused = { processId: focusedPid, processName: query.processName, title: typeof result.title === 'string' ? result.title : title };
@@ -450,7 +469,8 @@ export class WindowsAdapter implements PlatformAdapter {
       const b = result.bounds;
       if (b && b.width > 0 && b.height > 0) setWorkingPoint(b.x + b.width / 2, b.y + b.height / 2);
       return true;
-    } catch {
+    } catch (err) {
+      this.focusFailure = err instanceof Error ? err.message : String(err);
       return false;
     }
   }

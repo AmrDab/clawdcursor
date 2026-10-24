@@ -468,8 +468,20 @@ export class LinuxAdapter implements PlatformAdapter {
     return all[0] ?? null;
   }
 
+  /** Why the last focusWindow returned false. Taken once. */
+  private focusFailure: string | null = null;
+  takeFocusFailure(): string | null {
+    const f = this.focusFailure;
+    this.focusFailure = null;
+    return f;
+  }
+
   async focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean> {
-    if (!(await this.hasBinary('wmctrl'))) return false;
+    this.focusFailure = null;
+    if (!(await this.hasBinary('wmctrl'))) {
+      this.focusFailure = 'Focusing a window needs wmctrl, which is not installed — install it with your package manager.';
+      return false;
+    }
 
     // Prefer pid-based focus when we know it (wmctrl -i -a expects window id,
     // not pid, so we find the matching id from the list first).
@@ -495,8 +507,10 @@ export class LinuxAdapter implements PlatformAdapter {
         await execFileAsync('wmctrl', ['-a', query.title], { timeout: TOOL_TIMEOUT_MS });
         return true;
       }
+      this.focusFailure = 'No open window matches the given process or title.';
       return false;
-    } catch {
+    } catch (err) {
+      this.focusFailure = err instanceof Error ? err.message : String(err);
       return false;
     }
   }

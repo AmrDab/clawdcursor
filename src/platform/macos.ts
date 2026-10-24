@@ -355,11 +355,21 @@ export class MacOSAdapter implements PlatformAdapter {
     //   3. Else a title alone: the window list names the owner (a visible window before a minimized one).
     //   4. Pass title as the disambiguation hint when it is also provided.
     this.focusFailure = null;
+    // A failed lookup is kept, not swallowed: swallowed, a locked screen read as "No matching window found." (live macOS,
+    // 2026-10-24). A locked screen or a missing permission ends the focus with its own message, as in findElements; any
+    // other lookup error is the reason only when the focus then fails without a better one — never left behind on success.
+    const fatal = (e: unknown) => e instanceof MacAxError && (e.kind === 'locked' || e.kind === 'permission');
+    let lookupError: unknown = null;
+    const orElse = <T>(fallback: T) => (err: unknown): T => {
+      if (lookupError === null || (fatal(err) && !fatal(lookupError))) lookupError = err;
+      return fallback;
+    };
+    const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+    let notRunning = false;   // NSWorkspace answered: no such app — that, not a slow list, is why nothing matched
     let processId = query.processId;
     if (processId === undefined && query.processName) {
       const target = query.processName.toLowerCase();
-      // A failed list cannot resolve the name; fall through to "nothing to match on".
-      const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
+      const windows = await this.listWindows().catch(orElse([] as WindowInfo[]));
       // With a title as well, the window that has BOTH: the first window of that name may belong to another process of the app.
       const titleNeedle = query.title?.toLowerCase();
       const sameName = windows.filter(w => w.processName.toLowerCase() === target);
@@ -368,32 +378,41 @@ export class MacOSAdapter implements PlatformAdapter {
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
       if (hit) {
         processId = hit.processId;
-      } else {
+      } else if (!fatal(lookupError)) {
         // The list is the slow, fallible way to learn a pid: it can miss an app its time budget never reached (or fail
         // outright). The app is still a running process, and NSWorkspace names it in milliseconds.
-        const app = await this.ax.appState(query.processName).catch(() => null);
+        let failed = false;
+        const app = await this.ax.appState(query.processName).catch((err: unknown) => { failed = true; return orElse(null)(err); });
         if (app) processId = app.processId;
+        else notRunning = !failed;
       }
     } else if (processId === undefined && query.title) {
       const needle = query.title.toLowerCase();
-      const windows = await this.listWindows().catch(() => [] as WindowInfo[]);
+      const windows = await this.listWindows().catch(orElse([] as WindowInfo[]));
       const matches = windows.filter(w => w.title.toLowerCase().includes(needle));
       const hit = matches.find(w => !w.isMinimized) ?? matches[0];
       if (!hit) {
-        this.focusFailure = `No window has a title containing "${query.title}".`;
+        this.focusFailure = lookupError ? message(lookupError) : `No window has a title containing "${query.title}".`;
         return false;
       }
       processId = hit.processId;
     }
 
-    if (processId === undefined && !query.title) return false; // nothing to match on
+    if (fatal(lookupError)) { this.focusFailure = message(lookupError); return false; }
+    const lookupNote = lookupError ? message(lookupError) : null;
+    if (processId === undefined && !query.title) {
+      if (query.processName) {
+        this.focusFailure = notRunning || !lookupNote ? `No window or running app matches "${query.processName}".` : lookupNote;
+      }
+      return false; // nothing to match on
+    }
 
     if (processId !== undefined) {
       try {
         if (await this.ax.focusWindow(processId, query.title)) return true;
         // null: no helper (not built yet, or switched off) — the script below is the fallback
       } catch (err) {
-        this.focusFailure = err instanceof Error ? err.message : String(err);
+        this.focusFailure = message(err);
         return false;
       }
     }
@@ -408,11 +427,15 @@ export class MacOSAdapter implements PlatformAdapter {
         timeout: OSASCRIPT_TIMEOUT_MS,
       });
       const result = JSON.parse(stdout);
-      if (result?.success !== true) return false;
+      if (result?.success !== true) {
+        this.focusFailure = typeof result?.error === 'string' ? result.error : lookupNote;
+        return false;
+      }
       // The script says "focused" for whatever it raised; who really is frontmost decides.
       if (processId !== undefined) return await this.frontmostIs(processId);
       return true;
-    } catch {
+    } catch (err) {
+      this.focusFailure = message(err);
       return false;
     }
   }

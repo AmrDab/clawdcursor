@@ -114,7 +114,9 @@ describe('review fixes', () => {
       'Model not found (404)', 'tesseract not found']) {
       expect(classifyResult(t, true, true)?.code).not.toBe('NOT_FOUND');
     }
-    for (const t of ['Element not found: name=\'Save\'', 'Window not found', 'a11y invoke "X" missed — element not found']) {
+    for (const t of ['Element not found: name=\'Save\'', 'Window not found', 'a11y invoke "X" missed — element not found',
+      'No window or running app matches "Finderr".', 'No open window belongs to a process matching "x".',
+      'No open window matches the given process or title.', 'No window has a title containing "x".']) {
       expect(classifyResult(t, true, true)?.code).toBe('NOT_FOUND');
     }
   });

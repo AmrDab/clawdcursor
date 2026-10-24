@@ -217,6 +217,12 @@ describe('L4 — listWindows resolves processName from /proc', () => {
     expect(h.calls.some(c => c.cmd === 'wmctrl' && c.args.join(' ') === '-i -a 0x3c00003')).toBe(true);
   });
 
+  it('focusWindow with nothing matching says why', async () => {
+    const adapter = new LinuxAdapter();
+    expect(await adapter.focusWindow({ processName: 'nosuchapp' })).toBe(false);
+    expect(adapter.takeFocusFailure()).toBe('No open window matches the given process or title.');
+  });
+
   it('leaves processName empty when /proc is unreadable', async () => {
     const adapter = new LinuxAdapter();
     const wins = await adapter.listWindows();

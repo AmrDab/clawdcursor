@@ -80,7 +80,7 @@ const RULES: Rule[] = [
     hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
-    test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)/i,
+    test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing/i,
     hint: 'nothing matched; the name may differ or the element is off screen', next: REREAD },
 ];
 

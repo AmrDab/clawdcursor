@@ -55,6 +55,12 @@ describe('WindowsAdapter.findElements — last-focused window retry', () => {
     vi.spyOn(adapter, 'listWindows').mockResolvedValue([HOST, EDGE] as never);
   });
 
+  it('a process name no window matches says so, and sends no focus with nothing to aim at', async () => {
+    expect(await adapter.focusWindow({ processName: 'nosuchapp' })).toBe(false);
+    expect(adapter.takeFocusFailure()).toBe('No open window belongs to a process matching "nosuchapp".');
+    expect(runCalls.some(c => c.cmd === 'focus-window')).toBe(false);
+  });
+
   it('retries once against the window clawdcursor last focused when the foreground search is empty', async () => {
     expect(await adapter.focusWindow({ processId: EDGE.processId })).toBe(true);
     const hits = await adapter.findElements({ name: 'Identity validation' });
