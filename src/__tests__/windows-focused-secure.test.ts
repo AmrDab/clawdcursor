@@ -28,7 +28,7 @@ describe('ps-bridge get-focused-element — password fields', () => {
       .find(j => j && j.ready !== true && 'success' in j);
     if (!reply || reply.success === false) return;   // nothing focused (headless runner)
     expect(typeof reply.secure).toBe('boolean');
-  });
+  }, 60_000);   // starting the real PowerShell bridge (UIA assemblies) is slow under a full parallel run
 });
 
 describe('WindowsAdapter maps secure through', () => {

@@ -48,7 +48,13 @@ func captureFullScreenSCK(outputPath: String) -> Bool {
                 semaphore.signal()
                 return
             }
-            let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+            // clawdcursor's own on-screen overlay (the pill and the glow, the `clawd-overlay` process) is for the person
+            // at the screen, never part of what the agent sees: it sat over apps' toolbars and hid them in captures.
+            // (The overlay also sets sharingType = .none, which the older CGWindowList path honours.)
+            let ownOverlay = content.applications.filter {
+                $0.applicationName.hasPrefix("clawd-overlay") || $0.bundleIdentifier.contains("clawd-overlay")
+            }
+            let filter = SCContentFilter(display: display, excludingApplications: ownOverlay, exceptingWindows: [])
             let config = SCStreamConfiguration()
             // Capture at native resolution. SCK reports display size in
             // points; multiply by the display's backingScaleFactor so

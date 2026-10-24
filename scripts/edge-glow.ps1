@@ -48,6 +48,13 @@ using System.Windows.Forms;
 
 public class GlowOverlay : Form {
     protected override bool ShowWithoutActivation { get { return true; } }
+    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+    // For the person at the screen only: WDA_EXCLUDEFROMCAPTURE (0x11) keeps the glow out of screenshots and OCR
+    // (Windows 10 2004+; older Windows ignores it).
+    protected override void OnHandleCreated(EventArgs e) {
+        base.OnHandleCreated(e);
+        try { SetWindowDisplayAffinity(Handle, 0x11); } catch { }
+    }
     protected override CreateParams CreateParams {
         get {
             CreateParams cp = base.CreateParams;

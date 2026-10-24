@@ -40,6 +40,14 @@ public class NoActivateBannerForm : Form {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+    [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+    // The pill is for the person at the screen, never part of what the agent sees: WDA_EXCLUDEFROMCAPTURE (0x11) leaves
+    // it out of every screenshot and OCR capture (Windows 10 2004+; older Windows ignores it). It sat over the app's own
+    // toolbar in captures and hid it.
+    protected override void OnHandleCreated(EventArgs e) {
+        base.OnHandleCreated(e);
+        try { SetWindowDisplayAffinity(Handle, 0x11); } catch { }
+    }
     // Set while the user types an answer ("Something else"): the pill may then take the keyboard.
     public bool AllowActivate = false;
     // A click must not activate the pill either: answer WM_MOUSEACTIVATE with
