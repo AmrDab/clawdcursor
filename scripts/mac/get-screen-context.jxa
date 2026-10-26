@@ -160,20 +160,22 @@ function makeNode(p, children) {
  */
 function buildUINode(element, props, maxDepth, depth) {
     var children = [];
-    if (depth < maxDepth && !LEAF_ROLES[props.role]) {
+    if (depth < maxDepth && (!LEAF_ROLES[props.role] || props.popover)) {
         try {
-            var kids = element.uiElements;
+            var kids = LEAF_ROLES[props.role] ? element.uiElements.whose({ role: 'AXPopover' }) : element.uiElements;
             var names = kids.name();
             var n = names.length;
             if (n > 0) {
                 var descs = batch(kids, 'description', n), roles = batch(kids, 'role', n),
                     subs = batch(kids, 'subrole', n), vals = batch(kids, 'value', n),
                     poss = batch(kids, 'position', n), sizes = batch(kids, 'size', n);
+                // A leaf's children are decoration, except an open popover: AppKit hangs it under the control that presented it.
+                var grand; try { grand = kids.uiElements.role(); } catch (e) { grand = []; }
                 for (var i = 0; i < n; i++) {
                     var pos = poss[i] || [0, 0], sz = sizes[i] || [0, 0];
                     var child = buildUINode(kids[i], {
                         name: names[i] || descs[i] || '', role: roles[i] || '', subrole: subs[i] || '',
-                        value: vals[i],
+                        value: vals[i], popover: (grand[i] || []).indexOf('AXPopover') !== -1,
                         bounds: { x: pos[0] || 0, y: pos[1] || 0, width: sz[0] || 0, height: sz[1] || 0 }
                     }, maxDepth, depth + 1);
                     if (child) children.push(child);

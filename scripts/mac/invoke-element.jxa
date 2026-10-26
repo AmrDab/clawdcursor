@@ -70,6 +70,8 @@ function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
             try { names = kids.name(); } catch (e) { continue; }
             try { descs = kids.description(); } catch (e) { descs = []; }
             try { roles = kids.role(); } catch (e) { roles = []; }
+            // A leaf's children are decoration, except an open popover: AppKit hangs it under the control that presented it.
+            var grand; try { grand = kids.uiElements.role(); } catch (e) { grand = []; }
             for (var k = 0; k < names.length; k++) {
                 var el = kids[k];
                 var nm = names[k] || '', ds = descs[k] || '', rl = roles[k] || '';
@@ -79,7 +81,9 @@ function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
                 if (nameOk && roleOk && (nm || ds || rl)) {
                     out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want), depth: d });
                 }
+                var pop = (grand[k] || []).indexOf('AXPopover');
                 if (!LEAF[normRole(rl)]) next.push(el);
+                else if (pop !== -1) next.push(el.uiElements[pop]);
             }
         }
         level = next;
