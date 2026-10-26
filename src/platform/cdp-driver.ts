@@ -301,9 +301,12 @@ export class CDPDriver {
    *   4. If `launch` is allowed, spawn the SYSTEM browser on AGENT_CDP_PORT
    *      with a dedicated `--user-data-dir`. Chromium keys its single-instance
    *      lock on the profile directory, so this starts a SEPARATE process that
-   *      never closes, reuses, or steals focus from the user's windows. The
-   *      blank tab is labeled "ClawdCursor — agent browser" so the window is
-   *      recognizable and doesn't get silently adopted as a personal browser.
+   *      never closes or reuses the user's windows. The blank tab is labeled
+   *      "ClawdCursor — agent browser" so the window is recognizable and
+   *      doesn't get silently adopted as a personal browser.
+   *
+   * Connecting stays quiet: nothing is raised here. navigate() is what brings
+   * the browser window to the front (#277).
    *
    * @param opts.launch   Allow launching a dedicated instance (default false → attach-only).
    * @param opts.exePaths Candidate browser executables, in priority order.
@@ -374,7 +377,10 @@ export class CDPDriver {
     } catch { /* cosmetic only — never fail the connection over it */ }
   }
 
-  /** Navigate the active page to a URL (waits for DOM content to load). */
+  /**
+   * Navigate the active page to a URL (waits for DOM content to load), then
+   * raise the browser so the person at the screen sees what the agent drives.
+   */
   async navigate(url: string): Promise<CDPInteractionResult> {
     // ATTACHED mode = someone else's browser (likely the user's session). The
     // agent must not commandeer whatever tab the user last touched — claim ONE
@@ -393,9 +399,35 @@ export class CDPDriver {
     const pg = this.requirePage();
     try {
       await pg.goto(url, { waitUntil: 'domcontentloaded', timeout: 20_000 });
+      await this.raiseWindow(pg);
       return { success: true, method: 'goto', value: pg.url() };
     } catch (err) {
       return { success: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Bring the page's tab, then its OS window, to the front (#277): CDP works
+   * whatever the z-order, so the browser otherwise stayed hidden behind other
+   * apps. Page.bringToFront only selects the tab; the window is raised through
+   * the platform adapter by the connected browser's pid, since the user's own
+   * Chrome and the agent's can run side by side. Never throws: a failed raise
+   * must not fail the navigation.
+   */
+  private async raiseWindow(pg: Page): Promise<void> {
+    try {
+      // A pause that came up while the page loaded has the user's keyboard (its reply box): never raise over it.
+      const [{ pauseGate }, { foreignOverlayState }] = await Promise.all([import('../core/pause-gate'), import('../core/overlay-state')]);
+      if (pauseGate.current() || foreignOverlayState().paused) return;
+      await pg.bringToFront();
+      const pid = await this.getBrowserPid();
+      if (pid === null) return;
+      const { getPlatform } = await import('./index');
+      if (!(await (await getPlatform()).focusWindow({ processId: pid }))) {
+        console.warn(`   ⚠️ CDPDriver: could not raise the browser window (pid ${pid})`);
+      }
+    } catch (err) {
+      console.warn(`   ⚠️ CDPDriver: could not raise the browser window: ${err}`);
     }
   }
 
