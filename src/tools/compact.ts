@@ -217,7 +217,7 @@ function buildCompoundSchema(
   const schema: Record<string, import('./types').ParameterDef> = {
     action: {
       type: 'string',
-      description: 'Which sub-action to perform. See this tool\'s description for the enum of valid values.',
+      description: 'Which sub-action to perform. See this tool\'s description for the enum of valid values.' + requiredByAction(routes),
       required: true,
       enum: routes.map(r => r.action),
     },
@@ -287,6 +287,27 @@ function buildCompoundSchema(
   // MCP layer stripped it before it arrived (live macOS: `window focus` with expect said nothing either way).
   if (!('expect' in schema)) schema.expect = EXPECT_PARAM;
   return schema;
+}
+
+/**
+ * Each action's required fields, by the names the compound publishes (after argRemap), e.g.
+ * " Required: find_button: intent; set_value: value." The merged schema marks every field optional, so without
+ * this a caller cannot tell which action needs which field (issue #273: `target` passed to find_button, which needs
+ * `intent`). Actions with the same required fields share one entry to keep it short.
+ */
+function requiredByAction(routes: ActionRoute[]): string {
+  const groups = new Map<string, string[]>(); // "field, field" → actions requiring exactly those
+  for (const route of routes) {
+    const granular = getTool(route.delegate);
+    if (!granular) continue;
+    const fields = Object.entries(granular.parameters)
+      .filter(([, def]) => def.required === true)
+      .map(([pname]) => (route.argRemap ? Object.entries(route.argRemap).find(([, v]) => v === pname)?.[0] : undefined) ?? pname)
+      .join(', ');
+    if (fields) groups.set(fields, [...(groups.get(fields) ?? []), route.action]);
+  }
+  if (!groups.size) return '';
+  return ` Required: ${[...groups].map(([fields, actions]) => `${actions.join('/')}: ${fields}`).join('; ')}.`;
 }
 
 /** The `expect` post-condition list, as projected tools publish it (core/verify/assertions types). */
@@ -617,7 +638,7 @@ export function getCompactTools(): ToolDefinition[] {
       parameters: {
         action: {
           type: 'string',
-          description: 'Default "run" (submit/continue the instruction). "status" → poll the running task (cheap, poll at 1–2 Hz). "abort" → stop the running task. "resume" → continue a task paused for the user, when they tell you they finished.',
+          description: 'Default "run" (submit/continue the instruction). "status" → poll the running task (cheap, poll at 1–2 Hz). "abort" → stop the running task. "resume" → continue a task paused for the user, when they tell you they finished.' + requiredByAction(TASK_ACTIONS),
           required: false,
           enum: ['run', 'status', 'abort', 'resume'],
         },
