@@ -264,23 +264,26 @@ export async function runDoctor(opts: {
         console.log('   🔐 Requesting macOS permissions (system dialogs may appear)...');
         try {
           perms = await requestPermissions();
-        } catch {
-          // If requesting fails, continue with the original check results
+        } catch (err) {
+          // Continue with the check results, but say why no dialog came (e.g. the helpers are not built yet).
+          console.log(`   ⚠️  ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      // With no app bundle the grant belongs to whatever runs clawdcursor — there is no "ClawdCursor" entry to enable.
+      const who = perms.bundleId ? 'ClawdCursor' : 'the app running clawdcursor (your terminal or editor)';
 
       results.push({
         name: 'macOS Accessibility permission',
         ok: perms.accessibility,
         detail: perms.accessibility
           ? 'Granted — clawdcursor can read UI elements'
-          : 'DENIED — open System Settings → Privacy & Security → Accessibility → enable ClawdCursor',
+          : `DENIED — open System Settings → Privacy & Security → Accessibility → enable ${who}`,
       });
       if (perms.accessibility) {
         console.log('   ✅ Accessibility permission granted');
       } else {
         console.log('   ❌ Accessibility permission DENIED');
-        console.log('   → System Settings → Privacy & Security → Accessibility → enable ClawdCursor');
+        console.log(`   → System Settings → Privacy & Security → Accessibility → enable ${who}`);
       }
 
       results.push({
@@ -288,13 +291,13 @@ export async function runDoctor(opts: {
         ok: perms.screenRecording,
         detail: perms.screenRecording
           ? 'Granted — clawdcursor can capture the screen'
-          : 'DENIED — open System Settings → Privacy & Security → Screen & System Audio Recording → enable ClawdCursor',
+          : `DENIED — open System Settings → Privacy & Security → Screen & System Audio Recording → enable ${who}`,
       });
       if (perms.screenRecording) {
         console.log('   ✅ Screen Recording permission granted');
       } else {
         console.log('   ❌ Screen Recording permission DENIED');
-        console.log('   → System Settings → Privacy & Security → Screen & System Audio Recording → enable ClawdCursor');
+        console.log(`   → System Settings → Privacy & Security → Screen & System Audio Recording → enable ${who}`);
       }
 
       if (perms.bundleId) {

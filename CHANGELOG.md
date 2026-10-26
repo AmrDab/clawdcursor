@@ -6,6 +6,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- **`clawdcursor doctor` and the status check work on a Mac without the native
+  helpers.** When the helpers had not been built (no Xcode Command Line
+  Tools), the permission check stopped at "ClawdCursor app binary not found"
+  instead of falling back to its own probes, so `doctor` and status failed.
+  It now falls back as intended. Asking for the permissions without the
+  binary says how to build it.
 - **Each compact action's required fields are published (#273).** The
   compound schemas merge every action's fields and mark them all optional, so
   nothing said which action needs which: `accessibility find_button` with

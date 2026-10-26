@@ -317,8 +317,8 @@ export function getNativeHelper(): NativeHelper {
 
 async function probeScreenRecording(): Promise<boolean> {
   // Try screenshot-helper first (the actual capture mechanism clawdcursor uses)
-  const screenshotHelperPath = getNativeHelperPath('screenshot-helper');
-  if (fs.existsSync(screenshotHelperPath)) {
+  const screenshotHelperPath = findNativeHelperPath('screenshot-helper');
+  if (screenshotHelperPath) {
     const ok = await new Promise<boolean>((resolve) => {
       const tmp = `/tmp/.clawdcursor-probe-${process.pid}.png`;
       const proc = spawn(screenshotHelperPath, ['--fullscreen', tmp]);
@@ -344,6 +344,7 @@ async function probeScreenRecording(): Promise<boolean> {
     const tmp = `/tmp/.clawdcursor-probe2-${process.pid}.png`;
     const proc = spawn('screencapture', ['-x', '-t', 'png', tmp]);
     const timeout = setTimeout(() => { proc.kill(); resolve(false); }, 5000);
+    proc.on('error', () => { clearTimeout(timeout); resolve(false); });   // could not run: not a crash
     proc.on('close', (code) => {
       clearTimeout(timeout);
       try {
@@ -368,6 +369,7 @@ async function probeAccessibility(): Promise<boolean> {
       'var p = se.processes.whose({frontmost: true})[0]; ' +
       'p.windows.length; true']);
     const timeout = setTimeout(() => { proc.kill(); resolve(false); }, 5000);
+    proc.on('error', () => { clearTimeout(timeout); resolve(false); });
     let stdout = '';
     proc.stdout.on('data', (d) => { stdout += d; });
     proc.on('close', (code) => {
@@ -405,13 +407,14 @@ export async function checkPermissionsQuick(): Promise<PermissionStatus> {
   }
 
   if (!binaryResult) {
-    const permissionCheckPath = getNativeHelperPath('permission-check');
-    if (fs.existsSync(permissionCheckPath)) {
+    const permissionCheckPath = findNativeHelperPath('permission-check');
+    if (permissionCheckPath) {
       try {
         binaryResult = await new Promise<PermissionStatus>((resolve, reject) => {
           const proc = spawn(permissionCheckPath, []);
           let stdout = '';
           const timeout = setTimeout(() => { proc.kill(); reject(new Error('timeout')); }, 10000);
+          proc.on('error', (err) => { clearTimeout(timeout); reject(err); });
           proc.stdout.on('data', (data) => { stdout += data; });
           proc.on('close', (code) => {
             clearTimeout(timeout);
@@ -451,9 +454,8 @@ export async function requestPermissions(): Promise<PermissionStatus> {
     };
   }
 
-  const permissionCheckPath = getNativeHelperPath('permission-check');
-
-  if (!fs.existsSync(permissionCheckPath)) {
+  const permissionCheckPath = findNativeHelperPath('permission-check');
+  if (!permissionCheckPath) {
     throw new Error('permission-check binary not found. Run: cd native && ./build.sh');
   }
 
@@ -466,6 +468,7 @@ export async function requestPermissions(): Promise<PermissionStatus> {
       proc.kill();
       reject(new Error('permission-check timed out'));
     }, 30000);
+    proc.on('error', (err) => { clearTimeout(timeout); reject(err); });
 
     proc.stdout.on('data', (data: Buffer) => { stdout += data; });
     proc.stderr.on('data', (data: Buffer) => { stderr += data; });
@@ -485,17 +488,21 @@ export async function requestPermissions(): Promise<PermissionStatus> {
   });
 }
 
-function getNativeHelperPath(binary: string): string {
+/** Where a helper binary is installed, or null when it was never built (#244: no Xcode Command Line Tools). */
+function findNativeHelperPath(binary: string): string | null {
   const root = getPackageRoot();
   const locations = [
     path.join(root, 'native', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
     path.join(root, 'node_modules', '.clawdcursor', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
     path.join(os.homedir(), '.clawdcursor', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
   ];
-  for (const loc of locations) {
-    if (fs.existsSync(loc)) return loc;
-  }
-  throw new Error(`ClawdCursor app binary not found: ${binary}`);
+  return locations.find(loc => fs.existsSync(loc)) ?? null;
+}
+
+function getNativeHelperPath(binary: string): string {
+  const found = findNativeHelperPath(binary);
+  if (!found) throw new Error(`ClawdCursor app binary not found: ${binary}`);
+  return found;
 }
 
 export async function isHostRunning(): Promise<boolean> {
@@ -584,8 +591,8 @@ export class ScreenRecordingDeniedError extends Error {
  */
 export async function assertScreenRecordingGranted(): Promise<void> {
   if (!IS_MACOS) return;
-  let helperPath: string;
-  try { helperPath = getNativeHelperPath('screenshot-helper'); } catch { return; }   // not built (#244): nothing to ask
+  const helperPath = findNativeHelperPath('screenshot-helper');
+  if (!helperPath) return;   // not built (#244): nothing to ask
   const code = await new Promise<number | null>(resolve => {
     const proc = spawn(helperPath, ['--preflight']);
     const timer = setTimeout(() => { proc.kill(); resolve(null); }, 5000);
