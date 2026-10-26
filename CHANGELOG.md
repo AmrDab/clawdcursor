@@ -30,6 +30,15 @@ All notable changes to Clawd Cursor will be documented in this file.
   connected to, so a second Chrome running alongside is never raised by
   mistake. Connecting alone stays quiet. If the
   raise fails, it is logged and the navigation still succeeds.
+- **A failed capture or OCR read says so instead of passing for a real result.**
+  On macOS without Screen Recording, screenshots and OCR used to return an
+  image of only the wallpaper and menu bar, which looked like a real but
+  stale screen (#276). Every capture is now checked first and refused with
+  "Screen Recording permission denied" (`CAPTURE_DENIED`). An OCR read that
+  fails now reports its error. It used to come back as "No text detected",
+  which hid the cause on macOS window reads (#274). A window that is partly
+  off screen is read only where it is on screen, instead of shifting the
+  region onto other pixels.
 - **`expect` is checked on every action.** Only some tools checked it; on the
   others (`window`, `system`, `browser`) the parameter wasn't even published,
   so it was stripped before arriving (live macOS: `window focus` with a failing

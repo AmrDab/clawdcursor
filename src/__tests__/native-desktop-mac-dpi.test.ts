@@ -25,8 +25,15 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('../platform/ps-runner', () => ({ psRunner: { start: vi.fn(), run: vi.fn() } }));
 
-const helper = vi.hoisted(() => ({ capture: vi.fn(async () => ({ path: '/nonexistent/clawdcursor-probe.png', width: 4480, height: 2520 })) }));
-vi.mock('../platform/native-helper', () => ({ getNativeHelper: () => null, captureScreenViaHelper: helper.capture }));
+const helper = vi.hoisted(() => ({
+  capture: vi.fn(async () => ({ path: '/nonexistent/clawdcursor-probe.png', width: 4480, height: 2520 })),
+  preflight: vi.fn(async () => {}),
+  Denied: class ScreenRecordingDeniedError extends Error {},
+}));
+vi.mock('../platform/native-helper', () => ({
+  getNativeHelper: () => null, captureScreenViaHelper: helper.capture,
+  assertScreenRecordingGranted: helper.preflight, ScreenRecordingDeniedError: helper.Denied,
+}));
 
 const nsScreen = vi.hoisted(() => ({ value: null as null | { logicalWidth: number; logicalHeight: number; backingScaleFactor: number } }));
 vi.mock('../platform/mac-screen', () => ({ readMainScreenInfo: vi.fn(async () => nsScreen.value) }));
@@ -34,6 +41,28 @@ vi.mock('../platform/mac-screen', () => ({ readMainScreenInfo: vi.fn(async () =>
 import { NativeDesktop } from '../platform/native-desktop';
 
 const config = {} as ClawdConfig;   // connect() reads nothing from it
+
+describe('macOS without Screen Recording: an error, never a wallpaper-only image (#276)', () => {
+  it('a denial from the helper is not downgraded to a nut-js grab', async () => {
+    const nut = await import('@nut-tree-fork/nut-js');
+    const d = new NativeDesktop(config);
+    await d.connect();
+    const denied = new helper.Denied('Screen Recording permission denied');
+    helper.capture.mockRejectedValue(denied);
+    (nut.screen.grab as any).mockClear();
+    for (const capture of [() => d.captureScreen(), () => d.captureForLLM()]) {
+      await expect(capture()).rejects.toBe(denied);
+    }
+    expect(nut.screen.grab).not.toHaveBeenCalled();
+    // a grab that does fall back (helper missing) is checked too
+    helper.capture.mockRejectedValue(new Error('helper missing'));
+    helper.preflight.mockRejectedValueOnce(denied);
+    await expect(d.captureScreen()).rejects.toBe(denied);
+    expect(nut.screen.grab).not.toHaveBeenCalled();
+    helper.capture.mockReset();
+    helper.capture.mockImplementation(async () => ({ path: '/nonexistent/clawdcursor-probe.png', width: 4480, height: 2520 }));
+  });
+});
 
 describe('NativeDesktop.connect() on macOS with the screenshot-helper', () => {
   // connect()'s DPI step branches on process.platform (os.platform is mocked above): run as macOS on every CI runner.

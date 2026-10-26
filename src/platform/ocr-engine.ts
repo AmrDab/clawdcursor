@@ -17,12 +17,10 @@ import * as fs from 'fs';
 import * as crypto from 'crypto';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { screen } from '@nut-tree-fork/nut-js';
 import sharp from 'sharp';
 import { getPackageRoot } from '../paths';
 import { sharpFromGrab, type GrabImage } from './grab-image';
-import { beforeCapture } from './pointer-guard';
-import { isWaylandSession, grimGrab } from './wayland-screen';
+import { rawScreenGrab } from './screen-grab';
 import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
 import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
@@ -170,7 +168,8 @@ export class OcrEngine {
 
   /**
    * OCR the entire screen. Returns cached result if within 300ms window.
-   * Never throws — returns EMPTY_RESULT on failure and degrades gracefully.
+   * An unavailable engine reads as no text; a failed read throws — an empty result means the screen has no text, never
+   * that the capture or the engine failed (#274: a failure read as "No text detected").
    */
   async recognizeScreen(): Promise<OcrResult> {
     if (!this.isAvailable()) return { ...EMPTY_RESULT };
@@ -228,14 +227,14 @@ export class OcrEngine {
       if (this.cachedResult === null && isEngineMissing(err)) {
         this.available = false;
       }
-      return { ...EMPTY_RESULT, durationMs: Date.now() - start };
+      throw err;
     }
   }
 
   /**
    * OCR a rectangular region of the screen.
    * Coordinates are in real screen pixels (input and output).
-   * Never throws.
+   * Throws on a failed read, like recognizeScreen.
    */
   async recognizeRegion(x: number, y: number, w: number, h: number): Promise<OcrResult> {
     if (!this.isAvailable()) return { ...EMPTY_RESULT };
@@ -259,11 +258,12 @@ export class OcrEngine {
 
       const img = await this.grab();
 
-      // Clamp to screen bounds
-      const rx = Math.max(0, Math.min(x, img.width - 1));
-      const ry = Math.max(0, Math.min(y, img.height - 1));
-      const rw = Math.min(w, img.width - rx);
-      const rh = Math.min(h, img.height - ry);
+      // The part of the region that is on the captured screen — shifting it in would read other pixels.
+      const rx = Math.max(0, x);
+      const ry = Math.max(0, y);
+      const rw = Math.min(x + w, img.width) - rx;
+      const rh = Math.min(y + h, img.height) - ry;
+      if (rw <= 0 || rh <= 0) throw new Error(`the region (${x},${y} ${w}x${h}) is outside the captured screen (${img.width}x${img.height})`);
 
       const pngBuffer = await sharpFromGrab(img)
         .extract({ left: rx, top: ry, width: rw, height: rh })
@@ -291,16 +291,15 @@ export class OcrEngine {
       }
     } catch (err: any) {
       console.error(`[OCR] recognizeRegion failed: ${err?.message}`);
-      return { ...EMPTY_RESULT, durationMs: Date.now() - start };
+      throw err;
     }
   }
 
   // ─── Private ──────────────────────────────────────────────────────────────
 
-  /** Full-screen grab — grim on Wayland, where nut-js would crash the process (see wayland-screen.ts). */
-  private async grab(): Promise<GrabImage> {
-    await beforeCapture(); // clawdcursor's own pill must not be read as screen text
-    return isWaylandSession() ? grimGrab() : screen.grab();
+  /** The shared full-screen grab (screen-grab.ts): no pill, grim on Wayland, never a wallpaper-only macOS image. */
+  private grab(): Promise<GrabImage> {
+    return rawScreenGrab();
   }
 
   /**

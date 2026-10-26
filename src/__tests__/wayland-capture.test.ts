@@ -178,8 +178,9 @@ describe('OcrEngine on Wayland', () => {
     (ocr as any).available = true;
     // Region first: a failed full-screen OCR (no tesseract here) marks the
     // engine unavailable, which would skip the second capture.
-    await ocr.recognizeRegion(0, 0, 2, 2);
-    await ocr.recognizeScreen();
+    // No tesseract here, so the reads themselves fail (and now say so); only the capture source is under test.
+    await ocr.recognizeRegion(0, 0, 2, 2).catch(() => {});
+    await ocr.recognizeScreen().catch(() => {});
     expect(nutScreenCalls()).toBe(0);
     expect(calls.filter(([cmd]) => cmd === 'grim').length).toBe(2);
   });

@@ -568,6 +568,33 @@ function getOrCreateHostToken(): string {
   }
 }
 
+const SCREEN_RECORDING_DENIED = 'Screen Recording permission denied — grant it to the app running clawdcursor in System Settings → Privacy & Security → Screen Recording';
+
+/**
+ * Screen Recording is not granted. macOS does not fail a capture without it — it returns the wallpaper and menu bar only,
+ * which looks like a real screenshot (#276) — so this is an error that no capture path may fall back from.
+ */
+export class ScreenRecordingDeniedError extends Error {
+  constructor() { super(SCREEN_RECORDING_DENIED); this.name = 'ScreenRecordingDeniedError'; }
+}
+
+/**
+ * Throws ScreenRecordingDeniedError unless Screen Recording is granted (the helper's CGPreflightScreenCaptureAccess, which
+ * runs before it reads its arguments). Not macOS, or no helper built: nothing to check with, returns.
+ */
+export async function assertScreenRecordingGranted(): Promise<void> {
+  if (!IS_MACOS) return;
+  const helperPath = getNativeHelperPath('screenshot-helper');
+  if (!fs.existsSync(helperPath)) return;
+  const code = await new Promise<number | null>(resolve => {
+    const proc = spawn(helperPath, ['--preflight']);
+    const timer = setTimeout(() => { proc.kill(); resolve(null); }, 5000);
+    proc.on('close', c => { clearTimeout(timer); resolve(c); });
+    proc.on('error', () => { clearTimeout(timer); resolve(null); });
+  });
+  if (code === 2) throw new ScreenRecordingDeniedError();
+}
+
 /**
  * Capture the screen using the standalone screenshot-helper binary.
  * This avoids the ReplayKit CPU spin bug (19% idle CPU after capture in-process)
@@ -601,7 +628,7 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
     proc.on('close', (code) => {
       clearTimeout(timeout);
       if (code === 2) {
-        reject(new Error('Screen Recording permission denied — grant it in System Settings → Privacy & Security'));
+        reject(new ScreenRecordingDeniedError());
         return;
       }
       if (code !== 0) {

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-const reads = vi.hoisted(() => ({ screen: 0, regions: [] as number[][] }));
+const reads = vi.hoisted(() => ({ screen: 0, regions: [] as number[][], fail: null as string | null }));
 vi.mock('../platform/ocr-engine', () => ({
   OcrEngine: class {
     isAvailable() { return true; }
@@ -16,6 +16,7 @@ vi.mock('../platform/ocr-engine', () => ({
     }
     async recognizeRegion(x: number, y: number, w: number, h: number) {
       reads.regions.push([x, y, w, h]);
+      if (reads.fail) throw new Error(reads.fail);
       return { elements: [{ text: 'Save', x: x + 10, y: y + 20, width: 120, height: 40, confidence: 1, line: 0 }], fullText: 'Save', durationMs: 2 };
     }
   },
@@ -84,6 +85,13 @@ describe('ocr_read_screen scope', () => {
       expect(out.scope).toBe('screen');
       expect(reads.screen).toBe(1);
     }
+  });
+
+  it('a failed window read is an error with its reason, never "No text detected" (#274)', async () => {
+    reads.fail = 'sharp: extract_area: bad extract area';
+    try {
+      await expect(read('win32', 1, { scope: 'window' })).rejects.toThrow('bad extract area');
+    } finally { reads.fail = null; }
   });
 
   it('macOS: window bounds are logical points, the OCR crop is in physical pixels', async () => {
