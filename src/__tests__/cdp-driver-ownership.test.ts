@@ -20,6 +20,9 @@ const state = {
   userPage: null as any,
   newPages: [] as any[],
   cdpCalls: [] as string[],
+  // bringToFront / focusWindow, in call order (#277)
+  raises: [] as string[],
+  focusResult: true as boolean | Error,
 };
 
 function fakePage(url: string) {
@@ -31,8 +34,19 @@ function fakePage(url: string) {
     async title() { return 'fake'; },
     async goto(u: string) { this._gotos.push(u); this._url = u; },
     async evaluate() { /* labeling no-op */ },
+    async bringToFront() { state.raises.push('bringToFront'); },
   };
 }
+
+vi.mock('../platform', () => ({
+  getPlatform: async () => ({
+    focusWindow: async (q: { processId?: number }) => {
+      state.raises.push(`focusWindow:${q.processId}`);
+      if (state.focusResult instanceof Error) throw state.focusResult;
+      return state.focusResult;
+    },
+  }),
+}));
 
 vi.mock('playwright', () => ({
   chromium: {
@@ -64,6 +78,8 @@ beforeEach(() => {
   state.livePorts.clear();
   state.userPage = fakePage('https://www.youtube.com/watch?v=music');
   state.newPages.length = 0;
+  state.raises.length = 0;
+  state.focusResult = true;
 });
 
 describe('CDPDriver — ownership is encoded in the port', () => {
@@ -129,6 +145,40 @@ describe('CDPDriver — attached mode never navigates the user\'s tab', () => {
     await d.navigate('https://example.com');
     expect(state.newPages.length).toBe(0);
     expect(state.userPage._gotos).toEqual(['https://example.com']);
+  });
+});
+
+describe('navigate raises the browser window; connecting stays quiet (#277)', () => {
+  it('connect alone raises nothing', async () => {
+    state.livePorts.add(AGENT_CDP_PORT);
+    const d = new CDPDriver();
+    expect(await d.ensureConnected()).toBe(true);
+    expect(state.raises).toEqual([]);
+  });
+
+  it('navigate selects the tab, then focuses the window of the CONNECTED browser by pid', async () => {
+    state.livePorts.add(AGENT_CDP_PORT);
+    const d = new CDPDriver();
+    await d.ensureConnected();
+    expect((await d.navigate('https://example.com')).success).toBe(true);
+    expect(state.raises).toEqual(['bringToFront', 'focusWindow:4321']);
+  });
+
+  it('a failed raise never fails the navigation', async () => {
+    state.livePorts.add(AGENT_CDP_PORT);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const d = new CDPDriver();
+      await d.ensureConnected();
+      state.focusResult = false;
+      expect((await d.navigate('https://example.com/a')).success).toBe(true);
+      state.focusResult = new Error('focus blew up');
+      const r = await d.navigate('https://example.com/b');
+      expect(r).toMatchObject({ success: true, value: 'https://example.com/b' });
+      expect(warn).toHaveBeenCalledTimes(2);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
 

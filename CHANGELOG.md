@@ -21,6 +21,15 @@ All notable changes to Clawd Cursor will be documented in this file.
   them only for an open popover, in the helper and the JXA fallbacks. In the
   helper, a control with no title, description or text label is now named by
   its help text (tooltip), so icon-only buttons can be found by name.
+- **The browser comes to the front when the agent opens a page (#277).**
+  `browser` actions work over CDP whatever the window order, so the browser
+  the agent drove could stay hidden behind other apps for a whole session,
+  and the person watching never saw it. New policy, on every OS: a
+  successful `navigate` selects the agent's tab and raises that browser's
+  window. The window is found by the process id of the browser the agent is
+  connected to, so a second Chrome running alongside is never raised by
+  mistake. Connecting alone stays quiet. If the
+  raise fails, it is logged and the navigation still succeeds.
 - **`expect` is checked on every action.** Only some tools checked it; on the
   others (`window`, `system`, `browser`) the parameter wasn't even published,
   so it was stripped before arriving (live macOS: `window focus` with a failing
