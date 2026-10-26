@@ -14,6 +14,18 @@ vi.mock('os', async (orig) => {
   return { ...real, default: { ...real, homedir: () => empty }, homedir: () => empty };
 });
 
+// A Mac's probes (screencapture, osascript) exist and answer; here each one exits "not granted".
+vi.mock('child_process', async (orig) => {
+  const real = await orig<typeof import('child_process')>();
+  const { EventEmitter } = await import('events');
+  const spawn = () => {
+    const proc = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
+    setImmediate(() => proc.emit('close', 1));
+    return proc;
+  };
+  return { ...real, default: { ...real, spawn }, spawn };
+});
+
 const REAL = process.platform;
 afterEach(() => { Object.defineProperty(process, 'platform', { value: REAL, configurable: true }); vi.resetModules(); });
 
@@ -24,6 +36,16 @@ describe('assertScreenRecordingGranted', () => {
     const { assertScreenRecordingGranted } = await import('../platform/native-helper');
     await expect(assertScreenRecordingGranted()).resolves.toBeUndefined();
   });
+
+  it('macOS with no helpers built: the permission status still answers (falls through to the probes)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    vi.resetModules();
+    const { checkPermissionsQuick, requestPermissions } = await import('../platform/native-helper');
+    const status = await checkPermissionsQuick();   // what doctor and status run
+    expect(status).toMatchObject({ accessibility: expect.any(Boolean), screenRecording: expect.any(Boolean) });
+    // asking for the grants needs the binary: say how to get it, not "app binary not found"
+    await expect(requestPermissions()).rejects.toThrow('permission-check binary not found. Run: cd native && ./build.sh');
+  }, 30_000);
 
   it('not macOS: a no-op', async () => {
     Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
