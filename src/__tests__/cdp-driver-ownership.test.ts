@@ -23,6 +23,7 @@ const state = {
   // bringToFront / focusWindow, in call order (#277)
   raises: [] as string[],
   focusResult: true as boolean | Error,
+  pause: null as null | { message: string },
 };
 
 function fakePage(url: string) {
@@ -37,6 +38,8 @@ function fakePage(url: string) {
     async bringToFront() { state.raises.push('bringToFront'); },
   };
 }
+
+vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => state.pause } }));
 
 vi.mock('../platform', () => ({
   getPlatform: async () => ({
@@ -80,6 +83,7 @@ beforeEach(() => {
   state.newPages.length = 0;
   state.raises.length = 0;
   state.focusResult = true;
+  state.pause = null;
 });
 
 describe('CDPDriver — ownership is encoded in the port', () => {
@@ -162,6 +166,15 @@ describe('navigate raises the browser window; connecting stays quiet (#277)', ()
     await d.ensureConnected();
     expect((await d.navigate('https://example.com')).success).toBe(true);
     expect(state.raises).toEqual(['bringToFront', 'focusWindow:4321']);
+  });
+
+  it('a pause that came up while the page loaded is never raised over — its reply box has the keyboard', async () => {
+    state.livePorts.add(AGENT_CDP_PORT);
+    const d = new CDPDriver();
+    await d.ensureConnected();
+    state.pause = { message: 'Sign in' };
+    expect((await d.navigate('https://example.com')).success).toBe(true);
+    expect(state.raises).toEqual([]);
   });
 
   it('a failed raise never fails the navigation', async () => {

@@ -416,6 +416,9 @@ export class CDPDriver {
    */
   private async raiseWindow(pg: Page): Promise<void> {
     try {
+      // A pause that came up while the page loaded has the user's keyboard (its reply box): never raise over it.
+      const [{ pauseGate }, { foreignOverlayState }] = await Promise.all([import('../core/pause-gate'), import('../core/overlay-state')]);
+      if (pauseGate.current() || foreignOverlayState().paused) return;
       await pg.bringToFront();
       const pid = await this.getBrowserPid();
       if (pid === null) return;
