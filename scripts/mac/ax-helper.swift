@@ -349,6 +349,9 @@ let alwaysKeepRoles: Set<String> = [
 /// Controls whose label is often a child AXStaticText rather than their own title.
 let labelPeekRoles: Set<String> = ["AXButton", "AXCheckBox", "AXRadioButton", "AXMenuItem", "AXTab", "AXLink", "AXPopUpButton"]
 
+/// A leaf's children are decoration, except an open popover: AppKit hangs it under the control that presented it.
+func presentedPopovers(_ kids: [AXUIElement]) -> [AXUIElement] { kids.filter { str(copyAttr($0, "AXRole").value) == "AXPopover" } }
+
 /// AppKit stamps generated ids ("_NS:833") on unlabeled elements; a node is not worth keeping just for one.
 func isGeneratedIdentifier(_ id: String) -> Bool {
     id.hasPrefix("_NS:") && id.dropFirst(4).allSatisfy { $0.isNumber }
@@ -375,7 +378,7 @@ struct Walk {
 
 let nodeAttrs = [
     "AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXValue", "AXPosition", "AXSize",
-    "AXEnabled", "AXFocused", "AXSelected", "AXExpanded", "AXChildren",
+    "AXEnabled", "AXFocused", "AXSelected", "AXExpanded", "AXChildren", "AXHelp",
 ]
 
 func firstStaticTextValue(_ kids: [AXUIElement]) -> String {
@@ -411,14 +414,16 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     let value: String? = secure ? nil : str(a["AXValue"])
 
     var children: [[String: Any]] = []
-    if depth < w.maxDepth && !leafRoles.contains(role) {
-        for k in kids {
+    if depth < w.maxDepth {
+        for k in leafRoles.contains(role) ? presentedPopovers(kids) : kids {
             if let c = buildNode(k, depth + 1, &w) { children.append(c) }
             if w.cut == "time" { break }
         }
     }
     // The text on the control beats its identifier as a name: that is what an agent matches against what it sees.
     if name.isEmpty && labelPeekRoles.contains(role) { name = firstStaticTextValue(kids) }
+    // The tooltip is the last resort: an icon-only button often has nothing else.
+    if name.isEmpty { name = str(a["AXHelp"]) ?? "" }
 
     let hasValue = !(value ?? "").isEmpty
     let keep = depth == 0 || !name.isEmpty || (!ident.isEmpty && !isGeneratedIdentifier(ident)) || hasValue
@@ -469,7 +474,7 @@ func currentAim() -> Aim {
     return Aim(name: nonEmpty("name"), role: nonEmpty("role"), id: nonEmpty("id"))
 }
 
-let searchAttrs = ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXChildren"]
+let searchAttrs = ["AXRole", "AXSubrole", "AXTitle", "AXDescription", "AXIdentifier", "AXChildren", "AXHelp"]
 
 /// Identifiers are compared byte for byte. Swift's `==` calls canonically equivalent strings equal (NFC "é" and NFD "e" + U+0301),
 /// while the caller's own `===` does not: such an id would be found here and dropped there.
@@ -503,12 +508,14 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
             if wantName != nil && title.isEmpty && desc.isEmpty && labelPeekRoles.contains(role), let kids = a["AXChildren"] as? [AXUIElement] {
                 label = firstStaticTextValue(kids)
             }
+            // Same order as the tree: the tooltip names only a control that has no other name.
+            let help = title.isEmpty && desc.isEmpty && label.isEmpty ? (str(a["AXHelp"]) ?? "") : ""
             var matches = !role.isEmpty
             var exact = false
             if let w = wantName {
-                let tl = title.lowercased(), dl = desc.lowercased(), il = ident.lowercased(), ll = label.lowercased()
-                matches = matches && (tl.contains(w) || dl.contains(w) || il.contains(w) || ll.contains(w))
-                exact = tl == w || dl == w || il == w || ll == w
+                let tl = title.lowercased(), dl = desc.lowercased(), il = ident.lowercased(), ll = label.lowercased(), hl = help.lowercased()
+                matches = matches && (tl.contains(w) || dl.contains(w) || il.contains(w) || ll.contains(w) || hl.contains(w))
+                exact = tl == w || dl == w || il == w || ll == w || hl == w
             }
             if let id = aim.id {
                 // An identifier is exact, case included: find_element filters this reply with === afterwards, so a looser
@@ -518,12 +525,12 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
             }
             if let r = wantRole { matches = matches && normRole(role).contains(r) }
             if matches {
-                ctx.hits.append(Hit(element: el, name: !title.isEmpty ? title : (!desc.isEmpty ? desc : label), title: title, desc: desc, ident: ident, role: role,
+                ctx.hits.append(Hit(element: el, name: [title, desc, label, help].first(where: { !$0.isEmpty }) ?? "", title: title, desc: desc, ident: ident, role: role,
                                     subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact))
                 // An identifier names one element; walking the rest of a big window would only cost time.
                 if stopAtExactId && exact && aim.name == nil && aim.role == nil { return }
             }
-            if !leafRoles.contains(role), let kids = a["AXChildren"] as? [AXUIElement] { next.append(contentsOf: kids) }
+            if let kids = a["AXChildren"] as? [AXUIElement] { next.append(contentsOf: leafRoles.contains(role) ? presentedPopovers(kids) : kids) }
         }
         level = next
         depth += 1

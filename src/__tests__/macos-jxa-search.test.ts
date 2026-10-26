@@ -29,6 +29,9 @@ function coll(arr: FakeEl[]): any {
   c.description = () => arr.map(e => e.description());
   c.role = () => arr.map(e => e.role());
   for (const t of ['buttons', 'textFields', 'textAreas', 'checkboxes', 'radioButtons', 'popUpButtons', 'staticTexts', 'groups', 'menus']) c[t] = () => [];
+  // `kids.uiElements.role()`: every child's children's roles, nested, in one Apple Event.
+  Object.defineProperty(c, 'uiElements', { get: () => { reads.n++; return { role: () => arr.map(e => e.kidRoles()) }; } });
+  c.whose = (q: { role: string }) => coll(arr.filter(e => e.role() === q.role));
   arr.forEach((e, i) => { c[i] = e; });
   Object.defineProperty(c, 'length', { value: arr.length });
   return c;
@@ -48,6 +51,7 @@ function el(p: Props, kids: FakeEl[] = []): FakeEl {
     subrole: () => '',
     miniaturized: () => false,
     uiElements: coll(kids),
+    kidRoles: () => kids.map(k => k.role()),
   };
   // Count child reads so a test can prove leaf controls are never descended.
   const kidsColl = o.uiElements;
@@ -71,16 +75,27 @@ function fixture() {
   return { label, field, sub, rows, Application: () => app };
 }
 
+/** Freeform with "Insert Shape" open: AppKit hangs the AXPopover under the AXMenuButton that presented it (#273). */
+function popoverFixture() {
+  const pen = el({ name: 'Draw with Pen', role: 'AXButton' });
+  const icon = el({ name: 'shape icon', role: 'AXImage' });
+  const insert = el({ name: 'Insert Shape', role: 'AXMenuButton' }, [icon, el({ role: 'AXPopover' }, [el({ role: 'AXGroup' }, [pen])])]);
+  const win = el({ name: 'Board', role: 'AXWindow' }, [el({ role: 'AXToolbar' }, [insert])]);
+  const proc = { windows: coll([win]), unixId: () => 4242, name: () => 'Freeform' };
+  const app = { processes: { where: () => [proc] }, includeStandardAdditions: false };
+  return { pen, Application: () => app };
+}
+
 function loadScript(file: string): string {
   return readFileSync(join(getPackageRoot(), 'scripts', 'mac', file), 'utf8').replace(/^#!.*\n/, '');
 }
 
-function runInvoke(fx: ReturnType<typeof fixture>, argv: string[]) {
+function runInvoke(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[]) {
   const ctx = vm.createContext({ Application: fx.Application, JSON, Date, String, Number, Math, Array, Object });
   return JSON.parse(vm.runInContext(`${loadScript('invoke-element.jxa')}\nrun(${JSON.stringify(argv)})`, ctx));
 }
 
-function runFind(fx: ReturnType<typeof fixture>, argv: string[]) {
+function runFind(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[]) {
   const ctx = vm.createContext({
     Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
     ObjC: { unwrap: (x: unknown) => x, import: () => {} },
@@ -133,7 +148,7 @@ describe('macOS find-element.jxa', () => {
   });
 });
 
-function runScreenContext(fx: ReturnType<typeof fixture>) {
+function runScreenContext(fx: Pick<ReturnType<typeof fixture>, 'Application'>) {
   const ctx = vm.createContext({
     Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
     ObjC: { unwrap: (x: unknown) => x, import: () => {} },
@@ -157,5 +172,25 @@ describe('macOS get-screen-context.jxa (what compile_ui reads)', () => {
     runScreenContext(fx);
     // window + scroll area + group + root reads; the 63 leaf controls add none.
     expect(reads.n).toBeLessThan(10);
+  });
+});
+
+describe('macOS JXA walks into a popover a leaf control presented (#273)', () => {
+  it('get-screen-context.jxa: the popover appears under its button; the button\'s decoration does not', () => {
+    const flat: any[] = [];
+    (function walk(n: any) { if (!n) return; flat.push(n); (n.children || []).forEach(walk); })(runScreenContext(popoverFixture()).uiTree);
+    const insert = flat.find(n => n.name === 'Insert Shape');
+    expect(insert.children.map((n: any) => n.controlType)).toEqual(['AXPopover']);
+    expect(flat.map(n => n.name)).toContain('Draw with Pen');
+  });
+
+  it('find-element.jxa finds a button inside the popover', () => {
+    expect(runFind(popoverFixture(), ['-Name', 'Draw with Pen', '-ProcessId', '4242']).map((e: any) => e.name)).toEqual(['Draw with Pen']);
+  });
+
+  it('invoke-element.jxa clicks a button inside the popover', () => {
+    const fx = popoverFixture();
+    expect(runInvoke(fx, ['-ProcessId', '4242', '-Name', 'Draw with Pen', '-Action', 'click']).success).toBe(true);
+    expect(fx.pen.clicked).toBe(true);
   });
 });

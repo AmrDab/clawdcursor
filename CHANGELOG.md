@@ -13,6 +13,14 @@ All notable changes to Clawd Cursor will be documented in this file.
   on the missing `intent`. The `action` description of every compound now
   lists each action's required fields under the names it accepts, generated
   from the delegates (e.g. `find_button: intent; find_field: purpose`).
+- **macOS: an open popover is no longer invisible** (#273). With Freeform's
+  "Insert Shape" popover open, `read_tree`, `compile_ui`, `find_button`,
+  `find` and `invoke` saw the button that opened it and nothing inside it.
+  AppKit puts an open popover under the control that presented it, and the
+  walk never reads a button's children (they are decoration). It now reads
+  them only for an open popover, in the helper and the JXA fallbacks. In the
+  helper, a control with no title, description or text label is now named by
+  its help text (tooltip), so icon-only buttons can be found by name.
 - **`expect` is checked on every action.** Only some tools checked it; on the
   others (`window`, `system`, `browser`) the parameter wasn't even published,
   so it was stripped before arriving (live macOS: `window focus` with a failing
