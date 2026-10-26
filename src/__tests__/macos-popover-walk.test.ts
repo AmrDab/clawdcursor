@@ -41,11 +41,15 @@ describe('ax-helper.swift names a control by its AXHelp when nothing else names 
     expect(list('searchAttrs')).toContain('"AXHelp"');
   });
 
-  it('tree: AXHelp comes after title, description and the label peek', () => {
+  it('tree: AXHelp comes after title, description and the label peek, and names controls only', () => {
     const b = body('buildNode');
     const peek = b.indexOf('name = firstStaticTextValue(kids)');
     expect(peek).toBeGreaterThan(-1);
-    expect(b.search(/if name\.isEmpty \{ name = str\(a\["AXHelp"\]\) \?\? "" \}/)).toBeGreaterThan(peek);
+    expect(b.search(/if name\.isEmpty && \(alwaysKeepRoles\.contains\(role\) \|\| labelPeekRoles\.contains\(role\)\) \{ name = str\(a\["AXHelp"\]\) \?\? "" \}/)).toBeGreaterThan(peek);
+  });
+
+  it('the popover probe stays inside the time budget', () => {
+    expect(src).toMatch(/func presentedPopovers[^\n]*!timeUp\(\) &&/);
   });
 
   it('find / invoke: AXHelp matches and names a hit, last', () => {
