@@ -15,7 +15,8 @@ import { EventEmitter } from 'events';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
 import { normalizeKey } from './keys';
-import { getNativeHelper, captureScreenViaHelper } from './native-helper';
+import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } from './native-helper';
+import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen';
 import { llmScale, llmSize } from '../core/agent-loop/coord-scale';
@@ -365,6 +366,7 @@ export class NativeDesktop extends EventEmitter {
           format: 'png',
         };
       } catch (err: any) {
+        if (err instanceof ScreenRecordingDeniedError) throw err;   // final: a fallback grab would be the wallpaper (#276)
         console.warn(`⚠️  macOS screenshot-helper failed, falling back to nut-js: ${err?.message || err}`);
       }
     }
@@ -421,6 +423,7 @@ export class NativeDesktop extends EventEmitter {
           llmHeight,
         };
       } catch (err: any) {
+        if (err instanceof ScreenRecordingDeniedError) throw err;
         console.warn(`⚠️  macOS screenshot-helper LLM capture failed, falling back to nut-js: ${err?.message || err}`);
       }
     }
@@ -603,11 +606,10 @@ export class NativeDesktop extends EventEmitter {
    * nut-js would open X11 and take the process down (see wayland-screen.ts).
    */
   private async grab(): Promise<GrabImage> {
-    await beforeCapture(); // clawdcursor's own pill must not be in the capture
     try {
-      return await (isWaylandSession() ? grimGrab() : screen.grab());
+      return await rawScreenGrab();
     } catch (err: any) {
-      if (!IS_MAC) throw err;
+      if (!IS_MAC || err instanceof ScreenRecordingDeniedError) throw err;
       // Every capture path ends here when the screenshot helper is missing or fails (#244): say what fixes it.
       throw new Error(`Screen capture unavailable on macOS (${err?.message || err}). Grant Screen Recording to the app running clawdcursor (System Settings → Privacy & Security → Screen Recording), or install the Xcode Command Line Tools so its screenshot helper builds. Tools that do not capture the screen still work.`, { cause: err });
     }

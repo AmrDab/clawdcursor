@@ -207,6 +207,8 @@ if !CGPreflightScreenCaptureAccess() {
 
 // Parse arguments
 let args = CommandLine.arguments
+// The permission probe: granted (the check above passed).
+if args.count == 2 && args[1] == "--preflight" { exit(0) }
 guard args.count >= 3 else {
     fputs("usage: screenshot-helper <windowId|--fullscreen> <outputPath>\n", stderr)
     exit(1)

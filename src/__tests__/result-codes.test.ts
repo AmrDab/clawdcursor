@@ -109,6 +109,13 @@ describe('review fixes', () => {
     for (const t of ['[failed]', '{not json', 'mailto:a@b.com', 'Clicked']) expect(isJsonText(t)).toBe(false);
   });
 
+  it('a Screen Recording denial is a refusal that says what fixes it — never "read the screen" (#276)', () => {
+    const c = classifyResult('Screen Recording permission denied — grant it to the app running clawdcursor in System Settings', true, true);
+    expect(c).toMatchObject({ code: 'CAPTURE_DENIED', outcome: 'refused' });
+    // the helper-missing failure (#244) is not a denial
+    expect(classifyResult('Screen capture unavailable on macOS (helper missing). Grant Screen Recording to the app running clawdcursor', true, true)?.code).not.toBe('CAPTURE_DENIED');
+  });
+
   it('install problems are not NOT_FOUND ("helper not found" is not a missing element)', () => {
     for (const t of ['screenshot-helper not found at /x — it was not built', 'native helper not found; run ./build.sh',
       'Model not found (404)', 'tesseract not found']) {

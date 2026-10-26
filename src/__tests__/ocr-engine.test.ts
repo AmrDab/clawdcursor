@@ -35,6 +35,8 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 // ── Mock heavy native deps before any import ──────────────────────────────────
+// The Screen Recording probe spawns the real helper on a macOS runner; the grab source is what these tests cover.
+vi.mock('../platform/native-helper', async (orig) => ({ ...(await orig<typeof import('../platform/native-helper')>()), assertScreenRecordingGranted: async () => {} }));
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn() },
   keyboard: { config: {}, type: vi.fn() },
@@ -52,10 +54,11 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public left: number, public top: number, public width: number, public height: number) {} },
 }));
 
+const sharpExtract = vi.hoisted(() => vi.fn(function (this: unknown) { return this; }));
 vi.mock('sharp', () => ({
   default: vi.fn(() => ({
     resize: vi.fn().mockReturnThis(),
-    extract: vi.fn().mockReturnThis(),
+    extract: sharpExtract,
     png: vi.fn().mockReturnThis(),
     jpeg: vi.fn().mockReturnThis(),
     toBuffer: vi.fn().mockResolvedValue(Buffer.from('fake-png')),
@@ -173,8 +176,7 @@ describe('OcrEngine', () => {
       setPlatform('win32'); bridge.up = true;
       bridge.ocr = () => { throw new Error('Windows OCR engine not available - no recognized languages installed'); };
       const eng = new OcrEngine();
-      const r = await eng.recognizeScreen();
-      expect(r.elements).toEqual([]);
+      await expect(eng.recognizeScreen()).rejects.toThrow('no recognized languages installed');
       expect(mockExecFile).not.toHaveBeenCalled();
       expect(eng.isAvailable()).toBe(false);   // latched: later tools degrade to vision
     });
@@ -267,6 +269,7 @@ describe('OcrEngine', () => {
     it('returns EMPTY_RESULT when unavailable', async () => {
       setPlatform('darwin');
       const eng = new OcrEngine();
+      (eng as any).available = false;   // what the name says — a runner with swift installed would be available
       const result = await eng.recognizeScreen();
       expect(result.elements).toEqual([]);
       expect(result.fullText).toBe('');
@@ -306,10 +309,7 @@ describe('OcrEngine', () => {
       const eng = new OcrEngine();
       mockExecFile.mockReturnValue({ stdout: '{"error":"OCR failed"}' });
 
-      const result = await eng.recognizeScreen();
-
-      // Should degrade gracefully
-      expect(result.elements).toEqual([]);
+      await expect(eng.recognizeScreen()).rejects.toThrow('OCR failed');
       expect(mockUnlinkSync).toHaveBeenCalledTimes(1);
     });
 
@@ -329,9 +329,8 @@ describe('OcrEngine', () => {
       const eng = new OcrEngine();
       mockExecFile.mockImplementation(() => { throw new Error('PowerShell not found'); });
 
-      const result = await eng.recognizeScreen();
-
-      expect(result.elements).toEqual([]);
+      // A failed read is an error, never an empty "no text" result (#274).
+      await expect(eng.recognizeScreen()).rejects.toThrow('PowerShell not found');
       expect(eng.isAvailable()).toBe(false);
     });
 
@@ -343,7 +342,7 @@ describe('OcrEngine', () => {
         throw Object.assign(new Error('spawn python3 ENOENT'), { code: 'ENOENT' });
       });
 
-      await eng.recognizeScreen();
+      await expect(eng.recognizeScreen()).rejects.toThrow('ENOENT');
 
       expect(eng.isAvailable()).toBe(false);
     });
@@ -359,8 +358,7 @@ describe('OcrEngine', () => {
         throw new Error('Command failed: python3 ocr-recognize.py\nValueError: invalid literal for int() with base 10: \'81.879456\'');
       });
 
-      const first = await eng.recognizeScreen();
-      expect(first.elements).toEqual([]);
+      await expect(eng.recognizeScreen()).rejects.toThrow('ValueError');
       expect(eng.isAvailable()).toBe(true);
 
       mockExecFile.mockReturnValue({ stdout: sampleOcrJson(SAMPLE_ELEMENTS, 'Hello World Test') });
@@ -430,21 +428,33 @@ describe('OcrEngine', () => {
       expect(result.elements[0].y).toBe(40);
     });
 
-    it('clamps region to screen bounds', async () => {
+    it('reads only the part of the region on the screen — never shifted onto other pixels', async () => {
       setPlatform('win32');
       const eng = new OcrEngine();
       mockExecFile.mockReturnValue({ stdout: sampleOcrJson([]) });
+      sharpExtract.mockClear();
 
-      // Screen is 100×100 (from mock). Request region beyond bounds.
-      const result = await eng.recognizeRegion(90, 90, 200, 200);
+      // Screen is 100×100 (from mock). A region hanging off the right/bottom, and one off the left/top.
+      await eng.recognizeRegion(90, 90, 200, 200);
+      await eng.recognizeRegion(-20, -10, 50, 40);
+      expect(sharpExtract.mock.calls.map(c => c[0])).toEqual([
+        { left: 90, top: 90, width: 10, height: 10 },
+        { left: 0, top: 0, width: 30, height: 30 },
+      ]);
+    });
 
-      // Should not throw — clamped internally
-      expect(result.elements).toEqual([]);
+    it('a region wholly off the screen, or a failed read, is an error — not "no text" (#274)', async () => {
+      setPlatform('win32');
+      const eng = new OcrEngine();
+      await expect(eng.recognizeRegion(500, 500, 50, 50)).rejects.toThrow('outside the captured screen');
+      mockExecFile.mockImplementation(() => { throw new Error('engine crashed'); });
+      await expect(eng.recognizeRegion(0, 0, 50, 50)).rejects.toThrow('engine crashed');
     });
 
     it('returns EMPTY_RESULT when unavailable', async () => {
       setPlatform('darwin');
       const eng = new OcrEngine();
+      (eng as any).available = false;   // what the name says — a runner with swift installed would be available
       const result = await eng.recognizeRegion(0, 0, 100, 100);
       expect(result.elements).toEqual([]);
     });
@@ -487,13 +497,12 @@ describe('OcrEngine', () => {
       expect(result.elements).toEqual([]);
     });
 
-    it('handles malformed JSON gracefully', async () => {
+    it('malformed JSON is a failed read, not an empty one', async () => {
       setPlatform('win32');
       const eng = new OcrEngine();
       mockExecFile.mockReturnValue({ stdout: 'not-json{{{' });
 
-      const result = await eng.recognizeScreen();
-      expect(result.elements).toEqual([]);
+      await expect(eng.recognizeScreen()).rejects.toThrow();
     });
 
     it('handles error response from PowerShell', async () => {
@@ -503,8 +512,7 @@ describe('OcrEngine', () => {
         stdout: JSON.stringify({ error: 'No OCR languages installed' }),
       });
 
-      const result = await eng.recognizeScreen();
-      expect(result.elements).toEqual([]);
+      await expect(eng.recognizeScreen()).rejects.toThrow('No OCR languages installed');
     });
   });
 });
