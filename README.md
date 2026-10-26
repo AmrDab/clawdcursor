@@ -11,6 +11,7 @@
   <a href="https://www.npmjs.com/package/clawdcursor"><img src="https://img.shields.io/npm/v/clawdcursor?color=cb3837&logo=npm" alt="npm"></a>
   <img src="https://img.shields.io/badge/node-%E2%89%A520-339933?logo=nodedotjs&logoColor=white" alt="Node 20+">
   <img src="https://img.shields.io/badge/platform-win%20%7C%20mac%20%7C%20linux-0ea5e9" alt="Cross-platform">
+  <a href="https://glama.ai/mcp/servers/AmrDab/clawdcursor"><img src="https://glama.ai/mcp/servers/AmrDab/clawdcursor/badges/score.svg" alt="clawdcursor MCP server on Glama" height="20"></a>
   <a href="https://github.com/AmrDab/clawdcursor/actions/workflows/cross-platform.yml"><img src="https://img.shields.io/github/actions/workflow/status/AmrDab/clawdcursor/cross-platform.yml?branch=main&label=tests" alt="Tests"></a>
   <a href="https://discord.gg/hW29nrEZ8G"><img src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
 </p>
