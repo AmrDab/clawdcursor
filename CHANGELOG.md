@@ -6,6 +6,13 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- **Each compact action's required fields are published (#273).** The
+  compound schemas merge every action's fields and mark them all optional, so
+  nothing said which action needs which: `accessibility find_button` with
+  `target` (a real field of `smart_click`) passed the MCP layer and then failed
+  on the missing `intent`. The `action` description of every compound now
+  lists each action's required fields under the names it accepts, generated
+  from the delegates (e.g. `find_button: intent; find_field: purpose`).
 - **`expect` is checked on every action.** Only some tools checked it; on the
   others (`window`, `system`, `browser`) the parameter wasn't even published,
   so it was stripped before arriving (live macOS: `window focus` with a failing

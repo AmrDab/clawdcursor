@@ -28,6 +28,35 @@ describe('compact schema ↔ delegate contract', () => {
     expect(conflicts).toEqual([]);
   });
 
+  // Issue #273: the merged schema marks every field optional, so `find_button` with `target` (a real field of
+  // smart_click) passed the MCP layer and failed at runtime for the missing `intent`. Each action's required fields
+  // must be published, under the compound's names, in the `action` description that callers read.
+  it('every action\'s required fields are published and named in the `action` description', () => {
+    const byName = new Map(getAllTools().map(t => [t.name, t]));
+    const compounds = new Map(getCompactSurface().map(t => [t.name, t]));
+    const problems: string[] = [];
+    for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
+      const params = compounds.get(compound)?.parameters ?? {};
+      const text = /Required: (.*)\.$/.exec(params.action?.description ?? '')?.[1] ?? '';
+      const listed = new Map<string, string[]>();
+      for (const entry of text.split('; ')) {
+        const [actions, fields = ''] = entry.split(': ');
+        for (const a of actions.split('/')) listed.set(a, fields.split(', '));
+      }
+      for (const route of routes) {
+        const g = byName.get(route.delegate);
+        if (!g) { problems.push(`${compound}.${route.action}: delegate ${route.delegate} is not registered`); continue; }
+        for (const [pname, pdef] of Object.entries(g.parameters)) {
+          if (pdef.required !== true) continue;
+          const published = route.argRemap ? (Object.entries(route.argRemap).find(([, v]) => v === pname)?.[0] ?? pname) : pname;
+          if (!(published in params)) problems.push(`${compound}.${route.action}: required ${published} is not a published parameter`);
+          if (!listed.get(route.action)?.includes(published)) problems.push(`${compound}.${route.action}: required ${published} is not named in the action description`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
   it('every compound publishes `expect`, so it reaches the dispatcher instead of being stripped by the MCP layer', () => {
     for (const c of getCompactSurface()) {
       if (c.name === 'batch' || c.name === 'task') continue;
