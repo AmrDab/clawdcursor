@@ -350,7 +350,8 @@ let alwaysKeepRoles: Set<String> = [
 let labelPeekRoles: Set<String> = ["AXButton", "AXCheckBox", "AXRadioButton", "AXMenuItem", "AXTab", "AXLink", "AXPopUpButton"]
 
 /// A leaf's children are decoration, except an open popover: AppKit hangs it under the control that presented it.
-func presentedPopovers(_ kids: [AXUIElement]) -> [AXUIElement] { kids.filter { str(copyAttr($0, "AXRole").value) == "AXPopover" } }
+/// Within the time budget: a leaf can have many children (a text area's runs), each a round-trip to a possibly hung app.
+func presentedPopovers(_ kids: [AXUIElement]) -> [AXUIElement] { kids.filter { !timeUp() && str(copyAttr($0, "AXRole").value) == "AXPopover" } }
 
 /// AppKit stamps generated ids ("_NS:833") on unlabeled elements; a node is not worth keeping just for one.
 func isGeneratedIdentifier(_ id: String) -> Bool {
@@ -422,8 +423,9 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     }
     // The text on the control beats its identifier as a name: that is what an agent matches against what it sees.
     if name.isEmpty && labelPeekRoles.contains(role) { name = firstStaticTextValue(kids) }
-    // The tooltip is the last resort: an icon-only button often has nothing else.
-    if name.isEmpty { name = str(a["AXHelp"]) ?? "" }
+    // The tooltip is the last resort for a control: an icon-only button often has nothing else (not for decoration — web
+    // pages map title="" on every div to AXHelp).
+    if name.isEmpty && (alwaysKeepRoles.contains(role) || labelPeekRoles.contains(role)) { name = str(a["AXHelp"]) ?? "" }
 
     let hasValue = !(value ?? "").isEmpty
     let keep = depth == 0 || !name.isEmpty || (!ident.isEmpty && !isGeneratedIdentifier(ident)) || hasValue
