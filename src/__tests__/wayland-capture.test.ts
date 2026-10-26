@@ -18,6 +18,8 @@ const nutScreen = vi.hoisted(() => {
 const calls = vi.hoisted(() => [] as Array<[string, string[]]>);
 const state = vi.hoisted(() => ({ grim: true, png: Buffer.alloc(0) }));
 
+// The Screen Recording probe spawns the real helper on a macOS runner; the grab source is what these tests cover.
+vi.mock('../platform/native-helper', async (orig) => ({ ...(await orig<typeof import('../platform/native-helper')>()), assertScreenRecordingGranted: async () => {} }));
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, setPosition: vi.fn(), getPosition: vi.fn(async () => ({ x: 0, y: 0 })) },
   keyboard: { config: {} },

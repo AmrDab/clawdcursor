@@ -35,6 +35,8 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 // ── Mock heavy native deps before any import ──────────────────────────────────
+// The Screen Recording probe spawns the real helper on a macOS runner; the grab source is what these tests cover.
+vi.mock('../platform/native-helper', async (orig) => ({ ...(await orig<typeof import('../platform/native-helper')>()), assertScreenRecordingGranted: async () => {} }));
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn() },
   keyboard: { config: {}, type: vi.fn() },
@@ -267,6 +269,7 @@ describe('OcrEngine', () => {
     it('returns EMPTY_RESULT when unavailable', async () => {
       setPlatform('darwin');
       const eng = new OcrEngine();
+      (eng as any).available = false;   // what the name says — a runner with swift installed would be available
       const result = await eng.recognizeScreen();
       expect(result.elements).toEqual([]);
       expect(result.fullText).toBe('');
@@ -451,6 +454,7 @@ describe('OcrEngine', () => {
     it('returns EMPTY_RESULT when unavailable', async () => {
       setPlatform('darwin');
       const eng = new OcrEngine();
+      (eng as any).available = false;   // what the name says — a runner with swift installed would be available
       const result = await eng.recognizeRegion(0, 0, 100, 100);
       expect(result.elements).toEqual([]);
     });

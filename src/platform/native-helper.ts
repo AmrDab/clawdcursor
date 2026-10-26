@@ -584,8 +584,8 @@ export class ScreenRecordingDeniedError extends Error {
  */
 export async function assertScreenRecordingGranted(): Promise<void> {
   if (!IS_MACOS) return;
-  const helperPath = getNativeHelperPath('screenshot-helper');
-  if (!fs.existsSync(helperPath)) return;
+  let helperPath: string;
+  try { helperPath = getNativeHelperPath('screenshot-helper'); } catch { return; }   // not built (#244): nothing to ask
   const code = await new Promise<number | null>(resolve => {
     const proc = spawn(helperPath, ['--preflight']);
     const timer = setTimeout(() => { proc.kill(); resolve(null); }, 5000);
@@ -593,6 +593,7 @@ export async function assertScreenRecordingGranted(): Promise<void> {
     proc.on('error', () => { clearTimeout(timer); resolve(null); });
   });
   if (code === 2) throw new ScreenRecordingDeniedError();
+  if (code === null) console.warn('⚠️  Screen Recording check did not answer — capturing without it; a missing grant would show as a wallpaper-only image');
 }
 
 /**
