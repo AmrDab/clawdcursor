@@ -344,6 +344,7 @@ async function probeScreenRecording(): Promise<boolean> {
     const tmp = `/tmp/.clawdcursor-probe2-${process.pid}.png`;
     const proc = spawn('screencapture', ['-x', '-t', 'png', tmp]);
     const timeout = setTimeout(() => { proc.kill(); resolve(false); }, 5000);
+    proc.on('error', () => { clearTimeout(timeout); resolve(false); });   // could not run: not a crash
     proc.on('close', (code) => {
       clearTimeout(timeout);
       try {
@@ -368,6 +369,7 @@ async function probeAccessibility(): Promise<boolean> {
       'var p = se.processes.whose({frontmost: true})[0]; ' +
       'p.windows.length; true']);
     const timeout = setTimeout(() => { proc.kill(); resolve(false); }, 5000);
+    proc.on('error', () => { clearTimeout(timeout); resolve(false); });
     let stdout = '';
     proc.stdout.on('data', (d) => { stdout += d; });
     proc.on('close', (code) => {
@@ -412,6 +414,7 @@ export async function checkPermissionsQuick(): Promise<PermissionStatus> {
           const proc = spawn(permissionCheckPath, []);
           let stdout = '';
           const timeout = setTimeout(() => { proc.kill(); reject(new Error('timeout')); }, 10000);
+          proc.on('error', (err) => { clearTimeout(timeout); reject(err); });
           proc.stdout.on('data', (data) => { stdout += data; });
           proc.on('close', (code) => {
             clearTimeout(timeout);
@@ -465,6 +468,7 @@ export async function requestPermissions(): Promise<PermissionStatus> {
       proc.kill();
       reject(new Error('permission-check timed out'));
     }, 30000);
+    proc.on('error', (err) => { clearTimeout(timeout); reject(err); });
 
     proc.stdout.on('data', (data: Buffer) => { stdout += data; });
     proc.stderr.on('data', (data: Buffer) => { stderr += data; });

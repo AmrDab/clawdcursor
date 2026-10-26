@@ -14,13 +14,15 @@ vi.mock('os', async (orig) => {
   return { ...real, default: { ...real, homedir: () => empty }, homedir: () => empty };
 });
 
-// A Mac's probes (screencapture, osascript) exist and answer; here each one exits "not granted".
+// A Mac's probes (screencapture, osascript) exist and answer; here each one exits "not granted" — or, with
+// `spawnFails`, cannot be launched at all (not on PATH), as a real spawn reports it: an 'error' event and no exit.
+const probes = vi.hoisted(() => ({ spawnFails: false }));
 vi.mock('child_process', async (orig) => {
   const real = await orig<typeof import('child_process')>();
   const { EventEmitter } = await import('events');
   const spawn = () => {
     const proc = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
-    setImmediate(() => proc.emit('close', 1));
+    setImmediate(() => (probes.spawnFails ? proc.emit('error', Object.assign(new Error('spawn ENOENT'), { code: 'ENOENT' })) : proc.emit('close', 1)));
     return proc;
   };
   return { ...real, default: { ...real, spawn }, spawn };
@@ -42,9 +44,19 @@ describe('assertScreenRecordingGranted', () => {
     vi.resetModules();
     const { checkPermissionsQuick, requestPermissions } = await import('../platform/native-helper');
     const status = await checkPermissionsQuick();   // what doctor and status run
-    expect(status).toMatchObject({ accessibility: expect.any(Boolean), screenRecording: expect.any(Boolean) });
+    expect(status).toMatchObject({ accessibility: false, screenRecording: false });   // every probe here exits "not granted"
     // asking for the grants needs the binary: say how to get it, not "app binary not found"
     await expect(requestPermissions()).rejects.toThrow('permission-check binary not found. Run: cd native && ./build.sh');
+  }, 30_000);
+
+  it('a probe that cannot be launched answers "not granted" — doctor and status never crash on it', async () => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    vi.resetModules();
+    probes.spawnFails = true;
+    try {
+      const { checkPermissionsQuick } = await import('../platform/native-helper');
+      await expect(checkPermissionsQuick()).resolves.toMatchObject({ accessibility: false, screenRecording: false });
+    } finally { probes.spawnFails = false; }
   }, 30_000);
 
   it('not macOS: a no-op', async () => {
