@@ -39,4 +39,8 @@ describe('ocrToUI', () => {
     expect(el.confidence).toBeLessThan(0.4);   // the stray-"O" regression, structural
     expect(el.actionable).toBe(false);
   });
+  it('no engine score (Windows) is neutral: the same as a sure read, never 0 (#275)', () => {
+    const base = { text: 'Send', x: 1, y: 2, width: 20, height: 8, line: 3 };
+    expect(ocrToUI(base, 'el_9').confidence).toBe(ocrToUI({ ...base, confidence: 1 }, 'el_10').confidence);
+  });
 });

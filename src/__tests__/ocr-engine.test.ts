@@ -475,15 +475,34 @@ describe('OcrEngine', () => {
 
       const result = await eng.recognizeScreen();
 
+      // #275: no confidence from the engine stays absent — not 0 (unreadable) and not an invented 1.0 (certain)
       expect(result.elements[0]).toEqual({
         text: 'Hi',
         x: 0,
         y: 0,
         width: 0,
         height: 0,
-        confidence: 0,
         line: 0,
       });
+    });
+
+    it('keeps the engine\'s own confidence as given', async () => {
+      setPlatform('win32');
+      const eng = new OcrEngine();
+      mockExecFile.mockReturnValue({
+        stdout: JSON.stringify({ elements: [{ text: 'qzxv', confidence: 0.3 }, { text: 'Save', confidence: 1 }], fullText: 'qzxv Save' }),
+      });
+      const result = await eng.recognizeScreen();
+      expect(result.elements.map(e => e.confidence)).toEqual([0.3, 1]);
+    });
+
+    it('the Windows scripts invent no confidence (Windows.Media.Ocr has none)', async () => {
+      const fs = await vi.importActual<typeof import('fs')>('fs');   // fs is mocked in this file
+      const path = await vi.importActual<typeof import('path')>('path');
+      for (const f of ['ocr-recognize.ps1', 'ps-bridge.ps1']) {
+        const src = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', f), 'utf8');
+        expect(src, f).not.toMatch(/^\s*confidence\s*=/m);
+      }
     });
 
     it('handles null elements array', async () => {

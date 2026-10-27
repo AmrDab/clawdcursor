@@ -76,8 +76,7 @@ try {
                 y          = [math]::Round($r.Y)
                 width      = [math]::Round($r.Width)
                 height     = [math]::Round($r.Height)
-                confidence = 1.0   # Windows.Media.Ocr does not expose per-word confidence
-                line       = $lineIdx
+                line       = $lineIdx   # no confidence: Windows.Media.Ocr has none, and an invented 1.0 read as certainty (#275)
             }
         }
         $lineIdx++

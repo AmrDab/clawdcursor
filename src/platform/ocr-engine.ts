@@ -48,7 +48,10 @@ export interface OcrElement {
   y: number;        // top edge
   width: number;
   height: number;
-  confidence: number; // 0.0–1.0
+  /** The engine's own 0–1 doubt signal, absent when it has none (Windows.Media.Ocr). Not comparable across engines:
+   *  macOS Vision gives a per-line level (0.3 / 0.5 / 1 in the shipped config), Tesseract a real score. A low value means
+   *  the engine doubts the read; 1 does not mean the text is right (#275). */
+  confidence?: number;
   line: number;     // line index (for grouping)
 }
 
@@ -360,22 +363,7 @@ export class OcrEngine {
       throw new Error(data.error);
     }
 
-    const rawElements = Array.isArray(data.elements) ? data.elements : [];
-    const elements: OcrElement[] = rawElements.map((el: Record<string, unknown>) => ({
-      text:       String(el.text ?? ''),
-      x:          Number(el.x) || 0,
-      y:          Number(el.y) || 0,
-      width:      Number(el.width) || 0,
-      height:     Number(el.height) || 0,
-      confidence: Number(el.confidence) || 0,
-      line:       Number(el.line) || 0,
-    }));
-
-    return {
-      elements,
-      fullText: String(data.fullText ?? ''),
-      durationMs: 0, // filled by caller
-    };
+    return this.parseOcrJson(data);
   }
 
   /**
@@ -466,8 +454,8 @@ export class OcrEngine {
   }
 
   /**
-   * Shared JSON parser for macOS/Linux OCR output.
-   * Both scripts emit the same { elements, fullText } format.
+   * Shared JSON parser for every platform's OCR output.
+   * All the scripts emit the same { elements, fullText } format.
    */
   private parseOcrJson(data: Record<string, unknown>): OcrResult {
     const rawElements = Array.isArray(data.elements) ? data.elements : [];
@@ -477,7 +465,8 @@ export class OcrEngine {
       y:          Number(el.y) || 0,
       width:      Number(el.width) || 0,
       height:     Number(el.height) || 0,
-      confidence: Number(el.confidence) || 0,
+      // A missing score stays missing — read as 0 it made every word look unreadable.
+      ...(typeof el.confidence === 'number' && Number.isFinite(el.confidence) ? { confidence: el.confidence } : {}),
       line:       Number(el.line) || 0,
     }));
 
