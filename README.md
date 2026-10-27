@@ -43,6 +43,12 @@
 
 ## What's new
 
+**1.5.24** &mdash; **The AI never touches your pill, and failures stop looking like results.**
+- While a pause waits for you, nothing reads, clicks or types. The pill and pause prompt are never a target, even from another clawdcursor process.
+- On macOS, a screenshot without Screen Recording permission is an error, not a wallpaper image, and open popovers are readable.
+- The browser clawdcursor drives comes to the front when it navigates.
+- A failed OCR read reports its error instead of "No text detected", and OCR `confidence` is only shown when the engine really has one.
+
 **1.5.23** &mdash; **Windows: finding an element by name no longer matches stray letters.** A lone "C" on another page could match "User code 0", and "Don't Save" could match **Save**. A partial match now has to be a real part of the name you asked for.
 
 **1.5.22** &mdash; **Your turn is as short as possible.** When an agent needs you (a sign-in, a 2FA code), it asks for that one step and does the rest itself. With `done_when` (what shows on screen once you're done), the prompt turns from blue back to amber the moment you finish, with no Resume click.
