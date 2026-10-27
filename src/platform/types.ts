@@ -301,7 +301,8 @@ export interface PlatformAdapter {
   lastTreeTruncated?: boolean;
   /**
    * Optional: set when the last `listWindows` came back incomplete — a ready-to-print one-line note naming the apps whose
-   * windows are missing (the time budget ran out before they were read). Null/absent: the list is complete.
+   * windows are missing (the time budget ran out before they were read; on macOS, also windows on another Space, #278).
+   * Null/absent: the list is complete.
    */
   lastWindowListPartial?: string | null;
   /**

@@ -140,6 +140,29 @@ describe('windows (B1, B3)', () => {
       expect(mac.lastWindowListPartial).toContain('Other Late App');
     });
 
+    // #278: the list said "Windows (2)" with a whole desktop of windows on Desktop 1 while Desktop 2 was on screen.
+    it('names the apps with windows on another Space, once each, and says a focus switches Space', async () => {
+      const otherSpaces = [{ processName: 'Terminal', processId: 7 }, { processName: 'Google Chrome', processId: 8 },
+        { processName: 'Google Chrome', processId: 8 }];
+      const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => ({ windows: [WIN()], skipped: [], otherSpaces })) }) });
+      await mac.listWindows();
+      expect(mac.lastWindowListPartial).toMatch(/another desktop Space — Terminal, Google Chrome\./);
+      expect(mac.lastWindowListPartial).toMatch(/switches the screen to its Space/);
+    });
+
+    it('both notes at once: a skipped app and windows on another Space', async () => {
+      const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => ({ windows: [WIN()], skipped: slow,
+        otherSpaces: [{ processName: 'Terminal', processId: 7 }] })) }) });
+      await mac.listWindows();
+      expect(mac.lastWindowListPartial!.split('\n')).toHaveLength(2);
+    });
+
+    it('no windows on other Spaces: no note', async () => {
+      const mac = new MacOSAdapter({ ax: fakeAx({ listWindowsDetailed: vi.fn(async () => ({ windows: [WIN()], skipped: [], otherSpaces: [] })) }) });
+      await mac.listWindows();
+      expect(mac.lastWindowListPartial).toBeNull();
+    });
+
     it('a following complete list clears it', async () => {
       const detailed = vi.fn()
         .mockResolvedValueOnce({ windows: [WIN()], skipped: slow })

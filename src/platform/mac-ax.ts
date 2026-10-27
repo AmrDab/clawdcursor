@@ -452,6 +452,8 @@ export interface WindowListResult {
   windows: WindowInfo[];
   /** Empty when the list is complete. */
   skipped: SkippedApp[];
+  /** Windows on another Space, which accessibility cannot see (#278); absent when that could not be checked. */
+  otherSpaces?: Array<{ processName: string; processId: number; title?: string }>;
 }
 
 /**
@@ -705,7 +707,9 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         throw new MacAxError('timeout',
           `window list ran out of its ${Math.round(HELPER_LIST_DEADLINE_MS / 1000)}s time budget before reading any app (the Mac is busy). ${NOT_EMPTY}`);
       }
-      return { windows, skipped };
+      const otherSpaces = Array.isArray(reply.otherSpaces)
+        ? reply.otherSpaces.filter((w: any) => !isOwnUiPid(w.processId)) : undefined;
+      return { windows, skipped, ...(otherSpaces ? { otherSpaces } : {}) };
     }
     const raw = await viaJxa('get-windows.jxa', [], JXA_LIST_TIMEOUT_MS, 'window list');
     if (!Array.isArray(raw)) throw new MacAxError('failed', 'window list failed: unexpected output from get-windows.jxa');
