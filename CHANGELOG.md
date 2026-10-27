@@ -4,6 +4,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.24] - 2026-10-26
+
 ### Fixed
 
 - **A refused call is logged and reported as refused.** The safety gate logs

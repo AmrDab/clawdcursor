@@ -1,6 +1,6 @@
 # Clawd Cursor Installer for Windows
 # Usage: powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
-# Specify version: $env:VERSION='v1.5.23'; irm https://clawdcursor.com/install.ps1 | iex
+# Specify version: $env:VERSION='v1.5.24'; irm https://clawdcursor.com/install.ps1 | iex
 #
 # Installs the published npm package globally (npm i -g clawdcursor) -- no git
 # clone, no local build toolchain. Windows needs no native build step.
