@@ -26,6 +26,7 @@ import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from './screen-guard';
 import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
+import { logger } from '../core/observability/logger';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -173,6 +174,7 @@ export async function executeBatch(
     // the precondition, which reads the screen; a step with one is never pause-safe.
     const ownUi = ownUiRefusal(args, !guard && isPauseSafeCall(tool.name, stepAction));
     if (ownUi) {
+      logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'own_ui', reason: ownUi, batchStep: i });
       outcomes.push({ i, label, status: 'blocked', text: ownUi });
       return halt(i, `step ${i} (${label}): ${ownUi}`);
     }
@@ -208,7 +210,8 @@ export async function executeBatch(
     if (isImagePointerCall(tool.name, stepAction, args)) {
       const why = await imagePointerRefusal(ctx, args);
       if (why) {
-        outcomes.push({ i, label, status: 'error', text: why.slice(0, 200) });
+        logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'screen_binding', reason: why, batchStep: i });
+        outcomes.push({ i, label, status: 'blocked', text: why.slice(0, 200) });
         return halt(i, `step ${i} (${label}): ${why}`);
       }
     }

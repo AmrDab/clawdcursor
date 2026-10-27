@@ -27,6 +27,7 @@ import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
 import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
+import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
@@ -334,24 +335,24 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // Compound tools (compact surface) decide per action in dispatchCompound.
         if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
+        // The safety gate above has already logged `safety.decision allow`; a guard that refuses after it logs its own
+        // verdict, so the audit log never shows a refused call as allowed.
+        const refuse = (guard: string, why: string): McpToolResult => {
+          const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
+          logger.warn('safety.refused', { tool: tool.name, action, guard, reason: why });
+          sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
+          return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
+        };
         // Screenshot-bound pointer actions: image coordinates from a screenshot of a screen that has since changed
         // point at something else (screen-binding.ts).
         if (isImagePointerCall(tool.name, action, params ?? {})) {
           const why = await imagePointerRefusal(ctx, params ?? {});
-          if (why) {
-            const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
-            sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
-            return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
-          }
+          if (why) return refuse('screen_binding', why);
         }
         // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
         // Last before the handler: a pause that came up during the checks above still stops it.
         const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action));
-        if (ownUi) {
-          const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
-          sessionLog.record(tool.name, action, false, 0, ownUi, clientInfo(), { outcome: 'refused' });
-          return { content: [{ type: 'text', text: withOutcome(`${label}: ${ownUi}`, true) }], isError: true };
-        }
+        if (ownUi) return refuse('own_ui', ownUi);
         const started = Date.now();
         let result;
         try {
@@ -368,15 +369,17 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         if (!result.isError && isFullScreenshotCall(tool.name, action)) {
           result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };
         }
+        // A batch: one row per step class, not one act-other row. Steps the cap skipped never ran.
+        const steps = result.steps?.filter(s => s.status !== 'skipped').map(s => ({
+          tool: s.tool, action: s.action, ok: s.status === 'ok',
+          outcome: s.status === 'blocked' || s.status === 'needs_confirm' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
+        }));
+        // A batch halts at its first failed step, so a halt a guard caused is a refusal, not an error.
+        const batchRefused = result.isError && steps?.[steps.length - 1]?.outcome === 'refused';
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
-          { outcome: outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
-            // A batch: one row per step class, not one act-other row. Steps the
-            // cap skipped never ran.
-            steps: result.steps?.filter(s => s.status !== 'skipped').map(s => ({
-              tool: s.tool, action: s.action, ok: s.status === 'ok',
-              outcome: s.status === 'blocked' || s.status === 'needs_confirm' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
-            })) });
+          { outcome: batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
+            steps });
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
         // 3 screenshots with no text/a11y read in between (and every 5th

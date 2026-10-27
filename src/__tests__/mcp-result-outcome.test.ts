@@ -54,6 +54,7 @@ vi.mock('../core/banner', () => ({
 
 import { createMcpServer, type McpServerLike, type McpToolResult } from '../surface/mcp-server';
 import type { ToolContext } from '../tools/registry';
+import { logger } from '../core/observability/logger';
 
 // ── Minimal fake ToolContext — matches mcp-server.test.ts fakeCtx() ──────────
 function fakeCtx(): ToolContext {
@@ -308,5 +309,15 @@ describe('the user\'s own controls are never a target (owner requirement, live m
     expect(r.isError).toBe(true);
     expect(text(r)).toMatch(/pid 4242 is clawdcursor's own on-screen control/);
     expect(text(r)).toMatch(/\[refused · OWN_UI · /);
+  });
+
+  // Mac run: stderr showed only the safety gate's `allow` for calls this guard then refused, so the log alone could not
+  // tell a refused call from one that ran.
+  it('a refusal after the safety gate is logged as a refusal', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    await createMcpServer({ ctx: fakeCtx(), compact: true });
+    await capturedHandlers.get('accessibility')!({ action: 'read_tree', processId: 4242 });
+    expect(warn).toHaveBeenCalledWith('safety.refused', expect.objectContaining({ tool: 'accessibility', action: 'read_tree', guard: 'own_ui' }));
+    warn.mockRestore();
   });
 });

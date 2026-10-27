@@ -84,6 +84,9 @@ describe('SessionLog', () => {
     const back = readSession(log.file!);
     expect(back.calls).toHaveLength(1);
     expect(back.calls[0]).toMatchObject({ tool: 'computer', action: 'key', ok: false, outcome: 'refused' });
+    // a refusal is the guard working: counted apart from errors, in the live tally and when the file is read back
+    expect(log.summary).toMatchObject({ errors: 0, refused: 1 });
+    expect(back.tally).toMatchObject({ errors: 0, refused: 1 });
   });
 
   it('classifies batch steps one by one (not one act-other row)', () => {
@@ -125,5 +128,16 @@ describe('session report', () => {
     expect(url.startsWith('https://github.com/AmrDab/clawdcursor/issues/new?')).toBe(true);
     expect(url.length).toBeLessThan(8000);
     expect(new URL(url).searchParams.get('title')).toBe('Report: clicks missed the Save button');
+  });
+
+  // Mac run: three calls the pause guard refused showed up as "errors: 3" in the report.
+  it('lists guard refusals apart from errors', () => {
+    const log = new SessionLog({ version: '9.9.9', surface: 'compact' });
+    log.record('computer', 'key', false, 0, 'computer {action:"key"}: paused — a pause is waiting', undefined, { outcome: 'refused' });
+    log.record('computer', 'click', false, 5, 'click failed: no window', undefined, { outcome: 'error' });
+    const r = buildSessionReport();
+    expect(r.session?.errors).toEqual(['click failed: no window']);
+    expect(r.session?.refusals).toEqual(['computer {action:"key"}: paused — a pause is waiting']);
+    expect(reportMarkdown(r)).toMatch(/errors: 1; refused by a guard: 1/);
   });
 });

@@ -62,6 +62,8 @@ export function outcomeOf(isError: boolean, text: string): Outcome {
 }
 export interface SessionTally {
   calls: number; blind: number; vision: number; actName: number; actCoords: number; actOther: number; errors: number;
+  /** calls a guard (or the consent gate) refused before they ran — the guard working, not a failure, so not in `errors` */
+  refused: number;
   /** vision calls that had a blind read since the previous vision call */
   visionAfterBlind: number;
   firstPerception: 'blind' | 'vision' | null;
@@ -87,7 +89,7 @@ function redact(s: string): string {
 
 export class SessionLog {
   readonly file: string | null;
-  private tally: SessionTally = { calls: 0, blind: 0, vision: 0, actName: 0, actCoords: 0, actOther: 0, errors: 0, visionAfterBlind: 0, firstPerception: null, blindEmpty: 0, visionAfterBlindMiss: 0 };
+  private tally: SessionTally = { calls: 0, blind: 0, vision: 0, actName: 0, actCoords: 0, actOther: 0, errors: 0, refused: 0, visionAfterBlind: 0, firstPerception: null, blindEmpty: 0, visionAfterBlindMiss: 0 };
   private lastBlindMissed = false;
   private blindSinceVision = false;
   private visionStreak = 0;
@@ -116,7 +118,8 @@ export class SessionLog {
     const steps: StepCall[] | undefined = extra?.steps?.map(s => ({ tool: s.tool, ...(s.action ? { action: s.action } : {}),
       cls: classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error') }));
     this.tally.calls++;
-    if (!ok) this.tally.errors++;
+    if (outcome === 'refused' || outcome === 'consent_required') this.tally.refused++;
+    else if (!ok) this.tally.errors++;
     if (steps?.length) for (const s of steps) this.tallyClass(s.cls, s.outcome);
     else this.tallyClass(cls, outcome);
 

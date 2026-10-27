@@ -6,6 +6,16 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- **A refused call is logged and reported as refused.** The safety gate logs
+  `safety.decision allow` before the screenshot-binding and pause/own-UI
+  guards run. When one of those then refused the call, nothing else was
+  logged, so stderr showed only "allow" for a call that never ran. Those
+  guards now log `safety.refused` with the guard and the reason, on the
+  direct route and for each `batch` step. The session report (`system
+  report`, `clawdcursor report`) counts refusals separately from errors and
+  lists their reasons on their own, so a session where the pause guard did
+  its job no longer reads "errors: 3". This covers a batch a guard halted and
+  a call stopped by the consent prompt.
 - **`clawdcursor doctor` and the status check work on a Mac without the native
   helpers.** When the helpers had not been built (no Xcode Command Line
   Tools), the permission check stopped at "ClawdCursor app binary not found"

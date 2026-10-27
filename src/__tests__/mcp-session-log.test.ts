@@ -43,6 +43,7 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
 
 import { createMcpServer } from '../surface/mcp-server';
 import { listSessions, readSession } from '../surface/session-log';
+import { logger } from '../core/observability/logger';
 import type { ToolContext } from '../tools/registry';
 
 const ctx = { desktop: {}, a11y: {}, cdp: {}, platform: undefined, getMouseScaleFactor: () => 1,
@@ -80,5 +81,22 @@ describe('MCP session log', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0].tool).toBe('batch');
     expect(calls[0].steps).toEqual([{ tool: 'computer', action: 'key', cls: 'act-other', ok: false, outcome: 'refused' }]);
+  });
+
+  // A batch a guard halted is a refusal, not an error: the report counted it in `errors` and quoted it as the error.
+  it('a batch halted by a guard is recorded as refused, and the step refusal is logged', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    await handlers.get('batch')!({ steps: [{ name: 'accessibility', arguments: { action: 'read_tree', processId: 4242 } }] });
+    expect(warn).toHaveBeenCalledWith('safety.refused', expect.objectContaining({ tool: 'accessibility', guard: 'own_ui', batchStep: 0 }));
+    warn.mockRestore();
+    const { calls, tally } = readSession(listSessions()[0]);
+    expect(calls[0]).toMatchObject({ tool: 'batch', ok: false, outcome: 'refused' });
+    expect(tally).toMatchObject({ errors: 0, refused: 1 });
+  });
+
+  it('a call stopped by the consent prompt is counted as refused, not as an error', async () => {
+    consent.given = false;
+    await handlers.get('computer')!({ action: 'screenshot' });
+    expect(readSession(listSessions()[0]).tally).toMatchObject({ errors: 0, refused: 1 });
   });
 });
