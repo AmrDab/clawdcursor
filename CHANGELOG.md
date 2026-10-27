@@ -16,6 +16,18 @@ All notable changes to Clawd Cursor will be documented in this file.
   lists their reasons on their own, so a session where the pause guard did
   its job no longer reads "errors: 3". This covers a batch a guard halted and
   a call stopped by the consent prompt.
+- **OCR `confidence` is the engine's own value or absent (#275).** It was
+  presented as a comparable per-word score, but:
+  - Windows.Media.Ocr has no confidence, so every Windows word claimed 1.0;
+  - macOS Vision returns a per-line level (0.3 / 0.5 / 1 in the shipped
+    configuration, measured on a Mac), not a fine-grained score;
+  - a missing value was read as 0, which made the word look unreadable.
+
+  The Windows scripts no longer invent a value, and a missing score stays
+  absent. The `ui-map` and `smart_click` paths treat no score as neutral, so
+  Windows behaves as before. The `ocr` tool description says what the value
+  means: low means the engine likely misread the text, and 1 does not mean
+  the text is right.
 - **`clawdcursor doctor` and the status check work on a Mac without the native
   helpers.** When the helpers had not been built (no Xcode Command Line
   Tools), the permission check stopped at "ClawdCursor app binary not found"

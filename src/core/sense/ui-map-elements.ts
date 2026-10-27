@@ -25,7 +25,8 @@ export function ocrToUI(oe: OcrElement, id: string): UIElement {
   const caps = inferCapabilities({ role, source: 'ocr', enabled: true });
   // Single-char fragments are OCR noise — damp hard so they never win a match.
   const lenDamp = oe.text.trim().length <= 1 ? 0.4 : 1;
-  const confidence = oe.confidence * OCR_SCALE * lenDamp;
+  // No engine score (Windows) is neutral, not doubt.
+  const confidence = (oe.confidence ?? 1) * OCR_SCALE * lenDamp;
   return {
     id, role, text: oe.text, normalized_text: normText(oe.text),
     bounds: [oe.x, oe.y, oe.width, oe.height],

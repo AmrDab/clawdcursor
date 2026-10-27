@@ -38,7 +38,7 @@ export function getOcrTools(): ToolDefinition[] {
     {
       name: 'ocr_read_screen',
       description:
-        'Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:"screen". scope:"window" reads only the focused window — faster, and it does not read the text of other apps.',
+        'Step 2 of cheap-first perception: use when the a11y tree (read_screen) is empty or too sparse to identify your target. OS-level OCR returns text elements with pixel coordinates — no image bytes, no vision model. Much cheaper than a screenshot. Coordinates are screen coordinates — click them with space:"screen". scope:"window" reads only the focused window — faster, and it does not read the text of other apps. An element\'s `confidence`, when the OS engine gives one, is that engine\'s own doubt signal: low means it likely misread; 1 does not mean the text is right.',
       parameters: {
         scope: {
           type: 'string',

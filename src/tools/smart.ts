@@ -427,7 +427,9 @@ export function getSmartTools(): ToolDefinition[] {
                   y: minY,
                   width: maxX - minX,
                   height: maxY - minY,
-                  confidence: span.reduce((a, t) => a + (t.confidence ?? 0), 0) / span.length,
+                  // None when the engine gives none (Windows) — averaging in 0s made the phrase look unreadable.
+                  confidence: span.every(t => t.confidence === undefined)
+                    ? undefined : span.reduce((a, t) => a + (t.confidence ?? 1), 0) / span.length,
                 };
               };
 
