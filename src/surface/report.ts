@@ -55,6 +55,8 @@ export interface ErrorReport {
     sequence: string;
     recentCalls: Array<{ tool: string; action?: string; cls: string; ok: boolean; ms: number }>;
     errors: string[];
+    /** why a guard refused a call (pause up, own UI, stale screenshot, …) — kept apart from errors */
+    refusals: string[];
   };
   userNote?: string;
   errorContext?: string;
@@ -261,7 +263,8 @@ export function buildSessionReport(sessionPath?: string, userNote?: string): Err
     tally,
     sequence: seq.slice(-60).map(x => (x.n > 1 ? `${x.cls}×${x.n}` : x.cls)).join(' '),
     recentCalls: calls.slice(-40).map(c => ({ tool: c.tool, ...(c.action ? { action: c.action } : {}), cls: c.cls, ok: c.ok, ms: c.ms })),
-    errors: [...new Set(calls.filter(c => !c.ok && c.err).map(c => redactSensitive(String(c.err))))].slice(0, 8),
+    errors: [...new Set(calls.filter(c => !c.ok && c.err && c.outcome !== 'refused').map(c => redactSensitive(String(c.err))))].slice(0, 8),
+    refusals: [...new Set(calls.filter(c => c.outcome === 'refused' && c.err).map(c => redactSensitive(String(c.err))))].slice(0, 8),
   };
   if (!report.errorContext && report.session.errors.length) report.errorContext = report.session.errors[report.session.errors.length - 1];
   return report;
@@ -286,9 +289,10 @@ export function reportMarkdown(r: ErrorReport): string {
     L.push('', `**MCP session**: host ${s.client ?? 'unknown'}, ${s.surface ?? '?'} surface, ${t.calls} calls, ${(s.durationMs / 60000).toFixed(1)} min`);
     L.push(`- perception: ${t.blind} blind (a11y / text) vs ${t.vision} screenshots; first: ${t.firstPerception ?? '-'}; screenshots with a blind read first: ${t.visionAfterBlind}/${t.vision}`);
     L.push(`- blind reads that came back empty / timed out: ${t.blindEmpty}; screenshots right after one: ${t.visionAfterBlindMiss}`);
-    L.push(`- actions: ${t.actName} by name, ${t.actCoords} by coordinates, ${t.actOther} other; errors: ${t.errors}`);
+    L.push(`- actions: ${t.actName} by name, ${t.actCoords} by coordinates, ${t.actOther} other; errors: ${t.errors}; refused by a guard: ${t.refused}`);
     L.push('', '```', s.sequence, '```');
     if (s.errors.length) L.push('', '**Errors (redacted):**', ...s.errors.map(e => `- ${e}`));
+    if (s.refusals.length) L.push('', '**Refused by a guard (redacted):**', ...s.refusals.map(e => `- ${e}`));
   }
   if (r.task) L.push('', `**Agent task:** ${r.task.description} (${r.task.status}, ${r.task.totalSteps} steps)`);
   if (r.errorContext && !r.session) L.push('', `**Error:** ${r.errorContext}`);
@@ -401,7 +405,7 @@ export async function interactiveReport(): Promise<void> {
   if (report.session) {
     const t = report.session.tally;
     console.log(`  Host:       ${report.session.client ?? 'unknown'} (${report.session.surface} surface)`);
-    console.log(`  Calls:      ${t.calls} — ${t.blind} blind reads, ${t.vision} screenshots, ${t.actName} by name, ${t.actCoords} by coordinates, ${t.errors} errors`);
+    console.log(`  Calls:      ${t.calls} — ${t.blind} blind reads, ${t.vision} screenshots, ${t.actName} by name, ${t.actCoords} by coordinates, ${t.errors} errors, ${t.refused} refused`);
     console.log(`  Sequence:   ${report.session.sequence.slice(0, 200)}`);
   } else {
     console.log(`  Step data:  ${report.steps.length} entries (redacted)`);
