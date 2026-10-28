@@ -441,6 +441,7 @@ Rules for autonomous use:
 - **Network isolation:** Binds to `127.0.0.1` only. Verify with `netstat -an | grep 3847` on macOS/Linux, or `netstat -an | findstr 3847` on Windows PowerShell - should show `127.0.0.1:3847`, never `0.0.0.0:3847`. There is no setting that opens it to the network; to drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side.
 - **Local-only:** Ollama keeps screenshots in RAM - nothing leaves the machine.
   Cloud providers send screenshots/text ONLY to the user's configured endpoint.
+- **No-vision mode:** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, also for stdio `clawdcursor mcp`) sends no screenshot to any model; a call that would return one is refused with `VISION_DISABLED`, so read the screen with the accessibility tree or OCR.
 - **Token auth:** All mutating POST endpoints require `Authorization: Bearer <token>`
   from `~/.clawdcursor/token`.
 - **Consent gate:** First run requires explicit `clawdcursor consent --accept`.

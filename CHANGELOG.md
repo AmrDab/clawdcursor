@@ -83,13 +83,17 @@ All notable changes to Clawd Cursor will be documented in this file.
   `"port"`, and `--port` always defaulted to 3847, which outranked the config
   file. `{"server":{"port":N}}` and `{"port":N}` now both work, `--port` still
   wins when given, and the "port already in use" check looks at the port the
-  daemon will really bind.
+  daemon will really bind. `stop`, `resume` and `task` find the daemon on that
+  same port. The files are read in layer order, so a flat `port` in the
+  project's `.clawdcursor-config.json` outranks a nested `server.port` in
+  `~/.clawdcursor/config.json`.
 - **`--no-vision` keeps screenshots from every model.** The flag (and
   `CLAWD_DISABLE_VISION=1` / `"disableVision": true`) was read and then
   ignored, so screenshots still went to the model. Now the built-in agent is
-  not offered a screenshot tool and never sends an image, and the MCP surface
-  (HTTP daemon, and stdio for the env var or config key) refuses any call that
-  would return an image. Accessibility and OCR still work. The unused
+  not offered a screenshot tool, even inside a batch, its instructions no
+  longer mention screenshots, and it never sends an image. The MCP surface
+  (HTTP daemon, and stdio for the env var or config key) refuses any call or
+  batch step that would return an image. Accessibility and OCR still work. The unused
   `CLAWD_DISABLE_VERIFIER` / `disableVerifier` setting is removed; the
   verifier it switched off no longer exists.
 - **macOS: `window list` says which apps have windows on another desktop

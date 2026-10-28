@@ -323,12 +323,13 @@ describe('the user\'s own controls are never a target (owner requirement, live m
 });
 
 describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     capturedHandlers.clear();
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
     mockSafety.mockReturnValue(undefined);
+    (await import('../core/screen-binding')).__resetShotsForTests();
   });
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
   const ctxWithScreen = (disableVision: boolean): ToolContext => ({
@@ -336,18 +337,48 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
     disableVision,
     desktop: { captureForLLM: vi.fn(async () => ({ buffer: Buffer.from('pixels'), llmWidth: 10, llmHeight: 10, width: 10, height: 10, scaleFactor: 1 })) },
   });
+  const latestShot = async () => (await import('../core/screen-binding')).latestShotId();
+  const REFUSED = /vision is disabled on this server[\s\S]*\[refused · VISION_DISABLED · .*next: accessibility \{"action":"compile_ui"\}/;
 
-  it('control: without it, computer screenshot returns an image', async () => {
-    await createMcpServer({ ctx: ctxWithScreen(false), compact: true });
-    const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
-    expect(r.content.some(c => c.type === 'image')).toBe(true);
-  });
+  // Every surface a screenshot can be taken from: the compact compound, and the two granular screenshot tools.
+  const calls: Array<{ compact: boolean; name: string; args: Record<string, unknown> }> = [
+    { compact: true, name: 'computer', args: { action: 'screenshot' } },
+    { compact: false, name: 'desktop_screenshot', args: {} },
+    { compact: false, name: 'screenshot_full', args: {} },
+  ];
 
-  it('with it, the image is withheld and the call is refused with a blind next step', async () => {
-    await createMcpServer({ ctx: ctxWithScreen(true), compact: true });
-    const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
-    expect(r.content.some(c => c.type === 'image')).toBe(false);
-    expect(r.isError).toBe(true);
-    expect(text(r)).toMatch(/vision is disabled on this server[\s\S]*\[refused · VISION_DISABLED · .*next: accessibility \{"action":"compile_ui"\}/);
+  describe.each(calls)('$name $args', ({ compact, name, args }) => {
+    it('control: without it, the call returns an image and records the screenshot', async () => {
+      await createMcpServer({ ctx: ctxWithScreen(false), compact });
+      const r = await capturedHandlers.get(name)!(args);
+      expect(r.content.some(c => c.type === 'image')).toBe(true);
+      expect(await latestShot()).not.toBeNull();
+    });
+
+    it('with it, the image is withheld, the call is refused with a blind next step, and nothing is recorded', async () => {
+      await createMcpServer({ ctx: ctxWithScreen(true), compact });
+      const r = await capturedHandlers.get(name)!(args);
+      expect(r.content.some(c => c.type === 'image')).toBe(false);
+      expect(r.isError).toBe(true);
+      expect(text(r)).toMatch(REFUSED);
+      expect(await latestShot()).toBeNull();
+    });
+
+    it('control: without it, the same call as a batch step runs and records the screenshot', async () => {
+      await createMcpServer({ ctx: ctxWithScreen(false), compact });
+      const r = await capturedHandlers.get('batch')!({ steps: [{ name, arguments: args }] });
+      expect(r.isError).toBeFalsy();
+      expect(await latestShot()).not.toBeNull();
+    });
+
+    it('with it, the same call as a batch step is refused and not recorded as seen', async () => {
+      await createMcpServer({ ctx: ctxWithScreen(true), compact });
+      const r = await capturedHandlers.get('batch')!({ steps: [{ name, arguments: args }] });
+      expect(r.isError).toBe(true);
+      expect(r.content.some(c => c.type === 'image')).toBe(false);
+      // A batch has no outcome line of its own; the step's [blocked] status is the refusal (logged as refused).
+      expect(text(r)).toMatch(/halted at step 0 — step 0 .*: vision is disabled on this server[\s\S]*0\. \[blocked\]/);
+      expect(await latestShot()).toBeNull();
+    });
   });
 });

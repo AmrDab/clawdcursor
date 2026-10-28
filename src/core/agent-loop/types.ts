@@ -126,6 +126,8 @@ export interface AgentToolContext {
   cdp?: CDPDriver | null;
   /** Session-scoped UIMap cache for safe el_NN element refs (Part 2). */
   uiMaps?: import('../sense/ui-map-holder').UIMapHolder;
+  /** --no-vision: tools built from here (the batch's steps) leave out `screenshot`. */
+  disableVision?: boolean;
   /** Test-only platform override consumed by imageScale() (defaults to
    *  process.platform in production). Lets coordinate-scaling tests pin the
    *  OS branch deterministically instead of depending on the CI runner's OS. */

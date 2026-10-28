@@ -266,6 +266,11 @@ interface AgentModeOpts {
 // use, tunnel the port: `ssh -L 3847:127.0.0.1:3847 user@host`.
 const BIND_HOST = '127.0.0.1';
 
+/** The daemon's port, resolved the way `agent` binds it: --port, else server.port in config, else 3847. */
+function daemonPort(flag?: string): number {
+  return resolveConfig({ cliFlags: { port: flag } }).port;
+}
+
 async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   // commander stores negated flags as `{ llm: false }` / `{ vision: false }`.
   // Keep the internal explicit names so callers/tests can also pass noLlm /
@@ -288,7 +293,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     writeConsentFile();
     console.log('  Consent recorded.\n');
   } else if (!canSkipDev && !hasConsent()) {
-    const accepted = await runOnboarding('start', parseInt(opts.port ?? '3847', 10) || 3847);
+    const accepted = await runOnboarding('start', daemonPort(opts.port));
     if (!accepted) process.exit(1);
   }
 
@@ -811,9 +816,9 @@ program
 program
   .command('stop')
   .description('Stop every running Clawd Cursor instance; agents stay stopped until `clawdcursor resume`')
-  .option('--port <port>', 'API server port', '3847')
+  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
   .action(async (opts) => {
-    const port = parseInt(opts.port, 10);
+    const port = daemonPort(opts.port);
     if (isNaN(port) || port < 1 || port > 65535) {
       console.error('Invalid port number');
       process.exit(1);
@@ -920,9 +925,9 @@ program
   .command('resume')
   .description('Continue a task paused for you (same as the on-screen Resume), or --end it. After a stop, gives control back.')
   .option('--end', 'End the paused task')
-  .option('--port <port>', 'API server port', '3847')
+  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
   .action(async (opts) => {
-    const port = parseInt(opts.port, 10);
+    const port = daemonPort(opts.port);
     const answer = opts.end ? 'end' : 'resume';
     const gaveBack = !opts.end && isStopped();
     if (gaveBack) {
@@ -960,9 +965,10 @@ program
 program
   .command('task [text]')
   .description('Send a task to a running Clawd Cursor instance (interactive if no text given)')
-  .option('--port <port>', 'API server port', '3847')
+  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
   .action(async (text, opts) => {
-    const url = `http://127.0.0.1:${opts.port}/mcp`;
+    const port = daemonPort(opts.port);
+    const url = `http://127.0.0.1:${port}/mcp`;
     // A --compact daemon serves the `task` compound, not submit_task.
     const { resolveTaskTool } = await import('./task-tool');
     const tool = await resolveTaskTool(url, authHeaders());
@@ -1050,7 +1056,7 @@ while ($true) {
             method  = 'tools/call'
             params  = @{ name = '${tool.name}'; arguments = @{ ${tool.key} = $task } }
         } | ConvertTo-Json -Depth 6 -Compress
-        $response = Invoke-RestMethod -Uri http://127.0.0.1:${opts.port}/mcp -Method POST -Headers $headers -Body $body
+        $response = Invoke-RestMethod -Uri http://127.0.0.1:${port}/mcp -Method POST -Headers $headers -Body $body
         if ($response.error) {
             Write-Host ("MCP error: " + ($response.error.message)) -ForegroundColor Red
         } elseif ($response.result -and $response.result.content) {
@@ -1093,7 +1099,7 @@ while true; do
     RPC_ID=$((RPC_ID + 1))
     # JSON-encode the task by piping through python; falls back to naive escape if python missing
     BODY=$(python3 -c "import json,sys; print(json.dumps({'jsonrpc':'2.0','id':$RPC_ID,'method':'tools/call','params':{'name':'${tool.name}','arguments':{'${tool.key}':sys.argv[1]}}}))" "$task" 2>/dev/null) || BODY="{\\"jsonrpc\\":\\"2.0\\",\\"id\\":$RPC_ID,\\"method\\":\\"tools/call\\",\\"params\\":{\\"name\\":\\"${tool.name}\\",\\"arguments\\":{\\"${tool.key}\\":\\"$task\\"}}}"
-    curl -s -X POST http://127.0.0.1:${opts.port}/mcp \\
+    curl -s -X POST http://127.0.0.1:${port}/mcp \\
       -H "Content-Type: application/json" \\
       -H "Accept: application/json, text/event-stream"${token ? ' \\\n      -H "$AUTH_HEADER"' : ''} \\
       -d "$BODY" \\

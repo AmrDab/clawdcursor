@@ -34,7 +34,7 @@ const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 import { classifyResult, renderResultLine, isJsonText, isActingAction } from '../core/result-codes';
-import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from '../tools/screen-guard';
+import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -388,8 +388,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // High-security mode: no image reaches the model, whichever tool produced it. The capture stays in memory and
         // is dropped here, before the screenshot is recorded as one the model has seen.
         if (ctx.disableVision && result.image) {
-          return refuse('no_vision', 'vision is disabled on this server (--no-vision / CLAWD_DISABLE_VISION), so no screenshot is sent to the model. ' +
-            'Read the screen without one: the accessibility tree, or OCR text.');
+          return refuse('no_vision', VISION_DISABLED_REFUSAL);
         }
         if (!result.isError && isFullScreenshotCall(tool.name, action)) {
           result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };

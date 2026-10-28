@@ -128,7 +128,9 @@ async function finderMap(ctx: AgentToolContext, rawMaxCost: unknown) {
   return map;
 }
 
-export function buildUnifiedTools(): UnifiedTool[] {
+/** `disableVision` (--no-vision): the catalog has no `screenshot` tool. The agent loop and its batch both build from
+ *  here, so neither can reach one the other dropped. */
+export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): UnifiedTool[] {
   const tools: UnifiedTool[] = [
     // ─── PERCEPTION ─────────────────────────────────────────────
     {
@@ -2123,7 +2125,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
   // when a11y is insufficient. `cannot_read` is excluded — the model runs
   // in hybrid mode with direct screenshot access; there is no blind→vision
   // escalation path to trigger.
-  return tools.filter(t => t.name !== 'cannot_read');
+  return tools.filter(t => t.name !== 'cannot_read' && !(opts.disableVision && t.name === 'screenshot'));
 }
 
 /**

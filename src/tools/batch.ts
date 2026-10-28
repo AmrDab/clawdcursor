@@ -24,7 +24,7 @@ import { getTool, getCompactTools } from './registry';
 import { evaluateToolCall } from './safety-gate';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
-import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from './screen-guard';
+import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { logger } from '../core/observability/logger';
 
@@ -226,6 +226,13 @@ export async function executeBatch(
     if (res.isError) {
       outcomes.push({ i, label, status: 'error', text: (res.text || '').slice(0, 200) });
       return halt(i, `step ${i} (${label}) errored`);
+    }
+
+    // High-security mode: refused as a direct call is, and never recorded as a screenshot the model has seen.
+    if (ctx.disableVision && res.image) {
+      logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'no_vision', reason: VISION_DISABLED_REFUSAL, batchStep: i });
+      outcomes.push({ i, label, status: 'blocked', text: VISION_DISABLED_REFUSAL.slice(0, 200) });
+      return halt(i, `step ${i} (${label}): ${VISION_DISABLED_REFUSAL}`);
     }
 
     // A screenshot step names its id first, so it survives the step text's truncation.

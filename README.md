@@ -443,6 +443,7 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 - **Bearer-token auth** on every HTTP request (`~/.clawdcursor/token`).
 - **Sensitive-app policy.** Email, banking, password managers, private messaging auto-elevate to Confirm.
 - **No telemetry by default.** Nothing phones home. Screenshots stay in RAM; with a local model nothing leaves the machine; with a cloud provider, screenshots go only to the endpoint you configured. `clawdcursor report` is opt-in and previews exactly what it sends.
+- **No screenshots to any model, if you want.** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, which also covers stdio `clawdcursor mcp`) keeps every image from the built-in agent and from MCP clients; they work from the accessibility tree and OCR text.
 - **Prompt-injection defense.** Screen text is returned inside `<untrusted-screen-content>` tags &mdash; data, never instructions.
 - **Log privacy.** Logs redact password-field values (`AXSecureTextField`, UIA `IsPassword=true`).
 
