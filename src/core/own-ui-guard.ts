@@ -5,6 +5,7 @@
  * nothing stopped an agent from acting while a pause waited.
  *
  * One check, called before every tool runs (MCP wrapper, both batch executors, the agent loop):
+ *  - while the user has stopped clawdcursor (control.ts), every call is refused except asking them for control back;
  *  - a call aimed at an overlay process (by pid, or by the overlay's process name) is refused;
  *  - while a pause is pending, EVERY call is refused except the few that wait on, end or report it. Deny by default: the
  *    pause prompt's buttons and reply box exist only while paused, and the reply box takes the keyboard and the foreground
@@ -14,6 +15,7 @@
 import { controlBanner } from './banner';
 import { pauseGate } from './pause-gate';
 import { foreignOverlayState } from './overlay-state';
+import { isStopped, STOPPED_TEXT } from './control';
 
 const PID_ARGS = ['processId', 'pid', 'process_id'];
 const READ_ARGS = ['expect', 'assertions'];
@@ -38,9 +40,21 @@ export function isPauseSafeCall(toolName: string, action?: string): boolean {
   return PAUSE_SAFE.has(action ? `${toolName}:${action}` : toolName) || PAUSE_SAFE.has(toolName);
 }
 
+/** While the user has stopped clawdcursor: only asking them for control back, and reporting. Not even waiting or reading. */
+const STOP_SAFE = new Set([
+  'system:pause_for_user', 'pause_for_user', 'ask_user',
+  'task:status', 'agent_status', 'task:abort', 'abort_task', 'done', 'give_up', 'system:report',
+]);
+
+export function isStopSafeCall(toolName: string, action?: string): boolean {
+  return STOP_SAFE.has(action ? `${toolName}:${action}` : toolName) || STOP_SAFE.has(toolName);
+}
+
 const OWN = (what: string) => `${what} is clawdcursor's own on-screen control — it is the user's, never read or acted on. Target the app instead.`;
 
-export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSafe: boolean): string | null {
+export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSafe: boolean, stopSafe = false): string | null {
+  // The user stopped clawdcursor (control.ts): nothing runs until they give control back.
+  if (!stopSafe && isStopped()) return STOPPED_TEXT;
   // This process's overlay, and every other live clawdcursor process's (a daemon's pause is the user's to a stdio server too).
   const foreign = foreignOverlayState();
   const pids = [...controlBanner.overlayPids(), ...foreign.pids];

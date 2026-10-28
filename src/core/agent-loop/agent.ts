@@ -40,7 +40,8 @@ import type { UIMap } from '../sense/ui-map-types';
 import { logger, EVENTS, beginSpan } from '../observability/logger';
 import { getCorrelationId } from '../observability/correlation';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
-import { ownUiRefusal, isPauseSafeCall } from '../own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../own-ui-guard';
+import { isStopped } from '../control';
 import { untilNoForeignPause } from '../overlay-state';
 import {
   callLLMWithTools,
@@ -126,7 +127,8 @@ export interface AgentDeps {
 export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<AgentResult> {
   const startedAt = Date.now();
   const maxTurns = input.maxTurns ?? DEFAULT_MAX_TURNS;
-  const isAborted = input.isAborted ?? (() => false);
+  // A stop from any clawdcursor process (the pill, `clawdcursor stop`) ends the run too, not only this daemon's abort.
+  const isAborted = () => (input.isAborted?.() ?? false) || isStopped();
   const correlationId = getCorrelationId();
   const log = correlationId ? logger.with({ correlationId }) : logger;
 
@@ -601,7 +603,7 @@ ${renderReport(now)}` : null;
         }
 
         // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
-        const ownUi = ownUiRefusal(call.args as Record<string, unknown>, isPauseSafeCall(call.name));
+        const ownUi = ownUiRefusal(call.args as Record<string, unknown>, isPauseSafeCall(call.name), isStopSafeCall(call.name));
         if (ownUi) {
           log.info('agent.tool.blocked', { turn, tool: call.name, decision: 'own_ui', reason: ownUi });
           toolResults.push({ id: call.id, text: ownUi, isError: true });

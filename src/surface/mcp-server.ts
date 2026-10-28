@@ -26,7 +26,7 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
-import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
@@ -116,6 +116,16 @@ function isActingCall(toolName: string, action: string | undefined): boolean {
   return false;
 }
 
+/** Does any step of a batch (compact or granular tool names) change something? */
+function batchActs(steps: unknown): boolean {
+  if (!Array.isArray(steps)) return false;
+  return steps.some(s => {
+    const step = (s ?? {}) as { name?: unknown; arguments?: { action?: unknown }; args?: { action?: unknown } };
+    const action = step.arguments?.action ?? step.args?.action;
+    return typeof step.name === 'string' && isActingCall(step.name, typeof action === 'string' ? action : undefined);
+  });
+}
+
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
   const { compact, ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
@@ -175,7 +185,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +
       'A step your own rules won\'t let you take (creating an account, downloading a private key, entering a password, key or token) is a roadblock too, ' +
       'not a reason to turn the task down: hand over that step, as wide as your rules draw it, and do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there ' +
-      'and ask only for the paste ("Paste your app-specific password, press Enter, then click Resume"); afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
+      'and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
       'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. A paused task returns ' +
       '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
@@ -337,6 +347,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // perception (tier 0) stays silent.
         // Compound tools (compact surface) decide per action in dispatchCompound.
         if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
+        // A batch that acts at any step shows the pill from its start: its first step may be a 30 s wait, and a pill that
+        // is not there cannot be double-clicked (#294).
+        if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
         // The safety gate above has already logged `safety.decision allow`; a guard that refuses after it logs its own
         // verdict, so the audit log never shows a refused call as allowed.
@@ -354,10 +367,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         }
         // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
         // Last before the handler: a pause that came up during the checks above still stops it.
-        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action));
+        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action), isStopSafeCall(tool.name, action));
         if (ownUi) return refuse('own_ui', ownUi);
         const started = Date.now();
         let result;
+        const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         try {
           result = await tool.handler(params, ctx);
         } catch (err) {
@@ -368,6 +382,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           const msg = err instanceof Error ? err.message : String(err);
           sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg) });
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
+        } finally {
+          releasePill();
         }
         if (!result.isError && isFullScreenshotCall(tool.name, action)) {
           result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };

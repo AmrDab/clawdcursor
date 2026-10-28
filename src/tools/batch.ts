@@ -25,7 +25,7 @@ import { evaluateToolCall } from './safety-gate';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot } from './screen-guard';
-import { ownUiRefusal, isPauseSafeCall } from '../core/own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { logger } from '../core/observability/logger';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
@@ -172,7 +172,7 @@ export async function executeBatch(
     const stepAction = typeof args.action === 'string' ? args.action : undefined;
     // The user's own controls are never a target, and nothing runs while a pause waits (own-ui-guard.ts) — checked before
     // the precondition, which reads the screen; a step with one is never pause-safe.
-    const ownUi = ownUiRefusal(args, !guard && isPauseSafeCall(tool.name, stepAction));
+    const ownUi = ownUiRefusal(args, !guard && isPauseSafeCall(tool.name, stepAction), !guard && isStopSafeCall(tool.name, stepAction));
     if (ownUi) {
       logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'own_ui', reason: ownUi, batchStep: i });
       outcomes.push({ i, label, status: 'blocked', text: ownUi });

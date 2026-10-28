@@ -9,7 +9,7 @@
  * - Coordinate scaling handled transparently
  */
 
-import { beforePointerPress, beforeCapture } from './pointer-guard';
+import { beforePointerPress, beforeCapture, guardInputMethods } from './pointer-guard';
 import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
@@ -104,6 +104,7 @@ export class NativeDesktop extends EventEmitter {
   constructor(config: ClawdConfig) {
     super();
     this.config = config;
+    guardInputMethods(this);  // the MCP tools type and click through this class (pointer-guard.ts)
   }
 
   /**

@@ -41,6 +41,7 @@ import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
+import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -1631,7 +1632,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       changesScreen: false,
       async execute(args) {
         const ms = Math.min(5000, Math.max(0, Number(args.ms ?? 0)));
-        await sleep(ms);
+        if (await sleepUnlessStopped(ms)) return { success: false, text: `wait: ${STOPPED_TEXT}` };
         return { success: true, text: `Waited ${ms}ms.` };
       },
     },

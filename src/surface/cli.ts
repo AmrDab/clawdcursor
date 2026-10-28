@@ -68,6 +68,7 @@ import pc from 'picocolors';
 import { migrateFromLegacyDir, getPackageRoot } from '../paths';
 import { ensureHostAppRunning, stopHostApp } from '../platform/native-helper';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
+import { stopControl, resumeControl, isStopped } from '../core/control';
 
 dotenv.config({ quiet: true });
 
@@ -467,19 +468,23 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     ...serverShutdown,
   });
 
-  // ── On-screen control banner: double-click = the `clawdcursor stop` flow ──
-  // (same abort → graceful-stop → exit sequence as POST /stop, same grace
-  // window and hard-kill net). Disable with --no-banner / CLAWD_NO_BANNER=1.
+  // Starting the daemon is the user's own act: it gives control back after a stop.
+  if (isStopped()) {
+    resumeControl();
+    console.log(`   ${e('▶', '>')} An earlier stop was cleared: starting clawdcursor gives it control again.`);
+  }
+
+  // ── On-screen control banner: double-click = the user takes control back ──
+  // The running task is aborted and every clawdcursor process refuses to act until the user gives control back
+  // (control.ts, #294). The daemon stays up; `clawdcursor stop` still shuts it down. Disable with --no-banner / CLAWD_NO_BANNER=1.
   const { controlBanner } = await import('../core/banner');
   if (opts.banner === false) controlBanner.setEnabled(false);
   controlBanner.configure({
     onStopRequested: () => {
-      console.log(`\n${e('🛑', '[STOP]')} Control banner double-clicked — running the stop flow...`);
+      console.log(`\n${e('🛑', '[STOP]')} Control banner double-clicked — stopped; nothing runs until you give control back.`);
+      stopControl('pill');
       try { serverShutdown.onAbort(); } catch { /* non-fatal */ }
-      const grace = Promise.resolve().then(() => serverShutdown.onStop()).catch(() => {});
-      const cap = new Promise<void>(resolve => setTimeout(resolve, 2500));
-      void Promise.race([grace, cap]).then(() => process.exit(0));
-      setTimeout(() => process.exit(1), 6000); // hard-kill safety net
+      controlBanner.unpin();
     },
   });
 
@@ -832,6 +837,9 @@ program
       console.error('Invalid port number');
       process.exit(1);
     }
+    // Every clawdcursor process — stdio MCP servers too, which have no port or pidfile to reach — stops acting now, and a
+    // server the host starts again stays stopped until the user gives control back (control.ts, #294).
+    stopControl('cli');
     const isClawd = await isClawdInstance(port);
     if (!isClawd) {
       console.log(`${e('🐾', '>')} No running instance found on port ` + port);
@@ -928,13 +936,19 @@ program
 
 program
   .command('resume')
-  .description('Continue a task paused for you (same as the on-screen Resume), or --end it')
+  .description('Continue a task paused for you (same as the on-screen Resume), or --end it. After a stop, gives control back.')
   .option('--end', 'End the paused task')
   .option('--port <port>', 'API server port', '3847')
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
     const answer = opts.end ? 'end' : 'resume';
+    const gaveBack = !opts.end && isStopped();
+    if (gaveBack) {
+      resumeControl();
+      console.log(`${e('▶', '>')} control given back: clawdcursor may act again`);
+    }
     if (!(await isClawdInstance(port))) {
+      if (gaveBack) return;
       console.log(`${e('🐾', '>')} No running instance found on port ${port}`);
       process.exitCode = 1;
       return;
@@ -949,6 +963,8 @@ program
       const data = await res.json() as { outcome?: string; was?: string; error?: string };
       if (res.ok) {
         console.log(`${e('▶', '>')} ${data.outcome}${data.was ? `: ${data.was}` : ''}`);
+      } else if (gaveBack) {
+        // Nothing was paused: giving control back was the whole job.
       } else {
         console.error(`${e('❌', '[ERR]')} ${data.error ?? res.statusText}`);
         process.exitCode = 1;
@@ -1489,14 +1505,17 @@ program
 
     // On-screen control banner for EXTERNAL agents driving over stdio. The
     // mcp-server tool wrapper touches it on every consequential call; a
-    // double-click is the human kill switch — exiting the server severs the
-    // editor's desktop control (the host respawns a fresh server on demand).
+    // double-click is the human kill switch. It used to exit the server, but the host
+    // respawned a fresh one on the agent's next call that knew nothing of the stop (#294):
+    // now the stop is a state every clawdcursor process honours (control.ts), and the
+    // agent's in-flight batch ends with "stopped by the user" instead of a dead transport.
     const { controlBanner } = await import('../core/banner');
     if (opts.banner === false) controlBanner.setEnabled(false);
     controlBanner.configure({
       onStopRequested: () => {
-        process.stderr.write('\n[STOP] Control banner double-clicked — shutting down the MCP server.\n');
-        releaseMcp();
+        process.stderr.write('\n[STOP] Control banner double-clicked — stopped; nothing runs until the user gives control back.\n');
+        stopControl('pill');
+        controlBanner.unpin();
       },
     });
 

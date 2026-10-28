@@ -40,6 +40,7 @@ import { macOverlayBinary } from '../platform/mac-ocr-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
+import { isStopped } from './control';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -243,7 +244,7 @@ class ControlBanner {
 
   /** Show and keep shown until unpin() — the autonomous-task lifecycle. */
   pin(): void {
-    if (!this.enabled) return;
+    if (!this.enabled || isStopped()) return;
     this.pinned = true;
     this.clearIdleTimer();
     this.show();
@@ -260,15 +261,35 @@ class ControlBanner {
    * IDLE_HIDE_MS without further pokes. No-op on the timer while pinned.
    */
   touch(idleMs: number = IDLE_HIDE_MS): void {
-    if (!this.enabled) return;
+    if (!this.enabled || isStopped()) return; // after a stop, a refused call must not bring the pill back
     this.show();
     if (this.pinned || this.paused) return; // task lifecycle / pending pause owns visibility
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
+      // A call still in flight (a batch inside a 30 s wait) has control: hiding now told the user it was done (#294).
+      if (this.holds > 0) { this.idleWhileHeld = true; return; }
       if (!this.pinned && !this.paused) this.forceHide();
     }, idleMs);
     this.idleTimer.unref?.();
+  }
+
+  private holds = 0;
+  private idleWhileHeld = false;
+
+  /** For the length of a tool call: the pill, if it is up, stays up until the returned release runs. Shows nothing by itself. */
+  hold(): () => void {
+    this.holds++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.holds--;
+      if (this.holds === 0 && this.idleWhileHeld) {
+        this.idleWhileHeld = false;
+        this.touch(); // the idle countdown starts when control is really released
+      }
+    };
   }
 
   private exitHookInstalled = false;
@@ -405,6 +426,8 @@ class ControlBanner {
     this.pinned = false;
     this.glowEnabled = true;
     this.onStopRequested = undefined;
+    this.holds = 0;
+    this.idleWhileHeld = false;
   }
 }
 
