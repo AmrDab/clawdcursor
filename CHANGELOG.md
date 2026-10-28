@@ -59,7 +59,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   denial is `CAPTURE_DENIED`. A grant is remembered for the process, so
   captures no longer each start a check. A denial, a check that could not
   answer, and a helper that would not run are never remembered, and a failed
-  helper capture forgets the grant. `doctor` and status asked
+  helper capture forgets the grant. When the check cannot answer, the capture
+  still goes ahead, and the `computer screenshot` and `zoom` replies now say
+  that Screen Recording could not be checked: the stderr warning never
+  reached an MCP agent. `doctor` and status asked
   ClawdCursor.app's own entry, which captures never use: on a real Mac they
   printed "DENIED ... enable ClawdCursor" while captures worked. They now
   run the capture check, say "could not check" when it cannot answer, and

@@ -27,7 +27,7 @@ vi.mock('os', async (orig) => {
 // osascript bridge prints true or false. `helper` / `jxa` override those answers; `captureExit` is a helper capture's
 // exit. Everything else exits "not granted". `spawnFails`: nothing can be launched ('error', no exit). `hang`: no answer.
 const probes = vi.hoisted(() => ({
-  spawnFails: false, hang: false, granted: false, calls: [] as string[], captureExit: 1,
+  spawnFails: false, hang: false, granted: false, calls: [] as string[], argv: [] as string[][], captureExit: 1,
   helper: null as null | { code: number; stderr?: string },
   jxa: null as null | { code: number; out: string },
 }));
@@ -36,6 +36,7 @@ vi.mock('child_process', async (orig) => {
   const { EventEmitter } = await import('events');
   const spawn = (cmd: string, args: string[] = []) => {
     probes.calls.push(path.basename(cmd));
+    probes.argv.push(args);
     const proc = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), kill: () => true });
     if (probes.hang) return proc;
     const answer = (code: number, out = '', err = '') => {
@@ -53,7 +54,9 @@ vi.mock('child_process', async (orig) => {
         const j = probes.jxa ?? { code: 0, out: `${probes.granted}\n` };
         return answer(j.code, j.out);
       }
-      if (args[0] === '--fullscreen') return answer(probes.captureExit);
+      if (args[0] === '--fullscreen') {
+        return answer(probes.captureExit, probes.captureExit === 0 ? '{"success":true,"path":"/x.png","width":2,"height":2}' : '');
+      }
       answer(1);
     });
     return proc;
@@ -70,7 +73,7 @@ const mac = async () => {
 };
 const OLD_USAGE = 'usage: screenshot-helper <windowId|--fullscreen> <outputPath>\n';   // main.swift's usage line
 beforeEach(() => {
-  root.dir = empty; probes.calls.length = 0; probes.granted = false; probes.spawnFails = false; probes.hang = false;
+  root.dir = empty; probes.calls.length = 0; probes.argv.length = 0; probes.granted = false; probes.spawnFails = false; probes.hang = false;
   probes.helper = null; probes.jxa = null; probes.captureExit = 1;
 });
 afterEach(() => {
@@ -106,6 +109,33 @@ describe('screenRecordingGranted / assertScreenRecordingGranted', () => {
       await screenRecordingGranted();
       expect(probes.calls).toHaveLength(expected === true ? 1 : 2);   // only a grant is cached
     }
+  });
+
+  it('the osascript call coerces the bridge\'s answer to "true"/"false" (a 1/0 still parses)', async () => {
+    const { screenRecordingGranted, PREFLIGHT_JXA } = await mac();
+    await screenRecordingGranted();
+    expect(PREFLIGHT_JXA).toBe("ObjC.import('CoreGraphics'); String(Boolean($.CGPreflightScreenCaptureAccess()))");
+    expect(probes.argv).toEqual([['-l', 'JavaScript', '-e', PREFLIGHT_JXA]]);
+  });
+
+  it('a capture that went ahead unchecked is remembered for the screenshot reply; a checked one clears it', async () => {
+    root.dir = built;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { assertScreenRecordingGranted, captureScreenViaHelper, lastCaptureUnchecked } = await mac();
+      expect(lastCaptureUnchecked()).toBe(false);
+      probes.helper = { code: 127 };              // no answer: the grab goes ahead
+      await assertScreenRecordingGranted();
+      expect(lastCaptureUnchecked()).toBe(true);
+      probes.captureExit = 0;                     // a helper capture checks the grant itself
+      await captureScreenViaHelper();
+      expect(lastCaptureUnchecked()).toBe(false);
+      await assertScreenRecordingGranted();
+      expect(lastCaptureUnchecked()).toBe(true);
+      probes.helper = null; probes.granted = true;   // answered: granted
+      await assertScreenRecordingGranted();
+      expect(lastCaptureUnchecked()).toBe(false);
+    } finally { warn.mockRestore(); }
   });
 
   it('a grant is cached for the process; a denial is not', async () => {

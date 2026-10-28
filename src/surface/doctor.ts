@@ -290,10 +290,10 @@ export async function runDoctor(opts: {
         console.log(`   → System Settings → Privacy & Security → Accessibility → enable ${who}`);
       }
 
-      // null: the check could not run. Captures still go ahead (with a warning), so it is not a denial.
+      // null: the check could not run. Captures still go ahead (with a warning): not a denial, but not a pass either.
       results.push({
         name: 'macOS Screen Recording permission',
-        ok: perms.screenRecording !== false,
+        ok: perms.screenRecording === true,
         detail: perms.screenRecording === null
           ? 'Could not check — captures go ahead, but a missing grant would show as a wallpaper-only image'
           : perms.screenRecording

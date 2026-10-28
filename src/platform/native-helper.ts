@@ -598,7 +598,8 @@ async function helperPreflight(helperPath: string): Promise<boolean | null> {
   return null;   // the helper did not run (dyld, architecture, quarantine…): no answer, not a grant
 }
 
-const PREFLIGHT_JXA = "ObjC.import('CoreGraphics'); $.CGPreflightScreenCaptureAccess()";
+// Coerced, so a bridge that hands back 1/0 instead of a boolean still prints true/false.
+export const PREFLIGHT_JXA = "ObjC.import('CoreGraphics'); String(Boolean($.CGPreflightScreenCaptureAccess()))";
 
 async function osascriptPreflight(): Promise<boolean | null> {
   const r = await runCheck('osascript', ['-l', 'JavaScript', '-e', PREFLIGHT_JXA]);
@@ -606,9 +607,19 @@ async function osascriptPreflight(): Promise<boolean | null> {
   return out === 'true' ? true : out === 'false' ? false : null;
 }
 
+/** Whether the latest capture went ahead without an answer from the check (set by the gate, cleared by a helper capture). */
+let captureUnchecked = false;
+
+/**
+ * True when the latest capture went ahead although Screen Recording could not be checked. The warning goes to stderr,
+ * which an MCP client never shows the agent, so the screenshot tools say it in their reply.
+ */
+export function lastCaptureUnchecked(): boolean { return captureUnchecked; }
+
 /** Throws ScreenRecordingDeniedError unless Screen Recording is granted (screenRecordingGranted). Not macOS: returns. */
 export async function assertScreenRecordingGranted(): Promise<void> {
   const granted = await screenRecordingGranted();
+  captureUnchecked = granted === null;
   if (granted === false) throw new ScreenRecordingDeniedError();
   if (granted === null) console.warn('⚠️  Screen Recording check did not answer — capturing without it; a missing grant would show as a wallpaper-only image');
 }
@@ -658,6 +669,7 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
       try {
         const result = JSON.parse(stdout.trim());
         if (result.success) {
+          captureUnchecked = false;   // the helper checked the grant itself (exit 2 otherwise)
           resolve({ path: result.path, width: result.width, height: result.height });
         } else {
           fail(new Error(`screenshot-helper returned failure: ${stdout}`));
