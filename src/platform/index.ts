@@ -5,6 +5,7 @@
  */
 
 import type { PlatformAdapter } from './types';
+import { guardInputMethods } from './pointer-guard';
 
 let cached: PlatformAdapter | null = null;
 
@@ -25,7 +26,7 @@ export async function getPlatform(): Promise<PlatformAdapter> {
   }
 
   await adapter.init();
-  cached = adapter;
+  cached = guardInputMethods(adapter);
   return adapter;
 }
 

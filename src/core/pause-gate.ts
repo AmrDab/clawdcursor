@@ -31,6 +31,8 @@
 
 import { controlBanner } from './banner';
 import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
+import { isStopped, resumeControl } from './control';
+import { unguarded } from '../platform/pointer-guard';
 
 export type PauseAnswer = 'resume' | 'end' | 'reply';
 export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | 'replied';
@@ -187,7 +189,8 @@ class PauseGate {
       opts.signal?.removeEventListener('abort', onAbort);
     });
 
-    if (req.doneWhen) this.watchDone(entry, req.doneWhen, req.donePollMs ?? DONE_POLL_MS);
+    // While the user has stopped clawdcursor this prompt asks for control back: only their click answers it.
+    if (req.doneWhen && !isStopped()) this.watchDone(entry, req.doneWhen, req.donePollMs ?? DONE_POLL_MS);
 
     this.startWindow = null;
     void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
@@ -247,6 +250,8 @@ class PauseGate {
     if (this.pending !== p) return;
     this.pending = null;
     if (p.key && this.waiting.delete(p.key)) this.recent.set(p.key, { result, at: Date.now() });
+    // The user's own Resume (never an agent's, never a detected done_when) gives control back after a stop (control.ts).
+    if (result.outcome === 'resumed' && !result.detected && isStopped()) resumeControl();
     controlBanner.showRunning();
     p.settle(result);
   }
@@ -263,7 +268,8 @@ class PauseGate {
     const target: FocusTarget | null = pid
       ? { processId: pid, title: start && start.processId === pid ? start.title : undefined }
       : start;
-    if (target) void this.focusTracker.focus(target).catch(() => { /* best effort */ });
+    // The user's keyboard going back to their own window: not agent input, so never refused or bound (pointer-guard.ts).
+    if (target) void unguarded(() => this.focusTracker.focus(target)).catch(() => { /* best effort */ });
   }
 
   // ── test hooks ──

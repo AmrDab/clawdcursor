@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner } from '../core/banner';
+import { stopControl, __setControlDirForTests } from '../core/control';
 import type { ChildProcess } from 'child_process';
 
 class FakeChild extends EventEmitter {
@@ -82,6 +83,36 @@ describe('controlBanner', () => {
     expect(controlBanner.isVisible()).toBe(true);
     vi.advanceTimersByTime(5_001);
     expect(controlBanner.isVisible()).toBe(false);
+  });
+
+  it('a call in flight keeps the pill up past the idle window; the countdown starts when it returns (#294)', () => {
+    controlBanner.touch(30_000);
+    const release = controlBanner.hold();   // a batch inside a 30 s wait
+    vi.advanceTimersByTime(45_000);
+    expect(controlBanner.isVisible()).toBe(true);
+    release();
+    vi.advanceTimersByTime(29_000);
+    expect(controlBanner.isVisible()).toBe(true);
+    vi.advanceTimersByTime(1_001);
+    expect(controlBanner.isVisible()).toBe(false);
+  });
+
+  it('hold shows nothing by itself: a read-only call does not bring the pill up', () => {
+    const release = controlBanner.hold();
+    expect(controlBanner.isVisible()).toBe(false);
+    release();
+    expect(controlBanner.isVisible()).toBe(false);
+  });
+
+  it('after a stop, a touch or pin does not bring the pill back (#294)', () => {
+    stopControl('pill');
+    try {
+      controlBanner.touch();
+      controlBanner.pin();
+      expect(controlBanner.isVisible()).toBe(false);
+    } finally {
+      __setControlDirForTests(null);
+    }
   });
 
   it('touch while pinned never hides — the task lifecycle owns visibility', () => {

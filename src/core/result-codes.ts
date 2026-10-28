@@ -15,6 +15,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
+  | 'STOPPED' | 'FOREGROUND_CHANGED'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
@@ -63,6 +64,12 @@ const RULES: Rule[] = [
     hint: 'that is the user\'s pill; target the app instead', next: REREAD },
   { code: 'PAUSED', outcome: 'refused', test: /a pause is waiting for the user on screen/i,
     hint: 'the user has not answered the pause yet; wait, do not act' },
+  { code: 'STOPPED', outcome: 'refused', test: /stopped by the user — they took control back/i,
+    hint: 'the user stopped clawdcursor; nothing runs until their Resume gives control back',
+    next: PAUSE('<what you want to do next>') },
+  { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,
+    hint: 'the window in front is not the one you were working in; nothing was sent',
+    next: { mcp: 'window {"action":"focus","processName":"<your app>"}', agent: 'focus_window {"processName":"<your app>"}' } },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
     hint: 'this key combination is never sent; do the step another way' },
   { code: 'DEVIATION', outcome: 'failed', test: /\nDEVIATION: /, whole: true,

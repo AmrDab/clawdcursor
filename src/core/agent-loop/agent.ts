@@ -40,7 +40,8 @@ import type { UIMap } from '../sense/ui-map-types';
 import { logger, EVENTS, beginSpan } from '../observability/logger';
 import { getCorrelationId } from '../observability/correlation';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
-import { ownUiRefusal, isPauseSafeCall } from '../own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../own-ui-guard';
+import { isStopped } from '../control';
 import { untilNoForeignPause } from '../overlay-state';
 import {
   callLLMWithTools,
@@ -126,7 +127,9 @@ export interface AgentDeps {
 export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<AgentResult> {
   const startedAt = Date.now();
   const maxTurns = input.maxTurns ?? DEFAULT_MAX_TURNS;
-  const isAborted = input.isAborted ?? (() => false);
+  // A stop from any clawdcursor process (the pill, `clawdcursor stop`) ends the run too, not only this daemon's abort.
+  const isAborted = () => (input.isAborted?.() ?? false) || isStopped();
+  const abortReason = () => (isStopped() ? 'stopped by the user — nothing runs until they give control back' : 'aborted by user');
   const correlationId = getCorrelationId();
   const log = correlationId ? logger.with({ correlationId }) : logger;
 
@@ -266,7 +269,7 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
   const outerSpan = beginSpan();
   try {
     for (let turn = 1; turn <= maxTurns; turn++) {
-      if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
+      if (isAborted()) return finish('aborted', abortReason(), steps, llmCalls, screenshotsCaptured.n, startedAt);
 
       log.info(EVENTS.AGENT_TURN_START, { turn, historyTurns: history.length });
       const turnStart = Date.now();
@@ -324,7 +327,7 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
             // are distinguishable.
             if (isAborted() || input.abortSignal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
               log.info('agent.aborted', { turn, during: 'llm_call' });
-              return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
+              return finish('aborted', abortReason(), steps, llmCalls, screenshotsCaptured.n, startedAt);
             }
             const msg = err instanceof Error ? err.message : String(err);
             const transient = /\b(timeout|timed out|429|rate.?limit|overload|529|50[0-4]|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|network|fetch failed)\b/i.test(msg);
@@ -430,7 +433,7 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
       let anyScreenChangingTool = false;
 
       for (const call of llmResult.toolCalls) {
-        if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
+        if (isAborted()) return finish('aborted', abortReason(), steps, llmCalls, screenshotsCaptured.n, startedAt);
 
         const tool = toolMap.get(call.name);
         if (!tool) {
@@ -513,7 +516,7 @@ ${renderReport(now)}` : null;
             }
           }
           const outcome = await input.pause({ message: reason, doneWhen, donePollMs });
-          if (isAborted()) return finish('aborted', 'aborted by user', steps, llmCalls, screenshotsCaptured.n, startedAt);
+          if (isAborted()) return finish('aborted', abortReason(), steps, llmCalls, screenshotsCaptured.n, startedAt);
           if (outcome && typeof outcome === 'object') {
             log.info('agent.pause.replied', { turn, tool: call.name });
             holder.invalidate();
@@ -601,7 +604,7 @@ ${renderReport(now)}` : null;
         }
 
         // The user's own controls are never a target, and nothing acts while a pause waits (own-ui-guard.ts).
-        const ownUi = ownUiRefusal(call.args as Record<string, unknown>, isPauseSafeCall(call.name));
+        const ownUi = ownUiRefusal(call.args as Record<string, unknown>, isPauseSafeCall(call.name), isStopSafeCall(call.name));
         if (ownUi) {
           log.info('agent.tool.blocked', { turn, tool: call.name, decision: 'own_ui', reason: ownUi });
           toolResults.push({ id: call.id, text: ownUi, isError: true });

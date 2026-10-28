@@ -118,7 +118,7 @@ Three things here are genuinely rare:
 2. **It verifies.** Pass `expect` on a consequential action and Clawd Cursor re-checks the live screen (with a short settle window for async UIs) and reports a **DEVIATION** instead of a hollow "success." A completed task can't be marked done on evidence that was already true before it acted.
 3. **One safety gate.** Every call &mdash; from an editor over stdio, an external agent over HTTP, or the built-in loop &mdash; routes through a single `safety.evaluate()` chokepoint (allow / confirm / block) before it touches the desktop. The agent cannot bypass it.
 
-Plus: whenever an agent is driving, an on-screen **"desktop control in progress" banner** and an amber **glow around the screen edges**, on Windows, macOS and Linux &mdash; **double-click the banner to stop.** When the agent needs you (a sign-in, a 2FA code), the glow turns blue and the banner says what to do, with **Resume** and **End task**. A human at the machine always knows, and always has a kill switch.
+Plus: whenever an agent is driving, an on-screen **"desktop control in progress" banner** and an amber **glow around the screen edges**, on Windows, macOS and Linux &mdash; **double-click the banner to stop.** A stop holds until you give control back: the agent's next request comes up as a prompt, and only your **Resume** lets it act again (or run `clawdcursor resume`). Keys and clicks also go only to the window the agent was working in: if you switch apps while it waits, its next input is refused instead of landing in your window. When the agent needs you (a sign-in, a 2FA code), the glow turns blue and the banner says what to do, with **Resume** and **End task**. A human at the machine always knows, and always has a kill switch.
 
 ---
 

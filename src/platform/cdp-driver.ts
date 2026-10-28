@@ -49,6 +49,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AGENT_CDP_PORT } from '../llm/browser-config';
+import { guardInputMethods } from './pointer-guard';
 
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──
 const DEFAULT_CDP_PORT = 9223;
@@ -210,6 +211,7 @@ export class CDPDriver {
    */
   constructor(cdpPort = DEFAULT_CDP_PORT) {
     this.cdpPort = cdpPort;
+    guardInputMethods(this);  // page actions: refused once the user stops clawdcursor (pointer-guard.ts)
   }
 
   // ════════════════════════════════════════════════════════════════════

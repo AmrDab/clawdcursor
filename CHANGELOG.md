@@ -18,6 +18,36 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Fixed
 
+- **A stop really stops, and keys go only to the agent's window (#294).** An
+  agent queued a batch: wait 30 s, then Ctrl+L and paste a URL with Enter.
+  During the wait the user stopped clawdcursor and switched to the Claude app.
+  The keys and the URL landed in the Claude app, and every step said ok. There
+  were three causes:
+  - "Stop" was not a state. The pill's double-click ended the stdio server, and
+    the host started a fresh one on the agent's next call, which knew nothing of
+    the stop. `clawdcursor stop` could not reach stdio servers at all.
+  - Nothing checked which window was in front before a key, a paste or a click.
+  - The pill hides 30 s after the last action, and a wait is not an action, so
+    during the wait there was no pill to double-click.
+
+  Now a stop (the pill, `clawdcursor stop`, or the dashboard's Stop) is shared by
+  every clawdcursor process and survives a restart:
+  - every call answers "stopped by the user", a running `wait` ends at once, the
+    rest of a batch does not run, and a call already running is refused at its
+    next key, click, element action, window change or page action;
+  - only the user gives control back: their Resume on the agent's next
+    `pause_for_user` prompt, `clawdcursor resume`, or starting the daemon. The
+    daemon no longer exits on a double-click.
+
+  Every key, paste, click, drag and scroll first checks that the window in front
+  is still the one the agent was working in. If it is not, nothing is sent and
+  the agent is told "foreground changed: you were working in msedge, but claude
+  is in front now". A new window within 5 s of the agent's own click, Return or
+  shortcut is the agent's own doing; a change after a longer gap is the user's.
+  `window focus` binds the agent to a window on purpose.
+
+  A batch that acts at any step shows the pill from its start, and the pill
+  stays up while a call is still running.
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
   screen. With one hop to a full-screen Space, the list read "Windows (2)"

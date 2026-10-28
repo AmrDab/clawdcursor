@@ -49,7 +49,7 @@ vi.mock('../tools/safety-gate', () => ({
 
 // ── Mock controlBanner so touch() is a no-op ────────────────────────────────
 vi.mock('../core/banner', () => ({
-  controlBanner: { touch: vi.fn(), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
+  controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
 }));
 
 import { createMcpServer, type McpServerLike, type McpToolResult } from '../surface/mcp-server';

@@ -9,6 +9,7 @@ import { agentBrowserConnectOptions } from '../llm/browser-config';
 import { resolveAlias } from '../core/router/aliases';
 import { pauseGate } from '../core/pause-gate';
 import { foreignOverlayState } from '../core/overlay-state';
+import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 
 const execFileAsync = promisify(execFile);
 
@@ -336,7 +337,8 @@ export function getOrchestrationTools(): ToolDefinition[] {
       compactGroup: 'computer',
       safetyTier: 0,
       handler: async ({ seconds }) => {
-        await new Promise(r => setTimeout(r, seconds * 1000));
+        // Ends early when the user stops clawdcursor: a wait is exactly when they step in (#294).
+        if (await sleepUnlessStopped(seconds * 1000)) return { text: `wait: ${STOPPED_TEXT}`, isError: true };
         return { text: `Waited ${seconds}s` };
       },
     },

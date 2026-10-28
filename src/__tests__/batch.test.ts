@@ -22,6 +22,7 @@ let pausePending: null | { message: string } = null;
 vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pausePending } }));
 
 import { executeBatch, getBatchTools } from '../tools/batch';
+import { stopControl, sleepUnlessStopped, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 
 const tool = (name: string, handler: any) => ({ name, parameters: {}, safetyTier: 1, handler });
 const okTool = (name: string) => tool(name, vi.fn(async () => ({ text: `${name} ok` })));
@@ -52,6 +53,36 @@ describe('executeBatch — a pause waiting for the user', () => {
     const r = await executeBatch([{ name: 'click', arguments: { x: 1, y: 2 }, precheck: { window: 'Notepad' } } as any], ctx);
     expect(tools.get_active_window.handler).not.toHaveBeenCalled();
     expect(r.steps[0]).toMatchObject({ status: 'blocked' });
+  });
+});
+
+describe('executeBatch — the user stops clawdcursor mid-batch (#294)', () => {
+  afterEach(() => __setControlDirForTests(null));
+
+  it('a stop during the wait ends it at once, and the queued key and type never run', async () => {
+    tools.wait = { ...tool('wait', async () => (await sleepUnlessStopped(30_000)) ? { text: `wait: ${STOPPED_TEXT}`, isError: true } : { text: 'Waited' }), safetyTier: 0 };
+    tools.key_press = okTool('key_press');
+    tools.type_text = okTool('type_text');
+    setTimeout(() => stopControl('pill'), 30);
+    const started = Date.now();
+    const r = await executeBatch([
+      { name: 'wait', arguments: { seconds: 30 } },
+      { name: 'key_press', arguments: { key: 'ctrl+l' } },
+      { name: 'type_text', arguments: { text: 'https://example.com\n' } },
+    ], ctx);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(tools.key_press.handler).not.toHaveBeenCalled();
+    expect(tools.type_text.handler).not.toHaveBeenCalled();
+    expect(r.allDone).toBe(false);
+    expect(r.steps[0].text).toMatch(/stopped by the user/);
+  });
+
+  it('after a stop every step is refused before it runs', async () => {
+    tools.key_press = okTool('key_press');
+    stopControl('pill');
+    const r = await executeBatch([{ name: 'key_press', arguments: { key: 'Return' } }], ctx);
+    expect(tools.key_press.handler).not.toHaveBeenCalled();
+    expect(r.steps[0]).toMatchObject({ status: 'blocked', text: STOPPED_TEXT });
   });
 });
 
