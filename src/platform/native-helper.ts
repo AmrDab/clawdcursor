@@ -32,7 +32,7 @@ interface JsonRpcResponse {
 
 interface PermissionStatus {
   accessibility: boolean;
-  screenRecording: boolean;
+  screenRecording: boolean | null;   // null: could not check (captures go ahead with a warning)
   processPath?: string;
   bundleId?: string;
 }
@@ -395,7 +395,7 @@ export async function checkPermissionsQuick(): Promise<PermissionStatus> {
 
   return {
     accessibility: (binaryResult?.accessibility ?? false) || probeAx,
-    screenRecording: screenRecording === true,
+    screenRecording,
     processPath: binaryResult?.processPath ?? process.execPath,
     bundleId: binaryResult?.bundleId ?? undefined,
   };
@@ -552,55 +552,58 @@ export class ScreenRecordingDeniedError extends Error {
   constructor() { super(SCREEN_RECORDING_DENIED); this.name = 'ScreenRecordingDeniedError'; }
 }
 
-/** Set once Screen Recording is confirmed. A denial is never cached: the next capture asks again. */
+/** Set once Screen Recording is confirmed; cleared when a helper capture fails. A denial is never cached. */
 let screenRecordingConfirmed = false;
 
 /**
- * Whether this process may record the screen: true, false (denied) or null (the check did not answer). The one question
- * the capture gate and doctor/status ask. It is asked of a child process, which macOS judges as the same identity as a
- * capture here (the app running clawdcursor), not as ClawdCursor.app:
- * - the screenshot helper's CGPreflightScreenCaptureAccess, which runs before it reads its arguments (exit 2: denied);
- * - no helper built (#244): a `screencapture -x` test grab, which macOS fails without the grant.
+ * Whether this process may record the screen: true, false (denied) or null (could not check). The one question the
+ * capture gate and doctor/status ask. CGPreflightScreenCaptureAccess is asked in a child process, which macOS judges as
+ * the same identity as a capture here (the app running clawdcursor), not as ClawdCursor.app. Neither way captures, so
+ * there is no permission prompt and no capture flash:
+ * - the screenshot helper's own check, which runs before it reads its arguments (exit 2: denied);
+ * - no helper built (#244): the same call through osascript's JavaScript bridge, which needs no Command Line Tools.
  *
- * A grant is cached for the life of the process, so captures do not each spawn a check. Revoking it does not leave a
- * stale grant in use: macOS quits or blocks the app it is revoked from, and the helper still checks inside every capture.
+ * A grant is cached, so captures do not each spawn a check. Revoking it does not leave a stale grant in use: macOS quits
+ * or blocks the app it is revoked from, the helper still checks inside every capture, and a failed helper capture clears it.
  */
 export async function screenRecordingGranted(): Promise<boolean | null> {
   if (!IS_MACOS || screenRecordingConfirmed) return true;
   const helperPath = findNativeHelperPath('screenshot-helper');
-  const granted = await (helperPath ? helperPreflight(helperPath) : screencaptureProbe());
-  if (granted) screenRecordingConfirmed = true;
+  const granted = await (helperPath ? helperPreflight(helperPath) : osascriptPreflight());
+  if (granted === true) screenRecordingConfirmed = true;
   return granted;
 }
 
-function helperPreflight(helperPath: string): Promise<boolean | null> {
+/** Runs a check; null when it could not be launched, was killed, or did not answer within 5s. */
+function runCheck(cmd: string, args: string[]): Promise<{ code: number; stdout: string; stderr: string } | null> {
   return new Promise(resolve => {
-    const proc = spawn(helperPath, ['--preflight']);
+    const proc = spawn(cmd, args);
+    let stdout = '', stderr = '';
+    proc.stdout?.on('data', d => { stdout += d; });
+    proc.stderr?.on('data', d => { stderr += d; });
     const timer = setTimeout(() => { proc.kill(); resolve(null); }, 5000);
-    // Any exit but 2 passed the preflight (a helper older than --preflight exits 1 on the usage check after it).
-    proc.on('close', c => { clearTimeout(timer); resolve(c === null ? null : c !== 2); });
     proc.on('error', () => { clearTimeout(timer); resolve(null); });
+    proc.on('close', code => { clearTimeout(timer); resolve(code === null ? null : { code, stdout, stderr }); });
   });
 }
 
-/** A test grab: without the grant `screencapture` fails ("could not create image from display"), unlike a nut-js grab. */
-function screencaptureProbe(): Promise<boolean | null> {
-  const tmp = path.join(os.tmpdir(), `.clawdcursor-probe-${crypto.randomUUID()}.png`);
-  return new Promise(resolve => {
-    const done = (granted: boolean | null) => {
-      clearTimeout(timer);
-      try { fs.unlinkSync(tmp); } catch { /* nothing written */ }
-      resolve(granted);
-    };
-    const proc = spawn('screencapture', ['-x', '-t', 'png', tmp]);
-    const timer = setTimeout(() => { proc.kill(); done(null); }, 5000);
-    proc.on('error', () => done(null));   // could not run: no answer, not a denial
-    proc.on('close', code => {
-      let wrote = false;
-      try { wrote = fs.statSync(tmp).size > 100; } catch { /* nothing written */ }
-      done(code === 0 && wrote);
-    });
-  });
+/** What a helper built before --preflight existed prints, after its permission check passed (main.swift). */
+const HELPER_USAGE = 'usage: screenshot-helper <windowId|--fullscreen> <outputPath>';
+
+async function helperPreflight(helperPath: string): Promise<boolean | null> {
+  const r = await runCheck(helperPath, ['--preflight']);
+  if (r?.code === 0) return true;
+  if (r?.code === 2) return false;
+  if (r?.code === 1 && r.stderr.includes(HELPER_USAGE)) return true;   // an older helper: the check passed, then the usage line
+  return null;   // the helper did not run (dyld, architecture, quarantine…): no answer, not a grant
+}
+
+const PREFLIGHT_JXA = "ObjC.import('CoreGraphics'); $.CGPreflightScreenCaptureAccess()";
+
+async function osascriptPreflight(): Promise<boolean | null> {
+  const r = await runCheck('osascript', ['-l', 'JavaScript', '-e', PREFLIGHT_JXA]);
+  const out = r?.code === 0 ? r.stdout.trim() : '';
+  return out === 'true' ? true : out === 'false' ? false : null;
 }
 
 /** Throws ScreenRecordingDeniedError unless Screen Recording is granted (screenRecordingGranted). Not macOS: returns. */
@@ -628,13 +631,15 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
   const tmpPath = outputPath || path.join(os.tmpdir(), `.clawdcursor-cap-${crypto.randomUUID()}.png`);
 
   return new Promise((resolve, reject) => {
+    // A failed helper capture drops the cached grant: the fallback grab after it is checked afresh.
+    const fail = (err: Error) => { screenRecordingConfirmed = false; reject(err); };
     const proc = spawn(helperPath, ['--fullscreen', tmpPath]);
     let stdout = '';
     let stderr = '';
 
     const timeout = setTimeout(() => {
       proc.kill();
-      reject(new Error('screenshot-helper timed out after 15s'));
+      fail(new Error('screenshot-helper timed out after 15s'));
     }, 15000);
 
     proc.stdout.on('data', (data) => { stdout += data; });
@@ -643,11 +648,11 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
     proc.on('close', (code) => {
       clearTimeout(timeout);
       if (code === 2) {
-        reject(new ScreenRecordingDeniedError());
+        fail(new ScreenRecordingDeniedError());
         return;
       }
       if (code !== 0) {
-        reject(new Error(`screenshot-helper failed (exit ${code}): ${stderr}`));
+        fail(new Error(`screenshot-helper failed (exit ${code}): ${stderr}`));
         return;
       }
       try {
@@ -655,10 +660,10 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
         if (result.success) {
           resolve({ path: result.path, width: result.width, height: result.height });
         } else {
-          reject(new Error(`screenshot-helper returned failure: ${stdout}`));
+          fail(new Error(`screenshot-helper returned failure: ${stdout}`));
         }
       } catch {
-        reject(new Error(`Invalid screenshot-helper output: ${stdout}`));
+        fail(new Error(`Invalid screenshot-helper output: ${stdout}`));
       }
     });
   });

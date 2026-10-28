@@ -28,7 +28,7 @@ export interface ReadinessStatus {
   // macOS-specific permissions (null on other platforms)
   macPermissions: {
     accessibility: boolean;
-    screenRecording: boolean;
+    screenRecording: boolean | null;   // null: could not check
   } | null;
   
   // AI configuration
@@ -126,7 +126,7 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
       issues.push('macOS Accessibility permission not granted');
       nextSteps.push('System Settings → Privacy & Security → Accessibility → Enable ClawdCursor');
     }
-    if (!macPermissions.screenRecording) {
+    if (macPermissions.screenRecording === false) {
       issues.push('macOS Screen Recording permission not granted');
       nextSteps.push('System Settings → Privacy & Security → Screen & System Audio Recording → Enable the app running clawdcursor (terminal or MCP host)');
     }
@@ -180,7 +180,8 @@ export async function printStatusReport(): Promise<void> {
   // macOS Permissions
   if (status.macPermissions) {
     console.log(`${check(status.macPermissions.accessibility)} Accessibility: ${status.macPermissions.accessibility ? 'Granted' : 'Not granted'}`);
-    console.log(`${warn(status.macPermissions.screenRecording)} Screen Recording: ${status.macPermissions.screenRecording ? 'Granted' : 'Not granted'} ${!status.macPermissions.screenRecording ? pc.gray('(optional)') : ''}`);
+    const sr = status.macPermissions.screenRecording;
+    console.log(`${warn(sr === true)} Screen Recording: ${sr === null ? 'Could not check' : sr ? 'Granted' : 'Not granted'} ${!sr ? pc.gray('(optional)') : ''}`);
   } else if (process.platform !== 'darwin') {
     console.log(`${pc.green('✓')} Platform: ${process.platform} ${pc.gray('(no special permissions needed)')}`);
   }

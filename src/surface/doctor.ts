@@ -261,10 +261,10 @@ export async function runDoctor(opts: {
       let perms = await checkPermissionsQuick();
 
       // If any permission is missing, trigger system popups to request them
-      if (!perms.accessibility || !perms.screenRecording) {
+      if (!perms.accessibility || perms.screenRecording === false) {
         console.log('   🔐 Requesting macOS permissions (system dialogs may appear)...');
         try {
-          perms = { ...(await requestPermissions()), screenRecording: (await screenRecordingGranted()) === true };
+          perms = { ...(await requestPermissions()), screenRecording: await screenRecordingGranted() };
         } catch (err) {
           // Continue with the check results, but say why no dialog came (e.g. the helpers are not built yet).
           console.log(`   ⚠️  ${err instanceof Error ? err.message : String(err)}`);
@@ -272,8 +272,9 @@ export async function runDoctor(opts: {
       }
       // With no app bundle the grant belongs to whatever runs clawdcursor — there is no "ClawdCursor" entry to enable.
       const who = perms.bundleId ? 'ClawdCursor' : 'the app running clawdcursor (your terminal or editor)';
-      // Captures run as the app that launched clawdcursor, never as ClawdCursor.app (#276).
-      const recorder = 'the app running clawdcursor (this terminal; for the MCP server, its host app, e.g. Claude)';
+      // Captures run as the app that launched clawdcursor, never as ClawdCursor.app (#276) — so this answer is this terminal's.
+      const scope = 'checked for this terminal; the MCP server captures as its host app (e.g. Claude), which needs its own grant';
+      const enable = 'System Settings → Privacy & Security → Screen & System Audio Recording → enable the app running clawdcursor';
 
       results.push({
         name: 'macOS Accessibility permission',
@@ -289,19 +290,25 @@ export async function runDoctor(opts: {
         console.log(`   → System Settings → Privacy & Security → Accessibility → enable ${who}`);
       }
 
+      // null: the check could not run. Captures still go ahead (with a warning), so it is not a denial.
       results.push({
         name: 'macOS Screen Recording permission',
-        ok: perms.screenRecording,
-        detail: perms.screenRecording
-          ? 'Granted — clawdcursor can capture the screen'
-          : `DENIED — open System Settings → Privacy & Security → Screen & System Audio Recording → enable ${recorder}`,
+        ok: perms.screenRecording !== false,
+        detail: perms.screenRecording === null
+          ? 'Could not check — captures go ahead, but a missing grant would show as a wallpaper-only image'
+          : perms.screenRecording
+            ? 'Granted — clawdcursor can capture the screen'
+            : `DENIED — open ${enable}`,
       });
-      if (perms.screenRecording) {
+      if (perms.screenRecording === null) {
+        console.log('   ⚠️  Screen Recording permission: could not check');
+      } else if (perms.screenRecording) {
         console.log('   ✅ Screen Recording permission granted');
       } else {
         console.log('   ❌ Screen Recording permission DENIED');
-        console.log(`   → System Settings → Privacy & Security → Screen & System Audio Recording → enable ${recorder}`);
+        console.log(`   → ${enable}`);
       }
+      console.log(`   ℹ  ${scope}`);
 
       if (perms.bundleId) {
         console.log(`   ℹ  Checked process: ${perms.bundleId}`);

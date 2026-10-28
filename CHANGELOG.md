@@ -53,14 +53,19 @@ All notable changes to Clawd Cursor will be documented in this file.
   checked first, but it checked only when the screenshot helper was built.
   An npm install without the Xcode Command Line Tools has no helper, so the
   check was skipped and screenshots and OCR still returned the wallpaper and
-  menu bar. With no helper, a `screencapture -x` test grab now answers, which
-  macOS fails without the grant, and a denial is `CAPTURE_DENIED`. A grant is
-  remembered for the process, so captures no longer each start a check; a
-  denial is asked again on the next capture. `doctor` and status asked
+  menu bar. With no helper, macOS's own permission check
+  (`CGPreflightScreenCaptureAccess`) is now asked through `osascript`, which
+  needs no Command Line Tools and captures nothing (no prompt, no flash). A
+  denial is `CAPTURE_DENIED`. A grant is remembered for the process, so
+  captures no longer each start a check. A denial, a check that could not
+  answer, and a helper that would not run are never remembered, and a failed
+  helper capture forgets the grant. `doctor` and status asked
   ClawdCursor.app's own entry, which captures never use: on a real Mac they
   printed "DENIED ... enable ClawdCursor" while captures worked. They now
-  run the capture check and name the app to enable: the app running
-  clawdcursor (terminal or MCP host). The denial says that a server started
+  run the capture check, say "could not check" when it cannot answer, and
+  name the app to enable: the app running clawdcursor. `doctor` notes that
+  its answer is for its own terminal, and that the MCP server captures as its
+  host app (e.g. Claude), which needs its own grant. The denial says that a server started
   without an app (launchd, ssh) needs node and screenshot-helper enabled
   instead. The build hint no longer says `cd native && ./build.sh`, which
   fails from an npm install: it names `xcode-select --install` and the
