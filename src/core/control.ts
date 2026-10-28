@@ -62,6 +62,7 @@ export const STOPPED_TEXT =
 
 /** Sleep that ends early when the user stops clawdcursor. True when it was cut short. */
 export async function sleepUnlessStopped(ms: number): Promise<boolean> {
+  settle();
   const end = Date.now() + ms;
   for (;;) {
     if (isStopped()) return true;
@@ -152,14 +153,21 @@ function focused(q: WindowQuery): void {
 }
 
 /**
- * The agent launched an app: its next input binds to whatever opens. Not to the launched pid — the window often belongs to
- * another process (a UWP host, a browser's existing instance, an Electron launcher), and refusing there would block the
- * commonest flow, "open Notepad, then type".
+ * The agent launched an app: its next input binds to the launched window, matched by pid OR title — the window often
+ * belongs to another process than the one started (a UWP host, a browser's existing instance, an Electron launcher), and
+ * the adapters report the title of the window that came up. When a launch reports neither, the next input binds to
+ * whatever opens.
  */
-function launched(): void {
+function launched(r?: { pid?: number; title?: string }): void {
+  movedAt = Date.now();
+  if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined }; return; }
   lease = undefined;
   pending = null;
-  movedAt = Date.now();
+}
+
+/** A wait: the agent declares it does nothing, so a window that comes up during it is the user's, not the agent's (#294). */
+function settle(): void {
+  movedAt = 0;
 }
 
 setInputGuard({ stopCheck, before, done, focused, launched });

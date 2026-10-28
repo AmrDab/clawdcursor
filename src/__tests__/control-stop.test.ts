@@ -23,7 +23,7 @@ import { pauseGate } from '../core/pause-gate';
 type Win = { processId: number; processName: string; title?: string };
 const EDGE: Win = { processId: 100, processName: 'msedge' };
 const CLAUDE: Win = { processId: 200, processName: 'claude' };
-const NOTEPAD: Win = { processId: 300, processName: 'notepad' };
+const NOTEPAD: Win = { processId: 300, processName: 'notepad', title: 'Untitled - Notepad' };
 const START: Win = { processId: 400, processName: 'StartMenuExperienceHost' };
 
 let fg: Win | null;
@@ -44,7 +44,8 @@ function fakeDesktop() {
     async invokeElement(o: { name: string }) { sent.push(`invoke ${o.name}`); return { success: true }; },
     async focusWindow(q: Win) { if (d.focusLagMs) later(q, d.focusLagMs); else fg = q; return true; },
     // The Start-menu fallback: its own keys go to the Start menu, a different process.
-    async openApp(name: string) { await d.keyPress('Super'); fg = START; await d.typeText(name); fg = NOTEPAD; return { pid: 999 }; },
+    // The window that comes up belongs to another process than the one started (pid 999): matched by its title.
+    async openApp(name: string) { await d.keyPress('Super'); fg = START; await d.typeText(name); fg = NOTEPAD; return { pid: 999, title: 'Untitled - Notepad' }; },
   };
   return guardInputMethods(d);
 }
@@ -124,6 +125,32 @@ describe('the window in front (#294)', () => {
     await d.keyPress('b');
     expect(d.sent).toEqual(['key a', 'key Super', 'key mod+v', 'type notepad', 'key b']);
   });
+
+  it('a shortcut that opens a window in the same app (ctrl+l) does not excuse a switch to another app right after it', async () => {
+    const d = fakeDesktop();
+    await d.keyPress('ctrl+l');
+    vi.advanceTimersByTime(2_000);
+    fg = CLAUDE;
+    await expect(d.typeText('https://example.com\n')).rejects.toThrow(/working in msedge/);
+  });
+
+  it("a wait ends the agent's own-doing window: an app that comes up during it is the user's", async () => {
+    vi.useRealTimers();
+    const d = fakeDesktop();
+    await d.keyPress('a');
+    await d.mouseClick(1, 1);           // could bring another app up…
+    await sleepUnlessStopped(30);       // …but the agent waits, and in the wait the user switches
+    fg = CLAUDE;
+    await expect(d.keyPress('b')).rejects.toThrow(/working in msedge/);
+  });
+
+  it('a launch binds to the launched window: after a gap in which the user switched, typing is refused', async () => {
+    vi.useRealTimers();  // the wait for the launched window is measured on the real clock; the gap itself does not matter
+    const d = fakeDesktop();
+    await d.openApp('notepad');
+    fg = CLAUDE;
+    await expect(d.keyPress('x')).rejects.toThrow(/you focused Untitled - Notepad, but claude/);
+  }, 10_000);
 
   it("clawdcursor's own housekeeping (the keyboard back after a pause) is neither checked nor bound", async () => {
     const d = fakeDesktop();

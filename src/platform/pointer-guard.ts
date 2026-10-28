@@ -37,8 +37,8 @@ interface InputGuard {
   done(movesFocus: boolean): void;
   /** The agent brought a window up on purpose: the next input binds to it. */
   focused(q: WindowQuery): void;
-  /** The agent launched an app: the next input binds to whatever opens. */
-  launched(): void;
+  /** The agent launched an app: the next input binds to its window (by pid or title), or to whatever opens when unknown. */
+  launched(r?: { pid?: number; title?: string }): void;
 }
 let inputGuard: InputGuard | null = null;
 /** Inside a guarded call ('agent': its inner steps are already covered), or clawdcursor's own housekeeping ('user'). */
@@ -113,8 +113,8 @@ export function guardInputMethods<T extends object>(target: T): T {
   for (const m of ['openApp', 'launchApp']) {
     wrap(m, async (g, f, args, nested) => {
       if (!nested) g.stopCheck();
-      const r = await f(...args);
-      g.launched();
+      const r = await f(...args) as { pid?: number; title?: string } | undefined;
+      g.launched(r);
       return r;
     });
   }
@@ -122,15 +122,21 @@ export function guardInputMethods<T extends object>(target: T): T {
 }
 
 /**
- * Could this input bring another window to the front? A press of the pointer; Return, Escape, a function key or a combo
- * with a modifier; typed text ending in a newline. Plain typing cannot.
+ * Could this input bring ANOTHER APP's window to the front? A press of the pointer; Return or Escape; switching apps
+ * (alt/cmd+tab); the system launcher (the Windows key, Win+R, cmd+space); typed text ending in a newline. Not plain typing,
+ * scrolling, or a shortcut such as ctrl+l / ctrl+t / cmd+n, which opens a window in the same app — no new process to excuse.
  */
 function movesFocus(method: string, args: unknown[]): boolean {
   if (method === 'typeText') return /\r?\n$/.test(String(args[0] ?? ''));
+  if (method === 'mouseScroll') return false;
   if (method === 'keyPress' || method === 'keyDown') {
-    return /return|enter|escape|esc\b|tab|f\d|alt|super|win|cmd|meta|command|option|ctrl|control|mod\+/i.test(String(args[0] ?? ''));
+    const k = String(args[0] ?? '').toLowerCase().replace(/\s+/g, '');
+    return /(^|\+)(return|enter|escape|esc)$/.test(k)
+      || /(alt|cmd|command|super|win|meta)\+(shift\+)?tab$/.test(k)
+      || /^(super|win|meta)(\+|$)/.test(k)
+      || /^(cmd|command|mod|super)\+space$/.test(k);
   }
-  return true;  // clicks, drags, scrolls (Windows raises the window under the point), the composite execute* actions
+  return true;  // clicks, drags, a held button, the composite execute* actions
 }
 
 /**
