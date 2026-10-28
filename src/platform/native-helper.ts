@@ -110,7 +110,7 @@ export class NativeHelper {
     }
 
     throw new Error(
-      'ClawdCursor native helper not found. On macOS, run: cd native && ./build.sh\n' +
+      `ClawdCursor native helper not found. ${nativeBuildHint()}\n` +
       'Searched locations:\n' + locations.map(l => `  - ${l}`).join('\n')
     );
   }
@@ -314,51 +314,7 @@ export function getNativeHelper(): NativeHelper {
 // The permission-check binary reports the app bundle's TCC grants, but these
 // can differ from the terminal's grants. We probe using the same binaries
 // that clawdcursor agent/doctor use, so status matches reality.
-
-async function probeScreenRecording(): Promise<boolean> {
-  // Try screenshot-helper first (the actual capture mechanism clawdcursor uses)
-  const screenshotHelperPath = findNativeHelperPath('screenshot-helper');
-  if (screenshotHelperPath) {
-    const ok = await new Promise<boolean>((resolve) => {
-      const tmp = `/tmp/.clawdcursor-probe-${process.pid}.png`;
-      const proc = spawn(screenshotHelperPath, ['--fullscreen', tmp]);
-      const timeout = setTimeout(() => { proc.kill(); resolve(false); }, 5000);
-      proc.on('close', (code) => {
-        clearTimeout(timeout);
-        try {
-          if (code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 100) {
-            fs.unlinkSync(tmp);
-            resolve(true);
-          } else {
-            try { fs.unlinkSync(tmp); } catch { /* */ }
-            resolve(false);
-          }
-        } catch { resolve(false); }
-      });
-    });
-    if (ok) return true;
-  }
-
-  // Fallback: try screencapture (tests the terminal's own TCC grant)
-  return new Promise((resolve) => {
-    const tmp = `/tmp/.clawdcursor-probe2-${process.pid}.png`;
-    const proc = spawn('screencapture', ['-x', '-t', 'png', tmp]);
-    const timeout = setTimeout(() => { proc.kill(); resolve(false); }, 5000);
-    proc.on('error', () => { clearTimeout(timeout); resolve(false); });   // could not run: not a crash
-    proc.on('close', (code) => {
-      clearTimeout(timeout);
-      try {
-        if (code === 0 && fs.existsSync(tmp) && fs.statSync(tmp).size > 100) {
-          fs.unlinkSync(tmp);
-          resolve(true);
-        } else {
-          try { fs.unlinkSync(tmp); } catch { /* */ }
-          resolve(false);
-        }
-      } catch { resolve(false); }
-    });
-  });
-}
+// (Screen Recording is screenRecordingGranted below, the capture gate's own check.)
 
 async function probeAccessibility(): Promise<boolean> {
   // Must test actual WINDOW access — process enumeration works without assistive access,
@@ -381,8 +337,11 @@ async function probeAccessibility(): Promise<boolean> {
 
 // Quick permission check (doesn't need full helper running)
 // On non-macOS platforms, returns permissions as granted (not applicable)
-// Uses functional probes to test the terminal's actual capabilities,
+// Accessibility: functional probes of the terminal's actual capabilities,
 // merged with the app bundle's permission-check for best accuracy.
+// Screen Recording: the capture gate's own check (screenRecordingGranted), so
+// doctor and status answer for the identity a capture runs as — never the
+// host app's own entry, which captures do not use.
 export async function checkPermissionsQuick(): Promise<PermissionStatus> {
   // On non-macOS platforms, permissions aren't needed in the same way
   if (!IS_MACOS) {
@@ -429,14 +388,14 @@ export async function checkPermissionsQuick(): Promise<PermissionStatus> {
   // Functional probes — test what the terminal can ACTUALLY do.
   // If the binary says denied but the probe succeeds, the terminal has the permission.
   // If the binary says granted, trust it (no need to probe).
-  const [probeScreen, probeAx] = await Promise.all([
-    (binaryResult?.screenRecording) ? Promise.resolve(true) : probeScreenRecording(),
+  const [screenRecording, probeAx] = await Promise.all([
+    screenRecordingGranted(),
     (binaryResult?.accessibility) ? Promise.resolve(true) : probeAccessibility(),
   ]);
 
   return {
     accessibility: (binaryResult?.accessibility ?? false) || probeAx,
-    screenRecording: (binaryResult?.screenRecording ?? false) || probeScreen,
+    screenRecording: screenRecording === true,
     processPath: binaryResult?.processPath ?? process.execPath,
     bundleId: binaryResult?.bundleId ?? undefined,
   };
@@ -456,7 +415,7 @@ export async function requestPermissions(): Promise<PermissionStatus> {
 
   const permissionCheckPath = findNativeHelperPath('permission-check');
   if (!permissionCheckPath) {
-    throw new Error('permission-check binary not found. Run: cd native && ./build.sh');
+    throw new Error(`permission-check binary not found. ${nativeBuildHint()}`);
   }
 
   return new Promise((resolve, reject) => {
@@ -497,6 +456,12 @@ function findNativeHelperPath(binary: string): string | null {
     path.join(os.homedir(), '.clawdcursor', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
   ];
   return locations.find(loc => fs.existsSync(loc)) ?? null;
+}
+
+/** How to get the helpers built. The package's postinstall builds them when the Xcode Command Line Tools are present. */
+export function nativeBuildHint(): string {
+  return 'Install the Xcode Command Line Tools (xcode-select --install), then build the helpers: ' +
+    `node "${path.join(getPackageRoot(), 'scripts', 'postinstall-native.js')}"`;
 }
 
 function getNativeHelperPath(binary: string): string {
@@ -575,7 +540,9 @@ function getOrCreateHostToken(): string {
   }
 }
 
-const SCREEN_RECORDING_DENIED = 'Screen Recording permission denied — grant it to the app running clawdcursor in System Settings → Privacy & Security → Screen Recording';
+// TCC keys the grant to the app a process was launched from; with none above it (launchd, ssh), to each binary itself.
+const SCREEN_RECORDING_DENIED = 'Screen Recording permission denied — in System Settings → Privacy & Security → Screen Recording, ' +
+  'enable the app running clawdcursor (terminal or MCP host); if no app started it (launchd, ssh), enable node and screenshot-helper';
 
 /**
  * Screen Recording is not granted. macOS does not fail a capture without it — it returns the wallpaper and menu bar only,
@@ -585,22 +552,62 @@ export class ScreenRecordingDeniedError extends Error {
   constructor() { super(SCREEN_RECORDING_DENIED); this.name = 'ScreenRecordingDeniedError'; }
 }
 
+/** Set once Screen Recording is confirmed. A denial is never cached: the next capture asks again. */
+let screenRecordingConfirmed = false;
+
 /**
- * Throws ScreenRecordingDeniedError unless Screen Recording is granted (the helper's CGPreflightScreenCaptureAccess, which
- * runs before it reads its arguments). Not macOS, or no helper built: nothing to check with, returns.
+ * Whether this process may record the screen: true, false (denied) or null (the check did not answer). The one question
+ * the capture gate and doctor/status ask. It is asked of a child process, which macOS judges as the same identity as a
+ * capture here (the app running clawdcursor), not as ClawdCursor.app:
+ * - the screenshot helper's CGPreflightScreenCaptureAccess, which runs before it reads its arguments (exit 2: denied);
+ * - no helper built (#244): a `screencapture -x` test grab, which macOS fails without the grant.
+ *
+ * A grant is cached for the life of the process, so captures do not each spawn a check. Revoking it does not leave a
+ * stale grant in use: macOS quits or blocks the app it is revoked from, and the helper still checks inside every capture.
  */
-export async function assertScreenRecordingGranted(): Promise<void> {
-  if (!IS_MACOS) return;
+export async function screenRecordingGranted(): Promise<boolean | null> {
+  if (!IS_MACOS || screenRecordingConfirmed) return true;
   const helperPath = findNativeHelperPath('screenshot-helper');
-  if (!helperPath) return;   // not built (#244): nothing to ask
-  const code = await new Promise<number | null>(resolve => {
+  const granted = await (helperPath ? helperPreflight(helperPath) : screencaptureProbe());
+  if (granted) screenRecordingConfirmed = true;
+  return granted;
+}
+
+function helperPreflight(helperPath: string): Promise<boolean | null> {
+  return new Promise(resolve => {
     const proc = spawn(helperPath, ['--preflight']);
     const timer = setTimeout(() => { proc.kill(); resolve(null); }, 5000);
-    proc.on('close', c => { clearTimeout(timer); resolve(c); });
+    // Any exit but 2 passed the preflight (a helper older than --preflight exits 1 on the usage check after it).
+    proc.on('close', c => { clearTimeout(timer); resolve(c === null ? null : c !== 2); });
     proc.on('error', () => { clearTimeout(timer); resolve(null); });
   });
-  if (code === 2) throw new ScreenRecordingDeniedError();
-  if (code === null) console.warn('⚠️  Screen Recording check did not answer — capturing without it; a missing grant would show as a wallpaper-only image');
+}
+
+/** A test grab: without the grant `screencapture` fails ("could not create image from display"), unlike a nut-js grab. */
+function screencaptureProbe(): Promise<boolean | null> {
+  const tmp = path.join(os.tmpdir(), `.clawdcursor-probe-${crypto.randomUUID()}.png`);
+  return new Promise(resolve => {
+    const done = (granted: boolean | null) => {
+      clearTimeout(timer);
+      try { fs.unlinkSync(tmp); } catch { /* nothing written */ }
+      resolve(granted);
+    };
+    const proc = spawn('screencapture', ['-x', '-t', 'png', tmp]);
+    const timer = setTimeout(() => { proc.kill(); done(null); }, 5000);
+    proc.on('error', () => done(null));   // could not run: no answer, not a denial
+    proc.on('close', code => {
+      let wrote = false;
+      try { wrote = fs.statSync(tmp).size > 100; } catch { /* nothing written */ }
+      done(code === 0 && wrote);
+    });
+  });
+}
+
+/** Throws ScreenRecordingDeniedError unless Screen Recording is granted (screenRecordingGranted). Not macOS: returns. */
+export async function assertScreenRecordingGranted(): Promise<void> {
+  const granted = await screenRecordingGranted();
+  if (granted === false) throw new ScreenRecordingDeniedError();
+  if (granted === null) console.warn('⚠️  Screen Recording check did not answer — capturing without it; a missing grant would show as a wallpaper-only image');
 }
 
 /**

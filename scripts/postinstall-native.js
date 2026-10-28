@@ -43,6 +43,6 @@ try {
   execFileSync('/bin/bash', [buildSh], { stdio: 'inherit', cwd: nativeDir });
   console.log('[clawdcursor] Native macOS helper built.');
 } catch (_e) {
-  console.log('[clawdcursor] Native macOS helper build failed (non-fatal). Build manually with: cd native && ./build.sh');
+  console.log('[clawdcursor] Native macOS helper build failed (non-fatal). Build manually with: cd "' + nativeDir + '" && ./build.sh');
 }
 process.exit(0);

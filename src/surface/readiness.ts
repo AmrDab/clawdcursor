@@ -128,7 +128,7 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
     }
     if (!macPermissions.screenRecording) {
       issues.push('macOS Screen Recording permission not granted');
-      nextSteps.push('System Settings → Privacy & Security → Screen & System Audio Recording → Enable ClawdCursor');
+      nextSteps.push('System Settings → Privacy & Security → Screen & System Audio Recording → Enable the app running clawdcursor (terminal or MCP host)');
     }
   }
   

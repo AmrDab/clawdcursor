@@ -48,6 +48,23 @@ All notable changes to Clawd Cursor will be documented in this file.
 
   A batch that acts at any step shows the pill from its start, and the pill
   stays up while a call is still running.
+- **macOS: a capture without Screen Recording is refused on every install,
+  and `doctor` asks the same question (#276).** 1.5.24 said every capture is
+  checked first, but it checked only when the screenshot helper was built.
+  An npm install without the Xcode Command Line Tools has no helper, so the
+  check was skipped and screenshots and OCR still returned the wallpaper and
+  menu bar. With no helper, a `screencapture -x` test grab now answers, which
+  macOS fails without the grant, and a denial is `CAPTURE_DENIED`. A grant is
+  remembered for the process, so captures no longer each start a check; a
+  denial is asked again on the next capture. `doctor` and status asked
+  ClawdCursor.app's own entry, which captures never use: on a real Mac they
+  printed "DENIED ... enable ClawdCursor" while captures worked. They now
+  run the capture check and name the app to enable: the app running
+  clawdcursor (terminal or MCP host). The denial says that a server started
+  without an app (launchd, ssh) needs node and screenshot-helper enabled
+  instead. The build hint no longer says `cd native && ./build.sh`, which
+  fails from an npm install: it names `xcode-select --install` and the
+  package's own build script by its full path.
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
   screen. With one hop to a full-screen Space, the list read "Windows (2)"

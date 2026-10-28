@@ -809,7 +809,7 @@ program
       console.log('Permission grants are only needed on macOS.');
       return;
     }
-    const { requestPermissions } = await import('../platform/native-helper');
+    const { requestPermissions, nativeBuildHint } = await import('../platform/native-helper');
     console.log('🔐 Requesting macOS permissions...');
     console.log('   System dialogs may appear — please allow access.\n');
     try {
@@ -823,7 +823,7 @@ program
       }
     } catch (err) {
       console.error(`❌ Failed to request permissions: ${err}`);
-      console.error('   Ensure ClawdCursor.app is built: cd native && ./build.sh');
+      console.error(`   ${nativeBuildHint()}`);
     }
   });
 
