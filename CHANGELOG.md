@@ -10,9 +10,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   because one step was something their own rules forbid: creating an account,
   downloading a private key, entering a secret. The MCP instructions, the
   `pause_for_user` description and the skill now say that such a step is a
-  roadblock like a sign-in: hand over just that step and do the rest. When a secret
-  must go into a field or a terminal prompt, the agent puts the cursor there and
-  asks only for the paste ("Paste your app-specific password, then press Enter"),
+  roadblock like a sign-in: hand over that step, as wide as the agent's rules draw
+  it, and do the rest they allow. When a secret must go into a field or a terminal
+  prompt, the agent puts the cursor there and asks only for the paste ("Paste your
+  app-specific password, press Enter, then click Resume"),
   then passes the saved key's file path or keychain profile name, never the secret.
 
 ### Fixed
