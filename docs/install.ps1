@@ -55,7 +55,8 @@ $running = @(Get-CimInstance Win32_Process -Filter "Name='node.exe'" -ErrorActio
     Where-Object { $globalDir -and $_.CommandLine -and $_.CommandLine.Replace('/', '\').ToLower().Contains($globalDir) })
 if ($before -and $running.Count -gt 0) {
     Write-Host "  [!] clawdcursor is running in $($running.Count) session(s) (your editor or Claude app)." -ForegroundColor Yellow
-    Write-Host "      If the update fails with EBUSY, close those sessions or run 'clawdcursor stop', then re-run this." -ForegroundColor Yellow
+    Write-Host "      If the update fails with EBUSY, close those sessions or run 'clawdcursor stop', then re-run this" -ForegroundColor Yellow
+    Write-Host "      (after a stop, run 'clawdcursor resume' to let agents act again)." -ForegroundColor Yellow
 }
 
 Write-Host "  Installing $PKG (global)..." -ForegroundColor Cyan
@@ -65,7 +66,7 @@ if ($LASTEXITCODE -ne 0) {
     foreach ($line in ($output -split "`r?`n" | Where-Object { $_ })) { Write-Host "      $line" }
     if ($output -match 'EBUSY|EPERM') {
         Write-Host "      A running clawdcursor has its files open. Close the editor / Claude sessions using it" -ForegroundColor Yellow
-        Write-Host "      (or run 'clawdcursor stop'), then re-run this command." -ForegroundColor Yellow
+        Write-Host "      (or run 'clawdcursor stop', and 'clawdcursor resume' afterwards), then re-run this command." -ForegroundColor Yellow
     } else {
         Write-Host "      Retry in an elevated terminal, or set a user-writable npm prefix." -ForegroundColor Yellow
     }

@@ -18,7 +18,7 @@ import { getPackageRoot } from '../paths';
 import { defaultMacAx } from './mac-ax';
 import { utf8ClipboardEnv } from './mac-keyboard';
 import type { PlatformAdapter, UiElement } from './types';
-import { isOwnUiPid } from './pointer-guard';
+import { isOwnUiPid, guardInputMethods } from './pointer-guard';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -143,6 +143,10 @@ export class AccessibilityBridge {
   private taskbarCache: { buttons: UIElement[]; timestamp: number } | null = null;
   private readonly TASKBAR_CACHE_TTL = 30000;
   private explorerProcessId: number | null = null;
+
+  constructor() {
+    guardInputMethods(this);  // invoke / focus by element: refused once the user stops clawdcursor (pointer-guard.ts)
+  }
 
   /**
    * Check if the platform's shell is available.

@@ -30,10 +30,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   - The pill hides 30 s after the last action, and a wait is not an action, so
     during the wait there was no pill to double-click.
 
-  Now a stop (the pill, or `clawdcursor stop`) is shared by every clawdcursor
-  process and survives a restart:
-  - every call answers "stopped by the user", a running `wait` ends at once, and
-    the rest of a batch does not run;
+  Now a stop (the pill, `clawdcursor stop`, or the dashboard's Stop) is shared by
+  every clawdcursor process and survives a restart:
+  - every call answers "stopped by the user", a running `wait` ends at once, the
+    rest of a batch does not run, and a call already running is refused at its
+    next key, click, element action, window change or page action;
   - only the user gives control back: their Resume on the agent's next
     `pause_for_user` prompt, `clawdcursor resume`, or starting the daemon. The
     daemon no longer exits on a double-click.
@@ -41,7 +42,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   Every key, paste, click, drag and scroll first checks that the window in front
   is still the one the agent was working in. If it is not, nothing is sent and
   the agent is told "foreground changed: you were working in msedge, but claude
-  is in front now". `window focus` binds the agent to a window on purpose.
+  is in front now". A new window within 5 s of the agent's own click, Return or
+  shortcut is the agent's own doing; a change after a longer gap is the user's.
+  `window focus` binds the agent to a window on purpose.
 
   A batch that acts at any step shows the pill from its start, and the pill
   stays up while a call is still running.

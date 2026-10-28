@@ -32,6 +32,7 @@
 import { controlBanner } from './banner';
 import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
 import { isStopped, resumeControl } from './control';
+import { unguarded } from '../platform/pointer-guard';
 
 export type PauseAnswer = 'resume' | 'end' | 'reply';
 export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | 'replied';
@@ -267,7 +268,8 @@ class PauseGate {
     const target: FocusTarget | null = pid
       ? { processId: pid, title: start && start.processId === pid ? start.title : undefined }
       : start;
-    if (target) void this.focusTracker.focus(target).catch(() => { /* best effort */ });
+    // The user's keyboard going back to their own window: not agent input, so never refused or bound (pointer-guard.ts).
+    if (target) void unguarded(() => this.focusTracker.focus(target)).catch(() => { /* best effort */ });
   }
 
   // ── test hooks ──

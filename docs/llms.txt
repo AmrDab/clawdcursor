@@ -107,7 +107,7 @@ transport (stdio or HTTP). Sensitive actions auto-elevate to Confirm. HTTP requi
 a bearer token. Local-only by default. An on-screen "desktop control in progress"
 indicator shows whenever an agent is driving — double-click it to stop. A stop holds
 across restarts: every call returns "stopped by the user" until the user's Resume on a
-`system pause_for_user` prompt (or `clawdcursor resume`) gives control back. Input is
+`system pause_for_user` prompt gives control back. Never lift a stop any other way. Input is
 refused ("foreground changed") when a window other than the one the agent was working
 in is in front; `window focus` binds it to a window on purpose.
 At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the

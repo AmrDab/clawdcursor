@@ -26,57 +26,111 @@ export async function beforePointerPress(): Promise<void> {
  * the one the agent was working in (#294). Unlike the hooks above it throws — a refusal sends nothing. Releases (mouseUp,
  * keyUp) are never refused: a button or key the agent holds must always be let go.
  */
-interface InputGuard { before(): Promise<void>; after(): Promise<void>; rebind(): void }
+/** A window the agent asked for by process, name or title. */
+export interface WindowQuery { processId?: number; processName?: string; title?: string }
+interface InputGuard {
+  /** Throws while the user has stopped clawdcursor. */
+  stopCheck(): void;
+  /** Before an input: throws while stopped, or when the agent's window is no longer in front. */
+  before(): Promise<void>;
+  /** After an input; `movesFocus` when it could bring another window up (a click, Return, a shortcut). */
+  done(movesFocus: boolean): void;
+  /** The agent brought a window up on purpose: the next input binds to it. */
+  focused(q: WindowQuery): void;
+  /** The agent launched an app: the next input binds to whatever opens. */
+  launched(): void;
+}
 let inputGuard: InputGuard | null = null;
-const inInput = new AsyncLocalStorage<true>();
+/** Inside a guarded call ('agent': its inner steps are already covered), or clawdcursor's own housekeeping ('user'). */
+const inInput = new AsyncLocalStorage<'agent' | 'user'>();
 
 export function setInputGuard(g: InputGuard | null): void {
   inputGuard = g;
 }
 
+/** For clawdcursor's own housekeeping on the user's behalf (giving the keyboard back after a pause): not agent input. */
+export function unguarded<R>(fn: () => R): R {
+  return inInput.run('user', fn);
+}
+
+/** Synthetic keyboard and mouse input: refused while stopped, and when the agent's window is no longer in front. */
 const INPUT_METHODS = [
   'mouseClick', 'mouseDoubleClick', 'mouseRightClick', 'mouseDrag', 'mouseScroll', 'mouseDown',
   'typeText', 'keyPress', 'keyDown', 'executeMouseAction', 'executeKeyboardAction',
 ];
+/**
+ * Acts that do not go through the window in front — by element (accessibility), on a window by handle, or in a page
+ * (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
+ */
+const STOP_METHODS = [
+  'invokeElement', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
+  'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'fillFormByLabels', 'focus', 'selectOption', 'pressKey',
+];
 
 /**
- * Route an input layer's methods through the guard. One check per outermost call: a method that calls another
- * (typeText → keyPress for a paste) is one input. focusWindow binds the agent to the window it brought up; openApp leaves
- * the next input to bind to whatever opens.
+ * Route an input layer's methods through the guard: the platform adapter, NativeDesktop, the accessibility bridge and the
+ * CDP driver. One check per outermost call: a method that calls another (typeText → keyPress for a paste) is one input.
  */
 export function guardInputMethods<T extends object>(target: T): T {
   const t = target as unknown as Record<string, unknown>;
-  for (const m of INPUT_METHODS) {
+  // `nested`: called from inside another guarded call (a paste's keyPress, navigate raising the browser), already checked.
+  type Run = (g: InputGuard, f: (...a: unknown[]) => unknown, args: unknown[], nested: boolean) => unknown;
+  const wrap = (m: string, run: Run) => {
     const f = t[m];
-    if (typeof f !== 'function') continue;
+    if (typeof f !== 'function') return;
+    const bound = (...a: unknown[]) => f.apply(target, a);
     t[m] = (...args: unknown[]) => {
-      if (!inputGuard || inInput.getStore()) return f.apply(target, args);
+      const store = inInput.getStore();
+      if (!inputGuard || store === 'user') return bound(...args);
+      if (store === 'agent') return run(inputGuard, bound, args, true);
       const g = inputGuard;
-      return inInput.run(true, async () => {
-        await g.before();
-        const r = await f.apply(target, args);
-        await g.after();
-        return r;
-      });
+      return inInput.run('agent', () => run(g, bound, args, false));
     };
-  }
-  const focus = t.focusWindow;
-  if (typeof focus === 'function') {
-    t.focusWindow = async (...args: unknown[]) => {
-      const ok = await focus.apply(target, args);
-      if (ok && inputGuard) await inputGuard.after();
-      return ok;
-    };
-  }
-  const open = t.openApp;
-  if (typeof open === 'function') {
-    t.openApp = async (...args: unknown[]) => {
-      const r = await open.apply(target, args);
-      inputGuard?.rebind();
+  };
+  for (const m of INPUT_METHODS) {
+    wrap(m, async (g, f, args, nested) => {
+      if (nested) return f(...args);
+      await g.before();
+      const r = await f(...args);
+      g.done(movesFocus(m, args));
       return r;
-    };
+    });
+  }
+  for (const m of STOP_METHODS) wrap(m, async (g, f, args, nested) => { if (!nested) g.stopCheck(); return f(...args); });
+  // The agent's own focus and launches rebind the window it works in, nested or not (a navigate raises its browser).
+  // The platform adapter takes a query and answers true/false; the accessibility bridge takes (title, processId) and
+  // answers {success}.
+  wrap('focusWindow', async (g, f, args, nested) => {
+    if (!nested) g.stopCheck();
+    const r = await f(...args) as boolean | { success?: boolean } | undefined;
+    const q: WindowQuery = typeof args[0] === 'object' && args[0] !== null
+      ? args[0] as WindowQuery
+      : { title: args[0] as string | undefined, processId: args[1] as number | undefined };
+    if (r === true || (typeof r === 'object' && r?.success)) g.focused(q);
+    return r;
+  });
+  // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
+  for (const m of ['openApp', 'launchApp']) {
+    wrap(m, async (g, f, args, nested) => {
+      if (!nested) g.stopCheck();
+      const r = await f(...args);
+      g.launched();
+      return r;
+    });
   }
   return target;
+}
+
+/**
+ * Could this input bring another window to the front? A press of the pointer; Return, Escape, a function key or a combo
+ * with a modifier; typed text ending in a newline. Plain typing cannot.
+ */
+function movesFocus(method: string, args: unknown[]): boolean {
+  if (method === 'typeText') return /\r?\n$/.test(String(args[0] ?? ''));
+  if (method === 'keyPress' || method === 'keyDown') {
+    return /return|enter|escape|esc\b|tab|f\d|alt|super|win|cmd|meta|command|option|ctrl|control|mod\+/i.test(String(args[0] ?? ''));
+  }
+  return true;  // clicks, drags, scrolls (Windows raises the window under the point), the composite execute* actions
 }
 
 /**

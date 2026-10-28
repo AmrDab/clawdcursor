@@ -26,6 +26,7 @@ import { VERSION } from './version';
 import { DATA_DIR } from '../paths';
 import { e } from './format';
 import { pauseGate, type PauseAnswer } from '../core/pause-gate';
+import { stopControl } from '../core/control';
 
 const TOKEN_PATH = join(DATA_DIR, 'token');
 
@@ -347,6 +348,8 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
       return res.status(403).json({ error: 'Stop is only allowed from localhost' });
     }
 
+    // Like the pill and `clawdcursor stop`: the stop holds for every clawdcursor process until the user gives control back.
+    stopControl('http');
     const body = JSON.stringify({ stopped: true, message: 'Clawd Cursor stopped' });
     res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
     res.end(body, () => {

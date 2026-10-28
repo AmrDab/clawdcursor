@@ -829,7 +829,7 @@ program
 
 program
   .command('stop')
-  .description('Stop a running Clawd Cursor instance')
+  .description('Stop every running Clawd Cursor instance; agents stay stopped until `clawdcursor resume`')
   .option('--port <port>', 'API server port', '3847')
   .action(async (opts) => {
     const port = parseInt(opts.port, 10);
@@ -840,6 +840,7 @@ program
     // Every clawdcursor process — stdio MCP servers too, which have no port or pidfile to reach — stops acting now, and a
     // server the host starts again stays stopped until the user gives control back (control.ts, #294).
     stopControl('cli');
+    console.log(`${e('🛑', '[STOP]')} Agents can't act until you run \`clawdcursor resume\`, click Resume when one asks, or start \`clawdcursor agent\`.`);
     const isClawd = await isClawdInstance(port);
     if (!isClawd) {
       console.log(`${e('🐾', '>')} No running instance found on port ` + port);

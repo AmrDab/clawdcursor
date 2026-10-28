@@ -8,37 +8,38 @@
  *  - input went to whatever window was in front. Nothing checked that it was still the one the agent was working in.
  *
  * So:
- *  - STOPPED is a file shared by every clawdcursor process, set by any stop (the pill, `clawdcursor stop`) and outliving a
- *    restart. While it is set, own-ui-guard refuses every call except asking the user; only the user's Resume on a pause
- *    prompt (or `clawdcursor resume`) clears it — an agent cannot.
- *  - every synthetic key, type, click, drag and scroll first runs `guardInput` (pointer-guard.ts, called by both input
- *    layers): refused while stopped, and refused when the window in front is not the one the agent's own last input or
- *    focus left there — someone else moved focus in between. Nothing is sent; the agent is told what changed.
+ *  - STOPPED is a file shared by every clawdcursor process, set by any stop (the pill, `clawdcursor stop`, the daemon's
+ *    /stop) and outliving a restart. While it is set, own-ui-guard refuses every call except asking the user, and every act
+ *    in the input layers is refused (pointer-guard.ts). Only the user's Resume on a pause prompt, `clawdcursor resume` or
+ *    starting the daemon clears it. An agent confined to the tools cannot; one with a shell of its own is not confined.
+ *  - every synthetic key, type, click, drag and scroll is refused when the window in front is not the one the agent was
+ *    working in. A change right after the agent's own focus-moving input (a click, Return, a shortcut) or focus call is
+ *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
 import * as fs from 'fs';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
-import { setInputGuard, isOwnUiPid } from '../platform/pointer-guard';
+import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
 let dir: string | null = process.env.VITEST ? null : DATA_DIR;
 const stopFile = () => (dir ? path.join(dir, 'stopped.json') : null);
-let stoppedHere = false;  // in-process copy: a stop holds even where the file cannot be written
+/** Only where the stop file cannot be written: then this process at least stays stopped. Otherwise the file is the truth. */
+let stoppedHere = false;
 
-export function __setControlDirForTests(d: string | null): void { dir = d; stoppedHere = false; lease = undefined; }
+export function __setControlDirForTests(d: string | null): void { dir = d; stoppedHere = false; resetBinding(); }
 
 /** The user took control back. Every clawdcursor process sees it; it survives a restart. */
 export function stopControl(by: string): void {
-  stoppedHere = true;
   const file = stopFile();
-  if (!file || !dir) return;
+  if (!file || !dir) { stoppedHere = true; return; }
   try {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify({ by, pid: process.pid, at: Date.now() }));
-  } catch { /* the in-process flag still holds */ }
+  } catch { stoppedHere = true; }
 }
 
-/** Read on every call, never cached: another process's stop must reach this one at once. */
+/** Read on every call, never cached: another process's stop, or resume, must reach this one at once. */
 export function isStopped(): boolean {
   if (stoppedHere) return true;
   const file = stopFile();
@@ -72,36 +73,66 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 // ── The window the agent is working in ──
 
-interface Foreground { processId: number; processName: string }
+interface Foreground { processId: number; processName: string; title?: string }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
+/** A window the agent focused: bound when it is in front (activation can lag the focus call). */
+let pending: WindowQuery | null = null;
+/** When the agent's last focus-moving input or focus call ended. */
+let movedAt = 0;
+/**
+ * How long after the agent's own focus-moving input a new window in front is still its doing (a launch, a dialog, an
+ * activation that lags). Past it, a change is the user's. The issue's switch came during a 30 s wait.
+ */
+const OWN_MOVE_MS = 5_000;
+/** How long the next input waits for a window the agent just focused to come to the front. */
+const FOCUS_ARRIVAL_MS = 1_000;
+
+function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}` } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, title: w.title || undefined } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
 
 export function __setForegroundReaderForTests(f: (() => Promise<Foreground | null>) | null, reset = true): void {
   if (f) readForeground = f;
-  if (reset) lease = undefined;
-}
-
-/** The agent focused or launched a window on purpose: its next input binds to whatever is in front then. */
-export function rebindForeground(): void {
-  lease = undefined;
+  if (reset) resetBinding();
 }
 
 const name = (f: Foreground) => `${f.processName} (pid ${f.processId})`;
+const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
+const matches = (q: WindowQuery, f: Foreground) =>
+  (q.processId !== undefined && q.processId === f.processId)
+  || (!!q.processName && lower(f.processName).includes(lower(q.processName)))
+  || (!!q.title && !!f.title && f.title.toLowerCase().includes(q.title.toLowerCase()));
 
-async function before(): Promise<void> {
+function stopCheck(): void {
   if (isStopped()) throw new Error(STOPPED_TEXT);
-  const now = await readForeground().catch(() => null);
+}
+
+/** One foreground read per input, before it. */
+async function before(): Promise<void> {
+  stopCheck();
+  let now = await readForeground().catch(() => null);
   if (!now) return;  // this OS cannot say what is in front: nothing to compare
+  // A window the agent just focused may take a moment to come up (macOS activation, a window manager).
+  for (const until = Date.now() + FOCUS_ARRIVAL_MS; pending && !matches(pending, now) && Date.now() < until;) {
+    await new Promise(r => setTimeout(r, 100));
+    now = (await readForeground().catch(() => null)) ?? now;
+  }
   if (isOwnUiPid(now.processId)) throw new Error(`foreground changed: clawdcursor's own on-screen control is in front, not ${lease ? name(lease) : 'an app'} — nothing was sent. Wait for the user, then focus your window with window {"action":"focus"}.`);
-  if (lease && lease.processId !== now.processId) {
+  const ownMove = Date.now() - movedAt < OWN_MOVE_MS;
+  if (pending) {
+    // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
+    if (!matches(pending, now)) {
+      throw new Error(`foreground changed: you focused ${pending.processName ?? pending.title ?? `pid ${pending.processId}`}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
+    }
+    pending = null;
+  } else if (lease && lease.processId !== now.processId && !ownMove) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
@@ -109,10 +140,26 @@ async function before(): Promise<void> {
   lease = now;
 }
 
-/** After the agent's own input: it may have moved focus itself (a click on another window, Return opening a dialog). */
-async function after(): Promise<void> {
-  const now = await readForeground().catch(() => null);
-  if (now && !isOwnUiPid(now.processId)) lease = now;
+/** After the input: no read. A focus-moving one opens the window in which a new window in front is the agent's own doing. */
+function done(movesFocus: boolean): void {
+  if (movesFocus) movedAt = Date.now();
 }
 
-setInputGuard({ before, after, rebind: rebindForeground });
+/** The agent focused a window: the next input binds to it, not to whatever else is in front. */
+function focused(q: WindowQuery): void {
+  pending = q;
+  movedAt = Date.now();
+}
+
+/**
+ * The agent launched an app: its next input binds to whatever opens. Not to the launched pid — the window often belongs to
+ * another process (a UWP host, a browser's existing instance, an Electron launcher), and refusing there would block the
+ * commonest flow, "open Notepad, then type".
+ */
+function launched(): void {
+  lease = undefined;
+  pending = null;
+  movedAt = Date.now();
+}
+
+setInputGuard({ stopCheck, before, done, focused, launched });
