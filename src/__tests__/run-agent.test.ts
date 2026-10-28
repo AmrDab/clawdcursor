@@ -1175,3 +1175,38 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(result.steps[0].result.text).toMatch(/safety_confirm/);
   });
 });
+
+describe('runAgent — --no-vision keeps every image from the model', () => {
+  beforeEach(() => {
+    llmTurnQueue.length = 0;
+    capturedLlmCalls.length = 0;
+  });
+
+  /** Every image block the model was sent, top-level or inside a tool_result. */
+  const imagesSent = (): unknown[] => capturedLlmCalls.flatMap((c: any) => ((c?.messages ?? []) as any[])
+    .flatMap(m => (Array.isArray(m.content) ? m.content : []))
+    .flatMap((b: any) => (b.type === 'tool_result' && Array.isArray(b.content) ? b.content : [b]))
+    .filter((b: any) => b.type === 'image' || b.type === 'image_url'));
+
+  const run = (disableVision: boolean) => {
+    llmTurnQueue.push(turnCall('screenshot'));
+    llmTurnQueue.push(turnCall('done', { evidence: 'looked' }));
+    const adapter = makeAdapter();
+    return runAgent({ task: 'look at the screen', maxTurns: 4 }, { adapter, llm: VISION_CONFIG, disableVision })
+      .then(result => ({ result, adapter }));
+  };
+
+  it('control: without it, a screenshot reaches the model', async () => {
+    await run(false);
+    expect(imagesSent().length).toBeGreaterThan(0);
+  });
+
+  it('with it, the model is offered no screenshot tool, nothing is captured, and no image is sent', async () => {
+    const { result, adapter } = await run(true);
+    expect(capturedLlmCalls[0].tools.map((t: { name: string }) => t.name)).not.toContain('screenshot');
+    expect(result.steps[0].result.text).toBe('unknown tool');
+    expect(adapter.screenshot).not.toHaveBeenCalled();
+    expect(imagesSent()).toEqual([]);
+    expect(capturedLlmCalls.every((c: any) => c.model === 'stub-text')).toBe(true);
+  });
+});

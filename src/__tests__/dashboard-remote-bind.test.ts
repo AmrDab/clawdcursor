@@ -4,8 +4,8 @@
  * The dashboard injects the bearer token — full desktop control — into the
  * page's JS. On a non-loopback bind the server used to log a warning and then
  * serve it ANYWAY, so anyone who could reach the port and load `/` got the
- * token. Remote binding is opt-in (--allow-remote), which makes that user the
- * one who most needs this not to happen.
+ * token. The daemon now binds loopback only (#293); this guard is the second
+ * line for any other caller of createUtilityServer.
  *
  * Deliberately never calls initServerToken(): that would rewrite the real
  * token file and break a running daemon.

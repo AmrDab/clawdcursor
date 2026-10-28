@@ -385,6 +385,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         } finally {
           releasePill();
         }
+        // High-security mode: no image reaches the model, whichever tool produced it. The capture stays in memory and
+        // is dropped here, before the screenshot is recorded as one the model has seen.
+        if (ctx.disableVision && result.image) {
+          return refuse('no_vision', 'vision is disabled on this server (--no-vision / CLAWD_DISABLE_VISION), so no screenshot is sent to the model. ' +
+            'Read the screen without one: the accessibility tree, or OCR text.');
+        }
         if (!result.isError && isFullScreenshotCall(tool.name, action)) {
           result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };
         }

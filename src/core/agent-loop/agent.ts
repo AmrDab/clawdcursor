@@ -116,6 +116,8 @@ export interface AgentDeps {
   cdp?: import('../../platform/cdp-driver').CDPDriver | null;
   /** Optional session-scoped UIMap holder (Part 2). Created per-call if absent. */
   uiMaps?: UIMapHolder;
+  /** High-security mode (--no-vision): no screenshot tool, and no image ever goes to the model. */
+  disableVision?: boolean;
 }
 
 /**
@@ -164,7 +166,7 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
 
   // Build the flat tool catalog. Mode and capability params are no longer
   // accepted — the full catalog is served regardless of mode.
-  const tools = buildUnifiedTools();
+  const tools = buildUnifiedTools().filter(t => !(deps.disableVision && t.name === 'screenshot'));
   const toolMap = new Map(tools.map(t => [t.name, t]));
   const llmTools = toUnifiedLLMTools(tools);
 
@@ -902,7 +904,8 @@ ${renderReport(now)}` : null;
         const content: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [
           { type: 'text', text: err ? `${tr.text}\n${renderResultLine(err)}` : tr.text },
         ];
-        if (tr.screenshot) {
+        // --no-vision: the image never reaches the model, whichever tool captured it.
+        if (tr.screenshot && !deps.disableVision) {
           content.push(shotToInnerBlock(tr.screenshot));
         }
         nextBlocks.push({ type: 'tool_result', tool_use_id: tr.id, content, is_error: tr.isError });

@@ -14,7 +14,7 @@
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
+  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
@@ -60,6 +60,8 @@ const RULES: Rule[] = [
   { code: 'CAPTURE_DENIED', outcome: 'refused', test: /screen recording permission denied/i,
     hint: 'the screen cannot be captured until the user grants Screen Recording; tools that do not capture still work',
     next: PAUSE('Grant Screen Recording to the app running clawdcursor (System Settings → Privacy & Security), then click Resume') },
+  { code: 'VISION_DISABLED', outcome: 'refused', test: /vision is disabled on this server/i,
+    hint: 'high-security mode: no screenshot goes to the model; read the screen without one', next: REREAD },
   { code: 'OWN_UI', outcome: 'refused', test: /is clawdcursor's own on-screen control/i,
     hint: 'that is the user\'s pill; target the app instead', next: REREAD },
   { code: 'PAUSED', outcome: 'refused', test: /a pause is waiting for the user on screen/i,

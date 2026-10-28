@@ -55,7 +55,7 @@ process.on('unhandledRejection', (reason: any) => {
 import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
 import { Agent } from '../core/agent';
-import { createUtilityServer, requireAuth, initServerToken, getServerLogBuffer, isLoopbackHost, mountJson404 } from './http-utility';
+import { createUtilityServer, requireAuth, initServerToken, getServerLogBuffer, mountJson404 } from './http-utility';
 import { DEFAULT_CONFIG } from '../types';
 import type { ClawdConfig } from '../types';
 import { VERSION } from './version';
@@ -261,6 +261,11 @@ interface AgentModeOpts {
   banner?: boolean;
 }
 
+// SECURITY (#113, #293): this surface is full desktop control, so the daemon
+// binds loopback only — there is no setting or flag that widens it. For remote
+// use, tunnel the port: `ssh -L 3847:127.0.0.1:3847 user@host`.
+const BIND_HOST = '127.0.0.1';
+
 async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   // commander stores negated flags as `{ llm: false }` / `{ vision: false }`.
   // Keep the internal explicit names so callers/tests can also pass noLlm /
@@ -289,23 +294,6 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
 
   if (process.platform === 'darwin') {
     await ensureHostAppRunning();
-  }
-
-  // ── Port pre-check ──
-  const requestedPort = parseInt(opts.port ?? '3847', 10) || 3847;
-  const requestedHost = '127.0.0.1';
-  const net = await import('net');
-  const portFree = await new Promise<boolean>((resolve) => {
-    const tester = net.createServer()
-      .once('error', () => resolve(false))
-      .once('listening', () => { tester.close(); resolve(true); });
-    tester.listen(requestedPort, requestedHost);
-  });
-  if (!portFree) {
-    console.error(`\n${e('❌', '[ERR]')} Port ${requestedPort} is already in use.`);
-    console.error(`Another clawdcursor instance may be running.`);
-    console.error(`Run 'clawdcursor stop' first, or use --port <other_port>`);
-    process.exit(1);
   }
 
   // ── First-run auto-setup — best-effort, never fatal. ──
@@ -350,6 +338,22 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     },
   });
 
+  // ── Port pre-check — on the port the daemon will really bind (--port, else
+  // server.port from config, else 3847), not just the flag. ──
+  const net = await import('net');
+  const portFree = await new Promise<boolean>((resolve) => {
+    const tester = net.createServer()
+      .once('error', () => resolve(false))
+      .once('listening', () => { tester.close(); resolve(true); });
+    tester.listen(resolved.port, BIND_HOST);
+  });
+  if (!portFree) {
+    console.error(`\n${e('❌', '[ERR]')} Port ${resolved.port} is already in use.`);
+    console.error(`Another clawdcursor instance may be running.`);
+    console.error(`Run 'clawdcursor stop' first, or use --port <other_port>`);
+    process.exit(1);
+  }
+
   const config: ClawdConfig = {
     ...DEFAULT_CONFIG,
     server: {
@@ -379,30 +383,8 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     || (resolved.textBaseUrl && resolved.model)
     || (resolved.visionBaseUrl && resolved.visionModel)
   );
-  // SECURITY (#113): this surface is full desktop control. Loopback-only by
-  // default — a non-loopback bind (0.0.0.0 / LAN IP in config.server.host)
-  // requires an explicit `--allow-remote`, so a config typo can't silently
-  // expose the machine with only the bearer token in the way.
-  if (!isLoopbackHost(config.server.host)) {
-    if (!(opts as { allowRemote?: boolean }).allowRemote) {
-      console.error(
-        `${e('🛑', '[BLOCKED]')} Refusing to bind to non-loopback host "${config.server.host}".\n` +
-        `   This endpoint grants FULL desktop control; exposing it beyond 127.0.0.1 means\n` +
-        `   anyone on the network with the bearer token can drive this machine.\n` +
-        `   If that is really what you want, restart with:  clawdcursor agent --allow-remote\n` +
-        `   Otherwise set server.host back to 127.0.0.1 in your config.`,
-      );
-      process.exit(1);
-    }
-    console.warn(
-      `${e('⚠️', '[WARN]')} --allow-remote: binding to "${config.server.host}" — desktop control is\n` +
-      `   reachable from the network. The Bearer token is the ONLY protection. Prefer an\n` +
-      `   SSH tunnel or VPN over exposing this directly.`,
-    );
-  }
-
   const modeLabel = llmAvailable ? '' : ' (tools-only)';
-  console.log(`${pc.green('✓')} ${pc.bold('clawdcursor')} ${pc.gray(`v${VERSION}`)} ${pc.gray(`— desktop control active on ${config.server.host}:${config.server.port}${modeLabel}`)}`);
+  console.log(`${pc.green('✓')} ${pc.bold('clawdcursor')} ${pc.gray(`v${VERSION}`)} ${pc.gray(`— desktop control active on ${BIND_HOST}:${config.server.port}${modeLabel}`)}`);
 
   // ── Agent (only when an LLM is configured) ──
   let agent: Agent | undefined;
@@ -464,7 +446,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     },
   };
   const app = createUtilityServer({
-    host: config.server.host,
+    host: BIND_HOST,
     ...serverShutdown,
   });
 
@@ -555,6 +537,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     toolCtx.getLogBuffer = getServerLogBuffer;
     toolCtx.uiMaps = uiMapHolder;
   }
+  toolCtx.disableVision = resolved.disableVision;
 
   // Mount /mcp behind the same Bearer-auth gate the legacy REST routes used.
   // Compact-over-HTTP: default granular for backward compatibility (the
@@ -579,10 +562,10 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   // LAST mount — JSON 404 for unmatched routes (must come after /mcp).
   mountJson404(app);
 
-  app.listen(config.server.port, config.server.host, async () => {
+  app.listen(config.server.port, BIND_HOST, async () => {
     const serverToken = initServerToken();
     const tokenPath = path.join(require('os').homedir(), '.clawdcursor', 'token');
-    console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${config.server.host}:${config.server.port}`);
+    console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${config.server.port}`);
     console.log(`${pc.yellow(`${e('🔑', '[KEY]')} Auth token:`)} ${serverToken.slice(0, 8)}...`);
     console.log(pc.gray(`   (full token saved to ${tokenPath})`));
     console.log(`\nSurviving HTTP routes:`);
@@ -700,7 +683,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
 program
   .command('agent')
   .description('Start the clawdcursor daemon (autonomous agent + MCP-over-HTTP)')
-  .option('--port <port>', 'API server port', '3847')
+  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
   .option('--provider <provider>', 'AI provider (auto-detected, or specify: anthropic|openai|ollama|kimi|groq|...)')
   .option('--model <model>', 'Vision model to use')
   .option('--text-model <model>', 'Text/reasoning model for Layer 2')
@@ -709,11 +692,10 @@ program
   .option('--api-key <key>', 'AI provider API key')
   .option('--debug', 'Save screenshots to debug/ folder (off by default)')
   .option('--accept', 'Accept desktop control consent non-interactively and start')
-  .option('--no-vision', 'Refuse vision fallback — blind-first only (high-security mode)')
+  .option('--no-vision', 'High-security mode: no screenshot goes to any model — the built-in agent and MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'Force tools-only HTTP MCP mode; skip AI setup, scheduler, and credential validation')
   .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
   .option('--compact', 'Expose the 7-compound MCP surface (computer/accessibility/window/system/browser/task/batch) over HTTP /mcp instead of the 98 granular tools (also CLAWD_MCP_COMPACT=1)')
-  .option('--allow-remote', 'Permit binding to a non-loopback server.host. DANGER: exposes full desktop control to the network; the Bearer token is the only protection')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
     await runAgentMode(opts);
@@ -722,7 +704,7 @@ program
 program
   .command('start')
   .description('[deprecated — use `clawdcursor agent`] Start the Clawd Cursor agent')
-  .option('--port <port>', 'API server port', '3847')
+  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
   .option('--provider <provider>', 'AI provider (auto-detected, or specify: anthropic|openai|ollama|kimi|groq|...)')
   .option('--model <model>', 'Vision model to use')
   .option('--text-model <model>', 'Text/reasoning model for Layer 2')
@@ -731,10 +713,9 @@ program
   .option('--api-key <key>', 'AI provider API key')
   .option('--debug', 'Save screenshots to debug/ folder (off by default)')
   .option('--accept', 'Accept desktop control consent non-interactively and start')
-  .option('--no-vision', 'Refuse vision fallback — blind-first only (high-security mode)')
+  .option('--no-vision', 'High-security mode: no screenshot goes to any model — the built-in agent and MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'Force tools-only HTTP MCP mode; skip AI setup, scheduler, and credential validation')
   .option('--compact', 'Expose the 7-compound MCP surface over HTTP /mcp (also CLAWD_MCP_COMPACT=1)')
-  .option('--allow-remote', 'Permit binding to a non-loopback server.host. DANGER: exposes full desktop control to the network; the Bearer token is the only protection')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
     // v0.9 PR7.4 — `start` is now a thin deprecation alias for `agent`.
@@ -1476,7 +1457,9 @@ program
     const mode = opts.compact ? 'compact' : 'granular';
     console.log(`clawdcursor MCP mode starting... (${mode})`);
 
-    const ctx = await createToolContext();
+    const ctx: import('../tools/types').ToolContext = await createToolContext();
+    // CLAWD_DISABLE_VISION=1 / config disableVision holds here too (no --no-vision flag on stdio).
+    ctx.disableVision = resolveConfig().disableVision;
 
     // v0.9 PR7: server construction is shared with the HTTP transport in
     // src/mcp-server.ts — same registry, same safety gate, same param shape.
@@ -1566,7 +1549,7 @@ program
 program
   .command('serve')
   .description('[deprecated — use `clawdcursor agent`] Start the tool server only')
-  .option('--port <port>', 'HTTP server port', '3847')
+  .option('--port <port>', 'HTTP server port (default: server.port in config, else 3847)')
   .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
   .action(async (opts) => {
     console.warn(`${e('⚠', '[WARN]')} \`clawdcursor serve\` is deprecated; use \`clawdcursor agent\`. Removed in v0.10.`);

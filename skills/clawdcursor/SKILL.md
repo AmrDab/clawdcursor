@@ -438,7 +438,7 @@ Rules for autonomous use:
 
 ## Security
 
-- **Network isolation:** Binds to `127.0.0.1` only. Verify with `netstat -an | grep 3847` on macOS/Linux, or `netstat -an | findstr 3847` on Windows PowerShell - should show `127.0.0.1:3847`, never `0.0.0.0:3847`.
+- **Network isolation:** Binds to `127.0.0.1` only. Verify with `netstat -an | grep 3847` on macOS/Linux, or `netstat -an | findstr 3847` on Windows PowerShell - should show `127.0.0.1:3847`, never `0.0.0.0:3847`. There is no setting that opens it to the network; to drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side.
 - **Local-only:** Ollama keeps screenshots in RAM - nothing leaves the machine.
   Cloud providers send screenshots/text ONLY to the user's configured endpoint.
 - **Token auth:** All mutating POST endpoints require `Authorization: Bearer <token>`

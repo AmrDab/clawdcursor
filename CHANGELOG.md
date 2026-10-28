@@ -15,6 +15,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   prompt, the agent puts the cursor there and asks only for the paste ("Paste your
   app-specific password, press Enter, then click Resume"),
   then passes the saved key's file path or keychain profile name, never the secret.
+- **The daemon binds `127.0.0.1` only, and `--allow-remote` is gone (#293).**
+  `server.host` in the config was never read, so the daemon always bound
+  loopback and `--allow-remote` never did anything. Rather than open the
+  desktop-control port to the network, the flag and the `server.host` setting
+  are removed. To drive clawdcursor from another machine, tunnel the port:
+  `ssh -L 3847:127.0.0.1:3847 user@host`.
 
 ### Fixed
 
@@ -73,6 +79,19 @@ All notable changes to Clawd Cursor will be documented in this file.
   instead. The build hint no longer says `cd native && ./build.sh`, which
   fails from an npm install: it names `xcode-select --install` and the
   package's own build script by its full path.
+- **`server.port` in the config is used (#293).** The daemon only read a flat
+  `"port"`, and `--port` always defaulted to 3847, which outranked the config
+  file. `{"server":{"port":N}}` and `{"port":N}` now both work, `--port` still
+  wins when given, and the "port already in use" check looks at the port the
+  daemon will really bind.
+- **`--no-vision` keeps screenshots from every model.** The flag (and
+  `CLAWD_DISABLE_VISION=1` / `"disableVision": true`) was read and then
+  ignored, so screenshots still went to the model. Now the built-in agent is
+  not offered a screenshot tool and never sends an image, and the MCP surface
+  (HTTP daemon, and stdio for the env var or config key) refuses any call that
+  would return an image. Accessibility and OCR still work. The unused
+  `CLAWD_DISABLE_VERIFIER` / `disableVerifier` setting is removed; the
+  verifier it switched off no longer exists.
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
   screen. With one hop to a full-screen Space, the list read "Windows (2)"

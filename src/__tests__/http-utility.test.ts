@@ -1,8 +1,8 @@
 /**
- * isLoopbackHost — the #113 bind guard. The daemon refuses non-loopback binds
- * without --allow-remote, so this classification must be exact: a false
- * positive exposes desktop control to the network; a false negative blocks
- * legitimate local setups.
+ * isLoopbackHost — the #113 guard. The daemon binds 127.0.0.1 only (#293);
+ * createUtilityServer still uses this to keep the token-bearing dashboard off
+ * any other host, so this classification must be exact: a false positive
+ * hands out the token; a false negative blocks legitimate local setups.
  */
 import { describe, it, expect } from 'vitest';
 import { isLoopbackHost } from '../surface/http-utility';

@@ -32,9 +32,9 @@ const TOKEN_PATH = join(DATA_DIR, 'token');
 
 /**
  * True when `host` resolves to the local loopback interface. The MCP surface
- * controls the desktop, so the daemon refuses to bind anywhere else unless the
- * operator passes `--allow-remote` (issue #113 — the bearer token must not be
- * the ONLY thing between the LAN and full desktop control by default).
+ * controls the desktop, so the daemon binds 127.0.0.1 only (#113, #293 — the
+ * bearer token must not be the ONLY thing between the LAN and full desktop
+ * control). createUtilityServer uses this as a second line for the dashboard.
  */
 export function isLoopbackHost(host: string): boolean {
   const h = (host ?? '').trim().toLowerCase();
@@ -288,10 +288,9 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
   // Mount the dashboard at GET /. SECURITY: the bearer token is injected into
   // the page's JS, and that token is full desktop control. On a non-loopback
   // bind this used to log a warning and then serve it ANYWAY — so anyone who
-  // could reach the port and load `/` got the token. Remote binding is opt-in
-  // (--allow-remote), which makes that user the one who most needs this not to
-  // happen. The dashboard is now simply not mounted off-loopback; remote API
-  // clients authenticate with the bearer token directly and never need it.
+  // could reach the port and load `/` got the token. The daemon now binds
+  // loopback only (#293); this stays as a second line for any other caller.
+  // The dashboard is simply not mounted off-loopback.
   if (options.host && !isLoopbackHost(options.host)) {
     console.warn(`${e('⚠️', '[WARN]')} Dashboard disabled: bound to ${options.host}, and the dashboard embeds the control token. It is only served on localhost.`);
   } else {

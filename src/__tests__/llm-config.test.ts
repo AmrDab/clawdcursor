@@ -257,21 +257,6 @@ describe('OPENCLAW_* deprecation warnings', () => {
     expect(console.warn).not.toHaveBeenCalled();
   });
 
-  it('OPENCLAW_DISABLE_VERIFIER=1 warns and resolves disableVerifier: true', () => {
-    const tmpDir = makeTmpDir();
-
-    const result = resolveConfig({
-      projectConfigPath: path.join(tmpDir, 'nonexistent.json'),
-      userConfigPath: path.join(tmpDir, 'nonexistent.json'),
-      envOverride: { OPENCLAW_DISABLE_VERIFIER: '1' },
-    });
-
-    expect(result.disableVerifier).toBe(true);
-    expect(console.warn).toHaveBeenCalledWith(
-      expect.stringContaining('OPENCLAW_DISABLE_VERIFIER')
-    );
-  });
-
   it('deprecation warning is only emitted once per var per process', () => {
     const tmpDir = makeTmpDir();
 
@@ -330,6 +315,53 @@ describe('missing config files are not errors', () => {
 
     expect(result.port).toBe(3847); // DEFAULT_CONFIG.server.port
     expect(result.source.port).toBe('default');
+  });
+
+  // #293: the nested shape was ignored, so the daemon bound 3847 whatever the file said.
+  it('reads the nested {"server":{"port":N}} shape', () => {
+    const tmpDir = makeTmpDir();
+    const userPath = path.join(tmpDir, 'user.json');
+    writeJson(userPath, { server: { port: 4999 } });
+
+    const result = resolveConfig({
+      projectConfigPath: path.join(tmpDir, 'nonexistent.json'),
+      userConfigPath: userPath,
+      envOverride: {},
+    });
+
+    expect(result.port).toBe(4999);
+    expect(result.source.port).toBe('user');
+  });
+
+  it('reads the flat {"port":N} shape, and flat wins over nested in the same file', () => {
+    const tmpDir = makeTmpDir();
+    const projectPath = path.join(tmpDir, 'project.json');
+    writeJson(projectPath, { port: 4100, server: { port: 4200 } });
+
+    const result = resolveConfig({
+      projectConfigPath: projectPath,
+      userConfigPath: path.join(tmpDir, 'nonexistent.json'),
+      envOverride: {},
+    });
+
+    expect(result.port).toBe(4100);
+    expect(result.source.port).toBe('project');
+  });
+
+  it('a --port flag still wins over a config port', () => {
+    const tmpDir = makeTmpDir();
+    const userPath = path.join(tmpDir, 'user.json');
+    writeJson(userPath, { server: { port: 4999 } });
+
+    const result = resolveConfig({
+      cliFlags: { port: '5001' },
+      projectConfigPath: path.join(tmpDir, 'nonexistent.json'),
+      userConfigPath: userPath,
+      envOverride: {},
+    });
+
+    expect(result.port).toBe(5001);
+    expect(result.source.port).toBe('cli');
   });
 
   it('falls back to default debug=false when no source sets it', () => {
@@ -440,7 +472,6 @@ describe('source tracking', () => {
     });
 
     expect(result.source.disableVision).toBe('default');
-    expect(result.source.disableVerifier).toBe('default');
     expect(result.source.debug).toBe('default');
   });
 });
