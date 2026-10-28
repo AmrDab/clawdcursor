@@ -127,6 +127,20 @@ describe('listWindows — the compiled helper', () => {
       expect(r.skipped).toEqual([SLOW]);
     });
 
+    // #278: windows on another Space are invisible to accessibility; the helper reports them separately.
+    it('windows on another Space come back as otherSpaces, never as listed windows', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [WIN()], unresponsive: [],
+        otherSpaces: [{ processName: 'Terminal', processId: 77, title: 'zsh' }] }) });
+      const r = await ax.listWindowsDetailed();
+      expect(r.windows).toHaveLength(1);
+      expect(r.otherSpaces).toEqual([{ processName: 'Terminal', processId: 77, title: 'zsh' }]);
+    });
+
+    it('a helper that could not check Spaces claims nothing about them', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [WIN()], unresponsive: [] }) });
+      expect((await ax.listWindowsDetailed()).otherSpaces).toBeUndefined();
+    });
+
     it('a complete list reports nothing skipped', async () => {
       const { ax } = harness({ reply: JSON.stringify({ ok: true, windows: [WIN()], unresponsive: [] }) });
       await expect(ax.listWindowsDetailed()).resolves.toMatchObject({ skipped: [] });

@@ -61,6 +61,16 @@ function partialWindowListNote(skipped: readonly SkippedApp[]): string {
     `(${names}${more}) ${skipped.length === 1 ? 'was' : 'were'} read, so their windows are missing — call again)`;
 }
 
+/** One line for the tools: which apps have windows on another Space, missing from the list because accessibility only sees
+ *  the Space on screen (#278). */
+export function otherSpacesNote(other: ReadonlyArray<{ processName: string }>): string | null {
+  if (!other.length) return null;
+  const apps = [...new Set(other.map(w => w.processName))];
+  const names = apps.slice(0, 4).join(', ') + (apps.length > 4 ? `, … +${apps.length - 4} more` : '');
+  return `(not listed: windows on another desktop Space — ${names}. macOS shows only this Space's windows; ` +
+    '`window focus` on one of these apps switches the screen to its Space)';
+}
+
 export class MacOSAdapter implements PlatformAdapter {
   readonly platform = 'darwin' as const;
 
@@ -321,8 +331,9 @@ export class MacOSAdapter implements PlatformAdapter {
    */
   async listWindows(): Promise<WindowInfo[]> {
     this.lastWindowListPartial = null;
-    const { windows, skipped } = await this.ax.listWindowsDetailed();
-    if (skipped.length) this.lastWindowListPartial = partialWindowListNote(skipped);
+    const { windows, skipped, otherSpaces } = await this.ax.listWindowsDetailed();
+    const notes = [skipped.length ? partialWindowListNote(skipped) : null, otherSpacesNote(otherSpaces ?? [])].filter(Boolean);
+    if (notes.length) this.lastWindowListPartial = notes.join('\n');
     return windows;
   }
 

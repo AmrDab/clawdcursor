@@ -4,6 +4,18 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **macOS: `window list` says which apps have windows on another desktop
+  Space (#278).** The accessibility API only sees the windows of the Space on
+  screen. With one hop to a full-screen Space, the list read "Windows (2)"
+  while a whole desktop of windows sat on Desktop 1, and nothing said the
+  list was incomplete. The helper now finds those windows with CGWindowList
+  plus the WindowServer's Spaces lookup. The list ends with a line naming the
+  apps whose windows are on another Space, and it notes that `window focus`
+  on one of them switches the screen to that Space. On a macOS where the
+  Spaces lookup isn't available, nothing is claimed either way.
+
 ## [1.5.24] - 2026-10-26
 
 ### Fixed

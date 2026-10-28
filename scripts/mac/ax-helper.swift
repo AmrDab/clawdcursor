@@ -214,6 +214,41 @@ func topmostRegularApp() -> NSRunningApplication? {
     return nil
 }
 
+/// Windows of `apps` that sit on another Space (#278). The accessibility API only shows the windows of the Space on screen,
+/// so they are missing from `windows`; CGWindowList still has them (off screen), and the WindowServer's private Spaces calls
+/// say where they are. Looked up at run time: nil when this macOS does not have them — then nothing is claimed either way.
+func windowsOnOtherSpaces(_ apps: [NSRunningApplication]) -> [[String: Any]]? {
+    typealias MainConnection = @convention(c) () -> Int32
+    typealias ActiveSpace = @convention(c) (Int32) -> UInt64
+    typealias SpacesForWindows = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
+    guard let handle = dlopen(nil, RTLD_NOW),
+          let c = dlsym(handle, "CGSMainConnectionID"), let a = dlsym(handle, "CGSGetActiveSpace"),
+          let s = dlsym(handle, "CGSCopySpacesForWindows"),
+          let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    let conn = unsafeBitCast(c, to: MainConnection.self)()
+    let active = unsafeBitCast(a, to: ActiveSpace.self)(conn)
+    let spacesOf = unsafeBitCast(s, to: SpacesForWindows.self)
+    let byPid = Dictionary(apps.filter { $0.activationPolicy == .regular && !$0.isHidden }.map { ($0.processIdentifier, $0) },
+                           uniquingKeysWith: { a, _ in a })
+    var out: [[String: Any]] = []
+    for w in list {
+        guard (w[kCGWindowLayer as String] as? Int) == 0, (w[kCGWindowIsOnscreen as String] as? Bool) != true,
+              ((w[kCGWindowAlpha as String] as? Double) ?? 1) > 0,
+              let pid = w[kCGWindowOwnerPID as String] as? Int32, let app = byPid[pid],
+              let id = w[kCGWindowNumber as String] as? Int,
+              let b = w[kCGWindowBounds as String] as? [String: Double],
+              (b["Width"] ?? 0) >= 80, (b["Height"] ?? 0) >= 80,
+              let spaces = spacesOf(conn, 0x7, [id] as CFArray)?.takeRetainedValue() as? [NSNumber],
+              !spaces.isEmpty, !spaces.contains(where: { $0.uint64Value == active })
+        else { continue }
+        var d: [String: Any] = ["processName": app.localizedName ?? "unknown", "processId": Int(pid)]
+        if let t = w[kCGWindowName as String] as? String, !t.isEmpty { d["title"] = t }
+        out.append(d)
+    }
+    return out
+}
+
 /// NSWorkspace's frontmost application (which, unlike System Events, includes system dialogs).
 func activeApplication() -> NSRunningApplication? {
     guard let front = NSWorkspace.shared.frontmostApplication else { return nil }
@@ -776,8 +811,10 @@ func cmdWindows() -> Never {
             windows.append(d)
         }
     }
-    emit(["ok": true, "windows": windows, "unresponsive": reads.unresponsive, "skipped": reads.skipped,
-          "truncated": !reads.skipped.isEmpty, "elapsedMs": elapsedMs()])
+    var reply: [String: Any] = ["ok": true, "windows": windows, "unresponsive": reads.unresponsive, "skipped": reads.skipped,
+                                "truncated": !reads.skipped.isEmpty, "elapsedMs": elapsedMs()]
+    if let other = windowsOnOtherSpaces(apps) { reply["otherSpaces"] = other }
+    emit(reply)
 }
 
 func cmdActive() -> Never {
