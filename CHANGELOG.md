@@ -83,10 +83,16 @@ All notable changes to Clawd Cursor will be documented in this file.
   `"port"`, and `--port` always defaulted to 3847, which outranked the config
   file. `{"server":{"port":N}}` and `{"port":N}` now both work, `--port` still
   wins when given, and the "port already in use" check looks at the port the
-  daemon will really bind. `stop`, `resume` and `task` find the daemon on that
-  same port. The files are read in layer order, so a flat `port` in the
-  project's `.clawdcursor-config.json` outranks a nested `server.port` in
-  `~/.clawdcursor/config.json`.
+  daemon will really bind. The files are read in layer order, so a flat `port`
+  in the project's `.clawdcursor-config.json` outranks a nested `server.port`
+  in `~/.clawdcursor/config.json`. `stop`, `resume` and `task` find the daemon
+  on the port it recorded in its own lock file (`~/.clawdcursor/start.pid`,
+  used only while that process is alive), else 3847. Like the token file, the
+  lock is mode 0600 on macOS and Linux; on Windows it inherits your user
+  profile's permissions. They never
+  read the port from a config file, so a repo you run them in cannot redirect
+  the bearer token to another port. A `--port` that is not a whole number from
+  1 to 65535 is refused with "Invalid port number" on every command.
 - **`--no-vision` keeps screenshots from every model.** The flag (and
   `CLAWD_DISABLE_VISION=1` / `"disableVision": true`) was read and then
   ignored, so screenshots still went to the model. Now the built-in agent is

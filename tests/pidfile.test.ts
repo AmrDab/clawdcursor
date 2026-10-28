@@ -200,3 +200,59 @@ describe('isProcessAlive', () => {
     } finally { restore(); }
   });
 });
+
+// `stop` / `resume` / `task` must not take the daemon's port from a config file: a repo in the cwd could plant
+// .clawdcursor-config.json and have the bearer token sent to a port of its choosing.
+describe('daemonPortForClient', () => {
+  /** A cwd that plants a project config pointing somewhere else. */
+  function plantCwdConfig(): void {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-evil-repo-'));
+    fs.writeFileSync(path.join(repo, '.clawdcursor-config.json'), JSON.stringify({ port: 6666, server: { port: 6666 } }));
+    vi.spyOn(process, 'cwd').mockReturnValue(repo);
+  }
+
+  it('the running daemon\'s recorded port wins over a cwd config', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    try {
+      plantCwdConfig();
+      // The plant works: the config ladder would have picked it up.
+      const { resolveConfig } = await import('../src/llm/config');
+      expect(resolveConfig({ userConfigPath: path.join(tmpHome, 'none.json'), envOverride: {} }).port).toBe(6666);
+      expect(mod.claimPidFile('start')).toBeNull();   // this process plays the daemon
+      mod.recordLockPort('start', 4999);
+      expect(mod.daemonPortForClient()).toBe(4999);
+      // The record lives in the 0600 lock, next to the pid it belongs to.
+      expect(JSON.parse(fs.readFileSync(mod.pidFilePath('start'), 'utf-8'))).toMatchObject({ pid: process.pid, port: 4999 });
+    } finally { restore(); }
+  });
+
+  it('a record whose pid is dead falls back to 3847, not to the cwd config', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    try {
+      plantCwdConfig();
+      fs.mkdirSync(path.dirname(mod.pidFilePath('start')), { recursive: true });
+      fs.writeFileSync(mod.pidFilePath('start'), JSON.stringify({ v: 1, pid: 999999, startTime: Date.now(), mode: 'start', port: 4999 }));
+      expect(mod.daemonPortForClient()).toBe(3847);
+    } finally { restore(); }
+  });
+
+  it('no record at all → 3847; an explicit --port always wins', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    try {
+      plantCwdConfig();
+      expect(mod.daemonPortForClient()).toBe(3847);
+      expect(mod.daemonPortForClient(5001)).toBe(5001);
+    } finally { restore(); }
+  });
+
+  it('recordLockPort leaves a lock it does not own alone', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    try {
+      const other = { v: 1, pid: 999999, startTime: Date.now(), mode: 'start' };
+      fs.mkdirSync(path.dirname(mod.pidFilePath('start')), { recursive: true });
+      fs.writeFileSync(mod.pidFilePath('start'), JSON.stringify(other));
+      mod.recordLockPort('start', 4999);
+      expect(JSON.parse(fs.readFileSync(mod.pidFilePath('start'), 'utf-8'))).toEqual(other);
+    } finally { restore(); }
+  });
+});

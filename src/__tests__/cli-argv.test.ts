@@ -8,7 +8,20 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { userArgs } from '../surface/argv';
+import { userArgs, parsePort } from '../surface/argv';
+
+// Every command that takes --port refuses anything else with "Invalid port number".
+describe('parsePort', () => {
+  it('accepts an integer in 1..65535', () => {
+    expect(parsePort('1')).toBe(1);
+    expect(parsePort('3847')).toBe(3847);
+    expect(parsePort('65535')).toBe(65535);
+  });
+
+  it.each(['0', '65536', '-1', 'abc', '4000abc', '1e3', '3847.5', ' 3847', '', '0x10'])('refuses %j', (raw) => {
+    expect(parsePort(raw)).toBeNull();
+  });
+});
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-argv-'));
 const script = path.join(dir, 'dist', 'surface', 'cli.js');

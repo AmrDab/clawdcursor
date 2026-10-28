@@ -98,8 +98,8 @@ import { e } from './format';
 // The richer JSON lockfile records process start time, which lets the
 // liveness check distinguish a real live duplicate from a recycled PID
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
-import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose } from './pidfile';
-import { userArgs } from './argv';
+import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
+import { userArgs, parsePort } from './argv';
 
 /**
  * Graceful exit on a startup-time init failure (bad API key, no providers,
@@ -266,9 +266,20 @@ interface AgentModeOpts {
 // use, tunnel the port: `ssh -L 3847:127.0.0.1:3847 user@host`.
 const BIND_HOST = '127.0.0.1';
 
-/** The daemon's port, resolved the way `agent` binds it: --port, else server.port in config, else 3847. */
-function daemonPort(flag?: string): number {
-  return resolveConfig({ cliFlags: { port: flag } }).port;
+/** A `--port` flag: undefined when not given; anything but an integer in 1..65535 exits with "Invalid port number". */
+function portFlag(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined;
+  const port = parsePort(raw);
+  if (port === null) {
+    console.error('Invalid port number');
+    process.exit(1);
+  }
+  return port;
+}
+
+/** The port `stop` / `resume` / `task` talk to — never read from config (see daemonPortForClient). */
+function clientPort(raw: string | undefined): number {
+  return daemonPortForClient(portFlag(raw));
 }
 
 async function runAgentMode(opts: AgentModeOpts): Promise<void> {
@@ -277,6 +288,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   // noVision directly.
   const forceNoLlm = Boolean(opts.noLlm || (opts as any).llm === false);
   const forceNoVision = Boolean(opts.noVision || (opts as any).vision === false);
+  const cliPort = portFlag(opts.port);
 
   // Single-instance guard — uses the legacy `start` lockfile name so
   // existing `clawdcursor stop` sweeps still find it.
@@ -293,7 +305,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     writeConsentFile();
     console.log('  Consent recorded.\n');
   } else if (!canSkipDev && !hasConsent()) {
-    const accepted = await runOnboarding('start', daemonPort(opts.port));
+    const accepted = await runOnboarding('start', resolveConfig({ cliFlags: { port: cliPort } }).port);
     if (!accepted) process.exit(1);
   }
 
@@ -337,7 +349,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
       visionModel: opts.visionModel,
       model:       opts.model,
       provider:    opts.provider,
-      port:        opts.port,
+      port:        cliPort,
       debug:       opts.debug,
       noVision:    forceNoVision,
     },
@@ -568,6 +580,8 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   mountJson404(app);
 
   app.listen(config.server.port, BIND_HOST, async () => {
+    // Where `stop` / `resume` / `task` find this daemon (see daemonPortForClient).
+    recordLockPort('start', config.server.port);
     const serverToken = initServerToken();
     const tokenPath = path.join(require('os').homedir(), '.clawdcursor', 'token');
     console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${config.server.port}`);
@@ -816,13 +830,9 @@ program
 program
   .command('stop')
   .description('Stop every running Clawd Cursor instance; agents stay stopped until `clawdcursor resume`')
-  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
+  .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
   .action(async (opts) => {
-    const port = daemonPort(opts.port);
-    if (isNaN(port) || port < 1 || port > 65535) {
-      console.error('Invalid port number');
-      process.exit(1);
-    }
+    const port = clientPort(opts.port);
     // Every clawdcursor process — stdio MCP servers too, which have no port or pidfile to reach — stops acting now, and a
     // server the host starts again stays stopped until the user gives control back (control.ts, #294).
     stopControl('cli');
@@ -925,9 +935,9 @@ program
   .command('resume')
   .description('Continue a task paused for you (same as the on-screen Resume), or --end it. After a stop, gives control back.')
   .option('--end', 'End the paused task')
-  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
+  .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
   .action(async (opts) => {
-    const port = daemonPort(opts.port);
+    const port = clientPort(opts.port);
     const answer = opts.end ? 'end' : 'resume';
     const gaveBack = !opts.end && isStopped();
     if (gaveBack) {
@@ -965,9 +975,9 @@ program
 program
   .command('task [text]')
   .description('Send a task to a running Clawd Cursor instance (interactive if no text given)')
-  .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
+  .option('--port <port>', 'API server port (default: the running daemon\'s port, else 3847)')
   .action(async (text, opts) => {
-    const port = daemonPort(opts.port);
+    const port = clientPort(opts.port);
     const url = `http://127.0.0.1:${port}/mcp`;
     // A --compact daemon serves the `task` compound, not submit_task.
     const { resolveTaskTool } = await import('./task-tool');
