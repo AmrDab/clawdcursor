@@ -172,7 +172,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'to poll, task {action:"abort"} to stop. A timeout on your side is NOT a task failure. ' +
       'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
       'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
-      '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. A plan limit or upgrade wall is a roadblock too: ' +
+      '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +
+      'A step your own rules won\'t let you take (creating an account, downloading a private key, entering a password, key or token) is a roadblock too, ' +
+      'not a reason to turn the task down: hand over just that step and do the rest. When a secret must go into a field or a terminal prompt, put the cursor there ' +
+      'and ask only for the paste ("Paste your app-specific password, then press Enter"); afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
       'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. A paused task returns ' +
       '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +

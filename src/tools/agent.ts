@@ -137,8 +137,9 @@ export function getAgentTools(): ToolDefinition[] {
     {
       name: 'pause_for_user',
       description:
-        'Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping or asking them to come back to this chat. ' +
+        'Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself, a step your own rules won\'t let you take such as creating an account, downloading a private key or entering a secret) instead of stopping, turning the task down or asking them to come back to this chat. ' +
         'Ask for that ONE step only — e.g. "Sign in to Glama" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. ' +
+        'When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste ("Paste your app-specific password, then press Enter"); afterwards use the saved key\'s file path or keychain profile name, never the secret. ' +
         'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. ' +
         'Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user\'s click counts there. ' +
         'Shows an on-screen prompt: blue glow, your message, Resume / End task. ' +

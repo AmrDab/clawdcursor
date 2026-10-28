@@ -4,6 +4,17 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **A step the agent may not take is handed over, not the whole task.** Agents
+  turned down whole tasks (an APNs key, an App Store review account, notarization)
+  because one step was something their own rules forbid: creating an account,
+  downloading a private key, entering a secret. The MCP instructions, the
+  `pause_for_user` description and the skill now say that such a step is a
+  roadblock like a sign-in: hand over just that step and do the rest. When a secret
+  must go into a field or a terminal prompt, the agent puts the cursor there and
+  asks only for the paste ("Paste your app-specific password, then press Enter"),
+  then passes the saved key's file path or keychain profile name, never the secret.
+
 ### Fixed
 
 - **macOS: `window list` says which apps have windows on another desktop
