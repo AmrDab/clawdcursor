@@ -77,8 +77,8 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 interface Foreground { processId: number; processName: string; title?: string }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
-/** A window the agent focused: bound when it is in front (activation can lag the focus call). */
-let pending: WindowQuery | null = null;
+/** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
+let pending: (WindowQuery & { opened?: boolean }) | null = null;
 /** When the agent's last focus-moving input or focus call ended. */
 let movedAt = 0;
 /**
@@ -130,7 +130,7 @@ async function before(): Promise<void> {
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
     if (!matches(pending, now)) {
-      throw new Error(`foreground changed: you focused ${pending.processName ?? pending.title ?? `pid ${pending.processId}`}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
+      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${pending.processName ?? pending.title ?? `pid ${pending.processId}`}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
   } else if (lease && lease.processId !== now.processId && !ownMove) {
@@ -160,7 +160,7 @@ function focused(q: WindowQuery): void {
  */
 function launched(r?: { pid?: number; title?: string }): void {
   movedAt = Date.now();
-  if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined }; return; }
+  if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true }; return; }
   lease = undefined;
   pending = null;
 }
