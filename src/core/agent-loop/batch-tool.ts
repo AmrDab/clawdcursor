@@ -26,7 +26,7 @@ import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import { buildUnifiedTools } from './tools';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../own-ui-guard';
-import { refLabel, selectorLabel } from '../../tools/safety-gate';
+import { refLabel, selectorLabels, gateEachLabel } from '../../tools/safety-gate';
 import { captureSnapshot } from '../sense/snapshot';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
@@ -186,11 +186,11 @@ export function buildBatchTool(): UnifiedTool {
         // holder, name, automationId — plus target, same as the loop's 5a
         // (without the ref label a batched invoke on a "Send"/"Pay" button
         // skipped the destructive-label rule entirely — audit finding B/H3).
-        const targetLabel = selectorLabel([
+        const targetLabels = selectorLabels([
           step.name === 'invoke_element' ? refLabel(a, ctx.uiMaps) : undefined,
           a.name, a.automationId, a.target,
         ]);
-        const decision = safetyEvaluate({ tool: step.name, args: a, targetLabel, activeApp, userTaskText: ctx.task });
+        const decision = gateEachLabel(targetLabels, targetLabel => safetyEvaluate({ tool: step.name, args: a, targetLabel, activeApp, userTaskText: ctx.task }));
         if (!isAllowed(decision)) {
           trace.push(`  ${i}. [${decision.decision}] ${label}`);
           const why = 'reason' in decision ? decision.reason : decision.tier;

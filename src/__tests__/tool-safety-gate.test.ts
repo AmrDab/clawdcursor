@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { getCompactSurface, getTool } from '../tools/registry';
-import { evaluateToolCall } from '../tools/safety-gate';
+import { evaluateToolCall, gateEachLabel, selectorLabels } from '../tools/safety-gate';
+import { evaluate } from '../core/safety';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap } from '../core/sense/ui-map-types';
 
@@ -106,6 +107,16 @@ describe('the destructive-label rule sees every selector the handler may act on'
     const { holder, id } = holderWithSend();
     expect(evaluateToolCall(tool, { action: 'invoke', name: 'Reply', element_id: 'el_7', snapshot_id: id }, { uiMaps: holder })?.text)
       .toContain('safety confirm');
+  });
+
+  it('evaluates each selector on its own, so the intent match for one does not approve another', () => {
+    // The agent loop passes the user's task: "send the email" intent-matches Send, never Delete.
+    const args = { name: 'Send', automationId: 'Delete' };
+    const gate = (selectors: unknown[]) => gateEachLabel(selectorLabels(selectors), targetLabel =>
+      evaluate({ tool: 'invoke_element', args, targetLabel, userTaskText: 'send the email' }));
+    expect(gate([args.name, args.automationId]).decision).toBe('confirm');
+    expect(gate([args.name]).decision).toBe('allow'); // the bypass itself still works
+    expect(gate([]).decision).toBe('allow');          // no selector: one no-label evaluation
   });
 
   it('does not over-gate: benign selectors pass, and text typed into a named target is still content', () => {

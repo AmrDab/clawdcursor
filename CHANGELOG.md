@@ -110,9 +110,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   `element_id` ref when no name was given. `invoke_element` acts on the ref
   first, then `name`, then `automationId`. So `{automationId:"Send"}`, or
   `{name:"Reply", element_id:<the Send button>}`, pressed Send with no
-  confirmation. The MCP gate, the agent loop and its `batch` now pass every
-  selector present to the rule, and any one that matches (Send, Delete, Pay…)
-  asks for confirmation.
+  confirmation. The MCP gate, the agent loop and its `batch` now check every
+  selector present, each on its own, and the strictest decision wins: any one
+  that matches (Send, Delete, Pay…) asks for confirmation, unless the user's
+  task asked for that same action.
 
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on

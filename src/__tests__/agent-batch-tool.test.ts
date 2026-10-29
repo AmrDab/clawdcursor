@@ -141,8 +141,8 @@ describe('agent batch — per-step parity with the single-call pipeline (audit 2
       ] },
       { ...ctx, uiMaps } as any,
     );
-    expect(seenLabels[0]).toMatch(/\bSend\b/);
-    expect(seenLabels[1]).toMatch(/\bSend\b/);
+    // Each selector is evaluated on its own: step 0 -> 'Send' (the ref) and 'Reply'; step 1 -> 'Send'.
+    expect(seenLabels).toEqual(['Send', 'Reply', 'Send']);
   });
 
   it('invalidates the UIMap holder after a successful screen-changing step', async () => {
