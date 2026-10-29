@@ -21,7 +21,12 @@ const PLATFORM_MOD_LOWER = process.platform === 'darwin' ? 'cmd' : 'ctrl';
 
 /** Executor key names (`normalizeKey`, src/platform/keys.ts) in the blocklist's spelling: control → ctrl, option/opt → alt, escape → esc. */
 const BLOCKLIST_NAME: Record<string, string> = { Control: 'ctrl', Alt: 'alt', Shift: 'shift', Escape: 'esc' };
-/** Super-family tokens keep their spelling (`win` vs `cmd`); the per-OS views below resolve what they press. */
+/**
+ * Super-family tokens (whatever `normalizeKey` resolves to Super) keep their
+ * spelling (`win` vs `cmd`); the per-OS views below resolve what they press.
+ * Any other Super alias (`super_l`, `command_l`) is `super`: every executor
+ * that accepts one presses the Super/Windows key (Command on macOS).
+ */
 const SUPER_SPELLING: Record<string, string> = { windows: 'win', command: 'cmd' };
 const SUPER_FAMILY: ReadonlySet<string> = new Set(['win', 'cmd', 'super', 'meta']);
 /** Modifiers in one fixed order, so `shift+ctrl+esc` is `ctrl+shift+esc`. */
@@ -42,12 +47,18 @@ function canonToken(token: string): string {
   const t = token === 'mod' ? PLATFORM_MOD_LOWER : token;
   if (!t) return t;
   const name = normalizeKey(t);
-  if (name === 'Super') return SUPER_SPELLING[t] ?? t;
+  if (name === 'Super') return SUPER_SPELLING[t] ?? (SUPER_FAMILY.has(t) ? t : 'super');
   return BLOCKLIST_NAME[name] ?? t;
 }
 
+/** Also breaks on `_` and `-`, so the documented `ctrl-alt-delete` matches. */
 function tokensOf(combo: string): string[] {
   return combo.toLowerCase().replace(/\s+/g, '').replace(/[+_-]+/g, '+').split('+').map(canonToken);
+}
+
+/** Tokens as the executors read them: split on `+` only, each whole token resolved (`super_l` stays one token). */
+function executorTokensOf(combo: string): string[] {
+  return combo.toLowerCase().split('+').map(p => p.trim()).filter(Boolean).map(canonToken);
 }
 
 function joinTokens(tokens: string[]): string {
@@ -60,10 +71,12 @@ export function normalizeCombo(combo: string): string {
   return joinTokens(tokensOf(combo));
 }
 
-/** The combo as spelled, plus what each executor on this OS presses for its super-family tokens. */
+/** The combo as spelled, plus what each executor on this OS presses for its super-family tokens — for both tokenizations. */
 function chordViews(combo: string): string[] {
-  const tokens = tokensOf(combo);
-  return [joinTokens(tokens), ...SUPER_VIEWS.map(v => joinTokens(tokens.map(t => (SUPER_FAMILY.has(t) ? v(t) : t))))];
+  return [tokensOf(combo), executorTokensOf(combo)].flatMap(tokens => [
+    joinTokens(tokens),
+    ...SUPER_VIEWS.map(v => joinTokens(tokens.map(t => (SUPER_FAMILY.has(t) ? v(t) : t)))),
+  ]);
 }
 
 // Two tiers (v1.6.0): the old single list HARD-blocked everything with NO
