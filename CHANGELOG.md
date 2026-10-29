@@ -104,6 +104,16 @@ All notable changes to Clawd Cursor will be documented in this file.
   batch step that would return an image. Accessibility and OCR still work. The unused
   `CLAWD_DISABLE_VERIFIER` / `disableVerifier` setting is removed; the
   verifier it switched off no longer exists.
+- **A compound action is gated like the granular tool it runs.** The gate took
+  a compound action's tier from its own name table. That table had `open_file`
+  and `navigate_browser` at input tier, while both tools declare tier 2. So
+  `window`/`system {action:"open_file"}` and `window`/`browser
+  {action:"navigate"}` ran without the confirmation the granular tools ask for.
+  The gate now never goes below the declared tier of the tool a compound action
+  dispatches to. The projected `minimize_window_to_taskbar` declared tier 2,
+  against the tier 1 its own source and the `window` compound give it. It is
+  now tier 1, so minimize stays unconfirmed on both surfaces.
+
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
   screen. With one hop to a full-screen Space, the list read "Windows (2)"

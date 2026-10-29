@@ -147,6 +147,12 @@ export interface EvaluationContext {
    * tool name string.
    */
   toolSafetyTier?: NumericTier;
+  /**
+   * For a compound call, the declared tier of the granular tool it dispatches
+   * to. The gate never goes below it: TOOL_TIER had open_file and
+   * navigate_browser at 'input' while both declare tier 2.
+   */
+  delegateSafetyTier?: NumericTier;
 }
 
 /**
@@ -462,9 +468,12 @@ export function evaluate(ctx: EvaluationContext): Decision {
   // correctly. The toolSafetyTier override only applies to granular tools where
   // no further unpacking occurs.
   const isCompoundUnpacked = canonicalTool !== ctx.tool;
-  const tier: Tier = (!isCompoundUnpacked && ctx.toolSafetyTier !== undefined)
+  const baseTier: Tier = (!isCompoundUnpacked && ctx.toolSafetyTier !== undefined)
     ? numericToTierString(ctx.toolSafetyTier)
     : (TOOL_TIER[canonicalTool] ?? 'input');
+  const tier: Tier = ctx.delegateSafetyTier !== undefined && ctx.delegateSafetyTier > tierToNumeric(baseTier)
+    ? numericToTierString(ctx.delegateSafetyTier)
+    : baseTier;
   const correlationId = getCorrelationId();
 
   const emit = (decision: Decision) => {
@@ -656,6 +665,7 @@ export function evaluateInput(input: {
   toolName: string;
   args: Record<string, unknown>;
   safetyTier?: NumericTier;
+  delegateSafetyTier?: NumericTier;
   ctx?: {
     targetLabel?: string;
     activeApp?: string;
@@ -669,6 +679,7 @@ export function evaluateInput(input: {
     activeApp: input.ctx?.activeApp,
     userTaskText: input.ctx?.userIntent,
     toolSafetyTier: input.safetyTier,
+    delegateSafetyTier: input.delegateSafetyTier,
   };
   return toSafetyDecision(evaluate(legacyCtx));
 }

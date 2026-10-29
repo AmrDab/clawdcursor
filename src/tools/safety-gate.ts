@@ -1,6 +1,14 @@
 import { evaluateInput } from '../core/safety';
+import { COMPOUND_ROUTE_INDEX } from './compact';
+import { getTool } from './registry';
 import type { ToolDefinition, ToolResult } from './types';
 import type { UIMapHolder } from '../core/sense/ui-map-holder';
+
+/** The declared tier of the granular tool a compound call dispatches to (the same route lookup as dispatchCompound). */
+function delegateSafetyTier(tool: ToolDefinition, args: Record<string, unknown>): ToolDefinition['safetyTier'] {
+  const route = COMPOUND_ROUTE_INDEX[tool.name]?.find(r => r.action === String(args.action ?? ''));
+  return route ? getTool(route.delegate)?.safetyTier : undefined;
+}
 
 function labelFromArgs(args: Record<string, unknown>, uiMaps?: UIMapHolder): string | undefined {
   const candidates = [
@@ -48,6 +56,7 @@ export function evaluateToolCall(
     toolName: tool.name,
     args,
     safetyTier: tool.safetyTier,
+    delegateSafetyTier: delegateSafetyTier(tool, args),
     ctx: {
       targetLabel: labelFromArgs(args, opts?.uiMaps),
     },
