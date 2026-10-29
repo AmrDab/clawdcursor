@@ -19,15 +19,32 @@ import { normalizeKey } from '../../platform/keys';
  */
 const PLATFORM_MOD_LOWER = process.platform === 'darwin' ? 'cmd' : 'ctrl';
 
-/** Executor key names (`normalizeKey`, src/platform/keys.ts) in the blocklist's spelling: control → ctrl, option/opt → alt, escape → esc. */
-const BLOCKLIST_NAME: Record<string, string> = { Control: 'ctrl', Alt: 'alt', Shift: 'shift', Escape: 'esc' };
 /**
- * Super-family tokens (whatever `normalizeKey` resolves to Super) keep their
- * spelling (`win` vs `cmd`); the per-OS views below resolve what they press.
- * Any other Super alias (`super_l`, `command_l`) is `super`: every executor
- * that accepts one presses the Super/Windows key (Command on macOS).
+ * One name per key for every spelling an executor accepts: keys.ts
+ * `normalizeKey`, the Windows adapter's WIN_KEY_MAP, the nut-js `Key` enum
+ * names both Windows executors fall back to (`LeftControl`, `RightAlt`), the
+ * Linux and Wayland tables (`rightctrl`, `altgr`) and the macOS ones
+ * (`forwarddelete`). Left/right and `_l`/`_r` variants fold into the base key,
+ * so a side spelling no table lists yet still classifies as that modifier.
  */
-const SUPER_SPELLING: Record<string, string> = { windows: 'win', command: 'cmd' };
+const KEY_FAMILIES: ReadonlyArray<[RegExp, string]> = [
+  [/^(left|right|l|r)?(ctrl|control)(_?(l|r))?$/, 'ctrl'],
+  [/^(left|right|l|r)?(alt|option|opt)(_?(l|r))?$|^altgr$/, 'alt'],
+  [/^(left|right|l|r)?shift(_?(l|r))?$/, 'shift'],
+  [/^(esc|escape)$/, 'esc'],
+  [/^(del|delete|forwarddelete)$/, 'delete'],
+  [/^(space|spacebar)$/, 'space'],
+];
+/**
+ * The super family. Exact `win`/`windows`, `cmd`/`command`, `super`, `meta`
+ * keep their spelling (`win` vs `cmd`); the per-OS views below resolve what
+ * they press. A side or suffixed variant (`super_l`, `command_l`, `LeftWin`,
+ * `RightCmd`, `LeftMeta`), or anything else `normalizeKey` resolves to Super,
+ * is `super`: every executor that accepts one presses the Super/Windows key
+ * (Command on macOS) — none of them maps those to Ctrl.
+ */
+const SUPER_SPELLING: ReadonlyMap<string, string> = new Map([['win', 'win'], ['windows', 'win'], ['cmd', 'cmd'], ['command', 'cmd'], ['super', 'super'], ['meta', 'meta']]);
+const SUPER_VARIANT = /^(left|right|l|r)?(super|win|windows|meta|cmd|command)(_?(l|r))?$/;
 const SUPER_FAMILY: ReadonlySet<string> = new Set(['win', 'cmd', 'super', 'meta']);
 /** Modifiers in one fixed order, so `shift+ctrl+esc` is `ctrl+shift+esc`. */
 const MODIFIER_ORDER = ['ctrl', 'alt', 'shift', 'win', 'cmd', 'super', 'meta', 'fn'];
@@ -43,12 +60,14 @@ const SUPER_VIEWS: ReadonlyArray<(token: string) => string> =
   : process.platform === 'win32' ? [() => 'win', t => (t === 'super' || t === 'win' ? 'win' : 'ctrl')]
   : [() => 'win'];
 
+/** `token` is lowercased. */
 function canonToken(token: string): string {
   const t = token === 'mod' ? PLATFORM_MOD_LOWER : token;
   if (!t) return t;
-  const name = normalizeKey(t);
-  if (name === 'Super') return SUPER_SPELLING[t] ?? (SUPER_FAMILY.has(t) ? t : 'super');
-  return BLOCKLIST_NAME[name] ?? t;
+  const spelled = SUPER_SPELLING.get(t);
+  if (spelled) return spelled;
+  if (SUPER_VARIANT.test(t) || normalizeKey(t) === 'Super') return 'super';
+  return KEY_FAMILIES.find(([re]) => re.test(t))?.[1] ?? t;
 }
 
 /** Also breaks on `_` and `-`, so the documented `ctrl-alt-delete` matches. */
