@@ -129,3 +129,60 @@ describe('keys-blocklist (two-tier: HARD block vs CONFIRM, v1.6.0)', () => {
     expect(BLOCKED_KEYS.has('ctrl+w')).toBe(false);  // moved to confirm
   });
 });
+
+// The executors accept modifier aliases (src/platform/keys.ts and each adapter):
+// control, option/opt, escape, and a super family (super/meta/win/windows/
+// cmd/command) whose key depends on the OS. The blocklist matched spellings, so
+// `super+l` or `option+f4` classified null and was then pressed as Win+L / Alt+F4.
+describe('keys-blocklist matches what the executor presses, however it is spelled', () => {
+  /** The blocklist as loaded on `platform` (it resolves `mod` and the super family at load). */
+  async function blocklistOn(platform: NodeJS.Platform) {
+    const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...desc, value: platform });
+    vi.resetModules();
+    try { return await import('../tools/playbooks/keys-blocklist'); } finally { Object.defineProperty(process, 'platform', desc); }
+  }
+
+  it.each(['win32', 'darwin', 'linux'] as const)('resolves control/option/escape and modifier order on %s', async (platform) => {
+    const { keyBlockTier } = await blocklistOn(platform);
+    expect(keyBlockTier('control+shift+escape')).toBe('block');
+    expect(keyBlockTier('shift+ctrl+esc')).toBe('block');
+    expect(keyBlockTier('control+alt+delete')).toBe('block');
+    expect(keyBlockTier('cmd+option+escape')).toBe('block');
+    expect(keyBlockTier('option+f4')).toBe('confirm');
+    expect(keyBlockTier('control+w')).toBe('confirm');
+  });
+
+  it.each(['win32', 'linux'] as const)('super-family spellings are the Windows/Super key on %s', async (platform) => {
+    const { keyBlockTier, isBlockedKey } = await blocklistOn(platform);
+    for (const c of ['super+l', 'windows+l', 'meta+l', 'cmd+l', 'command+l']) {
+      expect(keyBlockTier(c)).toBe('block');
+      expect(isBlockedKey(c)).toBe(true);
+    }
+    expect(keyBlockTier('super+r')).toBe('confirm');
+    expect(keyBlockTier('super+d')).toBe('confirm');
+  });
+
+  it('the Windows adapter sends cmd/command/meta as Ctrl, so those spellings are classified as Ctrl too', async () => {
+    const { keyBlockTier } = await blocklistOn('win32');
+    expect(keyBlockTier('meta+w')).toBe('confirm');
+    expect(keyBlockTier('command+shift+esc')).toBe('block');
+  });
+
+  it('super-family spellings are Command on macOS (and Cmd+L stays free)', async () => {
+    const { keyBlockTier } = await blocklistOn('darwin');
+    expect(keyBlockTier('super+shift+q')).toBe('block');
+    expect(keyBlockTier('meta+control+q')).toBe('block');
+    expect(keyBlockTier('super+q')).toBe('confirm');
+    expect(keyBlockTier('command+w')).toBe('confirm');
+    expect(keyBlockTier('super+l')).toBeNull();
+    expect(keyBlockTier('cmd+l')).toBeNull();
+  });
+
+  it.each(['win32', 'darwin', 'linux'] as const)('does not gate safe combos on %s', async (platform) => {
+    const { keyBlockTier } = await blocklistOn(platform);
+    for (const c of ['mod+s', 'control+c', 'option+left', 'shift+tab', 'escape', 'Return']) {
+      expect(keyBlockTier(c)).toBeNull();
+    }
+  });
+});
