@@ -40,7 +40,7 @@ import { resolveApiConfig, inferProviderFromBaseUrl } from '../llm/credentials';
 import type { ResolvedConfig } from '../llm/config';
 import { callVisionLLMDirect } from '../llm/client';
 import { hasConsent } from './onboarding';
-import { checkPermissionsQuick, requestPermissions, isMacOS } from '../platform/native-helper';
+import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
 import { findInstalledCopies, describeCopies } from './installed-copies';
 
 const CONFIG_FILE = '.clawdcursor-config.json';
@@ -253,6 +253,7 @@ export async function runDoctor(opts: {
   // ─── 1b. macOS Permissions (Screen Recording + Accessibility) ───
   // Uses the SAME canonical path as readiness.ts and CLI status:
   //   Host /status → permission-check binary → direct AXIsProcessTrusted fallback
+  // Screen Recording is the capture gate's own check (screenRecordingGranted), so doctor never disagrees with a capture.
   // This ensures doctor, status, and readiness always agree.
   if (isMacOS()) {
     console.log('🍎 macOS permissions (via native permission-check)...');
@@ -260,10 +261,10 @@ export async function runDoctor(opts: {
       let perms = await checkPermissionsQuick();
 
       // If any permission is missing, trigger system popups to request them
-      if (!perms.accessibility || !perms.screenRecording) {
+      if (!perms.accessibility || perms.screenRecording === false) {
         console.log('   🔐 Requesting macOS permissions (system dialogs may appear)...');
         try {
-          perms = await requestPermissions();
+          perms = { ...(await requestPermissions()), screenRecording: await screenRecordingGranted() };
         } catch (err) {
           // Continue with the check results, but say why no dialog came (e.g. the helpers are not built yet).
           console.log(`   ⚠️  ${err instanceof Error ? err.message : String(err)}`);
@@ -271,6 +272,9 @@ export async function runDoctor(opts: {
       }
       // With no app bundle the grant belongs to whatever runs clawdcursor — there is no "ClawdCursor" entry to enable.
       const who = perms.bundleId ? 'ClawdCursor' : 'the app running clawdcursor (your terminal or editor)';
+      // Captures run as the app that launched clawdcursor, never as ClawdCursor.app (#276) — so this answer is this terminal's.
+      const scope = 'checked for this terminal; the MCP server captures as its host app (e.g. Claude), which needs its own grant';
+      const enable = 'System Settings → Privacy & Security → Screen & System Audio Recording → enable the app running clawdcursor';
 
       results.push({
         name: 'macOS Accessibility permission',
@@ -286,19 +290,25 @@ export async function runDoctor(opts: {
         console.log(`   → System Settings → Privacy & Security → Accessibility → enable ${who}`);
       }
 
+      // null: the check could not run. Captures still go ahead (with a warning): not a denial, but not a pass either.
       results.push({
         name: 'macOS Screen Recording permission',
-        ok: perms.screenRecording,
-        detail: perms.screenRecording
-          ? 'Granted — clawdcursor can capture the screen'
-          : `DENIED — open System Settings → Privacy & Security → Screen & System Audio Recording → enable ${who}`,
+        ok: perms.screenRecording === true,
+        detail: perms.screenRecording === null
+          ? 'Could not check — captures go ahead, but a missing grant would show as a wallpaper-only image'
+          : perms.screenRecording
+            ? 'Granted — clawdcursor can capture the screen'
+            : `DENIED — open ${enable}`,
       });
-      if (perms.screenRecording) {
+      if (perms.screenRecording === null) {
+        console.log('   ⚠️  Screen Recording permission: could not check');
+      } else if (perms.screenRecording) {
         console.log('   ✅ Screen Recording permission granted');
       } else {
         console.log('   ❌ Screen Recording permission DENIED');
-        console.log(`   → System Settings → Privacy & Security → Screen & System Audio Recording → enable ${who}`);
+        console.log(`   → ${enable}`);
       }
+      console.log(`   ℹ  ${scope}`);
 
       if (perms.bundleId) {
         console.log(`   ℹ  Checked process: ${perms.bundleId}`);
@@ -313,7 +323,7 @@ export async function runDoctor(opts: {
       results.push({ name: 'macOS Accessibility permission', ok: false, detail: `Could not query: ${err}` });
       results.push({ name: 'macOS Screen Recording permission', ok: false, detail: `Could not query: ${err}` });
       console.log(`   ❌ Permission check failed: ${err}`);
-      console.log('   → Ensure ClawdCursor.app is built: cd native && ./build.sh');
+      console.log(`   → ${nativeBuildHint()}`);
     }
   }
 

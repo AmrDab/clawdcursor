@@ -13,8 +13,14 @@ import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_W
 import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
 import { waitForPaste, writeClipboardVerified } from './paste-guard';
+import { lastCaptureUnchecked } from '../platform/native-helper';
 
 const IS_MAC = os.platform() === 'darwin';
+
+/** The capture went ahead unchecked (#276): a missing grant would look like this image, so the agent is told. */
+const uncheckedNote = (): string => lastCaptureUnchecked()
+  ? '\n(Screen Recording could not be checked on this Mac — if this image shows only the desktop background, the app running clawdcursor needs Screen Recording.)'
+  : '';
 
 /**
  * Coordinate space for pointer/region tools. Mirrors COORD_SPACE_SCHEMA on the
@@ -114,7 +120,7 @@ export function getDesktopTools(): ToolDefinition[] {
         const base64 = frame.buffer.toString('base64');
         const note = target && (process.platform === 'win32' || explicit !== undefined) ? displayNote(displays, target) : '';
         return {
-          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}`,
+          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}${uncheckedNote()}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },
@@ -156,7 +162,7 @@ export function getDesktopTools(): ToolDefinition[] {
         const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');
         return {
-          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space }, frame.llmWidth, frame.llmHeight)}`,
+          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },
