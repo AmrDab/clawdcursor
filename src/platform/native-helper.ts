@@ -598,8 +598,11 @@ async function helperPreflight(helperPath: string): Promise<boolean | null> {
   return null;   // the helper did not run (dyld, architecture, quarantine…): no answer, not a grant
 }
 
-// Coerced, so a bridge that hands back 1/0 instead of a boolean still prints true/false.
-export const PREFLIGHT_JXA = "ObjC.import('CoreGraphics'); String(Boolean($.CGPreflightScreenCaptureAccess()))";
+// CoreGraphics' bridge support does not declare CGPreflightScreenCaptureAccess (macOS 26.5: "$.CGPreflightScreenCaptureAccess
+// is not a function"), so it is bound by hand. Coerced, so a bridge that hands back 1/0 instead of a boolean still prints true/false.
+export const PREFLIGHT_JXA =
+  "ObjC.import('CoreGraphics'); ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]); " +
+  'String(Boolean($.CGPreflightScreenCaptureAccess()))';
 
 async function osascriptPreflight(): Promise<boolean | null> {
   const r = await runCheck('osascript', ['-l', 'JavaScript', '-e', PREFLIGHT_JXA]);

@@ -56,9 +56,12 @@ export function resumeControl(): void {
   if (file) { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } }
 }
 
+// The tool's own name, not one surface's call syntax: tool text is renamed per surface (compact.ts toCompactNames), and a
+// literal `system {"action":"pause_for_user"}` came out mangled inside a batch step on the real Mac. The exact call is in the
+// result line's `next` (result-codes.ts STOPPED).
 export const STOPPED_TEXT =
   'stopped by the user — they took control back, and nothing runs until they give it back. Do not retry. ' +
-  'To ask for it, call system {"action":"pause_for_user","message":"<what you want to do next>"}: their Resume click gives control back.';
+  'To ask for it, call pause_for_user with a message saying what you want to do next: their Resume click gives control back.';
 
 /** Sleep that ends early when the user stops clawdcursor. True when it was cut short. */
 export async function sleepUnlessStopped(ms: number): Promise<boolean> {

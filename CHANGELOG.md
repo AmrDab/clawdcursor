@@ -61,7 +61,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   check was skipped and screenshots and OCR still returned the wallpaper and
   menu bar. With no helper, macOS's own permission check
   (`CGPreflightScreenCaptureAccess`) is now asked through `osascript`, which
-  needs no Command Line Tools and captures nothing (no prompt, no flash). A
+  needs no Command Line Tools and captures nothing (no prompt, no flash). The
+  function is bound by hand: CoreGraphics' scripting bridge does not declare
+  it, and on macOS 26.5 the plain call failed, so the check never answered. A
   denial is `CAPTURE_DENIED`. A grant is remembered for the process, so
   captures no longer each start a check. A denial, a check that could not
   answer, and a helper that would not run are never remembered, and a failed
