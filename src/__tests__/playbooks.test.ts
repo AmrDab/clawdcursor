@@ -163,6 +163,16 @@ describe('keys-blocklist matches what the executor presses, however it is spelle
     expect(keyBlockTier('super+d')).toBe('confirm');
   });
 
+  it('reads a token whole, as the executors do: `super_l` / `command_l` are the Windows key on Windows', async () => {
+    // keys.ts resolves both to Super; NativeDesktop and the Windows adapter press LeftSuper+L.
+    const { keyBlockTier, isBlockedKey } = await blocklistOn('win32');
+    for (const c of ['super_l+l', 'command_l+l', 'SUPER_L + L']) {
+      expect(keyBlockTier(c)).toBe('block');
+      expect(isBlockedKey(c)).toBe(true);
+    }
+    expect(keyBlockTier('super_l+d')).toBe('confirm');
+  });
+
   it('the Windows adapter sends cmd/command/meta as Ctrl, so those spellings are classified as Ctrl too', async () => {
     const { keyBlockTier } = await blocklistOn('win32');
     expect(keyBlockTier('meta+w')).toBe('confirm');
