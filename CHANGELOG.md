@@ -120,6 +120,17 @@ All notable changes to Clawd Cursor will be documented in this file.
   check, with `key: ["alt+f4"]` therefore skipped the confirm tier and pressed
   Alt+F4. The gate now reads a non-string value the way the handlers do, and
   the key tool refuses one outright.
+- **The key blocklist matches a combo however its modifiers are spelled.** It
+  compared spellings, while the executors accept aliases: `control`,
+  `option`/`opt`, `escape`, and `super`/`meta`/`windows`/`cmd`/`command` for
+  the OS's super key. So `super+l`, `control+shift+escape` and `option+f4`
+  matched nothing, passed the safety gate and the hard-block backstop, and were
+  pressed as Win+L, Ctrl+Shift+Esc and Alt+F4. The blocklist now resolves those
+  aliases and the modifier order before matching, and classifies a super-family
+  token as what this OS presses for it: Command on macOS, the Windows/Super key
+  on Windows and Linux, and also Ctrl on Windows, where the adapter sends
+  `cmd`/`meta` as Ctrl. One side effect: `cmd+l` on Windows and Linux is now
+  hard-blocked: Linux and the MCP `key_press` path on Windows press it as Win+L.
 
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
