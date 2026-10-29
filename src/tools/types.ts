@@ -68,6 +68,8 @@ export interface ToolContext {
   getLogBuffer?: () => Array<{ timestamp: number; level: string; message: string }>;
   /** Session-scoped UIMap cache for safe el_NN element refs (Part 2). */
   uiMaps?: import('../core/sense/ui-map-holder').UIMapHolder;
+  /** High-security mode (--no-vision / CLAWD_DISABLE_VISION / config disableVision): no image goes to the model. */
+  disableVision?: boolean;
   /** Image-space → logical (mouse) coords. mouseCoord = imageCoord * factor */
   getMouseScaleFactor: () => number;
   /** Image-space → physical pixel coords (for screenshot region crop) */

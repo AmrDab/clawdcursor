@@ -224,6 +224,7 @@ export class Agent {
         llm: { text: textConfig, vision: visionConfig },
         cdp,
         uiMaps,
+        disableVision: this.resolvedConfig?.disableVision,
       },
     );
 

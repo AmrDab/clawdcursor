@@ -439,10 +439,11 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 | **Block** | `Ctrl+Alt+Del`, lock / log-out / force-quit / shutdown key sequences | Refused outright (no path) |
 
 - **Pauses instead of pushing through.** At a sign-in, 2FA, CAPTCHA or plan-limit page the agent hands the desktop to you (blue glow, Resume / End task) instead of guessing. A pause times out after 15 minutes (`CLAWD_PAUSE_TIMEOUT_MIN`); `CLAWD_NO_PAUSE=1` turns pausing off.
-- **Network isolation.** Binds to `127.0.0.1`. Verify: `netstat -an | findstr 3847` (Windows) / `| grep 3847` (Unix).
+- **Network isolation.** Binds to `127.0.0.1` only; there is no setting that opens it to the network. Verify: `netstat -an | findstr 3847` (Windows) / `| grep 3847` (Unix). To drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side.
 - **Bearer-token auth** on every HTTP request (`~/.clawdcursor/token`).
 - **Sensitive-app policy.** Email, banking, password managers, private messaging auto-elevate to Confirm.
 - **No telemetry by default.** Nothing phones home. Screenshots stay in RAM; with a local model nothing leaves the machine; with a cloud provider, screenshots go only to the endpoint you configured. `clawdcursor report` is opt-in and previews exactly what it sends.
+- **No screenshots to any model, if you want.** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, which also covers stdio `clawdcursor mcp`) keeps every image from the built-in agent and from MCP clients; they work from the accessibility tree and OCR text.
 - **Prompt-injection defense.** Screen text is returned inside `<untrusted-screen-content>` tags &mdash; data, never instructions.
 - **Log privacy.** Logs redact password-field values (`AXSecureTextField`, UIA `IsPassword=true`).
 

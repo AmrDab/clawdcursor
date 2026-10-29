@@ -28,6 +28,10 @@ export function isImagePointerCall(tool: string, action: string | undefined, arg
     || typeof args.path === 'string' || Array.isArray(args.path);
 }
 
+/** High-security mode (ctx.disableVision): why a call that returned an image is refused — a direct call or a batch step. */
+export const VISION_DISABLED_REFUSAL = 'vision is disabled on this server (--no-vision / CLAWD_DISABLE_VISION), so no ' +
+  'screenshot is sent to the model. Read the screen without one: the accessibility tree, or OCR text.';
+
 /** A full screenshot — the frame image coordinates refer to. Zoom / region crops keep the frame they came from. */
 export function isFullScreenshotCall(tool: string, action: string | undefined): boolean {
   return (tool === 'computer' && action === 'screenshot') || SCREENSHOT_TOOLS.has(tool);

@@ -1175,3 +1175,60 @@ describe('runAgent — pause for the user at a roadblock', () => {
     expect(result.steps[0].result.text).toMatch(/safety_confirm/);
   });
 });
+
+describe('runAgent — --no-vision keeps every image from the model', () => {
+  beforeEach(() => {
+    llmTurnQueue.length = 0;
+    capturedLlmCalls.length = 0;
+  });
+
+  /** Every image block the model was sent, top-level or inside a tool_result. */
+  const imagesSent = (): unknown[] => capturedLlmCalls.flatMap((c: any) => ((c?.messages ?? []) as any[])
+    .flatMap(m => (Array.isArray(m.content) ? m.content : []))
+    .flatMap((b: any) => (b.type === 'tool_result' && Array.isArray(b.content) ? b.content : [b]))
+    .filter((b: any) => b.type === 'image' || b.type === 'image_url'));
+
+  const direct = () => turnCall('screenshot');
+  const inBatch = () => turnCall('batch', { steps: [{ name: 'screenshot', args: {} }] });
+  const run = (disableVision: boolean, first: () => ReturnType<typeof turnCall>) => {
+    llmTurnQueue.push(first());
+    llmTurnQueue.push(turnCall('done', { evidence: 'looked' }));
+    const adapter = makeAdapter();
+    return runAgent({ task: 'look at the screen', maxTurns: 4 }, { adapter, llm: VISION_CONFIG, disableVision })
+      .then(result => ({ result, adapter }));
+  };
+  /** What the model is told before it acts: the system prompt and the first user turn. */
+  const firstContext = () => {
+    const c = capturedLlmCalls[0];
+    const firstUser = (c.messages[0].content as any[]).filter(b => b.type === 'text').map(b => b.text).join('\n');
+    return `${c.system}\n${firstUser}`;
+  };
+
+  it('control: without it, a screenshot reaches the model and a batch step captures one', async () => {
+    await run(false, direct);
+    expect(imagesSent().length).toBeGreaterThan(0);
+    expect(firstContext()).toMatch(/screenshot/i);
+    const { adapter } = await run(false, inBatch);
+    expect(adapter.screenshot).toHaveBeenCalled();
+  });
+
+  it('with it, nothing the model is told mentions a screenshot, and it is offered no screenshot tool', async () => {
+    await run(true, direct);
+    expect(firstContext()).not.toMatch(/screenshot/i);
+    expect(capturedLlmCalls[0].tools.map((t: { name: string }) => t.name)).not.toContain('screenshot');
+  });
+
+  it('with it, a screenshot call captures nothing and no image is sent', async () => {
+    const { adapter } = await run(true, direct);
+    expect(adapter.screenshot).not.toHaveBeenCalled();
+    expect(imagesSent()).toEqual([]);
+    expect(capturedLlmCalls.every((c: any) => c.model === 'stub-text')).toBe(true);
+  });
+
+  it('with it, a batch step {name:"screenshot"} is not available and captures nothing', async () => {
+    const { result, adapter } = await run(true, inBatch);
+    expect(result.steps[0].result.text).toMatch(/tool "screenshot" is not available inside a batch/);
+    expect(adapter.screenshot).not.toHaveBeenCalled();
+    expect(imagesSent()).toEqual([]);
+  });
+});

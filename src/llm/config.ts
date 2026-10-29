@@ -40,7 +40,6 @@ export interface ResolvedConfig {
   // Behaviour flags
   debug: boolean;
   disableVision: boolean;
-  disableVerifier: boolean;
   // Source tracking
   source: {
     apiKey: ConfigSource;
@@ -55,7 +54,6 @@ export interface ResolvedConfig {
     port: ConfigSource;
     debug: ConfigSource;
     disableVision: ConfigSource;
-    disableVerifier: ConfigSource;
   };
 }
 
@@ -149,7 +147,6 @@ interface StoredConfigFields {
   port?: number;
   debug?: boolean;
   disableVision?: boolean;
-  disableVerifier?: boolean;
 }
 
 /**
@@ -191,9 +188,10 @@ function parseStoredConfig(json: Record<string, any>): StoredConfigFields {
   if (typeof json.textBaseUrl === 'string' && json.textBaseUrl) result.textBaseUrl = json.textBaseUrl;
   if (typeof json.provider === 'string' && json.provider) result.provider = json.provider;
   if (typeof json.port === 'number') result.port = json.port;
+  // Nested `{"server":{"port":N}}` — the ClawdConfig shape the port messages name.
+  else if (typeof json.server?.port === 'number') result.port = json.server.port;
   if (typeof json.debug === 'boolean') result.debug = json.debug;
   if (typeof json.disableVision === 'boolean') result.disableVision = json.disableVision;
-  if (typeof json.disableVerifier === 'boolean') result.disableVerifier = json.disableVerifier;
 
   // Pipeline-nested (project config from doctor) — read model/baseUrl from pipeline layers
   const pipeline = json.pipeline;
@@ -280,9 +278,7 @@ export function resolveConfig(input?: ResolveInput): ResolvedConfig {
 
   // Boolean env flags — CLAWD_* > OPENCLAW_*
   const envDisableVisionStr   = readEnvPair('CLAWD_DISABLE_VISION',   'OPENCLAW_DISABLE_VISION',   env);
-  const envDisableVerifierStr = readEnvPair('CLAWD_DISABLE_VERIFIER', 'OPENCLAW_DISABLE_VERIFIER', env);
   const envDisableVision   = envDisableVisionStr   !== undefined ? (envDisableVisionStr   === '1' || envDisableVisionStr   === 'true') : undefined;
-  const envDisableVerifier = envDisableVerifierStr !== undefined ? (envDisableVerifierStr === '1' || envDisableVerifierStr === 'true') : undefined;
 
   // ── 5. Auto-detect via resolveApiConfig ────────────────────────────────────
   // Only call when no higher-priority source supplied an apiKey / baseUrl.
@@ -420,14 +416,6 @@ export function resolveConfig(input?: ResolveInput): ResolvedConfig {
     [false,                   'default'],
   ]);
 
-  // disableVerifier
-  const [disableVerifier, disableVerifierSrc] = firstDefined<boolean>([
-    [project.disableVerifier,  'project'],
-    [user.disableVerifier,     'user'],
-    [envDisableVerifier,       'env'],
-    [false,                    'default'],
-  ]);
-
   return {
     apiKey,
     baseUrl,
@@ -441,7 +429,6 @@ export function resolveConfig(input?: ResolveInput): ResolvedConfig {
     port,
     debug,
     disableVision,
-    disableVerifier,
     source: {
       apiKey:          apiKeySrc,
       baseUrl:         baseUrlSrc,
@@ -455,7 +442,6 @@ export function resolveConfig(input?: ResolveInput): ResolvedConfig {
       port:            portSrc,
       debug:           debugSrc,
       disableVision:   disableVisionSrc,
-      disableVerifier: disableVerifierSrc,
     },
   };
 }

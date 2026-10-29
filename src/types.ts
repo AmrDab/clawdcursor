@@ -94,9 +94,9 @@ export interface AgentState {
 }
 
 export interface ClawdConfig {
+  /** The daemon binds 127.0.0.1 only; there is no host setting (#293). */
   server: {
     port: number;
-    host: string;
   };
   ai: {
     provider: string;
@@ -138,7 +138,6 @@ export interface ClawdConfig {
 export const DEFAULT_CONFIG: ClawdConfig = {
   server: {
     port: 3847,
-    host: '127.0.0.1',
   },
   ai: {
     provider: 'auto',

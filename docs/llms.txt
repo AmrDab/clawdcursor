@@ -85,6 +85,7 @@ optional autonomous daemon.
     clawdcursor agent     # HTTP + MCP daemon on 127.0.0.1:3847
 
 `clawdcursor agent --no-llm` exposes the HTTP tool surface only (your agent supplies the brain).
+`clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, also for stdio) sends no screenshot to any model: a call that would return one is refused with VISION_DISABLED; read the screen with accessibility or OCR.
 
 ## Tool surface (compact — recommended, ~1500 tokens of catalog)
 

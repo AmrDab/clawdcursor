@@ -116,6 +116,8 @@ export interface AgentDeps {
   cdp?: import('../../platform/cdp-driver').CDPDriver | null;
   /** Optional session-scoped UIMap holder (Part 2). Created per-call if absent. */
   uiMaps?: UIMapHolder;
+  /** High-security mode (--no-vision): no screenshot tool, and no image ever goes to the model. */
+  disableVision?: boolean;
 }
 
 /**
@@ -164,11 +166,11 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
 
   // Build the flat tool catalog. Mode and capability params are no longer
   // accepted — the full catalog is served regardless of mode.
-  const tools = buildUnifiedTools();
+  const tools = buildUnifiedTools({ disableVision: deps.disableVision });
   const toolMap = new Map(tools.map(t => [t.name, t]));
   const llmTools = toUnifiedLLMTools(tools);
 
-  const systemPrompt = buildSystemPrompt();
+  const systemPrompt = buildSystemPrompt({ disableVision: deps.disableVision });
 
   // Seed the conversation.
   const history: LLMToolTurn[] = [];
@@ -238,7 +240,9 @@ export async function runAgent(input: AgentInput, deps: AgentDeps): Promise<Agen
     // DPI/scale header — tells the model how screenshot pixels map to tool coords.
     const shot = llmSize(screen.physicalWidth, screen.physicalHeight);
     const ssScale = shot.scale.toFixed(2);
-    const dpiNote = `\nDISPLAY: ${screen.physicalWidth}×${screen.physicalHeight} physical, screenshot ${shot.width}×${shot.height} (×${ssScale} to screen).`;
+    const dpiNote = deps.disableVision
+      ? `\nDISPLAY: ${screen.physicalWidth}×${screen.physicalHeight} physical.`
+      : `\nDISPLAY: ${screen.physicalWidth}×${screen.physicalHeight} physical, screenshot ${shot.width}×${shot.height} (×${ssScale} to screen).`;
     log.info('agent.coordinate_space', {
       physical: `${screen.physicalWidth}×${screen.physicalHeight}`,
       screenshotScale: ssScale,
@@ -785,6 +789,7 @@ ${renderReport(now)}` : null;
           targetWindow: input.targetWindow,
           cdp: deps.cdp ?? null,
           uiMaps: holder,
+          disableVision: deps.disableVision,
           coordSpaceDefault: imageInContext ? 'image' : 'screen',
           // P1 verification integrity — the `done` gate reads these.
           taskStartedAt: startedAt,
@@ -902,7 +907,8 @@ ${renderReport(now)}` : null;
         const content: Array<{ type: 'text'; text: string } | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }> = [
           { type: 'text', text: err ? `${tr.text}\n${renderResultLine(err)}` : tr.text },
         ];
-        if (tr.screenshot) {
+        // --no-vision: the image never reaches the model, whichever tool captured it.
+        if (tr.screenshot && !deps.disableVision) {
           content.push(shotToInnerBlock(tr.screenshot));
         }
         nextBlocks.push({ type: 'tool_result', tool_use_id: tr.id, content, is_error: tr.isError });
@@ -1055,7 +1061,7 @@ ${renderReport(now)}` : null;
           type: 'text',
           text: firm
             ? `\n⚠ STAGNATION (${consecutiveStagnantTurns} turns, no accessibility change). The screen may still be advancing — this app likely has a sparse a11y tree (new Outlook, web/canvas UIs). STOP repeating the last action. Switch APPROACH WITHIN this app: prefer a keyboard-only flow (open a fresh compose, the recipient field is focused — type, Return to commit the chip, Tab to the next field), or find_input_field/find_action_button to get an el_NN target, or call focus_window to confirm the right window is active, or give_up with a concrete reason. Do NOT open the web version of this app or switch to another app.`
-            : `\n⚠ STAGNATION (${consecutiveStagnantTurns}/${STAGNATION_HARD_LIMIT}): the last ${STAGNATION_WINDOW} actions did not change the accessibility tree. Try a DIFFERENT approach (keyboard shortcut, Tab between fields, different target, focus_window to check the active window) — or, if the screen really is changing, read it with read_text (OCR) first and a screenshot only if that is not enough. give_up if you're truly stuck.`,
+            : `\n⚠ STAGNATION (${consecutiveStagnantTurns}/${STAGNATION_HARD_LIMIT}): the last ${STAGNATION_WINDOW} actions did not change the accessibility tree. Try a DIFFERENT approach (keyboard shortcut, Tab between fields, different target, focus_window to check the active window) — or, if the screen really is changing, read it with read_text (OCR)${deps.disableVision ? '' : ' first and a screenshot only if that is not enough'}. give_up if you're truly stuck.`,
         });
         // Re-arm after a firm nudge so it recurs in waves (not every turn) and a
         // later genuine change cleanly resets the cadence. max_turns + the

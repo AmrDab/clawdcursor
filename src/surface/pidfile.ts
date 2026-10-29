@@ -40,6 +40,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
+import { DEFAULT_CONFIG } from '../types';
 
 export type LockMode = 'start' | 'mcp' | 'serve';
 
@@ -64,6 +65,11 @@ interface LockData {
    *  died — and reap it instead of refusing to start. Optional for back-compat
    *  with locks written before this field existed. */
   ppid?: number;
+  /** The port the daemon actually bound (`start` lock only, set once it listens). Client commands (`stop`, `resume`,
+   *  `task`) read it here — never from a config file, which a repo in the cwd could plant to point the bearer token at
+   *  another local port. The lock lives in the user's own data dir, like the token file: mode 0600 on POSIX; on
+   *  Windows the mode is ignored and the file inherits the user profile's ACL. */
+  port?: number;
 }
 
 export function pidFilePath(mode: LockMode): string {
@@ -223,6 +229,26 @@ export function claimPidFile(mode: LockMode): number | null {
     // is what users had before this guard existed.
     return null;
   }
+}
+
+/** Record the port this process bound in its own `mode` lock (no-op if the lock is not ours). Best-effort. */
+export function recordLockPort(mode: LockMode, port: number): void {
+  try {
+    const lock = readLockFile(mode);
+    if (!lock || lock.pid !== process.pid) return;
+    fs.writeFileSync(pidFilePath(mode), JSON.stringify({ ...lock, port }), { encoding: 'utf-8', mode: 0o600 });
+  } catch { /* the client falls back to 3847 */ }
+}
+
+/**
+ * The port a client command talks to: `--port` if given, else the port the running daemon recorded in its lock
+ * (only while that pid is alive), else 3847. Config files are deliberately not consulted.
+ */
+export function daemonPortForClient(flag?: number): number {
+  if (flag !== undefined) return flag;
+  const lock = readLockFile('start');
+  if (lock && typeof lock.port === 'number' && isProcessAlive(lock.pid)) return lock.port;
+  return DEFAULT_CONFIG.server.port;
 }
 
 /**

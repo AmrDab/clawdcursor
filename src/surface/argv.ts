@@ -20,6 +20,13 @@ function resolved(p: string): string {
   try { return fs.realpathSync(p); } catch { return path.resolve(p); }
 }
 
+/** A `--port` value: an integer in 1..65535, else null ("4000abc", "0", "1e3" and "" are all refused). */
+export function parsePort(raw: string): number | null {
+  if (!/^\d+$/.test(raw)) return null;
+  const port = Number(raw);
+  return port >= 1 && port <= 65535 ? port : null;
+}
+
 export function userArgs(argv: string[], scriptPath: string, isElectron = Boolean(process.versions.electron)): string[] {
   const here = resolved(scriptPath);
   // argv[0] is always the runtime binary; a symlinked bin (`/usr/local/bin/

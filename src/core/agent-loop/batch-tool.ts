@@ -112,7 +112,7 @@ export function buildBatchTool(): UnifiedTool {
       // semantics are discarded by the trace, so the loop would keep going
       // while the model believes it terminated.
       const byName = new Map(
-        buildUnifiedTools().filter(t => t.name !== 'batch' && t.terminal !== true).map(t => [t.name, t]),
+        buildUnifiedTools({ disableVision: ctx.disableVision }).filter(t => t.name !== 'batch' && t.terminal !== true).map(t => [t.name, t]),
       );
       const trace: string[] = [];
       let done = 0;

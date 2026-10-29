@@ -15,6 +15,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   prompt, the agent puts the cursor there and asks only for the paste ("Paste your
   app-specific password, press Enter, then click Resume"),
   then passes the saved key's file path or keychain profile name, never the secret.
+- **The daemon binds `127.0.0.1` only, and `--allow-remote` is gone (#293).**
+  `server.host` in the config was never read, so the daemon always bound
+  loopback and `--allow-remote` never did anything. Rather than open the
+  desktop-control port to the network, the flag and the `server.host` setting
+  are removed. To drive clawdcursor from another machine, tunnel the port:
+  `ssh -L 3847:127.0.0.1:3847 user@host`.
 
 ### Fixed
 
@@ -73,6 +79,29 @@ All notable changes to Clawd Cursor will be documented in this file.
   instead. The build hint no longer says `cd native && ./build.sh`, which
   fails from an npm install: it names `xcode-select --install` and the
   package's own build script by its full path.
+- **`server.port` in the config is used (#293).** The daemon only read a flat
+  `"port"`, and `--port` always defaulted to 3847, which outranked the config
+  file. `{"server":{"port":N}}` and `{"port":N}` now both work, `--port` still
+  wins when given, and the "port already in use" check looks at the port the
+  daemon will really bind. The files are read in layer order, so a flat `port`
+  in the project's `.clawdcursor-config.json` outranks a nested `server.port`
+  in `~/.clawdcursor/config.json`. `stop`, `resume` and `task` find the daemon
+  on the port it recorded in its own lock file (`~/.clawdcursor/start.pid`,
+  used only while that process is alive), else 3847. Like the token file, the
+  lock is mode 0600 on macOS and Linux; on Windows it inherits your user
+  profile's permissions. They never
+  read the port from a config file, so a repo you run them in cannot redirect
+  the bearer token to another port. A `--port` that is not a whole number from
+  1 to 65535 is refused with "Invalid port number" on every command.
+- **`--no-vision` keeps screenshots from every model.** The flag (and
+  `CLAWD_DISABLE_VISION=1` / `"disableVision": true`) was read and then
+  ignored, so screenshots still went to the model. Now the built-in agent is
+  not offered a screenshot tool, even inside a batch, its instructions no
+  longer mention screenshots, and it never sends an image. The MCP surface
+  (HTTP daemon, and stdio for the env var or config key) refuses any call or
+  batch step that would return an image. Accessibility and OCR still work. The unused
+  `CLAWD_DISABLE_VERIFIER` / `disableVerifier` setting is removed; the
+  verifier it switched off no longer exists.
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
   screen. With one hop to a full-screen Space, the list read "Windows (2)"
