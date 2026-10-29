@@ -26,6 +26,7 @@ import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import { buildUnifiedTools } from './tools';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../own-ui-guard';
+import { refLabel, selectorLabel } from '../../tools/safety-gate';
 import { captureSnapshot } from '../sense/snapshot';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
@@ -181,19 +182,14 @@ export function buildBatchTool(): UnifiedTool {
           }
         }
 
-        let targetLabel = typeof a.name === 'string' ? a.name : typeof a.target === 'string' ? a.target : undefined;
-        // el_NN refs carry no name/target — resolve the element's label from the
-        // holder so the safety gate sees a real label (same as the loop's 5a;
-        // without this a batched invoke on a "Send"/"Pay" button skipped the
-        // destructive-label rule entirely — audit finding B/H3).
-        if (!targetLabel && step.name === 'invoke_element'
-            && typeof a.element_id === 'string' && typeof a.snapshot_id === 'string' && ctx.uiMaps) {
-          const r = ctx.uiMaps.resolve(a.snapshot_id, Date.now());
-          if (r.ok) {
-            const el = r.map.elements.find(e => e.id === a.element_id);
-            if (el) targetLabel = el.text ?? el.normalized_text ?? undefined;
-          }
-        }
+        // Every selector invoke_element may act on — the ref's label from the
+        // holder, name, automationId — plus target, same as the loop's 5a
+        // (without the ref label a batched invoke on a "Send"/"Pay" button
+        // skipped the destructive-label rule entirely — audit finding B/H3).
+        const targetLabel = selectorLabel([
+          step.name === 'invoke_element' ? refLabel(a, ctx.uiMaps) : undefined,
+          a.name, a.automationId, a.target,
+        ]);
         const decision = safetyEvaluate({ tool: step.name, args: a, targetLabel, activeApp, userTaskText: ctx.task });
         if (!isAllowed(decision)) {
           trace.push(`  ${i}. [${decision.decision}] ${label}`);
