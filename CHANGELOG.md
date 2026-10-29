@@ -125,8 +125,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   `option`/`opt`, `escape`, and `super`/`meta`/`windows`/`cmd`/`command` for
   the OS's super key. So `super+l`, `control+shift+escape` and `option+f4`
   matched nothing, passed the safety gate and the hard-block backstop, and were
-  pressed as Win+L, Ctrl+Shift+Esc and Alt+F4. The blocklist now resolves those
-  aliases and the modifier order before matching, and classifies a super-family
+  pressed as Win+L, Ctrl+Shift+Esc and Alt+F4. The blocklist now reads each
+  `+`-separated token whole, as the executors do. It resolves every spelling an
+  executor accepts, including the nut-js key names, left/right variants
+  (`LeftWin`, `rightctrl`, `super_l`) and `forwarddelete`, and puts modifiers in
+  one order before matching. It classifies a super-family
   token as what this OS presses for it: Command on macOS, the Windows/Super key
   on Windows and Linux, and also Ctrl on Windows, where the adapter sends
   `cmd`/`meta` as Ctrl. One side effect: `cmd+l` on Windows and Linux is now
