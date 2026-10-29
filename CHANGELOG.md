@@ -114,6 +114,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   selector present, each on its own, and the strictest decision wins: any one
   that matches (Send, Delete, Pay…) asks for confirmation, unless the user's
   task asked for that same action.
+- **A key combo that isn't a string can't skip the keyboard gate.** The
+  safety gate classified `combo`/`key` only when it was a string, while the key
+  tool pressed `String(value)`. A `batch` step, which gets no per-step schema
+  check, with `key: ["alt+f4"]` therefore skipped the confirm tier and pressed
+  Alt+F4. The gate now reads a non-string value the way the handlers do, and
+  the key tool refuses one outright.
 
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on

@@ -484,12 +484,15 @@ export function evaluate(ctx: EvaluationContext): Decision {
   //    registers its keyboard tool as `key` and gates on `tool: call.name`, so
   //    every blocked combo fell through to the default allow on that path —
   //    and `key` is not in TOOL_TIER either (GHSA-35pc-g74h-p476, defect 1).
-  //    Any call carrying a combo/key STRING is a keyboard call whatever the
-  //    surface named it, which also survives the next rename. Verified: every
+  //    Any call carrying a combo/key is a keyboard call whatever the surface
+  //    named it, which also survives the next rename. Verified: every
   //    `key`/`combo` arg in the tree belongs to a keyboard tool, so this
-  //    cannot capture a non-keyboard surface.
-  const combo = typeof ctx.args.combo === 'string' ? ctx.args.combo
-    : typeof ctx.args.key === 'string' ? ctx.args.key : undefined;
+  //    cannot capture a non-keyboard surface. A non-string value is read the
+  //    way the key handlers read it — `combo ?? key`, then String() — so a
+  //    batch step with `key: ['alt+f4']` is classified as alt+f4 (batch steps
+  //    get no per-step schema check).
+  const rawCombo = ctx.args.combo ?? ctx.args.key;
+  const combo = rawCombo === undefined || rawCombo === null ? undefined : String(rawCombo);
   if (combo !== undefined) {
     // Sequence-aware: keyBlockMatch checks each whitespace-separated element
     // as well as the collapsed whole, and names the offending element.
