@@ -18,6 +18,7 @@ import {
   type ShortcutCategory,
   type ShortcutDefinition,
 } from '../shortcuts';
+import { evaluateInput } from '../core/safety';
 import type { ToolDefinition } from './types';
 
 const VALID_CATEGORIES: ShortcutCategory[] = [
@@ -164,6 +165,21 @@ export function getShortcutTools(): ToolDefinition[] {
             text: `No shortcut matched intent "${intent}". Try one of these:\n${suggestions.join('\n')}\n\nOr use key_press directly with a specific key combo.`,
             isError: true,
           };
+        }
+
+        // The safety gate saw only {intent, context}; the chord exists only now.
+        // Gate it as key_press would (key blocklist), with the intent as the
+        // label (send/delete/…), before pressing it.
+        const decision = evaluateInput({ toolName: 'key_press', args: { key: match.combo }, ctx: { targetLabel: match.canonicalIntent } });
+        if (!decision.allow) {
+          const why = `"${match.canonicalIntent}" presses ${match.combo}: ${decision.reason ?? 'needs approval'}`;
+          return decision.suggestedAction === 'block'
+            ? { text: `shortcuts_execute: safety block - ${why}`, isError: true }
+            : {
+                text: `shortcuts_execute: safety confirm - ${why} (requires user confirmation). ` +
+                      `Surface this to the user; once they approve, press ${match.combo} with key_press — shortcuts_execute will refuse it again.`,
+                isError: true,
+              };
         }
 
         // Execute the matched shortcut

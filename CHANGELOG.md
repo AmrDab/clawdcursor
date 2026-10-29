@@ -104,6 +104,15 @@ All notable changes to Clawd Cursor will be documented in this file.
   batch step that would return an image. Accessibility and OCR still work. The unused
   `CLAWD_DISABLE_VERIFIER` / `disableVerifier` setting is removed; the
   verifier it switched off no longer exists.
+- **`shortcuts_execute` gates the chord it resolves.** The safety gate saw only
+  `{intent, context}`, and the chord the intent resolved to was then pressed
+  with no blocklist or destructive-label check. So `close window` pressed Alt+F4
+  and `send email` pressed the send shortcut with no confirmation. The resolved
+  chord now goes through the same gate as `key_press`, with the shortcut's intent
+  as the label. A blocked chord is refused. A confirm-tier chord, or an intent
+  like send/delete, returns `safety confirm` and says to press the chord with
+  `key_press` once the user approves.
+
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on
   screen. With one hop to a full-screen Space, the list read "Windows (2)"
