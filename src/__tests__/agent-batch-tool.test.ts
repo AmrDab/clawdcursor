@@ -126,6 +126,25 @@ describe('agent batch — per-step parity with the single-call pipeline (audit 2
     expect(seenLabels).toContain('Send');
   });
 
+  it('gates every selector invoke_element may act on: the ref beside a benign name, and automationId', async () => {
+    unified.invoke_element = uTool('invoke_element');
+    const seenLabels: Array<string | undefined> = [];
+    safetyFn = (a) => { seenLabels.push(a.targetLabel); return { decision: 'allow', tier: 'input' }; };
+    const uiMaps = {
+      resolve: vi.fn(() => ({ ok: true, map: { elements: [{ id: 'el_7', text: 'Send', normalized_text: 'send' }] } })),
+      invalidate: vi.fn(),
+    };
+    await buildBatchTool().execute(
+      { steps: [
+        { name: 'invoke_element', args: { name: 'Reply', element_id: 'el_7', snapshot_id: 'obs_3' } },
+        { name: 'invoke_element', args: { automationId: 'Send' } },
+      ] },
+      { ...ctx, uiMaps } as any,
+    );
+    // Each selector is evaluated on its own: step 0 -> 'Send' (the ref) and 'Reply'; step 1 -> 'Send'.
+    expect(seenLabels).toEqual(['Send', 'Reply', 'Send']);
+  });
+
   it('invalidates the UIMap holder after a successful screen-changing step', async () => {
     unified.click = { ...uTool('click'), changesScreen: true };
     const uiMaps = { resolve: vi.fn(), invalidate: vi.fn() };

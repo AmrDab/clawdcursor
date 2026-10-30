@@ -42,6 +42,7 @@ import { getCorrelationId } from '../observability/correlation';
 import { evaluate as safetyEvaluate, isAllowed } from '../safety';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../own-ui-guard';
 import { isStopped } from '../control';
+import { refLabel, selectorLabels, gateEachLabel } from '../../tools/safety-gate';
 import { untilNoForeignPause } from '../overlay-state';
 import {
   callLLMWithTools,
@@ -553,36 +554,29 @@ ${renderReport(now)}` : null;
           // give_up that the user ended or nobody answered: runs as before (terminal).
         }
 
-        let targetLabel = typeof call.args.name === 'string' ? call.args.name
-          : typeof call.args.target === 'string' ? call.args.target
-          : undefined;
-        // el_NN ref clicks carry no name/target — look the element's name up from
-        // the holder's CURRENT map so the safety gate sees a real label (correct
-        // label-pattern rule + intent-match bypass) instead of the blunt "no target
-        // label" confirm. No safety weakening: same gate, more info; a stale/unknown
-        // snapshot → no label → blunt confirm still fires (safe default). The action
-        // path's own resolveRef still applies the full window guard at execute time.
-        if (!targetLabel && call.name === 'invoke_element'
-            && typeof call.args.element_id === 'string' && typeof call.args.snapshot_id === 'string') {
-          const res = holder.resolve(call.args.snapshot_id, Date.now());
-          if (res.ok) {
-            const el = res.map.elements.find(e => e.id === call.args.element_id);
-            if (el) targetLabel = el.text ?? el.normalized_text ?? undefined;
-          }
-        }
+        // Every selector invoke_element may act on (ref, then name, then
+        // automationId), plus target. el_NN refs carry no name — the ref's label
+        // comes from the holder's CURRENT map so the gate sees a real label
+        // (correct label-pattern rule + intent-match bypass). A stale/unknown
+        // snapshot → no ref label (safe default); the action path's own
+        // resolveRef still applies the full window guard at execute time.
+        const targetLabels = selectorLabels([
+          call.name === 'invoke_element' ? refLabel(call.args, holder) : undefined,
+          call.args.name, call.args.automationId, call.args.target,
+        ]);
 
         // 5a. Safety gate — single chokepoint. Pass through the user's task
         // text so the layer can detect intent-matched bypasses (when the user
         // explicitly asked for a destructive action, the confirm tier is
         // skipped — the agent isn't hallucinating a Send click out of nowhere,
         // the user typed "hit send").
-        const decision = safetyEvaluate({
+        const decision = gateEachLabel(targetLabels, targetLabel => safetyEvaluate({
           tool: call.name,
           args: call.args,
           targetLabel,
           activeApp,
           userTaskText: input.task,
-        });
+        }));
         if (!isAllowed(decision)) {
           const reason = decision.decision === 'block'
             ? decision.reason
