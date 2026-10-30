@@ -137,6 +137,12 @@ describe('a non-string combo/key cannot slip past the keyboard gate', () => {
     expect(evaluateToolCall(computer, { action: 'key', combo: ['alt+f4'] })?.text).toContain('safety confirm');
   });
 
+  it('both fields are classified: a harmless combo beside a dangerous key does not pass, either way round', () => {
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'a', key: 'win+l' })?.text).toContain('safety block');
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'win+l', key: 'a' })?.text).toContain('safety block');
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'a', key: 'alt+f4' })?.text).toContain('safety confirm');
+  });
+
   it('the key tool refuses a non-string combo/key instead of stringifying it', async () => {
     const key = buildUnifiedTools().find(t => t.name === 'key')!;
     const keyPress = vi.fn();

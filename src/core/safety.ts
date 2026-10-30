@@ -488,15 +488,18 @@ export function evaluate(ctx: EvaluationContext): Decision {
   //    named it, which also survives the next rename. Verified: every
   //    `key`/`combo` arg in the tree belongs to a keyboard tool, so this
   //    cannot capture a non-keyboard surface. A non-string value is read the
-  //    way the key handlers read it — `combo ?? key`, then String() — so a
-  //    batch step with `key: ['alt+f4']` is classified as alt+f4 (batch steps
-  //    get no per-step schema check).
-  const rawCombo = ctx.args.combo ?? ctx.args.key;
-  const combo = rawCombo === undefined || rawCombo === null ? undefined : String(rawCombo);
-  if (combo !== undefined) {
+  //    way the key handlers read it, String(), so a batch step with
+  //    `key: ['alt+f4']` is classified as alt+f4 (batch steps get no per-step
+  //    schema check). BOTH fields are classified and the strictest wins: the
+  //    handlers do not agree on which one they press (`combo ?? key` in the
+  //    agent tools, `key` alone in desktop key_press), so `{combo:"a",
+  //    key:"win+l"}` must not pass on the harmless one.
+  const fields = [ctx.args.combo, ctx.args.key].filter(v => v !== undefined && v !== null).map(v => String(v));
+  if (fields.length) {
     // Sequence-aware: keyBlockMatch checks each whitespace-separated element
     // as well as the collapsed whole, and names the offending element.
-    const match = keyBlockMatch(combo);
+    const matches = fields.map(f => keyBlockMatch(f));
+    const match = matches.find(m => m?.tier === 'block') ?? matches.find(m => m?.tier === 'confirm');
     // HARD block (lock/force-quit/shutdown) has no path; consequential combos
     // (close window/tab, show desktop, launchers) are confirm-able instead of
     // dead-ended (v1.6.0 — the old list hard-blocked win+d/ctrl+w).
