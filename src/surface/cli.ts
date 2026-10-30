@@ -714,7 +714,7 @@ program
   .option('--no-vision', 'High-security mode: no screenshot goes to any model — the built-in agent and MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'Force tools-only HTTP MCP mode; skip AI setup, scheduler, and credential validation')
   .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
-  .option('--compact', 'Expose the 7-compound MCP surface (computer/accessibility/window/system/browser/task/batch) over HTTP /mcp instead of the 98 granular tools (also CLAWD_MCP_COMPACT=1)')
+  .option('--compact', 'Expose the 7-compound MCP surface (computer/accessibility/window/system/browser/task/batch) over HTTP /mcp instead of the 100+ granular tools (also CLAWD_MCP_COMPACT=1)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
     await runAgentMode(opts);
@@ -1424,7 +1424,7 @@ async function createToolContext() {
 program
   .command('mcp')
   .description('Run as MCP tool server over stdio (for Claude Code, Cursor, Windsurf, Zed)')
-  .option('--compact', 'Expose 7 compound tools instead of 98 granular ones (Anthropic Computer-Use style — recommended for most agents)')
+  .option('--compact', 'Expose 7 compound tools instead of 100+ granular ones (recommended for most agents)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts: { compact?: boolean; banner?: boolean }) => {
     // No single-instance lock in MCP mode. Hosts legitimately run several

@@ -87,7 +87,7 @@ optional autonomous daemon.
 `clawdcursor agent --no-llm` exposes the HTTP tool surface only (your agent supplies the brain).
 `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, also for stdio) sends no screenshot to any model: a call that would return one is refused with VISION_DISABLED; read the screen with accessibility or OCR.
 
-## Tool surface (compact — recommended, ~1500 tokens of catalog)
+## Tool surface (compact — recommended, ~7,000 tokens of catalog vs ~20,000 granular)
 
 - computer — mouse, keyboard, screenshot (raw I/O)
 - accessibility — drive UI by element name; compile a fused el_NN UI map and act on {element_id, snapshot_id} (survives layout shifts)
@@ -97,7 +97,7 @@ optional autonomous daemon.
 - task — hand a whole task to the built-in autonomous loop
 - batch — run a guarded, safety-gated sequence of the above in one call
 
-98 granular tools (one schema per verb) are available by omitting `--compact`
+100+ granular tools (one schema per verb) are available by omitting `--compact`
 (granular is the default surface) — enumerate them with `tools/list` on either
 transport, if your runtime needs every primitive as a top-level tool.
 

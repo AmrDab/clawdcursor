@@ -325,7 +325,7 @@ flowchart TB
     vision --> act
 
     act["Act<br/>click/type/key/drag · invoke/set_value · open_app · batch"] --> safety
-    safety["Single safety gate<br/>safety.evaluate() → allow / confirm / block"] -- allowed --> tools["Tool registry<br/>98 granular + 7 compound"]
+    safety["Single safety gate<br/>safety.evaluate() → allow / confirm / block"] -- allowed --> tools["Tool registry<br/>100+ granular + 7 compound"]
     safety -- needs user --> confirm["Human confirmation"] --> tools
     safety -- denied --> blocked["blocked"]
 
@@ -354,7 +354,7 @@ flowchart TB
 
 ## The toolbox
 
-Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with an `action` enum covering ~10–20 verbs (about 7,000 tokens for the whole catalog, schemas included &mdash; about a third of the granular surface's ~20,000; the `computer_20250124` shape editor hosts already know). The **granular** surface is the 98 underlying primitives, one schema per verb (for runtimes that need top-level tools, or for debugging). Both run through the same `safety.evaluate()` chokepoint; the full catalog is always visible via MCP `tools/list`.
+Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with an `action` enum covering ~10–20 verbs (about 7,000 tokens for the whole catalog, schemas included &mdash; about a third of the granular surface's ~20,000; the `computer_20250124` shape editor hosts already know). The **granular** surface is the 100+ underlying primitives, one schema per verb (for runtimes that need top-level tools, or for debugging). Both run through the same `safety.evaluate()` chokepoint; the full catalog is always visible via MCP `tools/list`.
 
 | Toolbox | Actions |
 |---|---|
@@ -456,7 +456,7 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 | Directory | What lives here |
 |---|---|
 | `src/core/` | Thin agent loop (`runAgent`), sense layer (a11y / snapshot / fingerprint / UI compiler), reactive verification, focus guard, safety gate. |
-| `src/tools/` | 98 granular tools + 7 compound aggregators + `batch`, playbooks, registry, dispatch. |
+| `src/tools/` | 100+ granular tools + 7 compound aggregators + `batch`, playbooks, registry, dispatch. |
 | `src/platform/` | `PlatformAdapter` + Windows / macOS / Linux / Wayland, OCR engine, CDP driver, URI handler. |
 | `src/llm/` | Provider clients (Claude, GPT, Gemini, Llama, Kimi, Ollama, …), credentials, model config. |
 | `src/surface/` | CLI, MCP server (stdio + HTTP), dashboard, doctor, onboarding, control banner. |

@@ -545,7 +545,7 @@ export function getCompactTools(): ToolDefinition[] {
     {
       name: 'computer',
       description:
-        'Direct mouse/keyboard/screenshot control (Anthropic Computer-Use style). ' +
+        'Direct mouse/keyboard/screenshot control. ' +
         `Pick an action: ${actionCatalog(COMPUTER_ACTIONS)}. ` +
         '`screenshot` is the LAST RESORT for seeing the screen: first try `accessibility read_tree`/`find`/`compile_ui` ' +
         '(names + positions) or `system copy_all_text` (exact page text). Coordinates default to image-space pixels of ' +
