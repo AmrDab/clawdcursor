@@ -141,6 +141,8 @@ describe('a non-string combo/key cannot slip past the keyboard gate', () => {
     expect(evaluateToolCall(getTool('key_press')!, { combo: 'a', key: 'win+l' })?.text).toContain('safety block');
     expect(evaluateToolCall(getTool('key_press')!, { combo: 'win+l', key: 'a' })?.text).toContain('safety block');
     expect(evaluateToolCall(getTool('key_press')!, { combo: 'a', key: 'alt+f4' })?.text).toContain('safety confirm');
+    // The reason names the chord that decided it, not the harmless one beside it.
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'alt+f4', key: 'win+l' })?.text).toMatch(/safety block.*win\+l/i);
   });
 
   it('the key tool refuses a non-string combo/key instead of stringifying it', async () => {

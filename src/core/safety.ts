@@ -487,10 +487,9 @@ export function evaluate(ctx: EvaluationContext): Decision {
   //    Any call carrying a combo/key is a keyboard call whatever the surface
   //    named it, which also survives the next rename. Verified: every
   //    `key`/`combo` arg in the tree belongs to a keyboard tool, so this
-  //    cannot capture a non-keyboard surface. A non-string value is read the
-  //    way the key handlers read it, String(), so a batch step with
-  //    `key: ['alt+f4']` is classified as alt+f4 (batch steps get no per-step
-  //    schema check). BOTH fields are classified and the strictest wins: the
+  //    cannot capture a non-keyboard surface. A non-string value is String()'d
+  //    and classified too (the key handlers refuse one; this is defence in
+  //    depth, as batch steps get no per-step schema check). BOTH fields are classified and the strictest wins: the
   //    handlers do not agree on which one they press (`combo ?? key` in the
   //    agent tools, `key` alone in desktop key_press), so `{combo:"a",
   //    key:"win+l"}` must not pass on the harmless one.
