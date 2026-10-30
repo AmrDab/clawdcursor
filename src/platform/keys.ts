@@ -13,6 +13,7 @@
  * `Unknown key: "mod"` (Win/Linux) or silently drop the modifier on macOS.
  */
 const PLATFORM_PRIMARY_MOD = process.platform === 'darwin' ? 'Super' : 'Control';
+const CMD_MOD = process.platform === 'win32' ? 'Control' : 'Super';
 
 /** Canonical key name map — input (case-insensitive) → normalized name */
 const KEY_ALIASES: Record<string, string> = {
@@ -50,13 +51,16 @@ const KEY_ALIASES: Record<string, string> = {
   'alt': 'Alt',
   'opt': 'Alt',
   'option': 'Alt',
-  'meta': 'Super',
+  // cmd / command / meta are the Mac's primary modifier: Ctrl on Windows, as the Windows adapter has always pressed them
+  // (windows.ts keyPress). Mapping them to the Windows key here made the two executors disagree — "cmd+l" pressed
+  // Ctrl+L through one and Win+L (lock screen) through the other. Linux keeps Super, as its adapter does.
+  'meta': CMD_MOD,
   'super': 'Super',
   'super_l': 'Super',
   'win': 'Super',
   'windows': 'Super',
-  'cmd': 'Super',
-  'command': 'Super',
+  'cmd': CMD_MOD,
+  'command': CMD_MOD,
   'command_l': 'Super',
 
   // Platform-aware "primary" modifier — Cmd on macOS, Ctrl on Win/Linux.

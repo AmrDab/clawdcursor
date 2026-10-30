@@ -50,14 +50,15 @@ const SUPER_FAMILY: ReadonlySet<string> = new Set(['win', 'cmd', 'super', 'meta'
 const MODIFIER_ORDER = ['ctrl', 'alt', 'shift', 'win', 'cmd', 'super', 'meta', 'fn'];
 
 /**
- * What a super-family token presses on this OS, per executor. macOS: Command.
- * Linux, and NativeDesktop on Windows (keys.ts): the Super/Windows key. The
- * Windows adapter sends cmd/command/meta as Ctrl and only super/win as the
- * Windows key — so on Windows a chord is classified both ways.
+ * What a super-family token presses on this OS. macOS: Command. Linux: the
+ * Super key. Windows: both executors (keys.ts, windows.ts) send cmd/command/meta
+ * as Ctrl and only super/win as the Windows key.
  */
 const SUPER_VIEWS: ReadonlyArray<(token: string) => string> =
   process.platform === 'darwin' ? [() => 'cmd']
-  : process.platform === 'win32' ? [() => 'win', t => (t === 'super' || t === 'win' ? 'win' : 'ctrl')]
+  // Windows: cmd / command / meta are pressed as Ctrl by both executors (keys.ts, windows.ts); the rest of the family is the
+  // Windows key.
+  : process.platform === 'win32' ? [t => (t === 'cmd' || t === 'command' || t === 'meta' ? 'ctrl' : 'win')]
   : [() => 'win'];
 
 /** `token` is lowercased. */
