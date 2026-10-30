@@ -170,7 +170,8 @@ export function getShortcutTools(): ToolDefinition[] {
         // The safety gate saw only {intent, context}; the chord exists only now.
         // Gate it as key_press would (key blocklist), with the intent as the
         // label (send/delete/…), before pressing it.
-        const decision = evaluateInput({ toolName: 'key_press', args: { key: match.combo }, ctx: { targetLabel: match.canonicalIntent } });
+        // Logged under this tool's own name: the keyboard rule reads the `key` argument, not the tool name.
+        const decision = evaluateInput({ toolName: 'shortcuts_execute', args: { key: match.combo }, ctx: { targetLabel: match.canonicalIntent } });
         if (!decision.allow) {
           const why = `"${match.canonicalIntent}" presses ${match.combo}: ${decision.reason ?? 'needs approval'}`;
           return decision.suggestedAction === 'block'
