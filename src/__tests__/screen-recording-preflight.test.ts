@@ -114,7 +114,10 @@ describe('screenRecordingGranted / assertScreenRecordingGranted', () => {
   it('the osascript call coerces the bridge\'s answer to "true"/"false" (a 1/0 still parses)', async () => {
     const { screenRecordingGranted, PREFLIGHT_JXA } = await mac();
     await screenRecordingGranted();
-    expect(PREFLIGHT_JXA).toBe("ObjC.import('CoreGraphics'); String(Boolean($.CGPreflightScreenCaptureAccess()))");
+    // Bound by hand: the CoreGraphics bridge does not declare it (real macOS 26.5: "is not a function").
+    expect(PREFLIGHT_JXA).toBe(
+      "ObjC.import('CoreGraphics'); ObjC.bindFunction('CGPreflightScreenCaptureAccess', ['bool', []]); " +
+      'String(Boolean($.CGPreflightScreenCaptureAccess()))');
     expect(probes.argv).toEqual([['-l', 'JavaScript', '-e', PREFLIGHT_JXA]]);
   });
 
