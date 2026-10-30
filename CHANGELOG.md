@@ -130,10 +130,12 @@ All notable changes to Clawd Cursor will be documented in this file.
   executor accepts, including the nut-js key names, left/right variants
   (`LeftWin`, `rightctrl`, `super_l`) and `forwarddelete`, and puts modifiers in
   one order before matching. It classifies a super-family
-  token as what this OS presses for it: Command on macOS, the Windows/Super key
-  on Windows and Linux, and also Ctrl on Windows, where the adapter sends
-  `cmd`/`meta` as Ctrl. One side effect: `cmd+l` on Windows and Linux is now
-  hard-blocked: Linux and the MCP `key_press` path on Windows press it as Win+L.
+  token as what this OS presses for it: Command on macOS, the Super key on
+  Linux (so `cmd+l` is blocked there: it locks the screen), and on Windows the
+  Windows key for `super`/`win` but Ctrl for `cmd`/`command`/`meta`. The two
+  Windows executors used to disagree on that (one pressed `cmd+l` as Ctrl+L,
+  the other as Win+L); both now press Ctrl, so a Mac-trained model's `cmd+l` is
+  the address bar on Windows, not the lock screen.
 
 - **macOS: `window list` says which apps have windows on another desktop
   Space (#278).** The accessibility API only sees the windows of the Space on

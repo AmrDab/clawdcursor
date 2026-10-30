@@ -153,14 +153,22 @@ describe('keys-blocklist matches what the executor presses, however it is spelle
     expect(keyBlockTier('control+w')).toBe('confirm');
   });
 
-  it.each(['win32', 'linux'] as const)('super-family spellings are the Windows/Super key on %s', async (platform) => {
-    const { keyBlockTier, isBlockedKey } = await blocklistOn(platform);
+  it('super-family spellings are the Super key on linux', async () => {
+    const { keyBlockTier, isBlockedKey } = await blocklistOn('linux');
     for (const c of ['super+l', 'windows+l', 'meta+l', 'cmd+l', 'command+l']) {
       expect(keyBlockTier(c)).toBe('block');
       expect(isBlockedKey(c)).toBe(true);
     }
     expect(keyBlockTier('super+r')).toBe('confirm');
     expect(keyBlockTier('super+d')).toBe('confirm');
+  });
+
+  it('on win32 super/win are the Windows key, but cmd/command/meta are Ctrl — as both executors press them', async () => {
+    const { keyBlockTier, isBlockedKey } = await blocklistOn('win32');
+    for (const c of ['super+l', 'win+l', 'windows+l']) expect(isBlockedKey(c)).toBe(true);
+    // A Mac-trained model's cmd+l is Ctrl+L (the address bar), cmd+r reload, cmd+d bookmark: never the lock screen.
+    for (const c of ['cmd+l', 'command+l', 'meta+l', 'cmd+r', 'cmd+d']) expect(keyBlockTier(c)).toBeNull();
+    expect(keyBlockTier('super+r')).toBe('confirm');
   });
 
   it('reads a token whole, as the executors do: `super_l` / `command_l` are the Windows key on Windows', async () => {
