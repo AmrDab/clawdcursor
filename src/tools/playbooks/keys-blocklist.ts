@@ -10,6 +10,8 @@
  * path (text-agent, vision-agent, MCP direct, REST /action, playbooks).
  */
 
+import { normalizeKey } from '../../platform/keys';
+
 /**
  * Platform-aware substitution for the `mod` modifier — resolves to `cmd` on
  * macOS and `ctrl` on Windows/Linux. Mirrors the `mod` alias in `src/keys.ts`
@@ -17,13 +19,84 @@
  */
 const PLATFORM_MOD_LOWER = process.platform === 'darwin' ? 'cmd' : 'ctrl';
 
-/** Normalize a user-supplied combo for comparison — lowercase, trim, collapse whitespace, resolve `mod`. */
+/**
+ * One name per key for every spelling an executor accepts: keys.ts
+ * `normalizeKey`, the Windows adapter's WIN_KEY_MAP, the nut-js `Key` enum
+ * names both Windows executors fall back to (`LeftControl`, `RightAlt`), the
+ * Linux and Wayland tables (`rightctrl`, `altgr`) and the macOS ones
+ * (`forwarddelete`). Left/right and `_l`/`_r` variants fold into the base key,
+ * so a side spelling no table lists yet still classifies as that modifier.
+ */
+const KEY_FAMILIES: ReadonlyArray<[RegExp, string]> = [
+  [/^(left|right|l|r)?(ctrl|control)(_?(l|r))?$/, 'ctrl'],
+  [/^(left|right|l|r)?(alt|option|opt)(_?(l|r))?$|^altgr$/, 'alt'],
+  [/^(left|right|l|r)?shift(_?(l|r))?$/, 'shift'],
+  [/^(esc|escape)$/, 'esc'],
+  [/^(del|delete|forwarddelete)$/, 'delete'],
+  [/^(space|spacebar)$/, 'space'],
+];
+/**
+ * The super family. Exact `win`/`windows`, `cmd`/`command`, `super`, `meta`
+ * keep their spelling (`win` vs `cmd`); the per-OS views below resolve what
+ * they press. A side or suffixed variant (`super_l`, `command_l`, `LeftWin`,
+ * `RightCmd`, `LeftMeta`), or anything else `normalizeKey` resolves to Super,
+ * is `super`: every executor that accepts one presses the Super/Windows key
+ * (Command on macOS) — none of them maps those to Ctrl.
+ */
+const SUPER_SPELLING: ReadonlyMap<string, string> = new Map([['win', 'win'], ['windows', 'win'], ['cmd', 'cmd'], ['command', 'cmd'], ['super', 'super'], ['meta', 'meta']]);
+const SUPER_VARIANT = /^(left|right|l|r)?(super|win|windows|meta|cmd|command)(_?(l|r))?$/;
+const SUPER_FAMILY: ReadonlySet<string> = new Set(['win', 'cmd', 'super', 'meta']);
+/** Modifiers in one fixed order, so `shift+ctrl+esc` is `ctrl+shift+esc`. */
+const MODIFIER_ORDER = ['ctrl', 'alt', 'shift', 'win', 'cmd', 'super', 'meta', 'fn'];
+
+/**
+ * What a super-family token presses on this OS. macOS: Command. Linux: the
+ * Super key. Windows: both executors (keys.ts, windows.ts) send cmd/command/meta
+ * as Ctrl and only super/win as the Windows key.
+ */
+const SUPER_VIEWS: ReadonlyArray<(token: string) => string> =
+  process.platform === 'darwin' ? [() => 'cmd']
+  // Windows: cmd / command / meta are pressed as Ctrl by both executors (keys.ts, windows.ts); the rest of the family is the
+  // Windows key.
+  : process.platform === 'win32' ? [t => (t === 'cmd' || t === 'command' || t === 'meta' ? 'ctrl' : 'win')]
+  : [() => 'win'];
+
+/** `token` is lowercased. */
+function canonToken(token: string): string {
+  const t = token === 'mod' ? PLATFORM_MOD_LOWER : token;
+  if (!t) return t;
+  const spelled = SUPER_SPELLING.get(t);
+  if (spelled) return spelled;
+  if (SUPER_VARIANT.test(t) || normalizeKey(t) === 'Super') return 'super';
+  return KEY_FAMILIES.find(([re]) => re.test(t))?.[1] ?? t;
+}
+
+/** Also breaks on `_` and `-`, so the documented `ctrl-alt-delete` matches. */
+function tokensOf(combo: string): string[] {
+  return combo.toLowerCase().replace(/\s+/g, '').replace(/[+_-]+/g, '+').split('+').map(canonToken);
+}
+
+/** Tokens as the executors read them: split on `+` only, each whole token resolved (`super_l` stays one token). */
+function executorTokensOf(combo: string): string[] {
+  return combo.toLowerCase().split('+').map(p => p.trim()).filter(Boolean).map(canonToken);
+}
+
+function joinTokens(tokens: string[]): string {
+  const mods = MODIFIER_ORDER.filter(m => tokens.includes(m));
+  return [...mods, ...tokens.filter(t => !MODIFIER_ORDER.includes(t))].join('+');
+}
+
+/** Normalize a user-supplied combo for comparison — lowercase, collapse whitespace, resolve `mod` and the executors' aliases, order modifiers. */
 export function normalizeCombo(combo: string): string {
-  const flat = combo.toLowerCase().replace(/\s+/g, '').replace(/[+_-]+/g, '+');
-  // Resolve the platform-aware `mod` token in any position so `mod+q` matches
-  // `cmd+q` on macOS and `ctrl+q` (etc.) on Win/Linux.
-  if (!flat.includes('mod')) return flat;
-  return flat.split('+').map(p => p === 'mod' ? PLATFORM_MOD_LOWER : p).join('+');
+  return joinTokens(tokensOf(combo));
+}
+
+/** The combo as spelled, plus what each executor on this OS presses for its super-family tokens — for both tokenizations. */
+function chordViews(combo: string): string[] {
+  return [tokensOf(combo), executorTokensOf(combo)].flatMap(tokens => [
+    joinTokens(tokens),
+    ...SUPER_VIEWS.map(v => joinTokens(tokens.map(t => (SUPER_FAMILY.has(t) ? v(t) : t)))),
+  ]);
 }
 
 // Two tiers (v1.6.0): the old single list HARD-blocked everything with NO
@@ -69,9 +142,9 @@ export interface KeyBlockMatch {
 
 /** Tier of a SINGLE chord — no sequence handling. */
 function chordTier(combo: string): KeyBlockTier {
-  const n = normalizeCombo(combo);
-  if (HARD_BLOCK_SET.has(n)) return 'block';
-  if (CONFIRM_BLOCK_SET.has(n)) return 'confirm';
+  const views = chordViews(combo);
+  if (views.some(n => HARD_BLOCK_SET.has(n))) return 'block';
+  if (views.some(n => CONFIRM_BLOCK_SET.has(n))) return 'confirm';
   return null;
 }
 
