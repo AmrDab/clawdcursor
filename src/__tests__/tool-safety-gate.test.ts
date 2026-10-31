@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { getCompactSurface, getTool } from '../tools/registry';
 import { evaluateToolCall, gateEachLabel, selectorLabels } from '../tools/safety-gate';
 import { evaluate } from '../core/safety';
+import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap } from '../core/sense/ui-map-types';
 
@@ -122,5 +123,36 @@ describe('the destructive-label rule sees every selector the handler may act on'
   it('does not over-gate: benign selectors pass, and text typed into a named target is still content', () => {
     expect(evaluateToolCall(getTool('invoke_element')!, { name: 'Reply', automationId: 'ReplyButton' })).toBeNull();
     expect(evaluateToolCall(getTool('smart_type')!, { target: 'Message body', text: 'please send the report' })).toBeNull();
+  });
+});
+
+// The gate classified combo/key only when it was a string, while the key tool
+// pressed String(value). A batch step (no per-step schema check) with
+// `key: ['alt+f4']` therefore skipped the confirm tier and pressed Alt+F4.
+describe('a non-string combo/key cannot slip past the keyboard gate', () => {
+  it('the gate classifies a non-string combo/key the way the handler would read it', () => {
+    expect(evaluateToolCall(getTool('key_press')!, { key: ['alt+f4'] })?.text).toContain('safety confirm');
+    expect(evaluateToolCall(getTool('key_press')!, { combo: ['win+l'] })?.text).toContain('safety block');
+    const computer = getCompactSurface().find(t => t.name === 'computer')!;
+    expect(evaluateToolCall(computer, { action: 'key', combo: ['alt+f4'] })?.text).toContain('safety confirm');
+  });
+
+  it('both fields are classified: a harmless combo beside a dangerous key does not pass, either way round', () => {
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'a', key: 'win+l' })?.text).toContain('safety block');
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'win+l', key: 'a' })?.text).toContain('safety block');
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'a', key: 'alt+f4' })?.text).toContain('safety confirm');
+    // The reason names the chord that decided it, not the harmless one beside it.
+    expect(evaluateToolCall(getTool('key_press')!, { combo: 'alt+f4', key: 'win+l' })?.text).toMatch(/safety block.*win\+l/i);
+  });
+
+  it('the key tool refuses a non-string combo/key instead of stringifying it', async () => {
+    const key = buildUnifiedTools().find(t => t.name === 'key')!;
+    const keyPress = vi.fn();
+    const ctx = { platform: { keyPress, takeInputWarning: () => null } } as any;
+    for (const args of [{ combo: ['alt+f4'] }, { key: ['alt+f4'] }, { combo: 42 }]) {
+      const r = await key.execute(args, ctx);
+      expect(r.isError).toBe(true);
+    }
+    expect(keyPress).not.toHaveBeenCalled();
   });
 });

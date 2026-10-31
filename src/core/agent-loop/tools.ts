@@ -943,7 +943,12 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             text: 'key: "combo" is required — the key or combo to press, e.g. "Return" or "mod+s". (The MCP surface alias is "key".)',
           };
         }
-        const input = String(raw).trim();
+        // A non-string (a batch step skips schema validation) is refused, never
+        // stringified into a chord.
+        if (typeof raw !== 'string') {
+          return { success: false, isError: true, text: `key: "combo" must be a string, e.g. "Return" or "mod+s" — got ${Array.isArray(raw) ? 'an array' : typeof raw}.` };
+        }
+        const input = raw.trim();
         // (b) "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = input.split(/\s+/);
         // (c) Hard-block backstop. This carried its own 3-entry copy
