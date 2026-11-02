@@ -43,6 +43,12 @@ describe('SafetyLayer.evaluate', () => {
       expect(evaluate({ tool: 'key_press', args: { key: 'mod+s' } }).decision).toBe('allow');
       expect(evaluate({ tool: 'press', args: { combo: 'Return' } }).decision).toBe('allow');
     });
+    it('classifies the modifier aliases the executors accept (control, option, escape, reordered)', () => {
+      expect(evaluate({ tool: 'key', args: { combo: 'control+shift+escape' } }).decision).toBe('block');
+      expect(evaluate({ tool: 'key', args: { combo: 'shift+ctrl+esc' } }).decision).toBe('block');
+      expect(evaluate({ tool: 'key_press', args: { key: 'option+f4' } }).decision).toBe('confirm');
+      expect(evaluate({ tool: 'key_press', args: { key: 'control+w' } }).decision).toBe('confirm');
+    });
   });
 
   // GHSA-35pc-g74h-p476. Two independent bypasses of this same gate:
