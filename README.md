@@ -43,6 +43,13 @@
 
 ## What's new
 
+**1.5.25** &mdash; **A stop really stops, and keys only go to the window the agent was working in.**
+- Double-click the pill and every clawdcursor process stops: a running wait ends at once, the rest of a batch never runs, and it stays stopped (even across restarts) until you click Resume.
+- Every key, paste and click first checks that the agent's window is still in front. If you switched apps, nothing is sent and the agent is told so.
+- Safety gate: key combos are blocked however their modifiers are spelled, `shortcuts_execute` and compound actions are gated like the tools they run, and every element an invoke may act on is checked.
+- `--no-vision` now really keeps screenshots from every model; the daemon is loopback-only (use an SSH tunnel for remote), and `server.port` in config works.
+- macOS: the Screen Recording check works without the helper built, and `doctor` asks the same question screenshots do.
+
 **1.5.24** &mdash; **The AI never touches your pill, and failures stop looking like results.**
 - While a pause waits for you, nothing reads, clicks or types. The pill and pause prompt are never a target, even from another clawdcursor process.
 - On macOS, a screenshot without Screen Recording permission is an error, not a wallpaper image, and open popovers are readable.
