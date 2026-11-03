@@ -46,7 +46,7 @@ export function untrusted(s: unknown): string {
 const norm = (s: string) => s.replace(/&/g, '').replace(/\s+/g, ' ').trim().replace(/[:：]$/, '').trim().toLowerCase();
 /** The kinds of role a UIMap role may be reported as by UIA ("ControlType.Edit"), AX ("AXTextField") or AT-SPI ("entry"). Others: unchecked. */
 const ROLE_FAMILY: Record<string, RegExp> = {
-  input: /edit|text ?(field|area|box|view|entry)|entry|combo|search|password|document|spin|slider/i,
+  input: /edit|text ?(field|area|box|view|entry)|^text$|entry|combo|search|password|document|spin|slider/i,
   button: /button|menu ?item|hyperlink|link/i,
   link: /link|hyperlink|button/i,
   checkbox: /check|radio|toggle|switch|button/i,

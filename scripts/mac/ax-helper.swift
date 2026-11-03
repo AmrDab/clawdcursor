@@ -1014,7 +1014,14 @@ func cmdInvoke() -> Never {
     var found = SearchCtx()
     let (windows, hung) = windowsToSearch(app)
     if hung { fail("timeout", "\(app.localizedName ?? "the app") is not responding") }
-    for w in windows where !timeUp() {
+    // scroll-to-visible searches the KEY window only (the one the caller was bound to): a miss there must not fall through to
+    // another window of the app, and with no key window there is nothing to scroll in.
+    var toSearch = windows
+    if action == "scroll-to-visible" {
+        guard let k = keyWindow(appElement(app.processIdentifier)).window else { emit(refuse(action, "the app has no key window - refusing to look for the element in another window")) }
+        toSearch = [k]
+    }
+    for w in toSearch where !timeUp() {
         search(w, aim, maxDepth: 12, limit: 400, ctx: &found)
         if found.hits.contains(where: { $0.exact }) { break }
     }

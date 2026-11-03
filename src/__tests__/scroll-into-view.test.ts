@@ -184,6 +184,11 @@ describe('ensureVisible', () => {
     if (!r.ok) expect(r.error).toMatch(/scrolled a different element[\s\S]*Company website/);
   });
 
+  it('accepts a bare AT-SPI "text" role (GTK TextView) for an input, but not a "label"', async () => {
+    expect(await run(scrolled({ role: 'text' }))).toMatchObject({ ok: true });
+    expect(await run(scrolled({ role: 'label' }))).toMatchObject({ ok: false });
+  });
+
   it('refuses when the platform scrolled a different kind of element (role)', async () => {
     const r = await run(scrolled({ role: 'ControlType.Button' }));
     expect(r).toMatchObject({ ok: false });
