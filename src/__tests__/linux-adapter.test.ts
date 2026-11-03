@@ -395,6 +395,30 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
   });
 });
 
+// ─── scroll into view ─────────────────────────────────────────────────────────
+describe('scrollIntoView drives the AT-SPI bridge (Component.scroll_to)', () => {
+  it('sends --cmd scroll-into-view with name and pid and reports where the element is now', async () => {
+    h.exec = defaultExec(() => ({ success: true, action: 'scroll-into-view', method: 'Component.scroll_to', bounds: { x: 10, y: 400, width: 300, height: 80 } }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const res = await adapter.scrollIntoView!({ name: 'Describe', bounds: { x: 10, y: 1500, width: 300, height: 80 } });
+    expect(res).toEqual({ success: true, method: 'Component.scroll_to', bounds: { x: 10, y: 400, width: 300, height: 80 } });
+    const args = bridgeCalls()[0];
+    expect(args.slice(0, 2)).toEqual(['--cmd', 'scroll-into-view']);
+    expect(args[args.indexOf('--name') + 1]).toBe('Describe');
+    expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
+  });
+
+  it('a refusal carries its reason and no position; no bridge, no call', async () => {
+    h.exec = defaultExec(() => ({ success: false, error: 'element exposes no Component interface' }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const res = await adapter.scrollIntoView!({ name: 'X' });
+    expect(res).toEqual({ success: false, error: 'element exposes no Component interface' });
+    expect(await new LinuxAdapter().scrollIntoView!({ name: 'X' })).toMatchObject({ success: false });
+  });
+});
+
 // ─── L9 ───────────────────────────────────────────────────────────────────────
 describe('L9 — AT-SPI roles normalize to the shared vocabulary; bad bounds are flagged', () => {
   const INT_MIN = -2147483648;

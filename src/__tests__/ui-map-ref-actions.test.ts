@@ -99,10 +99,16 @@ describe('resolveRef', () => {
     if (!r.ok) expect(r.error).toMatch(/window/i);
   });
 
-  it('rejects bounds dispatch when bounds fall outside the active window', () => {
-    const els = [el({ id: 'el_0' }), el({ id: 'el_1', bounds: [5000, 5000, 40, 12] })]; // off-window
+  it('flags a bounds dispatch whose element is outside the window rect as offView (scrolled out of view), not as refused', () => {
+    const els = [el({ id: 'el_0' }), el({ id: 'el_1', bounds: [5000, 5000, 40, 12] })]; // below the fold
     const r = resolveRef({ element_id: 'el_1', snapshot_id: 'obs_1' }, holderWith(mapWith(els)), 0, 'click', active);
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/window|bounds/i);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r).toMatchObject({ via: 'bounds', bounds: [5000, 5000, 40, 12], offView: true });
+  });
+
+  it('does not flag an element fully inside the window', () => {
+    const els = [el({ id: 'el_0' }), el({ id: 'el_1', bounds: [100, 200, 40, 12] })];
+    const r = resolveRef({ element_id: 'el_1', snapshot_id: 'obs_1' }, holderWith(mapWith(els)), 0, 'click', active);
+    expect(r.ok && r.via === 'bounds' && r.offView).toBeFalsy();
   });
 });

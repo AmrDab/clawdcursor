@@ -770,9 +770,32 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
     return perform_action(target, action, value)
 
 
+def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: Optional[int],
+                         window_title: Optional[str] = None, exclude_pids: Optional[set] = None) -> dict:
+    """Scroll an element that is inside its window but outside the visible part of it into view with the toolkit's own call
+    (Component.scroll_to). Sends no input. Replies with where the element is NOW; the caller checks that it is on screen.
+    Unlike `invoke`, a hidden match is the point here: find_target falls back to hidden matches when none is showing."""
+    action = 'scroll-into-view'
+    if not name and not role:
+        return {"success": False, "action": action, "error": "name or role required"}
+    app = active_application(process_id, window_title, exclude_pids)
+    if app is None:
+        return {"success": False, "action": action, "error": "application not found"}
+    target, _showing = find_target(app, name, role)
+    if target is None:
+        return {"success": False, "action": action, "error": f"element not found: {name or role}"}
+    if not safe(lambda: target.get_component_iface()):
+        return {"success": False, "action": action, "error": "element exposes no Component interface"}
+    if not safe(lambda: Atspi.Component.scroll_to(target, Atspi.ScrollType.ANYWHERE), False):
+        return {"success": False, "action": action, "error": "Component.scroll_to failed"}
+    bounds, _ = element_bounds(target)
+    return {"success": True, "action": action, "method": "Component.scroll_to",
+            "bounds": {"x": bounds[0], "y": bounds[1], "width": bounds[2], "height": bounds[3]}}
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
-    p.add_argument('--cmd', required=True, choices=['get-tree', 'find', 'focused', 'invoke', 'page-text'])
+    p.add_argument('--cmd', required=True, choices=['get-tree', 'find', 'focused', 'invoke', 'page-text', 'scroll-into-view'])
     p.add_argument('--name', default=None)
     p.add_argument('--role', default=None)
     p.add_argument('--process-id', type=int, default=None)
@@ -798,6 +821,8 @@ def main() -> int:
         elif args.cmd == 'invoke':
             result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value,
                                 args.window_title, excl)
+        elif args.cmd == 'scroll-into-view':
+            result = cmd_scroll_into_view(args.name, args.role, args.process_id, args.window_title, excl)
         else:
             result = {"error": f"unknown command: {args.cmd}"}
     except Exception as exc:

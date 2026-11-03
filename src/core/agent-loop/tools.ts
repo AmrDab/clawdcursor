@@ -39,6 +39,7 @@ import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
+import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
@@ -259,10 +260,12 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             await sleep(150);
             return { success: refRes.success, text: refRes.success ? `Invoked "${plan.name}" via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
           }
-          const [bx, by, bw, bh] = plan.bounds;
+          const seen = await boundsToClick(ctx, plan, aw);
+          if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
+          const [bx, by, bw, bh] = seen.bounds;
           await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
           await sleep(150);
-          return { success: true, text: `Clicked ${plan.element.id} at its bounds center.`, targetLabel: plan.element.id };
+          return { success: true, text: `Clicked ${plan.element.id} at its bounds center${plan.offView ? ' (scrolled into view first)' : ''}.`, targetLabel: plan.element.id };
         }
         // `automationId` is accepted for MCP backward-compat but the PlatformAdapter
         // invokeElement interface does not expose automationId filtering — it is used
@@ -361,14 +364,16 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             await sleep(150);
             return { success: res.success, text: res.success ? `Set "${plan.name}" = ${fillValue.length} chars (via ${plan.element.id}).` : `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
           }
-          const [bx, by, bw, bh] = plan.bounds;
+          const seen = await boundsToClick(ctx, plan, aw);
+          if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
+          const [bx, by, bw, bh] = seen.bounds;
           await ctx.platform.mouseClick(Math.round(bx + bw / 2), Math.round(by + bh / 2));
           // Replace, don't append: a set_value that types after the old text
           // left "old textnew" in the Save-As box (live Windows check).
           await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(fillValue);
           await sleep(150);
-          return { success: true, text: `Filled ${plan.element.id} via bounds + select-all + type (${fillValue.length} chars).`, targetLabel: plan.element.id };
+          return { success: true, text: `Filled ${plan.element.id} via bounds + select-all + type (${fillValue.length} chars${plan.offView ? ', scrolled into view first' : ''}).`, targetLabel: plan.element.id };
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -2157,6 +2162,23 @@ async function resolveAgentPid(
 
 /** UIA's "no rectangle" sentinel (System.Windows.Rect.Empty → int). */
 const RECT_INT_MIN = -2147483648;
+
+/**
+ * The bounds to click for a ref planned `via:'bounds'`. A ref whose element is in the window but scrolled out of view
+ * (`offView`) is scrolled in first and re-read; the click then lands on where it IS, not where it was compiled. Refused
+ * only when it belongs to another window or the scroll did not bring it into view (see ensureVisible).
+ */
+async function boundsToClick(
+  ctx: AgentToolContext,
+  plan: { bounds: [number, number, number, number]; element: { text?: string }; offView?: true },
+  win: { processId: number; title: string; bounds: { x: number; y: number; width: number; height: number } } | null,
+): Promise<{ ok: true; bounds: [number, number, number, number] } | { ok: false; error: string }> {
+  if (!plan.offView) return { ok: true, bounds: plan.bounds };
+  if (!win) return { ok: false, error: 'cannot verify active window — call compile_ui again' };
+  const [x, y, width, height] = plan.bounds;
+  const vis = await ensureVisible(ctx.platform, { name: plan.element.text, bounds: { x, y, width, height } }, win);
+  return vis.ok ? { ok: true, bounds: [vis.bounds.x, vis.bounds.y, vis.bounds.width, vis.bounds.height] } : vis;
+}
 
 /**
  * Coordinate fallback for the activate intent when the element was FOUND

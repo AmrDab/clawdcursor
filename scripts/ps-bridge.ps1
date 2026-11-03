@@ -1166,6 +1166,65 @@ function Cmd-InvokeElement {
     }
 }
 
+# ── Command: scroll-into-view ─────────────────────────────────────────────────
+# Scroll an element that is inside its window but outside the visible part of it (below the fold of a web page, past the
+# end of a list) into view: UIA ScrollItemPattern.ScrollIntoView, else SetFocus (browsers and most toolkits scroll the
+# focused element into view). Sends no input; never raises or activates a window. The element is found by its exact name
+# (every window of the process), the one whose rect is nearest the `bounds` the caller last saw when several share the
+# name; with no name only an element sitting at those bounds counts. Replies with the element's rect AFTER the scroll.
+function Cmd-ScrollIntoView {
+    param($cmd)
+    $name = if ($cmd.name) { [string]$cmd.name } else { "" }
+    $wpid = [int]$cmd.processId
+    $want = $cmd.bounds
+    if ($name -eq "" -and $null -eq $want) { return @{ success=$false; error="scroll-into-view needs a name or the element's bounds" } }
+
+    $root = [System.Windows.Automation.AutomationElement]::RootElement
+    $pc = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid)
+    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pc)
+    if ($wins.Count -eq 0) { return @{ success=$false; error="No window for pid $wpid" } }
+    $cond = if ($name -ne "") { New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name) }
+        else { [System.Windows.Automation.Condition]::TrueCondition }
+
+    $best = $null; $bestD = [double]::MaxValue
+    foreach ($w in $wins) {
+        foreach ($el in $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)) {
+            try {
+                $r = $el.Current.BoundingRectangle
+                $d = 1e9   # no rect (scrolled out of a virtualised list): a candidate only when it is the nearest by name
+                if (-not $r.IsEmpty -and -not [double]::IsInfinity($r.X) -and $null -ne $want) {
+                    $d = [Math]::Abs($r.X - $want.x) + [Math]::Abs($r.Y - $want.y) + [Math]::Abs($r.Width - $want.width) + [Math]::Abs($r.Height - $want.height)
+                }
+                if ($name -eq "" -and $d -gt 8) { continue }   # nameless: the rect is all there is to go on
+                if ($d -lt $bestD) { $best = $el; $bestD = $d }
+            } catch {}
+        }
+    }
+    if ($null -eq $best) { return @{ success=$false; error="element not found in pid $wpid (name='$name')" } }
+
+    $method = $null
+    try { $best.GetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern).ScrollIntoView(); $method = "ScrollItemPattern" } catch {}
+    if ($null -eq $method) {
+        try { $best.SetFocus(); $method = "SetFocus" } catch {}
+    }
+    if ($null -eq $method) { return @{ success=$false; error="the element supports neither ScrollItemPattern nor SetFocus" } }
+
+    # The scroll is animated / applied on the page's next frame: wait for the rect to settle (two equal reads).
+    $prev = $null; $r = $null
+    for ($i = 0; $i -lt 8; $i++) {
+        Start-Sleep -Milliseconds 80
+        try { $r = $best.Current.BoundingRectangle } catch { $r = $null; break }
+        $cur = if ($r.IsEmpty -or [double]::IsInfinity($r.X)) { "empty" } else { "$($r.X),$($r.Y),$($r.Width),$($r.Height)" }
+        if ($cur -eq $prev) { break }
+        $prev = $cur
+    }
+    $out = @{ success=$true; action="scroll-into-view"; method=$method }
+    if ($null -ne $r -and -not $r.IsEmpty -and -not [double]::IsInfinity($r.X)) {
+        $out.bounds = @{ x=[int]$r.X; y=[int]$r.Y; width=[int]$r.Width; height=[int]$r.Height }
+    }
+    return $out
+}
+
 # ── Command: get-focused-element ──────────────────────────────────────────────
 function Cmd-GetFocusedElement {
     try {
@@ -1359,6 +1418,7 @@ while ($true) {
             "focus-window"          { Cmd-FocusWindow $cmd }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }
+            "scroll-into-view"      { Cmd-ScrollIntoView $cmd }
             "get-focused-element"   { Cmd-GetFocusedElement }
             "get-page-text"         { Cmd-GetPageText $cmd }
             "activate-at-point"     { Cmd-ActivateAtPoint $cmd }

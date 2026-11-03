@@ -667,6 +667,29 @@ export class MacOSAdapter implements PlatformAdapter {
     return !res.success && res.error ? { ...res, data: { ...res.data, error: res.error } } : res;
   }
 
+  /** AXScrollToVisible on the named element (the accessibility helper only). `bounds` is not needed: the helper aims by name. */
+  async scrollIntoView(query: {
+    name?: string; controlType?: string; processId?: number;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }): Promise<{ success: boolean; method?: string; bounds?: { x: number; y: number; width: number; height: number }; error?: string }> {
+    if (!query.name?.trim()) return { success: false, error: 'scrolling needs the element\'s name on this platform' };
+    let processId = query.processId;
+    if (processId === undefined) processId = (await this.getActiveWindow().catch(() => null))?.processId;
+    try {
+      const res = await this.ax.invoke({ name: query.name, controlType: query.controlType, processId, action: 'scroll-to-visible' });
+      const b = res.bounds;
+      return {
+        success: res.success,
+        ...(res.success ? { method: 'AXScrollToVisible' } : {}),
+        // A failed call reports the element's centre as a 1x1 rect (see toInvokeResult): not a position to trust.
+        ...(res.success && b && b.width > 1 ? { bounds: b } : {}),
+        ...(res.error ? { error: res.error } : {}),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error)?.message ?? 'the scroll call failed' };
+    }
+  }
+
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
     const interval = query.intervalMs ?? 250;
     const deadline = Date.now() + timeoutMs;

@@ -19,6 +19,8 @@ import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from './paste-guard';
 import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
+import { ensureVisible } from '../core/sense/ui-map-visible';
+import { locateFieldByLabel } from '../core/sense/ui-map-field';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -844,6 +846,8 @@ export function getSmartTools(): ToolDefinition[] {
         // If target specified, find and focus it first
         if (target) {
           let focused = false;
+          // Why the field was found but not reached (could not scroll to it, ...): said in the error instead of "could not find".
+          let whyNot: string | undefined;
 
           // Try UIA focus
           try {
@@ -875,9 +879,17 @@ export function getSmartTools(): ToolDefinition[] {
                 const field = (found ?? []).filter((el: any) => EDITABLE_TYPE.test(String(el.controlType ?? '')) && !/^text$/i.test(String(el.controlType ?? ''))
                   && el.bounds?.width > 0 && el.bounds?.height > 0)[0];
                 if (field) {
-                  await ctx.desktop.mouseClick(field.bounds.x + Math.floor(field.bounds.width / 2), field.bounds.y + Math.floor(field.bounds.height / 2));
-                  await new Promise(r => setTimeout(r, 100));
-                  focused = true;
+                  // Found, but below the fold of its window: scroll it in before clicking where it is not.
+                  let at: { x: number; y: number; width: number; height: number } | undefined = field.bounds;
+                  if (ctx.platform && activeWin) {
+                    const vis = await ensureVisible(ctx.platform, { name: target, bounds: field.bounds }, activeWin);
+                    if (vis.ok) at = vis.bounds; else { at = undefined; whyNot = vis.error; }
+                  }
+                  if (at) {
+                    await ctx.desktop.mouseClick(at.x + Math.floor(at.width / 2), at.y + Math.floor(at.height / 2));
+                    await new Promise(r => setTimeout(r, 100));
+                    focused = true;
+                  }
                 }
               }
             }
@@ -909,8 +921,22 @@ export function getSmartTools(): ToolDefinition[] {
             } catch { /* fall through */ }
           }
 
+          // The lookup find_field uses (the compiled UI: a field's label may not be its accessibility name), scrolled into view.
+          if (!focused && ctx.platform) {
+            try {
+              const at = await locateFieldByLabel(ctx.platform, ctx.uiMaps, target);
+              if (at.ok) {
+                await ctx.desktop.mouseClick(at.x, at.y);
+                await new Promise(r => setTimeout(r, 100));
+                focused = true;
+              } else if (!/^no field named/.test(at.error)) {
+                whyNot = at.error;   // found, but not reachable: say why. A plain miss keeps the earlier reason.
+              }
+            } catch { /* fall through */ }
+          }
+
           if (!focused) {
-            return { text: `Could not find element "${target}" to focus before typing`, isError: true };
+            return { text: `Could not find element "${target}" to focus before typing${whyNot ? ` — ${whyNot}` : ''}`, isError: true };
           }
         }
 

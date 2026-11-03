@@ -864,6 +864,39 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
+  /** UIA ScrollItemPattern.ScrollIntoView (else SetFocus) on the element — see ps-bridge.ps1 `scroll-into-view`. */
+  async scrollIntoView(query: {
+    name?: string;
+    controlType?: string;
+    processId?: number;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }): Promise<{
+    success: boolean;
+    method?: string;
+    bounds?: { x: number; y: number; width: number; height: number };
+    error?: string;
+  }> {
+    const processId = query.processId ?? (await this.getActiveWindow().catch(() => null))?.processId;
+    if (processId === undefined) return { success: false, error: 'no window to scroll in' };
+    try {
+      const result = await psRunner.run({
+        cmd: 'scroll-into-view',
+        processId,
+        ...(query.name ? { name: query.name } : {}),
+        ...(query.bounds ? { bounds: query.bounds } : {}),
+      }) as any;
+      const b = result?.bounds;
+      return {
+        success: result?.success === true,
+        ...(typeof result?.method === 'string' ? { method: result.method } : {}),
+        ...(b && [b.x, b.y, b.width, b.height].every(Number.isFinite) ? { bounds: b } : {}),
+        ...(typeof result?.error === 'string' ? { error: result.error } : {}),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error)?.message ?? 'the scroll call failed' };
+    }
+  }
+
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
     const interval = query.intervalMs ?? 250;
     const deadline = Date.now() + timeoutMs;

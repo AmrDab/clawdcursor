@@ -742,6 +742,16 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
             if p.done { return pressed(action, method: "AXShowMenu", pending: p.pending) }
         }
         return miss(action, "the element does not support \(action) (no AXExpanded)", element: el)
+    case "scroll-to-visible":
+        // Scrolls the element's enclosing scroll area; sends no input and raises no window. The reply carries where the
+        // element is NOW — the caller checks that it is on screen.
+        let p = press(el, "AXScrollToVisible")
+        if p.hung { hungDuringAction(action, appName) }
+        if !p.done { return miss(action, "the element does not support AXScrollToVisible (AXError \(p.code))", element: el) }
+        Thread.sleep(forTimeInterval: 0.15)
+        var r = pressed(action, method: "AXScrollToVisible", pending: false)
+        if let g = elementRect(el) { r["bounds"] = g.rect }
+        return r
     case "toggle":
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }

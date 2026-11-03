@@ -72,3 +72,34 @@ describe('WindowsAdapter.invokeElement — pattern miss surfaces bounds', () => 
     expect(runCalls.find(c => c.cmd === 'invoke-element')).toBeUndefined();
   });
 });
+
+describe('WindowsAdapter.scrollIntoView — UIA ScrollItemPattern through the bridge', () => {
+  let adapter: WindowsAdapter;
+  beforeEach(() => {
+    runCalls.length = 0;
+    adapter = new WindowsAdapter();
+    vi.spyOn(adapter, 'getActiveWindow').mockResolvedValue({ processId: 42 } as never);
+  });
+
+  it('sends scroll-into-view with the pid, name and last-seen bounds, and maps the new rect', async () => {
+    reply = () => ({ success: true, action: 'scroll-into-view', method: 'ScrollItemPattern', bounds: { x: 10, y: 400, width: 300, height: 80 } });
+    const bounds = { x: 10, y: 1500, width: 300, height: 80 };
+    const res = await adapter.scrollIntoView({ name: 'Describe', processId: 7, bounds });
+    expect(runCalls[0]).toEqual({ cmd: 'scroll-into-view', processId: 7, name: 'Describe', bounds });
+    expect(res).toEqual({ success: true, method: 'ScrollItemPattern', bounds: { x: 10, y: 400, width: 300, height: 80 } });
+  });
+
+  it('defaults to the foreground window\'s pid', async () => {
+    reply = () => ({ success: true, method: 'SetFocus' });
+    const res = await adapter.scrollIntoView({ name: 'Describe' });
+    expect(runCalls[0].processId).toBe(42);
+    expect(res).toEqual({ success: true, method: 'SetFocus' });   // no rect read: no bounds claimed
+  });
+
+  it('carries the bridge\'s reason on a miss, and a bridge failure is a failed scroll, not a throw', async () => {
+    reply = () => ({ success: false, error: 'element not found in pid 42 (name=\'Describe\')' });
+    expect(await adapter.scrollIntoView({ name: 'Describe' })).toEqual({ success: false, error: 'element not found in pid 42 (name=\'Describe\')' });
+    reply = () => { throw new Error('bridge timeout'); };
+    expect(await adapter.scrollIntoView({ name: 'Describe' })).toEqual({ success: false, error: 'bridge timeout' });
+  });
+});

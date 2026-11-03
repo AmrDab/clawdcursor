@@ -800,6 +800,31 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
+  /** AT-SPI Component.scroll_to on the named element — see atspi-bridge.py `scroll-into-view`. */
+  async scrollIntoView(query: {
+    name?: string; controlType?: string; processId?: number;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }): Promise<{ success: boolean; method?: string; bounds?: { x: number; y: number; width: number; height: number }; error?: string }> {
+    if (!this.atspiAvailable) return { success: false, error: 'AT-SPI is not available' };
+    if (!query.name?.trim()) return { success: false, error: 'scrolling needs the element\'s name on this platform' };
+    try {
+      const args = ['--cmd', 'scroll-into-view', '--name', query.name];
+      if (query.controlType) args.push('--role', atspiRoleQuery(query.controlType));
+      args.push(...await this.a11yScopeArgs(query.processId));
+      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], { timeout: A11Y_TIMEOUT_MS });
+      const result = JSON.parse(stdout);
+      const b = result?.bounds;
+      return {
+        success: result?.success === true,
+        ...(typeof result?.method === 'string' ? { method: result.method } : {}),
+        ...(result?.success === true && b && typeof b.x === 'number' && !isIntMin(b.x) && b.width > 0 ? { bounds: b } : {}),
+        ...(typeof result?.error === 'string' ? { error: result.error } : {}),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error)?.message ?? 'the scroll call failed' };
+    }
+  }
+
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
     if (!this.atspiAvailable) return null;
     const interval = query.intervalMs ?? 250;

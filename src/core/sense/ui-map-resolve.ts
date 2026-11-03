@@ -15,7 +15,9 @@ interface ActiveWindow { processId: number; processName: string; title: string; 
 
 export type RefPlan =
   | { ok: true; via: 'name'; name: string; element: UIElement }
-  | { ok: true; via: 'bounds'; bounds: Bounds; element: UIElement }
+  // `offView`: the element is in the map's window but not fully inside the active window's rect — scrolled out of view (below
+  // the fold of a page, past the end of a list). The caller scrolls it in (ensureVisible) before acting on `bounds`.
+  | { ok: true; via: 'bounds'; bounds: Bounds; element: UIElement; offView?: true }
   | { ok: false; error: string };
 
 function boundsInside(b: Bounds, w: ActiveWindow['bounds']): boolean {
@@ -69,6 +71,9 @@ export function resolveRef(
   const uniqueName = name !== '' && map.elements.filter(e => e.normalized_text === name).length === 1;
   if (uniqueName) return { ok: true, via: 'name', name, element };
 
-  if (!boundsInside(element.bounds, activeWindow.bounds)) return { ok: false, error: 'element is off the active window — call compile_ui again' };
+  // The window check above passed, so the element belongs to this window's tree. Bounds outside the window's rect then mean
+  // "scrolled out of view", not "in another window" (a real run: a form field below the fold was refused as "off the
+  // active window"). Hand it back flagged; ensureVisible scrolls it in and refuses only if that fails.
+  if (!boundsInside(element.bounds, activeWindow.bounds)) return { ok: true, via: 'bounds', bounds: element.bounds, element, offView: true };
   return { ok: true, via: 'bounds', bounds: element.bounds, element };
 }
