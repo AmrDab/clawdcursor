@@ -270,3 +270,40 @@ describe('shortcuts_execute', () => {
     expect(ctx.ensureInitialized).toHaveBeenCalled();
   });
 });
+
+// The safety gate sees only {intent, context}; the chord is resolved inside the
+// handler. It used to be pressed with no blocklist or destructive-label check, so
+// "close window" sent Alt+F4 and "send email" sent the send shortcut unconfirmed.
+describe('shortcuts_execute gates the chord it resolves', () => {
+  beforeEach(() => {
+    mockKeyPress.mockReset();
+    mockGetActiveWindow.mockReset();
+    mockGetActiveWindow.mockResolvedValue({ processName: 'OUTLOOK', title: 'Inbox - Outlook' });
+  });
+
+  it.each(['send email', 'delete email', 'send message'])('needs confirmation for a destructive intent ("%s")', async (intent) => {
+    const result = await getExecuteTool().handler({ intent }, createMockContext());
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain('safety confirm -');
+    expect(mockKeyPress).not.toHaveBeenCalled();
+  });
+
+  it('needs confirmation for a confirm-tier chord (close window → Alt+F4 on Windows)', async () => {
+    // os.platform() reads process.platform.
+    const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...desc, value: 'win32' });
+    try {
+      const result = await getExecuteTool().handler({ intent: 'close window' }, createMockContext());
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('safety confirm -');
+      expect(result.text).toContain('Alt+F4');
+      expect(mockKeyPress).not.toHaveBeenCalled();
+    } finally { Object.defineProperty(process, 'platform', desc); }
+  });
+
+  it('still presses an ordinary shortcut', async () => {
+    const result = await getExecuteTool().handler({ intent: 'copy' }, createMockContext());
+    expect(result.isError).toBeUndefined();
+    expect(mockKeyPress).toHaveBeenCalledTimes(1);
+  });
+});
