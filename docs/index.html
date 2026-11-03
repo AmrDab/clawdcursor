@@ -46,7 +46,7 @@
       UI didn't obey, instead of silently "succeeding."
 
     ── COMPATIBILITY / DEBUGGING ────────────────────────────────────────────────
-    98 granular tools (one schema per verb) via the --granular flag or
+    100+ granular tools (one schema per verb), the default without --compact, or
     `tools/list` on either transport. Use when your runtime requires every
     primitive as a top-level MCP tool, or for direct debugging.
 
@@ -464,7 +464,7 @@
   <!-- Stats -->
   <div class="stats">
     <div class="stat"><div class="stat-val">7</div><div class="stat-lbl">Compound tools (recommended)</div></div>
-    <div class="stat"><div class="stat-val">98</div><div class="stat-lbl">Granular tools (compat / debug)</div></div>
+    <div class="stat"><div class="stat-val">100+</div><div class="stat-lbl">Granular tools (compat / debug)</div></div>
     <div class="stat"><div class="stat-val">3</div><div class="stat-lbl">Operating Systems</div></div>
   </div>
 
@@ -521,7 +521,7 @@
           <span class="tag">Zed</span>
         </div>
         <div class="mode-stats">
-          <div><div class="mode-stat-val">7 / 98</div><div class="mode-stat-lbl">Compact / Granular tools</div></div>
+          <div><div class="mode-stat-val">7 / 100+</div><div class="mode-stat-lbl">Compact / Granular tools</div></div>
           <div><div class="mode-stat-val">stdio</div><div class="mode-stat-lbl">Transport</div></div>
         </div>
       </div>
@@ -669,8 +669,8 @@
     <details class="cli-details">
       <summary class="cli-summary">
         <span class="sect-label" style="margin-bottom:0;">Tools</span>
-        <span class="cli-summary-title">7 compact tools + 98 granular <span class="cli-summary-chev" aria-hidden="true">›</span></span>
-        <span class="cli-summary-sub">The 7 compounds are the recommended surface. The 98 granular tools cover compatibility and debugging.</span>
+        <span class="cli-summary-title">7 compact tools + 100+ granular <span class="cli-summary-chev" aria-hidden="true">›</span></span>
+        <span class="cli-summary-sub">The 7 compounds are the recommended surface. The 100+ granular tools cover compatibility and debugging.</span>
       </summary>
 
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;margin-top:18px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
@@ -720,7 +720,7 @@
       <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
         <strong style="color:var(--text2);">Compact</strong> (~7,000 tokens of catalog, a third of granular): <code style="font-size:0.9em;color:var(--accent2);">computer({ "action": "key", "combo": "mod+s" })</code>.
         <strong style="color:var(--text2);">Granular:</strong> <code style="font-size:0.9em;color:var(--accent2);">key_press({ "key": "mod+s" })</code>.
-        Both hit the same <code>safety.evaluate()</code> chokepoint. Pass <code style="color:var(--accent2);">--granular</code> for the granular surface.
+        Both hit the same <code>safety.evaluate()</code> chokepoint. Leave out <code style="color:var(--accent2);">--compact</code> for the granular surface.
         See <a href="https://github.com/AmrDab/clawdcursor/blob/main/schema.snapshot.json" target="_blank" rel="noopener" style="color:var(--accent2);">schema.snapshot.json</a> for every parameter.
       </p>
     </details>

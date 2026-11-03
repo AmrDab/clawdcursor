@@ -4,7 +4,7 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
-## [1.5.25] - 2026-11-03
+## [1.5.25] - 2026-11-02
 
 ### Changed
 - **A step the agent may not take is handed over, not the whole task.** Agents
