@@ -882,7 +882,7 @@ export function getSmartTools(): ToolDefinition[] {
                   // Found, but below the fold of its window: scroll it in before clicking where it is not.
                   let at: { x: number; y: number; width: number; height: number } | undefined = field.bounds;
                   if (ctx.platform && activeWin) {
-                    const vis = await ensureVisible(ctx.platform, { name: target, bounds: field.bounds }, activeWin);
+                    const vis = await ensureVisible(ctx.platform, { name: field.name || target, role: 'input', bounds: field.bounds }, activeWin, ctx.uiMaps);
                     if (vis.ok) at = vis.bounds; else { at = undefined; whyNot = vis.error; }
                   }
                   if (at) {

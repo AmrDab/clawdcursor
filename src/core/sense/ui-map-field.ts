@@ -8,7 +8,7 @@ import { UIMapHolder } from './ui-map-holder';
 import { compileUIMap, defaultCompileDeps } from './ui-map';
 import { findInputField } from './ui-map-find';
 import { resolveRef } from './ui-map-resolve';
-import { ensureVisible } from './ui-map-visible';
+import { ensureVisible, untrusted } from './ui-map-visible';
 
 export type FieldLocation = { ok: true; x: number; y: number; id: string } | { ok: false; error: string };
 
@@ -28,14 +28,14 @@ export async function locateFieldByLabel(
   const found = findInputField(map.elements, map.snapshot_id, label);
   if (found.status === 'none') return { ok: false, error: `no field named "${label}" in the compiled UI` };
   if (found.status === 'ambiguous') {
-    return { ok: false, error: `"${label}" matches several fields (${found.candidates.map(c => `"${c.label}"`).join(', ')}) — name one exactly` };
+    return { ok: false, error: `"${label}" matches several fields (${untrusted(found.candidates.map(c => c.label).join(' | '))}) — name one exactly` };
   }
   const win = await platform.getActiveWindow().catch(() => null);
   // The same gates as an el_NN ref: confidence, editable, and the map's window still the active one.
   const plan = resolveRef({ element_id: found.best.element_id, snapshot_id: map.snapshot_id }, maps, now, 'fill', win);
   if (!plan.ok) return { ok: false, error: plan.error };
   const [x, y, width, height] = plan.element.bounds;
-  const vis = await ensureVisible(platform, { name: plan.element.text, bounds: { x, y, width, height } }, win!);
+  const vis = await ensureVisible(platform, { name: plan.element.text, role: plan.element.role, bounds: { x, y, width, height } }, win!, maps);
   if (!vis.ok) return vis;
   return { ok: true, x: Math.round(vis.bounds.x + vis.bounds.width / 2), y: Math.round(vis.bounds.y + vis.bounds.height / 2), id: plan.element.id };
 }

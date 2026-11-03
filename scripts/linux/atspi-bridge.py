@@ -770,27 +770,114 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
     return perform_action(target, action, value)
 
 
+LABEL_ROLE_NAMES = {'label', 'static', 'heading', 'paragraph', 'section', 'caption', 'image', 'separator', 'panel', 'filler'}
+
+
+def collect_scroll_matches(top: Any, name: Optional[str], role: Optional[str]) -> list:
+    """Every element under `top` named `name` (exact, case-insensitive, padding ignored; substring matches only when there is
+    no exact one) and of `role`. No early exit: ambiguity is the point."""
+    name_l = name.lower().strip() if name else None
+    roles = role_alternatives(role)
+    exact: list = []
+    partial: list = []
+    seen = [0]
+
+    def visit(acc: Any, depth: int) -> None:
+        if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES:
+            return
+        seen[0] += 1
+        n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
+        r = (safe(lambda: acc.get_role_name(), '') or '').lower()
+        if (roles is None or role_matches(roles, r)) and name_l is not None:
+            if n == name_l:
+                exact.append(acc)
+            elif name_l in n:
+                partial.append(acc)
+        count = safe(lambda: acc.get_child_count(), 0) or 0
+        for i in range(count):
+            visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
+
+    visit(top, 1)
+    return exact or partial
+
+
 def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: Optional[int],
-                         window_title: Optional[str] = None, exclude_pids: Optional[set] = None) -> dict:
+                         window_title: Optional[str] = None, exclude_pids: Optional[set] = None,
+                         bounds: Optional[str] = None, origin_arg: Optional[str] = None) -> dict:
     """Scroll an element that is inside its window but outside the visible part of it into view with the toolkit's own call
-    (Component.scroll_to). Sends no input. Replies with where the element is NOW; the caller checks that it is on screen.
-    Unlike `invoke`, a hidden match is the point here: find_target falls back to hidden matches when none is showing."""
+    (Component.scroll_to). Sends no input. The search is limited to the ACTIVE window of the app. Several elements of that
+    name: the one nearest the last-seen `bounds` ("x,y,w,h") wins, elements with no position are dropped, a tie — or several
+    and no bounds — is refused rather than guessed. Replies with the element's name, role and rect AFTER the scroll; the
+    caller checks it is the element it meant and that it is on screen."""
     action = 'scroll-into-view'
-    if not name and not role:
-        return {"success": False, "action": action, "error": "name or role required"}
+    if not name:
+        return {"success": False, "action": action, "error": "name required"}
+    # The active window's screen origin ("x,y"), added to window-relative extents so every rect is in screen space.
+    origin = None
+    if origin_arg:
+        try:
+            ox, oy = [int(float(v)) for v in origin_arg.split(',')]
+            origin = (ox, oy)
+        except ValueError:
+            origin = None
+    no_origin = {"success": False, "action": action,
+                 "error": "the toolkit reports window-relative extents and the window's origin is unknown - cannot tell where the element is"}
     app = active_application(process_id, window_title, exclude_pids)
     if app is None:
         return {"success": False, "action": action, "error": "application not found"}
-    target, _showing = find_target(app, name, role)
-    if target is None:
-        return {"success": False, "action": action, "error": f"element not found: {name or role}"}
+    tops = toplevels_active_first(app)
+    if not tops:
+        return {"success": False, "action": action, "error": "the application has no window"}
+    matches = collect_scroll_matches(tops[0], name, role)
+    if not matches:
+        return {"success": False, "action": action, "error": f"element not found in the active window: {name}"}
+    # A label and the field it labels share a name: the field is what a scroll is for. Labels only when nothing else matches.
+    actionable = [m for m in matches
+                  if (safe(lambda m=m: m.get_role_name(), '') or '').lower() not in LABEL_ROLE_NAMES]
+    matches = actionable or matches
+    want = None
+    if bounds:
+        try:
+            want = [int(float(v)) for v in bounds.split(',')]
+        except ValueError:
+            want = None
+        if want is not None and len(want) != 4:
+            want = None
+    if want is None:
+        if len(matches) > 1:
+            return {"success": False, "action": action,
+                    "error": f"{len(matches)} elements in the active window share that name - refusing to scroll an arbitrary one"}
+        target = matches[0]
+    else:
+        scored = []
+        for acc in matches:
+            (x, y, w, h), ct = element_bounds(acc)
+            if w <= 0 or h <= 0:
+                continue   # no position: cannot be the element last seen at `want`
+            if ct == 'window':   # window-relative extents (GTK4 on X11): the caller's rects are screen space
+                if origin is None:
+                    return no_origin
+                x, y = x + origin[0], y + origin[1]
+            scored.append((abs(x - want[0]) + abs(y - want[1]) + abs(w - want[2]) + abs(h - want[3]), len(scored), acc))
+        if not scored:
+            return {"success": False, "action": action, "error": "no element of that name has a position to compare with the one referenced"}
+        scored.sort(key=lambda t: (t[0], t[1]))
+        if len(scored) > 1 and scored[0][0] == scored[1][0]:
+            return {"success": False, "action": action,
+                    "error": "several elements in the active window match that name and position equally - refusing to scroll an arbitrary one"}
+        target = scored[0][2]
     if not safe(lambda: target.get_component_iface()):
         return {"success": False, "action": action, "error": "element exposes no Component interface"}
     if not safe(lambda: Atspi.Component.scroll_to(target, Atspi.ScrollType.ANYWHERE), False):
         return {"success": False, "action": action, "error": "Component.scroll_to failed"}
-    bounds, _ = element_bounds(target)
+    b, ct = element_bounds(target)
+    if ct == 'window':   # same conversion LinuxAdapter.offsetWindowRelative applies to get-tree / find
+        if origin is None:
+            return no_origin
+        b = (b[0] + origin[0], b[1] + origin[1], b[2], b[3])
     return {"success": True, "action": action, "method": "Component.scroll_to",
-            "bounds": {"x": bounds[0], "y": bounds[1], "width": bounds[2], "height": bounds[3]}}
+            "name": safe(lambda: target.get_name(), '') or '', "role": safe(lambda: target.get_role_name(), '') or '',
+            "bounds": {"x": b[0], "y": b[1], "width": b[2], "height": b[3]}}
 
 
 def main() -> int:
@@ -806,6 +893,10 @@ def main() -> int:
     p.add_argument('--action', default='click',
                    choices=['click', 'focus', 'set-value', 'get-value', 'toggle', 'select', 'expand', 'collapse'])
     p.add_argument('--value', default=None)
+    # scroll-into-view: where the element was last seen, "x,y,w,h"
+    p.add_argument('--bounds', default=None)
+    # scroll-into-view: the active window's screen origin "x,y" (for window-relative extents)
+    p.add_argument('--origin', default=None)
     args = p.parse_args()
     excl = {int(x) for x in args.exclude_pids.split(',') if x.strip().isdigit()}
 
@@ -822,7 +913,7 @@ def main() -> int:
             result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value,
                                 args.window_title, excl)
         elif args.cmd == 'scroll-into-view':
-            result = cmd_scroll_into_view(args.name, args.role, args.process_id, args.window_title, excl)
+            result = cmd_scroll_into_view(args.name, args.role, args.process_id, args.window_title, excl, args.bounds, args.origin)
         else:
             result = {"error": f"unknown command: {args.cmd}"}
     except Exception as exc:

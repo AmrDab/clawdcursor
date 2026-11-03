@@ -669,18 +669,23 @@ export class MacOSAdapter implements PlatformAdapter {
 
   /** AXScrollToVisible on the named element (the accessibility helper only). `bounds` is not needed: the helper aims by name. */
   async scrollIntoView(query: {
-    name?: string; controlType?: string; processId?: number;
+    name?: string; processId?: number;
+    windowHandle?: number | string;
     bounds?: { x: number; y: number; width: number; height: number };
-  }): Promise<{ success: boolean; method?: string; bounds?: { x: number; y: number; width: number; height: number }; error?: string }> {
+  }): Promise<{ success: boolean; method?: string; bounds?: { x: number; y: number; width: number; height: number }; name?: string; role?: string; error?: string }> {
     if (!query.name?.trim()) return { success: false, error: 'scrolling needs the element\'s name on this platform' };
     let processId = query.processId;
     if (processId === undefined) processId = (await this.getActiveWindow().catch(() => null))?.processId;
     try {
-      const res = await this.ax.invoke({ name: query.name, controlType: query.controlType, processId, action: 'scroll-to-visible' });
+      // The helper picks the hit nearest `bounds` among those of this name, and refuses when that is ambiguous.
+      const res = await this.ax.invoke({ name: query.name, processId, action: 'scroll-to-visible', bounds: query.bounds });
       const b = res.bounds;
+      const d = res.data as { name?: unknown; role?: unknown } | undefined;
       return {
         success: res.success,
         ...(res.success ? { method: 'AXScrollToVisible' } : {}),
+        ...(res.success && typeof d?.name === 'string' ? { name: d.name } : {}),
+        ...(res.success && typeof d?.role === 'string' ? { role: d.role } : {}),
         // A failed call reports the element's centre as a 1x1 rect (see toInvokeResult): not a position to trust.
         ...(res.success && b && b.width > 1 ? { bounds: b } : {}),
         ...(res.error ? { error: res.error } : {}),

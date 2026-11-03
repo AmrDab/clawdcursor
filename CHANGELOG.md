@@ -28,7 +28,14 @@ All notable changes to Clawd Cursor will be documented in this file.
   the app, when the platform cannot scroll, or when the scroll leaves it out of
   view, and the error says which ("could not be scrolled into view (...)",
   "scrolled but still not visible"). Scrolling sends no input and does not change
-  the window the agent is bound to; a stopped session does not scroll.
+  the window the agent is bound to (the active window is read again afterwards and
+  the act is refused if its handle, title or bounds differ); a stopped session does
+  not scroll. The platform looks only in the active window and picks the element
+  nearest the last-seen bounds, refusing when several share the name; the result is
+  then checked to be the referenced element (name, role kind, size). A scroll moves
+  every other element in the snapshot, so the snapshot is invalidated and the next
+  ref must be compiled afresh. Window titles and element names in these errors are
+  wrapped as untrusted screen content.
   `smart_type` with a target now also looks the field up in the compiled UI the
   way `find_field` does (a field's label need not be its accessibility name) and
   scrolls it in. Verified live on Windows 11 / Edge; the macOS and Linux calls are

@@ -608,6 +608,8 @@ let actionRoles: [String: [String]] = [
     "get-value": ["textfield", "textarea", "combobox", "searchfield", "statictext"],
     "toggle": ["checkbox", "radiobutton", "switch"],
     "click": ["button", "menuitem", "menubuttonitem", "link", "radiobutton", "checkbox", "popupbutton", "cell", "row", "tab"],
+    // What a scroll is for: the field, not the label that shares its name.
+    "scroll-to-visible": ["textfield", "textarea", "combobox", "searchfield", "checkbox", "radiobutton", "popupbutton", "button", "link", "cell", "row", "tab"],
 ]
 
 func rankHits(_ hits: [Hit], action: String?) -> [Hit] {
@@ -706,6 +708,35 @@ func selectRow(_ row: AXUIElement, action: String) -> [String: Any] {
     return miss(action, "selecting the row did not take effect — click its coordinates instead", element: row)
 }
 
+/// The one element scroll-to-visible should act on. Exact-name hits only when there are any. With the caller's last-seen
+/// `--bounds x,y,w,h` the nearest hit wins (hits with no position are dropped; a tie is ambiguous); without, a second hit is
+/// ambiguous. Never a guess: scrolling the wrong list row or field moves the page under the agent's next click.
+func scrollTarget(_ hits: [Hit]) -> (hit: Hit?, error: String?) {
+    let exact = hits.filter { $0.exact }
+    let named = exact.isEmpty ? hits : exact
+    // A label and its field share a name: keep the actionable roles when any hit has one (see actionRoles).
+    let pref = actionRoles["scroll-to-visible"] ?? []
+    let typed = named.filter { pref.contains(normRole($0.role)) }
+    let pool = typed.isEmpty ? named : typed
+    guard let spec = opts["bounds"], !spec.isEmpty else {
+        if pool.count == 1 { return (pool[0], nil) }
+        return (nil, "\(pool.count) elements match that name - refusing to scroll an arbitrary one")
+    }
+    let n = spec.split(separator: ",").compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+    if n.count != 4 { return (nil, "bad --bounds \"\(spec)\"") }
+    var scored: [(hit: Hit, d: Int)] = []
+    for h in pool {
+        guard let g = elementRect(h.element) else { continue }
+        let r = g.rect
+        let d = abs((r["x"] ?? 0) - n[0]) + abs((r["y"] ?? 0) - n[1]) + abs((r["width"] ?? 0) - n[2]) + abs((r["height"] ?? 0) - n[3])
+        scored.append((hit: h, d: d))
+    }
+    scored.sort { $0.d < $1.d }
+    guard let best = scored.first else { return (nil, "no element of that name has a position to compare with the one referenced") }
+    if scored.count > 1 && scored[1].d == best.d { return (nil, "several elements match that name and position equally - refusing to scroll an arbitrary one") }
+    return (best.hit, nil)
+}
+
 func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
     let el = h.element
     switch action {
@@ -749,7 +780,8 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         if p.hung { hungDuringAction(action, appName) }
         if !p.done { return miss(action, "the element does not support AXScrollToVisible (AXError \(p.code))", element: el) }
         Thread.sleep(forTimeInterval: 0.15)
-        var r = pressed(action, method: "AXScrollToVisible", pending: false)
+        // name and role: what was scrolled, so the caller can check it is the element it meant.
+        var r = pressed(action, method: "AXScrollToVisible", pending: false, extra: ["name": h.name, "role": h.role])
         if let g = elementRect(el) { r["bounds"] = g.rect }
         return r
     case "toggle":
@@ -985,6 +1017,16 @@ func cmdInvoke() -> Never {
     for w in windows where !timeUp() {
         search(w, aim, maxDepth: 12, limit: 400, ctx: &found)
         if found.hits.contains(where: { $0.exact }) { break }
+    }
+    // scroll-to-visible never takes "the best-ranked" hit: it acts only on the one the caller meant (see scrollTarget), and only
+    // when the whole window was read - an unread part could hold a second element of the same name.
+    if action == "scroll-to-visible" && !found.hits.isEmpty {
+        if timeUp() || found.unreadable > 0 {
+            fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to scroll a possibly wrong element\(wayForward)")
+        }
+        let pick = scrollTarget(found.hits)
+        guard let hit = pick.hit else { emit(refuse(action, pick.error ?? "no element to scroll")) }
+        emit(perform(action, hit, appName: app.localizedName ?? "the app"))
     }
     guard let best = rankHits(found.hits, action: action).first else {
         if timeUp() || found.unreadable > 0 { fail("timeout", "the element search could not read part of the window — not \"Element not found\"") }

@@ -89,6 +89,13 @@ describe('WindowsAdapter.scrollIntoView — UIA ScrollItemPattern through the br
     expect(res).toEqual({ success: true, method: 'ScrollItemPattern', bounds: { x: 10, y: 400, width: 300, height: 80 } });
   });
 
+  it('passes the bound window handle, and maps the scrolled element\'s name and role back', async () => {
+    reply = () => ({ success: true, method: 'ScrollItemPattern', name: 'Describe', role: 'ControlType.Edit', bounds: { x: 10, y: 400, width: 300, height: 80 } });
+    const res = await adapter.scrollIntoView({ name: 'Describe', processId: 7, windowHandle: 4242, bounds: { x: 10, y: 1500, width: 300, height: 80 } });
+    expect(runCalls[0].handle).toBe(4242);
+    expect(res).toMatchObject({ success: true, name: 'Describe', role: 'ControlType.Edit' });
+  });
+
   it('defaults to the foreground window\'s pid', async () => {
     reply = () => ({ success: true, method: 'SetFocus' });
     const res = await adapter.scrollIntoView({ name: 'Describe' });

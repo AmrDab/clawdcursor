@@ -2170,13 +2170,13 @@ const RECT_INT_MIN = -2147483648;
  */
 async function boundsToClick(
   ctx: AgentToolContext,
-  plan: { bounds: [number, number, number, number]; element: { text?: string }; offView?: true },
-  win: { processId: number; title: string; bounds: { x: number; y: number; width: number; height: number } } | null,
+  plan: { bounds: [number, number, number, number]; element: { text?: string; role?: string }; offView?: true },
+  win: { processId: number; title: string; handle?: number | string; bounds: { x: number; y: number; width: number; height: number } } | null,
 ): Promise<{ ok: true; bounds: [number, number, number, number] } | { ok: false; error: string }> {
   if (!plan.offView) return { ok: true, bounds: plan.bounds };
   if (!win) return { ok: false, error: 'cannot verify active window — call compile_ui again' };
   const [x, y, width, height] = plan.bounds;
-  const vis = await ensureVisible(ctx.platform, { name: plan.element.text, bounds: { x, y, width, height } }, win);
+  const vis = await ensureVisible(ctx.platform, { name: plan.element.text, role: plan.element.role, bounds: { x, y, width, height } }, win, ctx.uiMaps);
   return vis.ok ? { ok: true, bounds: [vis.bounds.x, vis.bounds.y, vis.bounds.width, vis.bounds.height] } : vis;
 }
 

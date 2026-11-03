@@ -1168,10 +1168,12 @@ function Cmd-InvokeElement {
 
 # ── Command: scroll-into-view ─────────────────────────────────────────────────
 # Scroll an element that is inside its window but outside the visible part of it (below the fold of a web page, past the
-# end of a list) into view: UIA ScrollItemPattern.ScrollIntoView, else SetFocus (browsers and most toolkits scroll the
-# focused element into view). Sends no input; never raises or activates a window. The element is found by its exact name
-# (every window of the process), the one whose rect is nearest the `bounds` the caller last saw when several share the
-# name; with no name only an element sitting at those bounds counts. Replies with the element's rect AFTER the scroll.
+# end of a list) into view with UIA ScrollItemPattern.ScrollIntoView ONLY (no SetFocus: that moves focus). Sends no input;
+# never raises or activates a window. The search is limited to the ACTIVE window: the foreground window, which must belong
+# to the pid and (when given) be the window handle the caller bound to. The element is found by its exact name; of several
+# that share it, the one whose rect is nearest the `bounds` the caller last saw (elements with no rect are dropped, a tie
+# is ambiguous and refused). Several matches and no bounds is refused too. With no name only an element sitting at those
+# bounds counts. Replies with the element's name, role and rect AFTER the scroll, and fails if the foreground window changed.
 function Cmd-ScrollIntoView {
     param($cmd)
     $name = if ($cmd.name) { [string]$cmd.name } else { "" }
@@ -1179,35 +1181,46 @@ function Cmd-ScrollIntoView {
     $want = $cmd.bounds
     if ($name -eq "" -and $null -eq $want) { return @{ success=$false; error="scroll-into-view needs a name or the element's bounds" } }
 
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-    $pc = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid)
-    $wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $pc)
-    if ($wins.Count -eq 0) { return @{ success=$false; error="No window for pid $wpid" } }
+    $fg = [Win32UIA]::GetForegroundWindow()
+    $fgPid = 0
+    if ($fg -ne [IntPtr]::Zero) { [void][Win32UIA]::GetWindowThreadProcessId($fg, [ref]$fgPid) }
+    if ($fg -eq [IntPtr]::Zero -or $fgPid -ne $wpid) { return @{ success=$false; error="the active window is not a window of pid $wpid" } }
+    if ($cmd.handle -and [int]$fg -ne [int]$cmd.handle) { return @{ success=$false; error="the active window is no longer the one the element was seen in" } }
+    $winEl = $null
+    try { $winEl = [System.Windows.Automation.AutomationElement]::FromHandle($fg) } catch {}
+    if ($null -eq $winEl) { return @{ success=$false; error="cannot read the active window" } }
+    # Nameless: only focusable elements (a field, a button) are worth matching by rect, and only the first 4000 are read.
     $cond = if ($name -ne "") { New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $name) }
-        else { [System.Windows.Automation.Condition]::TrueCondition }
+        else { New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::IsKeyboardFocusableProperty, $true) }
+    $found = $winEl.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)
+    $limit = [Math]::Min($found.Count, 4000)
+    if ($name -eq "" -and $found.Count -gt $limit) { return @{ success=$false; error="the window has too many elements ($($found.Count)) to find one by position alone" } }
 
-    $best = $null; $bestD = [double]::MaxValue
-    foreach ($w in $wins) {
-        foreach ($el in $w.FindAll([System.Windows.Automation.TreeScope]::Descendants, $cond)) {
-            try {
-                $r = $el.Current.BoundingRectangle
-                $d = 1e9   # no rect (scrolled out of a virtualised list): a candidate only when it is the nearest by name
-                if (-not $r.IsEmpty -and -not [double]::IsInfinity($r.X) -and $null -ne $want) {
-                    $d = [Math]::Abs($r.X - $want.x) + [Math]::Abs($r.Y - $want.y) + [Math]::Abs($r.Width - $want.width) + [Math]::Abs($r.Height - $want.height)
-                }
+    $cands = @()
+    for ($k = 0; $k -lt $limit; $k++) {
+        $el = $found.Item($k)
+        try {
+            $r = $el.Current.BoundingRectangle
+            $hasRect = (-not $r.IsEmpty) -and (-not [double]::IsInfinity($r.X))
+            $d = 0
+            if ($null -ne $want) {
+                if (-not $hasRect) { continue }   # given the last-seen rect, an element with none cannot be that element
+                $d = [Math]::Abs($r.X - $want.x) + [Math]::Abs($r.Y - $want.y) + [Math]::Abs($r.Width - $want.width) + [Math]::Abs($r.Height - $want.height)
                 if ($name -eq "" -and $d -gt 8) { continue }   # nameless: the rect is all there is to go on
-                if ($d -lt $bestD) { $best = $el; $bestD = $d }
-            } catch {}
-        }
+            }
+            $cands += [pscustomobject]@{ el = $el; d = $d }
+        } catch {}
     }
-    if ($null -eq $best) { return @{ success=$false; error="element not found in pid $wpid (name='$name')" } }
+    if ($cands.Count -eq 0) { return @{ success=$false; error="element not found in the active window (name='$name')" } }
+    $sorted = @($cands | Sort-Object d)
+    if ($null -eq $want -and $sorted.Count -gt 1) { return @{ success=$false; error="$($sorted.Count) elements in the active window share that name - refusing to scroll an arbitrary one" } }
+    if ($sorted.Count -gt 1 -and $sorted[0].d -eq $sorted[1].d) { return @{ success=$false; error="several elements in the active window match that name and position equally - refusing to scroll an arbitrary one" } }
+    $best = $sorted[0].el
 
     $method = $null
     try { $best.GetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern).ScrollIntoView(); $method = "ScrollItemPattern" } catch {}
-    if ($null -eq $method) {
-        try { $best.SetFocus(); $method = "SetFocus" } catch {}
-    }
-    if ($null -eq $method) { return @{ success=$false; error="the element supports neither ScrollItemPattern nor SetFocus" } }
+    if ($null -eq $method) { return @{ success=$false; error="the element does not support ScrollItemPattern" } }
+    if ([Win32UIA]::GetForegroundWindow() -ne $fg) { return @{ success=$false; error="the active window changed while scrolling" } }
 
     # The scroll is animated / applied on the page's next frame: wait for the rect to settle (two equal reads).
     $prev = $null; $r = $null
@@ -1219,6 +1232,7 @@ function Cmd-ScrollIntoView {
         $prev = $cur
     }
     $out = @{ success=$true; action="scroll-into-view"; method=$method }
+    try { $out.name = [string]$best.Current.Name; $out.role = $best.Current.ControlType.ProgrammaticName } catch {}
     if ($null -ne $r -and -not $r.IsEmpty -and -not [double]::IsInfinity($r.X)) {
         $out.bounds = @{ x=[int]$r.X; y=[int]$r.Y; width=[int]$r.Width; height=[int]$r.Height }
     }

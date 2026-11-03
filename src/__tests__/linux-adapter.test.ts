@@ -409,6 +409,28 @@ describe('scrollIntoView drives the AT-SPI bridge (Component.scroll_to)', () => 
     expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
   });
 
+  it('passes the last-seen bounds (the nearest of several same-named elements wins) and the active window\'s origin', async () => {
+    h.exec = defaultExec(() => ({ success: true, name: 'Describe', role: 'entry', bounds: { x: 10, y: 400, width: 300, height: 80 } }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const res = await adapter.scrollIntoView!({ name: 'Describe', bounds: { x: 10.4, y: 1500, width: 300, height: 80 } });
+    const args = bridgeCalls()[0];
+    expect(args[args.indexOf('--bounds') + 1]).toBe('10,1500,300,80');
+    // the active window's screen origin lets the bridge put window-relative extents (GTK4 on X11) in screen space
+    expect(args[args.indexOf('--origin') + 1]).toMatch(/^-?\d+,-?\d+$/);
+    expect(args).not.toContain('--role');   // identity is name + bounds; a role filter would miss a combo/text-view
+    expect(res).toMatchObject({ success: true, name: 'Describe', role: 'entry' });
+  });
+
+  it('refuses without calling the bridge when the active window is not the bound one', async () => {
+    h.exec = defaultExec(() => ({ success: true }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const res = await adapter.scrollIntoView!({ name: 'Describe', windowHandle: 'not-the-active-window' });
+    expect(res.success).toBe(false);
+    expect(bridgeCalls()).toHaveLength(0);
+  });
+
   it('a refusal carries its reason and no position; no bridge, no call', async () => {
     h.exec = defaultExec(() => ({ success: false, error: 'element exposes no Component interface' }));
     const adapter = new LinuxAdapter();
