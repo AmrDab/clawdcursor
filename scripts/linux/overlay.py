@@ -198,8 +198,8 @@ def run_pill():
         input_cfg = env_json('CLAWD_BANNER_INPUT')
         if not isinstance(input_cfg, dict):
             input_cfg = None
-        placeholder = str(input_cfg.get('placeholder') or '') if input_cfg else ''
-        multiline = bool(input_cfg) and input_cfg.get('multiline') is True
+        placeholder = str(input_cfg.get('placeholder') or '') if input_cfg is not None else ''
+        multiline = input_cfg is not None and input_cfg.get('multiline') is True
 
         def answer(line):
             emit(line)

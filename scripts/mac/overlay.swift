@@ -17,7 +17,8 @@
 //                  button per option, printing BANNER_CHOICE <index>;
 //                  CLAWD_BANNER_INPUT (JSON {placeholder, multiline}) puts the
 //                  text field on the card from the start (a click into it takes
-//                  the keyboard), replacing "Something else".
+//                  the keyboard; Esc gives it back), replacing "Something else".
+//                  In a multiline field Return adds a line, Cmd+Return sends.
 //   overlay glow [--color #RRGGBB] [--duration SEC]
 //                  a pulsing glow on every edge of every display; clicks pass
 //                  straight through it.
@@ -214,14 +215,31 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var inlineInput = false
     var multilineInput = false
 
-    /// Esc in the field: back to the buttons ("Something else"), or just the keyboard back to the user's app (the card's
-    /// own box keeps what was typed).
+    /// Esc in the card's own box: the panel stops being key and the user's app gets the keyboard back (what was typed
+    /// stays). A key non-activating panel never made this app active, so giveFocusBack() (guarded by NSApp.isActive)
+    /// would do nothing here: the panel has to leave the screen to resign key, then come back, and the app is activated
+    /// directly. Deferred a turn so it does not run inside the field editor's own command handling.
+    func releaseKeyboard() {
+        typingReply = false
+        pillPanel?.makeFirstResponder(nil)
+        pillPanel?.allowKey = false
+        DispatchQueue.main.async { [weak self] in
+            if let panel = self?.pillPanel {
+                panel.orderOut(nil)
+                panel.orderFrontRegardless()
+            }
+            if let prev = previousApp, prev.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
+            }
+        }
+    }
+
+    /// Esc in the field: back to the buttons ("Something else"), or the keyboard back to the user's app (the card's own
+    /// box). Return in a multiline box adds a line; Cmd+Return sends.
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.cancelOperation(_:)) {
             if inlineInput {
-                typingReply = false
-                pillPanel?.allowKey = false
-                giveFocusBack()
+                releaseKeyboard()
             } else {
                 replyField?.stringValue = ""
                 showReply(false)
@@ -229,7 +247,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return true
         }
         if multilineInput && selector == #selector(NSResponder.insertNewline(_:)) {
-            textView.insertNewlineIgnoringFieldEditor(nil)
+            if NSApp.currentEvent?.modifierFlags.contains(.command) == true {
+                sendReply(nil)
+            } else {
+                textView.insertNewlineIgnoringFieldEditor(nil)
+            }
             return true
         }
         return false
@@ -273,7 +295,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             multilineInput = multiline
             let boxH: CGFloat = multiline ? 66 : 26
             let choicesH: CGFloat = choices.isEmpty ? 0 : CGFloat(choices.count) * 38 + 4
-            let inputH: CGFloat = hasInput ? (placeholder.isEmpty ? 0 : 20) + max(boxH, 30) + 2 + 26 : 0
+            let hintH: CGFloat = placeholder.isEmpty ? 0 : 20
+            let boxRowH: CGFloat = max(boxH, 30) + 2
+            let inputH: CGFloat = hasInput ? hintH + boxRowH + 26 : 0
             // Offsets below are from the top of the pill; the row of Resume / End task starts at `rowTop`.
             let rowTop: CGFloat = 38 + msgH + 12 + choicesH + inputH
             height = rowTop + 30 + 14
@@ -320,7 +344,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     iy += 20
                 }
                 boxTop = iy
-                iy += max(boxH, 30) + 2
+                iy += boxRowH
                 let warn = label("Don't type passwords here", size: 12, color: dim)
                 warn.frame = NSRect(x: 40, y: height - iy - 16, width: width - 54, height: 16)
                 cardViews.append(warn)
@@ -362,8 +386,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             sendButton = send
 
             var views: [NSView] = [dot, title, msg]
-            views += cardViews
-            views += [resume, end, field, send]
+            views.append(contentsOf: cardViews)
+            let bottom: [NSView] = [resume, end, field, send]
+            views.append(contentsOf: bottom)
             if let other = other { views.append(other) }
             views.forEach { content.addSubview($0) }
         } else {

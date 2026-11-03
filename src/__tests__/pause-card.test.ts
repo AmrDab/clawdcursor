@@ -92,10 +92,25 @@ describe('parsePauseCard: validation', () => {
     expect(parsePauseCard({ a: 1 }, undefined)).toMatchObject({ error: expect.stringMatching(/must be an array/) });
   });
 
-  it('rejects an option wearing the label of one of the card\'s own buttons', () => {
-    for (const label of ['Resume', 'end task', 'Something else', 'Send', 'Type an answer']) {
+  it('rejects an option posing as one of the card\'s own buttons, punctuation and emoji aside', () => {
+    for (const label of ['Resume', 'end task', 'Something else', 'Send', 'Type an answer', 'Resume!', '  RESUME. ', 'Resume now', '✅ Resume',
+      'End-task', 'End task now', '🛑 End Task!', 'Or something else...', 'Send!', '"Send"']) {
       expect(parsePauseCard(['Yes', label], undefined), label).toMatchObject({ error: expect.stringMatching(/card's own buttons/) });
     }
+  });
+
+  it('keeps real answers that merely mention those words', () => {
+    expect(parsePauseCard(['Yes, send', 'Do not send', 'Send it later', 'Not ready to resume', 'Stop the task'], undefined))
+      .toEqual({ choices: ['Yes, send', 'Do not send', 'Send it later', 'Not ready to resume', 'Stop the task'] });
+  });
+
+  it('treats null (what some hosts send for "not given") as absent', async () => {
+    expect(parsePauseCard(null, null)).toEqual({});
+    const call = body({ message: 'Sign in to Glama', choices: null, input: null });
+    await flush();
+    expect(pauseGate.current()).not.toHaveProperty('choices');
+    say('BANNER_RESUME');
+    expect((await call).status).toBe('resumed');
   });
 
   it('rejects a malformed input', () => {

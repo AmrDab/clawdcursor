@@ -116,4 +116,31 @@ describe('array params keep their real shape', () => {
     expect(path?.items?.properties).toHaveProperty('x');
     expect(path?.items?.properties).toHaveProperty('y');
   });
+
+  it('pause_for_user carries choices (array of strings) and input (object with its fields) on the wire', async () => {
+    for (const compact of [false, true]) {
+      const tools = await listTools(compact);
+      const tool = tools.find(t => t.name === (compact ? 'system' : 'pause_for_user'));
+      const props = (tool?.inputSchema as any)?.properties;
+      expect(props?.choices?.type, `compact=${compact}`).toBe('array');
+      expect(props?.choices?.items?.type).toBe('string');
+      expect(props?.input?.type, `compact=${compact}`).toBe('object');
+      expect(props?.input?.properties).toHaveProperty('placeholder');
+      expect(props?.input?.properties).toHaveProperty('multiline');
+      expect(props?.input?.properties?.multiline?.type).toBe('boolean');
+    }
+  });
+
+  it('null for an optional array / object param is accepted as "not given" (reaches the handler)', async () => {
+    const { server } = await createMcpServer({ compact: false, ctx: ctx() });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await (server as any).connect(a);
+    const client = new Client({ name: 'null-test', version: '0' });
+    await client.connect(b);
+    const r: any = await client.callTool({ name: 'pause_for_user', arguments: { message: 'Sign in', choices: null, input: null, done_when: null } });
+    await client.close();
+    const text = JSON.stringify(r);
+    expect(text).not.toMatch(/Expected an (array|object)/);
+    expect(text).not.toMatch(/Invalid arguments|invalid_type/i);
+  });
 });

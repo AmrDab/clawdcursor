@@ -121,8 +121,16 @@ export const MIN_CHOICES = 2;
 export const MAX_CHOICES = 6;
 export const MAX_CHOICE_LEN = 40;
 export const MAX_PLACEHOLDER_LEN = 80;
-/** Labels the card already uses for its own buttons: a choice wearing one could pose as Resume / End task. */
-const RESERVED_CHOICES = new Set(['resume', 'end task', 'something else', 'type an answer', 'send']);
+/**
+ * Would this choice pose as one of the card's own buttons? Compared case-insensitively with punctuation and emoji
+ * dropped ("Resume!", "End-task", "✅ Resume now"): "resume" as the first word, "send" as the whole label (a longer
+ * "Yes, send" is a real answer), "end task" / "something else" / "type an answer" anywhere.
+ */
+function posesAsButton(choice: string): boolean {
+  const n = choice.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return n === 'send' || n === 'resume' || n.startsWith('resume ')
+    || n.includes('end task') || n.includes('something else') || n.includes('type an answer');
+}
 // eslint-disable-next-line no-control-regex -- detecting control characters is the point
 const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
 
@@ -151,7 +159,7 @@ export function parsePauseCard(rawChoices: unknown, rawInput: unknown): { choice
       const c = item.replace(/\s+/g, ' ').trim();
       if (!c) return { error: '`choices` must not contain an empty string.' };
       if (c.length > MAX_CHOICE_LEN) return { error: `choice "${c.slice(0, 20)}..." is ${c.length} characters; keep each choice to ${MAX_CHOICE_LEN} or fewer.` };
-      if (RESERVED_CHOICES.has(c.toLowerCase())) return { error: `"${c}" is the label of one of the card's own buttons; pick a different wording for that choice.` };
+      if (posesAsButton(c)) return { error: `"${c}" is the label of one of the card's own buttons; pick a different wording for that choice.` };
       const key = c.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
