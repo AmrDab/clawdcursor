@@ -13,7 +13,7 @@
 import { mapImagePoint, mapImageLength, getLastFrame } from '../core/agent-loop/coord-scale';
 
 export interface ParameterDef {
-  type: 'string' | 'number' | 'boolean' | 'array';
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
   required?: boolean;
   enum?: string[];
@@ -22,6 +22,8 @@ export interface ParameterDef {
   default?: any;
   /** For type:'array' — the JSON Schema each element must match. */
   items?: Record<string, any>;
+  /** For type:'object' — the JSON Schema of each field. */
+  properties?: Record<string, any>;
 }
 
 /** Result returned by a tool handler */
@@ -191,6 +193,7 @@ export function toJsonSchema(params: Record<string, ParameterDef>): object {
     if (def.maximum !== undefined) prop.maximum = def.maximum;
     if (def.default !== undefined) prop.default = def.default;
     if (def.items !== undefined) prop.items = def.items;
+    if (def.properties !== undefined) prop.properties = def.properties;
     properties[key] = prop;
     if (def.required !== false) required.push(key);
   }

@@ -20,6 +20,10 @@
 #     takes the keyboard only then, on the user's click); Enter / Send prints
 #     BANNER_REPLY <base64 of the UTF-8 text> and exits. No double-click stop here. A short system sound plays
 #     when it appears (off with CLAWD_PAUSE_SOUND=0).
+#     The card: CLAWD_BANNER_CHOICES (JSON array of 2-6 strings) adds one button per option, printing
+#     BANNER_CHOICE <index> (only the index; the parent maps it to the text). CLAWD_BANNER_INPUT (JSON
+#     {placeholder, multiline}) puts a text box on the card (Send / Enter sends as BANNER_REPLY, "Something else"
+#     is then not needed). Both unset = the plain prompt above.
 #
 # CRITICAL: the window must NEVER steal focus — it appears WHILE the agent is
 # typing/clicking, and an activating window would redirect those keystrokes
@@ -196,47 +200,133 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         if ($line) { $b.Add_Click({ param($sender, $e) Send-Line ([string]$sender.Tag) }) }
         return $b
     }
-    $btnY  = 38 + $msgH + 12
-    $gray  = [System.Drawing.Color]::FromArgb(60, 60, 72)
-    $yes   = New-PillButton 'Resume'   'BANNER_RESUME' ($form.Width - 380) $btnY $blue
-    $other = New-PillButton 'Something else' '' ($form.Width - 260) $btnY $gray
-    $other.Size = New-Object System.Drawing.Size(120, 30)
-    $no    = New-PillButton 'End task' 'BANNER_END'    ($form.Width - 130) $btnY $gray
+    $gray = [System.Drawing.Color]::FromArgb(60, 60, 72)
+    $dim  = [System.Drawing.Color]::FromArgb(150, 150, 165)
 
-    # "Something else": the user types an answer for the agent instead of doing the step. The buttons give way to a
-    # text box + Send; Enter sends, Esc goes back. Sent as BANNER_REPLY <base64 UTF-8> (one line, whatever was typed).
+    # The card (set by pause_for_user): CLAWD_BANNER_CHOICES = JSON array of strings -> one button each, printing
+    # BANNER_CHOICE <index>; CLAWD_BANNER_INPUT = JSON {placeholder, multiline} -> a text box (sent as BANNER_REPLY).
+    # Neither set = the plain prompt. They sit above the usual Resume / End task row.
+    $choices = New-Object System.Collections.ArrayList
+    if ($env:CLAWD_BANNER_CHOICES) {
+        try { foreach ($c in ($env:CLAWD_BANNER_CHOICES | ConvertFrom-Json)) { if (($c -is [string]) -and $c.Length -gt 0 -and $choices.Count -lt 6) { [void]$choices.Add($c) } } } catch { }
+    }
+    $inputCfg = $null
+    if ($env:CLAWD_BANNER_INPUT) {
+        try { $inputCfg = $env:CLAWD_BANNER_INPUT | ConvertFrom-Json } catch { $inputCfg = $null }
+    }
+    $hasInput = $inputCfg -is [System.Management.Automation.PSCustomObject]
+    $multi    = $hasInput -and ($inputCfg.multiline -eq $true)
+    $extra    = New-Object System.Collections.ArrayList   # card controls, added to the form below
+
+    $y = 38 + $msgH + 12
+    for ($i = 0; $i -lt $choices.Count; $i++) {
+        $cb = New-PillButton ([string]$choices[$i]) ('BANNER_CHOICE ' + $i) 40 $y $blue
+        $cb.Size        = New-Object System.Drawing.Size(($form.Width - 54), 30)
+        $cb.UseMnemonic = $false   # a choice reading "Fish & chips" must not turn "& c" into an underline
+        [void]$extra.Add($cb)
+        $y += 38
+    }
+    if ($choices.Count -gt 0) { $y += 4 }
+
+    # The text box. With `input` it is on the card from the start (a click into it takes the keyboard); without, it is
+    # "Something else": the buttons give way to the box + Send. Sent as BANNER_REPLY <base64 UTF-8> (one line, whatever
+    # was typed).
     $reply = New-Object System.Windows.Forms.TextBox
     $reply.Font        = New-Object System.Drawing.Font('Segoe UI', 10)
     $reply.BackColor   = [System.Drawing.Color]::FromArgb(36, 36, 48)
     $reply.ForeColor   = [System.Drawing.Color]::White
     $reply.BorderStyle = 'FixedSingle'
-    $reply.Location    = New-Object System.Drawing.Point(40, ($btnY + 3))
-    $reply.Size        = New-Object System.Drawing.Size(($form.Width - 40 - 100), 26)
     $reply.Visible     = $false
-    $send = New-PillButton 'Send' '' ($form.Width - 90) $btnY $blue
+    $send = New-PillButton 'Send' '' ($form.Width - 90) 0 $blue
     $send.Size    = New-Object System.Drawing.Size(76, 30)
     $send.Visible = $false
+    if ($hasInput) {
+        $ph = [string]$inputCfg.placeholder
+        if ($ph) {
+            $hint = New-Object System.Windows.Forms.Label
+            $hint.Text = $ph; $hint.UseMnemonic = $false
+            $hint.Font = New-Object System.Drawing.Font('Segoe UI', 9); $hint.ForeColor = $dim
+            $hint.BackColor = [System.Drawing.Color]::Transparent
+            $hint.AutoSize = $false; $hint.AutoEllipsis = $true
+            $hint.Size = New-Object System.Drawing.Size(($form.Width - 54), 16)
+            $hint.Location = New-Object System.Drawing.Point(40, $y)
+            [void]$extra.Add($hint)
+            $y += 20
+        }
+        $boxH = 26
+        if ($multi) { $boxH = 66; $reply.Multiline = $true; $reply.AcceptsReturn = $true; $reply.ScrollBars = 'Vertical' }
+        $reply.Location = New-Object System.Drawing.Point(40, $y)
+        $reply.Size     = New-Object System.Drawing.Size(($form.Width - 40 - 100), $boxH)
+        $reply.Visible  = $true
+        $send.Location  = New-Object System.Drawing.Point(($form.Width - 90), $y)
+        $send.Visible   = $true
+        $y += [Math]::Max($boxH, 30) + 2
+        $warn = New-Object System.Windows.Forms.Label
+        $warn.Text = 'Don''t type passwords here'
+        $warn.Font = New-Object System.Drawing.Font('Segoe UI', 9); $warn.ForeColor = $dim
+        $warn.BackColor = [System.Drawing.Color]::Transparent
+        $warn.AutoSize = $false
+        $warn.Size = New-Object System.Drawing.Size(($form.Width - 54), 16)
+        $warn.Location = New-Object System.Drawing.Point(40, $y)
+        [void]$extra.Add($warn)
+        $y += 26
+    }
+
+    $btnY = $y
+    $resumeColor = $blue
+    if ($choices.Count -gt 0) { $resumeColor = $gray }   # the choices are the main answer then
+    if ($hasInput) {
+        $yes   = New-PillButton 'Resume'   'BANNER_RESUME' ($form.Width - 250) $btnY $resumeColor
+        $other = $null   # the box is already there
+    } else {
+        $yes   = New-PillButton 'Resume'   'BANNER_RESUME' ($form.Width - 380) $btnY $resumeColor
+        $other = New-PillButton 'Something else' '' ($form.Width - 260) $btnY $gray
+        $other.Size = New-Object System.Drawing.Size(120, 30)
+        $reply.Location = New-Object System.Drawing.Point(40, ($btnY + 3))
+        $reply.Size     = New-Object System.Drawing.Size(($form.Width - 40 - 100), 26)
+        $send.Location  = New-Object System.Drawing.Point(($form.Width - 90), $btnY)
+    }
+    $no = New-PillButton 'End task' 'BANNER_END' ($form.Width - 130) $btnY $gray
+
     function Send-Reply {
         $t = $reply.Text.Trim()
         if ($t.Length -eq 0) { return }
         Send-Line ('BANNER_REPLY ' + [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($t)))
     }
     function Show-ReplyBox([bool]$on) {
-        foreach ($b in @($yes, $other, $no)) { $b.Visible = -not $on }
+        foreach ($b in @($yes, $other, $no)) { if ($b) { $b.Visible = -not $on } }
         $reply.Visible = $on; $send.Visible = $on
         if ($on) { $form.TakeKeyboard(); [void]$reply.Focus() }
         elseif ($script:userWindow -ne [IntPtr]::Zero) { [void][NoActivateBannerForm]::SetForegroundWindow($script:userWindow) }
     }
-    $other.Add_Click({ Show-ReplyBox $true })
+    if ($other) { $other.Add_Click({ Show-ReplyBox $true }) }
     $send.Add_Click({ Send-Reply })
+    if ($hasInput) {
+        # The pill never takes the keyboard on its own: only the user's click into the box does.
+        $reply.Add_MouseDown({
+            $fg = [NoActivateBannerForm]::GetForegroundWindow()
+            if ($fg -ne $form.Handle) { $script:userWindow = $fg }
+            if (-not $form.AllowActivate) { $form.TakeKeyboard() }
+            [void]$reply.Focus()
+        })
+    }
     $reply.Add_KeyDown({
         param($s, $e)
-        if ($e.KeyCode -eq 'Return') { $e.SuppressKeyPress = $true; Send-Reply }
-        elseif ($e.KeyCode -eq 'Escape') { $e.SuppressKeyPress = $true; $reply.Text = ''; Show-ReplyBox $false }
+        if ($e.KeyCode -eq 'Return') {
+            # A longer answer: Enter adds a line, Ctrl+Enter (or Send) sends.
+            if (-not $multi -or $e.Control) { $e.SuppressKeyPress = $true; Send-Reply }
+        }
+        elseif ($e.KeyCode -eq 'Escape') {
+            $e.SuppressKeyPress = $true
+            if ($hasInput) {
+                # The box stays (with what was typed); the keyboard goes back to the user's window.
+                if ($script:userWindow -ne [IntPtr]::Zero) { [void][NoActivateBannerForm]::SetForegroundWindow($script:userWindow) }
+            } else { $reply.Text = ''; Show-ReplyBox $false }
+        }
     })
 
     $form.Height = $btnY + 30 + 14
-    $form.Controls.AddRange(@($dot, $title, $msg, $yes, $other, $no, $reply, $send))
+    foreach ($ctl in @($dot, $title, $msg) + @($extra) + @($yes, $other, $no, $reply, $send)) { if ($ctl) { $form.Controls.Add($ctl) } }
     Set-PillShape $form 14
 
     # Slow blue pulse on the dot — calmer than the red "recording" blink.

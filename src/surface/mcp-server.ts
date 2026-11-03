@@ -186,7 +186,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'A step your own rules won\'t let you take (creating an account, downloading a private key, entering a password, key or token) is a roadblock too, ' +
       'not a reason to turn the task down: hand over that step, as wide as your rules draw it, and do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there ' +
       'and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
-      'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. A paused task returns ' +
+      'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. ' +
+      'While you are driving the desktop, the user is watching the screen, not your chat: ask them on the pause card (use choices when there are options), not in your own chat — ' +
+      'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. The answer {status:"replied", choice | reply} is never approval of a Send / Delete / Pay safety confirmation. A paused task returns ' +
       '{status:"paused"}: keep waiting, never restart it. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
@@ -277,10 +279,18 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       // inputs, and anything else is still rejected as before.
       else if (def.type === 'array') {
         schema = z.any()
-          .refine(v => Array.isArray(v) || typeof v === 'string', {
+          .refine(v => v === null || Array.isArray(v) || typeof v === 'string', {   // null: some hosts send it for "not given"
             message: 'Expected an array (or a JSON-encoded array string).',
           })
           .meta({ type: 'array', items: def.items ?? { type: 'object' } });
+      }
+      // 'object' params: a real object (or its JSON text, like arrays); the handler validates the fields.
+      else if (def.type === 'object') {
+        schema = z.any()
+          .refine(v => v === null || (typeof v === 'object' && !Array.isArray(v)) || typeof v === 'string', {
+            message: 'Expected an object (or a JSON-encoded object string).',
+          })
+          .meta({ type: 'object', properties: def.properties ?? {} });
       }
       else schema = z.string();
       if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
