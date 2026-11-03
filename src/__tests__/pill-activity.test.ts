@@ -89,6 +89,14 @@ describe('the pill line', () => {
     expect(last().child.written).toEqual([]);
     expect(overlayEnv(last().mode).CLAWD_BANNER_APP).toBe('');
   });
+
+  it('the pill after a pause does not repeat the action from before it', () => {
+    controlBanner.setActivity('Typing in Edge');
+    controlBanner.touch();
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    controlBanner.showRunning();
+    expect(last().mode.activity).toBeUndefined();
+  });
 });
 
 describe('pointer-guard announces guarded inputs', () => {

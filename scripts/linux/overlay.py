@@ -364,10 +364,10 @@ def run_pill():
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         head.pack_start(dot, False, False, 0)
         head.pack_start(title, False, False, 0)
-        # "Something else..." on the left; End task, then Resume on the right.
+        # "Something else..." (with `input`: "Type an answer", the only way to the box here, since this popup can never
+        # take the keyboard) on the left; End task, then Resume on the right.
         buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        if input_cfg is None:
-            buttons.pack_start(other, False, False, 0)
+        buttons.pack_start(other, False, False, 0)
         buttons.pack_end(resume, False, False, 0)
         buttons.pack_end(end, False, False, 0)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)

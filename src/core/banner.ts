@@ -291,6 +291,7 @@ class ControlBanner {
   showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string, choice?: number) => void, onRefocus?: (pid?: number) => void): void {
     if (!this.enabled) return;
     this.paused = info;
+    this.activity = ''; // after the answer the pill says "Working" until the agent's next input, not what it did before
     this.onAnswer = onAnswer;
     this.onRefocus = onRefocus;
     this.clearIdleTimer();
