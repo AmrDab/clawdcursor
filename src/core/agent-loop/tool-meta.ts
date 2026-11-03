@@ -409,7 +409,9 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'minimize_window_to_taskbar',
     category: 'window',
     compactGroup: 'window',
-    safetyTier: 2,
+    // Tier 1 (input): minimizing is reversible — the tier extras.ts and the
+    // window compound already give it. This projected copy still said 2.
+    safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',

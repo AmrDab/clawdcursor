@@ -1,8 +1,10 @@
 import { evaluateInput } from '../core/safety';
+import { COMPOUND_ROUTE_INDEX } from './compact';
+import { getTool } from './registry';
 import type { ToolDefinition, ToolResult } from './types';
 import type { UIMapHolder } from '../core/sense/ui-map-holder';
 
-const present = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
+const present =(v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
 
 /**
  * The label of the element an el_NN ref points at. Refs carry no name/target —
@@ -51,6 +53,12 @@ function labelsFromArgs(args: Record<string, unknown>, uiMaps?: UIMapHolder): Ar
   return selectorLabels([refLabel(args, uiMaps), args.name, args.automationId, args.target, text, args.label, args.title, args.selector]);
 }
 
+/** The declared tier of the granular tool a compound call dispatches to (the same route lookup as dispatchCompound). */
+function delegateSafetyTier(tool: ToolDefinition, args: Record<string, unknown>): ToolDefinition['safetyTier'] {
+  const route = COMPOUND_ROUTE_INDEX[tool.name]?.find(r => r.action === String(args.action ?? ''));
+  return route ? getTool(route.delegate)?.safetyTier : undefined;
+}
+
 /**
  * Enforce the canonical safety gate before direct MCP/REST tool handlers run.
  *
@@ -67,10 +75,12 @@ export function evaluateToolCall(
   args: Record<string, unknown>,
   opts?: { uiMaps?: UIMapHolder },
 ): ToolResult | null {
+  const delegateTier = delegateSafetyTier(tool, args);
   const decision = gateEachLabel(labelsFromArgs(args, opts?.uiMaps), targetLabel => evaluateInput({
     toolName: tool.name,
     args,
     safetyTier: tool.safetyTier,
+    delegateSafetyTier: delegateTier,
     ctx: {
       targetLabel,
     },
