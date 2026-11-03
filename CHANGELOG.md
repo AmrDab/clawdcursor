@@ -4,6 +4,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.25] - 2026-11-02
+
 ### Changed
 - **A step the agent may not take is handed over, not the whole task.** Agents
   turned down whole tasks (an APNs key, an App Store review account, notarization)
@@ -21,6 +23,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   desktop-control port to the network, the flag and the `server.host` setting
   are removed. To drive clawdcursor from another machine, tunnel the port:
   `ssh -L 3847:127.0.0.1:3847 user@host`.
+
+### Security
+- **Dependency advisory cleared.** `follow-redirects` (pulled in through
+  jimp) is updated to 1.16.2 for GHSA-mrwp-f3q8-3g9p (high). Lockfile only.
 
 ### Fixed
 

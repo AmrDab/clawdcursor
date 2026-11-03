@@ -1,6 +1,6 @@
 ---
 name: clawdcursor
-version: 1.5.24
+version: 1.5.25
 description: >
   FALLBACK ONLY — do not invoke unless you have already ruled out (1) a
   native API (Gmail API, GitHub API, Slack API …), (2) a CLI (git, gh,
@@ -63,10 +63,10 @@ metadata:
 > - MCP stdio (editor host): add `"args": ["mcp", "--compact"]` to your config.
 > - MCP over HTTP (daemon mode): start the daemon with `--compact` (or set
 >   `CLAWD_MCP_COMPACT=1`) so `/mcp` serves the 7 compound tools (incl. `batch`). The surface is
->   fixed at startup — a daemon serves EITHER the compact tools OR the 98
+>   fixed at startup — a daemon serves EITHER the compact tools OR the 100+
 >   granular ones, not both. Default (no flag) is granular.
 >
-> Granular mode's 98 tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
+> Granular mode's 100+ tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
 
 If you connect via MCP with `--compact`, you get a single tool that takes the
 whole task:
@@ -183,8 +183,8 @@ clawdcursor exposes one protocol (**MCP**) over two transports. The daemon's beh
 
 | Mode | Command | Transport | Brain | Tools available |
 |------|---------|-----------|-------|-----------------|
-| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 98 granular (default) or compact surface (`--compact`) |
-| `agent --no-llm` or `agent` with no LLM configured | `clawdcursor agent --no-llm [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 98 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
+| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 100+ granular (default) or compact surface (`--compact`) |
+| `agent --no-llm` or `agent` with no LLM configured | `clawdcursor agent --no-llm [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 100+ granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
 | `agent` (LLM configured)    | `clawdcursor agent` | HTTP `/mcp` | Built-in thin agent loop | All of the above PLUS the autonomous task-handoff tool — named `task` on the compact surface, `submit_task` on granular — hand it a plain-English task |
 
 In `mcp` (stdio) and tools-only `agent` (HTTP): **you reason, clawdcursor acts.** There is no built-in LLM in the loop. You call tools, interpret results, decide next steps. In autonomous `agent` mode (LLM configured): clawdcursor's thin loop reasons AND acts — it perceives the desktop, selects tools, and iterates until done. Call `task` (compact) or `submit_task` (granular) with a natural-language instruction, then poll `agent_status`.
@@ -207,7 +207,7 @@ In `mcp` (stdio) and tools-only `agent` (HTTP): **you reason, clawdcursor acts.*
 }
 ```
 
-**Granular - 98 individual tools (power-user, back-compat, larger prompt budget):**
+**Granular - 100+ individual tools (power-user, back-compat, larger prompt budget):**
 ```json
 {
   "mcpServers": {
@@ -508,6 +508,6 @@ Hit a clawdcursor bug (a tool throws/crashes or behaves contrary to this doc —
 
 ## Full documentation
 
-- **Tool catalog (98 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
+- **Tool catalog (100+ granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
 - **Architecture detail:** README.md in the repo
 - **Changelog:** CHANGELOG.md
