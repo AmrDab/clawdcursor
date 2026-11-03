@@ -62,6 +62,20 @@ All notable changes to Clawd Cursor will be documented in this file.
   not its chat, so it should ask on the pause card (with `choices` when there are
   options) rather than in its own chat.
 
+### Changed
+- **A redesigned pill that says what the agent is doing.** The running pill read
+  "desktop control in progress - double-click to stop" behind a red dot that looked
+  like an error, and a wait looked the same as finished work. It now shows an amber
+  dot, the current action and app ("Typing in Edge", "Opening a page"), the time since
+  it appeared, and a Stop button (a double-click anywhere still stops). Each guarded
+  input names its method once it passed the foreground and stop checks, and the
+  daemon sends the label as one `ACTIVITY <text>` line on the pill's stdin when it
+  changes; a refused input names nothing. The app is named only for keys, typing and
+  the pointer, which read the window in front first. The pause card has the same
+  look with a blue outline, "waiting for you" and the app, and one full-width row per
+  choice. Answers, focus handling and the stdout lines are unchanged on all three
+  overlays.
+
 ## [1.5.25] - 2026-11-02
 
 ### Changed

@@ -144,6 +144,11 @@ async function before(): Promise<void> {
   lease = now;
 }
 
+/** The app the agent's last input went to (the pill names it), or undefined before the first one. */
+export function workingIn(): string | undefined {
+  return lease?.processName;
+}
+
 /** After the input: no read. A focus-moving one opens the window in which a new window in front is the agent's own doing. */
 function done(movesFocus: boolean): void {
   if (movesFocus) movedAt = Date.now();
