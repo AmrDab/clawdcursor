@@ -14,7 +14,7 @@
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
+  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
 
@@ -55,6 +55,9 @@ const RULES: Rule[] = [
     hint: 'needs the user\'s OK first; retrying will not help', next: PAUSE('Please confirm: <what and why>') },
   { code: 'KEYBOARD_OWNED', outcome: 'refused', test: /system dialog owns the keyboard/i,
     hint: 'a system dialog has the keyboard; answer or close it first', next: PAUSE('Close the system dialog that has the keyboard') },
+  { code: 'SECURE_INPUT', outcome: 'refused', test: /secure input is on/i,
+    hint: 'macOS sends keys and focus only to the app holding secure input (a password field); the user must leave that field',
+    next: PAUSE('Leave the password field in <App>') },
   { code: 'SCREEN_LOCKED', outcome: 'refused', test: /screen is locked/i,
     hint: 'the screen is locked', next: PAUSE('Unlock the screen') },
   { code: 'CAPTURE_DENIED', outcome: 'refused', test: /screen recording permission denied/i,

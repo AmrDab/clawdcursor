@@ -32,6 +32,7 @@ import type {
   WindowState,
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
+import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { wheelUnitsPerNotch } from './wheel';
@@ -90,7 +91,10 @@ export class MacOSAdapter implements PlatformAdapter {
   lastTreeTruncated = false;
   lastWindowListPartial: string | null = null;
 
-  constructor(opts: { ax?: MacAx } = {}) {
+  private readonly secureInput: () => Promise<SecureInputState | null>;
+
+  constructor(opts: { ax?: MacAx; secureInput?: () => Promise<SecureInputState | null> } = {}) {
+    this.secureInput = opts.secureInput ?? (() => checkSecureInput());
     this.ax = opts.ax ?? defaultMacAx();
     this.keyboard = new MacKeyboardGuard(this.ax);
   }
@@ -423,7 +427,8 @@ export class MacOSAdapter implements PlatformAdapter {
         if (await this.ax.focusWindow(processId, query.title)) return true;
         // null: no helper (not built yet, or switched off) — the script below is the fallback
       } catch (err) {
-        this.focusFailure = message(err);
+        // The helper's own read-back ("focus went to <app>, not to <app>") is the one failure secure input explains.
+        this.focusFailure = /focus went to/.test(message(err)) ? await this.withSecureInputCause(message(err)) : message(err);
         return false;
       }
     }
@@ -459,8 +464,18 @@ export class MacOSAdapter implements PlatformAdapter {
       if (!front || front.processId === processId) return true;      // unknown counts as fine: the script said it worked
       await sleep(120);
     }
-    this.focusFailure = `Focus went to ${front!.name} (pid ${front!.processId}), not to pid ${processId}.`;
+    this.focusFailure = await this.withSecureInputCause(`Focus went to ${front!.name} (pid ${front!.processId}), not to pid ${processId}.`);
     return false;
+  }
+
+  /**
+   * A focus read-back failed. If secure input is on, that is the cause: say so, and who holds it, with the read-back after
+   * it. Not known (the check failed) or off: `detail` unchanged. The AX call having "succeeded" is never evidence either way.
+   */
+  private async withSecureInputCause(detail: string): Promise<string> {
+    const state = await this.secureInput().catch(() => null);
+    if (!state?.on) return detail;
+    return `${secureInputMessage(state.holder)} (${detail.replace(/\.$/, '')})`;
   }
 
   async maximizeWindow(): Promise<void> {
