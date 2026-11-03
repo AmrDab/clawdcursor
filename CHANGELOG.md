@@ -4,6 +4,18 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **macOS: `window focus` names secure input as the cause (#267).** While a
+  password field holds secure input, macOS sends keys and focus only to that
+  app, and a focus ended with a vague "focus went to Google Chrome" / `UNKNOWN`.
+  The focus read-back stays the assertion (a successful accessibility call is no
+  evidence); when it fails, clawdcursor now checks `IsSecureEventInputEnabled()`
+  and, if on, finds the holder (`kCGSSessionSecureInputPID` via `ioreg`) and
+  returns a typed `SECURE_INPUT` result: "secure input is on (held by <App>, pid N)
+  ... Close or leave the password field in <App>, then try again", with a
+  `pause_for_user` next step. If the check cannot answer, the old message is
+  kept. macOS only; no `open -b` fallback.
+
 ## [1.5.25] - 2026-11-02
 
 ### Changed

@@ -12,6 +12,7 @@ describe('classifyResult — errors get a code from the text the tools already w
     ['a11y_invoke: safety confirm - "Send" needs approval (requires user confirmation). Next step: surface this', 'NEEDS_CONFIRMATION', 'refused'],
     ['[confirm] click "Pay": headless run: no human to confirm. DO NOT retry', 'NEEDS_CONFIRMATION', 'refused'],
     ['A system dialog owns the keyboard: "UserNotificationCenter" (pid 311) is frontmost per NSWorkspace.', 'KEYBOARD_OWNED', 'refused'],
+    ['secure input is on (held by 1Password, pid 412): macOS sends keys and focus only to it. Close or leave the password field in 1Password, then try again. (focus went to Google Chrome (pid 935), not to Notes (pid 77))', 'SECURE_INPUT', 'refused'],
     ['smart_click failed: the screen is locked — unlock it first', 'SCREEN_LOCKED', 'refused'],
     ['BLOCKED: "alt+f4" is a dangerous key combo.', 'DANGEROUS_KEY', 'refused'],
     ['Clicked "Save" at (10,20)\nDEVIATION: 1/1 expected check(s) failed (still failing after a 2s settle window)', 'DEVIATION', 'failed'],
