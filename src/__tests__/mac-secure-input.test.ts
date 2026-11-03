@@ -21,7 +21,7 @@ import {
 import { classifyResult } from '../core/result-codes';
 import type { WindowInfo } from '../platform/types';
 
-const IOREG = '    | |   "kCGSSessionUserIDKey" = 501\n    | |   "kCGSSessionSecureInputPID" = 412\n    | |   "kCGSSessionOnConsoleKey" = Yes\n';
+const IOREG = '  | |   "IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes,"kCGSSessionSecureInputPID"=412,"kCGSSessionUserNameKey"="amr"})\n';
 const PS = '/Applications/1Password.app/Contents/MacOS/1Password\n';
 
 /** A fake exec keyed by command; a value of Error is thrown. */
@@ -86,8 +86,15 @@ describe('checkSecureInput', () => {
 describe('parsing', () => {
   it('finds the pid, and nothing in output without the key', () => {
     expect(parseSecureInputPid(IOREG)).toBe(412);
+    expect(parseSecureInputPid('    | |   "kCGSSessionSecureInputPID" = 412\n')).toBe(412);   // spaced form
     expect(parseSecureInputPid('"kCGSSessionSecureInputPID" = 0')).toBeNull();
     expect(parseSecureInputPid('')).toBeNull();
+  });
+
+  it('fast user switching: several sessions, the first says 0 — the first pid above 0 is the holder', () => {
+    const two = '"IOConsoleUsers" = ({"kCGSSessionSecureInputPID"=0,"kCGSSessionUserNameKey"="guest"},' +
+      '{"kCGSSessionSecureInputPID"=412,"kCGSSessionUserNameKey"="amr"})';
+    expect(parseSecureInputPid(two)).toBe(412);
   });
 
   it('names an app by its bundle, else by the executable', () => {

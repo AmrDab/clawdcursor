@@ -43,11 +43,17 @@ export const SECURE_INPUT_JXA =
   "ObjC.import('Carbon'); ObjC.bindFunction('IsSecureEventInputEnabled', ['bool', []]); " +
   'String(Boolean($.IsSecureEventInputEnabled()))';
 
-/** The pid in `ioreg -l -w 0` output (`"kCGSSessionSecureInputPID" = 412`, inside the console user's entry), or null. */
+/**
+ * The holder's pid in `ioreg -l -w 0` output, or null. ioreg prints the sessions inline in one array
+ * (`"IOConsoleUsers" = ({"kCGSSessionOnConsoleKey"=Yes,"kCGSSessionSecureInputPID"=412,...})`), with one dict per login
+ * session under fast user switching, and a session that holds nothing says 0: the first pid above 0 is the holder.
+ */
 export function parseSecureInputPid(ioregOutput: string): number | null {
-  const m = /"kCGSSessionSecureInputPID"\s*=\s*(\d+)/.exec(ioregOutput);
-  const pid = m ? parseInt(m[1], 10) : NaN;
-  return pid > 0 ? pid : null;
+  for (const m of ioregOutput.matchAll(/"kCGSSessionSecureInputPID"\s*=\s*(\d+)/g)) {
+    const pid = parseInt(m[1], 10);
+    if (pid > 0) return pid;
+  }
+  return null;
 }
 
 /** An app's name from `ps -o comm=` output: the .app bundle's name when the executable lives in one, else the file name. */
