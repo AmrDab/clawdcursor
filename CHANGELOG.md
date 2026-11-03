@@ -24,6 +24,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   are removed. To drive clawdcursor from another machine, tunnel the port:
   `ssh -L 3847:127.0.0.1:3847 user@host`.
 
+### Security
+- **Dependency advisory cleared.** `follow-redirects` (pulled in through
+  jimp) is updated to 1.16.2 for GHSA-mrwp-f3q8-3g9p (high). Lockfile only.
+
 ### Fixed
 
 - **A stop really stops, and keys go only to the agent's window (#294).** An
