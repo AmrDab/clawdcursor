@@ -3,7 +3,7 @@
  * be true the moment the prompt appears, so callers reject one.
  */
 export function pausePromptText(message: string): string {
-  return `The agent says: ${message} Resume End task Something else desktop control in progress`.toLowerCase();
+  return `The agent says: ${message} Resume End task Something else ClawdCursor waiting for you`.toLowerCase();
 }
 
 /**

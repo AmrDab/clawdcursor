@@ -4,22 +4,28 @@
 Same contract as scripts/banner.ps1 + scripts/edge-glow.ps1 on Windows, driven
 by src/core/banner.ts:
 
-  overlay.py pill    the top-center pill. Running: red blinking dot, "desktop
-                     control in progress - double-click to stop" -> prints
-                     BANNER_STOP. Paused (env CLAWD_BANNER_MODE=paused): blue
-                     dot, the instruction from CLAWD_BANNER_MESSAGE, and Resume
-                     / Something else / End task -> prints BANNER_RESUME /
-                     BANNER_END; "Something else" opens a small text box under
-                     the pill and Enter / Send prints BANNER_REPLY <base64 of
-                     the UTF-8 text>. Plays a
+  overlay.py pill    the top-center pill. Running: a pulsing amber dot,
+                     "ClawdCursor", what the agent is doing (env
+                     CLAWD_BANNER_ACTIVITY, then "ACTIVITY <text>" lines on
+                     stdin), the time since it appeared and a Stop button; Stop
+                     or a double-click anywhere -> prints BANNER_STOP. Paused
+                     (env CLAWD_BANNER_MODE=paused): a card with a blue outline,
+                     "ClawdCursor - waiting for you" (+ the app from
+                     CLAWD_BANNER_APP), the instruction from CLAWD_BANNER_MESSAGE,
+                     and Resume / Something else / End task -> prints
+                     BANNER_RESUME / BANNER_END; "Something else" opens a small
+                     text box under the pill and Enter / Send prints BANNER_REPLY
+                     <base64 of the UTF-8 text>. Plays a
                      short system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
                      The card: CLAWD_BANNER_CHOICES (JSON array of strings) adds a
-                     button per option, printing BANNER_CHOICE <index>;
+                     row per option, printing BANNER_CHOICE <index>;
                      CLAWD_BANNER_INPUT (JSON {placeholder, multiline}) turns
                      "Something else" into "Type an answer", whose box has the
                      placeholder, a multiline field when asked, and a note not to
                      type passwords. (The pill is a popup that can never take the
                      keyboard, so the box is still a window opened by that click.)
+                     stdin: "HIDE <ms>" steps aside for an agent's click;
+                     "ACTIVITY <text>" replaces the activity text.
   overlay.py glow [--color #RRGGBB] [--duration SEC]
                      a pulsing glow on every edge of every monitor; clicks pass
                      straight through it.
@@ -46,14 +52,15 @@ import gi  # noqa: E402
 
 gi.require_version('Gtk', '3.0')
 gi.require_version('Gdk', '3.0')
-from gi.repository import Gdk, GLib, Gtk  # noqa: E402
+from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 import cairo  # noqa: E402
 
-RED = (1.0, 59 / 255, 48 / 255)
-RED_DIM = (110 / 255, 25 / 255, 20 / 255)
+AMBER = (245 / 255, 158 / 255, 11 / 255)
+AMBER_DIM = (120 / 255, 78 / 255, 8 / 255)
 BLUE = (59 / 255, 130 / 255, 246 / 255)
 BLUE_DIM = (25 / 255, 55 / 255, 110 / 255)
-BG = (18 / 255, 18 / 255, 26 / 255)
+BG = (22 / 255, 24 / 255, 29 / 255)
+EDGE = (58 / 255, 62 / 255, 72 / 255)  # the 1px outline; blue on the paused card
 
 
 def emit(line):
@@ -97,16 +104,30 @@ def rounded(cr, w, h, r):
 
 CSS = b"""
 label { color: #ffffff; font-family: "Segoe UI", "Cantarell", "Ubuntu", sans-serif; }
-label.sub { color: #aaaab9; font-size: 9pt; }
-label.title { font-weight: bold; font-size: 10pt; }
-label.msg { color: #d7d7e1; font-size: 10pt; }
-label.hint { color: #96969f; font-size: 9pt; }
-button { border: none; border-radius: 4px; padding: 4px 18px; min-width: 74px; min-height: 22px;
-         color: #ffffff; font-weight: bold; background-image: none; box-shadow: none; text-shadow: none; }
+label.brand { color: #8c929e; font-size: 9pt; font-weight: 600; }
+label.activity { color: #ffffff; font-size: 9.5pt; font-weight: 600; }
+label.clock { color: #8c929e; font-size: 9pt; }
+label.head { color: #93b4f5; font-size: 9pt; font-weight: 600; }
+label.msg { color: #e8eaed; font-size: 10.5pt; }
+label.hint { color: #8c929e; font-size: 9pt; }
+button { border: none; border-radius: 8px; padding: 0 12px; min-width: 96px; min-height: 30px;
+         background-image: none; background-color: #2c3039; box-shadow: none; text-shadow: none; }
+button label { color: #ffffff; font-size: 9.5pt; font-weight: 600; }
+button:hover { background-color: #3a3f4b; }
 button.resume { background-color: #3b82f6; }
 button.resume:hover { background-color: #5b97f8; }
-button.end { background-color: #3c3c48; }
-button.end:hover { background-color: #4c4c5a; }
+button.other { min-width: 132px; }
+button.other label { color: #93b4f5; }
+button.end label { color: #f87171; }
+button.send { min-width: 76px; }
+button.choice { min-width: 0; min-height: 34px; padding: 0 10px; background-color: #22262e; }
+button.choice:hover { background-color: #2c3039; }
+button.choice label { font-size: 10pt; font-weight: normal; }
+button.stop { min-width: 52px; min-height: 24px; padding: 0; border-radius: 6px; background-color: #401e21; }
+button.stop:hover { background-color: #5c262a; }
+button.stop label { color: #fca5a5; font-size: 9pt; }
+window.replywin { background-color: #16181d; }
+.replywin entry, .replywin textview, .replywin textview text { background-color: #22262e; color: #ffffff; }
 """
 
 
@@ -143,55 +164,81 @@ def run_pill():
     Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), provider,
                                              Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
 
-    width = 560 if paused else 430
-    win, composited = popup(width, 1)
-    radius = 14 if paused else 18
+    pad = 18
+    width = 460 if paused else 1  # the running pill sizes its width to its row
+    pill_h = 38
+    win, composited = popup(width, 1 if paused else pill_h)
+    radius = 14 if paused else 19
+    edge = BLUE if paused else EDGE
 
     def draw(_w, cr):
         alloc = win.get_allocation()
+        w, h = alloc.width, alloc.height
         cr.set_operator(cairo.OPERATOR_SOURCE)
         if composited:
             cr.set_source_rgba(0, 0, 0, 0)
             cr.paint()
-            rounded(cr, alloc.width, alloc.height, min(radius, alloc.height / 2))
+            r = min(radius, h / 2)
+            rounded(cr, w, h, r)
         else:
-            cr.rectangle(0, 0, alloc.width, alloc.height)
+            cr.rectangle(0, 0, w, h)
         cr.set_source_rgb(*BG)
         cr.fill()
+        # The 1px outline, drawn inside the edge.
+        cr.set_source_rgb(*edge)
+        cr.set_line_width(1)
+        if composited:
+            cr.save()
+            cr.translate(0.5, 0.5)
+            rounded(cr, w - 1, h - 1, max(min(radius, h / 2) - 0.5, 0))
+            cr.restore()
+        else:
+            cr.rectangle(0.5, 0.5, w - 1, h - 1)
+        cr.stroke()
         return False
 
     win.connect('draw', draw)
 
+    dot_size = 10 if paused else 12
     dot = Gtk.DrawingArea()
-    dot.set_size_request(18, 18)
+    dot.set_size_request(dot_size, dot_size)
     dot.set_valign(Gtk.Align.CENTER)
     state = {'bright': True}
-    on, off = (BLUE, BLUE_DIM) if paused else (RED, RED_DIM)
+    on, off = (BLUE, BLUE_DIM) if paused else (AMBER, AMBER_DIM)
 
     def draw_dot(_w, cr):
         cr.set_source_rgb(*(on if state['bright'] else off))
-        cr.arc(9, 9, 6, 0, 2 * math.pi)
+        cr.arc(dot_size / 2, dot_size / 2, dot_size / 2 - 1, 0, 2 * math.pi)
         cr.fill()
         return False
 
     dot.connect('draw', draw_dot)
 
-    def blink():
-        state['bright'] = not state['bright']
-        dot.queue_draw()
-        return True
+    # Running pill: lay the row out and size the pill to it (the activity text changes), centred again each time.
+    def layout():
+        _min, nat = win.get_preferred_width()
+        w = max(nat, 1)
+        win.resize(w, pill_h)
+        area = primary_geometry()
+        win.move(area.x + (area.width - w) // 2, area.y + 8)
+        win.queue_draw()
 
-    GLib.timeout_add(900 if paused else 600, blink)
+    activity_label = None  # set below in the running pill
 
     if paused:
-        title = Gtk.Label(label='ClawdCursor paused - your turn', xalign=0)
-        title.get_style_context().add_class('title')
+        title_text = 'ClawdCursor · waiting for you'
+        app = os.environ.get('CLAWD_BANNER_APP')
+        if app:
+            title_text += ' · ' + app
+        title = Gtk.Label(label=title_text, xalign=0)  # plain text, never markup
+        title.get_style_context().add_class('head')
         msg = Gtk.Label(label=os.environ.get('CLAWD_BANNER_MESSAGE', ''), xalign=0)
         msg.set_line_wrap(True)
-        msg.set_max_width_chars(62)
+        msg.set_line_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        msg.set_size_request(width - 2 * pad, -1)
         msg.get_style_context().add_class('msg')
 
-        # The card (set by pause_for_user): choices -> one button each (BANNER_CHOICE <index>); input -> the reply box
+        # The card (set by pause_for_user): choices -> one row each (BANNER_CHOICE <index>); input -> the reply box
         # below gets the agent's placeholder, a multiline field when asked, and a note not to type passwords.
         raw_choices = env_json('CLAWD_BANNER_CHOICES')
         choices = [c for c in raw_choices if isinstance(c, str) and c][:6] if isinstance(raw_choices, list) else []
@@ -206,40 +253,48 @@ def run_pill():
             Gtk.main_quit()
 
         resume = Gtk.Button(label='Resume')
-        resume.get_style_context().add_class('end' if choices else 'resume')  # the choices are the main answer then
+        if not choices:
+            resume.get_style_context().add_class('resume')  # with choices they are the main answer, Resume stays gray
         resume.connect('clicked', lambda *_: answer('BANNER_RESUME'))
         end = Gtk.Button(label='End task')
         end.get_style_context().add_class('end')
         end.connect('clicked', lambda *_: answer('BANNER_END'))
-        other = Gtk.Button(label='Type an answer' if input_cfg is not None else 'Something else')
-        other.get_style_context().add_class('end')
+        other = Gtk.Button(label='Type an answer' if input_cfg is not None else 'Something else…')
+        other.get_style_context().add_class('other')
         other.connect('clicked', lambda *_: open_reply())
         for b in (resume, other, end):
             b.set_can_focus(False)
+            b.set_focus_on_click(False)
 
-        choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         for i, text in enumerate(choices):
-            cb = Gtk.Button(label=text)
-            cb.get_style_context().add_class('resume')
+            cb = Gtk.Button()
+            lbl = Gtk.Label(label=text, xalign=0)  # plain text; left-aligned, full width
+            lbl.set_ellipsize(Pango.EllipsizeMode.END)
+            cb.add(lbl)
+            cb.get_style_context().add_class('choice')
             cb.set_can_focus(False)
+            cb.set_focus_on_click(False)
             cb.connect('clicked', lambda *_, i=i: answer('BANNER_CHOICE %d' % i))
             choice_box.pack_start(cb, False, False, 0)
 
         def open_reply():
             # "Something else" / "Type an answer": the user types an answer for the agent instead of doing the step.
             # The pill is an override-redirect popup that can never take the keyboard, so the text box is a small
-            # normal window right under it — opened only on the user's own click.
+            # normal window right under it - opened only on the user's own click.
             box = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
+            box.get_style_context().add_class('replywin')
             box.set_decorated(False)
             box.set_keep_above(True)
             box.set_skip_taskbar_hint(True)
             box.set_type_hint(Gdk.WindowTypeHint.DIALOG)
+            box.set_size_request(width, -1)
             if multiline:
                 entry = Gtk.TextView()
                 entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
                 field = Gtk.ScrolledWindow()
                 field.set_shadow_type(Gtk.ShadowType.IN)
-                field.set_size_request(420, 70)
+                field.set_size_request(-1, 70)
                 field.add(entry)
 
                 def get_text():
@@ -249,13 +304,13 @@ def run_pill():
                 entry = Gtk.Entry()
                 if input_cfg is None:
                     entry.set_placeholder_text('Tell the agent what to do instead')
-                entry.set_width_chars(52)
                 field = entry
 
                 def get_text():
                     return entry.get_text()
             send = Gtk.Button(label='Send')
             send.get_style_context().add_class('resume')
+            send.get_style_context().add_class('send')
 
             def send_reply(*_):
                 text = get_text().strip()
@@ -285,10 +340,10 @@ def run_pill():
             row.pack_start(field, True, True, 0)
             row.pack_start(send, False, False, 0)
             column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-            column.set_margin_start(10)
-            column.set_margin_end(10)
-            column.set_margin_top(8)
-            column.set_margin_bottom(8)
+            column.set_margin_start(pad)
+            column.set_margin_end(pad)
+            column.set_margin_top(10)
+            column.set_margin_bottom(10)
             if input_cfg is not None and placeholder:
                 hint = Gtk.Label(label=placeholder, xalign=0)
                 hint.get_style_context().add_class('hint')
@@ -309,47 +364,85 @@ def run_pill():
         head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         head.pack_start(dot, False, False, 0)
         head.pack_start(title, False, False, 0)
-        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        buttons.pack_end(end, False, False, 0)
-        buttons.pack_end(other, False, False, 0)
+        # "Something else..." on the left; End task, then Resume on the right.
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        if input_cfg is None:
+            buttons.pack_start(other, False, False, 0)
         buttons.pack_end(resume, False, False, 0)
+        buttons.pack_end(end, False, False, 0)
         body = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        body.set_margin_start(14)
-        body.set_margin_end(18)
-        body.set_margin_top(10)
-        body.set_margin_bottom(12)
+        body.set_margin_start(pad)
+        body.set_margin_end(pad)
+        body.set_margin_top(pad)
+        body.set_margin_bottom(pad)
         body.pack_start(head, False, False, 0)
         body.pack_start(msg, False, False, 0)
         if choices:
-            body.pack_start(choice_box, False, False, 0)
+            body.pack_start(choice_box, False, False, 4)
         body.pack_start(buttons, False, False, 4)
         win.add(body)
     else:
+        start_time = time.monotonic()
         brand = Gtk.Label(label='ClawdCursor')
-        brand.get_style_context().add_class('title')
-        sub = Gtk.Label(label='desktop control in progress  -  double-click to stop')
-        sub.get_style_context().add_class('sub')
+        brand.get_style_context().add_class('brand')
+        activity_label = Gtk.Label(label=os.environ.get('CLAWD_BANNER_ACTIVITY') or 'Working')
+        activity_label.get_style_context().add_class('activity')
+        activity_label.set_ellipsize(Pango.EllipsizeMode.END)
+        activity_label.set_max_width_chars(60)
+        clock = Gtk.Label(label='0:00')
+        clock.get_style_context().add_class('clock')
+        stop = Gtk.Button(label='Stop')
+        stop.get_style_context().add_class('stop')
+        stop.set_can_focus(False)
+        stop.set_focus_on_click(False)
+        stop.set_valign(Gtk.Align.CENTER)
+
+        def stop_now(*_):
+            emit('BANNER_STOP')
+            Gtk.main_quit()
+
+        stop.connect('clicked', stop_now)
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        row.set_margin_start(14)
-        row.set_margin_end(14)
+        row.set_margin_start(12)
+        row.set_margin_end(7)
+        row.set_valign(Gtk.Align.CENTER)
         row.pack_start(dot, False, False, 0)
         row.pack_start(brand, False, False, 0)
-        row.pack_start(sub, False, False, 4)
+        row.pack_start(activity_label, False, False, 0)
+        row.pack_start(clock, False, False, 0)
+        row.pack_start(stop, False, False, 0)
         events = Gtk.EventBox()
         events.set_visible_window(False)
         events.add(row)
 
         def press(_w, event):
             if event.type == Gdk.EventType._2BUTTON_PRESS:
-                emit('BANNER_STOP')
-                Gtk.main_quit()
+                stop_now()
             return False
 
         events.connect('button-press-event', press)
         win.add(events)
 
+        def tick_clock():
+            s = int(time.monotonic() - start_time)
+            t = '%d:%02d' % (s // 60, s % 60)
+            if clock.get_text() != t:
+                clock.set_text(t)
+                layout()
+
+    # The dot pulses (the running pill's clock counts on the same tick).
+    def blink():
+        state['bright'] = not state['bright']
+        dot.queue_draw()
+        if not paused:
+            tick_clock()
+        return True
+
+    GLib.timeout_add(900 if paused else 700, blink)
+
     # stdin carries "HIDE <ms>" from the parent just before an agent's click: the pill steps aside so the click reaches
     # the app under it (it sits where browsers keep their tab strip and address bar), then comes back on its own.
+    # "ACTIVITY <text>" replaces what the running pill says the agent is doing.
     hide_state = {'token': 0, 'buf': b''}
 
     def reshow(token):
@@ -366,6 +459,11 @@ def run_pill():
             hide_state['token'] += 1
             win.hide()
             GLib.timeout_add(ms, reshow, hide_state['token'])
+        elif line.startswith('ACTIVITY ') and activity_label is not None:
+            text = line[9:].strip()
+            if text:
+                activity_label.set_text(text)
+                layout()
 
     def on_stdin(fd, condition):
         # Raw reads, split here: a buffered readline() could keep a second line that arrived in the same read until
@@ -387,14 +485,18 @@ def run_pill():
     except Exception:
         pass  # no stdin: nothing to listen to
 
-    # Fixed width; the paused pill's height follows its content (the message
-    # may wrap), the running pill is a fixed 40 px like on Windows.
-    win.set_size_request(width, -1 if paused else 40)
-    win.show_all()
-    area = primary_geometry()
-    win.move(area.x + (area.width - width) // 2, area.y + 8)
+    # The paused card has a fixed width and its height follows its content (the message may wrap); the running pill is
+    # a fixed 38 px high and its width follows its row.
     if paused:
+        win.set_size_request(width, -1)
+        win.show_all()
+        area = primary_geometry()
+        win.move(area.x + (area.width - width) // 2, area.y + 8)
         pause_chime()
+    else:
+        win.set_size_request(-1, pill_h)
+        win.show_all()
+        layout()
 
 
 def run_glow(color, thickness, period_ms, min_alpha, peak_alpha, duration):

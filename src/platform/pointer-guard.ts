@@ -48,6 +48,13 @@ export function setInputGuard(g: InputGuard | null): void {
   inputGuard = g;
 }
 
+/** Told which guarded method the agent is about to run (once it passed the guard): the pill says what is happening. */
+let onAgentInput: ((method: string) => void) | null = null;
+export function setOnAgentInput(f: ((method: string) => void) | null): void {
+  onAgentInput = f;
+}
+const announce = (m: string) => { try { onAgentInput?.(m); } catch { /* cosmetic */ } };
+
 /** For clawdcursor's own housekeeping on the user's behalf (giving the keyboard back after a pause): not agent input. */
 export function unguarded<R>(fn: () => R): R {
   return inInput.run('user', fn);
@@ -91,12 +98,13 @@ export function guardInputMethods<T extends object>(target: T): T {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
       await g.before();
+      announce(m);
       const r = await f(...args);
       g.done(movesFocus(m, args));
       return r;
     });
   }
-  for (const m of STOP_METHODS) wrap(m, async (g, f, args, nested) => { if (!nested) g.stopCheck(); return f(...args); });
+  for (const m of STOP_METHODS) wrap(m, async (g, f, args, nested) => { if (!nested) { g.stopCheck(); announce(m); } return f(...args); });
   // The agent's own focus and launches rebind the window it works in, nested or not (a navigate raises its browser).
   // The platform adapter takes a query and answers true/false; the accessibility bridge takes (title, processId) and
   // answers {success}.
@@ -112,7 +120,7 @@ export function guardInputMethods<T extends object>(target: T): T {
   // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
   for (const m of ['openApp', 'launchApp']) {
     wrap(m, async (g, f, args, nested) => {
-      if (!nested) g.stopCheck();
+      if (!nested) { g.stopCheck(); announce(m); }
       const r = await f(...args) as { pid?: number; title?: string } | undefined;
       g.launched(r);
       return r;

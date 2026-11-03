@@ -4,11 +4,14 @@
 // scripts/linux/overlay.py, driven by src/core/banner.ts. Compiled once with
 // `swiftc -O` into ~/.clawdcursor/bin (like the OCR helper).
 //
-//   overlay pill   the top-center pill. Running: red blinking dot, "desktop
-//                  control in progress - double-click to stop" -> prints
-//                  BANNER_STOP. Paused (env CLAWD_BANNER_MODE=paused): blue
-//                  dot, the instruction from CLAWD_BANNER_MESSAGE, and Resume /
-//                  Something else / End task -> prints BANNER_RESUME /
+//   overlay pill   the top-center pill. Running: pulsing amber dot, "ClawdCursor",
+//                  what the agent is doing (env CLAWD_BANNER_ACTIVITY, then
+//                  "ACTIVITY <text>" lines on stdin), the time since it appeared
+//                  and a Stop button; Stop or a double-click prints BANNER_STOP.
+//                  stdin also takes "HIDE <ms>". Paused (env CLAWD_BANNER_MODE=paused):
+//                  a card with a blue outline, "waiting for you" (+ the app from
+//                  CLAWD_BANNER_APP), the instruction from CLAWD_BANNER_MESSAGE, and
+//                  Resume / Something else / End task -> prints BANNER_RESUME /
 //                  BANNER_END; "Something else" opens a text field (the panel
 //                  takes the keyboard only then) and Enter / Send prints
 //                  BANNER_REPLY <base64 of the UTF-8 text>. Plays the
@@ -50,11 +53,21 @@ func option(_ name: String, _ fallback: String) -> String {
     return fallback
 }
 
-let red = NSColor(srgbRed: 1, green: 59 / 255, blue: 48 / 255, alpha: 1)
-let redDim = NSColor(srgbRed: 110 / 255, green: 25 / 255, blue: 20 / 255, alpha: 1)
-let blue = NSColor(srgbRed: 59 / 255, green: 130 / 255, blue: 246 / 255, alpha: 1)
-let blueDim = NSColor(srgbRed: 25 / 255, green: 55 / 255, blue: 110 / 255, alpha: 1)
-let background = NSColor(srgbRed: 18 / 255, green: 18 / 255, blue: 26 / 255, alpha: 0.97)
+func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
+    return NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1)
+}
+
+let amber = rgb(245, 158, 11)
+let amberDim = rgb(120, 78, 8)
+let blue = rgb(59, 130, 246)
+let blueDim = rgb(25, 55, 110)
+let background = rgb(22, 24, 29)
+let outline = rgb(58, 62, 72)
+let muted = rgb(140, 146, 158)
+let headerBlue = rgb(147, 180, 245)
+let rowBg = rgb(34, 38, 46)
+let footerBg = rgb(44, 48, 57)
+let endRed = rgb(248, 113, 113)
 
 /// A panel that never becomes key or main: clicking it leaves focus where it was. The one exception is the user's own
 /// click on "Something else": then it may become key (a non-activating panel takes keystrokes without activating the app).
@@ -96,9 +109,15 @@ final class PillView: NSView {
     }
 }
 
-func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false) -> NSTextField {
+func label(_ text: String, size: CGFloat, color: NSColor, bold: Bool = false, semibold: Bool = false) -> NSTextField {
     let l = NSTextField(labelWithString: text)
-    l.font = bold ? NSFont.boldSystemFont(ofSize: size) : NSFont.systemFont(ofSize: size)
+    if bold {
+        l.font = NSFont.boldSystemFont(ofSize: size)
+    } else if semibold {
+        l.font = NSFont.systemFont(ofSize: size, weight: .semibold)
+    } else {
+        l.font = NSFont.systemFont(ofSize: size)
+    }
     l.textColor = color
     l.backgroundColor = .clear
     l.isBezeled = false
@@ -149,6 +168,83 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         NSApp.terminate(nil)
     }
 
+    /// A flat rounded button; a click prints `line` (see answer) unless the caller changes the action.
+    func makeButton(_ text: String, _ line: String, frame: NSRect, color: NSColor, textColor: NSColor = .white,
+                    fontSize: CGFloat = 13, semibold: Bool = true, radius: CGFloat = 8, left: Bool = false) -> FirstClickButton {
+        let b = FirstClickButton(frame: frame)
+        b.title = text
+        b.line = line
+        b.isBordered = false
+        b.wantsLayer = true
+        b.layer?.backgroundColor = color.cgColor
+        b.layer?.cornerRadius = radius
+        let weight: NSFont.Weight = semibold ? .semibold : .regular
+        var attrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: textColor,
+            .font: NSFont.systemFont(ofSize: fontSize, weight: weight)]
+        if left {
+            let ps = NSMutableParagraphStyle()
+            ps.alignment = .left
+            ps.firstLineHeadIndent = 10
+            ps.lineBreakMode = .byTruncatingTail
+            attrs[.paragraphStyle] = ps
+            b.alignment = .left
+        }
+        b.attributedTitle = NSAttributedString(string: text, attributes: attrs)
+        b.target = self
+        b.action = #selector(answer(_:))
+        return b
+    }
+
+    // The running pill: [dot] ClawdCursor  <activity>  m:ss  [Stop]
+    var runDot: NSTextField?
+    var runActivity: NSTextField?
+    var runClock: NSTextField?
+    var runBrand: NSTextField?
+    var runStop: NSButton?
+    var runStart = Date()
+
+    /// Lays the row out left to right, sizes the pill to it and puts it back at the top centre.
+    func layoutRunning() {
+        guard let panel = pillPanel, let dot = runDot, let brand = runBrand, let act = runActivity,
+              let clock = runClock, let stop = runStop else { return }
+        let rowH: CGFloat = 38
+        func place(_ l: NSTextField, _ x: CGFloat, _ maxWidth: CGFloat) -> CGFloat {
+            l.sizeToFit()
+            let w = min(ceil(l.frame.width), maxWidth)
+            let h = ceil(l.frame.height)
+            l.frame = NSRect(x: x, y: floor((rowH - h) / 2), width: w, height: h)
+            return w
+        }
+        var x: CGFloat = 14
+        x += place(dot, x, 40) + 4
+        x += place(brand, x, 200) + 6
+        x += place(act, x, 360) + 8
+        x += place(clock, x, 100) + 12
+        stop.frame = NSRect(x: x, y: 7, width: 52, height: 24)
+        x += 52 + 7
+        let width = ceil(x)
+        let screen = NSScreen.screens.first ?? NSScreen.main!
+        let area = screen.visibleFrame
+        panel.setFrame(NSRect(x: area.midX - width / 2, y: area.maxY - rowH - 8, width: width, height: rowH), display: true)
+    }
+
+    func setActivity(_ text: String) {
+        guard let act = runActivity else { return }
+        act.stringValue = text
+        layoutRunning()
+    }
+
+    func updateClock() {
+        guard let clock = runClock else { return }
+        let s = Int(Date().timeIntervalSince(runStart))
+        let t = String(format: "%d:%02d", s / 60, s % 60)
+        if clock.stringValue != t {
+            clock.stringValue = t
+            layoutRunning()
+        }
+    }
+
     // "Something else": the user types an answer for the agent instead of doing the step.
     var pillPanel: PillPanel?
     var choiceButtons: [NSView] = []
@@ -184,8 +280,12 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             while let nl = pending.firstIndex(of: "\n") {
                 let line = pending[..<nl].trimmingCharacters(in: .whitespaces)
                 pending = String(pending[pending.index(after: nl)...])
-                guard line.hasPrefix("HIDE "), let ms = Int(line.dropFirst(5)) else { continue }
-                DispatchQueue.main.async { self?.hide(for: ms) }
+                if line.hasPrefix("HIDE "), let ms = Int(line.dropFirst(5)) {
+                    DispatchQueue.main.async { self?.hide(for: ms) }
+                } else if line.hasPrefix("ACTIVITY ") {
+                    let text = String(line.dropFirst(9))
+                    DispatchQueue.main.async { self?.setActivity(text) }
+                }
             }
         }
     }
@@ -259,24 +359,36 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     func pill() {
         let paused = ProcessInfo.processInfo.environment["CLAWD_BANNER_MODE"] == "paused"
-        let width: CGFloat = paused ? 560 : 430
+        // The running pill sizes itself to its row (layoutRunning); 300 is only the starting width.
+        let width: CGFloat = paused ? 460 : 300
         let content = PillView(frame: .zero)
         content.wantsLayer = true
         content.layer?.backgroundColor = background.cgColor
-        content.layer?.cornerRadius = paused ? 14 : 18
+        content.layer?.cornerRadius = paused ? 14 : 19
         content.layer?.masksToBounds = true
+        content.layer?.borderWidth = 1
+        content.layer?.borderColor = (paused ? blue : outline).cgColor
 
-        let dot = label("\u{25CF}", size: 16, color: paused ? blue : red, bold: true)
-        var height: CGFloat = 40
+        let dot = label("\u{25CF}", size: paused ? 9 : 12, color: paused ? blue : amber)
+        var height: CGFloat = 38
 
         if paused {
-            let message = ProcessInfo.processInfo.environment["CLAWD_BANNER_MESSAGE"] ?? ""
-            let title = label("ClawdCursor paused - your turn", size: 13, color: .white, bold: true)
+            let pad: CGFloat = 18
+            let inner = width - 2 * pad
+            let env = ProcessInfo.processInfo.environment
+            let message = env["CLAWD_BANNER_MESSAGE"] ?? ""
+            let app = env["CLAWD_BANNER_APP"] ?? ""
+            var titleText = "ClawdCursor \u{00B7} waiting for you"
+            if !app.isEmpty { titleText += " \u{00B7} " + app }
+            let title = label(titleText, size: 11, color: headerBlue, semibold: true)
+            title.lineBreakMode = .byTruncatingTail
             let msg = NSTextField(wrappingLabelWithString: message)
             msg.font = NSFont.systemFont(ofSize: 13)
-            msg.textColor = NSColor(srgbRed: 215 / 255, green: 215 / 255, blue: 225 / 255, alpha: 1)
-            msg.preferredMaxLayoutWidth = 500
-            let msgH = ceil(msg.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: 500, height: 10_000)).height)
+            msg.textColor = NSColor(srgbRed: 232 / 255, green: 234 / 255, blue: 237 / 255, alpha: 1)
+            msg.preferredMaxLayoutWidth = inner
+            let msgH = ceil(msg.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: inner, height: 10_000)).height)
+            let msgTop: CGFloat = 40
+            let afterMsg: CGFloat = msgTop + msgH + 14
 
             // The card (set by pause_for_user): CLAWD_BANNER_CHOICES = JSON array of strings -> one button each, printing
             // BANNER_CHOICE <index>; CLAWD_BANNER_INPUT = JSON {placeholder, multiline} -> a text box (BANNER_REPLY).
@@ -294,78 +406,74 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             inlineInput = hasInput
             multilineInput = multiline
             let boxH: CGFloat = multiline ? 66 : 26
-            let choicesH: CGFloat = choices.isEmpty ? 0 : CGFloat(choices.count) * 38 + 4
+            let choicesH: CGFloat = choices.isEmpty ? 0 : CGFloat(choices.count) * 40 + 6
             let hintH: CGFloat = placeholder.isEmpty ? 0 : 20
             let boxRowH: CGFloat = max(boxH, 30) + 2
             let inputH: CGFloat = hasInput ? hintH + boxRowH + 26 : 0
-            // Offsets below are from the top of the pill; the row of Resume / End task starts at `rowTop`.
-            let rowTop: CGFloat = 38 + msgH + 12 + choicesH + inputH
-            height = rowTop + 30 + 14
+            // Offsets below are from the top of the card; the footer row (Something else / End task / Resume) starts at `rowTop`.
+            let rowTop: CGFloat = afterMsg + choicesH + inputH
+            height = rowTop + 30 + 16
 
-            dot.frame = NSRect(x: 14, y: height - 34, width: 20, height: 22)
-            title.frame = NSRect(x: 40, y: height - 31, width: 480, height: 18)
-            msg.frame = NSRect(x: 40, y: height - 38 - msgH, width: 500, height: msgH)
+            dot.frame = NSRect(x: pad, y: height - 16 - 16, width: 12, height: 16)
+            title.frame = NSRect(x: pad + 14, y: height - 16 - 16, width: inner - 14, height: 16)
+            msg.frame = NSRect(x: pad, y: height - msgTop - msgH, width: inner, height: msgH)
 
-            func button(_ text: String, _ line: String, x: CGFloat, y: CGFloat = 14, width w: CGFloat = 110, color: NSColor) -> FirstClickButton {
-                let b = FirstClickButton(frame: NSRect(x: x, y: y, width: w, height: 30))
-                b.title = text
-                b.line = line
-                b.isBordered = false
-                b.wantsLayer = true
-                b.layer?.backgroundColor = color.cgColor
-                b.layer?.cornerRadius = 4
-                b.attributedTitle = NSAttributedString(string: text, attributes: [
-                    .foregroundColor: NSColor.white, .font: NSFont.boldSystemFont(ofSize: 13)])
-                b.target = self
-                b.action = #selector(answer(_:))
-                return b
-            }
-            let gray = NSColor(srgbRed: 60 / 255, green: 60 / 255, blue: 72 / 255, alpha: 1)
-            let dim = NSColor(srgbRed: 150 / 255, green: 150 / 255, blue: 165 / 255, alpha: 1)
+            let gray = footerBg
+            let dim = muted
             var cardViews: [NSView] = []
 
-            // One full-width button per option, top to bottom.
-            var cy = 38 + msgH + 12
+            // One full-width row per option, top to bottom.
+            var cy = afterMsg
             for (i, text) in choices.enumerated() {
-                cardViews.append(button(text, "BANNER_CHOICE \(i)", x: 40, y: height - cy - 30, width: width - 54, color: blue))
-                cy += 38
+                let row = makeButton(text, "BANNER_CHOICE \(i)",
+                                     frame: NSRect(x: pad, y: height - cy - 34, width: inner, height: 34),
+                                     color: rowBg, semibold: false, left: true)
+                cardViews.append(row)
+                cy += 40
             }
 
             // The text box: on the card from the start with `input` (a click into it takes the keyboard); otherwise
             // it is "Something else" and stays hidden until that button is clicked.
             var boxTop = rowTop + 2   // "Something else": over the Resume row
             if hasInput {
-                var iy = 38 + msgH + 12 + choicesH
+                var iy = afterMsg + choicesH
                 if !placeholder.isEmpty {
                     let hint = label(placeholder, size: 12, color: dim)
                     hint.lineBreakMode = .byTruncatingTail
-                    hint.frame = NSRect(x: 40, y: height - iy - 16, width: width - 54, height: 16)
+                    hint.frame = NSRect(x: pad, y: height - iy - 16, width: inner, height: 16)
                     cardViews.append(hint)
                     iy += 20
                 }
                 boxTop = iy
                 iy += boxRowH
                 let warn = label("Don't type passwords here", size: 12, color: dim)
-                warn.frame = NSRect(x: 40, y: height - iy - 16, width: width - 54, height: 16)
+                warn.frame = NSRect(x: pad, y: height - iy - 16, width: inner, height: 16)
                 cardViews.append(warn)
             }
 
-            let resume = button("Resume", "BANNER_RESUME", x: hasInput ? width - 250 : width - 380, color: choices.isEmpty ? blue : gray)
+            // Footer: "Something else..." on the left (not with `input`); End task then Resume on the right.
+            let footerY: CGFloat = 16
+            let resume = makeButton("Resume", "BANNER_RESUME",
+                                    frame: NSRect(x: width - pad - 96, y: footerY, width: 96, height: 30),
+                                    color: choices.isEmpty ? blue : gray)
+            let end = makeButton("End task", "BANNER_END",
+                                 frame: NSRect(x: width - pad - 96 - 8 - 96, y: footerY, width: 96, height: 30),
+                                 color: gray, textColor: endRed)
             var other: FirstClickButton? = nil
             if !hasInput {
-                let o = button("Something else", "", x: width - 260, color: gray)
-                o.frame.size.width = 120
+                let o = makeButton("Something else\u{2026}", "",
+                                   frame: NSRect(x: pad, y: footerY, width: 132, height: 30),
+                                   color: gray, textColor: headerBlue)
                 o.action = #selector(somethingElse(_:))
                 other = o
             }
-            let end = button("End task", "BANNER_END", x: width - 130, color: gray)
             if let other = other { choiceButtons = [resume, other, end] } else { choiceButtons = [resume, end] }
 
             let boxHeight: CGFloat = hasInput ? boxH : 26
-            let field = ClickToTypeField(frame: NSRect(x: 40, y: height - boxTop - boxHeight, width: width - 40 - 100, height: boxHeight))
+            let field = ClickToTypeField(frame: NSRect(x: pad, y: height - boxTop - boxHeight, width: inner - 84, height: boxHeight))
             field.font = NSFont.systemFont(ofSize: 13)
             field.textColor = .white
-            field.backgroundColor = NSColor(srgbRed: 36 / 255, green: 36 / 255, blue: 48 / 255, alpha: 1)
+            field.backgroundColor = rowBg
             field.isBezeled = true
             field.bezelStyle = .squareBezel
             if multiline {
@@ -380,7 +488,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             field.delegate = self
             field.isHidden = !hasInput
             replyField = field
-            let send = button("Send", "", x: width - 90, y: hasInput ? height - boxTop - 30 : 14, width: 76, color: blue)
+            let send = makeButton("Send", "",
+                                  frame: NSRect(x: width - pad - 76, y: hasInput ? height - boxTop - 30 : footerY, width: 76, height: 30),
+                                  color: blue)
             send.action = #selector(sendReply(_:))
             send.isHidden = !hasInput
             sendButton = send
@@ -392,13 +502,22 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             if let other = other { views.append(other) }
             views.forEach { content.addSubview($0) }
         } else {
-            let brand = label("ClawdCursor", size: 13, color: .white, bold: true)
-            let sub = label("desktop control in progress  -  double-click to stop", size: 12,
-                            color: NSColor(srgbRed: 170 / 255, green: 170 / 255, blue: 185 / 255, alpha: 1))
-            dot.frame = NSRect(x: 14, y: 8, width: 20, height: 22)
-            brand.frame = NSRect(x: 40, y: 11, width: 90, height: 18)
-            sub.frame = NSRect(x: 133, y: 11, width: 290, height: 17)
-            [dot, brand, sub].forEach { content.addSubview($0) }
+            let brand = label("ClawdCursor", size: 11, color: muted, semibold: true)
+            let initial = ProcessInfo.processInfo.environment["CLAWD_BANNER_ACTIVITY"] ?? ""
+            let activity = label(initial.isEmpty ? "Working" : initial, size: 12, color: .white, semibold: true)
+            activity.lineBreakMode = .byTruncatingTail
+            let clock = label("0:00", size: 11, color: muted)
+            clock.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+            let stop = makeButton("Stop", "BANNER_STOP", frame: NSRect(x: 0, y: 7, width: 52, height: 24),
+                                  color: rgb(64, 30, 33), textColor: rgb(252, 165, 165), fontSize: 11, radius: 6)
+            let rowViews: [NSView] = [dot, brand, activity, clock, stop]
+            rowViews.forEach { content.addSubview($0) }
+            runDot = dot
+            runBrand = brand
+            runActivity = activity
+            runClock = clock
+            runStop = stop
+            runStart = Date()
             content.onDoubleClick = {
                 emit("BANNER_STOP")
                 NSApp.terminate(nil)
@@ -423,6 +542,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.orderFrontRegardless()
         windows.append(panel)
         pillPanel = panel
+        if !paused { layoutRunning() }
         listenForCommands()
 
         // A short system sound when the prompt appears, so a user who isn't
@@ -437,9 +557,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
 
         var bright = true
-        timer = Timer.scheduledTimer(withTimeInterval: paused ? 0.9 : 0.6, repeats: true) { _ in
+        timer = Timer.scheduledTimer(withTimeInterval: paused ? 0.9 : 0.7, repeats: true) { [weak self] _ in
             bright.toggle()
-            dot.textColor = bright ? (paused ? blue : red) : (paused ? blueDim : redDim)
+            dot.textColor = bright ? (paused ? blue : amber) : (paused ? blueDim : amberDim)
+            if !paused { self?.updateClock() }
         }
     }
 

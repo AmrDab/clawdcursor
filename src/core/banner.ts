@@ -1,7 +1,8 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
- *   - the pill: topmost, never-focused, with a blinking red dot; carries the
- *     double-click → stop affordance.
+ *   - the pill: topmost, never-focused; an amber dot, what the agent is doing
+ *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
+ *     it appeared, and a Stop button (a double-click anywhere stops too).
  *   - the glow: a click-through amber glow that pulses on every edge of every
  *     display. Pure ambient signal; spawned/killed in lockstep with the pill so
  *     the two are always in sync. Opt out via CLAWD_NO_GLOW=1.
@@ -39,10 +40,10 @@ import * as path from 'path';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { isStopped } from './control';
+import { isStopped, workingIn } from './control';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -50,8 +51,45 @@ const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
 const PAUSED_GLOW = '#3b82f6'; // blue — "your turn"
 
-/** Which form of the overlay to draw: running (default) or paused for the user. */
-export interface OverlayMode { paused?: PauseInfo }
+/**
+ * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
+ * ("Typing in Edge"); `app` names the agent's window on the paused card.
+ */
+export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
+
+// What the running pill says the agent is doing, per guarded input method (pointer-guard.ts). `true`: the method read
+// the window in front first, so the app is known; the others (accessibility, the browser driver) only say what they do.
+const ACTIVITY: Record<string, [string, boolean]> = {
+  mouseClick: ['Clicking', true], mouseDoubleClick: ['Clicking', true], mouseRightClick: ['Clicking', true],
+  mouseDown: ['Clicking', true], executeMouseAction: ['Clicking', true], mouseDrag: ['Dragging', true],
+  mouseScroll: ['Scrolling', true], typeText: ['Typing', true], keyPress: ['Pressing keys', true],
+  keyDown: ['Pressing keys', true], executeKeyboardAction: ['Pressing keys', true],
+  invokeElement: ['Clicking', false], click: ['Clicking', false], clickByText: ['Clicking', false], focus: ['Clicking', false],
+  scrollIntoView: ['Scrolling', false], typeInField: ['Typing', false], typeByLabel: ['Typing', false],
+  fillFormByLabels: ['Filling a form', false], selectOption: ['Choosing an option', false], pressKey: ['Pressing keys', false],
+  navigate: ['Opening a page', false], openApp: ['Opening an app', false], launchApp: ['Opening an app', false],
+  setWindowState: ['Arranging windows', false], setWindowBounds: ['Arranging windows', false],
+  maximizeWindow: ['Arranging windows', false], restoreWindow: ['Arranging windows', false],
+};
+const APP_NAMES: Record<string, string> = {
+  msedge: 'Edge', chrome: 'Chrome', firefox: 'Firefox', explorer: 'File Explorer', code: 'VS Code',
+  winword: 'Word', excel: 'Excel', powerpnt: 'PowerPoint', outlook: 'Outlook',
+};
+
+/** A process name as a person knows the app: "msedge.exe" → "Edge", "notepad" → "Notepad". */
+export function appLabel(processName: string | undefined): string | undefined {
+  const base = (processName ?? '').replace(/\.(exe|app)$/i, '').replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
+  if (!base || /^pid \d+$/.test(base)) return undefined;
+  return APP_NAMES[base.toLowerCase()] ?? base.charAt(0).toUpperCase() + base.slice(1);
+}
+
+/** "Typing in Edge" — what the running pill shows for an input method; undefined for a method it has no words for. */
+export function activityLabel(method: string, processName?: string): string | undefined {
+  const a = ACTIVITY[method];
+  if (!a) return undefined;
+  const app = a[1] ? appLabel(processName) : undefined;
+  return app ? `${a[0]} in ${app}` : a[0];
+}
 type Spawner = (mode: OverlayMode) => ChildProcess;
 
 const ANSWER_LINES: Record<string, PauseAnswer> = { BANNER_RESUME: 'resume', BANNER_END: 'end' };
@@ -88,6 +126,9 @@ const linuxScript = () => path.join(getPackageRoot(), 'scripts', 'linux', 'overl
 export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...process.env,
   ...extra,
+  // Always set, so a stray variable in our own environment never shows.
+  CLAWD_BANNER_ACTIVITY: mode.activity ?? '',
+  CLAWD_BANNER_APP: mode.app ?? '',
   // The message is model-written: say so on screen, so injected text can't pose
   // as clawdcursor's own instructions. The drawer plays a short system sound when
   // the paused pill appears, so a user who isn't looking hears it's their turn
@@ -197,6 +238,18 @@ class ControlBanner {
     if (!stdin || stdin.destroyed || !stdin.writable) return;
     try { stdin.write(`HIDE ${ms}\n`); } catch { return; }
     await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+  }
+
+  private activity = '';
+
+  /** What the agent is doing now ("Typing in Edge"): the running pill shows it; a new pill starts with it. */
+  setActivity(label: string): void {
+    const line = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
+    if (!line || line === this.activity) return;
+    this.activity = line;
+    const stdin = this.child?.stdin;
+    if (this.paused || !stdin || stdin.destroyed || !stdin.writable) return;
+    try { stdin.write(`ACTIVITY ${line}\n`); } catch { /* the pill is gone */ }
   }
 
   /** Wire the double-click → stop callback (the `clawdcursor stop` flow). */
@@ -330,7 +383,9 @@ class ControlBanner {
     let child: ChildProcess;
     let forPause: number | undefined;
     try {
-      child = this.spawner({ paused: this.paused ?? undefined });
+      child = this.spawner(this.paused
+        ? { paused: this.paused, app: appLabel(workingIn()) }
+        : { activity: this.activity || undefined });
       // Which pause this pill answers. Its answer counts while that pause is the
       // current one, even if the process already exited (stdout can drain after
       // 'exit'); a pill from an earlier pause can never answer a newer one.
@@ -419,6 +474,7 @@ class ControlBanner {
 
   private forceHide(): void {
     this.clearIdleTimer();
+    this.activity = ''; // the next session's pill must not open with this one's last action
     this.paused = null;
     this.onAnswer = undefined;
     this.onRefocus = undefined;
@@ -453,6 +509,11 @@ export const controlBanner = new ControlBanner();
 // Every synthetic mouse press, drag or scroll first moves the pill out of the way (pointer-guard.ts).
 setBeforePointerPress(() => controlBanner.dodge());
 setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pids]);
+// Every guarded input says what it does: the running pill reads "Typing in Edge", not just "in progress".
+setOnAgentInput(method => {
+  const label = activityLabel(method, workingIn());
+  if (label) controlBanner.setActivity(label);
+});
 // Captures: the Windows and macOS overlays exclude themselves from capture (WDA_EXCLUDEFROMCAPTURE, sharingType none +
 // the helper's filter); the Linux one cannot, so it steps aside for the capture as it does for a click.
 if (process.platform === 'linux') setBeforeCapture(() => controlBanner.dodge());
