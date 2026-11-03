@@ -25,6 +25,12 @@
  * human ('resumed'); an AI calling task {action:"resume"} is 'resumed_unverified',
  * so the agent is told the user did NOT confirm it on screen.
  *
+ * A pause can also be a small card: `choices` (2-6 short options, one button each) and/or `input` (a text box). A
+ * picked option settles as 'replied' with `choice` (the exact option text, looked up here from the index the pill
+ * reports, never taken from the pill). Only the user on screen can pick: an agent's answer never carries a choice.
+ * A choice answers the agent's QUESTION. It is not an approval and nothing in the safety layer reads it (safety.ts,
+ * safety-gate.ts and batch.ts never touch this gate), so it cannot lift a confirm-tier block (Send / Delete / Pay).
+ *
  * Only offered when a human can see it: the overlay must be able to show, and
  * CLAWD_NO_PAUSE=1 restores the old fail-fast behaviour (CI / unattended runs).
  */
@@ -34,13 +40,17 @@ import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
 import { isStopped, resumeControl } from './control';
 import { unguarded } from '../platform/pointer-guard';
 
-export type PauseAnswer = 'resume' | 'end' | 'reply';
+export type PauseAnswer = 'resume' | 'end' | 'reply' | 'choice';
 export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | 'replied';
 
-/** The outcome, plus what the user typed when they answered with "Something else". */
+/** A text box on the pause card. */
+export interface PauseInput { placeholder?: string; multiline?: boolean }
+
+/** The outcome, plus what the user typed (`reply`) or the option they picked (`choice`, an exact entry of `choices`). */
 export interface PauseResult {
   outcome: PauseOutcome;
   reply?: string;
+  choice?: string;
   /**
    * Resumed because `doneWhen` came true, not by a click. What it observed is screen state a page can write (a title,
    * text), so it is NOT the user's confirmation — callers must not report it as one.
@@ -61,12 +71,18 @@ export interface PauseRequest {
   doneWhen?: () => Promise<boolean>;
   /** How often to check `doneWhen` (ms). Longer for expensive checks such as OCR. */
   donePollMs?: number;
+  /** Options shown as buttons (see parsePauseCard for the limits). A pick settles as 'replied' with `choice`. */
+  choices?: string[];
+  /** A text box on the card. */
+  input?: PauseInput;
 }
 
 export interface PauseInfo {
   id: number;
   message: string;
   since: number;
+  choices?: string[];
+  input?: PauseInput;
 }
 
 interface Pending {
@@ -100,6 +116,76 @@ const MAX_MESSAGE = 300;
 const DONE_POLL_MS = 1500;
 const MAX_REPLY = 2000;
 const RECENT_TTL_MS = 5 * 60_000;
+
+export const MIN_CHOICES = 2;
+export const MAX_CHOICES = 6;
+export const MAX_CHOICE_LEN = 40;
+export const MAX_PLACEHOLDER_LEN = 80;
+/** Labels the card already uses for its own buttons: a choice wearing one could pose as Resume / End task. */
+const RESERVED_CHOICES = new Set(['resume', 'end task', 'something else', 'type an answer', 'send']);
+// eslint-disable-next-line no-control-regex -- detecting control characters is the point
+const CONTROL_CHARS = /[\x00-\x1f\x7f]/;
+
+/** A tool argument that may arrive as a real value or as its JSON text (the MCP array/object convention here). */
+function fromJsonText(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  try { return JSON.parse(v); } catch { return v; }
+}
+
+/**
+ * Validate the card options an agent asked for. Strict: a bad value is an error naming the limit, never silently
+ * trimmed or cut (the user would see something other than what the agent meant). Choices are trimmed and
+ * de-duplicated (case-insensitively, keeping the first); the 2-6 count applies to the distinct options.
+ */
+export function parsePauseCard(rawChoices: unknown, rawInput: unknown): { choices?: string[]; input?: PauseInput } | { error: string } {
+  const card: { choices?: string[]; input?: PauseInput } = {};
+
+  if (rawChoices !== undefined && rawChoices !== null) {
+    const list = fromJsonText(rawChoices);
+    if (!Array.isArray(list)) return { error: '`choices` must be an array of 2-6 short strings, e.g. ["Yes","No"].' };
+    const seen = new Set<string>();
+    const choices: string[] = [];
+    for (const item of list) {
+      if (typeof item !== 'string') return { error: 'every entry of `choices` must be a string.' };
+      if (CONTROL_CHARS.test(item)) return { error: 'a choice must be one line of plain text (no line breaks or control characters).' };
+      const c = item.replace(/\s+/g, ' ').trim();
+      if (!c) return { error: '`choices` must not contain an empty string.' };
+      if (c.length > MAX_CHOICE_LEN) return { error: `choice "${c.slice(0, 20)}..." is ${c.length} characters; keep each choice to ${MAX_CHOICE_LEN} or fewer.` };
+      if (RESERVED_CHOICES.has(c.toLowerCase())) return { error: `"${c}" is the label of one of the card's own buttons; pick a different wording for that choice.` };
+      const key = c.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      choices.push(c);
+    }
+    if (choices.length < MIN_CHOICES || choices.length > MAX_CHOICES) {
+      return { error: `\`choices\` needs ${MIN_CHOICES}-${MAX_CHOICES} distinct options (got ${choices.length}).` };
+    }
+    card.choices = choices;
+  }
+
+  if (rawInput !== undefined && rawInput !== null) {
+    const cfg = fromJsonText(rawInput);
+    if (!cfg || typeof cfg !== 'object' || Array.isArray(cfg)) return { error: '`input` must be an object: {placeholder?: string, multiline?: boolean}.' };
+    const { placeholder, multiline, ...rest } = cfg as Record<string, unknown>;
+    const unknown = Object.keys(rest);
+    if (unknown.length) return { error: `\`input\` has unknown field(s): ${unknown.join(', ')}. Allowed: placeholder, multiline.` };
+    const input: PauseInput = {};
+    if (placeholder !== undefined && placeholder !== null) {
+      if (typeof placeholder !== 'string') return { error: '`input.placeholder` must be a string.' };
+      if (CONTROL_CHARS.test(placeholder)) return { error: '`input.placeholder` must be one line of plain text.' };
+      const ph = placeholder.replace(/\s+/g, ' ').trim();
+      if (ph.length > MAX_PLACEHOLDER_LEN) return { error: `\`input.placeholder\` is ${ph.length} characters; keep it to ${MAX_PLACEHOLDER_LEN} or fewer.` };
+      if (ph) input.placeholder = ph;
+    }
+    if (multiline !== undefined && multiline !== null) {
+      if (typeof multiline !== 'boolean') return { error: '`input.multiline` must be true or false.' };
+      if (multiline) input.multiline = true;
+    }
+    card.input = input;
+  }
+
+  return card;
+}
 
 function timeoutMs(): number {
   const min = Number(process.env.CLAWD_PAUSE_TIMEOUT_MIN);
@@ -167,6 +253,8 @@ class PauseGate {
       await this.pending.promise;
     }
 
+    // Callers (the MCP tool) validate and report errors; a bad card reaching here is dropped, never shown half-formed.
+    const card = parsePauseCard(req.choices, req.input);
     const info: PauseInfo = {
       id: this.nextId++,
       // Control characters (NUL in particular) would make the overlay spawn fail
@@ -174,6 +262,7 @@ class PauseGate {
       // eslint-disable-next-line no-control-regex -- stripping control characters is the point
       message: req.message.replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, MAX_MESSAGE) || 'Your turn.',
       since: Date.now(),
+      ...('error' in card ? {} : card),
     };
     let settle!: (r: PauseResult) => void;
     const promise = new Promise<PauseResult>(resolve => { settle = resolve; });
@@ -194,20 +283,29 @@ class PauseGate {
 
     this.startWindow = null;
     void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
-    controlBanner.showPaused(info, (answer, reply) => { this.answer(answer, 'user', reply); }, pid => { this.refocus(pid); });
+    controlBanner.showPaused(info, (answer, reply, choice) => { this.answer(answer, 'user', reply, choice); }, pid => { this.refocus(pid); });
     return promise;
   }
 
   /**
    * Answer the pending pause: Resume continues the run, End task ends it, a reply (the pill's "Something else") continues
-   * it with what the user typed. `by: 'agent'` (an AI calling task {action:"resume"}) resumes as unverified.
+   * it with what the user typed, a choice (the index of one of the card's `choices`, as the pill reports it) continues
+   * it with that option's text. `by: 'agent'` (an AI calling task {action:"resume"}) resumes as unverified and can never
+   * choose: a choice is the user's.
    */
-  answer(a: PauseAnswer, by: 'user' | 'agent' = 'user', reply?: string): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
+  answer(a: PauseAnswer, by: 'user' | 'agent' = 'user', reply?: string, choice?: number): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
     const p = this.pending;
     if (!p) return { ok: false, error: 'nothing is paused' };
+    if (a === 'choice') {
+      if (by !== 'user') return { ok: false, error: 'a choice can only be made by the user on screen' };
+      const text = Number.isInteger(choice) ? p.info.choices?.[choice as number] : undefined;
+      if (text === undefined) return { ok: false, error: 'no such choice' };
+      this.finish(p, { outcome: 'replied', choice: text });
+      return { ok: true, outcome: 'replied' };
+    }
     if (a === 'reply') {
       // eslint-disable-next-line no-control-regex -- control characters other than newline/tab are noise from a text box
-      const text = String(reply ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f]+/g, ' ').trim().slice(0, MAX_REPLY);
+      const text = String(reply ?? '').replace(/\r\n?/g, '\n').replace(/[\x00-\x08\x0b-\x1f\x7f]+/g, ' ').trim().slice(0, MAX_REPLY);
       if (!text) return { ok: false, error: 'the reply is empty' };
       this.finish(p, { outcome: 'replied', reply: text });
       return { ok: true, outcome: 'replied' };

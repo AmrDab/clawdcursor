@@ -13,6 +13,13 @@ by src/core/banner.ts:
                      the pill and Enter / Send prints BANNER_REPLY <base64 of
                      the UTF-8 text>. Plays a
                      short system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
+                     The card: CLAWD_BANNER_CHOICES (JSON array of strings) adds a
+                     button per option, printing BANNER_CHOICE <index>;
+                     CLAWD_BANNER_INPUT (JSON {placeholder, multiline}) turns
+                     "Something else" into "Type an answer", whose box has the
+                     placeholder, a multiline field when asked, and a note not to
+                     type passwords. (The pill is a popup that can never take the
+                     keyboard, so the box is still a window opened by that click.)
   overlay.py glow [--color #RRGGBB] [--duration SEC]
                      a pulsing glow on every edge of every monitor; clicks pass
                      straight through it.
@@ -25,6 +32,7 @@ the app being driven or the field the user is typing in. Runs on X11, and on
 Wayland through XWayland (GDK_BACKEND=x11).
 """
 import base64
+import json
 import math
 import os
 import shutil
@@ -92,6 +100,7 @@ label { color: #ffffff; font-family: "Segoe UI", "Cantarell", "Ubuntu", sans-ser
 label.sub { color: #aaaab9; font-size: 9pt; }
 label.title { font-weight: bold; font-size: 10pt; }
 label.msg { color: #d7d7e1; font-size: 10pt; }
+label.hint { color: #96969f; font-size: 9pt; }
 button { border: none; border-radius: 4px; padding: 4px 18px; min-width: 74px; min-height: 22px;
          color: #ffffff; font-weight: bold; background-image: none; box-shadow: none; text-shadow: none; }
 button.resume { background-color: #3b82f6; }
@@ -118,6 +127,13 @@ def pause_chime():
     display = Gdk.Display.get_default()
     if display is not None:
         display.beep()
+
+
+def env_json(name):
+    try:
+        return json.loads(os.environ.get(name) or 'null')
+    except ValueError:
+        return None
 
 
 def run_pill():
@@ -175,39 +191,74 @@ def run_pill():
         msg.set_max_width_chars(62)
         msg.get_style_context().add_class('msg')
 
+        # The card (set by pause_for_user): choices -> one button each (BANNER_CHOICE <index>); input -> the reply box
+        # below gets the agent's placeholder, a multiline field when asked, and a note not to type passwords.
+        raw_choices = env_json('CLAWD_BANNER_CHOICES')
+        choices = [c for c in raw_choices if isinstance(c, str) and c][:6] if isinstance(raw_choices, list) else []
+        input_cfg = env_json('CLAWD_BANNER_INPUT')
+        if not isinstance(input_cfg, dict):
+            input_cfg = None
+        placeholder = str(input_cfg.get('placeholder') or '') if input_cfg else ''
+        multiline = bool(input_cfg) and input_cfg.get('multiline') is True
+
         def answer(line):
             emit(line)
             Gtk.main_quit()
 
         resume = Gtk.Button(label='Resume')
-        resume.get_style_context().add_class('resume')
+        resume.get_style_context().add_class('end' if choices else 'resume')  # the choices are the main answer then
         resume.connect('clicked', lambda *_: answer('BANNER_RESUME'))
         end = Gtk.Button(label='End task')
         end.get_style_context().add_class('end')
         end.connect('clicked', lambda *_: answer('BANNER_END'))
-        other = Gtk.Button(label='Something else')
+        other = Gtk.Button(label='Type an answer' if input_cfg is not None else 'Something else')
         other.get_style_context().add_class('end')
         other.connect('clicked', lambda *_: open_reply())
         for b in (resume, other, end):
             b.set_can_focus(False)
 
+        choice_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        for i, text in enumerate(choices):
+            cb = Gtk.Button(label=text)
+            cb.get_style_context().add_class('resume')
+            cb.set_can_focus(False)
+            cb.connect('clicked', lambda *_, i=i: answer('BANNER_CHOICE %d' % i))
+            choice_box.pack_start(cb, False, False, 0)
+
         def open_reply():
-            # "Something else": the user types an answer for the agent instead of doing the step. The pill is an
-            # override-redirect popup that can never take the keyboard, so the text box is a small normal window
-            # right under it — opened only on the user's own click.
+            # "Something else" / "Type an answer": the user types an answer for the agent instead of doing the step.
+            # The pill is an override-redirect popup that can never take the keyboard, so the text box is a small
+            # normal window right under it — opened only on the user's own click.
             box = Gtk.Window(type=Gtk.WindowType.TOPLEVEL)
             box.set_decorated(False)
             box.set_keep_above(True)
             box.set_skip_taskbar_hint(True)
             box.set_type_hint(Gdk.WindowTypeHint.DIALOG)
-            entry = Gtk.Entry()
-            entry.set_placeholder_text('Tell the agent what to do instead')
-            entry.set_width_chars(52)
+            if multiline:
+                entry = Gtk.TextView()
+                entry.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
+                field = Gtk.ScrolledWindow()
+                field.set_shadow_type(Gtk.ShadowType.IN)
+                field.set_size_request(420, 70)
+                field.add(entry)
+
+                def get_text():
+                    buf = entry.get_buffer()
+                    return buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+            else:
+                entry = Gtk.Entry()
+                if input_cfg is None:
+                    entry.set_placeholder_text('Tell the agent what to do instead')
+                entry.set_width_chars(52)
+                field = entry
+
+                def get_text():
+                    return entry.get_text()
             send = Gtk.Button(label='Send')
             send.get_style_context().add_class('resume')
 
             def send_reply(*_):
-                text = entry.get_text().strip()
+                text = get_text().strip()
                 if not text:
                     return
                 emit('BANNER_REPLY ' + base64.b64encode(text.encode('utf-8')).decode('ascii'))
@@ -219,19 +270,35 @@ def run_pill():
                     # Ask the parent to give the keyboard back to the user's window (the one active when the pause began).
                     emit('BANNER_REFOCUS')
                     return True
+                # A longer answer: Enter adds a line, Ctrl+Enter (or Send) sends.
+                if multiline and event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter) \
+                        and event.state & Gdk.ModifierType.CONTROL_MASK:
+                    send_reply()
+                    return True
                 return False
 
-            entry.connect('activate', send_reply)
+            if not multiline:
+                entry.connect('activate', send_reply)
             send.connect('clicked', send_reply)
             box.connect('key-press-event', key)
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            row.set_margin_start(10)
-            row.set_margin_end(10)
-            row.set_margin_top(8)
-            row.set_margin_bottom(8)
-            row.pack_start(entry, True, True, 0)
+            row.pack_start(field, True, True, 0)
             row.pack_start(send, False, False, 0)
-            box.add(row)
+            column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            column.set_margin_start(10)
+            column.set_margin_end(10)
+            column.set_margin_top(8)
+            column.set_margin_bottom(8)
+            if input_cfg is not None and placeholder:
+                hint = Gtk.Label(label=placeholder, xalign=0)
+                hint.get_style_context().add_class('hint')
+                column.pack_start(hint, False, False, 0)
+            column.pack_start(row, False, False, 0)
+            if input_cfg is not None:
+                warn = Gtk.Label(label="Don't type passwords here", xalign=0)
+                warn.get_style_context().add_class('hint')
+                column.pack_start(warn, False, False, 0)
+            box.add(column)
             box.show_all()
             x, y = win.get_position()
             _w, h = win.get_size()
@@ -253,6 +320,8 @@ def run_pill():
         body.set_margin_bottom(12)
         body.pack_start(head, False, False, 0)
         body.pack_start(msg, False, False, 0)
+        if choices:
+            body.pack_start(choice_box, False, False, 0)
         body.pack_start(buttons, False, False, 4)
         win.add(body)
     else:

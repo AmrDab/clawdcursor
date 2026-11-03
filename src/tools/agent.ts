@@ -15,7 +15,7 @@
 import * as fs from 'fs';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
-import { pauseGate } from '../core/pause-gate';
+import { pauseGate, parsePauseCard } from '../core/pause-gate';
 import { promptSatisfies } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { controlBanner } from '../core/banner';
@@ -143,10 +143,30 @@ export function getAgentTools(): ToolDefinition[] {
         'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. ' +
         'Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user\'s click counts there. ' +
         'Shows an on-screen prompt: blue glow, your message, Resume / End task. ' +
-        'BOUNDED: waits up to `timeout` seconds (default 45). {status:"waiting"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). ' +
+        'While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. ' +
+        'To ask a question, put it in `message` and add `choices` (2-6 short options, each at most 40 characters: one button each) and/or `input` ({placeholder?, multiline?}: a text box). Use `choices` whenever the answer is one of a few options. ' +
+        '{status:"replied", choice:"<the exact option text>"} → they picked that option; {status:"replied", reply:"..."} → they typed an answer. Only the user on screen can pick or type: no tool call of yours can. ' +
+        'A choice or a reply answers your QUESTION only. It is never approval of a safety confirmation (Send / Delete / Pay and the like): the safety layer does not read it, so a confirm-tier action stays blocked whatever was picked. ' +
+        'Never ask for a password or secret in `input` or `choices`: what they pick or type reaches you. ' +
+        'BOUNDED: waits up to `timeout` seconds (default 45). {status:"waiting"} → the user is still busy: re-call with the SAME message (and the same `choices` / `input`) to keep waiting (re-attaches, the prompt stays up). ' +
         '{status:"resumed"} → re-read the screen, then continue the task. {status:"ended"} → the user stopped it: report back.',
       parameters: {
-        message: { type: 'string', description: 'The one thing only the user can do, short, e.g. "Sign in to GitHub". Say "then click Resume" only when you pass no done_when.', required: true },
+        message: { type: 'string', description: 'The one thing only the user can do, short, e.g. "Sign in to GitHub", or the question to ask them. Say "then click Resume" only when you pass no done_when.', required: true },
+        choices: {
+          type: 'array',
+          description: 'Optional, for a question: 2-6 distinct short options (each at most 40 characters, one line), shown as buttons. The result is {status:"replied", choice:"<exact text>"}. Not with done_when. Do not use the words Resume, End task, Something else or Send as an option.',
+          required: false,
+          items: { type: 'string' },
+        },
+        input: {
+          type: 'object',
+          description: 'Optional, for a question: shows a text box on the prompt ("Don\'t type passwords here"). The result is {status:"replied", reply:"..."}. placeholder: a short hint above the box (at most 80 characters); multiline: true for a longer answer. Not with done_when.',
+          required: false,
+          properties: {
+            placeholder: { type: 'string' },
+            multiline: { type: 'boolean' },
+          },
+        },
         done_when: {
           type: 'array',
           description: 'Optional, for sign-in / code / CAPTCHA steps: conditions that become true once the user has done their step (same types as expect: element_exists, element_value_contains, window_title_contains — any open window —, app_running, file_exists, ocr_contains). Checked every 1.5 s (ocr_contains: 5 s); when all hold, the pause resumes by itself. Rejected if already true now. Set on the first call; a re-call keeps the first one.',
@@ -158,16 +178,23 @@ export function getAgentTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'system',
       safetyTier: 0,
-      handler: async ({ message, timeout, done_when }, ctx) => {
+      handler: async ({ message, timeout, done_when, choices, input }, ctx) => {
         const text = String(message ?? '').trim();
         if (!text) return { text: 'pause_for_user: `message` is required (what the user should do).', isError: true };
+        const card = parsePauseCard(choices, input);
+        if ('error' in card) return { text: `pause_for_user: ${card.error}`, isError: true };
+        const asking = !!(card.choices || card.input);
+        if (asking && done_when !== undefined && done_when !== null) {
+          return { text: 'pause_for_user: done_when cannot be combined with `choices` / `input`: a question is answered only by the user\'s click or text, never by what shows on screen.', isError: true };
+        }
         if (!pauseGate.available()) {
           return {
             text: 'pause_for_user: no on-screen prompt is available on this machine (the overlay is off: --no-banner, CLAWD_NO_BANNER, CLAWD_NO_PAUSE, or not supported on this OS yet). Ask the user in your own chat instead.',
             isError: true,
           };
         }
-        const key = `mcp:${normMessage(text)}`;
+        // A different card (other options) is a different question: it must not re-attach to the one on screen.
+        const key = `mcp:${normMessage(text)}${asking ? `|${JSON.stringify([card.choices ?? null, card.input ?? null])}` : ''}`;
         // Another pause is on screen: do not queue this one behind it. Queued prompts surfaced one after another later,
         // long after anyone needed them (macOS run: ~90 stale prompts). Same message = re-attach (below).
         // Another clawdcursor process's pause counts too: a second prompt on top of the user's is never shown.
@@ -220,7 +247,7 @@ export function getAgentTools(): ToolDefinition[] {
         // waiting for it: cancel it, or it would surface later as a stale prompt. One already on screen is never cancelled.
         const queued = new AbortController();
         const result = await Promise.race([
-          pauseGate.requestWithReply({ message: text, key, doneWhen, donePollMs }, { signal: queued.signal }),
+          pauseGate.requestWithReply({ message: text, key, doneWhen, donePollMs, ...card }, { signal: queued.signal }),
           new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
         ]);
         clearTimeout(timer);
@@ -246,6 +273,15 @@ export function getAgentTools(): ToolDefinition[] {
           };
         }
         pauseGate.forget(key);
+        if (outcome === 'replied' && result?.choice !== undefined) {
+          return {
+            text: JSON.stringify({
+              status: 'replied',
+              choice: result.choice,
+              next: 'The user picked this option on the prompt. It is their answer to your question: follow it. It is NOT approval of a Send / Delete / Pay-type action: those still go through the safety layer. Read the screen again before acting.',
+            }),
+          };
+        }
         if (outcome === 'replied') {
           return {
             text: JSON.stringify({

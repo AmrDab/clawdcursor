@@ -16,6 +16,27 @@ All notable changes to Clawd Cursor will be documented in this file.
   `pause_for_user` next step. If the check cannot answer, the old message is
   kept. macOS only; no `open -b` fallback.
 
+### Added
+- **The pause prompt is now a card: choices and a text box.** Agents asked their
+  questions in their own chat while the user was looking at the screen (a yes/no on a
+  YC application had to be typed). `pause_for_user` takes `choices` (2-6 short options,
+  at most 40 characters each, de-duplicated: one button each) and/or `input`
+  (`{placeholder?, multiline?}`: a text box with "Don't type passwords here"), and
+  returns `{status:"replied", choice:"<exact option text>"}` or `{status:"replied",
+  reply}`. Bad values are rejected with the limit named; `done_when` cannot be combined
+  with a question. Resume / End task are unchanged, and a pause without `choices` /
+  `input` looks and behaves as before. The overlays print `BANNER_CHOICE <index>`
+  (the text is looked up by the daemon, never taken from the overlay); the card reaches
+  them as JSON in `CLAWD_BANNER_CHOICES` / `CLAWD_BANNER_INPUT`. Windows and macOS show
+  the text box on the card; on Linux the pill cannot take the keyboard, so the
+  button reads "Type an answer" and opens the box. Only the user on screen can choose
+  (an agent's `resume_task` stays unverified), and a choice is never a safety approval:
+  Send / Delete / Pay confirmations are decided by the safety layer alone.
+- The MCP instructions, the `pause_for_user` description, the skill and `llms.txt` say
+  it plainly: while an agent is driving the desktop the user is watching the screen,
+  not its chat, so it should ask on the pause card (with `choices` when there are
+  options) rather than in its own chat.
+
 ## [1.5.25] - 2026-11-02
 
 ### Changed

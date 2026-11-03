@@ -13,6 +13,11 @@
 //                  takes the keyboard only then) and Enter / Send prints
 //                  BANNER_REPLY <base64 of the UTF-8 text>. Plays the
 //                  "Glass" system sound when it appears (CLAWD_PAUSE_SOUND=0: off).
+//                  The card: CLAWD_BANNER_CHOICES (JSON array of strings) adds a
+//                  button per option, printing BANNER_CHOICE <index>;
+//                  CLAWD_BANNER_INPUT (JSON {placeholder, multiline}) puts the
+//                  text field on the card from the start (a click into it takes
+//                  the keyboard), replacing "Something else".
 //   overlay glow [--color #RRGGBB] [--duration SEC]
 //                  a pulsing glow on every edge of every display; clicks pass
 //                  straight through it.
@@ -65,6 +70,21 @@ var typingReply = false
 final class FirstClickButton: NSButton {
     var line = ""
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The text box that is on the card from the start (pause_for_user's `input`): a click into it makes the panel key, so
+/// the user can type; nothing else ever gives the panel the keyboard.
+final class ClickToTypeField: NSTextField {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override func mouseDown(with event: NSEvent) {
+        if let panel = window as? PillPanel, !panel.allowKey {
+            typingReply = true
+            panel.allowKey = true
+            panel.makeKeyAndOrderFront(nil)
+            panel.makeFirstResponder(self)
+        }
+        super.mouseDown(with: event)
+    }
 }
 
 final class PillView: NSView {
@@ -190,11 +210,26 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         NSApp.terminate(nil)
     }
 
-    /// Esc in the field: back to the buttons.
+    /// The card's own text box (`input`) rather than "Something else"; a longer answer takes Enter for a new line.
+    var inlineInput = false
+    var multilineInput = false
+
+    /// Esc in the field: back to the buttons ("Something else"), or just the keyboard back to the user's app (the card's
+    /// own box keeps what was typed).
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         if selector == #selector(NSResponder.cancelOperation(_:)) {
-            replyField?.stringValue = ""
-            showReply(false)
+            if inlineInput {
+                typingReply = false
+                pillPanel?.allowKey = false
+                giveFocusBack()
+            } else {
+                replyField?.stringValue = ""
+                showReply(false)
+            }
+            return true
+        }
+        if multilineInput && selector == #selector(NSResponder.insertNewline(_:)) {
+            textView.insertNewlineIgnoringFieldEditor(nil)
             return true
         }
         return false
@@ -220,14 +255,35 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             msg.textColor = NSColor(srgbRed: 215 / 255, green: 215 / 255, blue: 225 / 255, alpha: 1)
             msg.preferredMaxLayoutWidth = 500
             let msgH = ceil(msg.cell!.cellSize(forBounds: NSRect(x: 0, y: 0, width: 500, height: 10_000)).height)
-            height = 38 + msgH + 12 + 30 + 14
+
+            // The card (set by pause_for_user): CLAWD_BANNER_CHOICES = JSON array of strings -> one button each, printing
+            // BANNER_CHOICE <index>; CLAWD_BANNER_INPUT = JSON {placeholder, multiline} -> a text box (BANNER_REPLY).
+            // Neither set = the plain prompt. They sit above the usual Resume / End task row.
+            func envJSON(_ name: String) -> Any? {
+                guard let s = ProcessInfo.processInfo.environment[name], !s.isEmpty, let d = s.data(using: .utf8) else { return nil }
+                return try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed])
+            }
+            let choices: [String] = Array(((envJSON("CLAWD_BANNER_CHOICES") as? [Any]) ?? [])
+                .compactMap { $0 as? String }.filter { !$0.isEmpty }.prefix(6))
+            let inputCfg = envJSON("CLAWD_BANNER_INPUT") as? [String: Any]
+            let hasInput = inputCfg != nil
+            let multiline = (inputCfg?["multiline"] as? Bool) == true
+            let placeholder = (inputCfg?["placeholder"] as? String) ?? ""
+            inlineInput = hasInput
+            multilineInput = multiline
+            let boxH: CGFloat = multiline ? 66 : 26
+            let choicesH: CGFloat = choices.isEmpty ? 0 : CGFloat(choices.count) * 38 + 4
+            let inputH: CGFloat = hasInput ? (placeholder.isEmpty ? 0 : 20) + max(boxH, 30) + 2 + 26 : 0
+            // Offsets below are from the top of the pill; the row of Resume / End task starts at `rowTop`.
+            let rowTop: CGFloat = 38 + msgH + 12 + choicesH + inputH
+            height = rowTop + 30 + 14
 
             dot.frame = NSRect(x: 14, y: height - 34, width: 20, height: 22)
             title.frame = NSRect(x: 40, y: height - 31, width: 480, height: 18)
             msg.frame = NSRect(x: 40, y: height - 38 - msgH, width: 500, height: msgH)
 
-            func button(_ text: String, _ line: String, x: CGFloat, color: NSColor) -> FirstClickButton {
-                let b = FirstClickButton(frame: NSRect(x: x, y: 14, width: 110, height: 30))
+            func button(_ text: String, _ line: String, x: CGFloat, y: CGFloat = 14, width w: CGFloat = 110, color: NSColor) -> FirstClickButton {
+                let b = FirstClickButton(frame: NSRect(x: x, y: y, width: w, height: 30))
                 b.title = text
                 b.line = line
                 b.isBordered = false
@@ -241,32 +297,75 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 return b
             }
             let gray = NSColor(srgbRed: 60 / 255, green: 60 / 255, blue: 72 / 255, alpha: 1)
-            let resume = button("Resume", "BANNER_RESUME", x: width - 380, color: blue)
-            let other = button("Something else", "", x: width - 260, color: gray)
-            other.frame.size.width = 120
-            other.action = #selector(somethingElse(_:))
-            let end = button("End task", "BANNER_END", x: width - 130, color: gray)
-            choiceButtons = [resume, other, end]
+            let dim = NSColor(srgbRed: 150 / 255, green: 150 / 255, blue: 165 / 255, alpha: 1)
+            var cardViews: [NSView] = []
 
-            let field = NSTextField(frame: NSRect(x: 40, y: 16, width: width - 40 - 100, height: 26))
+            // One full-width button per option, top to bottom.
+            var cy = 38 + msgH + 12
+            for (i, text) in choices.enumerated() {
+                cardViews.append(button(text, "BANNER_CHOICE \(i)", x: 40, y: height - cy - 30, width: width - 54, color: blue))
+                cy += 38
+            }
+
+            // The text box: on the card from the start with `input` (a click into it takes the keyboard); otherwise
+            // it is "Something else" and stays hidden until that button is clicked.
+            var boxTop = rowTop + 2   // "Something else": over the Resume row
+            if hasInput {
+                var iy = 38 + msgH + 12 + choicesH
+                if !placeholder.isEmpty {
+                    let hint = label(placeholder, size: 12, color: dim)
+                    hint.lineBreakMode = .byTruncatingTail
+                    hint.frame = NSRect(x: 40, y: height - iy - 16, width: width - 54, height: 16)
+                    cardViews.append(hint)
+                    iy += 20
+                }
+                boxTop = iy
+                iy += max(boxH, 30) + 2
+                let warn = label("Don't type passwords here", size: 12, color: dim)
+                warn.frame = NSRect(x: 40, y: height - iy - 16, width: width - 54, height: 16)
+                cardViews.append(warn)
+            }
+
+            let resume = button("Resume", "BANNER_RESUME", x: hasInput ? width - 250 : width - 380, color: choices.isEmpty ? blue : gray)
+            var other: FirstClickButton? = nil
+            if !hasInput {
+                let o = button("Something else", "", x: width - 260, color: gray)
+                o.frame.size.width = 120
+                o.action = #selector(somethingElse(_:))
+                other = o
+            }
+            let end = button("End task", "BANNER_END", x: width - 130, color: gray)
+            if let other = other { choiceButtons = [resume, other, end] } else { choiceButtons = [resume, end] }
+
+            let boxHeight: CGFloat = hasInput ? boxH : 26
+            let field = ClickToTypeField(frame: NSRect(x: 40, y: height - boxTop - boxHeight, width: width - 40 - 100, height: boxHeight))
             field.font = NSFont.systemFont(ofSize: 13)
             field.textColor = .white
             field.backgroundColor = NSColor(srgbRed: 36 / 255, green: 36 / 255, blue: 48 / 255, alpha: 1)
             field.isBezeled = true
             field.bezelStyle = .squareBezel
-            field.placeholderString = "Tell the agent what to do instead"
+            if multiline {
+                field.cell?.usesSingleLineMode = false
+                field.cell?.wraps = true
+                field.cell?.isScrollable = false
+                field.lineBreakMode = .byWordWrapping
+            }
+            if !hasInput { field.placeholderString = "Tell the agent what to do instead" }
             field.target = self
             field.action = #selector(sendReply(_:))
             field.delegate = self
-            field.isHidden = true
+            field.isHidden = !hasInput
             replyField = field
-            let send = button("Send", "", x: width - 90, color: blue)
-            send.frame.size.width = 76
+            let send = button("Send", "", x: width - 90, y: hasInput ? height - boxTop - 30 : 14, width: 76, color: blue)
             send.action = #selector(sendReply(_:))
-            send.isHidden = true
+            send.isHidden = !hasInput
             sendButton = send
 
-            [dot, title, msg, resume, other, end, field, send].forEach { content.addSubview($0) }
+            var views: [NSView] = [dot, title, msg]
+            views += cardViews
+            views += [resume, end, field, send]
+            if let other = other { views.append(other) }
+            views.forEach { content.addSubview($0) }
         } else {
             let brand = label("ClawdCursor", size: 13, color: .white, bold: true)
             let sub = label("desktop control in progress  -  double-click to stop", size: 12,

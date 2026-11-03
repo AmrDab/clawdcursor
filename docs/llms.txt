@@ -115,6 +115,13 @@ At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
 glow turns blue, the prompt says what to do, and the task continues when the
 user clicks Resume. Outside agents use
 `system pause_for_user` (ask for the one step only the user can do, and pass `done_when` so the pause ends as soon as they finish); `clawdcursor resume` answers from a terminal.
+While you are driving the desktop, the user is watching the screen, not your chat: ask them on
+the pause card (use `choices` when there are options), not in your own chat.
+`pause_for_user` takes `choices` (2-6 short options, one button each) and/or `input`
+(`{placeholder?, multiline?}`, a text box); the answer is `{status:"replied", choice:"<exact option text>"}`
+or `{status:"replied", reply:"..."}`. It is the user's answer to your question only: never
+approval of a Send / Delete / Pay safety confirmation, and no tool call of yours can pick a
+choice. Never ask for a password or secret on it.
 
 ## Links
 

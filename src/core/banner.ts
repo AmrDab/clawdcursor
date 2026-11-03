@@ -20,7 +20,9 @@
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
  * roadblock, both overlays are respawned in their paused form — a BLUE glow and
  * a pill that says what to do, with Resume / End task. The pill prints
- * BANNER_RESUME / BANNER_END; showRunning() swaps back to the amber form.
+ * BANNER_RESUME / BANNER_END; showRunning() swaps back to the amber form. The card can add choice buttons
+ * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
+ * (CLAWD_BANNER_INPUT, JSON {placeholder?, multiline?}; sent as BANNER_REPLY like "Something else").
  *
  *   - pin()/unpin(): the autonomous task loop pins the banner for the whole
  *     task (agent.executeTask). A pinned banner ignores idle timers.
@@ -65,6 +67,15 @@ export function parseReplyLine(line: string): string | null {
   return text || null;
 }
 
+/**
+ * A choice button on the paused card: `BANNER_CHOICE <index>` (0-based, into the pause's `choices`). Only the index
+ * crosses the pipe; the gate looks the text up itself, so the pill can never put words in the user's mouth.
+ */
+export function parseChoiceLine(line: string): number | null {
+  const m = /^BANNER_CHOICE (\d{1,2})$/.exec(line);
+  return m ? Number(m[1]) : null;
+}
+
 const psArgs = (script: string, extra: string[] = []) =>
   ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script, ...extra];
 
@@ -85,6 +96,9 @@ export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): No
     CLAWD_BANNER_MODE: 'paused',
     CLAWD_BANNER_MESSAGE: `The agent says: ${mode.paused.message}`,
     CLAWD_PAUSE_SOUND: process.env.CLAWD_PAUSE_SOUND === '0' ? '0' : '1',
+    // The card: JSON, so any text survives (always set, so a stray variable in our own environment never shows).
+    CLAWD_BANNER_CHOICES: mode.paused.choices ? JSON.stringify(mode.paused.choices) : '',
+    CLAWD_BANNER_INPUT: mode.paused.input ? JSON.stringify(mode.paused.input) : '',
   } : {}),
 });
 
@@ -141,7 +155,7 @@ class ControlBanner {
   private glowEnabled = process.env.CLAWD_NO_GLOW !== '1';
   private onStopRequested: (() => void) | undefined;
   private paused: PauseInfo | null = null;
-  private onAnswer: ((a: PauseAnswer, reply?: string) => void) | undefined;
+  private onAnswer: ((a: PauseAnswer, reply?: string, choice?: number) => void) | undefined;
   private onRefocus: ((pid?: number) => void) | undefined;
   private spawner: Spawner = (mode) => {
     // stdin carries `HIDE <ms>` (dodge) to the pill; stdout carries its answers.
@@ -221,7 +235,7 @@ class ControlBanner {
    * Switch to the paused form (blue glow + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
-  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string) => void, onRefocus?: (pid?: number) => void): void {
+  showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string, choice?: number) => void, onRefocus?: (pid?: number) => void): void {
     if (!this.enabled) return;
     this.paused = info;
     this.onAnswer = onAnswer;
@@ -339,7 +353,9 @@ class ControlBanner {
           const refocus = /^BANNER_REFOCUS(?: (\d+))?$/.exec(msg);
           if (refocus) { this.onRefocus?.(refocus[1] ? Number(refocus[1]) : undefined); return; }
           const reply = parseReplyLine(msg);
+          const choice = parseChoiceLine(msg);
           if (reply) this.onAnswer?.('reply', reply);
+          else if (choice !== null) this.onAnswer?.('choice', undefined, choice);
           else if (ANSWER_LINES[msg]) this.onAnswer?.(ANSWER_LINES[msg]);
         } catch { /* never throw into the rl loop */ }
       });

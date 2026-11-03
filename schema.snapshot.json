@@ -1799,14 +1799,33 @@
     },
     {
       "name": "pause_for_user",
-      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a step your own rules won't let you take such as creating an account, downloading a private key or entering a secret, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping, turning the task down or asking them to come back to this chat. Ask for that ONE step only — e.g. \"Sign in to Glama\" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste (\"Paste your app-specific password into the Terminal, press Enter, then click Resume\"), naming where it goes: never into the prompt's own reply box, whose text reaches you; afterwards pass the saved key's file path or keychain profile name, never the secret. For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{\"type\":\"element_exists\",\"name\":\"Sign out\"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user's click counts there. Shows an on-screen prompt: blue glow, your message, Resume / End task. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
+      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a step your own rules won't let you take such as creating an account, downloading a private key or entering a secret, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping, turning the task down or asking them to come back to this chat. Ask for that ONE step only — e.g. \"Sign in to Glama\" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste (\"Paste your app-specific password into the Terminal, press Enter, then click Resume\"), naming where it goes: never into the prompt's own reply box, whose text reaches you; afterwards pass the saved key's file path or keychain profile name, never the secret. For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{\"type\":\"element_exists\",\"name\":\"Sign out\"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user's click counts there. Shows an on-screen prompt: blue glow, your message, Resume / End task. While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. To ask a question, put it in `message` and add `choices` (2-6 short options, each at most 40 characters: one button each) and/or `input` ({placeholder?, multiline?}: a text box). Use `choices` whenever the answer is one of a few options. {status:\"replied\", choice:\"<the exact option text>\"} → they picked that option; {status:\"replied\", reply:\"...\"} → they typed an answer. Only the user on screen can pick or type: no tool call of yours can. A choice or a reply answers your QUESTION only. It is never approval of a safety confirmation (Send / Delete / Pay and the like): the safety layer does not read it, so a confirm-tier action stays blocked whatever was picked. Never ask for a password or secret in `input` or `choices`: what they pick or type reaches you. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message (and the same `choices` / `input`) to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
         "properties": {
           "message": {
             "type": "string",
-            "description": "The one thing only the user can do, short, e.g. \"Sign in to GitHub\". Say \"then click Resume\" only when you pass no done_when."
+            "description": "The one thing only the user can do, short, e.g. \"Sign in to GitHub\", or the question to ask them. Say \"then click Resume\" only when you pass no done_when."
+          },
+          "choices": {
+            "type": "array",
+            "description": "Optional, for a question: 2-6 distinct short options (each at most 40 characters, one line), shown as buttons. The result is {status:\"replied\", choice:\"<exact text>\"}. Not with done_when. Do not use the words Resume, End task, Something else or Send as an option.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "input": {
+            "type": "object",
+            "description": "Optional, for a question: shows a text box on the prompt (\"Don't type passwords here\"). The result is {status:\"replied\", reply:\"...\"}. placeholder: a short hint above the box (at most 80 characters); multiline: true for a longer answer. Not with done_when.",
+            "properties": {
+              "placeholder": {
+                "type": "string"
+              },
+              "multiline": {
+                "type": "boolean"
+              }
+            }
           },
           "done_when": {
             "type": "array",
