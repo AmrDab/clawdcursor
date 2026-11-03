@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.26] - 2026-11-02
 
 ### Fixed
 - **macOS: `window focus` names secure input as the cause (#267).** While a
