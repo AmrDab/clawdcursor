@@ -181,7 +181,7 @@ const wellFormed = (s: string): string => s.replace(LONE_SURROGATE, '\uFFFD');
 const given = (s: string | undefined): string | undefined => (s !== undefined && s.trim() !== '' ? s : undefined);
 
 /** Actions that press or change something: aimed at a role alone they would act on whichever match ranks first. */
-const PRESSING_ACTIONS: ReadonlySet<InvokeAction> = new Set<InvokeAction>(['click', 'toggle', 'select', 'expand', 'collapse']);
+const PRESSING_ACTIONS: ReadonlySet<string> = new Set<InvokeAction>(['click', 'toggle', 'select', 'expand', 'collapse']);
 
 const toWindow = (raw: any): WindowInfo => ({
   title: raw.title ?? '',
@@ -506,7 +506,7 @@ export interface MacAx {
    */
   find(query: ElementQuery): Promise<UiElement[]>;
   /** Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws. */
-  invoke(query: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult>;
+  invoke(query: ElementQuery & { action: InvokeAction | 'scroll-to-visible'; value?: string; bounds?: { x: number; y: number; width: number; height: number } }): Promise<InvokeResult>;
   /**
    * Type `text` into whatever has the keyboard with Unicode key events, so any character arrives as itself (System Events'
    * `keystroke` types "a" for a character the keyboard layout has no key for, #242). False when the helper is not available;
@@ -859,7 +859,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       return Array.isArray(out) ? out.map((el: any) => toUiElement(el, undefined, q.processId)) : [];
     },
 
-    async invoke(q: ElementQuery & { action: InvokeAction; value?: string }): Promise<InvokeResult> {
+    async invoke(q: ElementQuery & { action: InvokeAction | 'scroll-to-visible'; value?: string; bounds?: { x: number; y: number; width: number; height: number } }): Promise<InvokeResult> {
       const what = 'accessibility invoke';
       const name = given(q.name);
       const automationId = given(q.automationId);
@@ -882,6 +882,8 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       const reply = await viaHelper(
         ['invoke', ...(q.processId ? ['--pid', String(q.processId)] : []),
           '--action', q.action,
+          // scroll-to-visible: where the element was last seen, to pick the nearest of several of the same name.
+          ...(q.bounds ? ['--bounds', [q.bounds.x, q.bounds.y, q.bounds.width, q.bounds.height].map(Math.round).join(',')] : []),
           ...(q.controlType ? ['--role', axRoleFor(q.controlType)] : []),
           '--timeout-ms', String(HELPER_FIND_DEADLINE_MS), ...text.args],
         HELPER_FIND_DEADLINE_MS + HELPER_GRACE_MS,
@@ -889,6 +891,10 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         { input: text.input, act: true },
       );
       if (reply) return toInvokeResult(reply);
+      // AXScrollToVisible exists only in the helper: invoke-element.jxa has no such action.
+      if (q.action === 'scroll-to-visible') {
+        return { success: false, error: `scrolling an element into view needs the accessibility helper, which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'}` };
+      }
       // No helper. invoke-element.jxa matches by name only: it has no AXIdentifier, and it cannot tell that a role is unique —
       // run without a name it writes into (or reads, or focuses) the FIRST element of that role.
       if (!name) {

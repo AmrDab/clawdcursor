@@ -800,6 +800,43 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
+  /** AT-SPI Component.scroll_to on the named element — see atspi-bridge.py `scroll-into-view`. */
+  async scrollIntoView(query: {
+    name?: string; processId?: number; windowHandle?: number | string;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }): Promise<{ success: boolean; method?: string; bounds?: { x: number; y: number; width: number; height: number }; name?: string; role?: string; error?: string }> {
+    if (!this.atspiAvailable) return { success: false, error: 'AT-SPI is not available' };
+    if (!query.name?.trim()) return { success: false, error: 'scrolling needs the element\'s name on this platform' };
+    try {
+      const args = ['--cmd', 'scroll-into-view', '--name', query.name];
+      // Where the element was last seen picks the nearest of several of the same name; the active window's origin puts
+      // window-relative extents in the same (screen) space.
+      if (query.bounds) args.push('--bounds', [query.bounds.x, query.bounds.y, query.bounds.width, query.bounds.height].map(Math.round).join(','));
+      const fg = await this.getActiveWindow().catch(() => null);
+      if (fg) {
+        // The window the element was seen in must still be the active one (the bridge searches the active window).
+        if (query.windowHandle !== undefined && fg.handle !== undefined && String(fg.handle) !== String(query.windowHandle)) {
+          return { success: false, error: 'the active window is no longer the one the element was seen in' };
+        }
+        args.push('--origin', `${Math.round(fg.bounds.x)},${Math.round(fg.bounds.y)}`);
+      }
+      args.push(...await this.a11yScopeArgs(query.processId));
+      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], { timeout: A11Y_TIMEOUT_MS });
+      const result = JSON.parse(stdout);
+      const b = result?.bounds;
+      return {
+        success: result?.success === true,
+        ...(typeof result?.method === 'string' ? { method: result.method } : {}),
+        ...(result?.success === true && typeof result?.name === 'string' ? { name: result.name } : {}),
+        ...(result?.success === true && typeof result?.role === 'string' ? { role: result.role } : {}),
+        ...(result?.success === true && b && typeof b.x === 'number' && !isIntMin(b.x) && b.width > 0 ? { bounds: b } : {}),
+        ...(typeof result?.error === 'string' ? { error: result.error } : {}),
+      };
+    } catch (err) {
+      return { success: false, error: (err as Error)?.message ?? 'the scroll call failed' };
+    }
+  }
+
   async waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null> {
     if (!this.atspiAvailable) return null;
     const interval = query.intervalMs ?? 250;

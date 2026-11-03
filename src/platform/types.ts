@@ -343,6 +343,31 @@ export interface PlatformAdapter {
   }>;
 
   /**
+   * Optional: scroll an element that is inside its window but outside the visible part of it (below the fold of a web
+   * page, past the end of a list) into view, using the platform's own call — UIA ScrollItemPattern.ScrollIntoView on
+   * Windows, AXScrollToVisible on macOS, Component.scroll_to on Linux. Sends no input and never changes the foreground
+   * window. The search is limited to the ACTIVE window (`windowHandle`, when known, must be it). `bounds` (screen space,
+   * as last seen) picks the nearest of several elements that share a name; with several and no `bounds`, or a tie, the
+   * platform REFUSES rather than pick one. On success `bounds` is where the element is NOW, and `name` / `role` are what
+   * was scrolled, so the caller can check it is the element it meant. Absent: the platform cannot scroll an element
+   * into view, and the caller says so instead of guessing.
+   */
+  scrollIntoView?(query: {
+    name?: string;
+    processId?: number;
+    windowHandle?: number | string;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }): Promise<{
+    success: boolean;
+    method?: string;
+    bounds?: { x: number; y: number; width: number; height: number };
+    /** The scrolled element's accessibility name and role, as the platform reports them. */
+    name?: string;
+    role?: string;
+    error?: string;
+  }>;
+
+  /**
    * Poll for an element to appear. Returns the first matching element or
    * null when `timeoutMs` elapses. Useful for waiting out transient UI
    * (dialogs, spinners). Tranche 1A primitive — lifted from

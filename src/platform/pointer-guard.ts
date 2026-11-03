@@ -63,7 +63,7 @@ const INPUT_METHODS = [
  * (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
  */
 const STOP_METHODS = [
-  'invokeElement', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
+  'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
   'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'fillFormByLabels', 'focus', 'selectOption', 'pressKey',
 ];
 

@@ -15,6 +15,31 @@ All notable changes to Clawd Cursor will be documented in this file.
   ... Close or leave the password field in <App>, then try again", with a
   `pause_for_user` next step. If the check cannot answer, the old message is
   kept. macOS only; no `open -b` fallback.
+- **A field below the fold is scrolled into view, not refused.** On a long web form,
+  `accessibility find_field` returned a field, then `set_value` / `invoke` on its
+  `{element_id, snapshot_id}` failed with "element is off the active window", and
+  `smart_type` with the field's label said "Could not find element". The ref check
+  took "outside the window's rectangle" to mean "in another window", but a page
+  element below the fold reports bounds past the window's edge. The element is
+  now scrolled into view with the platform's own call (Windows: UIA
+  `ScrollItemPattern.ScrollIntoView`, else `SetFocus`; macOS: `AXScrollToVisible`;
+  Linux: AT-SPI `Component.scroll_to`), its bounds are read again, and the act
+  lands where it is now. It is still refused when it belongs to another window of
+  the app, when the platform cannot scroll, or when the scroll leaves it out of
+  view, and the error says which ("could not be scrolled into view (...)",
+  "scrolled but still not visible"). Scrolling sends no input and does not change
+  the window the agent is bound to (the active window is read again afterwards and
+  the act is refused if its handle, title or bounds differ); a stopped session does
+  not scroll. The platform looks only in the active window and picks the element
+  nearest the last-seen bounds, refusing when several share the name; the result is
+  then checked to be the referenced element (name, role kind, size). A scroll moves
+  every other element in the snapshot, so the snapshot is invalidated and the next
+  ref must be compiled afresh. Window titles and element names in these errors are
+  wrapped as untrusted screen content.
+  `smart_type` with a target now also looks the field up in the compiled UI the
+  way `find_field` does (a field's label need not be its accessibility name) and
+  scrolls it in. Verified live on Windows 11 / Edge; the macOS and Linux calls are
+  unit-tested but still need a run on a real Mac and a real Linux desktop.
 
 ### Added
 - **The pause prompt is now a card: choices and a text box.** Agents asked their
