@@ -46,7 +46,7 @@
 **1.5.26** &mdash; **The agent asks you on screen, and the pill says what it is doing.**
 - The pause prompt is a card: the agent can offer 2-6 choices to click, or a text box, and gets your exact answer back. A choice is never a safety approval.
 - A redesigned pill: what the agent is doing right now ("Typing in Edge"), how long it has been running, and a Stop button.
-- A field below the fold is scrolled into view instead of refused (Windows, macOS, Linux).
+- A field below the fold is scrolled into view instead of refused (verified on Windows; the macOS and Linux calls are in but not yet run on a real desktop).
 - macOS: when a password field holds secure input, `window focus` names the app holding it instead of failing vaguely.
 
 **1.5.25** &mdash; **A stop really stops, and keys only go to the window the agent was working in.**
