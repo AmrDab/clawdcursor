@@ -493,6 +493,9 @@ export class WindowsAdapter implements PlatformAdapter {
     let hwnd: number | undefined;
 
     if (query) {
+      // The pid is written into the script below. A tool step (batch) can hand over any JSON, so anything but an integer is
+      // refused rather than written there (GHSA-9ppf-38v8-h97v).
+      if (query.processId !== undefined && !Number.isInteger(query.processId)) return false;
       // Prefer pid resolution when we can — cheaper than listWindows.
       pid = query.processId;
       if (pid === undefined) {
@@ -572,7 +575,8 @@ export class WindowsAdapter implements PlatformAdapter {
           '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();' +
           '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr hWnd, int nCmdShow);' +
           "' -PassThru | Out-Null;" +
-          '$title = $env:CLAWD_PS_TITLE;' +
+          // [string]: an empty env var reads as $null, which is -ne "".
+          '$title = [string]$env:CLAWD_PS_TITLE;' +
           `$h = ${target};` +
           '$el = $null;' +
           // Strategy A — find the top-level window by title via UIA. This is the
