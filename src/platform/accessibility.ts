@@ -14,6 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { promisify } from 'util';
 import { psRunner } from './ps-runner';
+import { setWindowsClipboard } from './ps-input';
 import { getPackageRoot } from '../paths';
 import { defaultMacAx } from './mac-ax';
 import { utf8ClipboardEnv } from './mac-keyboard';
@@ -620,15 +621,7 @@ export class AccessibilityBridge {
   async writeClipboard(text: string): Promise<void> {
     try {
       if (IS_WIN) {
-        // Use -EncodedCommand with Base64-encoded UTF-16LE to safely handle
-        // all characters (quotes, newlines, special chars) without escaping issues.
-        const utf16 = Buffer.from(
-          `Set-Clipboard -Value '${text.replace(/'/g, "''")}'`,
-          'utf16le',
-        );
-        await execFileAsync('powershell.exe', [
-          '-NoProfile', '-EncodedCommand', utf16.toString('base64'),
-        ], { timeout: 2000 });
+        await setWindowsClipboard(text, 2000);
       } else if (IS_MAC) {
         // macOS: pipe to pbcopy via shell
         await new Promise<void>((resolve, reject) => {
