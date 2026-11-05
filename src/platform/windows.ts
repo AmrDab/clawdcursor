@@ -27,6 +27,7 @@ import {
 } from '@nut-tree-fork/nut-js';
 
 import { psRunner } from './ps-runner';
+import { setWindowsClipboard } from './ps-input';
 import { normalizeKey } from './keys';
 import { sharpFromGrab } from './grab-image';
 import type {
@@ -492,6 +493,9 @@ export class WindowsAdapter implements PlatformAdapter {
     let hwnd: number | undefined;
 
     if (query) {
+      // The pid is written into the script below. A tool step (batch) can hand over any JSON, so anything but an integer is
+      // refused rather than written there (GHSA-9ppf-38v8-h97v).
+      if (query.processId !== undefined && !Number.isInteger(query.processId)) return false;
       // Prefer pid resolution when we can — cheaper than listWindows.
       pid = query.processId;
       if (pid === undefined) {
@@ -556,7 +560,6 @@ export class WindowsAdapter implements PlatformAdapter {
         const visualState = state === 'maximize' ? 'Maximized'
           : state === 'minimize' ? 'Minimized'
           : 'Normal';
-        const titleQ = this.psQuote(query?.title ?? '');
         const forceMin = state === 'minimize'
           ? ' [Win32.NativeMethods]::ShowWindowAsync($nwh, 11) | Out-Null;'
           : '';
@@ -572,7 +575,8 @@ export class WindowsAdapter implements PlatformAdapter {
           '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();' +
           '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr hWnd, int nCmdShow);' +
           "' -PassThru | Out-Null;" +
-          `$title = ${titleQ};` +
+          // [string]: an empty env var reads as $null, which is -ne "".
+          '$title = [string]$env:CLAWD_PS_TITLE;' +
           `$h = ${target};` +
           '$el = $null;' +
           // Strategy A — find the top-level window by title via UIA. This is the
@@ -596,7 +600,8 @@ export class WindowsAdapter implements PlatformAdapter {
           `    [Win32.NativeMethods]::ShowWindowAsync($nwh, ${showCmd}) | Out-Null;${forceMin}` +
           '    $ok = $true } }' +
           '  if ($ok) { "ok" } else { "no-window" } }';
-        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: PS_TIMEOUT_MS });
+        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps],
+          { timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } });
         return stdout.trim() === 'ok';
       }
 
@@ -1206,18 +1211,8 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async writeClipboard(text: string): Promise<void> {
-    // Pack the command as UTF-16LE base64 so arbitrary characters (quotes,
-    // newlines, non-ASCII) survive without any escaping dance.
-    const utf16 = Buffer.from(
-      `Set-Clipboard -Value '${text.replace(/'/g, "''")}'`,
-      'utf16le',
-    );
     try {
-      await execFileAsync(
-        'powershell.exe',
-        ['-NoProfile', '-EncodedCommand', utf16.toString('base64')],
-        { timeout: CLIPBOARD_TIMEOUT_MS },
-      );
+      await setWindowsClipboard(text, CLIPBOARD_TIMEOUT_MS);
     } catch {
       // Silent — clipboard is best-effort (same contract as macOS adapter).
     }
@@ -1319,23 +1314,23 @@ export class WindowsAdapter implements PlatformAdapter {
       return this.foregroundLaunched(await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore));
     }
 
-    // Route 2: classic Start-Process via PowerShell with safely quoted args.
-    const args = ['-NoProfile', '-Command'];
-    const cmdParts: string[] = ['Start-Process'];
-    cmdParts.push('-FilePath', this.psQuote(name));
+    // Route 2: classic Start-Process via PowerShell; the values arrive as $env:, never as script source (ps-input.ts).
+    const env: NodeJS.ProcessEnv = { ...process.env, CLAWD_PS_FILE: name };
+    const cmdParts: string[] = ['Start-Process', '-FilePath', '$env:CLAWD_PS_FILE'];
     // eslint-disable-next-line no-control-regex -- intentional: reject control chars that could escape PowerShell quoting
     if (opts?.url && !/[\r\n\t\x00-\x1f"'`$]/.test(opts.url)) {
-      cmdParts.push('-ArgumentList', this.psQuote(opts.url));
+      env.CLAWD_PS_ARGS = opts.url;
+      cmdParts.push('-ArgumentList', '$env:CLAWD_PS_ARGS');
     }
     // eslint-disable-next-line no-control-regex -- intentional: reject control chars that could escape PowerShell quoting
     if (opts?.cwd && !/[\r\n\t\x00-\x1f"'`$]/.test(opts.cwd)) {
-      cmdParts.push('-WorkingDirectory', this.psQuote(opts.cwd));
+      env.CLAWD_PS_CWD = opts.cwd;
+      cmdParts.push('-WorkingDirectory', '$env:CLAWD_PS_CWD');
     }
-    args.push(cmdParts.join(' '));
 
     try {
-      const child = spawn('powershell.exe', args, {
-        stdio: 'ignore', detached: true, windowsHide: true,
+      const child = spawn('powershell.exe', ['-NoProfile', '-Command', cmdParts.join(' ')], {
+        stdio: 'ignore', detached: true, windowsHide: true, env,
       });
       child.unref();
     } catch {
@@ -1518,16 +1513,6 @@ export class WindowsAdapter implements PlatformAdapter {
     // Skip minimized windows — if the user hid it, they probably want a
     // "fresh" focus, but we still return it so focusWindow can restore.
     return hit ?? null;
-  }
-
-  /**
-   * PowerShell single-quoted string escape. Inside single quotes, the only
-   * special char is the single quote itself, which doubles to escape.
-   * This is the only safe way to pass a user-controlled string as a
-   * PowerShell argument.
-   */
-  private psQuote(s: string): string {
-    return `'${s.replace(/'/g, "''")}'`;
   }
 
   // ─── INTERNAL HELPERS ─────────────────────────────────────────────

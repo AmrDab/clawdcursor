@@ -235,10 +235,11 @@ export function getElectronBridgeTools(): ToolDefinition[] {
           const flag = `--remote-debugging-port=${p}`;
           if (ctx.platform.platform === 'win32') {
             const { spawn } = await import('child_process');
+            // The name arrives as $env:, never as script source (platform/ps-input.ts).
             const child = spawn('powershell.exe', [
               '-NoProfile', '-Command',
-              `Start-Process -FilePath '${name.replace(/'/g, "''")}' -ArgumentList '${flag}'`,
-            ], { stdio: 'ignore', detached: true, windowsHide: true });
+              `Start-Process -FilePath $env:CLAWD_PS_FILE -ArgumentList '${flag}'`,
+            ], { stdio: 'ignore', detached: true, windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } });
             child.unref();
           } else {
             // macOS / Linux — open -a / direct spawn.

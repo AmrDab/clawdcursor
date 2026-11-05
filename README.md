@@ -43,6 +43,13 @@
 
 ## What's new
 
+**1.5.26** &mdash; **The agent asks you on screen, and the pill says what it is doing.**
+- Security (Windows, high): text the agent typed or copied could run as PowerShell code ([GHSA-9ppf-38v8-h97v](https://github.com/AmrDab/clawdcursor/security/advisories/GHSA-9ppf-38v8-h97v)). Fixed; upgrade.
+- The pause prompt is a card: the agent can offer 2-6 choices to click, or a text box, and gets your exact answer back. A choice is never a safety approval.
+- A redesigned pill: what the agent is doing right now ("Typing in Edge"), how long it has been running, and a Stop button.
+- A field below the fold is scrolled into view instead of refused (verified on Windows; the macOS and Linux calls are in but not yet run on a real desktop).
+- macOS: when a password field holds secure input, `window focus` names the app holding it instead of failing vaguely.
+
 **1.5.25** &mdash; **A stop really stops, and keys only go to the window the agent was working in.**
 - Double-click the pill and every clawdcursor process stops: a running wait ends at once, the rest of a batch never runs, and it stays stopped (even across restarts) until you click Resume.
 - Every key, paste and click first checks that the agent's window is still in front. If you switched apps, nothing is sent and the agent is told so.

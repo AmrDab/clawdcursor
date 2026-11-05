@@ -2,7 +2,20 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.5.26] - 2026-11-05
+
+### Security
+- **Windows: text could run as PowerShell code (GHSA-9ppf-38v8-h97v, high).**
+  Clipboard writes (`type_text`, `smart_type`, `copy_all_text` and the restore
+  of the user's clipboard), app launches, window-title lookups and
+  `relaunch_with_cdp` quoted values into PowerShell source, and the quoting
+  could be broken by other characters PowerShell treats as quotes, so text
+  from a document, a page or the clipboard could break out and run commands
+  with no confirmation. Values now reach PowerShell only as data: clipboard
+  text on stdin, names and titles as environment variables, and a window pid
+  only when it is an integer. Large clipboard writes, which failed on the
+  command-line length limit, work too. macOS and Linux were not affected.
+  Versions through 1.5.25 are affected. Reported by @Sauron-sol (CleanIssue).
 
 ### Fixed
 - **macOS: `window focus` names secure input as the cause (#267).** While a

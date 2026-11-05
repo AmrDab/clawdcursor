@@ -213,17 +213,14 @@ async function snapshotProcessWindows(processNameLower: string): Promise<Set<str
     // a11y bridge so we're not adding a new runtime.
     //
     // processNameLower flows in from registry / WindowsApps lookups (not
-    // LLM-controlled), but defense-in-depth: double single-quotes to
-    // escape any embedded apostrophe so it can't break out of the PS
-    // string literal. Same pattern as Windows.psQuote.
-    const safeName = processNameLower.replace(/'/g, "''");
+    // LLM-controlled); it still arrives as $env:, never as script source (ps-input.ts).
     const { stdout } = await execFileAsync(
       'powershell.exe',
       [
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
-        `Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.ProcessName.ToLower() -eq '${safeName}' } | ForEach-Object { "$($_.MainWindowHandle)|$($_.MainWindowTitle)" }`,
+        `Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.ProcessName.ToLower() -eq $env:CLAWD_PS_NAME } | ForEach-Object { "$($_.MainWindowHandle)|$($_.MainWindowTitle)" }`,
       ],
-      { timeout: 3000 },
+      { timeout: 3000, env: { ...process.env, CLAWD_PS_NAME: processNameLower } },
     );
     return new Set(
       stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean),
