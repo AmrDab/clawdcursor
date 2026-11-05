@@ -30,7 +30,7 @@ import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
@@ -68,6 +68,9 @@ function getAgentOcr(): OcrEngine {
  * phrases. Words like "looks", "shown", "displayed" are LEGITIMATE
  * concrete-observation language and stay allowed.
  */
+/** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
+const GET_VALUE_MAX = 20_000;
+
 const HEDGING_PATTERN = new RegExp(
   [
     // Modal verbs of uncertainty
@@ -180,10 +183,13 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const page = ordered.slice(offset, offset + limit);
         // One element per line: line breaks in a value are escaped. A cut value says so — an agent that took the first 40
         // characters of a document for all of it rewrote the document without its tail (perception eval 2026-11-05).
+        let cut = false;
         const shown = (v?: string) => {
           if (!v) return '';
           const head = JSON.stringify(v.slice(0, 40));
-          return v.length > 40 ? ` value=${head}… (+${v.length - 40} chars not shown — get_value, or copy_all_text for a document, reads all of it)` : ` value=${head}`;
+          if (v.length <= 40) return ` value=${head}`;
+          cut = true;
+          return ` value=${head}… (+${v.length - 40} chars not shown)`;
         };
         const lines = page.map(el => isOff(el)
           ? `[${el.controlType || 'Element'}] "${el.name || ''}"${shown(el.value)} (offscreen — scroll to see)`
@@ -191,7 +197,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         );
         const rest = ordered.length - (offset + page.length);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
-        const hint = tree.length < 5 || activeIsBrowser ? `\n${nextStep}` : '';
+        const hint = (tree.length < 5 || activeIsBrowser ? `\n${nextStep}` : '') +
+          (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
       },
@@ -572,8 +579,10 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         }
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'get-value' });
         if (!res.success) return { success: false, text: `"${name}" has no readable value.` };
-        const value = (res.data as any)?.value ?? '';
-        return { success: true, text: wrapUntrustedScreenContent(`"${name}" = "${truncate(String(value), 120)}"`) };
+        // The whole value: read_tree points here to read what it cut. Only a huge one is cut again, and says so.
+        const value = String((res.data as any)?.value ?? '');
+        const shownValue = value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
+        return { success: true, text: wrapUntrustedScreenContent(`"${name}" = "${shownValue}"`) };
       },
     },
 

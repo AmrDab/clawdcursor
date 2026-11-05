@@ -16,6 +16,15 @@ export const SPARSE_NEXT_STEP =
   'Electron/Chromium app? Restarting it with --force-renderer-accessibility exposes the whole page (required on Linux).';
 
 /** The same advice for clawdcursor's internal agent loop, in its own tool names. */
+/** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface). */
+export const CUT_VALUE_NEXT_STEP =
+  '→ A value ending in "chars not shown" is cut. Read it whole: copy_all_text for a document · ' +
+  'a11y_get_value name:"…" for a field (an unnamed editor: name:"" controlType:"Edit").';
+
+export const CUT_VALUE_NEXT_STEP_INTERNAL =
+  '→ A value ending in "chars not shown" is cut. Read it whole with a11y_get_value name:"…" ' +
+  '(an unnamed editor: name:"" controlType:"Edit").';
+
 export const SPARSE_NEXT_STEP_INTERNAL =
   '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
   'read_text (OCR) to read it · screenshot only if that is not enough.';
