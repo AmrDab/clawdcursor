@@ -1076,13 +1076,18 @@ export class LinuxAdapter implements PlatformAdapter {
   /**
    * Type through xdotool when it is installed. nut-js drops Shift on symbols under X11: "ada@example.com A!#" arrived as
    * "ada2example.com A13" (perception eval 2026-11-05, Xvfb + Mousepad/Chrome). The text goes on stdin (`--file -`), not
-   * argv, so other processes cannot read it. False when xdotool is missing or fails, so the caller falls back to nut-js.
+   * argv, so other processes cannot read it. False only when xdotool never started, so the caller falls back to nut-js;
+   * a failure after it started throws, because part of the text may already be typed and a retry would type it twice.
    */
   private async xdotoolType(text: string): Promise<boolean> {
     if (!(await this.hasBinary('xdotool'))) return false;
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
       const child = execFile('xdotool', ['type', '--delay', '12', '--file', '-'],
-        { timeout: 10_000 + text.length * 50 }, err => resolve(!err));
+        { timeout: 10_000 + text.length * 50 }, err => {
+          if (!err) resolve(true);
+          else if ((err as NodeJS.ErrnoException).code === 'ENOENT') resolve(false);
+          else reject(new Error(`xdotool type failed part-way: ${err.message}`));
+        });
       child.stdin?.on('error', () => { /* reported by the exit callback */ });
       child.stdin?.end(text);
     });

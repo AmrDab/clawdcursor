@@ -289,12 +289,29 @@ describe('L5 — unknown key names are rejected, portable names still map', () =
     expect(h.keyboard.type).not.toHaveBeenCalled();
   });
 
-  it('falls back to nut-js when xdotool is missing or fails', async () => {
+  it('falls back to nut-js only when xdotool never started', async () => {
     const base = defaultExec();
-    h.exec = (cmd, args) => { if (cmd === 'xdotool' && args[0] === 'type') throw new Error('no display'); return base(cmd, args); };
+    h.exec = (cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'type') throw Object.assign(new Error('spawn xdotool ENOENT'), { code: 'ENOENT' });
+      return base(cmd, args);
+    };
     const adapter = new LinuxAdapter();
     await adapter.typeText('abc');
     expect(h.keyboard.type).toHaveBeenCalledWith('abc');
+  });
+
+  it('a failure after xdotool started is reported, never retyped (part of the text may be in already)', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => { if (cmd === 'xdotool' && args[0] === 'type') throw new Error('killed: timeout'); return base(cmd, args); };
+    const adapter = new LinuxAdapter();
+    await expect(adapter.typeText('ada@example.com')).rejects.toThrow(/part-way/);
+    expect(h.keyboard.type).not.toHaveBeenCalled();
+  });
+
+  it('a literal "+" key is typed through xdotool', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.keyPress('+');
+    expect(h.calls.find(c => c.cmd === 'xdotool' && c.args[0] === 'type')?.stdin).toBe('+');
   });
 });
 
