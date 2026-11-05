@@ -178,9 +178,16 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const isOff = (el: typeof tree[number]) => el.offscreen === true || (el.bounds.width <= 0 && el.bounds.height <= 0);
         const ordered = [...tree.filter(el => !isOff(el)), ...tree.filter(isOff)];
         const page = ordered.slice(offset, offset + limit);
+        // One element per line: line breaks in a value are escaped. A cut value says so — an agent that took the first 40
+        // characters of a document for all of it rewrote the document without its tail (perception eval 2026-11-05).
+        const shown = (v?: string) => {
+          if (!v) return '';
+          const head = JSON.stringify(v.slice(0, 40));
+          return v.length > 40 ? ` value=${head}… (+${v.length - 40} chars not shown — get_value, or copy_all_text for a document, reads all of it)` : ` value=${head}`;
+        };
         const lines = page.map(el => isOff(el)
-          ? `[${el.controlType || 'Element'}] "${el.name || ''}"${el.value ? ` value="${el.value.slice(0, 40)}"` : ''} (offscreen — scroll to see)`
-          : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${el.value ? ` value="${el.value.slice(0, 40)}"` : ''}${el.focused ? ' [FOCUSED]' : ''}`,
+          ? `[${el.controlType || 'Element'}] "${el.name || ''}"${shown(el.value)} (offscreen — scroll to see)`
+          : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${shown(el.value)}${el.focused ? ' [FOCUSED]' : ''}`,
         );
         const rest = ordered.length - (offset + page.length);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
