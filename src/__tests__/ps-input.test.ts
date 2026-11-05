@@ -3,7 +3,7 @@
  * PowerShell ends a single-quoted string at ' and also at ‘ ’ ‚ ‛ (U+2018–U+201B), so doubling ' was not enough:
  * clipboard text holding ’;<code>;’ ran <code> when type_text pasted it, or when the user's clipboard was put back.
  */
-import { describe, it, expect, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -33,7 +33,8 @@ describe.runIf(process.platform === 'win32')('setWindowsClipboard (live)', () =>
   const readClipboard = () => Buffer.from(execFileSync('powershell.exe', ['-NoProfile', '-Command',
     '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))'],
   ).toString().trim(), 'base64').toString('utf8');
-  const before = readClipboard();
+  let before = '';
+  beforeAll(() => { before = readClipboard(); }); // not at collection: a skipped describe body still runs
   afterAll(async () => { await setWindowsClipboard(before, 5000).catch(() => {}); fs.rmSync(marker, { force: true }); });
 
   for (const q of QUOTES) {
