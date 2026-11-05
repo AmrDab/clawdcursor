@@ -53,6 +53,9 @@ function getAgentOcr(): OcrEngine {
   return _agentOcr;
 }
 
+/** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
+const GET_VALUE_MAX = 20_000;
+
 /**
  * Hedging-language phrases that indicate the agent is GUESSING about
  * the task outcome instead of observing the actual screen state. Used
@@ -68,9 +71,6 @@ function getAgentOcr(): OcrEngine {
  * phrases. Words like "looks", "shown", "displayed" are LEGITIMATE
  * concrete-observation language and stay allowed.
  */
-/** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
-const GET_VALUE_MAX = 20_000;
-
 const HEDGING_PATTERN = new RegExp(
   [
     // Modal verbs of uncertainty

@@ -15,16 +15,16 @@ export const SPARSE_NEXT_STEP =
   'ocr to read it · screenshot only if those fail. ' +
   'Electron/Chromium app? Restarting it with --force-renderer-accessibility exposes the whole page (required on Linux).';
 
-/** The same advice for clawdcursor's internal agent loop, in its own tool names. */
-/** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface). */
+/** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface).
+ *  A role-only get_value works on Linux but not on Windows, so an unnamed editor goes to copy_all_text. */
 export const CUT_VALUE_NEXT_STEP =
-  '→ A value ending in "chars not shown" is cut. Read it whole: copy_all_text for a document · ' +
-  'a11y_get_value name:"…" for a field (an unnamed editor: name:"" controlType:"Edit").';
+  '→ A value ending in "chars not shown" is cut. Read it whole: copy_all_text for a document or an unnamed editor · ' +
+  'a11y_get_value name:"…" for a named field.';
 
 export const CUT_VALUE_NEXT_STEP_INTERNAL =
-  '→ A value ending in "chars not shown" is cut. Read it whole with a11y_get_value name:"…" ' +
-  '(an unnamed editor: name:"" controlType:"Edit").';
+  '→ A value ending in "chars not shown" is cut. Read a named field whole with a11y_get_value name:"…".';
 
+/** The same advice for clawdcursor's internal agent loop, in its own tool names. */
 export const SPARSE_NEXT_STEP_INTERNAL =
   '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
   'read_text (OCR) to read it · screenshot only if that is not enough.';

@@ -42,8 +42,8 @@ describe('read_tree — long values', () => {
     for (const l of lines) expect(l).toContain(`… (+${NOTE.length - 40} chars not shown)`);
     const after = text.slice(text.indexOf('</untrusted-screen-content>'));
     expect(after.match(/chars not shown" is cut/g)).toHaveLength(1);
-    expect(after).toMatch(/copy_all_text/);
-    expect(after).toMatch(/a11y_get_value name:"…" for a field \(an unnamed editor: name:"" controlType:"Edit"\)/);
+    expect(after).toMatch(/copy_all_text for a document or an unnamed editor/);
+    expect(after).toMatch(/a11y_get_value name:"…" for a named field/);
   });
 
   it('keeps each element on one line: line breaks and quotes in a value are escaped', async () => {
