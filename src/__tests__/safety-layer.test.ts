@@ -128,7 +128,8 @@ describe('SafetyLayer.evaluate', () => {
   });
 
   describe('destructive target labels', () => {
-    it.each(['Send', 'Delete', 'Confirm delete', 'Confirm payment', 'Remove', 'Checkout', 'Pay', 'Publish', 'Log Out'])(
+    it.each(['Send', 'Delete', 'Confirm delete', 'Confirm deletion', 'Confirm removal', 'Confirm uninstallation',
+      'Confirm payment', 'Remove', 'Checkout', 'Pay', 'Publish', 'Log Out'])(
       'elevates click with target=%j to confirm',
       (label) => {
         const d = evaluate({ tool: 'mouse_click', args: {}, targetLabel: label });

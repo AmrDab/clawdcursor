@@ -162,11 +162,12 @@ export interface EvaluationContext {
  */
 const CONFIRM_LABEL_PATTERNS: RegExp[] = [
   /\bsend\b/i,             // email, message, wire transfer
-  /\bdelete\b/i,           // destructive
-  /\bremove\b/i,
+  // Noun and -ing forms too: without the bare "confirm" rule, "Confirm deletion" is held only by its verb.
+  /\bdelet(e|ion|ing)\b/i, // destructive
+  /\bremov(e|al|ing)\b/i,
   /\btrash\b/i,
-  /\berase\b/i,
-  /\buninstall\b/i,
+  /\beras(e|ure|ing)\b/i,
+  /\buninstall(ation|ing)?\b/i,
   /\bdrop\s+(database|table)/i,
   /\bshut\s*down\b/i,
   /\brestart\b/i,
