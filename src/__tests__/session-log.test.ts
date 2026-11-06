@@ -141,3 +141,45 @@ describe('session report', () => {
     expect(reportMarkdown(r)).toMatch(/errors: 1; refused by a guard: 1/);
   });
 });
+
+describe('how a server ended', () => {
+  const dayLog = () => {
+    const dir = process.env.CLAWDCURSOR_LOG_DIR!;
+    return fs.readdirSync(dir).filter(f => f.endsWith('.log')).map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('')
+      .split('\n').filter(Boolean).map(l => JSON.parse(l));
+  };
+
+  it('a clean exit names its reason and the call it cut off, in the session file and the day log', () => {
+    const s = new SessionLog({ version: 't', surface: 'compact' });
+    s.record('window', 'list', true, 12);
+    s.running('batch');
+    s.end('the host closed the connection (stdin ended)');
+    const lines = fs.readFileSync(s.file!, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    const end = lines[lines.length - 1];
+    expect(end).toMatchObject({ type: 'end', reason: 'the host closed the connection (stdin ended)', cutOff: { tool: 'batch' } });
+    expect(readSession(s.file!).calls).toHaveLength(1);  // the end line is not a call
+    const log = dayLog();
+    expect(log.some(r => r.msg === 'tool.done' && r.meta.tool === 'window' && r.meta.ms === 12 && r.meta.outcome === 'ok')).toBe(true);
+    expect(log.some(r => r.msg === 'mcp.exit' && r.level === 'warn' && r.meta.cutOff.tool === 'batch')).toBe(true);
+  });
+
+  it('a server that was killed is reported once, at the next start', async () => {
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const dir = process.env.CLAWDCURSOR_SESSION_DIR!;
+    const dead = 2147483000;  // no such process
+    const file = path.join(dir, `session-2026-01-01T00-00-00-000Z-${dead}.jsonl`);
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session', started: 'x', pid: dead }),
+      JSON.stringify({ t: '2026-01-01T00:00:01Z', tool: 'computer', action: 'type', cls: 'act-other', ok: true, ms: 5 }),
+    ].join('\n') + '\n');
+    // A file from before the header had a pid: its ending was never recorded, so it is not judged.
+    const old = path.join(dir, 'session-2025-01-01T00-00-00-000Z-1.jsonl');
+    fs.writeFileSync(old, JSON.stringify({ type: 'session', started: 'x' }) + '\n' + JSON.stringify({ t: 'y', tool: 'window' }) + '\n');
+    reportUncleanExits();
+    reportUncleanExits();
+    const exits = dayLog().filter(r => r.msg === 'mcp.exit' && r.meta.pid === dead);
+    expect(exits).toHaveLength(1);
+    expect(exits[0].meta).toMatchObject({ reason: expect.stringMatching(/killed or crashed/), lastFinishedCall: { tool: "computer", action: "type" } });
+    expect(fs.readFileSync(old, 'utf8')).not.toMatch(/"end"/);
+  });
+});
