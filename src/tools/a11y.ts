@@ -231,7 +231,7 @@ export function getA11yTools(): ToolDefinition[] {
               return { tree: [] as UiElement[], woke: false };
             });
           const partial = (ctx.platform.lastTreeTruncated
-            ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '')
+            ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '')
             + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
           const nextStep = tree.length < 5 || isBrowser ? await nextStepFor(ctx, active) : '';
           baseText = [
@@ -542,6 +542,13 @@ export function getA11yTools(): ToolDefinition[] {
             text: `${ctx.platform.lastFindNote ?? 'Not found in the readable part of the window.'} — it may be in the part that did not answer; this is not "nothing found". ` +
               'Read what did answer with read_tree (text that is only a value shows there even when find by name misses it), ' +
               'or smart_click name:"…" / ocr for text you can see.',
+            isError: true,
+          };
+        }
+        if (ctx.platform?.lastFindError === 'error') {
+          return {
+            text: 'accessibility search FAILED (the accessibility bridge did not answer — this is not "nothing found"). ' +
+              'Read it another way: copy_all_text for the exact page text · smart_click name:"…" (OCR fallback) · ocr.',
             isError: true,
           };
         }

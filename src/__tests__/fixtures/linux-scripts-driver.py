@@ -305,6 +305,20 @@ OUT['hidden_only_done'] = only_hidden.action.done
 # nameless rows dropped.
 OUT['tree'] = [(e['name'], e['controlType']) for e in bridge.cmd_get_tree(7777)['elements']]
 
+# Depth: a Chromium page nests its controls 15-30 levels deep; a walk that stops short must say it was cut.
+def chain(levels, leaf):
+    node = leaf
+    for i in range(levels):
+        node = Acc('', 'section', children=[node])
+    return node
+deep_out, deep_cut = [], [False]
+bridge.walk(chain(30, Acc('Deep button', 'push button')), deep_out, 1, deep_cut)
+OUT['deep_found'] = any(e['name'] == 'Deep button' for e in deep_out)
+OUT['deep_cut'] = deep_cut[0]
+too_deep_out, too_deep_cut = [], [False]
+bridge.walk(chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button')), too_deep_out, 1, too_deep_cut)
+OUT['too_deep_cut'] = too_deep_cut[0]
+
 # Focus: scoped to the app, active window first — never another app's widget.
 OUT['focused_editor'] = bridge.cmd_focused(7777)['element']
 name_field.states.discard(StateType.FOCUSED)  # focused by the 'focus' invoke above

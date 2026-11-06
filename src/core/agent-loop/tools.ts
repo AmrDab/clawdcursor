@@ -173,7 +173,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         }
         const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
         const activeIsBrowser = !!active && isBrowserProcess(active.processName);
-        const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '';
+        const partial = ctx.platform.lastTreeTruncated ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '';
         // Below-the-fold elements come back with empty (0×0) bounds: list them
         // AFTER the on-screen ones, marked, instead of interleaved at @0,0 where
         // they read as noise (live 2026-10-15: Settings → About's "Windows 11

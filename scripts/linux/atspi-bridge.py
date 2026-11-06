@@ -71,7 +71,8 @@ except Exception as exc:
 
 # ── Helpers ────────────────────────────────────────────────────────
 
-MAX_TREE_DEPTH = 12
+# Chromium/Electron pages sit 15-30 levels deep; the node cap bounds the cost.
+MAX_TREE_DEPTH = 40
 MAX_TREE_NODES = 800   # stop after this many elements to bound cost
 INTERACTIVE_ROLES = {
     # Roles whose state/value the agent is most likely to care about.
@@ -251,10 +252,12 @@ def element_bounds(acc: Any):
     return (0, 0, 0, 0), 'screen'
 
 
-def walk(acc: Any, out: list, depth: int = 0) -> None:
-    """Depth-first flatten with caps on depth + total node count."""
+def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> None:
+    """Depth-first flatten with caps on depth + total node count. `cut[0]` is set when the depth cap drops a subtree."""
     if acc is None: return
-    if depth > MAX_TREE_DEPTH: return
+    if depth > MAX_TREE_DEPTH:
+        if cut is not None: cut[0] = True
+        return
     if len(out) > MAX_TREE_NODES: return
 
     node = node_to_dict(acc)
@@ -270,7 +273,7 @@ def walk(acc: Any, out: list, depth: int = 0) -> None:
             child = acc.get_child_at_index(i)
         except Exception:
             continue
-        walk(child, out, depth + 1)
+        walk(child, out, depth + 1, cut)
         if len(out) > MAX_TREE_NODES: return
 
 
@@ -378,7 +381,7 @@ def focused_element(process_id: Optional[int] = None,
 
 
 def _find_focused(acc: Any, depth: int) -> Optional[Any]:
-    if acc is None or depth > 12: return None
+    if acc is None or depth > MAX_TREE_DEPTH: return None
     try:
         ss = acc.get_state_set()
         if ss is not None and ss.contains(Atspi.StateType.FOCUSED):
@@ -495,16 +498,17 @@ def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
                  exclude_pids: Optional[set] = None) -> dict:
     app = active_application(process_id, window_title, exclude_pids)
     out: list = []
+    cut = [False]
     if app is not None:
         root = node_to_dict(app)
         if root is not None:
             out.append(root)
         # The active window (a dialog over its main window) is walked first.
         for top in toplevels_active_first(app):
-            walk(top, out, 1)
+            walk(top, out, 1, cut)
             if len(out) > MAX_TREE_NODES:
                 break
-    truncated = len(out) > MAX_TREE_NODES
+    truncated = len(out) > MAX_TREE_NODES or cut[0]
     # Useful elements first: on-screen ones in document order, then the hidden
     # rest (closed menus and hidden toolbars report 0x0 and used to fill the
     # top of the list). Nameless, valueless rows carry nothing to act on —
