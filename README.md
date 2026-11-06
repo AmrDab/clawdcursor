@@ -312,12 +312,14 @@ See the [changelog](CHANGELOG.md) for the full release history, or the [latest r
 
 **Where the brain lives** decides how you run it. Both modes can run side-by-side.
 
+> **Deprecated in 1.5.27:** the built-in LLM loop (`task`, `submit_task`, `system delegate` and the `clawdcursor agent` model set up by `doctor`) will be removed in 1.6, and clawdcursor will no longer call a model itself. Drive the MCP tools from your own agent instead (Claude Code, Codex, Cursor, …). The daemon's HTTP MCP transport stays for remote use.
+
 | Brain lives… | Mode | Command | What you call |
 |---|---|---|---|
 | In your editor (Claude Code, Cursor, Windsurf, Zed) | Direct tools | `clawdcursor mcp` | Each tool, via stdio MCP |
 | In a headless agent with its own LLM (OpenClaw, Agent SDK, your loop) | Direct tools | `clawdcursor agent --no-llm` | Same, over HTTP MCP |
-| Inside Clawd Cursor itself (scheduled / "submit and walk away") | Thin agent loop | `clawdcursor agent` + `doctor`-configured LLM | `task` / `submit_task` |
-| External brain that delegates sub-tasks to the built-in loop | Direct + delegation | `clawdcursor agent` + your client | `task({instruction:…})` to hand off |
+| Inside Clawd Cursor itself (scheduled / "submit and walk away") &mdash; *deprecated, removed in 1.6* | Thin agent loop | `clawdcursor agent` + `doctor`-configured LLM | `task` / `submit_task` |
+| External brain that delegates sub-tasks to the built-in loop &mdash; *deprecated, removed in 1.6* | Direct + delegation | `clawdcursor agent` + your client | `task({instruction:…})` to hand off |
 
 ### The loop
 
@@ -362,7 +364,7 @@ flowchart TB
 
 **`batch` for deterministic stretches.** When the next N steps are known, collapse them into one call &mdash; each step still routes through the safety gate; on any guard miss or error the batch halts with a per-step trace.
 
-**Task delegation.** With an LLM configured on the daemon, an external agent can hand off at any point: `task({"instruction":"…"})`. The built-in loop takes the wheel and reports back &mdash; offload grunt work to a cheaper model without burning your own context.
+**Task delegation (deprecated, removed in 1.6).** With an LLM configured on the daemon, an external agent can hand off at any point: `task({"instruction":"…"})`. The built-in loop takes the wheel and reports back &mdash; offload grunt work to a cheaper model without burning your own context.
 
 ---
 
@@ -377,14 +379,13 @@ Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with a
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
 | `system` | `copy_all_text`, `ocr`, `clipboard_read`, `clipboard_write`, `shortcuts_list`, `shortcuts_run`, `undo`, `pause_for_user`, `report`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_webview`, `relaunch_with_cdp`, `delegate`, `system_time`, `system_prompt` |
 | `browser` | `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
-| `task` | `run` (default; **bounded-sync** &mdash; waits up to `timeout`s, returns `{status:"running"}` + progress if longer, re-call to keep waiting), `status`, `abort`, `resume` (continue a task paused for the user). Delegates to the built-in loop. Requires `clawdcursor agent` with an LLM. |
+| `task` | `run` (default; **bounded-sync** &mdash; waits up to `timeout`s, returns `{status:"running"}` + progress if longer, re-call to keep waiting), `status`, `abort`, `resume` (continue a task paused for the user). Delegates to the built-in loop. Requires `clawdcursor agent` with an LLM. Deprecated, removed in 1.6. |
 | `batch` | `{steps:[…]}` &mdash; collapse N calls into one round-trip; each step `{name, arguments, expect?}`, re-perceived and safety-gated, halts with a trace on any miss. |
 
 ```js
 computer({ action: "key", combo: "mod+s" })          // Cmd+S / Ctrl+S, resolved per-OS
 accessibility({ action: "invoke", name: "Send" })    // click by name, not pixels
 window({ action: "open_app", name: "Outlook" })
-task({ instruction: "open Notepad and type hello" }) // hand off to the thin loop
 ```
 
 ---

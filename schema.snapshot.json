@@ -580,7 +580,7 @@
     },
     {
       "name": "delegate_to_agent",
-      "description": "Hand a whole task to clawdcursor's built-in thin agent loop, which drives the toolbox with the model configured via `clawdcursor doctor` (perceive → act → iterate until done). For an expensive frontier model this is the delegation lever: hand grunt work to a cheaper configured model that takes the wheel. BOUNDED-SYNC: waits up to `timeout` seconds (default 45) for completion. A finished task returns its result directly; a longer task returns a {status:\"running\"} receipt with progress while the loop CONTINUES in the background — re-call with the SAME task text to keep waiting (re-attaches, never restarts), or poll agent_status / abort via abort_task. Requires `clawdcursor agent` running WITH a model configured; in tools-only / --no-llm mode there is no model to drive it.",
+      "description": "Deprecated (removed in 1.6): Hand a whole task to clawdcursor's built-in thin agent loop, which drives the toolbox with the model configured via `clawdcursor doctor` (perceive → act → iterate until done). For an expensive frontier model this is the delegation lever: hand grunt work to a cheaper configured model that takes the wheel. BOUNDED-SYNC: waits up to `timeout` seconds (default 45) for completion. A finished task returns its result directly; a longer task returns a {status:\"running\"} receipt with progress while the loop CONTINUES in the background — re-call with the SAME task text to keep waiting (re-attaches, never restarts), or poll agent_status / abort via abort_task. Requires `clawdcursor agent` running WITH a model configured; in tools-only / --no-llm mode there is no model to drive it.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -2326,7 +2326,7 @@
     },
     {
       "name": "submit_task",
-      "description": "Submit a natural-language task to the autonomous agent. The agent classifies, decomposes, and executes the task through the unified pipeline (a11y → text-agent → vision fallback). Returns immediately with `accepted: true`; poll agent_status to track progress. Runs locally on a cheap model — prefer this over driving the mouse_*/screenshot tools yourself to save tokens.",
+      "description": "Deprecated (removed in 1.6): Submit a natural-language task to the autonomous agent. The agent classifies, decomposes, and executes the task through the unified pipeline (a11y → text-agent → vision fallback). Returns immediately with `accepted: true`; poll agent_status to track progress. Runs locally on a cheap model — prefer this over driving the mouse_*/screenshot tools yourself to save tokens.",
       "category": "orchestration",
       "parameters": {
         "type": "object",

@@ -56,7 +56,7 @@ metadata:
 
 ---
 
-## The easiest path - one tool, natural-language task (START HERE)
+## Start here - compact mode and the compound tools
 
 > **If you are an LLM reading this: YOU SHOULD BE USING COMPACT MODE.**
 >
@@ -68,23 +68,7 @@ metadata:
 >
 > Granular mode's 100+ tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
 
-If you connect via MCP with `--compact`, you get a single tool that takes the
-whole task:
-
-```
-task({"instruction": "open Notepad and type hello"})
-task({"instruction": "send an email in Outlook to amy@x.com saying I'll be late"})
-task({"instruction": "find the file README.md in Downloads and open it"})
-```
-
-clawdcursor's built-in agent loop takes the wheel: it perceives the desktop, acts with the toolbox, and iterates until done, then returns a trace.
-
-**`task` vs. compound tools — pick one, never both:**
-
-- **Editor-host LLM** (Claude Code, Cursor, Windsurf, Zed, OpenClaw, Claude Agent SDK — anything with its own agent loop): **use compound tools directly.** Calling `task` creates a loop-inside-a-loop; the inner loop can't see your higher-level goal and you pay for two models to plan the same work.
-- **External script / one-shot client with no agent loop** — or a frontier model delegating grunt work: `task({"instruction": "..."})` is what you want. clawdcursor reasons AND acts using the model configured via `clawdcursor doctor`.
-
-**If unsure: you are almost certainly the first case. Use the compound tools.**
+**`task` is deprecated (removed in 1.6): drive the compound tools below yourself, from your own agent.**
 
 ---
 
@@ -99,7 +83,7 @@ accessibility(action, ...)  Read the a11y tree, click by name, set values, toggl
 window(action, ...)         Open apps / focus / maximize / minimize / close / resize
 system(action, ...)         Clipboard / time / OCR / undo / shortcuts / delegate
 browser(action, ...)        DevTools Protocol - DOM-level control of any CDP-capable browser (Chrome, Edge, Chromium, Brave)
-task({instruction})         See above - delegate a whole task to the built-in thin agent loop
+task({instruction})         Deprecated (removed in 1.6) - delegates to the built-in agent loop
 batch({steps})              Collapse N tool calls into one round-trip (see "Execution playbook" below)
 ```
 
@@ -185,7 +169,7 @@ clawdcursor exposes one protocol (**MCP**) over two transports. The daemon's beh
 |------|---------|-----------|-------|-----------------|
 | `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 100+ granular (default) or compact surface (`--compact`) |
 | `agent --no-llm` or `agent` with no LLM configured | `clawdcursor agent --no-llm [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 100+ granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
-| `agent` (LLM configured)    | `clawdcursor agent` | HTTP `/mcp` | Built-in thin agent loop | All of the above PLUS the autonomous task-handoff tool — named `task` on the compact surface, `submit_task` on granular — hand it a plain-English task |
+| `agent` (LLM configured) — deprecated, removed in 1.6 | `clawdcursor agent` | HTTP `/mcp` | Built-in thin agent loop | All of the above PLUS the autonomous task-handoff tool — named `task` on the compact surface, `submit_task` on granular — hand it a plain-English task |
 
 In `mcp` (stdio) and tools-only `agent` (HTTP): **you reason, clawdcursor acts.** There is no built-in LLM in the loop. You call tools, interpret results, decide next steps. In autonomous `agent` mode (LLM configured): clawdcursor's thin loop reasons AND acts — it perceives the desktop, selects tools, and iterates until done. Call `task` (compact) or `submit_task` (granular) with a natural-language instruction, then poll `agent_status`.
 
@@ -262,6 +246,8 @@ clawdcursor agent
 ```
 
 ### Autonomous-agent mode
+
+> **Deprecated (removed in 1.6).** Use the compound tools from your own agent instead; the HTTP `/mcp` transport stays.
 
 Configure an LLM via `clawdcursor doctor`, then use `submit_task` / `agent_status` / `abort_task` on the granular surface (or `task({...})` on the compact surface) to hand off a plain-English task. The built-in loop compiles the screen (a11y tree + OCR, with screenshot/vision only as last resort), acts on stable element ids, and iterates until done or the turn budget is exhausted. See the Modes table above.
 
@@ -387,11 +373,6 @@ accessibility({"action":"invoke","name":"Message"})
 computer({"action":"type","text":"Body of the email"})
 accessibility({"action":"invoke","name":"Send"})   // ← will pause for user confirm (🟡 Confirm tier)
 // verify: accessibility read_tree - is the sent-folder visible?
-```
-
-**Or just hand the whole thing off:**
-```
-task({"instruction": "open Outlook and send an email to recipient@x.com with subject Hi and body Body of the email"})
 ```
 
 ---

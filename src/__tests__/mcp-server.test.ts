@@ -29,6 +29,8 @@ vi.mock('sharp', () => ({
   })),
 }));
 
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createMcpServer } from '../surface/mcp-server';
 import { getAllTools, getCompactSurface, type ToolContext } from '../tools/registry';
 
@@ -65,5 +67,18 @@ describe('createMcpServer', () => {
     const ctx = fakeCtx();
     const { server } = await createMcpServer({ ctx });
     expect(typeof server.connect).toBe('function');
+  });
+
+  it('marks the built-in agent loop deprecated and stops steering stdio agents to it', async () => {
+    const { server, tools } = await createMcpServer({ compact: true, ctx: fakeCtx() });
+    expect(tools.find(t => t.name === 'task')?.description).toMatch(/^Deprecated \(removed in 1\.6\):/);
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    await (server as any).connect(a);
+    const client = new Client({ name: 'instructions-test', version: '0' });
+    await client.connect(b);
+    const instructions = client.getInstructions() ?? '';
+    await client.close();
+    expect(instructions).toContain('You drive the tools yourself');
+    expect(instructions).not.toContain('start the daemon');
   });
 });

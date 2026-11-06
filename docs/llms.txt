@@ -81,6 +81,8 @@ optional autonomous daemon.
 
 ## Use as an autonomous daemon (clawdcursor brings the model)
 
+Deprecated (removed in 1.6): use the compound tools below from your own agent; `clawdcursor agent` keeps serving HTTP MCP.
+
     clawdcursor doctor    # configure the built-in LLM (13 providers supported)
     clawdcursor agent     # HTTP + MCP daemon on 127.0.0.1:3847
 
@@ -94,7 +96,7 @@ optional autonomous daemon.
 - window — launch, focus, resize apps
 - system — clipboard, OCR, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
 - browser — Chrome DevTools Protocol for Electron / WebView2 apps
-- task — hand a whole task to the built-in autonomous loop
+- task — deprecated (removed in 1.6); drive the compounds above yourself
 - batch — run a guarded, safety-gated sequence of the above in one call
 
 100+ granular tools (one schema per verb) are available by omitting `--compact`
