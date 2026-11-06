@@ -128,7 +128,7 @@ describe('SafetyLayer.evaluate', () => {
   });
 
   describe('destructive target labels', () => {
-    it.each(['Send', 'Delete', 'Confirm', 'Remove', 'Checkout', 'Pay', 'Publish', 'Log Out'])(
+    it.each(['Send', 'Delete', 'Confirm delete', 'Confirm payment', 'Remove', 'Checkout', 'Pay', 'Publish', 'Log Out'])(
       'elevates click with target=%j to confirm',
       (label) => {
         const d = evaluate({ tool: 'mouse_click', args: {}, targetLabel: label });
@@ -139,6 +139,12 @@ describe('SafetyLayer.evaluate', () => {
 
     it('allows click on benign target', () => {
       expect(evaluate({ tool: 'mouse_click', args: {}, targetLabel: 'New' }).decision).toBe('allow');
+    });
+
+    // Audit 2026-11-05: the bare word blocked "Confirm archive" by name while the same button by coordinates went
+    // through. A confirm button is held by what it confirms (Confirm delete / Confirm payment above).
+    it.each(['Confirm', 'Confirm archive', 'Confirm email address'])('allows %j: the word "confirm" alone is not destructive', (label) => {
+      expect(evaluate({ tool: 'mouse_click', args: {}, targetLabel: label }).decision).toBe('allow');
     });
   });
 
