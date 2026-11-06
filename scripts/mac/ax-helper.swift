@@ -791,7 +791,8 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         if p.pending { return pressed(action, method: "AXPress", pending: true, extra: ["toggleState": "unknown"]) }
         Thread.sleep(forTimeInterval: 0.05)
         let after = str(copyAttr(el, "AXValue").value)
-        let state = after == nil ? "unknown" : (after == "0" ? "Off" : "On")
+        // AXValue 2 is a mixed checkbox: it was reported "On".
+        let state = after == "0" ? "Off" : after == "1" ? "On" : after == "2" ? "Indeterminate" : "unknown"
         return ["ok": true, "success": true, "action": action, "method": "AXPress", "data": ["toggleState": state]]
     case "select":
         if let row = selectableRowAbove(el) { return selectRow(row, action: action) }

@@ -72,7 +72,7 @@ class CoordType:
 
 class StateType:
     (FOCUSED, ENABLED, SENSITIVE, SELECTED, BUSY, VISIBLE, SHOWING,
-     CHECKED, PRESSED, EXPANDED, EXPANDABLE, EDITABLE, ACTIVE) = range(13)
+     CHECKED, PRESSED, EXPANDED, EXPANDABLE, EDITABLE, ACTIVE, CHECKABLE, INDETERMINATE) = range(15)
 
 
 class Cache:
@@ -277,6 +277,12 @@ OUT['seven'] = bridge.node_to_dict(seven)
 OUT['click'] = bridge.cmd_invoke('7', None, 4242, 'click', None)
 OUT['click_done'] = seven.action.done
 OUT['toggle'] = bridge.cmd_invoke('Agree', None, 4242, 'toggle', None)
+OUT['agree_after'] = bridge.node_to_dict(agree)
+# A push button is neither a tickbox nor an expander: refused, never pressed (the click fallback used to press it).
+seven_done_before = list(seven.action.done)
+OUT['toggle_button'] = bridge.cmd_invoke('7', None, 4242, 'toggle', None)
+OUT['expand_button'] = bridge.cmd_invoke('7', None, 4242, 'expand', None)
+OUT['button_pressed_again'] = seven.action.done != seven_done_before
 OUT['focus'] = bridge.cmd_invoke('Name', None, 4242, 'focus', None)
 OUT['focus_state'] = StateType.FOCUSED in name_field.states
 OUT['set_value'] = bridge.cmd_invoke('Name', None, 4242, 'set-value', 'Ada')
