@@ -101,23 +101,6 @@ import { e } from './format';
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
 
-/**
- * Graceful exit on a startup-time init failure (bad API key, no providers,
- * etc.). Synchronous `process.exit(N)` while async handles are mid-close
- * triggers libuv asserts on Windows ("Assertion failed: !(handle->flags &
- * UV_HANDLE_CLOSING), src\\win\\async.c:76") — so set the exit code, kick
- * off cleanup, and let the event loop drain. A 2-second hard-kill safety
- * net guarantees the process always exits even if a handle gets stuck.
- */
-function gracefulExitOnInitFailure(code: number, agent: { disconnect: () => unknown }): void {
-  process.exitCode = code;
-  releasePidFile('start');
-  try { agent.disconnect(); } catch { /* non-fatal */ }
-  // Hard-kill safety net: if the loop hangs, force-exit after 2s.
-  // .unref() so the timer itself doesn't keep the loop alive.
-  setTimeout(() => process.exit(code), 2000).unref();
-}
-
 const program = new Command();
 
 async function isClawdInstance(port: number): Promise<boolean> {
@@ -641,25 +624,16 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
             console.log(pc.gray(`   vision: ${visionModel}${visionState}   ← ${visionBase}`));
           } catch { /* non-fatal — boot continues either way */ }
         } catch (err: any) {
+          // A key or billing problem stops only the built-in agent: the MCP tools need no key, and the saved setup is
+          // kept (deleting it made a rotated key a full re-setup, and exiting took the MCP surface down with it).
           if (err.name === 'LLMAuthError') {
             console.error(`\n${e('❌', '[ERR]')} API key INVALID for ${pipelineConfig.provider.name} (${pipelineConfig.layer2.model})`);
-            console.error(`   The saved config has an expired or revoked key. Tools-only mode still works.\n`);
-            const staleConfig = path.join(getPackageRoot(), '.clawdcursor-config.json');
-            try { fs.unlinkSync(staleConfig); } catch { /* ok */ }
-            console.error(`   ${e('🗑️', '[DEL]')}  Removed stale config. Fix your key and restart:`);
-            console.error(`   1. Update your API key in .env or environment variables`);
-            console.error(`   2. Run: clawdcursor agent   (will re-detect providers)`);
-            console.error(`   Or run: clawdcursor doctor   to reconfigure manually\n`);
-            if (agent) gracefulExitOnInitFailure(1, agent);
-            else process.exit(1);
-            return;
+            console.error(`   The built-in agent cannot run until the key is fixed; the MCP tools keep working.`);
+            console.error(`   Update the key in .env or your environment, or run: clawdcursor doctor — then restart.\n`);
           } else if (err.name === 'LLMBillingError') {
             console.error(`\n${e('❌', '[ERR]')} API credits exhausted for ${pipelineConfig.provider.name}`);
-            console.error(`   Add credits or switch providers, then restart.`);
-            console.error(`   Run: clawdcursor doctor   to reconfigure\n`);
-            if (agent) gracefulExitOnInitFailure(1, agent);
-            else process.exit(1);
-            return;
+            console.error(`   The built-in agent cannot run until credits are added; the MCP tools keep working.`);
+            console.error(`   Add credits or switch providers (clawdcursor doctor), then restart.\n`);
           } else {
             console.warn(`${e('⚠️', '[WARN]')} Could not validate API key: ${err.message?.substring(0, 100)}`);
           }
