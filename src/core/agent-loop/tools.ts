@@ -43,6 +43,7 @@ import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
+import { unguarded } from '../../platform/pointer-guard';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -895,11 +896,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             await ctx.platform.keyPress('mod+v');
             // A slow app reads the clipboard late: restoring too early would paste the user's own clipboard.
             await waitForPaste(async () => (await ctx.platform.getFocusedElement())?.value, body, { minMs: 150 });
-            await ctx.platform.writeClipboard(prior).catch(() => {});
+            await unguarded(() => ctx.platform.writeClipboard(prior!)).catch(() => {});
             prior = null;
           } catch (err) {
             // The paste failed or was refused: what was meant to be typed must not stay on the user's clipboard.
-            if (prior !== null) await ctx.platform.writeClipboard(prior).catch(() => {});
+            if (prior !== null) await unguarded(() => ctx.platform.writeClipboard(prior!)).catch(() => {});
             // Typing it instead would show it to other processes here (it is why it was pasted): stop.
             if (!privateTyping) throw err;
             how = 'keys';

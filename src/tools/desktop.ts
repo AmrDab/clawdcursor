@@ -14,6 +14,7 @@ import { pickDisplay, displayNote } from '../platform/display-target';
 import { isBlockedKey } from './playbooks/keys-blocklist';
 import { waitForPaste, writeClipboardVerified } from './paste-guard';
 import { lastCaptureUnchecked } from '../platform/native-helper';
+import { unguarded } from '../platform/pointer-guard';
 
 const IS_MAC = os.platform() === 'darwin';
 
@@ -404,7 +405,7 @@ export function getDesktopTools(): ToolDefinition[] {
           // Also when the paste was refused (a system dialog owns the keyboard): what the user asked to type — a password,
           // say — must not be left on their clipboard.
           if (saved !== null) {
-            try { await ctx.a11y.writeClipboard(saved); } catch { /* best-effort */ }
+            try { await unguarded(() => ctx.a11y.writeClipboard(saved!)); } catch { /* best-effort */ }
           }
         }
 
