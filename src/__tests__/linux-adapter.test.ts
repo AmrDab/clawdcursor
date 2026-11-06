@@ -23,7 +23,7 @@ import { EventEmitter } from 'events';
 
 type ExecResult = { stdout: string; stderr?: string };
 const h = vi.hoisted(() => ({
-  calls: [] as Array<{ cmd: string; args: string[] }>,
+  calls: [] as Array<{ cmd: string; args: string[]; stdin?: string }>,
   exec: null as null | ((cmd: string, args: string[]) => ExecResult | Promise<ExecResult>),
   spawn: null as null | ((cmd: string, args: string[], opts: unknown) => unknown),
   proc: {} as Record<string, string | Error>,
@@ -39,7 +39,8 @@ const h = vi.hoisted(() => ({
 vi.mock('child_process', () => ({
   execFile: (cmd: string, args: string[], opts: unknown, cb?: (e: unknown, r?: unknown) => void) => {
     const done = (typeof opts === 'function' ? opts : cb) as (e: unknown, r?: unknown) => void;
-    h.calls.push({ cmd, args });
+    const call: { cmd: string; args: string[]; stdin?: string } = { cmd, args };
+    h.calls.push(call);
     try {
       Promise.resolve(h.exec!(cmd, args)).then(
         r => done(null, { stdout: r.stdout, stderr: r.stderr ?? '' }),
@@ -48,6 +49,8 @@ vi.mock('child_process', () => ({
     } catch (e) {
       done(e);
     }
+    // What the adapter writes to the child's stdin is recorded on the call.
+    return { stdin: { on: () => {}, end: (d?: string) => { call.stdin = d; } } };
   },
   spawn: (cmd: string, args: string[], opts: unknown) => h.spawn!(cmd, args, opts),
 }));
@@ -273,7 +276,42 @@ describe('L5 — unknown key names are rejected, portable names still map', () =
   it('a single printable character with no key mapping is typed', async () => {
     const adapter = new LinuxAdapter();
     await adapter.keyPress('*');
-    expect(h.keyboard.type).toHaveBeenCalledWith('*');
+    expect(h.calls.find(c => c.cmd === 'xdotool' && c.args[0] === 'type')?.stdin).toBe('*');
+  });
+
+  // nut-js dropped Shift on symbols under X11: "ada@example.com A!#" arrived as "ada2example.com A13" (eval 2026-11-05).
+  it('types through xdotool, with the text on stdin and never in argv', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.typeText('ada@example.com A!#');
+    const call = h.calls.find(c => c.cmd === 'xdotool' && c.args[0] === 'type')!;
+    expect(call.args).toEqual(['type', '--delay', '12', '--file', '-']);
+    expect(call.stdin).toBe('ada@example.com A!#');
+    expect(h.keyboard.type).not.toHaveBeenCalled();
+  });
+
+  it('falls back to nut-js only when xdotool never started', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => {
+      if (cmd === 'xdotool' && args[0] === 'type') throw Object.assign(new Error('spawn xdotool ENOENT'), { code: 'ENOENT' });
+      return base(cmd, args);
+    };
+    const adapter = new LinuxAdapter();
+    await adapter.typeText('abc');
+    expect(h.keyboard.type).toHaveBeenCalledWith('abc');
+  });
+
+  it('a failure after xdotool started is reported, never retyped (part of the text may be in already)', async () => {
+    const base = defaultExec();
+    h.exec = (cmd, args) => { if (cmd === 'xdotool' && args[0] === 'type') throw new Error('killed: timeout'); return base(cmd, args); };
+    const adapter = new LinuxAdapter();
+    await expect(adapter.typeText('ada@example.com')).rejects.toThrow(/part-way/);
+    expect(h.keyboard.type).not.toHaveBeenCalled();
+  });
+
+  it('a literal "+" key is typed through xdotool', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.keyPress('+');
+    expect(h.calls.find(c => c.cmd === 'xdotool' && c.args[0] === 'type')?.stdin).toBe('+');
   });
 });
 
