@@ -186,7 +186,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'A step your own rules won\'t let you take (creating an account, downloading a private key, entering a password, key or token) is a roadblock too, ' +
       'not a reason to turn the task down: hand over that step, as wide as your rules draw it, and do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there ' +
       'and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
-      'stop, quote the blocking text and ask_user / pause_for_user; never click Upgrade / Subscribe yourself. ' +
+      'stop, quote the blocking text and pause_for_user; never click Upgrade / Subscribe yourself. ' +
       'While you are driving the desktop, the user is watching the screen, not your chat: ask them on the pause card (use choices when there are options), not in your own chat — ' +
       'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. The answer {status:"replied", choice | reply} is never approval of a Send / Delete / Pay safety confirmation. A paused task returns ' +
       '{status:"paused"}: keep waiting, never restart it. ' +

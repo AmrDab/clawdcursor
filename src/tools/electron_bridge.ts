@@ -141,7 +141,7 @@ function buildHint(fp: WebViewFingerprint, cdpPort: number | null, title: string
     `${fp.displayName} ("${title}") is a ${fp.kind} app whose accessibility tree is largely empty — ` +
     `its UI is inside an embedded Chromium. To get a reliable DOM-level bridge, ask the user to relaunch it ` +
     `with \`${flag}\` (e.g. \`${fp.processNames[0]} ${flag}\`). Then call ` +
-    `\`browser({"action":"connect"})\` to attach. ` +
+    `\`browser({"action":"connect"})\` (or \`cdp_connect\` in granular mode) to attach. ` +
     `Until then, fall back to \`system({"action":"ocr"})\` + coord clicks, OR \`accessibility({"action":"invoke","name":"..."})\` against whatever names DO show up.`
   );
 }
@@ -153,7 +153,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
       description:
         'Enumerate running Electron / WebView2 / Chromium-shell apps (e.g. New Outlook, Teams, Discord, Slack, VS Code) whose ' +
         'accessibility trees are typically sparse because the UI is rendered inside a web view. Returns each candidate with a ' +
-        'CDP-discovery hint — if a remote-debugging port is already live, you can attach to it via `browser({"action":"connect"})`; ' +
+        'CDP-discovery hint — if a remote-debugging port is already live, you can attach to it via `cdp_connect`; ' +
         'otherwise the hint shows the relaunch command the user should run to enable CDP. Use this WHEN `read_screen` returns an ' +
         'unexpectedly empty tree on a "native" app.',
       parameters: {},
@@ -194,7 +194,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
         if (candidates.length === 0) {
           return {
             text: 'No known Electron / WebView2 apps detected in the current window list. ' +
-                  `${cdpPort !== null ? `A CDP endpoint IS live on port ${cdpPort} — call browser({"action":"connect"}) to attach.` : 'No CDP endpoint is currently live on the standard ports (9222/9223/9229/8315).'}`,
+                  `${cdpPort !== null ? `A CDP endpoint IS live on port ${cdpPort} — call cdp_connect to attach.` :'No CDP endpoint is currently live on the standard ports (9222/9223/9229/8315).'}`,
           };
         }
 

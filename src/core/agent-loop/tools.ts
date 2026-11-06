@@ -139,7 +139,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
     // ─── PERCEPTION ─────────────────────────────────────────────
     {
       name: 'read_screen',
-      description: 'START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. The snapshot is auto-attached each turn; call this again only when you expect the screen changed since the last turn. If the tree is empty, escalate to read_text (OCR) next, then screenshot only as a last resort.',
+      description: 'START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. If the tree is empty, escalate to read_text (OCR) next, then screenshot only as a last resort.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -588,7 +588,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     {
       name: 'verify',
-      description: 'Deterministically check CURRENT state against machine-checkable assertions — the harness executes them, no guessing. Types: window_title_contains{value}, app_running{name}, element_exists{name}, element_value_contains{name,value}, clipboard_contains{value}, file_exists{path}, file_contains{path,value}, ocr_contains{value}, file_changed_since_start{path} (proves a file was written during THIS task). Cheaper and more reliable than a screenshot — use after a critical step or before done().',
+      description: 'Deterministically check CURRENT state against machine-checkable assertions — the harness executes them, no guessing. Types: window_title_contains{value}, app_running{name}, element_exists{name}, element_value_contains{name,value}, clipboard_contains{value}, file_exists{path}, file_contains{path,value}, ocr_contains{value}, file_changed_since_start{path} (proves a file was written during THIS task). Cheaper and more reliable than a screenshot — use after a critical step.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -662,7 +662,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
     // ─── INPUT (mouse) ──────────────────────────────────────────
     {
       name: 'click',
-      description: 'Click at (x,y). The default coordinate space follows context (image-space while a screenshot is in your context, else screen-space) — pass `space` explicitly when mixing sources: space:"screen" for a11y/@x,y map coords, space:"image" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.',
+      description: 'Click at (x,y). Pass space:"screen" for a11y/@x,y map coords, space:"image" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -706,7 +706,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     {
       name: 'drag',
-      description: 'Drag the mouse from (startX,startY) to (endX,endY) — select text, draw, resize. To TRACE A CURVE/PATH (gesture, curved track, drawing), pass `path` = an array of 12–20 {x,y} points instead: press at the first point, move through each, release at the last. The default coordinate space follows context; if you read coords off the SCREENSHOT, pass space:"image" so the tool scales them.',
+      description: 'Drag the mouse from (startX,startY) to (endX,endY) — select text, draw, resize. To TRACE A CURVE/PATH (gesture, curved track, drawing), pass `path` = an array of 12–20 {x,y} points instead: press at the first point, move through each, release at the last. If you read coords off the SCREENSHOT, pass space:"image" so the tool scales them.',
       inputSchema: {
         type: 'object',
         properties: {

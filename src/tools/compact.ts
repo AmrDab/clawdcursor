@@ -1,29 +1,29 @@
 /**
- * Compact MCP surface — 6 compound tools covering every granular
+ * Compact MCP surface — compound tools covering every granular
  * primitive, Anthropic-Computer-Use-style.
  *
  * Why this exists:
- *   An agent driving clawdcursor via MCP otherwise sees 97 granular
- *   tool schemas (~18,000 tokens of tool catalog). Most models
+ *   An agent driving clawdcursor via MCP otherwise sees every granular
+ *   tool schema. Most models
  *   over-think the choice, pick near-duplicates, and burn context.
- *   This file collapses the granular tools into 6 action-discriminated
+ *   This file collapses the granular tools into action-discriminated
  *   compound tools — the same "1 tool with N sub-actions" shape that
  *   Anthropic uses for computer_20250124.
  *
- *   Net effect: the LLM sees ~1,500 tokens of tool catalog, picks a
+ *   Net effect: the LLM sees a much smaller tool catalog, picks a
  *   COMPOUND first (which primitive SPACE do I want?), then an
  *   ACTION (which specific operation?), then fills in the args.
  *   Decision trees shrink, accuracy rises.
  *
- * The 6 compounds cover EXACTLY the granular tool set — no new
+ * The compounds cover EXACTLY the granular tool set — no new
  * capability, no removed capability. Every compact action maps to
  * exactly one granular tool via the delegation table. The granular
  * surface stays available (same repo, same schemas); agents simply
  * pick which shape to consume.
  *
  * Selection:
- *   `clawdcursor mcp`             → 97 granular tools (back-compat)
- *   `clawdcursor mcp --compact`   → 6 compound tools (this file)
+ *   `clawdcursor mcp`             → granular tools (back-compat)
+ *   `clawdcursor mcp --compact`   → compound tools (this file)
  *   GET /tools?mode=compact      → REST gets the same compact schemas
  *
  * Extending:

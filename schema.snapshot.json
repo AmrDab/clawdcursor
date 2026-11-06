@@ -658,7 +658,7 @@
     },
     {
       "name": "detect_webview_apps",
-      "description": "Enumerate running Electron / WebView2 / Chromium-shell apps (e.g. New Outlook, Teams, Discord, Slack, VS Code) whose accessibility trees are typically sparse because the UI is rendered inside a web view. Returns each candidate with a CDP-discovery hint — if a remote-debugging port is already live, you can attach to it via `browser({\"action\":\"connect\"})`; otherwise the hint shows the relaunch command the user should run to enable CDP. Use this WHEN `read_screen` returns an unexpectedly empty tree on a \"native\" app.",
+      "description": "Enumerate running Electron / WebView2 / Chromium-shell apps (e.g. New Outlook, Teams, Discord, Slack, VS Code) whose accessibility trees are typically sparse because the UI is rendered inside a web view. Returns each candidate with a CDP-discovery hint — if a remote-debugging port is already live, you can attach to it via `cdp_connect`; otherwise the hint shows the relaunch command the user should run to enable CDP. Use this WHEN `read_screen` returns an unexpectedly empty tree on a \"native\" app.",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -1195,7 +1195,7 @@
     },
     {
       "name": "mouse_click",
-      "description": "Click at (x,y). The default coordinate space follows context (image-space while a screenshot is in your context, else screen-space) — pass `space` explicitly when mixing sources: space:\"screen\" for a11y/@x,y map coords, space:\"image\" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.",
+      "description": "Click at (x,y). Pass space:\"screen\" for a11y/@x,y map coords, space:\"image\" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.",
       "category": "mouse",
       "parameters": {
         "type": "object",
@@ -1315,7 +1315,7 @@
     },
     {
       "name": "mouse_drag",
-      "description": "Drag the mouse from (startX,startY) to (endX,endY) — select text, draw, resize. To TRACE A CURVE/PATH (gesture, curved track, drawing), pass `path` = an array of 12–20 {x,y} points instead: press at the first point, move through each, release at the last. The default coordinate space follows context; if you read coords off the SCREENSHOT, pass space:\"image\" so the tool scales them.",
+      "description": "Drag the mouse from (startX,startY) to (endX,endY) — select text, draw, resize. To TRACE A CURVE/PATH (gesture, curved track, drawing), pass `path` = an array of 12–20 {x,y} points instead: press at the first point, move through each, release at the last. If you read coords off the SCREENSHOT, pass space:\"image\" so the tool scales them.",
       "category": "mouse",
       "parameters": {
         "type": "object",
@@ -1763,7 +1763,7 @@
     },
     {
       "name": "open_uri",
-      "description": "Open ANY registered URI (mailto:, tel:, sms:, webcal:, file:, slack:, vscode:, obsidian:, spotify:, zoommtg:, https:, custom-scheme:, ...) via the OS protocol-handler registry. The OS routes to whichever app the user has registered as the handler. Replaces dozens of app-specific shortcuts with one general primitive. For mailto:, use the convenience helper compose_uri_mailto, or pass a full pre-built URI. Tier 2 (mutation): the OS will dispatch to whatever app is registered for the scheme — that handler may be privileged or destructive (file: opens files which on Windows can execute .exe; vscode: opens a workspace; zoommtg: joins a call). The dispatcher does no scheme allowlist — callers + the agent loop are responsible for not constructing dangerous URIs.",
+      "description": "Open ANY registered URI (mailto:, tel:, sms:, webcal:, file:, slack:, vscode:, obsidian:, spotify:, zoommtg:, https:, custom-scheme:, ...) via the OS protocol-handler registry. The OS routes to whichever app the user has registered as the handler. Replaces dozens of app-specific shortcuts with one general primitive. Tier 2 (mutation): the OS will dispatch to whatever app is registered for the scheme — that handler may be privileged or destructive (file: opens files which on Windows can execute .exe; vscode: opens a workspace; zoommtg: joins a call). The dispatcher does no scheme allowlist — callers + the agent loop are responsible for not constructing dangerous URIs.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -1865,7 +1865,7 @@
     },
     {
       "name": "read_screen",
-      "description": "START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. The snapshot is auto-attached each turn; call this again only when you expect the screen changed since the last turn. If the tree is empty, escalate to ocr_read_screen (OCR) next, then screenshot only as a last resort.",
+      "description": "START HERE — cheapest perception. Read the accessibility tree of the focused window: buttons, inputs, text elements with coordinates. If the tree is empty, escalate to ocr_read_screen (OCR) next, then screenshot only as a last resort.",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -2443,7 +2443,7 @@
     },
     {
       "name": "verify",
-      "description": "Deterministically check CURRENT state against machine-checkable assertions — the harness executes them, no guessing. Types: window_title_contains{value}, app_running{name}, element_exists{name}, element_value_contains{name,value}, clipboard_contains{value}, file_exists{path}, file_contains{path,value}, ocr_contains{value}, file_changed_since_start{path} (proves a file was written during THIS task). Cheaper and more reliable than a screenshot — use after a critical step or before done().",
+      "description": "Deterministically check CURRENT state against machine-checkable assertions — the harness executes them, no guessing. Types: window_title_contains{value}, app_running{name}, element_exists{name}, element_value_contains{name,value}, clipboard_contains{value}, file_exists{path}, file_contains{path,value}, ocr_contains{value}, file_changed_since_start{path} (proves a file was written during THIS task). Cheaper and more reliable than a screenshot — use after a critical step.",
       "category": "perception",
       "parameters": {
         "type": "object",
