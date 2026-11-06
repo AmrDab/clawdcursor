@@ -108,6 +108,10 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.too_deep_cut).toBe(true);
   });
 
+  it('find stops after MAX_TREE_NODES nodes visited, matching or not (a deep page must not cost thousands of calls)', () => {
+    expect(out.wide_capped).toBe(true);
+  });
+
   it('invoke toggle reports the new state', () => {
     expect(out.toggle).toMatchObject({ success: true, toggleState: 'On' });
   });

@@ -318,6 +318,9 @@ OUT['deep_cut'] = deep_cut[0]
 too_deep_out, too_deep_cut = [], [False]
 bridge.walk(chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button')), too_deep_out, 1, too_deep_cut)
 OUT['too_deep_cut'] = too_deep_cut[0]
+# find_target counts nodes visited, not matches: a name that matches nothing stops after MAX_TREE_NODES nodes.
+wide = Acc('page', 'document web', children=[Acc('row %d' % i, 'section') for i in range(bridge.MAX_TREE_NODES * 2)] + [Acc('Needle', 'push button')])
+OUT['wide_capped'] = bridge.find_target(Acc('app', 'application', children=[wide]), 'Needle', None)[0] is None
 
 # Focus: scoped to the app, active window first — never another app's widget.
 OUT['focused_editor'] = bridge.cmd_focused(7777)['element']

@@ -545,13 +545,6 @@ export function getA11yTools(): ToolDefinition[] {
             isError: true,
           };
         }
-        if (ctx.platform?.lastFindError === 'error') {
-          return {
-            text: 'accessibility search FAILED (the accessibility bridge did not answer — this is not "nothing found"). ' +
-              'Read it another way: copy_all_text for the exact page text · smart_click name:"…" (OCR fallback) · ocr.',
-            isError: true,
-          };
-        }
         if (ctx.platform?.lastFindError === 'timeout') {
           return {
             text: 'accessibility search TIMED OUT on a very large window (this is not "nothing found"). ' +
@@ -570,6 +563,14 @@ export function getA11yTools(): ToolDefinition[] {
           const lines = ['(no UIA matches — falling back to CDP DOM; coords are viewport-relative)'];
           lines.push(...cdpHits.map(formatElement));
           return { text: lines.join('\n') };
+        }
+        // A bridge that failed is not "nothing found" — said only after the browser DOM fallback also found nothing.
+        if (ctx.platform?.lastFindError === 'error') {
+          return {
+            text: 'accessibility search FAILED (the accessibility bridge did not answer — this is not "nothing found"). ' +
+              'Read it another way: copy_all_text for the exact page text · smart_click name:"…" (OCR fallback) · ocr.',
+            isError: true,
+          };
         }
         // Say which window(s) were searched — an unscoped query follows the
         // live foreground window, which may not be the app the agent meant.

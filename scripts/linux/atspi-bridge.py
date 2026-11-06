@@ -374,14 +374,16 @@ def focused_element(process_id: Optional[int] = None,
             apps = [active] + [a for a in apps if a is not active]
     for app in apps:
         for top in toplevels_active_first(app):
-            hit = _find_focused(top, 1)
+            hit = _find_focused(top, 1, [0])
             if hit is not None:
                 return node_to_dict(hit)
     return None
 
 
-def _find_focused(acc: Any, depth: int) -> Optional[Any]:
-    if acc is None or depth > MAX_TREE_DEPTH: return None
+def _find_focused(acc: Any, depth: int, seen: list) -> Optional[Any]:
+    """`seen[0]` counts nodes visited in this window, so a deep page cannot turn one focus read into thousands of calls."""
+    if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES: return None
+    seen[0] += 1
     try:
         ss = acc.get_state_set()
         if ss is not None and ss.contains(Atspi.StateType.FOCUSED):
@@ -393,7 +395,7 @@ def _find_focused(acc: Any, depth: int) -> Optional[Any]:
     except Exception:
         return None
     for i in range(n):
-        hit = _find_focused(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
+        hit = _find_focused(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1, seen)
         if hit is not None:
             return hit
     return None
@@ -460,7 +462,7 @@ def cmd_page_text(process_id: Optional[int], window_title: Optional[str] = None,
     if not tops:
         return {"error": "the active application has no window"}
     top = tops[0]
-    focused = _find_focused(top, 1)
+    focused = _find_focused(top, 1, [0])
     # The document holding the focus. A text box on a web page is part of the page: the page is what is read.
     doc, a, hops = None, focused, 0
     while a is not None and hops < 60:
@@ -589,11 +591,13 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
     roles = role_alternatives(role)
     exact: list = []
     partial: list = []
+    seen = [0]  # nodes visited, not matches: a name that matches nothing must not walk a whole web page
 
     def visit(acc: Any, depth: int) -> bool:
         """True once the best possible hit (exact + showing) is found."""
-        if acc is None or depth > MAX_TREE_DEPTH or len(partial) > MAX_TREE_NODES:
+        if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES:
             return False
+        seen[0] += 1
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
         r = (safe(lambda: acc.get_role_name(), '') or '').lower()
         if (roles is None or role_matches(roles, r)) and name_l is not None:
