@@ -495,7 +495,7 @@ export interface GetToolsOptions {
   /**
    * Which surface to return.
    *   'granular' — the full set of granular primitives (default)
-   *   'compact'  — the 6 compound tools (same as getCompactSurface())
+   *   'compact'  — the compound tools (same as getCompactSurface())
    */
   palette?: 'granular' | 'compact';
   /**
@@ -591,8 +591,8 @@ export function getAllTools(): ToolDefinition[] {
 }
 
 /**
- * Get the COMPACT surface — 6 compound tools covering every granular
- * primitive. Equivalent semantics; ~1/12th the catalog tokens. Use via
+ * Get the COMPACT surface — compound tools covering every granular
+ * primitive. Equivalent semantics; far fewer catalog tokens. Use via
  * `clawdcursor mcp --compact` or `GET /tools?mode=compact`.
  * Back-compat wrapper around getTools({ palette: 'compact' }).
  */
