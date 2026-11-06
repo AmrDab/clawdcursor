@@ -70,3 +70,30 @@ describe('PSRunner — a timed-out command never has its late reply routed to th
     await expect(p2).resolves.toEqual({ ok: true, for: 'next' });
   });
 });
+
+// Audit 2026-11-05: every reply with an `error` key was rejected, so a command that ran and failed — an invoke miss
+// that carries the element's bounds for a click fallback, a focus refusal with its reason — reached the caller as a
+// bare throw, and the agent saw "not found or not actionable".
+describe('PSRunner — a command failure is an answer, not a crash', () => {
+  beforeEach(() => {
+    procs.length = 0;
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('resolves {success:false, error, ...} with its data, and rejects a bridge-level {error}', async () => {
+    const runner = new PSRunner();
+    const miss = runner.run({ cmd: 'invoke-element' });
+    await flush();
+    procs[0].reply({ ready: true });
+    await flush();
+    procs[0].reply({ success: false, error: 'No invoke/toggle/select pattern', bounds: { x: 1, y: 2, width: 3, height: 4 } });
+    await expect(miss).resolves.toMatchObject({ success: false, error: 'No invoke/toggle/select pattern', bounds: { x: 1 } });
+
+    const broken = runner.run({ cmd: 'nope' });
+    await flush();
+    procs[0].reply({ error: 'Unknown command: nope' });
+    await expect(broken).rejects.toThrow('Unknown command: nope');
+  });
+});
