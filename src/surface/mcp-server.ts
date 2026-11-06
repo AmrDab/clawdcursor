@@ -146,11 +146,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // (HTTP) context has a live agent, so only it can offer `task`.
   const instructions = ctx.agent
     ? // Daemon / HTTP MCP — the cheap local pipeline is available.
-      'clawdcursor is a local desktop-automation execution layer. PREFER the ' +
-      '`task` tool: it runs the full perceive→act→verify loop locally on a ' +
-      'cheap model, so you spend almost no tokens driving the GUI yourself. ' +
-      'Fall back to the granular tools only when you need fine-grained control. ' +
-      '`task` is deprecated and will be removed in 1.6: drive the tools from your own agent instead. ' +
+      'clawdcursor is a local desktop-automation execution layer. Drive its tools yourself. ' +
+      '`task` (a local model loop) is deprecated and will be removed in 1.6. ' +
       'Every tool name carries a token-cost class — escalate in order: ' +
       '[act] (side-effect actions) < [inspect] (cheap structured reads) < ' +
       '[perceive-text] (a11y tree / OCR — no image bytes) < [perceive-image] (screenshot). ' +
