@@ -231,7 +231,7 @@ export function getA11yTools(): ToolDefinition[] {
               return { tree: [] as UiElement[], woke: false };
             });
           const partial = (ctx.platform.lastTreeTruncated
-            ? ' — PARTIAL (the walk hit its time budget on a very large window)' : '')
+            ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '')
             + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
           const nextStep = tree.length < 5 || isBrowser ? await nextStepFor(ctx, active) : '';
           baseText = [
@@ -563,6 +563,14 @@ export function getA11yTools(): ToolDefinition[] {
           const lines = ['(no UIA matches — falling back to CDP DOM; coords are viewport-relative)'];
           lines.push(...cdpHits.map(formatElement));
           return { text: lines.join('\n') };
+        }
+        // A bridge that failed is not "nothing found" — said only after the browser DOM fallback also found nothing.
+        if (ctx.platform?.lastFindError === 'error') {
+          return {
+            text: 'accessibility search FAILED (the accessibility bridge did not answer — this is not "nothing found"). ' +
+              'Read it another way: copy_all_text for the exact page text · smart_click name:"…" (OCR fallback) · ocr.',
+            isError: true,
+          };
         }
         // Say which window(s) were searched — an unscoped query follows the
         // live foreground window, which may not be the app the agent meant.
