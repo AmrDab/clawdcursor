@@ -36,7 +36,7 @@ export const TOKEN_PATH = path.join(DATA_DIR, 'token');
  * Why: pre-v0.9 every source file lived directly under `src/` so compiled
  * output landed at `dist/<file>.js` and `__dirname/..` always pointed at the
  * package root. After v0.9 PR10's directory restructure, files now live at
- * `dist/<core|tools|platform|llm|surface>/<file>.js`, so `__dirname/..` is
+ * `dist/<core|tools|platform|surface>/<file>.js`, so `__dirname/..` is
  * one level too shallow. This helper walks up until it finds package.json
  * regardless of how deeply nested the calling file is — so any future moves
  * don't break path resolution again.

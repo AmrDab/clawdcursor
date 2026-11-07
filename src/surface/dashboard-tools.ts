@@ -1,7 +1,7 @@
 /**
  * Map a dashboard call (named by its granular tool) onto the tools the daemon
  * actually serves. A `--compact` daemon serves only the compound surface, so
- * tools with no compact equivalent (favorites, logs) are unavailable → null.
+ * tools with no compact equivalent (logs) are unavailable → null.
  *
  * Self-contained on purpose: its source is embedded in the dashboard page
  * (`dashboardToolCall.toString()`), so it must not reference anything else.

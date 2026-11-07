@@ -57,8 +57,7 @@ import { Command } from 'commander';
 import { createUtilityServer, requireAuth, initServerToken, getServerLogBuffer, mountJson404 } from './http-utility';
 import { VERSION } from './version';
 import dotenv from 'dotenv';
-import { resolveApiConfig } from '../llm/credentials';
-import { resolveConfig } from '../llm/config';
+import { resolveConfig } from '../config';
 import * as fs from 'fs';
 import * as path from 'path';
 import pc from 'picocolors';
@@ -211,6 +210,7 @@ program
 //   GET  /         — dashboard (calls /mcp via JSON-RPC)
 //   GET  /health   — readiness probe (no auth)
 //   POST /stop     — graceful shutdown (auth + localhost-only)
+//   GET  /resume   — the pending pause for the user, if any (auth + localhost-only)
 //   POST /resume   — answer a pause for the user (auth + localhost-only)
 //   POST /mcp      — MCP streamable-HTTP transport (auth)
 //   GET  /mcp      — MCP SSE channel (auth)
@@ -443,42 +443,15 @@ program
 
 program
   .command('doctor')
-  .description('🩺 Diagnose setup and configure the AI provider — only needed for `clawdcursor agent` (the autonomous daemon with its own LLM). Driving clawdcursor from your own agent over MCP needs no doctor: consent + (macOS) `grant` is the whole setup.')
-  .option('--provider <provider>', 'AI provider (auto-detected, or specify: anthropic|openai|ollama|kimi|groq|...)')
-  .option('--api-key <key>', 'AI provider API key')
-  .option('--no-save', 'Don\'t save config to disk')
-  .option('--reset', 'Delete saved config and re-detect everything from scratch')
-  .action(async (opts) => {
+  .description('🩺 Diagnose setup: version, consent, screen capture, accessibility, permissions. Driving clawdcursor over MCP needs no doctor: consent + (macOS) `grant` is the whole setup.')
+  .action(async () => {
     const { runDoctor } = await import('./doctor');
-    const resolvedApi = resolveApiConfig({
-      apiKey: opts.apiKey,
-      provider: opts.provider,
-    });
-
-    if (opts.reset) {
-      const configPath = path.join(getPackageRoot(), '.clawdcursor-config.json');
-      if (fs.existsSync(configPath)) {
-        fs.unlinkSync(configPath);
-        console.log(`${e('🗑️', '[DEL]')}  Cleared saved config — re-detecting from scratch\n`);
-      }
-    }
-
-    // Only use explicit CLI flags for single-provider override.
-    // Auto-detected external credentials should go through multi-provider scan.
-    const isExplicit = !!(opts.apiKey || opts.provider);
-    await runDoctor({
-      apiKey: isExplicit ? resolvedApi.apiKey : undefined,
-      provider: isExplicit ? (resolvedApi.provider || opts.provider) : undefined,
-      baseUrl: isExplicit ? resolvedApi.baseUrl : undefined,
-      textModel: isExplicit ? resolvedApi.textModel : undefined,
-      visionModel: isExplicit ? resolvedApi.visionModel : undefined,
-      save: opts.save !== false,
-    });
+    await runDoctor();
   });
 
 program
   .command('status')
-  .description('📊 Check readiness status (consent, permissions, AI config)')
+  .description('📊 Check readiness status (consent, permissions)')
   .action(async () => {
     const { printStatusReport } = await import('./readiness');
     await printStatusReport();
@@ -865,7 +838,7 @@ async function createToolContext() {
   const { AccessibilityBridge } = await import('../platform/accessibility');
   const { CDPDriver } = await import('../platform/cdp-driver');
   const { DEFAULT_CONFIG } = await import('../types');
-  const { DEFAULT_CDP_PORT } = await import('../llm/browser-config');
+  const { DEFAULT_CDP_PORT } = await import('../platform/browser-config');
   const { getPlatform } = await import('../platform');
 
   const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });

@@ -10,8 +10,7 @@
  *   - NO ctx.platform call happens outside a tool's `execute()` — the agent
  *     loop never touches the adapter directly.
  *   - Terminal actions (`done` / `give_up` / `cannot_read`) just return
- *     `stop: true` with a terminalExit tag; the agent loop decides the
- *     AgentResult.
+ *     `stop: true` with a terminalExit tag.
  *   - a11y-first wording. `invoke_element` and `set_field_value` are the
  *     preferred targeting tools; coord clicks are the fallback.
  *
@@ -32,8 +31,8 @@ import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
-import { isBrowserProcess } from '../../llm/browser-config';
-import { agentBrowserConnectOptions } from '../../llm/browser-config';
+import { isBrowserProcess } from '../../platform/browser-config';
+import { agentBrowserConnectOptions } from '../../platform/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';

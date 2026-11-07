@@ -13,7 +13,7 @@
 
 import type { PlatformAdapter } from '../../platform/types';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
-import { isBrowserProcess } from '../../llm/browser-config';
+import { isBrowserProcess } from '../../platform/browser-config';
 import type { Snapshot, SnapshotElement, Platform } from './types';
 import { fingerprint } from './fingerprint';
 

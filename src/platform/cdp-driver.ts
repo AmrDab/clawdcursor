@@ -48,7 +48,7 @@ import { spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { AGENT_CDP_PORT } from '../llm/browser-config';
+import { AGENT_CDP_PORT } from './browser-config';
 import { guardInputMethods } from './pointer-guard';
 
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──

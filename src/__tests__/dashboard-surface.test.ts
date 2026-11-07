@@ -44,6 +44,20 @@ describe('dashboard page', () => {
     expect(html).toContain("fetch('/resume'");
   });
 
+  it('shows the pause banner from the authenticated GET /resume, not from /health', () => {
+    const html = page();
+    expect(html).toMatch(/fetch\('\/resume', \{ headers: authHeaders\(\) \}\)/);
+    expect(html).toContain('Resume');
+    expect(html).toContain('End task');
+  });
+
+  it('has no Tasks or Scheduled tab, task form or favorites left', () => {
+    const html = page();
+    for (const gone of ['panelTask', 'panelScheduled', 'sendTask', 'taskInput', 'switchTab', 'Scheduled', 'favorites_', 'submit_task']) {
+      expect(html).not.toContain(gone);
+    }
+  });
+
   it('the embedded script parses', () => {
     const script = page().split('<script>')[1].split('</script>')[0];
     expect(() => new Function(script)).not.toThrow();

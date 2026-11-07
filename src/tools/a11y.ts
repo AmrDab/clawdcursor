@@ -8,7 +8,7 @@
 import type { ToolDefinition, ToolContext } from './types';
 import { a11yToMouse } from './types';
 import type { UiElement, WindowInfo } from '../platform/types';
-import { isBrowserProcess } from '../llm/browser-config';
+import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from './window-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';

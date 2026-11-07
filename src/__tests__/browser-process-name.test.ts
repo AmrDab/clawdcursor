@@ -4,7 +4,7 @@
  * on a Mac nothing treated Chrome as a browser (#234 / #235).
  */
 import { describe, it, expect } from 'vitest';
-import { isBrowserProcess } from '../llm/browser-config';
+import { isBrowserProcess } from '../platform/browser-config';
 
 describe('isBrowserProcess', () => {
   it.each(['chrome', 'msedge', 'chrome.exe', 'Google Chrome', 'Microsoft Edge', 'Brave Browser', 'Chromium', 'Firefox', 'Safari', 'Arc'])(
