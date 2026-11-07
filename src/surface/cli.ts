@@ -406,6 +406,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   // ── Agent (only when an LLM is configured) ──
   let agent: Agent | undefined;
   if (llmAvailable) {
+    console.error('The built-in agent loop is deprecated and will be removed in 1.6 — drive clawdcursor\'s MCP tools from your own agent instead.');
     agent = new Agent(config, resolved);
     try {
       await agent.connect();

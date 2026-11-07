@@ -146,10 +146,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // (HTTP) context has a live agent, so only it can offer `task`.
   const instructions = ctx.agent
     ? // Daemon / HTTP MCP — the cheap local pipeline is available.
-      'clawdcursor is a local desktop-automation execution layer. PREFER the ' +
-      '`task` tool: it runs the full perceive→act→verify loop locally on a ' +
-      'cheap model, so you spend almost no tokens driving the GUI yourself. ' +
-      'Fall back to the granular tools only when you need fine-grained control. ' +
+      'clawdcursor is a local desktop-automation execution layer. Drive its tools yourself. ' +
+      '`task` (a local model loop) is deprecated and will be removed in 1.6. ' +
       'Every tool name carries a token-cost class — escalate in order: ' +
       '[act] (side-effect actions) < [inspect] (cheap structured reads) < ' +
       '[perceive-text] (a11y tree / OCR — no image bytes) < [perceive-image] (screenshot). ' +
@@ -175,11 +173,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           '(2) use OCR ([perceive-text]) when the tree is empty or sparse; ' +
           '(3) capture a screenshot ([perceive-image]) only as a last resort when both fail. ' +
           'Prefer named-target actions (by a11y name) over pixel coordinates. ') +
-      'For fully autonomous, low-cost execution, start the daemon (`clawdcursor agent`) ' +
-      'and use the `task` tool — it runs a local cheap-model pipeline instead of your model. ' +
-      '`task` waits up to 45s; longer tasks return {status:"running"} and CONTINUE in the ' +
-      'background — re-call with the same instruction to keep waiting, task {action:"status"} ' +
-      'to poll, task {action:"abort"} to stop. A timeout on your side is NOT a task failure. ' +
       'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
       'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
       '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +

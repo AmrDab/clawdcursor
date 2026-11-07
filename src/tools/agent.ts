@@ -46,12 +46,11 @@ export function getAgentTools(): ToolDefinition[] {
     {
       name: 'submit_task',
       description:
+        'Deprecated (removed in 1.6): ' +
         'Submit a natural-language task to the autonomous agent. The agent ' +
         'classifies, decomposes, and executes the task through the unified ' +
         'pipeline (a11y → text-agent → vision fallback). Returns immediately ' +
-        'with `accepted: true`; poll agent_status to track progress. ' +
-        'Runs locally on a cheap model — prefer this over driving the ' +
-        'mouse_*/screenshot tools yourself to save tokens.',
+        'with `accepted: true`; poll agent_status to track progress.',
       parameters: {
         task: { type: 'string', description: 'Natural-language task', required: true },
       },
