@@ -110,7 +110,7 @@ const RULES: Rule[] = [
 const ACTING: Record<string, ReadonlySet<string>> = {
   computer: new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'drag', 'drag_path', 'scroll',
     'scroll_horizontal', 'mouse_down', 'mouse_up', 'type', 'key', 'key_press', 'key_down', 'key_up']),
-  accessibility: new Set(['invoke', 'click', 'focus', 'set_value', 'set-value', 'expand', 'collapse', 'toggle', 'select',
+  accessibility: new Set(['invoke', 'focus', 'set_value', 'expand', 'collapse', 'toggle', 'select',
     'smart_click', 'smart_type']),
   window: new Set(['focus', 'maximize', 'minimize', 'restore', 'close', 'resize', 'open_app', 'open_file', 'open_url',
     'switch_tab', 'navigate']),
