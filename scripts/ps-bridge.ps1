@@ -164,6 +164,36 @@ $interactiveTypes = @(
     'ControlType.Text', 'ControlType.Group'
 )
 
+# Tick, selection and open state on every element the bridge reports (tree, find, focused) -> UiElement.checked /
+# selected / expanded. Only `find` carried the tick, and a radio (SelectionItem, not Toggle) never had one. Asked only of
+# the control types that have these states: each read is a cross-process call, and the tree can hold hundreds of nodes.
+$stateTypes = @('ControlType.CheckBox', 'ControlType.RadioButton', 'ControlType.Button', 'ControlType.MenuItem',
+    'ControlType.ListItem', 'ControlType.TreeItem', 'ControlType.TabItem', 'ControlType.ComboBox',
+    'ControlType.DataItem', 'ControlType.SplitButton')
+function Add-StateFields($node, $el, $typeName) {
+    if ($stateTypes -notcontains $typeName) { return }
+    $ae = [System.Windows.Automation.AutomationElement]
+    try {
+        if ($el.GetCurrentPropertyValue($ae::IsTogglePatternAvailableProperty)) {
+            $node.toggleState = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
+        }
+    } catch {}
+    try {
+        if ($el.GetCurrentPropertyValue($ae::IsSelectionItemPatternAvailableProperty)) {
+            $node.selected = [bool]$el.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Current.IsSelected
+        }
+    } catch {}
+    try {
+        if ($el.GetCurrentPropertyValue($ae::IsExpandCollapsePatternAvailableProperty)) {
+            $s = $el.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Current.ExpandCollapseState
+            if ($s -ne [System.Windows.Automation.ExpandCollapseState]::LeafNode) {
+                $node.expandable = $true
+                $node.expanded = ($s -ne [System.Windows.Automation.ExpandCollapseState]::Collapsed)
+            }
+        }
+    } catch {}
+}
+
 # ── UI tree builder ───────────────────────────────────────────────────────────
 function ConvertTo-UINode {
     param(
@@ -261,6 +291,7 @@ function ConvertTo-UINode {
         value        = $nodeValue
         children     = @()
     }
+    Add-StateFields $node $Element $typeName
 
     if ($Depth -lt $MaxDepth) {
         try {
@@ -856,12 +887,7 @@ function Cmd-FindElement {
                 name=$c.Name; automationId=$c.AutomationId; controlType=$c.ControlType.ProgrammaticName
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
             }
-            # Checkbox / toggle state, so `state` can say checked/unchecked.
-            try {
-                if ($el.GetCurrentPropertyValue([System.Windows.Automation.AutomationElement]::IsTogglePatternAvailableProperty)) {
-                    $r.toggleState = $el.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern).Current.ToggleState.ToString()
-                }
-            } catch {}
+            Add-StateFields $r $el $c.ControlType.ProgrammaticName
             $results += $r
         } catch {}
     }
@@ -1268,7 +1294,7 @@ function Cmd-GetFocusedElement {
                 } catch {}
             }
         }
-        return [ordered]@{
+        $out = [ordered]@{
             success      = $true
             name         = if ($cur.Name) { $cur.Name } else { "" }
             automationId = if ($cur.AutomationId) { $cur.AutomationId } else { "" }
@@ -1280,6 +1306,8 @@ function Cmd-GetFocusedElement {
             value        = $value
             secure       = $isPassword
         }
+        Add-StateFields $out $focused $typeName
+        return $out
     } catch {
         return @{ success=$false; error=$_.Exception.Message }
     }

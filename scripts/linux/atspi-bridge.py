@@ -54,6 +54,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from typing import Any, Optional
 
 try:
@@ -215,11 +216,31 @@ def node_to_dict(acc: Any) -> Optional[dict]:
         "processId": pid,
         "automationId": automation_id,
     }
+    # Tick state and open state, the same fields the Windows and macOS adapters report (UiElement.checked/expanded).
+    # SELECTED is a list item's state, not a tick: a ticked Chrome checkbox read selected:false.
+    tick = checked_state(acc, role_name)
+    if tick is not None:
+        out["checked"] = tick
+    if has_state(acc, Atspi.StateType.EXPANDABLE):
+        out["expandable"] = True
+        out["expanded"] = has_state(acc, Atspi.StateType.EXPANDED)
     if coord_type == 'window':
         # Bounds are relative to the toplevel; LinuxAdapter offsets them by
         # the window origin it already knows from wmctrl.
         out["coordType"] = 'window'
     return out
+
+
+CHECKABLE_ROLES = {'check box', 'radio button', 'toggle button', 'check menu item', 'radio menu item', 'switch'}
+
+
+def checked_state(acc: Any, role_name: str) -> Any:
+    """True / False / 'mixed' for an element that can be ticked; None for one that cannot."""
+    if role_name not in CHECKABLE_ROLES and not has_state(acc, Atspi.StateType.CHECKABLE):
+        return None
+    if has_state(acc, Atspi.StateType.INDETERMINATE):
+        return 'mixed'
+    return has_state(acc, Atspi.StateType.CHECKED) or has_state(acc, Atspi.StateType.PRESSED)
 
 
 def element_bounds(acc: Any):
@@ -713,12 +734,19 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
                     out["error"] = "element exposes neither Value nor Text"
 
     elif action == 'toggle':
-        used = do_named_action(acc, 'toggle')
-        if used is None:
-            out["error"] = "element exposes no Action interface"
+        # Only something that can be ticked: the click fallback in do_named_action pressed any button and called it toggled.
+        role = (safe(lambda: acc.get_role_name(), '') or '').lower()
+        if checked_state(acc, role) is None:
+            out["error"] = "not a checkbox, radio, switch or toggle button"
         else:
-            on = has_state(acc, Atspi.StateType.CHECKED) or has_state(acc, Atspi.StateType.PRESSED)
-            out["success"], out["method"], out["toggleState"] = True, used, ("On" if on else "Off")
+            used = do_named_action(acc, 'toggle')
+            if used is None:
+                out["error"] = "element exposes no Action interface"
+            else:
+                time.sleep(0.15)   # Chromium updates the state after the action returns: read it back, don't guess
+                tick = checked_state(acc, role)
+                out["success"], out["method"] = True, used
+                out["toggleState"] = "Indeterminate" if tick == 'mixed' else ("On" if tick else "Off")
 
     elif action == 'select':
         parent = safe(lambda: acc.get_parent())
@@ -735,7 +763,13 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
 
     elif action in ('expand', 'collapse'):
         want = action == 'expand'
-        if has_state(acc, Atspi.StateType.EXPANDED) == want:
+        act = safe(lambda: acc.get_action_iface())
+        named = [((safe(lambda i=i: act.get_action_name(i), '') or '').lower())
+                 for i in range(safe(lambda: act.get_n_actions(), 0) or 0)] if act else []
+        if not has_state(acc, Atspi.StateType.EXPANDABLE) and action not in named:
+            # Not an expander: the click fallback in do_named_action pressed it (a "select" on a Save button saved).
+            out["error"] = "element cannot expand or collapse"
+        elif has_state(acc, Atspi.StateType.EXPANDED) == want:
             out["success"], out["method"] = True, "already"
         else:
             used = do_named_action(acc, action)

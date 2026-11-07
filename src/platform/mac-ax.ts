@@ -233,6 +233,11 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
   const label: string = raw.name ?? '';
   const secure = raw.secure === true || raw.subrole === 'AXSecureTextField';
   const value = secure || raw.value === undefined || raw.value === null ? undefined : String(raw.value);
+  // A checkbox, radio or switch keeps its tick in AXValue (0 / 1 / 2 = mixed): UiElement.checked, as on Windows and Linux.
+  // Only for those roles: a slider at 1 is not "checked".
+  const role = String(raw.controlType ?? raw.role ?? '');
+  const tickable = /^(AX)?(CheckBox|RadioButton)$/.test(role) || /^AX(Switch|Toggle)$/.test(String(raw.subrole ?? ''));
+  const checked = !tickable ? undefined : value === '1' ? true : value === '0' ? false : value === '2' ? 'mixed' as const : undefined;
   return {
     name: label || (automationId && !GENERATED_ID.test(automationId) ? automationId : ''),
     controlType: String(raw.controlType ?? raw.role ?? '').replace(/^AX/, ''),
@@ -248,6 +253,7 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
     offscreen: raw.offscreen,
     expandable: raw.expandable,
     expanded: raw.expanded,
+    ...(checked !== undefined ? { checked } : {}),
     automationId: automationId || undefined,
     description: raw.description || undefined,
     processId: raw.processId ?? processId,

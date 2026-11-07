@@ -105,6 +105,20 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.toggle).toMatchObject({ success: true, toggleState: 'On' });
   });
 
+  // Audit 2026-11-05: the tick was read from SELECTED (a ticked Chrome checkbox read selected:false, no `checked`), and
+  // toggle / expand fell through to clicking whatever was named — `select` on a Save button pressed Save.
+  it('a tickbox reports checked; an expander reports expanded', () => {
+    expect(out.agree_after).toMatchObject({ checked: true });
+    expect(out.seven).not.toHaveProperty('checked');
+    expect(out.expand).toMatchObject({ success: true });
+  });
+
+  it('toggle and expand refuse a plain button and never press it', () => {
+    expect(out.toggle_button).toMatchObject({ success: false, error: expect.stringMatching(/not a checkbox/) });
+    expect(out.expand_button).toMatchObject({ success: false, error: expect.stringMatching(/cannot expand/) });
+    expect(out.button_pressed_again).toBe(false);
+  });
+
   it('invoke focus grabs focus via Component', () => {
     expect(out.focus.success).toBe(true);
     expect(out.focus_state).toBe(true);
