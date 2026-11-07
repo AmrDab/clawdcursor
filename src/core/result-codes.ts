@@ -52,7 +52,7 @@ const RULES: Rule[] = [
   { code: 'SAFETY_BLOCKED', outcome: 'refused', test: /safety block -|^\[block\]/i,
     hint: 'blocked by the safety gate; do not retry, tell the user' },
   { code: 'NEEDS_CONFIRMATION', outcome: 'refused', test: /safety confirm -|^\[confirm\]|requires user confirmation/i,
-    hint: 'needs the user\'s OK first; retrying will not help', next: PAUSE('Please confirm: <what and why>') },
+    hint: 'only the user can do this step; retrying will not help', next: PAUSE('Please <do it> yourself, then Resume') },
   { code: 'KEYBOARD_OWNED', outcome: 'refused', test: /system dialog owns the keyboard/i,
     hint: 'a system dialog has the keyboard; answer or close it first', next: PAUSE('Close the system dialog that has the keyboard') },
   { code: 'SECURE_INPUT', outcome: 'refused', test: /secure input is on/i,
