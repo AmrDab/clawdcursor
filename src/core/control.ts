@@ -19,6 +19,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
+import { logger } from './observability/logger';
 import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
@@ -31,6 +32,7 @@ export function __setControlDirForTests(d: string | null): void { dir = d; stopp
 
 /** The user took control back. Every clawdcursor process sees it; it survives a restart. */
 export function stopControl(by: string): void {
+  logger.warn('control.stop', { by, pid: process.pid });
   const file = stopFile();
   if (!file || !dir) { stoppedHere = true; return; }
   try {
@@ -50,7 +52,8 @@ export function isStopped(): boolean {
  * Only the user gives control back: a Resume click on a pause prompt, `clawdcursor resume`, or starting the daemon. The
  * window binding is kept: if the user left another app in front, the agent's next input is refused until it focuses its own.
  */
-export function resumeControl(): void {
+export function resumeControl(by: string): void {
+  logger.info('control.resume', { by, pid: process.pid });
   stoppedHere = false;
   const file = stopFile();
   if (file) { try { fs.rmSync(file, { force: true }); } catch { /* gone */ } }

@@ -15,6 +15,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
+import { logger } from '../core/observability/logger';
+import { isProcessAlive } from './pidfile';
 
 export type CallClass = 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
 
@@ -94,6 +96,8 @@ export class SessionLog {
   private blindSinceVision = false;
   private visionStreak = 0;
   private headerWritten = false;
+  /** The call the handler is running now: an exit while it runs names it. */
+  private current: { tool: string; action?: string; at: number } | null = null;
 
   /** `persist: false` keeps only the in-memory tally (used to replay a file). */
   constructor(private meta: { version: string; surface: string }, persist = true) {
@@ -115,6 +119,7 @@ export class SessionLog {
     extra?: { outcome?: Outcome; space?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }> }): CallClass {
     const cls = classifyCall(tool, action);
     const outcome = extra?.outcome ?? (ok ? 'ok' : 'error');
+    this.current = null;
     const steps: StepCall[] | undefined = extra?.steps?.map(s => ({ tool: s.tool, ...(s.action ? { action: s.action } : {}),
       cls: classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error') }));
     this.tally.calls++;
@@ -124,18 +129,43 @@ export class SessionLog {
     else this.tallyClass(cls, outcome);
 
     if (this.file) {
+      // The day log gets the same line, so one file shows what ran, how long it took and how it ended.
+      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(err ? { err: redact(err) } : {}) });
       try {
-        if (!this.headerWritten) {
-          fs.appendFileSync(this.file, JSON.stringify({ type: 'session', started: new Date().toISOString(), ...this.meta,
-            platform: process.platform, client: client?.name ? `${client.name} ${client.version ?? ''}`.trim() : undefined }) + '\n');
-          this.headerWritten = true;
-        }
+        this.writeHeader(client);
         const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),
           outcome, ...(extra?.space ? { space: extra.space } : {}), ...(err ? { err: redact(err) } : {}), ...(steps ? { steps } : {}) };
         fs.appendFileSync(this.file, JSON.stringify(line) + '\n');
       } catch { /* never break a tool call over logging */ }
     }
     return cls;
+  }
+
+  private writeHeader(client?: { name?: string; version?: string }): void {
+    if (this.headerWritten || !this.file) return;
+    fs.appendFileSync(this.file, JSON.stringify({ type: 'session', started: new Date().toISOString(), ...this.meta,
+      platform: process.platform, pid: process.pid,
+      client: client?.name ? `${client.name} ${client.version ?? ''}`.trim() : undefined }) + '\n');
+    this.headerWritten = true;
+  }
+
+  /** The handler of this call starts now. The file exists from here: a kill during the first call still leaves a trace. */
+  running(tool: string, action?: string, client?: { name?: string; version?: string }): void {
+    this.current = { tool, ...(action ? { action } : {}), at: Date.now() };
+    try { this.writeHeader(client); } catch { /* never break a tool call over logging */ }
+  }
+
+  /**
+   * The server is exiting: say why, and which call it cut off. Synchronous, so it lands before process.exit. A kill
+   * (Task Manager, kill -9) or a crash never gets here: the next server reports those (reportUncleanExits).
+   */
+  end(reason: string): void {
+    const cut = this.current ? { tool: this.current.tool, ...(this.current.action ? { action: this.current.action } : {}),
+      ranMs: Date.now() - this.current.at } : undefined;
+    (cut ? logger.warn : logger.info)('mcp.exit', { reason, pid: process.pid, ...(cut ? { cutOff: cut } : {}) });
+    if (!this.file || !this.headerWritten) return;  // no call was made: no session file to close
+    try { fs.appendFileSync(this.file, JSON.stringify({ type: 'end', t: new Date().toISOString(), reason, ...(cut ? { cutOff: cut } : {}) }) + '\n'); }
+    catch { /* best-effort */ }
   }
 
   private tallyClass(cls: CallClass, outcome: Outcome): void {
@@ -170,12 +200,39 @@ export function readSession(file: string): { header: Record<string, unknown> | n
   try {
     for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
       if (!line.trim()) continue;
-      try { const o = JSON.parse(line); (o.type === 'session' ? header : calls).push(o); } catch { /* skip */ }
+      try {
+        const o = JSON.parse(line);
+        if (o.type === 'session') header.push(o);
+        else if (o.type !== 'end') calls.push(o);
+      } catch { /* skip */ }
     }
   } catch { /* missing file */ }
   const replay = new SessionLog({ version: '', surface: '' }, false);
   for (const c of calls) replay.record(c.tool, c.action, c.ok, c.ms, undefined, undefined, { outcome: c.outcome, steps: c.steps });
   return { header: header[0] ?? null, calls, tally: replay.summary };
+}
+
+/**
+ * Servers that ended without saying why: killed (Task Manager, kill -9, the host force-closing it) or crashed. Their session
+ * file has calls but no `end` line, and their process is gone. Logged once each (an `end` line is added), at the next start.
+ * Files from before the header carried a pid are skipped: their ending was never recorded.
+ */
+export function reportUncleanExits(): void {
+  for (const file of listSessions()) {
+    try {
+      const lines = fs.readFileSync(file, 'utf8').split('\n').filter(l => l.trim());
+      const header = JSON.parse(lines[0] ?? '{}');
+      const pid = header.type === 'session' ? Number(header.pid) : NaN;
+      if (!Number.isInteger(pid) || pid === process.pid || isProcessAlive(pid)) continue;
+      const last = JSON.parse(lines[lines.length - 1]);
+      if (last.type === 'end') continue;
+      // Only the header: it was killed during its first call.
+      const lastCall = last.type === 'session' ? undefined : { tool: last.tool, ...(last.action ? { action: last.action } : {}), at: last.t };
+      const reason = 'killed or crashed: no clean exit was recorded';
+      logger.warn('mcp.exit', { reason, pid, detectedAt: 'next start', ...(lastCall ? { lastFinishedCall: lastCall } : {}) });
+      fs.appendFileSync(file, JSON.stringify({ type: 'end', t: new Date().toISOString(), reason, detectedAtNextStart: true }) + '\n');
+    } catch { /* unreadable file: skip */ }
+  }
 }
 
 /** Newest session files first. */
