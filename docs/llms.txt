@@ -76,17 +76,13 @@ server (via npx) and bundles the usage skill in one step:
     claude plugin marketplace add AmrDab/clawdcursor
     claude plugin install clawdcursor@clawdcursor
 
-Note: `clawdcursor doctor` is NOT needed for MCP use; it only configures the
-optional autonomous daemon.
+Note: `clawdcursor doctor` is NOT needed for MCP use; it is a diagnostic.
 
-## Use as an autonomous daemon (clawdcursor brings the model)
+## Use over HTTP
 
-Deprecated (removed in 1.6): use the compound tools below from your own agent; `clawdcursor agent` keeps serving HTTP MCP.
+    clawdcursor agent     # HTTP MCP daemon on 127.0.0.1:3847; your agent drives the tools
 
-    clawdcursor doctor    # configure the built-in LLM (13 providers supported)
-    clawdcursor agent     # HTTP + MCP daemon on 127.0.0.1:3847
-
-`clawdcursor agent --no-llm` exposes the HTTP tool surface only (your agent supplies the brain).
+clawdcursor never runs a model.
 `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, also for stdio) sends no screenshot to any model: a call that would return one is refused with VISION_DISABLED; read the screen with accessibility or OCR.
 
 ## Tool surface (compact — recommended, ~7,000 tokens of catalog vs ~20,000 granular)
@@ -96,7 +92,6 @@ Deprecated (removed in 1.6): use the compound tools below from your own agent; `
 - window — launch, focus, resize apps
 - system — clipboard, OCR, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
 - browser — Chrome DevTools Protocol for Electron / WebView2 apps
-- task — deprecated (removed in 1.6); drive the compounds above yourself
 - batch — run a guarded, safety-gated sequence of the above in one call
 
 100+ granular tools (one schema per verb) are available by omitting `--compact`

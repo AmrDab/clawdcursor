@@ -48,14 +48,13 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   cdp_connect: 'act', cdp_click: 'act', cdp_type: 'act', cdp_select_option: 'act',
   cdp_switch_tab: 'act', cdp_scroll: 'act',
   // orchestration verbs
-  delegate_to_agent: 'act', open_app: 'act', navigate_browser: 'act', wait: 'act',
+  open_app: 'act', navigate_browser: 'act', wait: 'act',
   open_file: 'act', open_url: 'act', open_uri: 'act', relaunch_with_cdp: 'act',
-  submit_task: 'act', abort_task: 'act', submit_report: 'act',
+  submit_report: 'act',
   pause_for_user: 'act', resume_task: 'act',
   // batch is inert itself (each step is gated/costed individually); classify the wrapper cheapest.
   batch: 'act',
   favorites_add: 'act', favorites_remove: 'act',
-  scheduled_task_create: 'act', scheduled_task_delete: 'act', scheduled_task_toggle: 'act',
 
   // ── inspect ── cheap structured read. ≤2K tok.
   get_screen_size: 'inspect', get_system_time: 'inspect', wait_for_element: 'inspect',
@@ -70,9 +69,8 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   find_element: 'inspect', list_displays: 'inspect',
   read_clipboard: 'inspect',
   cdp_evaluate: 'inspect', cdp_wait_for_selector: 'inspect', cdp_list_tabs: 'inspect',
-  build_uri: 'inspect', logs_recent: 'inspect', agent_status: 'inspect',
-  task_logs_list: 'inspect', task_logs_current: 'inspect', favorites_list: 'inspect',
-  scheduled_task_list: 'inspect',
+  build_uri: 'inspect', logs_recent: 'inspect',
+  favorites_list: 'inspect',
 
   // ── perceive-text ── a11y/OCR/DOM dumps + tools that read them internally. ≤10K tok.
   read_screen: 'perceive-text', ocr_read_screen: 'perceive-text', smart_read: 'perceive-text',
@@ -80,7 +78,6 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   session_report: 'inspect',
   smart_type: 'perceive-text', smart_click: 'perceive-text',
   cdp_page_context: 'perceive-text', cdp_read_text: 'perceive-text',
-  get_system_prompt: 'perceive-text',
   compile_ui: 'perceive-text',
   find_action_button: 'perceive-text', find_input_field: 'perceive-text',
 

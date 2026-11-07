@@ -193,26 +193,6 @@
       "costClass": "act"
     },
     {
-      "name": "abort_task",
-      "description": "Signal the running task to abort. The pipeline checks `isAborted()` between steps; long-running LLM calls may take a few seconds to wind down. agent_status will return `idle` once the abort has settled.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "costClass": "act"
-    },
-    {
-      "name": "agent_status",
-      "description": "Return the autonomous agent's current state: status (idle | thinking | acting | waiting_confirm | paused), currentTask, currentStep, stepsCompleted, stepsTotal; `pause` {id, message, since} while a pause for the user is up; and `overlay` — what the on-screen overlay shows: {mode:\"hidden\"|\"running\"} or {mode:\"paused\", message, since}. Cheap (synchronous read) — safe to poll at 1–2 Hz.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "costClass": "inspect"
-    },
-    {
       "name": "batch",
       "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
       "category": "orchestration",
@@ -579,28 +559,6 @@
       "costClass": "inspect"
     },
     {
-      "name": "delegate_to_agent",
-      "description": "Deprecated (removed in 1.6): Hand a whole task to clawdcursor's built-in thin agent loop, which drives the toolbox with the model configured via `clawdcursor doctor` (perceive → act → iterate until done). BOUNDED-SYNC: waits up to `timeout` seconds (default 45) for completion. A finished task returns its result directly; a longer task returns a {status:\"running\"} receipt with progress while the loop CONTINUES in the background — re-call with the SAME task text to keep waiting (re-attaches, never restarts), or poll agent_status / abort via abort_task. Requires `clawdcursor agent` running WITH a model configured; in tools-only / --no-llm mode there is no model to drive it.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "task": {
-            "type": "string",
-            "description": "Natural language task description"
-          },
-          "timeout": {
-            "type": "number",
-            "description": "Max seconds to WAIT for completion before returning a running receipt (default 45, clamped 1–50; stays under MCP client call-timeouts). The task itself keeps running — this only bounds the wait."
-          }
-        },
-        "required": [
-          "task"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
       "name": "desktop_screenshot",
       "description": "LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge (the reply states its size and scale).",
       "category": "perception",
@@ -897,27 +855,6 @@
         "properties": {}
       },
       "costClass": "inspect"
-    },
-    {
-      "name": "get_system_prompt",
-      "description": "Return the canonical agent system prompt. Use this to mirror clawdcursor's behavioral rules in your own agent loop — coordinate syntax, key combo syntax, web-service policy (never type \"browser\" into search bars), protocol escape hatches (mailto:/https:/file:/...), stagnation recovery, termination rules (done/give_up/cannot_read), untrusted-screen-content discipline. Reflects the prompt at the current installed clawdcursor version — pull this rather than hardcoding rules so they stay in sync with upstream changes.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "mode": {
-            "type": "string",
-            "description": "Agent mode hint for the system prompt (blind / hybrid / vision). Defaults to \"hybrid\".",
-            "enum": [
-              "blind",
-              "hybrid",
-              "vision"
-            ],
-            "default": "hybrid"
-          }
-        }
-      },
-      "costClass": "perceive-text"
     },
     {
       "name": "get_system_time",
@@ -1990,84 +1927,6 @@
       "costClass": "act"
     },
     {
-      "name": "scheduled_task_create",
-      "description": "Create a recurring task that runs on a cron schedule. The task submits to the autonomous agent each time the cron tick fires; if the agent is busy at that moment, the tick is skipped (no queue). Cron is standard 5-field syntax (`* * * * *` = every minute) or 6-field with leading seconds. Returns the created task with id + next-run timestamp. Persisted across daemon restarts.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "task": {
-            "type": "string",
-            "description": "Natural-language task to run on each tick"
-          },
-          "cron": {
-            "type": "string",
-            "description": "Cron expression (e.g. \"0 9 * * 1-5\" = 9am weekdays)"
-          },
-          "tz": {
-            "type": "string",
-            "description": "Optional timezone (e.g. \"America/New_York\"). Defaults to server local."
-          }
-        },
-        "required": [
-          "task",
-          "cron"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
-      "name": "scheduled_task_delete",
-      "description": "Delete one scheduled task by id. No-op if id is unknown.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "ScheduledTask.id"
-          }
-        },
-        "required": [
-          "id"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
-      "name": "scheduled_task_list",
-      "description": "Return every scheduled task: id, cron expression, task text, enabled state, run/skip counters, last-run / last-error, next-run timestamp.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "costClass": "inspect"
-    },
-    {
-      "name": "scheduled_task_toggle",
-      "description": "Pause/resume a scheduled task without deleting it. When disabled the cron job is unregistered (no firing); state stays persisted.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "description": "ScheduledTask.id"
-          },
-          "enabled": {
-            "type": "boolean",
-            "description": "true=enable, false=pause"
-          }
-        },
-        "required": [
-          "id",
-          "enabled"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
       "name": "screenshot_full",
       "description": "Capture the full primary display. Returns base64 image bytes plus a `format` field (`jpeg` by default, `png` if configured); the MCP `image.mimeType` is set to match. Equivalent to desktop_screenshot but returns the full frame unconditionally (no region cropping). Useful for the dashboard's /screenshot REST replacement.",
       "category": "perception",
@@ -2325,24 +2184,6 @@
       "costClass": "act"
     },
     {
-      "name": "submit_task",
-      "description": "Deprecated (removed in 1.6): Submit a natural-language task to the autonomous agent. The agent classifies, decomposes, and executes the task through the unified pipeline (a11y → text-agent → vision fallback). Returns immediately with `accepted: true`; poll agent_status to track progress.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "task": {
-            "type": "string",
-            "description": "Natural-language task"
-          }
-        },
-        "required": [
-          "task"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
       "name": "switch_tab_os",
       "description": "Cycle or jump to a browser tab using the OS-agnostic keyboard shortcut (Ctrl+Tab / Ctrl+Shift+Tab on every OS; mod+{1..9} to jump). Works in Chrome, Firefox, Edge, Safari. For in-browser DOM-level control use cdp_switch_tab.",
       "category": "window",
@@ -2366,26 +2207,6 @@
         }
       },
       "costClass": "act"
-    },
-    {
-      "name": "task_logs_current",
-      "description": "Return the structured log entries for the currently-executing task (or the most recent if no task is running). Each entry is a JSONL event from the pipeline trace.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "costClass": "inspect"
-    },
-    {
-      "name": "task_logs_list",
-      "description": "List the last 50 task summaries from the daemon's structured log. Each summary contains task text, correlation ID, start/end timestamps, and final status. Returns [] when no logger is attached.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "costClass": "inspect"
     },
     {
       "name": "type_text",

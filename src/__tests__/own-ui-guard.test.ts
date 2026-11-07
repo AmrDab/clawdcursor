@@ -54,18 +54,18 @@ describe('ownUiRefusal', () => {
 
 describe('isPauseSafeCall — deny by default', () => {
   it('waiting on, ending or reporting the pause is allowed', () => {
-    for (const [tool, action] of [['system', 'pause_for_user'], ['task', 'status'], ['task', 'abort'], ['task', 'resume'],
-      ['pause_for_user', undefined], ['agent_status', undefined], ['abort_task', undefined], ['resume_task', undefined],
+    for (const [tool, action] of [['system', 'pause_for_user'],
+      ['pause_for_user', undefined], ['resume_task', undefined],
       ['ask_user', undefined], ['done', undefined], ['give_up', undefined],
-      // re-calling a paused delegated task keeps waiting (a new run cannot start during a pause); waiting touches nothing
-      ['task', 'run'], ['delegate_to_agent', undefined], ['computer', 'wait'], ['wait', undefined], ['system', 'report']] as const) {
+      // waiting touches nothing
+      ['computer', 'wait'], ['wait', undefined], ['system', 'report']] as const) {
       expect(isPauseSafeCall(tool, action), `${tool} ${action ?? ''}`).toBe(true);
     }
   });
 
-  it('everything else is not — reads, scripts, key-sending reads, batches, submitting a task', () => {
+  it('everything else is not — reads, scripts, key-sending reads, batches', () => {
     for (const [tool, action] of [['accessibility', 'read_tree'], ['accessibility', 'invoke'], ['browser', 'evaluate'],
-      ['system', 'copy_all_text'], ['system', 'clipboard_write'], ['computer', 'key'], ['computer', 'hover'], ['submit_task', undefined],
+      ['system', 'copy_all_text'], ['system', 'clipboard_write'], ['computer', 'key'], ['computer', 'hover'],
       ['batch', undefined], ['read_screen', undefined], ['invoke_element', undefined], ['type_text', undefined]] as const) {
       expect(isPauseSafeCall(tool, action), `${tool} ${action ?? ''}`).toBe(false);
     }

@@ -4,13 +4,20 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
-### Deprecated
-- **The built-in agent loop is deprecated and will be removed in 1.6.** The
-  `task` tool, `submit_task`, `system delegate`, the `clawdcursor agent` model
-  loop, the doctor's model/provider setup and the scheduler go away, and
-  clawdcursor will no longer call a model itself. Drive the MCP tools from your
-  own agent instead (Claude Code, Codex, Cursor, …); the daemon's HTTP MCP
-  transport stays for remote use.
+### Removed
+- **The built-in agent loop.** clawdcursor no longer calls a model itself; drive
+  its MCP tools from your own agent (Claude Code, Codex, Cursor, …). Gone: the
+  `task` compound tool (compact surface: now `computer`, `accessibility`,
+  `window`, `system`, `browser`, `batch`), the granular `submit_task`,
+  `agent_status`, `abort_task`, `delegate_to_agent`, `task_logs_list`,
+  `task_logs_current` and `get_system_prompt` tools, the `system` actions
+  `delegate` and `system_prompt`, the scheduler (`scheduled_task_*`), the
+  `clawdcursor task` command and the daemon's `POST /abort` route.
+  `clawdcursor agent` is now only the HTTP MCP server: no model, no key, no
+  provider check. `--no-llm` is still accepted and does nothing; the
+  `--provider`, `--model`, `--text-model`, `--vision-model`, `--base-url` and
+  `--api-key` flags are gone from `agent` and `start`. The HTTP MCP transport,
+  `/stop`, `/resume`, `/health` and token auth are unchanged.
 
 ## [1.5.26] - 2026-11-05
 

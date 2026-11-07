@@ -17,7 +17,7 @@ Use this precedence for every request:
 
 1. **OpenClaw native capability** (API, local files, shell, existing domain skill)
 2. **Browser direct path** (Playwright/CDP)
-3. **Clawd Cursor GUI path** (MCP `submit_task` tool — was REST `/task` in v0.8) only for residual UI steps
+3. **Clawd Cursor GUI path** (MCP tools: `accessibility`, `computer`, `window`) only for residual UI steps
 
 This prevents Clawd Cursor from re-solving work OpenClaw already solves well.
 

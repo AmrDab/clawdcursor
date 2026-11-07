@@ -147,7 +147,7 @@ export const overlayEnv = (mode: OverlayMode, extra: NodeJS.ProcessEnv = {}): No
  *  pill apart from the running one (#237). The drawers read the env. */
 export const pillArgs = (mode: OverlayMode): string[] => (mode.paused ? ['--paused'] : []);
 
-/** What the overlay shows right now (agent_status reports it). */
+/** What the overlay shows right now (the control banner state). */
 export type OverlayState =
   | { mode: 'hidden' }
   | { mode: 'running' }

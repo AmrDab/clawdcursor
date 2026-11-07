@@ -22,23 +22,13 @@ app-specific API required.
 }
 ```
 You see 6 compound tools: `computer`, `accessibility`, `window`, `system`,
-`browser`, `task`.
+`browser`, `batch`.
 
 **MCP HTTP (for any HTTP-capable agent):**
 ```bash
-clawdcursor agent           # full daemon (with autonomous submit_task)
-clawdcursor agent --no-llm  # tool surface only; skips built-in brain, scheduler startup, and credential validation
+clawdcursor agent           # HTTP MCP daemon; you drive the tools (clawdcursor never runs a model)
 ```
 JSON-RPC at `POST http://127.0.0.1:3847/mcp` — `tools/list` returns the catalog, `tools/call` invokes a tool. Auth via `Authorization: Bearer <token>` from `~/.clawdcursor/token`. Stateless — no session init handshake required.
-
-## The simplest path
-
-When you don't need step-level control, hand clawdcursor the whole task:
-```
-task({"instruction": "open Notepad and type hello"})
-```
-The built-in pipeline decomposes it, picks the cheapest execution path
-(router → blind agent → hybrid → vision fallback), runs it, and returns a trace.
 
 ## For full detail
 

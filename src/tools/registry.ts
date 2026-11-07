@@ -19,8 +19,6 @@ import { getElectronBridgeTools } from './electron_bridge';
 import { getCompactTools } from './compact';
 import { getAgentTools } from './agent';
 import { getFavoritesTools } from './favorites';
-import { getSchedulerTools } from './scheduler';
-import { getIntrospectionTools } from './introspection';
 import type { ToolDefinition, ToolContext, ToolResult, CompactGroup } from './types';
 import { toOpenAiFunctions, toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
@@ -542,8 +540,6 @@ function granularTools(): ToolDefinition[] {
       ...getElectronBridgeTools(),
       ...getAgentTools(),
       ...getFavoritesTools(),
-      ...getSchedulerTools(),
-      ...getIntrospectionTools(),
     ].filter(t =>
       !WINDOW_MCP_NAMES.has(t.name) &&
       !KEYBOARD_MCP_NAMES.has(t.name) &&

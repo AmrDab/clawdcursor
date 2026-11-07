@@ -15,7 +15,7 @@
  */
 import type { PlatformAdapter } from '../../platform/types';
 import { isOwnUiPid } from '../../platform/pointer-guard';
-import { wrapUntrustedScreenContent } from '../agent-loop/prompt';
+import { wrapUntrustedScreenContent } from '../untrusted-screen-content';
 
 export interface Rect { x: number; y: number; width: number; height: number }
 interface Win { processId: number; title: string; bounds: Rect; handle?: number | string }

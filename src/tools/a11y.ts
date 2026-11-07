@@ -14,7 +14,7 @@ import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, nameMissHint } from './blind-hints';
-import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
+import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns

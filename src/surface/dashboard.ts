@@ -620,25 +620,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   <!-- Scheduled Tab (v0.9.1) -->
   <div class="tab-content" id="panelScheduled">
     <div class="sched-help">
-      Recurring tasks fire through the same agent pipeline as <code>submit_task</code>.
-      If the agent is busy when a tick fires, the tick is skipped (no queue).
-      Cron is standard 5-field syntax — <code>0 9 * * 1-5</code> = 9am weekdays.
-    </div>
-
-    <div class="sched-form">
-      <input type="text" class="sched-input sched-cron"
-             id="schedCron" placeholder='Cron: e.g. "0 9 * * 1-5"'>
-      <input type="text" class="sched-input sched-task"
-             id="schedTask" placeholder='Task: e.g. "open Outlook and read latest unread"'>
-      <input type="text" class="sched-input sched-tz"
-             id="schedTz" placeholder='TZ (optional): e.g. America/New_York'>
-      <button class="send-btn sched-add-btn" onclick="addSchedule()">＋ Add Schedule</button>
-    </div>
-
-    <div class="sched-list-section">
-      <div class="sched-title">Active &amp; paused schedules</div>
-      <ul class="sched-list" id="schedList"></ul>
-      <div class="empty-state" id="emptySched">No schedules yet. Add one above.</div>
+      Scheduled tasks were removed: clawdcursor no longer runs a model, so it has nothing to run on a schedule.
+      Schedule your own agent instead.
     </div>
   </div>
 
@@ -711,7 +694,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   }
 
   // Which surface does this daemon serve? A --compact daemon has no
-  // submit_task / agent_status: ask tools/list once and map every call onto
+  // granular tools: ask tools/list once and map every call onto
   // what is served (dashboardToolCall, shared with the server-side tests).
   ${dashboardToolCall.toString()}
   var __servedTools = null;
@@ -771,101 +754,7 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     document.querySelectorAll('.tab-content').forEach(p => p.classList.remove('active'));
     document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
     document.getElementById('panel' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
-    // Refresh the Scheduled tab whenever it's opened.
-    if (tab === 'scheduled') loadSchedules();
   };
-
-  // ── Scheduled tasks (v0.9.1) ──────────────────────────────────────
-  // Each handler calls the matching scheduled_task_* MCP tool. Errors are
-  // surfaced inline; the panel re-fetches on every mutation so the list
-  // stays in sync with the daemon's in-process cron registry.
-  async function loadSchedules() {
-    var list = document.getElementById('schedList');
-    var empty = document.getElementById('emptySched');
-    try {
-      var res = await toolCall('scheduled_task_list', {});
-      var tasks = (res && res.tasks) || [];
-      list.innerHTML = '';
-      if (tasks.length === 0) {
-        empty.style.display = 'block';
-        return;
-      }
-      empty.style.display = 'none';
-      tasks.forEach(function(t) {
-        var li = document.createElement('li');
-        li.className = 'sched-item' + (t.enabled ? '' : ' disabled');
-        var meta = 'runs=' + (t.runCount || 0) + ' skips=' + (t.skipCount || 0);
-        if (t.nextRun) meta += ' next=' + new Date(t.nextRun).toLocaleString();
-        else if (t.lastError) meta += ' err';
-        li.innerHTML =
-          '<div class="sched-item-cron">' + escapeHtml(t.cron) + '</div>' +
-          '<div class="sched-item-task" title="' + escapeHtml(t.task) + '">' + escapeHtml(t.task) + '</div>' +
-          '<div class="sched-item-meta">' + escapeHtml(meta) + '</div>' +
-          '<button class="sched-toggle-btn" data-id="' + t.id + '" data-enabled="' + (!t.enabled) + '">' +
-            (t.enabled ? '⏸ Pause' : '▶ Resume') + '</button>' +
-          '<button class="sched-delete-btn" data-id="' + t.id + '">✕</button>';
-        list.appendChild(li);
-      });
-      // Wire toggle + delete buttons.
-      list.querySelectorAll('.sched-toggle-btn').forEach(function(b) {
-        b.onclick = function() {
-          toggleSchedule(b.getAttribute('data-id'), b.getAttribute('data-enabled') === 'true');
-        };
-      });
-      list.querySelectorAll('.sched-delete-btn').forEach(function(b) {
-        b.onclick = function() { deleteSchedule(b.getAttribute('data-id')); };
-      });
-    } catch (err) {
-      list.innerHTML = '<li class="sched-item">Could not load schedules: ' + escapeHtml(String(err && err.message || err)) + '</li>';
-    }
-  }
-
-  window.addSchedule = async function() {
-    var cronInput = document.getElementById('schedCron');
-    var taskInput = document.getElementById('schedTask');
-    var tzInput   = document.getElementById('schedTz');
-    var cron = cronInput.value.trim();
-    var task = taskInput.value.trim();
-    var tz   = tzInput.value.trim();
-    if (!cron || !task) {
-      alert('Both a cron expression and a task are required.');
-      return;
-    }
-    try {
-      var args = { cron: cron, task: task };
-      if (tz) args.tz = tz;
-      var res = await toolCall('scheduled_task_create', args);
-      if (res && res.ok) {
-        cronInput.value = '';
-        taskInput.value = '';
-        tzInput.value = '';
-        loadSchedules();
-      } else {
-        alert('Could not add schedule: ' + JSON.stringify(res));
-      }
-    } catch (err) {
-      alert('Could not add schedule: ' + (err && err.message || err));
-    }
-  };
-
-  async function toggleSchedule(id, enabled) {
-    try {
-      await toolCall('scheduled_task_toggle', { id: id, enabled: enabled });
-      loadSchedules();
-    } catch (err) {
-      alert('Toggle failed: ' + (err && err.message || err));
-    }
-  }
-
-  async function deleteSchedule(id) {
-    if (!confirm('Delete this schedule?')) return;
-    try {
-      await toolCall('scheduled_task_delete', { id: id });
-      loadSchedules();
-    } catch (err) {
-      alert('Delete failed: ' + (err && err.message || err));
-    }
-  }
 
   function escapeHtml(s) {
     return String(s || '').replace(/[&<>"']/g, function(c) {
@@ -876,10 +765,8 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   // Status polling
   async function pollStatus() {
     try {
-      // v0.9 PR7.3: status now goes through MCP agent_status.
-      const data = await toolCall('agent_status', {});
-      setConnected(true);
-      updateStatus(data);
+      const res = await fetch('/health');
+      setConnected(res.ok);
     } catch(e) {
       setConnected(false);
     }
@@ -936,70 +823,12 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     }
   }
 
-  // Send task
-  window.sendTask = async function() {
-    const task = taskInput.value.trim();
-    if (!task) return;
-
-    sendBtn.disabled = true;
-    spinner.classList.add('visible');
-    responseCard.classList.remove('visible');
-    emptyTask.style.display = 'none';
-
-    try {
-      // v0.9 PR7.3: submit_task replaces POST /task.
-      const data = await toolCall('submit_task', { task: task });
-      responseCard.classList.add('visible');
-      // granular submit_task: {accepted}; compact task: a running / paused
-      // receipt, or the result when it finished within the 1 s wait.
-      const started = data && typeof data === 'object' &&
-        (data.accepted || data.status === 'running' || data.status === 'paused' || typeof data.success === 'boolean');
-      if (started) {
-        responseText.textContent = 'Task accepted: ' + task + '\\nWaiting for completion...';
-        addHistory(task, 'accepted');
-        taskInput.value = '';
-        // Poll until completion
-        waitForCompletion(task);
-      } else {
-        responseText.textContent = JSON.stringify(data, null, 2);
-        addHistory(task, JSON.stringify(data));
-      }
-    } catch(e) {
-      responseCard.classList.add('visible');
-      responseText.textContent = 'Error: ' + e.message;
-      addHistory(task, 'Error: ' + e.message);
-    }
-
-    spinner.classList.remove('visible');
-    sendBtn.disabled = false;
+  // Send task: the built-in agent loop was removed, so the form only says so.
+  window.sendTask = function() {
+    responseCard.classList.add('visible');
+    responseText.textContent = 'Removed: clawdcursor no longer runs tasks itself. ' +
+      'Drive its MCP tools from your own agent (Claude Code, Codex, Cursor).';
   };
-
-  async function waitForCompletion(task) {
-    const start = Date.now();
-    const maxWait = 300000; // 5 min
-    const check = async () => {
-      if (Date.now() - start > maxWait) {
-        updateHistoryResult(task, 'Timed out after 5 minutes');
-        return;
-      }
-      try {
-        // v0.9 PR7.3: agent_status replaces GET /status.
-        const data = await toolCall('agent_status', {});
-        if (data && data.status === 'idle') {
-          responseText.textContent = 'Task completed: ' + task;
-          updateHistoryResult(task, 'Completed');
-          return;
-        }
-        // Update current progress
-        if (data && data.currentStep) {
-          responseText.textContent = 'Task: ' + task + '\\nStep: ' + data.currentStep +
-            '\\nProgress: ' + (data.stepsCompleted || 0) + '/' + (data.stepsTotal || '?');
-        }
-      } catch(e) { /* ignore */ }
-      setTimeout(check, 1500);
-    };
-    setTimeout(check, 1500);
-  }
 
   // Answer a pause (POST /resume): Resume or End task.
   let paused = false;

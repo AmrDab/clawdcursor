@@ -141,20 +141,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // into the connecting agent's context. This is the only channel to tell an
   // integrating agent (Claude Code, Cursor, Windsurf, Zed, OpenClaw) HOW to
   // use clawdcursor cheaply. Without it, agents drive the raw GUI tools with
-  // their own premium model — the expensive path — and never discover the
-  // local fallback pipeline. The guidance differs by mode: only the daemon
-  // (HTTP) context has a live agent, so only it can offer `task`.
-  const instructions = ctx.agent
-    ? // Daemon / HTTP MCP — the cheap local pipeline is available.
-      'clawdcursor is a local desktop-automation execution layer. Drive its tools yourself. ' +
-      '`task` (a local model loop) is deprecated and will be removed in 1.6. ' +
-      'Every tool name carries a token-cost class — escalate in order: ' +
-      '[act] (side-effect actions) < [inspect] (cheap structured reads) < ' +
-      '[perceive-text] (a11y tree / OCR — no image bytes) < [perceive-image] (screenshot). ' +
-      'For perception specifically: read the accessibility tree first; use OCR ' +
-      '([perceive-text]) when the tree is empty or sparse; take a screenshot ' +
-      '([perceive-image]) only as a last resort when both tree and OCR fail.'
-    : // Stdio MCP (editor integration) — no pipeline; you drive the tools.
+  // their own premium model, the expensive path.
+  const instructions =
       'clawdcursor is a local desktop-automation tool layer. You drive the tools ' +
       'yourself. ' +
       (compact
@@ -496,9 +484,9 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
  *     session gets its OWN server (from `createServer`) and a stateful
  *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern.
  *   - One-shot JSON-RPC posts with no initialize and no session (the
- *     dashboard, `clawdcursor task`, curl) get a fresh stateless transport on
+ *     dashboard, curl) get a fresh stateless transport on
  *     an idle server: `server` when it is free, another from `createServer`
- *     while it is busy (a 45 s `task` call must not block a status poll).
+ *     while it is busy (a long tool call must not block a status poll).
  *
  * Previously ONE server was connected to a fresh transport per request. An SDK
  * client's GET stream (or any in-flight call) kept that server connected, so
