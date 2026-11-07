@@ -41,6 +41,10 @@ function fakeDesktop() {
     async typeText(text: string) { await d.keyPress('mod+v'); sent.push(`type ${text}`); },  // a paste: one input
     async mouseClick(x: number, y: number) { sent.push(`click ${x},${y}`); if (d.clickOpens) later(d.clickOpens); },
     async mouseUp() { sent.push('up'); },
+    async mouseMove(x: number, y: number) { sent.push(`move ${x},${y}`); },
+    async writeClipboard(t: string) { sent.push(`clip ${t}`); },
+    async evaluate(js: string) { sent.push(`js ${js}`); },
+    async switchTab(t: string) { sent.push(`tab ${t}`); return true; },
     async invokeElement(o: { name: string }) { sent.push(`invoke ${o.name}`); return { success: true }; },
     async focusWindow(q: Win) { if (d.focusLagMs) later(q, d.focusLagMs); else fg = q; return true; },
     // The Start-menu fallback: its own keys go to the Start menu, a different process.
@@ -178,6 +182,19 @@ describe('stop is a state (#294)', () => {
     await expect(d.focusWindow(NOTEPAD)).rejects.toThrow(/stopped by the user/);
     await d.mouseUp();
     expect(d.sent).toEqual(['up']);
+  });
+
+  // Audit 2026-11-05: after a stop the agent could still hover (menus open), write the clipboard, run page script and
+  // raise tabs. Putting the user's own clipboard back after a paste is not agent input and still runs.
+  it('a stop also refuses hover, clipboard writes, page script and tab switches; a clipboard restore still runs', async () => {
+    const d = fakeDesktop();
+    stopControl('pill');
+    await expect(d.mouseMove(5, 5)).rejects.toThrow(/stopped by the user/);
+    await expect(d.writeClipboard('agent text')).rejects.toThrow(/stopped by the user/);
+    await expect(d.evaluate('document.forms[0].submit()')).rejects.toThrow(/stopped by the user/);
+    await expect(d.switchTab('Bank')).rejects.toThrow(/stopped by the user/);
+    await unguarded(() => d.writeClipboard('the user clipboard'));
+    expect(d.sent).toEqual(['clip the user clipboard']);
   });
 
   it('survives a restart, and a resume from another process reaches this one (no in-process copy)', () => {
