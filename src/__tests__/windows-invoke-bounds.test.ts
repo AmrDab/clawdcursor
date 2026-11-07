@@ -110,3 +110,13 @@ describe('WindowsAdapter.scrollIntoView — UIA ScrollItemPattern through the br
     expect(await adapter.scrollIntoView({ name: 'Describe' })).toEqual({ success: false, error: 'bridge timeout' });
   });
 });
+
+describe('WindowsAdapter.invokeElement — the reason reaches the agent', () => {
+  it('carries the bridge error and a late invoke failure in data', async () => {
+    const adapter = new WindowsAdapter();
+    vi.spyOn(adapter, 'getActiveWindow').mockResolvedValue({ processId: 42 } as never);
+    reply = () => ({ success: false, error: 'No invoke/toggle/select pattern', lateInvokeError: 'Element not enabled', clickPoint: { x: 5, y: 6 } });
+    const res = await adapter.invokeElement({ name: 'X', processId: 3292 });
+    expect(res.data).toEqual({ error: 'No invoke/toggle/select pattern', lateInvokeError: 'Element not enabled' });
+  });
+});

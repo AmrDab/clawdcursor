@@ -862,7 +862,14 @@ export class WindowsAdapter implements PlatformAdapter {
         // ({success, action, value, method}), not nested under .data — but
         // every consumer reads res.data?.value. Surface it so a11y_get_value /
         // element_value_contains actually see the value (review 2026-06-11).
-        data: result?.data ?? (result?.value !== undefined ? { value: result.value } : undefined),
+        // The miss's reason and a late failure of an earlier invoke ride in data too: the tools read res.data.error /
+        // res.data.lateInvokeError to tell the agent WHY, instead of "not found or not actionable".
+        data: (result?.data || result?.value !== undefined || result?.error || result?.lateInvokeError) ? {
+          ...(result?.data ?? {}),
+          ...(result?.value !== undefined && !result?.data ? { value: result.value } : {}),
+          ...(typeof result?.error === 'string' ? { error: result.error } : {}),
+          ...(typeof result?.lateInvokeError === 'string' ? { lateInvokeError: result.lateInvokeError } : {}),
+        } : undefined,
       };
     } catch {
       return { success: false };
