@@ -16,6 +16,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from '../core/observability/logger';
+import { SLOW_STEP_MS, type StepTotal } from '../core/observability/steps';
 import { isProcessAlive } from './pidfile';
 
 export type CallClass = 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
@@ -116,7 +117,9 @@ export class SessionLog {
    *  A batch passes its `steps`: each is tallied by its own class instead of the batch's. */
   record(tool: string, action: string | undefined, ok: boolean, ms: number, err?: string,
     client?: { name?: string; version?: string },
-    extra?: { outcome?: Outcome; space?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }> }): CallClass {
+    extra?: { outcome?: Outcome; space?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }>;
+      /** Where the call's time went (steps.ts): name → count + total ms. Day log only, and only for a slow call. */
+      timing?: Record<string, StepTotal> }): CallClass {
     const cls = classifyCall(tool, action);
     const outcome = extra?.outcome ?? (ok ? 'ok' : 'error');
     this.current = null;
@@ -130,7 +133,8 @@ export class SessionLog {
 
     if (this.file) {
       // The day log gets the same line, so one file shows what ran, how long it took and how it ended.
-      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(err ? { err: redact(err) } : {}) });
+      const timing = ms >= SLOW_STEP_MS && extra?.timing && Object.keys(extra.timing).length ? { steps: extra.timing } : {};
+      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(err ? { err: redact(err) } : {}), ...timing });
       try {
         this.writeHeader(client);
         const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),

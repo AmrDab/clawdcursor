@@ -16,6 +16,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as readline from 'readline';
 import * as path from 'path';
 import { getPackageRoot } from '../paths';
+import { timeStep } from '../core/observability/steps';
 
 const BRIDGE_SCRIPT = path.join(getPackageRoot(), 'scripts', 'ps-bridge.ps1');
 const READY_TIMEOUT = 12000; // initial PS startup + assembly load
@@ -141,7 +142,12 @@ export class PSRunner {
     });
   }
 
-  async run(command: Record<string, unknown>): Promise<unknown> {
+  /** One bridge command; its time, queue wait and a bridge restart included, is a step of the tool call (steps.ts). */
+  run(command: Record<string, unknown>): Promise<unknown> {
+    return timeStep(`ps-bridge ${String(command.cmd ?? '?')}`, () => this.runUntimed(command));
+  }
+
+  private async runUntimed(command: Record<string, unknown>): Promise<unknown> {
     // Auto-start or auto-restart
     if (!this.startPromise || this.dead) {
       if (this.dead) console.log('[PSBridge] Restarting crashed bridge process...');
