@@ -21,6 +21,7 @@ import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from
 import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
+import { unguarded } from '../platform/pointer-guard';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -966,13 +967,13 @@ export function getSmartTools(): ToolDefinition[] {
         } catch (err) {
           // The keys were refused (a system dialog owns the keyboard): nothing was typed, so the text must not stay on the
           // user's clipboard.
-          if (prior !== null) await ctx.a11y.writeClipboard(prior).catch(() => {});
+          if (prior !== null) await unguarded(() => ctx.a11y.writeClipboard(prior!)).catch(() => {});
           throw err;
         }
         // Once the paste has landed, put the user's clipboard back, as type_text does (#243).
         if (prior !== null) {
           await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, text);
-          await ctx.a11y.writeClipboard(prior).catch(() => {});
+          await unguarded(() => ctx.a11y.writeClipboard(prior!)).catch(() => {});
         } else if (!viaKeys) {
           await new Promise(r => setTimeout(r, 100));
         }

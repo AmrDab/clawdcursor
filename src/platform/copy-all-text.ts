@@ -13,6 +13,7 @@
  * page text equals what was already on the clipboard".
  */
 import type { PlatformAdapter, UiElement, WindowInfo } from './types';
+import { unguarded } from './pointer-guard';
 
 const TERMINALS = /^(windowsterminal|wt|cmd|powershell|pwsh|conhost|openconsole|terminal|iterm2?|gnome-terminal(-server)?|konsole|xterm|uxterm|alacritty|kitty|wezterm(-gui)?|tilix|xfce4-terminal|terminator|lxterminal|mate-terminal|hyper|warp|tabby|foot|ghostty)(\.exe)?$/i;
 
@@ -158,7 +159,7 @@ export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextRe
       copied = await platform.readClipboard().catch(() => sentinel);
     } while (copied === sentinel && Date.now() < deadline);
   } finally {
-    await platform.writeClipboard(prior).catch(() => { /* best effort */ });
+    await unguarded(() => platform.writeClipboard(prior)).catch(() => { /* best effort */ });
   }
 
   if (!copied || copied === sentinel) {

@@ -68,10 +68,13 @@ const INPUT_METHODS = [
 /**
  * Acts that do not go through the window in front — by element (accessibility), on a window by handle, or in a page
  * (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
+ * mouseMove (hover opens menus), writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05).
+ * Putting the user's own clipboard back after a paste is not agent input: those restores run unguarded().
  */
 const STOP_METHODS = [
   'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
   'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'fillFormByLabels', 'focus', 'selectOption', 'pressKey',
+  'mouseMove', 'writeClipboard', 'evaluate', 'switchTab',
 ];
 
 /**
