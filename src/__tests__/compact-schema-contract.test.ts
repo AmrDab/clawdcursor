@@ -64,3 +64,28 @@ describe('compact schema ↔ delegate contract', () => {
     }
   });
 });
+
+// Audit 2026-11-05: invoke_element's own `action` enum (click|set-value|get-value…) was merged into the accessibility
+// compound's, so the schema advertised `accessibility {action:"click"}`, and the call failed with "that action lives on
+// the computer compound" — steering the agent to pixel clicks.
+describe('compact actions are real', () => {
+  it('every action a compound publishes has a route', () => {
+    const missing: string[] = [];
+    for (const c of getCompactSurface()) {
+      const routes = COMPOUND_ROUTE_INDEX[c.name];
+      if (!routes) continue;
+      for (const a of (c.parameters.action?.enum ?? []) as string[]) {
+        if (!routes.some(r => r.action === a)) missing.push(`${c.name}.${a}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
+  it('`accessibility click` points to invoke, not to pixel clicks', async () => {
+    const acc = getCompactSurface().find(t => t.name === 'accessibility')!;
+    const r = await acc.handler({ action: 'click', name: 'OK' }, {} as never);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/use action "invoke"/);
+    expect(r.text).not.toMatch(/computer/);
+  });
+});

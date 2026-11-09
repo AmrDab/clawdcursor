@@ -227,6 +227,9 @@ function buildCompoundSchema(
     const granular = getTool(route.delegate);
     if (!granular) continue; // Defensive: unknown delegate (shouldn't happen).
     for (const [pname, pdef] of Object.entries(granular.parameters)) {
+      // A delegate's own `action` (invoke_element's click|set-value|get-value…) is not the compound's: merged in, it
+      // published `accessibility {action:"click"}`, which no route serves (audit 2026-11-05).
+      if (pname === 'action') continue;
       // Apply arg remapping — the compound exposes the REMAPPED name,
       // dispatcher un-maps back to the granular name at runtime.
       const remappedFrom = route.argRemap
@@ -357,6 +360,9 @@ export const COMPOUND_ROUTE_INDEX: Record<string, ActionRoute[]> = {
   task: TASK_ACTIONS,
 };
 
+/** Names a model reaches for on `accessibility` that are spelled differently there (invoke_element's own verbs). */
+const BY_NAME: Record<string, string> = { click: 'invoke', 'set-value': 'set_value', 'get-value': 'get_value' };
+
 /** Which other compound(s) expose `action`, excluding the one already tried. */
 function compoundsForAction(action: string, exclude: string): string[] {
   const hits: string[] = [];
@@ -413,10 +419,14 @@ async function dispatchCompound(
   }
   const route = routes.find(r => r.action === actionName);
   if (!route) {
+    // "click" on accessibility means invoke by name, not "go click pixels on computer".
+    const meant = compoundName === 'accessibility' ? BY_NAME[actionName] : undefined;
     const elsewhere = compoundsForAction(actionName, compoundName);
-    const hint = elsewhere.length
-      ? ` — that action lives on the "${elsewhere.join('"/"')}" compound; call it there.`
-      : '';
+    const hint = meant
+      ? ` — to act on an element by name use action "${meant}".`
+      : elsewhere.length
+        ? ` — that action lives on the "${elsewhere.join('"/"')}" compound; call it there.`
+        : '';
     return {
       text: `${compoundName}: unknown action "${actionName}"${hint} Valid actions here: ${actionCatalog(routes)}`,
       isError: true,
@@ -567,7 +577,6 @@ export function getCompactTools(): ToolDefinition[] {
         'START HERE to see and drive a window: the OS accessibility tree — read element names, find by name/role, invoke, toggle, expand/collapse, set value, select an option, query state. ' +
         `Pick an action: ${actionCatalog(ACCESSIBILITY_ACTIONS)}. ` +
         'Always preferred over `computer.click(x,y)` when the target has a name — more reliable across DPI, window resize, layout shifts. ' +
-        '`click`, `set-value` and `get-value` are aliases of `invoke`, `set_value` and `get_value`. ' +
         '`read_tree` / `find` return one line per element — [Role] "name" @x,y w×h (SCREEN coordinates: click them with `computer click` space:"screen"), plus value= when there is one; page past "+N more" with offset. ' +
         '`invoke`, `set_value`, `toggle` and `select` change the app (pressing "Delete" deletes); a destructive target name (Send, Delete, Pay) needs the user\'s confirmation. ' +
         'For sparse/ambiguous UIs: `compile_ui` fuses a11y+OCR into one ranked map of elements with stable ids; `find_button`/`find_field` locate a target semantically and return an {element_id, snapshot_id} you pass straight to `invoke`/`set_value` (survives layout shifts, no coordinates).',
