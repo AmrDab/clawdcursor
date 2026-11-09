@@ -799,6 +799,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const data: Record<string, unknown> = {};
       if (result?.value !== undefined) data.value = result.value;
       if (result?.toggleState !== undefined) data.toggleState = result.toggleState;
+      if (result?.toggleChanged !== undefined) data.toggleChanged = result.toggleChanged;
       // e.g. "exists but is not visible on screen" — say why, not just "missed".
       if (result?.success !== true && typeof result?.error === 'string') data.error = result.error;
       return {

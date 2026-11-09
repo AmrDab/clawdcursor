@@ -231,6 +231,11 @@ export function getA11yDepthTools(): ToolDefinition[] {
         });
         if (!res.success) return { text: `a11y_toggle failed for "${name}".`, isError: true };
         const state = res.data?.toggleState ?? 'unknown';
+        // The bridges read the state back until it changes; if it never did, the new state was not seen and the old one
+        // must not be reported as the result.
+        if (res.data?.toggleChanged === false) {
+          return { text: `Toggled "${name}" but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.` };
+        }
         return { text: `Toggled "${name}" → ${state}.` };
       },
     },

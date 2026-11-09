@@ -785,15 +785,21 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         if let g = elementRect(el) { r["bounds"] = g.rect }
         return r
     case "toggle":
+        let beforeValue = str(copyAttr(el, "AXValue").value)
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
         if !p.done { return miss(action, "the element does not support toggle (no AXPress; AXError \(p.code))", element: el) }
         if p.pending { return pressed(action, method: "AXPress", pending: true, extra: ["toggleState": "unknown"]) }
-        Thread.sleep(forTimeInterval: 0.05)
-        let after = str(copyAttr(el, "AXValue").value)
+        // Apps update AXValue after the press returns: read it back until it differs from before, or ~0.5 s.
+        var after = beforeValue
+        for _ in 0..<10 {
+            Thread.sleep(forTimeInterval: 0.05)
+            after = str(copyAttr(el, "AXValue").value)
+            if after != beforeValue { break }
+        }
         // AXValue 2 is a mixed checkbox: it was reported "On".
         let state = after == "0" ? "Off" : after == "1" ? "On" : after == "2" ? "Indeterminate" : "unknown"
-        return ["ok": true, "success": true, "action": action, "method": "AXPress", "data": ["toggleState": state]]
+        return ["ok": true, "success": true, "action": action, "method": "AXPress", "data": ["toggleState": state, "toggleChanged": after != beforeValue]]
     case "select":
         if let row = selectableRowAbove(el) { return selectRow(row, action: action) }
         if settable(el, "AXSelected"), AXUIElementSetAttributeValue(el, "AXSelected" as CFString, kCFBooleanTrue) == .success {

@@ -84,6 +84,14 @@ describe('executeBatch — the user stops clawdcursor mid-batch (#294)', () => {
     expect(tools.key_press.handler).not.toHaveBeenCalled();
     expect(r.steps[0]).toMatchObject({ status: 'blocked', text: STOPPED_TEXT });
   });
+
+  it('the stop is reported before a safety confirm on the same step', async () => {
+    tools.set_clipboard = okTool('set_clipboard');
+    safetyFor = () => ({ text: 'safety confirm: needs confirmation', isError: true });
+    stopControl('pill');
+    const r = await executeBatch([{ name: 'set_clipboard', arguments: { text: 'x' } }], ctx);
+    expect(r.steps[0]).toMatchObject({ status: 'blocked', text: STOPPED_TEXT });
+  });
 });
 
 describe('executeBatch — happy path', () => {

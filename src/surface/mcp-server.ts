@@ -27,6 +27,7 @@ import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { isStopped, STOPPED_TEXT } from '../core/control';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
@@ -337,6 +338,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             }],
             isError: true,
           };
+        }
+        // The user's stop comes right after consent and before every other refusal (safety confirm, screen binding, own UI):
+        // an agent told "no screenshot taken" or "confirm first" never learns the user took control back (control.ts).
+        if (isStopped() && !isStopSafeCall(tool.name, callAction)) {
+          const label = callAction ? `${tool.name} {action:"${callAction}"}` : tool.name;
+          logger.warn('safety.refused', { tool: tool.name, action: callAction, guard: 'stopped', reason: STOPPED_TEXT });
+          sessionLog.record(tool.name, callAction, false, 0, STOPPED_TEXT, clientInfo(), { outcome: 'refused' });
+          return { content: [{ type: 'text', text: withOutcome(`${label}: ${STOPPED_TEXT}`, true) }], isError: true };
         }
         // Pass the holder so el_NN refs resolve to their element label for
         // the destructive-label rule (Send/Delete/Pay) on the MCP route too.

@@ -744,17 +744,24 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
     elif action == 'toggle':
         # Only something that can be ticked: the click fallback in do_named_action pressed any button and called it toggled.
         role = (safe(lambda: acc.get_role_name(), '') or '').lower()
-        if checked_state(acc, role) is None:
+        before = checked_state(acc, role)
+        if before is None:
             out["error"] = "not a checkbox, radio, switch or toggle button"
         else:
             used = do_named_action(acc, 'toggle')
             if used is None:
                 out["error"] = "element exposes no Action interface"
             else:
-                time.sleep(0.15)   # Chromium updates the state after the action returns: read it back, don't guess
+                # Toolkits (GTK, Chromium) update the state set a moment after the action: read it back until it differs
+                # from before the toggle, or ~0.5 s. toggleChanged=False means the new state was never seen.
+                deadline = time.monotonic() + 0.5
                 tick = checked_state(acc, role)
+                while tick == before and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                    tick = checked_state(acc, role)
                 out["success"], out["method"] = True, used
                 out["toggleState"] = "Indeterminate" if tick == 'mixed' else ("On" if tick else "Off")
+                out["toggleChanged"] = tick != before
 
     elif action == 'select':
         parent = safe(lambda: acc.get_parent())

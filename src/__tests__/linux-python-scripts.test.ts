@@ -130,6 +130,12 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.button_pressed_again).toBe(false);
   });
 
+  it('invoke toggle waits for a state set that updates late, and says when it never changed', () => {
+    expect(out.toggle).toMatchObject({ toggleChanged: true });
+    expect(out.toggle_late).toMatchObject({ success: true, toggleState: 'On', toggleChanged: true });
+    expect(out.toggle_stuck).toMatchObject({ success: true, toggleState: 'Off', toggleChanged: false });
+  });
+
   it('invoke focus grabs focus via Component', () => {
     expect(out.focus.success).toBe(true);
     expect(out.focus_state).toBe(true);

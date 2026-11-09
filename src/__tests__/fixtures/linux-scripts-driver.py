@@ -13,6 +13,7 @@ import importlib.util
 import json
 import os
 import sys
+import threading
 import types
 
 SCRIPTS = sys.argv[1]
@@ -123,7 +124,11 @@ class Action:
 
     def do_action(self, i):
         self.done.append(self.names[i])
-        if self.names[i] == 'toggle' or self.acc.role == 'check box':
+        if self.acc.lag is not None:
+            # A toolkit that updates its state set after the action returns (Chromium); lag 0 = never updates.
+            if self.acc.lag:
+                threading.Timer(self.acc.lag, lambda: self.acc.states.symmetric_difference_update({StateType.CHECKED})).start()
+        elif self.names[i] == 'toggle' or self.acc.role == 'check box':
             self.acc.states ^= {StateType.CHECKED}
         if self.names[i] in ('expand', 'collapse'):
             self.acc.states ^= {StateType.EXPANDED}
@@ -177,8 +182,9 @@ class Selection:
 class Acc:
     def __init__(self, name, role, states=(StateType.ENABLED, StateType.SENSITIVE, StateType.VISIBLE, StateType.SHOWING),
                  screen=(10, 20, 30, 40), window=(0, 0, 0, 0), actions=None, children=(), pid=4242,
-                 text=None, editable=False, value=None, selection=False):
+                 text=None, editable=False, value=None, selection=False, lag=None):
         self.name, self.role, self.states = name, role, set(states)
+        self.lag = lag
         self.screen, self.window = screen, window
         self.action = Action(self, actions) if actions is not None else None
         self.children = list(children)
@@ -214,6 +220,8 @@ class Acc:
 
 seven = Acc('7', 'push button', actions=['press', 'click'])
 agree = Acc('Agree', 'check box', actions=['toggle'])
+late = Acc('Late', 'check box', actions=['toggle'], lag=0.2)
+stuck = Acc('Stuck', 'check box', actions=['toggle'], lag=0)
 name_field = Acc('Name', 'text', text='old', editable=True)
 display = Acc('Display', 'label', text='42')
 canvas = Acc('canvas', 'drawing area', actions=None)
@@ -228,7 +236,7 @@ node = Acc('Node', 'tree item', states=(StateType.ENABLED, StateType.SENSITIVE, 
 # GTK4 on X11: SCREEN extents are 0,0 with the real size; WINDOW has the position.
 gtk4 = Acc('Gtk4', 'push button', screen=(0, 0, 64, 44), window=(16, 349, 64, 44))
 frame = Acc('Calculator', 'frame', screen=(100, 200, 800, 600),
-            children=[seven, agree, name_field, display, canvas, tabs, empty_state, sensitive_only, rel, node, gtk4])
+            children=[seven, agree, late, stuck, name_field, display, canvas, tabs, empty_state, sensitive_only, rel, node, gtk4])
 calc_app = Acc('gnome-calculator', 'application', children=[frame], pid=4242)
 # Another app whose (inactive) window still holds FOCUSED on a widget.
 other_app = Acc('mousepad', 'application', pid=5555, children=[
@@ -283,6 +291,8 @@ seven_done_before = list(seven.action.done)
 OUT['toggle_button'] = bridge.cmd_invoke('7', None, 4242, 'toggle', None)
 OUT['expand_button'] = bridge.cmd_invoke('7', None, 4242, 'expand', None)
 OUT['button_pressed_again'] = seven.action.done != seven_done_before
+OUT['toggle_late'] = bridge.cmd_invoke('Late', None, 4242, 'toggle', None)
+OUT['toggle_stuck'] = bridge.cmd_invoke('Stuck', None, 4242, 'toggle', None)
 OUT['focus'] = bridge.cmd_invoke('Name', None, 4242, 'focus', None)
 OUT['focus_state'] = StateType.FOCUSED in name_field.states
 OUT['set_value'] = bridge.cmd_invoke('Name', None, 4242, 'set-value', 'Ada')
