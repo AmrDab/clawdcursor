@@ -77,6 +77,9 @@ export class LinuxAdapter implements PlatformAdapter {
 
   private screenSize: ScreenSize | null = null;
   private binaryCache = new Map<string, boolean>();
+  /** Why the last find came back short, and whether the last tree read was cut (parity with Windows / macOS). */
+  lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastTreeTruncated = false;
   private lastCursor: { x: number; y: number } | null = null;
   /**
    * Wayland input backend. On X11 this stays `kind:'none'` and all input
@@ -637,6 +640,7 @@ export class LinuxAdapter implements PlatformAdapter {
   // responses as before — zero regression on boxes without AT-SPI.
 
   async getUiTree(processId?: number): Promise<UiElement[]> {
+    this.lastTreeTruncated = false;
     if (!this.atspiAvailable) return [];
     try {
       // Default to the active window when the caller omits a pid, so an
@@ -646,7 +650,8 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { elements?: any[] };
+      const data = JSON.parse(stdout) as { elements?: any[]; truncated?: boolean };
+      this.lastTreeTruncated = data.truncated === true;
       const raw = Array.isArray(data.elements) ? data.elements : [];
       return this.offsetWindowRelative(raw, raw.map(this.normalizeAtspiElement));
     } catch {
@@ -655,10 +660,12 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]> {
+    this.lastFindError = null;
     if (!this.atspiAvailable) return [];
     try {
       const args = ['--cmd', 'find'];
-      if (query.name) args.push('--name', query.name);
+      // `--name=…`: a name starting with '-' ("--Select--") would otherwise be read by argparse as an option.
+      if (query.name) args.push(`--name=${query.name}`);
       // Without a pid the bridge guesses the app (focused-descendant
       // heuristic, else the first app on the bus) and searched the wrong
       // one. Scope to the foreground window like Windows / macOS do.
@@ -679,7 +686,10 @@ export class LinuxAdapter implements PlatformAdapter {
         });
       }
       return this.offsetWindowRelative(raw, raw.map(this.normalizeAtspiElement));
-    } catch {
+    } catch (err) {
+      // A bridge that failed or timed out is not "no match" — say which (Windows does the same).
+      this.lastFindError = (err as { killed?: boolean })?.killed || /timed? ?out|ETIMEDOUT/i.test(String((err as Error)?.message ?? err))
+        ? 'timeout' : 'error';
       return [];
     }
   }
@@ -699,7 +709,7 @@ export class LinuxAdapter implements PlatformAdapter {
     const others = (await this.listWindows().catch(() => [] as WindowInfo[]))
       .filter(w => w.processId && w.title === fg.title && w.handle !== fg.handle)
       .map(w => w.processId);
-    return ['--window-title', fg.title, ...(others.length ? ['--exclude-pids', [...new Set(others)].join(',')] : [])];
+    return [`--window-title=${fg.title}`, ...(others.length ? ['--exclude-pids', [...new Set(others)].join(',')] : [])];
   }
 
   /**
@@ -775,10 +785,11 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!this.atspiAvailable) return { success: false };
     try {
       const args = ['--cmd', 'invoke', '--action', query.action ?? 'click'];
-      if (query.name) args.push('--name', query.name);
-      if (query.controlType) args.push('--role', atspiRoleQuery(query.controlType));
+      // `--opt=…` form: a name or value starting with '-' must not be read as an option.
+      if (query.name) args.push(`--name=${query.name}`);
+      if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
       args.push(...await this.a11yScopeArgs(query.processId));
-      if (query.value !== undefined) args.push('--value', query.value);
+      if (query.value !== undefined) args.push(`--value=${query.value}`);
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
@@ -808,7 +819,7 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!this.atspiAvailable) return { success: false, error: 'AT-SPI is not available' };
     if (!query.name?.trim()) return { success: false, error: 'scrolling needs the element\'s name on this platform' };
     try {
-      const args = ['--cmd', 'scroll-into-view', '--name', query.name];
+      const args = ['--cmd', 'scroll-into-view', `--name=${query.name}`];
       // Where the element was last seen picks the nearest of several of the same name; the active window's origin puts
       // window-relative extents in the same (screen) space.
       if (query.bounds) args.push('--bounds', [query.bounds.x, query.bounds.y, query.bounds.width, query.bounds.height].map(Math.round).join(','));

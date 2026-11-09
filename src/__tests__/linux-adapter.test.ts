@@ -392,7 +392,7 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
     const args = bridgeCalls()[0];
     expect(args.slice(0, 2)).toEqual(['--cmd', 'invoke']);
     expect(args[args.indexOf('--action') + 1]).toBe('click');
-    expect(args[args.indexOf('--name') + 1]).toBe('7');
+    expect(args).toContain('--name=7');
     expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
   });
 
@@ -403,7 +403,7 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
     await adapter.init();
     await adapter.invokeElement({ name: 'Name', action: 'set-value', value: 'Ada' });
     let args = bridgeCalls()[0];
-    expect(args[args.indexOf('--value') + 1]).toBe('Ada');
+    expect(args).toContain('--value=Ada');
 
     reply = { success: true, action: 'get-value', value: '42' };
     const got = await adapter.invokeElement({ name: 'Display', action: 'get-value' });
@@ -443,7 +443,7 @@ describe('scrollIntoView drives the AT-SPI bridge (Component.scroll_to)', () => 
     expect(res).toEqual({ success: true, method: 'Component.scroll_to', bounds: { x: 10, y: 400, width: 300, height: 80 } });
     const args = bridgeCalls()[0];
     expect(args.slice(0, 2)).toEqual(['--cmd', 'scroll-into-view']);
-    expect(args[args.indexOf('--name') + 1]).toBe('Describe');
+    expect(args).toContain('--name=Describe');
     expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
   });
 
@@ -585,7 +585,7 @@ describe('B4/B5 — a11y calls are scoped to the foreground window, even without
     await adapter.getFocusedElement();
     for (const args of bridgeCalls()) {
       expect(args).not.toContain('--process-id');
-      expect(args[args.indexOf('--window-title') + 1]).toBe('xcalc');
+      expect(args).toContain('--window-title=xcalc');
     }
     expect(bridgeCalls()).toHaveLength(4);
   });
@@ -739,7 +739,43 @@ describe('R2 — a pid-less window whose title another app also uses is never sc
     await adapter.init();
     await adapter.findElements({ name: '=' });
     const args = bridgeCalls()[0];
-    expect(args[args.indexOf('--window-title') + 1]).toBe('Calculator');
+    expect(args).toContain('--window-title=Calculator');
     expect(args[args.indexOf('--exclude-pids') + 1]).toBe('4242');
+  });
+});
+
+// Eval 2026-11-05: on Linux every bridge failure read as "no match", a depth-cut tree as complete, and a name starting
+// with '-' ("--Select--") made argparse exit.
+describe('R3 — the bridge says why a read came back short', () => {
+  it('a find whose bridge failed or timed out says so, not "nothing found"', async () => {
+    const base = defaultExec();
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    h.exec = (cmd, args) => { if (cmd === 'python3' && args[1] === '--cmd') throw new Error('python3 exited 1'); return base(cmd, args); };
+    expect(await adapter.findElements({ name: 'Save' })).toEqual([]);
+    expect(adapter.lastFindError).toBe('error');
+    h.exec = (cmd, args) => { if (cmd === 'python3' && args[1] === '--cmd') throw Object.assign(new Error('Command failed'), { killed: true }); return base(cmd, args); };
+    await adapter.findElements({ name: 'Save' });
+    expect(adapter.lastFindError).toBe('timeout');
+    h.exec = base;
+    await adapter.findElements({ name: 'Save' });
+    expect(adapter.lastFindError).toBeNull();
+  });
+
+  it('a tree the bridge cut is marked truncated', async () => {
+    h.exec = defaultExec(() => ({ elements: [{ name: 'Form', controlType: 'section', bounds: { x: 1, y: 1, width: 10, height: 10 } }], truncated: true }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.getUiTree(4242);
+    expect(adapter.lastTreeTruncated).toBe(true);
+  });
+
+  it('a name starting with "-" is passed as --name=…, never as a separate argument', async () => {
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.findElements({ name: '--Select--' });
+    const args = bridgeCalls().at(-1)!;
+    expect(args).toContain('--name=--Select--');
+    expect(args).not.toContain('--name');
   });
 });

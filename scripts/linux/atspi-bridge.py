@@ -71,7 +71,8 @@ except Exception as exc:
 
 # ── Helpers ────────────────────────────────────────────────────────
 
-MAX_TREE_DEPTH = 12
+# Chromium/Electron pages sit 15-30 levels deep; the node cap bounds the cost.
+MAX_TREE_DEPTH = 40
 MAX_TREE_NODES = 800   # stop after this many elements to bound cost
 INTERACTIVE_ROLES = {
     # Roles whose state/value the agent is most likely to care about.
@@ -251,10 +252,12 @@ def element_bounds(acc: Any):
     return (0, 0, 0, 0), 'screen'
 
 
-def walk(acc: Any, out: list, depth: int = 0) -> None:
-    """Depth-first flatten with caps on depth + total node count."""
+def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> None:
+    """Depth-first flatten with caps on depth + total node count. `cut[0]` is set when the depth cap drops a subtree."""
     if acc is None: return
-    if depth > MAX_TREE_DEPTH: return
+    if depth > MAX_TREE_DEPTH:
+        if cut is not None: cut[0] = True
+        return
     if len(out) > MAX_TREE_NODES: return
 
     node = node_to_dict(acc)
@@ -270,7 +273,7 @@ def walk(acc: Any, out: list, depth: int = 0) -> None:
             child = acc.get_child_at_index(i)
         except Exception:
             continue
-        walk(child, out, depth + 1)
+        walk(child, out, depth + 1, cut)
         if len(out) > MAX_TREE_NODES: return
 
 
@@ -371,14 +374,16 @@ def focused_element(process_id: Optional[int] = None,
             apps = [active] + [a for a in apps if a is not active]
     for app in apps:
         for top in toplevels_active_first(app):
-            hit = _find_focused(top, 1)
+            hit = _find_focused(top, 1, [0])
             if hit is not None:
                 return node_to_dict(hit)
     return None
 
 
-def _find_focused(acc: Any, depth: int) -> Optional[Any]:
-    if acc is None or depth > 12: return None
+def _find_focused(acc: Any, depth: int, seen: list) -> Optional[Any]:
+    """`seen[0]` counts nodes visited in this window, so a deep page cannot turn one focus read into thousands of calls."""
+    if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES: return None
+    seen[0] += 1
     try:
         ss = acc.get_state_set()
         if ss is not None and ss.contains(Atspi.StateType.FOCUSED):
@@ -390,7 +395,7 @@ def _find_focused(acc: Any, depth: int) -> Optional[Any]:
     except Exception:
         return None
     for i in range(n):
-        hit = _find_focused(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
+        hit = _find_focused(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1, seen)
         if hit is not None:
             return hit
     return None
@@ -457,7 +462,7 @@ def cmd_page_text(process_id: Optional[int], window_title: Optional[str] = None,
     if not tops:
         return {"error": "the active application has no window"}
     top = tops[0]
-    focused = _find_focused(top, 1)
+    focused = _find_focused(top, 1, [0])
     # The document holding the focus. A text box on a web page is part of the page: the page is what is read.
     doc, a, hops = None, focused, 0
     while a is not None and hops < 60:
@@ -495,16 +500,17 @@ def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
                  exclude_pids: Optional[set] = None) -> dict:
     app = active_application(process_id, window_title, exclude_pids)
     out: list = []
+    cut = [False]
     if app is not None:
         root = node_to_dict(app)
         if root is not None:
             out.append(root)
         # The active window (a dialog over its main window) is walked first.
         for top in toplevels_active_first(app):
-            walk(top, out, 1)
+            walk(top, out, 1, cut)
             if len(out) > MAX_TREE_NODES:
                 break
-    truncated = len(out) > MAX_TREE_NODES
+    truncated = len(out) > MAX_TREE_NODES or cut[0]
     # Useful elements first: on-screen ones in document order, then the hidden
     # rest (closed menus and hidden toolbars report 0x0 and used to fill the
     # top of the list). Nameless, valueless rows carry nothing to act on —
@@ -585,11 +591,13 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
     roles = role_alternatives(role)
     exact: list = []
     partial: list = []
+    seen = [0]  # nodes visited, not matches: a name that matches nothing must not walk a whole web page
 
     def visit(acc: Any, depth: int) -> bool:
         """True once the best possible hit (exact + showing) is found."""
-        if acc is None or depth > MAX_TREE_DEPTH or len(partial) > MAX_TREE_NODES:
+        if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES:
             return False
+        seen[0] += 1
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
         r = (safe(lambda: acc.get_role_name(), '') or '').lower()
         if (roles is None or role_matches(roles, r)) and name_l is not None:

@@ -101,6 +101,17 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.click_done).toEqual(['click']);
   });
 
+  // Eval 2026-11-05: Chrome's form controls sat below the old 12-level cap — read_tree omitted them and said nothing.
+  it('the tree reaches controls 30 levels deep, and a walk the depth cap cuts says so', () => {
+    expect(out.deep_found).toBe(true);
+    expect(out.deep_cut).toBe(false);
+    expect(out.too_deep_cut).toBe(true);
+  });
+
+  it('find stops after MAX_TREE_NODES nodes visited, matching or not (a deep page must not cost thousands of calls)', () => {
+    expect(out.wide_capped).toBe(true);
+  });
+
   it('invoke toggle reports the new state', () => {
     expect(out.toggle).toMatchObject({ success: true, toggleState: 'On' });
   });

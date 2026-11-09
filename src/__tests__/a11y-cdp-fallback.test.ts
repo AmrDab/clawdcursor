@@ -121,6 +121,21 @@ describe('find_element — CDP DOM fallback', () => {
     expect(result.text).toContain('Submit Order');
   });
 
+  // Review of #315: a bridge failure ('error', set on Windows/macOS/Linux) must not pre-empt the browser DOM fallback.
+  it('still queries CDP when the accessibility bridge failed, and says FAILED only when CDP finds nothing too', async () => {
+    const cdpEvaluate = vi.fn().mockResolvedValue([
+      { name: 'Submit Order', controlType: 'web.button', bounds: { x: 200, y: 400, width: 80, height: 30 } },
+    ]);
+    const ctx = makeCtx({ processName: 'msedge', platformFindElements: [], cdpConnected: true, cdpPageEvaluate: cdpEvaluate });
+    ctx.platform.lastFindError = 'error';
+    const hit = await findElement.handler({ name: 'Submit' }, ctx);
+    expect(hit.text).toContain('Submit Order');
+    cdpEvaluate.mockResolvedValue([]);
+    const miss = await findElement.handler({ name: 'Submit' }, ctx);
+    expect(miss.isError).toBe(true);
+    expect(miss.text).toMatch(/FAILED/);
+  });
+
   it('does NOT query CDP when active window is not a browser', async () => {
     const cdpEvaluate = vi.fn().mockResolvedValue([]);
     const ctx = makeCtx({
