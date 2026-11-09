@@ -533,8 +533,10 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
       console.error('Subsystem init failed:', err?.message);
     });
     if (toolCtx.cdp) {
-      toolCtx.cdp.connect().then(() => {
-        console.log(`   ${e('🌐', '[NET]')} CDP connected to browser`);
+      // connect() resolves false on failure (it logs the reason itself): only true is a connection.
+      toolCtx.cdp.connect().then((ok: boolean) => {
+        if (ok) console.log(`   ${e('🌐', '[NET]')} CDP connected to browser`);
+        else console.log(`   ${e('ℹ️', 'i')} CDP: no browser detected (will retry when web tools are called)`);
       }).catch(() => {
         console.log(`   ${e('ℹ️', 'i')} CDP: no browser detected (will retry when web tools are called)`);
       });
