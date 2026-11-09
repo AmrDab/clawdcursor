@@ -103,8 +103,11 @@ export class PSRunner {
         this.current = null;
         if (call) {
           clearTimeout(call.timer);
-          if (data.error) call.reject(new Error(data.error));
-          else            call.resolve(data);
+          // Only a bridge-level failure ({error} alone: unknown command, a throw) rejects. A command that ran and
+          // failed answers {success:false, error, ...} and resolves: its reason and fallback data (an invoke miss
+          // carries the element's bounds for a click) were thrown away with the rejection.
+          if (data.error && data.success === undefined) call.reject(new Error(data.error));
+          else call.resolve(data);
         }
         this._drain();
       });
