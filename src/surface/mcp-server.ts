@@ -98,6 +98,8 @@ export interface McpServerHandle {
   toolCount: number;
   /** Snapshot of the tools that were registered (in registration order). */
   tools: ToolDefinition[];
+  /** This server's session record: the stdio entry closes it with the exit reason. */
+  sessionLog: SessionLog;
 }
 
 /**
@@ -375,6 +377,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const started = Date.now();
         let result;
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
+        sessionLog.running(tool.name, action, clientInfo());
         try {
           result = await tool.handler(params, ctx);
         } catch (err) {
@@ -427,7 +430,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
 
   stripRootSchemaDialect(server);
 
-  return { server, toolCount: tools.length, tools };
+  return { server, toolCount: tools.length, tools, sessionLog };
 }
 
 /**

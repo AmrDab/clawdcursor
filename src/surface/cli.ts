@@ -24,6 +24,10 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
     return;
   }
   console.error(`Uncaught exception: ${err?.stack ?? err}`);
+  try {
+    const { logger } = require('../core/observability/logger');
+    logger.error('crash', { msg: err?.message ?? String(err), stack: err?.stack });
+  } catch { /* stderr above has it */ }
   process.exit(1);
 });
 
@@ -453,7 +457,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
 
   // Starting the daemon is the user's own act: it gives control back after a stop.
   if (isStopped()) {
-    resumeControl();
+    resumeControl('daemon_start');
     console.log(`   ${e('▶', '>')} An earlier stop was cleared: starting clawdcursor gives it control again.`);
   }
 
@@ -916,7 +920,7 @@ program
     const answer = opts.end ? 'end' : 'resume';
     const gaveBack = !opts.end && isStopped();
     if (gaveBack) {
-      resumeControl();
+      resumeControl('cli');
       console.log(`${e('▶', '>')} control given back: clawdcursor may act again`);
     }
     if (!(await isClawdInstance(port))) {
@@ -1455,9 +1459,13 @@ program
     // v0.9 PR7: server construction is shared with the HTTP transport in
     // src/mcp-server.ts — same registry, same safety gate, same param shape.
     const { createMcpServer, startMcpStdio } = await import('./mcp-server');
-    const { server, toolCount } = await createMcpServer({ compact: opts.compact, ctx });
+    const { server, toolCount, sessionLog } = await createMcpServer({ compact: opts.compact, ctx });
     await startMcpStdio(server);
     console.log(`clawdcursor MCP ready — ${toolCount} tools registered`);
+    const { logger } = await import('../core/observability/logger');
+    logger.info('mcp.start', { version: VERSION, pid: process.pid, hostPid: process.ppid, surface: mode, readyMs: Math.round(process.uptime() * 1000) });
+    const { reportUncleanExits } = await import('./session-log');
+    reportUncleanExits();
 
     ctx.ensureInitialized().catch((err: any) => {
       console.error('Subsystem init failed:', err?.message);
@@ -1470,13 +1478,14 @@ program
     // 'end' handler causes SIGSEGV on Linux where libuv is still unwinding
     // the read handle.
     let mcpExiting = false;
-    const releaseMcp = () => {
+    const releaseMcp = (reason: string) => {
       if (mcpExiting) return;
       mcpExiting = true;
+      sessionLog.end(reason);                      // synchronous: in the log before the exit
       setImmediate(() => process.exit(0));         // deferred — lets libuv unwind cleanly
     };
-    process.on('SIGINT', releaseMcp);
-    process.on('SIGTERM', releaseMcp);
+    process.on('SIGINT', () => releaseMcp('SIGINT (Ctrl+C or the host stopping the server)'));
+    process.on('SIGTERM', () => releaseMcp('SIGTERM (the host or a kill stopped the server)'));
 
     // On-screen control banner for EXTERNAL agents driving over stdio. The
     // mcp-server tool wrapper touches it on every consequential call; a
@@ -1508,9 +1517,9 @@ program
     // but its close path is asynchronous and host-dependent; treating EOF
     // as a hard exit signal here makes the orphan-reaping behavior
     // deterministic and the same on every platform.
-    process.stdin.on('end', releaseMcp);
-    process.stdin.on('close', releaseMcp);
-    process.stdin.on('error', releaseMcp);
+    process.stdin.on('end', () => releaseMcp('the host closed the connection (stdin ended)'));
+    process.stdin.on('close', () => releaseMcp('the host closed the connection (stdin closed)'));
+    process.stdin.on('error', (err) => releaseMcp(`stdin error: ${err?.message ?? err}`));
 
     // Parent-death watchdog — the DETERMINISTIC orphan reaper.
     //
@@ -1525,7 +1534,7 @@ program
     const parentPid = process.ppid;
     if (parentPid && parentPid > 1) {
       setInterval(() => {
-        if (!isProcessAlive(parentPid)) releaseMcp();
+        if (!isProcessAlive(parentPid)) releaseMcp(`the host process (pid ${parentPid}) is gone`);
       }, 2000).unref();
     }
   });

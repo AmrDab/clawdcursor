@@ -39,6 +39,7 @@ import { controlBanner } from './banner';
 import { foreignOverlayState, untilNoForeignPause } from './overlay-state';
 import { isStopped, resumeControl } from './control';
 import { unguarded } from '../platform/pointer-guard';
+import { logger } from './observability/logger';
 
 export type PauseAnswer = 'resume' | 'end' | 'reply' | 'choice';
 export type PauseOutcome = 'resumed' | 'resumed_unverified' | 'ended' | 'timeout' | 'replied';
@@ -357,7 +358,9 @@ class PauseGate {
     this.pending = null;
     if (p.key && this.waiting.delete(p.key)) this.recent.set(p.key, { result, at: Date.now() });
     // The user's own Resume (never an agent's, never a detected done_when) gives control back after a stop (control.ts).
-    if (result.outcome === 'resumed' && !result.detected && isStopped()) resumeControl();
+    // 'ended' is the user's End task (or the task being aborted); the reply text is never logged.
+    logger.info('pause.end', { outcome: result.outcome, ...(result.detected ? { detected: true } : {}) });
+    if (result.outcome === 'resumed' && !result.detected && isStopped()) resumeControl('pause_resume');
     controlBanner.showRunning();
     p.settle(result);
   }

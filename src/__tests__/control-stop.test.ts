@@ -214,7 +214,7 @@ describe('stop is a state (#294)', () => {
     expect(refuse('accessibility', 'read_tree')).toBe(STOPPED_TEXT);
     expect(refuse('system', 'pause_for_user')).toBeNull();
     expect(refuse('system', 'report')).toBeNull();
-    resumeControl();
+    resumeControl("test");
     expect(refuse('computer', 'key')).toBeNull();
   });
 
