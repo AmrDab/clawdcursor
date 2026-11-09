@@ -33,6 +33,7 @@ import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
+import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { classifyResult, renderResultLine, isJsonText, isActingAction } from '../core/result-codes';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
 
@@ -205,6 +206,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // Local record of this session (tool / action / blind-vs-vision / ok — no
   // content). Feeds `clawdcursor report` and the vision-streak nudge below.
   const sessionLog = new SessionLog({ version: VERSION, surface: compact ? 'compact' : 'granular' });
+  watchChildProcesses();  // each child process a call starts is one of its steps (steps.ts)
   const VISION_STREAK_HINT = (n: number) => compact
     ? `[clawdcursor] ${n} screenshots in a row with no text read. Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
     : `[clawdcursor] ${n} screenshots in a row with no text read. Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
@@ -375,22 +377,21 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action), isStopSafeCall(tool.name, action));
         if (ownUi) return refuse('own_ui', ownUi);
         const started = Date.now();
-        let result;
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
-        try {
-          result = await tool.handler(params, ctx);
-        } catch (err) {
+        const run = await withSteps(tool.name, action, () => tool.handler(params, ctx));  // where the call's time went
+        releasePill();
+        if (!run.ok) {
           // A handler throw (e.g. projected tools' toolContextToAgent when the
           // platform adapter failed to init) must NOT propagate to the MCP SDK
           // — in stdio mode an unhandled rejection can corrupt the JSON-RPC
           // stream. Convert to a clean isError result.
+          const err = run.error;
           const msg = err instanceof Error ? err.message : String(err);
-          sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg) });
+          sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg), timing: run.steps });
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
-        } finally {
-          releasePill();
         }
+        let result = run.result;
         // High-security mode: no image reaches the model, whichever tool produced it. The capture stays in memory and
         // is dropped here, before the screenshot is recorded as one the model has seen.
         if (ctx.disableVision && result.image) {
@@ -409,7 +410,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome: batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
-            steps });
+            steps, timing: run.steps });
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
         // 3 screenshots with no text/a11y read in between (and every 5th
