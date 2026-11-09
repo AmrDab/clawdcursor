@@ -62,8 +62,12 @@ describe('WindowsAdapter — checked state', () => {
     const bridge = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'ps-bridge.ps1'), 'utf8');
     const start = bridge.indexOf('function Cmd-FindElement {');
     const body = bridge.slice(start, bridge.indexOf('\nfunction ', start + 1));
-    expect(body).toContain('IsTogglePatternAvailableProperty');
-    expect(body).toContain('toggleState');
+    // One state rule (#323): find-element fills state through the shared helper the tree and focus reads use too.
+    expect(body).toContain('Add-StateFields');
+    const hStart = bridge.indexOf('function Add-StateFields(');
+    const helper = bridge.slice(hStart, bridge.indexOf('\nfunction ', hStart + 1));
+    expect(helper).toContain('IsTogglePatternAvailableProperty');
+    expect(helper).toContain('toggleState');
   });
 });
 

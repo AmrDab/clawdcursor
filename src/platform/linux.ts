@@ -888,6 +888,8 @@ export class LinuxAdapter implements PlatformAdapter {
       enabled,
       focused: raw?.focused,
       selected: raw?.selected,
+      ...(raw?.checked === true || raw?.checked === false || raw?.checked === 'mixed' ? { checked: raw.checked } : {}),
+      ...(raw?.expandable === true ? { expandable: true, expanded: raw?.expanded === true } : {}),
       disabled: enabled === false ? true : undefined,
       busy: raw?.busy,
       offscreen,

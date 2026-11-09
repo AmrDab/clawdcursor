@@ -1555,7 +1555,10 @@ export class WindowsAdapter implements PlatformAdapter {
       processId: raw?.processId ?? raw?.pid,
       ...(raw?.toggleState === 'On' ? { checked: true }
         : raw?.toggleState === 'Off' ? { checked: false }
-        : raw?.toggleState === 'Indeterminate' ? { checked: 'mixed' as const } : {}),
+        : raw?.toggleState === 'Indeterminate' ? { checked: 'mixed' as const }
+        // A radio's tick is its SelectionItem state (UIA radios have no TogglePattern), as on Linux and macOS.
+        : /RadioButton$/.test(raw?.controlType ?? '') && typeof (raw?.selected ?? raw?.isSelected) === 'boolean'
+          ? { checked: Boolean(raw?.selected ?? raw?.isSelected) } : {}),
     };
   };
 
