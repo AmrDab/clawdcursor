@@ -1072,10 +1072,19 @@ function Cmd-InvokeElement {
 
             # 2) Keyboard fallback: focus the resolved target, select-all, type. Last
             #    resort for controls with no usable (writable) ValuePattern.
+            #    SendKeys types into the FOREGROUND window and UIA SetFocus does not change
+            #    it (Cmd-FocusWindow), so with another app in front the Ctrl+A and the text
+            #    landed there, reported as success. Not refused: the caller then clicks the
+            #    field (which brings its window forward) and types.
             try {
                 Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
                 $target.SetFocus()
                 Start-Sleep -Milliseconds 60
+                $fgPid = [uint32]0
+                [void][Win32UIA]::GetWindowThreadProcessId([Win32UIA]::GetForegroundWindow(), [ref]$fgPid)
+                if ($fgPid -ne [uint32]$target.Current.ProcessId) {
+                    return @{ success=$false; error="no settable value, and its window is not in front to type into" }
+                }
                 $esc = [regex]::Replace($value, '([+^%~(){}\[\]])', '{$1}')
                 [System.Windows.Forms.SendKeys]::SendWait("^a"); Start-Sleep -Milliseconds 30
                 [System.Windows.Forms.SendKeys]::SendWait($esc); Start-Sleep -Milliseconds 60
