@@ -162,11 +162,12 @@ export interface EvaluationContext {
  */
 const CONFIRM_LABEL_PATTERNS: RegExp[] = [
   /\bsend\b/i,             // email, message, wire transfer
-  /\bdelete\b/i,           // destructive
-  /\bremove\b/i,
+  // Noun and -ing forms too: without the bare "confirm" rule, "Confirm deletion" is held only by its verb.
+  /\bdelet(e|ion|ing)\b/i, // destructive
+  /\bremov(e|al|ing)\b/i,
   /\btrash\b/i,
-  /\berase\b/i,
-  /\buninstall\b/i,
+  /\beras(e|ure|ing)\b/i,
+  /\buninstall(ation|ing)?\b/i,
   /\bdrop\s+(database|table)/i,
   /\bshut\s*down\b/i,
   /\brestart\b/i,
@@ -175,10 +176,12 @@ const CONFIRM_LABEL_PATTERNS: RegExp[] = [
   /\bpurchase\b/i,
   /\bbuy\b/i,
   /\bcheckout\b/i,
-  /\bpay\b/i,
+  /\bpay(ment)?\b/i,       // "Confirm payment" is held by what it confirms, not by the word "confirm"
   /\btransfer\b/i,
   /\bpublish\b/i,
-  /\bconfirm\b/i,          // confirm dialogs themselves — require user
+  // Not /\bconfirm\b/ (audit 2026-11-05): a Confirm dialog is the second step of an action already gated or allowed —
+  // "Confirm delete" is held by "delete". The bare word blocked "Confirm archive" by name while the same button clicked
+  // by coordinates went through, so it pushed agents off acting by name and stopped nothing.
   // Plan changes and payment set-up (#239): an upgrade wall is the user's call.
   // Kept narrow so page text doesn't trip it: "Subscriber count", "Unsubscribe",
   // "Upgrade guide", Trello's "Add a card" stay ungated.
