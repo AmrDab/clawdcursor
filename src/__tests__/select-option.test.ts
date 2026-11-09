@@ -23,7 +23,7 @@ function fakePlatform(opts: { value?: string | null; options: string[]; sticks?:
     }),
     findElements: vi.fn(async (q: { name?: string }) =>
       [...opts.options, 'Profile', 'Plan'].filter(n => n.toLowerCase().includes(String(q.name).toLowerCase()))
-        .map(n => ({ name: n, controlType: 'ListItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }))),
+        .map(n => ({ name: n, controlType: n === 'Plan' ? 'ComboBox' : 'ListItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }))),
   };
   return platform;
 }
@@ -58,6 +58,38 @@ describe('selectOption', () => {
     expect(r.text).toMatch(/no option named exactly "Pro".*Nothing was changed/);
     expect(p.calls.some(c => c.action === 'select' || c.action === 'click')).toBe(false);
     expect(p.calls.at(-1)?.action).toBe('collapse');
+  });
+
+  it('without a controlType, aims at the dropdown, not the label with the same name (1.5.27 live test)', async () => {
+    const p = fakePlatform({ options: ['Free', 'Pro'] });
+    p.findElements.mockImplementation(async (q: any) => q.name === 'Plan'
+      ? [{ name: 'Plan', controlType: 'Text' }, { name: 'Plan', controlType: 'ComboBox' }]
+      : [{ name: q.name, controlType: 'ListItem' }]);
+    const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' });
+    expect(r).toMatchObject({ success: true, verified: true });
+    expect(p.calls.filter(c => c.name === 'Plan').every(c => c.controlType === 'ComboBox')).toBe(true);
+  });
+
+  it('says so when only a label has that name, instead of "no option named"', async () => {
+    const p = fakePlatform({ options: ['Free', 'Pro'] });
+    p.findElements.mockImplementation(async () => [{ name: 'Plan', controlType: 'Text' }]);
+    const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' });
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/No dropdown or list named "Plan"; only Text matched/);
+    expect(r.text).not.toMatch(/no option named/);
+    expect(p.calls).toEqual([]);
+  });
+
+  it('recognises the macOS, AT-SPI and UIA spellings of a control that holds options', async () => {
+    for (const role of ['AXPopUpButton', 'combo box', 'List', 'AXComboBox']) {
+      const p = fakePlatform({ options: ['Free', 'Pro'] });
+      p.findElements.mockImplementation(async (q: any) => q.name === 'Plan'
+        ? [{ name: 'Plan', controlType: 'Text' }, { name: 'Plan', controlType: role }]
+        : [{ name: q.name, controlType: 'ListItem' }]);
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' });
+      expect(r.success, role).toBe(true);
+      expect(p.calls.find(c => c.name === 'Plan')?.controlType, role).toBe(role);
+    }
   });
 
   it('reports failure when the read-back disagrees', async () => {

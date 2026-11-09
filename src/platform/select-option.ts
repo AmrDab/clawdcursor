@@ -22,12 +22,31 @@ export interface SelectOptionResult {
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/** Roles that can hold options, in each OS's spelling: UIA ComboBox / List / Tab, AX PopUpButton / ComboBox / List / TabGroup,
+ * AT-SPI (mapped to the UIA names). A label (Text), an option (ListItem) or a button is not one. */
+const HOLDS_OPTIONS = /^(ax)?(combobox|popupbutton|menubutton|dropdown|select|list|listbox|tab|tabgroup|tablist|pagetablist|radiogroup)$/;
+const holdsOptions = (role?: string) => HOLDS_OPTIONS.test(norm(role).replace(/[^a-z]/g, ''));
 
 export async function selectOption(
   platform: Pick<PlatformAdapter, 'invokeElement' | 'findElements'>,
   q: { name: string; value: string; controlType?: string; processId?: number },
 ): Promise<SelectOptionResult> {
-  const { name, value, controlType, processId } = q;
+  const { name, value, processId } = q;
+  let controlType = q.controlType;
+  // Without a role the bridge takes the first element with that name, and a form's label ("Favorite color") is found before
+  // its combo box. Aim at the one that can hold options; if only labels or the like have the name, say so.
+  if (!controlType) {
+    const named = (await platform.findElements({ name, processId }).catch(() => []))
+      .filter(h => norm(h.name) === norm(name) && h.controlType);
+    if (named.length) {
+      const holder = named.find(h => holdsOptions(h.controlType));
+      if (!holder) {
+        const roles = [...new Set(named.map(h => h.controlType))].join(', ');
+        return { success: false, verified: false, text: `No dropdown or list named "${name}"; only ${roles} matched (a label or another element, not something with options). Nothing was changed.` };
+      }
+      controlType = holder.controlType;
+    }
+  }
   const readValue = async (): Promise<string | null> => {
     const r = await platform.invokeElement({ name, controlType, processId, action: 'get-value' }).catch(() => null);
     if (!r?.success) return null;

@@ -1186,9 +1186,18 @@ function Cmd-InvokeElement {
         "toggle" {
             try {
                 $p = $element.GetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern)
+                $before = $p.Current.ToggleState.ToString()
                 $p.Toggle()
-                $state = $p.Current.ToggleState.ToString()
-                return @{ success=$true; action="toggle"; data=@{ toggleState=$state } }
+                # Chromium (Edge, Chrome) updates UIA after Toggle() returns, so an immediate read is the state from BEFORE the
+                # toggle. Read it back until it differs, or ~0.5 s; toggleChanged=$false means the new state was never seen.
+                $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                $state = $before
+                do {
+                    $state = $p.Current.ToggleState.ToString()
+                    if ($state -ne $before) { break }
+                    Start-Sleep -Milliseconds 50
+                } while ($sw.ElapsedMilliseconds -lt 500)
+                return @{ success=$true; action="toggle"; data=@{ toggleState=$state; toggleChanged=($state -ne $before) } }
             } catch { return @{ success=$false; error="TogglePattern not supported" } }
         }
         "select" {
