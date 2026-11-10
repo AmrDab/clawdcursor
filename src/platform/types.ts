@@ -442,8 +442,8 @@ export interface PlatformAdapter {
   openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }>;
   launchApp(name: string, opts?: {
     /**
-     * `name` is an app name an agent typed, not one from the alias table: start it only if it resolves to an INSTALLED
-     * APP. Never hand it to a shell that could read it as a URI or a file, and never type it into a launcher search
+     * `name` is an app name an agent typed, not one from the alias table: start it only if it resolves to an APP the OS
+     * knows (Windows: PATH / the Start menu; macOS: LaunchServices; Linux: PATH / a .desktop entry). Never hand it to a shell that could read it as a URI or a file, and never type it into a launcher search
      * (Start menu, Spotlight), which opens the best match for the text — possibly a document. Not found → `{}`.
      */
     nameOnly?: boolean;

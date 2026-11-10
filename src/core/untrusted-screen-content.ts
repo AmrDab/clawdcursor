@@ -11,19 +11,34 @@
  * Each defuses the delimiter inside the text, so content can neither close a block early nor open a fake one.
  */
 
-/** The delimiter as written, and anything a lenient reader could take for it: attributes, `/>`, no closing bracket. */
-const DELIMITER = /<\s*(\/?)\s*untrusted-screen-content\s*>/gi;
-const NEAR_MISS = /<(\s*\/?\s*untrusted-screen-content)([^>]*>)?/gi;
+const NAME = 'untrusted-screen-content';
+const isSpace = (c: number) => c === 32 || (c >= 9 && c <= 13) || c === 0xa0 || c === 0xfeff || c === 0x2028 || c === 0x2029 || (c >= 0x2000 && c <= 0x200a) || c === 0x1680 || c === 0x202f || c === 0x205f || c === 0x3000;
 
 /**
- * The text with every spelling of the delimiter made inert (‹…›): it stays readable and can pair with nothing. The
- * exact tag keeps its shape; a near miss (`</untrusted-screen-content x>`, `<untrusted-screen-content/>`, a tag with no
- * `>`) loses both brackets, opening and closing tag alike, case-insensitively.
+ * The text with every spelling of the delimiter made inert: it stays readable and can pair with nothing.
+ *
+ * Every `<` that starts the delimiter's name — after optional whitespace, an optional `/` and more whitespace, in any
+ * case — becomes `‹`, whatever follows it: the exact tag, a tag with attributes, `/>`, no closing bracket, or another
+ * tag nested inside it. The exact tag also gets `›` for its `>`, so it keeps its shape. Nothing is removed, so no new tag
+ * can form from what is left, and a second pass changes nothing.
+ *
+ * One left-to-right scan, no regex: each character is looked at a bounded number of times, so a megabyte of unclosed
+ * near-miss tags costs milliseconds (a regex with a greedy tail took seconds on 400 KB).
  */
 export function defuseScreenDelimiters(text: string): string {
-  return text
-    .replace(DELIMITER, '‹$1untrusted-screen-content›')
-    .replace(NEAR_MISS, (_m, tag: string, rest?: string) => `‹${tag}${rest ? `${rest.slice(0, -1)}›` : ''}`);
+  let out = '';
+  let last = 0;
+  for (let i = text.indexOf('<'); i !== -1; i = text.indexOf('<', i + 1)) {
+    let j = i + 1;
+    while (isSpace(text.charCodeAt(j))) j++;
+    if (text.charCodeAt(j) === 47 /* / */) { j++; while (isSpace(text.charCodeAt(j))) j++; }
+    if ((text.charCodeAt(j) | 32) !== 117 /* u */ || text.slice(j, j + NAME.length).toLowerCase() !== NAME) continue;
+    let k = j + NAME.length;
+    while (isSpace(text.charCodeAt(k))) k++;
+    out += `${text.slice(last, i)}‹`;
+    if (text.charCodeAt(k) === 62 /* > */) { out += `${text.slice(i + 1, k)}›`; last = k + 1; } else { last = i + 1; }
+  }
+  return last === 0 ? text : out + text.slice(last);
 }
 
 /**

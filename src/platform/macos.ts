@@ -1073,7 +1073,8 @@ export class MacOSAdapter implements PlatformAdapter {
       if (found) return found;
     }
 
-    // An agent-typed name (PlatformAdapter.launchApp nameOnly): `open -a` above only ever opens an application. Spotlight
+    // An agent-typed name (PlatformAdapter.launchApp nameOnly): `open -a` above only ever opens an application
+    // known to LaunchServices (not necessarily one the user installed: a bundle in Downloads counts). Spotlight
     // opens the best match for the text, which can be a document, so it is not tried.
     if (opts?.nameOnly) return {};
 
