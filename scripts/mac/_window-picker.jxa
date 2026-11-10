@@ -129,9 +129,10 @@ function pickInteractionWindow(windows) {
 
 // Finds first window whose name contains `needle` (case-insensitive)
 // AND has non-zero visible area. Used by focus-window.jxa.
-// Titles compared without format characters (zero-width space, joiners, BOM), whitespace collapsed, lower case.
+// Titles compared without format characters (the Unicode Cf category: zero-width space, joiners, BOM, the Arabic letter mark
+// U+061C...), whitespace collapsed, lower case. Keep in sync with focus-window.jxa, which inlines this.
 function titleKey(s) {
-    return String(s).replace(/[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u206F\uFEFF]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+    return String(s).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function findTitleMatchWindow(windows, needle) {

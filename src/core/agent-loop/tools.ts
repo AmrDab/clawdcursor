@@ -2207,8 +2207,10 @@ export async function runActivationLadder(
     used = ladder[i];
     res = await call(used);
   }
-  if (!res.success && first.data?.error !== undefined) {
-    res = { ...res, data: { ...res.data, error: first.data.error } };
+  // The click rung is the one that read the element: its reason AND its bounds (for the coordinate fallback) stand.
+  if (!res.success) {
+    res = { ...res, bounds: first.bounds ?? res.bounds,
+      ...(first.data?.error !== undefined ? { data: { ...res.data, error: first.data.error } } : {}) };
   }
   return { res, used };
 }

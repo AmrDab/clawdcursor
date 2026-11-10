@@ -250,6 +250,17 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.other_window_done).toEqual([]);
   });
 
+  it('the tree, the no-name find and invoke all cover the same windows: the active one and its open popups', () => {
+    expect(out.scope_names).toEqual(['Save As', 'File']);
+    expect(out.scope_tree).not.toContain('Print');
+    expect(out.scope_names_none_active).toEqual(['notes.txt - Editor', 'File', 'Edit', 'Save As']);
+  });
+
+  it('a miss says only the front window was searched and how to work in another', () => {
+    expect(out.miss_note.success).toBe(false);
+    expect(out.miss_note.error).toMatch(/^element not found: Nothing here; only the front window "Save As" was searched; this app has 1 other window - window \{"action":"focus"/);
+  });
+
   it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {
     expect(out.text_view.value).toBe('hello world');
     expect(out.get_value).toMatchObject({ success: true, value: '42' });
@@ -274,9 +285,9 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('B7 tree: on-screen first (active dialog leading), hidden after, nameless rows dropped', () => {
     const names = out.tree.map((t: [string, string]) => `${t[1]}:${t[0]}`);
     expect(names).toEqual([
-      'file chooser:Save As', 'text:Name', 'push button:Save', 'frame:notes.txt - Editor', 'text:',
-      // hidden: the 0x0 application node, the dialog's hidden item, the closed menu, the hidden toolbar
-      'application:editor', 'menu item:Preview', 'menu item:Save      ', 'menu item:Print', 'push button:Save',
+      'file chooser:Save As', 'text:Name', 'push button:Save',
+      // hidden: the 0x0 application node and the dialog's hidden item; the inactive main window is not read at all
+      'application:editor', 'menu item:Preview',
     ]);
   });
 

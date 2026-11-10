@@ -99,8 +99,15 @@ const RULES: Rule[] = [
     hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
   // The element WAS found; this verb does not apply to it ("TogglePattern not supported", "element cannot expand or collapse").
   // Before NOT_FOUND: an invoke miss is worded "missed — <reason>", and the reason decides which of the two it is.
+  // First the activation cascade that tried EVERY verb (invoke, toggle, select, expand) and none took: suggesting those verbs
+  // again would loop, so the next step is a click at the element's bounds.
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
-    test: /Pattern not supported|no (?:invoke|click)\/\w+(?:\/\w+)* pattern|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|exposes (?:no|neither) (?:Action|EditableText|Value)|no Selection interface/i,
+    test: /no (?:invoke|click)\/\w+(?:\/\w+)* pattern|Invoke failed:|does not support (?:AXPress|click\(\))|exposes no Action interface/i,
+    hint: 'found it, but no activation (invoke / toggle / select / expand) takes on it; it is on screen, so click it at its bounds',
+    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (bounds: accessibility find)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (bounds: find_element)' } },
+  // One verb that does not fit this element ("TogglePattern not supported", "cannot expand or collapse").
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /Pattern not supported|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|element does not support (?:expand|collapse|toggle|select|AXScrollToVisible)|exposes (?:no|neither) (?:EditableText|Value)|no Selection interface/i,
     hint: 'found it, but it cannot be done that way (toggled / selected / set / expanded); try invoke / expand / toggle / select, or read its state',
     next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.

@@ -10,6 +10,7 @@ import { a11yToMouse } from './types';
 import type { UiElement, WindowInfo } from '../platform/types';
 import { isBrowserProcess } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
+import { narrowedScopeNote } from './scope-note';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
@@ -583,7 +584,7 @@ export function getA11yTools(): ToolDefinition[] {
         const searched = scopes
           .filter(s => s.processId !== undefined)
           .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` "${s.title}"` : ''}`);
-        const where = searched.length ? `\nsearched: ${searched.join(', ')} — pass processId to target another window` : '';
+        const where = searched.length ? `\nsearched: ${searched.join(', ')}${await narrowedScopeNote(ctx.platform, scopes)}` : '';
         const searchedPid = typeof processId === 'number' ? processId
           : scopes.length === 1 ? scopes[0].processId : undefined;
         // A miss in a window with real structure is a wrong name, not a blind app: say what it has and what is close.

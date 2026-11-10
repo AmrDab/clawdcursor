@@ -183,12 +183,35 @@ def toplevels_active_first(app: Any) -> list:
             + [k for k in kids if not has_state(k, Atspi.StateType.ACTIVE)])
 
 
+# Toplevels that belong to the window in use rather than being another window: GTK3 and Qt put an open menu, a combo's list
+# or a tooltip in a toplevel of its own, and it is never ACTIVE.
+POPUP_TOPLEVEL_ROLES = {'menu', 'popup menu', 'tool tip', 'tooltip', 'combo box', 'list'}
+
+
 def scope_toplevels(app: Any) -> list:
-    """The windows a find / invoke searches: only the ACTIVE one when the app has one (the window the agent works in, so
-    the names of its other windows never reach the caller); every window when none is active (the app is not focused)."""
+    """The windows a find / invoke / tree read covers: only the ACTIVE one when the app has one (the window the agent works
+    in, so the names of its other windows never reach the caller), plus the app's open popups (menus, a combo's list,
+    tooltips: toplevels of their own that are never ACTIVE); every window when none is active (the app is not focused)."""
     tops = toplevels_active_first(app)
     active = [t for t in tops if has_state(t, Atspi.StateType.ACTIVE)]
-    return active or tops
+    if not active:
+        return tops
+    popups = [t for t in tops if t not in active
+              and (safe(lambda t=t: t.get_role_name(), '') or '').lower() in POPUP_TOPLEVEL_ROLES
+              and has_state(t, Atspi.StateType.SHOWING)]
+    return active + popups
+
+
+def other_windows_note(app: Any, searched: list) -> str:
+    """What a miss says when only the front window was searched and the app has more windows."""
+    tops = toplevels_active_first(app)
+    others = [t for t in tops if t not in searched]
+    if not others or not searched:
+        return ''
+    title = safe(lambda: searched[0].get_name(), '') or ''
+    n = len(others)
+    return (f"; only the front window \"{title}\" was searched; this app has {n} other window{'' if n == 1 else 's'}"
+            ' - window {"action":"focus","title":"..."} first to work in one')
 
 
 def node_to_dict(acc: Any) -> Optional[dict]:
@@ -581,8 +604,8 @@ def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
         root = node_to_dict(app)
         if root is not None:
             out.append(root)
-        # The active window (a dialog over its main window) is walked first.
-        for top in toplevels_active_first(app):
+        # The active window (a dialog over its main window) and its popups: the same windows a find / invoke searches.
+        for top in scope_toplevels(app):
             walk(top, out, 1, cut)
             if len(out) > MAX_TREE_NODES:
                 break
@@ -695,8 +718,8 @@ def role_matches(alts: list, role_name: str) -> bool:
 def find_target(app: Any, name: Optional[str], role: Optional[str]):
     """(accessible, showing) for the best match under `app`: name exact
     (case-insensitive, padding ignored) before substring, role substring;
-    ON-SCREEN matches before hidden ones, the ACTIVE window's before the
-    rest. A hidden 0x0 duplicate (a hidden toolbar's "Save" vs the Save
+    ON-SCREEN matches before hidden ones. Only the ACTIVE window (and its popups) is searched
+    when the app has one (see scope_toplevels). A hidden 0x0 duplicate (a hidden toolbar's "Save" vs the Save
     dialog's button) used to win just by coming first in the tree.
     (None, False) when nothing matches."""
     name_l = name.lower().strip() if name else None
@@ -727,7 +750,7 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
                 return True
         return False
 
-    # The active window only (see scope_toplevels).
+    # The active window and its popups (see scope_toplevels).
     for top in scope_toplevels(app):
         if visit(top, 1):
             return exact[-1], True
@@ -914,7 +937,8 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
                     "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched: {name or role} "
                              "(this is not 'no such element')"}
-        return {"success": False, "action": action, "error": f"element not found: {name or role}"}
+        return {"success": False, "action": action,
+                "error": f"element not found: {name or role}" + other_windows_note(app, scope_toplevels(app))}
     if not showing and action != 'get-value':
         # Acting on a hidden element (closed menu, hidden toolbar, 0x0) and
         # calling it a success is how a Save dialog went unsaved. No bounds:

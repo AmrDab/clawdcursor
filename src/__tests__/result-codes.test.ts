@@ -132,7 +132,6 @@ describe('review fixes', () => {
   it('an element that was found but does not take the verb is UNSUPPORTED_ACTION, not NOT_FOUND', () => {
     for (const t of ['a11y invoke "More options" missed — TogglePattern not supported.',
       'a11y invoke "X" missed — SelectionItemPattern not supported.',
-      'a11y invoke "Y" missed — No invoke/toggle/select/expand pattern.',
       'a11y_toggle failed for "Z": ExpandCollapsePattern not supported.',
       'a11y invoke "W" missed — element cannot expand or collapse.']) {
       const c = classifyResult(t, true, true);

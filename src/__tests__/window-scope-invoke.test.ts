@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
+import vm from 'node:vm';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {} }, keyboard: { config: {} }, screen: {},
@@ -20,6 +21,8 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 import { runActivationLadder } from '../core/agent-loop/tools';
 import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
 import { checkAssertions } from '../core/verify/assertions';
+import { narrowedScopeNote } from '../tools/scope-note';
+import { classifyResult } from '../core/result-codes';
 
 const root = join(__dirname, '../..');
 const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');
@@ -32,31 +35,71 @@ const fnBody = (src: string, name: string) => {
 const ZWSP = String.fromCharCode(0x200b);
 const EDGE_TITLE = `CC Test Page - [InPrivate] - Microsoft${ZWSP} Edge`;
 
-describe('ps-bridge: find and invoke stay in the window the agent works in', () => {
-  const scope = fnBody(bridge, 'Get-ProcessScopeWindows');
+/** Run PowerShell 5.1 with the bridge functions named, the UIA assemblies loaded and the seams replaced by fakes. */
+function runPs(functions: string[], body: string): string[] {
+  const defs = functions.map(f => fnBody(bridge, f)).join('\n');
+  const script = `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes\n${defs}\n${body}`;
+  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim().split(/\r?\n/);
+}
+const FAKE_SEAMS = `
+function Get-ScopeWindowHandle { param($wpid) if ($wpid -eq 1) { return [IntPtr]11 }; if ($wpid -eq 5) { throw 'no foreground' }; return [IntPtr]::Zero }
+function ConvertFrom-ScopeHandle { param($h) return [pscustomobject]@{ Name = "front$h" } }
+function Get-FirstPidWindow { param($wpid)
+  if ($wpid -eq 2) { return [pscustomobject]@{ Name = 'first' } }
+  if ($wpid -eq 3) { return @([pscustomobject]@{ Name = 'a' }, [pscustomobject]@{ Name = 'b' }) } }
+`;
 
-  it('the shared helper returns only the foreground window (at GA_ROOT) when it belongs to the pid, else all windows of the pid', () => {
-    expect(scope).toMatch(/GetForegroundWindow\(\)/);
-    expect(scope).toMatch(/GetAncestor\(\$fgH, 2\)/);
-    expect(scope).toMatch(/if \(\$fgPid -eq \$wpid\)[\s\S]*FromHandle\(\$rootH\)/);
-    expect(scope).toMatch(/ProcessIdProperty, \$wpid[\s\S]*TreeScope\]::Children, \$pc/);
+describe.runIf(process.platform === 'win32')('ps-bridge (run for real, fake windows): find and invoke stay in the window the agent works in', () => {
+  it('Get-ProcessScopeWindows gives a FLAT array: 0 windows -> 0, the front window -> that one object, the fallback -> one, never an array in an array', () => {
+    const out = runPs(['Get-ProcessScopeWindows'], `${FAKE_SEAMS}
+foreach ($p in 0, 1, 2, 3, 5) { $r = @(Get-ProcessScopeWindows $p); "$p count=$($r.Count) first=$(if ($r.Count) { $r[0].Name } else { '-' }) isArray=$($r.Count -gt 0 -and $r[0] -is [array])" }`);
+    expect(out).toEqual([
+      '0 count=0 first=- isArray=False',      // no window at all: Count -eq 0 fires (it never did when the helper wrapped it)
+      '1 count=1 first=front11 isArray=False', // the front window of the pid, and only it
+      '2 count=1 first=first isArray=False',   // not in front: UIA's first window of the pid
+      '3 count=2 first=a isArray=False',       // two items stay two flat items
+      '5 count=0 first=- isArray=False',       // the foreground lookup throwing is not a crash
+    ]);
   });
 
-  it('find-element searches the scope windows, not every window of the pid', () => {
-    const find = fnBody(bridge, 'Cmd-FindElement');
-    expect(find).toMatch(/Get-ProcessScopeWindows \$wpid/);
-    expect(find).not.toMatch(/ProcessIdProperty/);
+  it('invoke on a pid with no window answers "No window for pid", find answers an empty list (neither throws on .FindAll)', () => {
+    const out = runPs(['Get-ProcessScopeWindows', 'Cmd-InvokeElement', 'Cmd-FindElement'], `${FAKE_SEAMS}
+$inv = Cmd-InvokeElement ([pscustomobject]@{ processId = 99; name = 'x'; action = 'click' })
+"invoke: $($inv.success) $($inv.error)"
+$fnd = (Cmd-FindElement ([pscustomobject]@{ processId = 99; name = 'x' }))
+"find: $($fnd.Count)"`);
+    expect(out).toEqual(['invoke: False No window for pid 99', 'find: 0']);
   });
 
-  it('invoke-element no longer takes the FIRST window of the pid; it searches the scope windows in order', () => {
+  it('invoke given the front window searches that window only, once (a match is not acted on in two windows)', () => {
+    const out = runPs(['Get-ProcessScopeWindows', 'Cmd-InvokeElement'], `${FAKE_SEAMS}
+$script:searched = @()
+function ConvertFrom-ScopeHandle { param($h)
+  $w = [pscustomobject]@{ Name = "front$h" }
+  $w | Add-Member -MemberType ScriptMethod -Name FindFirst -Value { param($scope, $cond) $script:searched += $this.Name; return $null }
+  $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) $script:searched += $this.Name; return @() }
+  return $w }
+function Get-ScopeNarrowNote { param($a, $b) return '' }
+$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 1; name = 'Confirm'; automationId = 'ok'; action = 'click' })
+"searched=$($script:searched -join ',') success=$($r.success)"
+$r.error`);
+    expect(out[0]).toBe('searched=front11,front11 success=False'); // automationId lookup, then the name walk: both in the one window
+    expect(out[1]).toMatch(/^Element not found: name='Confirm'/);
+  });
+
+  it('ps-bridge.ps1 parses', () => {
+    const file = join(root, 'scripts/ps-bridge.ps1').replace(/'/g, "''");
+    const script = `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file}',[ref]$null,[ref]$e); Write-Output $e.Count`;
+    expect(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim()).toBe('0');
+  });
+});
+
+describe('ps-bridge: which functions use the scope helper', () => {
+  it('find and invoke call Get-ProcessScopeWindows; invoke no longer takes the first window of the pid', () => {
+    expect(fnBody(bridge, 'Cmd-FindElement')).toMatch(/@\(Get-ProcessScopeWindows \$wpid\)/);
     const inv = fnBody(bridge, 'Cmd-InvokeElement');
-    expect(inv).toMatch(/Get-ProcessScopeWindows \$wpid/);
-    expect(inv).toMatch(/foreach \(\$window in \$scopeWindows\)/);
+    expect(inv).toMatch(/@\(Get-ProcessScopeWindows \$wpid\)/);
     expect(inv).not.toMatch(/FindFirst\(\[System\.Windows\.Automation\.TreeScope\]::Children/);
-  });
-
-  it('the only pid conditions left are the helper and the tree read (which reads the foreground window first)', () => {
-    expect([...bridge.matchAll(/ProcessIdProperty/g)].length).toBe(2);
   });
 });
 
@@ -65,7 +108,7 @@ describe('invoke activates an expandable element and reports why a miss is a mis
     const inv = fnBody(bridge, 'Cmd-InvokeElement');
     const click = inv.slice(inv.indexOf('"click" {'), inv.indexOf('"set-value" {'));
     expect(click).toMatch(/ExpandCollapsePattern\]::Pattern/);
-    expect(click).toMatch(/if \(\$was -eq 'Expanded'\) \{ \$p\.Collapse\(\); \$now = 'Collapsed' \}/);
+    expect(click).toMatch(/\$was = \$p\.Current\.ExpandCollapseState/);
     expect(click).toMatch(/method="ExpandCollapsePattern"; data=@\{ expandState=\$now/);
     // a tree item is selected, not expanded: SelectionItem is tried first
     expect(click.indexOf('SelectionItemPattern')).toBeLessThan(click.indexOf('ExpandCollapsePattern'));
@@ -88,6 +131,69 @@ describe('invoke activates an expandable element and reports why a miss is a mis
     expect(call).toHaveBeenCalledTimes(1);
     expect(used).toBe('click');
     expect(res.data?.expandState).toBe('Expanded');
+  });
+});
+
+describe('invoke: bounds survive the ladder, and the expand reports the state it read back', () => {
+  it('a miss keeps the click rung\'s bounds so the coordinate fallback can click (the eval needed a manual click)', async () => {
+    const bounds = { x: 10, y: 20, width: 30, height: 40 };
+    const call = vi.fn(async (a: string) => a === 'click' ? { success: false, bounds, data: { error: 'No invoke/toggle/select/expand pattern' } } : { success: false });
+    const { res } = await runActivationLadder(call as any, ['click', 'select', 'toggle']);
+    expect(res.bounds).toEqual(bounds);
+  });
+
+  it('the expand rung is bounded and read back like toggle', () => {
+    const inv = fnBody(bridge, 'Cmd-InvokeElement');
+    expect(inv).toMatch(/\[UiaInvoker\]::Expand\(\$p, 1200\)/);
+    expect(inv).toMatch(/\[UiaInvoker\]::Collapse\(\$p, 1200\)/);
+    expect(inv).toMatch(/expandState=\$now; was=\$was; expandChanged=/);
+    expect(bridge).toMatch(/public static string Expand\(ExpandCollapsePattern p, int waitMs\)/);
+  });
+});
+
+describe('a miss says the search covered the front window only', () => {
+  const win = (processId: number, title: string) => ({ processId, title });
+  it('names the front window and the count of the app\'s other windows', async () => {
+    const platform = { listWindows: async () => [win(7, 'A - Edge'), win(7, 'B - Edge'), win(7, 'C - Edge'), win(8, 'Notes')] };
+    const note = await narrowedScopeNote(platform, [{ processId: 7, title: 'A - Edge' }]);
+    expect(note).toBe('; only the front window "A - Edge" was searched; this app has 2 other windows — window {"action":"focus","title":"…"} first to work in one');
+  });
+  it('is the plain advice for a one-window app', async () => {
+    const note = await narrowedScopeNote({ listWindows: async () => [win(7, 'A')] }, [{ processId: 7, title: 'A' }]);
+    expect(note).toBe(' — pass processId to target another app');
+  });
+  it('the bridges put it on their own invoke misses', () => {
+    expect(bridge).toMatch(/Element not found: name='\$name' id='\$automationId' ct='\$controlType'" \+ \(Get-ScopeNarrowNote/);
+    expect(readFileSync(join(root, 'scripts/mac/ax-helper.swift'), 'utf8')).toMatch(/scopeNote\(app, searched: toSearch\)/);
+  });
+});
+
+describe('UNSUPPORTED_ACTION on every OS\'s texts', () => {
+  const cls = (t: string) => classifyResult(t, true, true);
+  it('macOS and Windows "found, does not take it" texts', () => {
+    for (const t of ['a11y invoke "Mute" missed — the element does not support toggle (no AXPress; AXError -25206).',
+      'a11y invoke "x" missed — the element does not support select (no AXSelected / AXPress).',
+      'a11y invoke "x" missed — Element does not support expand (no AXExpanded attribute or AXShowMenu action).',
+      'a11y invoke "x" missed — ExpandCollapsePattern not supported.']) {
+      expect(cls(t)?.code, t).toBe('UNSUPPORTED_ACTION');
+    }
+  });
+  it('when the cascade tried every verb, the hint and next say to click the bounds, not to try those verbs again', () => {
+    for (const t of ['a11y invoke "More" missed — No invoke/toggle/select/expand pattern.',
+      'a11y invoke "Go" missed — Invoke failed: The element is not enabled.',
+      'a11y invoke "Go" missed — the element does not support AXPress (AXError -25205) — click its coordinates instead.']) {
+      const c = cls(t);
+      expect(c?.code, t).toBe('UNSUPPORTED_ACTION');
+      expect(c?.hint).toMatch(/click it at its bounds/);
+      expect(c?.hint).not.toMatch(/try invoke/);
+      expect(c?.next).toMatch(/"action":"click"/);
+    }
+  });
+  it('real not-found texts, scope note included, stay NOT_FOUND', () => {
+    for (const t of ['a11y invoke "x" missed — Element not found: name=\'x\' id=\'\' ct=\'\'; only the front window "A" was searched; this app has 2 other windows - window {"action":"focus","title":"..."} first to work in one',
+      'a11y invoke "x" missed — element not found: Nothing here; only the front window "Save As" was searched; this app has 1 other window - window {"action":"focus"}']) {
+      expect(cls(t)?.code, t).toBe('NOT_FOUND');
+    }
   });
 });
 
@@ -120,13 +226,6 @@ describe('window titles are compared without invisible characters', () => {
     expect(out[1]).toBe('cc test page - [inprivate] - microsoft edge');
   });
 
-  it.runIf(process.platform === 'win32')('ps-bridge.ps1 parses', () => {
-    const file = join(root, 'scripts/ps-bridge.ps1').replace(/'/g, "''");
-    const script = `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file}',[ref]$null,[ref]$e); Write-Output $e.Count`;
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim();
-    expect(out).toBe('0');
-  });
-
   it('the macOS and Linux bridges normalize both sides of a title match too', () => {
     const swift = readFileSync(join(root, 'scripts/mac/ax-helper.swift'), 'utf8');
     expect(swift).toMatch(/generalCategory != \.format/);
@@ -138,14 +237,42 @@ describe('window titles are compared without invisible characters', () => {
 });
 
 describe('macOS and Linux find/invoke search only the key / active window', () => {
-  it('ax-helper windowsToSearch returns just the key window when there is one', () => {
+  it('ax-helper windowsToSearch returns the key window (plus the main window when a panel is key), else every window', () => {
     const swift = readFileSync(join(root, 'scripts/mac/ax-helper.swift'), 'utf8');
-    expect(swift).toMatch(/if let k = key\.window \{ return \(\[k\], key\.hung\) \}/);
+    const fn = swift.slice(swift.indexOf('func windowsToSearch'), swift.indexOf('/// What a miss says'));
+    expect(fn).toMatch(/if let k = key\.window \{/);
+    expect(fn).toMatch(/copyAttr\(el, "AXMainWindow"\)/);
+    expect(fn).not.toMatch(/where !out\.contains/);
+    // the doc comment sits above its own function, not above titleKey
+    const above = swift.slice(swift.indexOf('/// The windows a find / invoke searches'), swift.indexOf('func windowsToSearch'));
+    expect(above).not.toMatch(/func titleKey/);
   });
 
-  it('atspi-bridge find and find_target use scope_toplevels (active window only), not every toplevel', () => {
+  it('the JXA that osascript loads (focus-window.jxa inlines the helpers) strips Cf characters, including U+061C, and matches the title as typed', () => {
+    const src = readFileSync(join(root, 'scripts/mac/focus-window.jxa'), 'utf8');
+    const grab = (name: string) => {
+      const a = src.indexOf(`function ${name}(`);
+      expect(a, name).toBeGreaterThan(-1);
+      return src.slice(a, src.indexOf('\n}\n', a) + 3);
+    };
+    const sandbox: Record<string, unknown> = {};
+    vm.runInNewContext(`${grab('titleKey')}\n${grab('findTitleMatchWindow')}\nfunction getWinBounds() { return { width: 10, height: 10 }; }\nthis.titleKey = titleKey; this.find = findTitleMatchWindow;`, sandbox);
+    const key = sandbox.titleKey as (s: string) => string;
+    expect(key(`Microsoft${ZWSP} Edge`)).toBe('microsoft edge');
+    expect(key(`a${String.fromCodePoint(0x061c)}b`)).toBe('ab');
+    const wins = [{ name: () => 'Other' }, { name: () => EDGE_TITLE }];
+    const hit = (sandbox.find as (w: unknown[], n: string) => { index: number } | null)(wins, 'CC Test Page - [InPrivate] - Microsoft Edge');
+    expect(hit?.index).toBe(1);
+    // the shared copy stays identical
+    const picker = readFileSync(join(root, 'scripts/mac/_window-picker.jxa'), 'utf8');
+    expect(picker).toContain(grab('titleKey'));
+  });
+
+  it('atspi-bridge find, the tree read and find_target all go through scope_toplevels', () => {
     const py = readFileSync(join(root, 'scripts/linux/atspi-bridge.py'), 'utf8');
-    expect(py).toMatch(/def scope_toplevels[\s\S]*return active or tops/);
+    const tree = py.slice(py.indexOf('def cmd_get_tree'), py.indexOf('def cmd_find'));
+    expect(tree).toMatch(/scope_toplevels\(app\)/);
+    expect(tree).not.toMatch(/toplevels_active_first/);
     const find = py.slice(py.indexOf('def cmd_find'), py.indexOf('def cmd_focused'));
     expect(find).toMatch(/scope_toplevels\(app\)/);
     expect(find).not.toMatch(/toplevels_active_first/);

@@ -475,4 +475,15 @@ OUT['by_colliding_title'] = bridge.cmd_get_tree(None, 'Calculator', {4242})['ele
 OUT['invoke_colliding'] = bridge.cmd_invoke('7', None, None, 'click', None, 'Calculator', {4242})
 dialog.states.add(StateType.ACTIVE)
 
+# Scope: the active window, plus the open popup (a toplevel of its own, never ACTIVE); not the inactive window; a hidden popup is not.
+open_menu = Acc('File', 'popup menu', pid=7777, children=[Acc('Open', 'menu item', pid=7777)])
+closed_menu = Acc('Edit', 'popup menu', states=HIDDEN, screen=(0, 0, 0, 0), pid=7777)
+scope_app = Acc('editor', 'application', pid=7777, screen=(0, 0, 0, 0), children=[main_win, open_menu, closed_menu, dialog])
+OUT['scope_names'] = [t.name for t in bridge.scope_toplevels(scope_app)]
+OUT['scope_tree'] = [e['name'] for e in bridge.cmd_get_tree(7777)['elements']]
+OUT['miss_note'] = bridge.cmd_invoke('Nothing here', None, 7777, 'click', None)
+dialog.states.discard(StateType.ACTIVE)
+OUT['scope_names_none_active'] = [t.name for t in bridge.scope_toplevels(scope_app)]
+dialog.states.add(StateType.ACTIVE)
+
 sys.stdout.write(json.dumps(OUT))

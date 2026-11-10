@@ -103,16 +103,22 @@ function pickInteractionWindow(windows) {
     return { window: best, index: bestIndex };
 }
 
+// Titles compared without format characters (the Unicode Cf category: zero-width space, joiners, BOM, the Arabic letter mark
+// U+061C...), whitespace collapsed, lower case. Inlined from _window-picker.jxa: keep in sync.
+function titleKey(s) {
+    return String(s).replace(/\p{Cf}/gu, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
 function findTitleMatchWindow(windows, needle) {
     if (!needle) return null;
-    var n = String(needle).toLowerCase();
+    var n = titleKey(needle);
     for (var i = 0; i < windows.length; i++) {
         try {
             var w = windows[i];
             var title = '';
             try { title = w.name() || ''; } catch (e) {}
             if (!title) continue;
-            if (title.toLowerCase().indexOf(n) === -1) continue;
+            if (titleKey(title).indexOf(n) === -1) continue;
             var b = getWinBounds(w);
             if (b.width * b.height <= 0) continue;
             return { window: w, index: i, title: title };

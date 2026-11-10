@@ -113,6 +113,8 @@ try {
             }
         }
         public static string Invoke(InvokePattern p, int waitMs) { return Run(p.Invoke, waitMs); }
+        public static string Expand(ExpandCollapsePattern p, int waitMs) { return Run(p.Expand, waitMs); }
+        public static string Collapse(ExpandCollapsePattern p, int waitMs) { return Run(p.Collapse, waitMs); }
         public static string TakeLateError() { lock (Gate) { var e = _late; _late = null; return e; } }
     }
 "@
@@ -326,30 +328,80 @@ function Get-OwnedWindowElements {
     return ,$found
 }
 
-# The top-level windows of a process that a find / invoke searches. A browser, Explorer or Office process has several
-# windows, and an element search over all of them returned the names in the user's OTHER windows (live 2026-11-10: a
-# "Confirm was clicked" from an old Edge window the agent never saw; also a privacy leak), while an invoke took whichever
-# window UIA listed first. When the FOREGROUND window, at its GA_ROOT, belongs to the pid, that is the window the agent
-# works in: only it is returned (a Save as dialog in front is its own root, so it is searched). Otherwise every
-# top-level window of the pid, as before.
-function Get-ProcessScopeWindows {
+# The window a find / invoke searches in a process. A browser, Explorer or Office process has several top-level windows,
+# and a search over all of them returned the names in the user's OTHER windows (live 2026-11-10: a "Confirm was clicked"
+# from an old Edge window the agent never saw; a privacy leak too), while an invoke took whichever window UIA listed first.
+# The window the agent works in is the FOREGROUND window when it belongs to the pid (at its GA_ROOT: a Save as dialog in
+# front is its own root), else the pid's TOPMOST window in z-order. Only that one: no other window of the pid is searched.
+# Returns the window as ONE pipeline item (nothing when the pid has no window), so the caller's @(...) is a flat array.
+# The three seams below are what a test replaces.
+function Get-ScopeWindowHandle {
     param([int]$wpid)
-    try {
-        $fgH = [Win32UIA]::GetForegroundWindow()
-        if ($fgH -ne [IntPtr]::Zero) {
-            $rootH = [Win32UIA]::GetAncestor($fgH, 2)  # GA_ROOT
-            if ($rootH -eq [IntPtr]::Zero) { $rootH = $fgH }
-            $fgPid = 0
-            [void][Win32UIA]::GetWindowThreadProcessId($rootH, [ref]$fgPid)
-            if ($fgPid -eq $wpid) {
-                return ,@([System.Windows.Automation.AutomationElement]::FromHandle($rootH))
-            }
-        }
-    } catch { }
+    $fgH = [Win32UIA]::GetForegroundWindow()
+    if ($fgH -ne [IntPtr]::Zero) {
+        $rootH = [Win32UIA]::GetAncestor($fgH, 2)  # GA_ROOT
+        if ($rootH -eq [IntPtr]::Zero) { $rootH = $fgH }
+        $fgPid = 0
+        [void][Win32UIA]::GetWindowThreadProcessId($rootH, [ref]$fgPid)
+        if ($fgPid -eq $wpid) { return $rootH }
+    }
+    # Not in front: the pid's topmost visible, uncloaked window with an area (owned dialogs included).
+    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
+        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
+        $hp = 0
+        [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$hp)
+        if ($hp -ne $wpid) { continue }
+        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
+        if ($cloaked -ne 0) { continue }
+        try {
+            $r = [System.Windows.Automation.AutomationElement]::FromHandle($h).Current.BoundingRectangle
+            if ($r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) { continue }
+        } catch { continue }
+        return $h
+    }
+    return [IntPtr]::Zero
+}
+function ConvertFrom-ScopeHandle {
+    param($h)
+    return [System.Windows.Automation.AutomationElement]::FromHandle($h)
+}
+function Get-FirstPidWindow {
+    param([int]$wpid)
     $pc = New-Object System.Windows.Automation.PropertyCondition(
         [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
     )
-    return ,@([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $pc))
+    return [System.Windows.Automation.AutomationElement]::RootElement.FindFirst([System.Windows.Automation.TreeScope]::Children, $pc)
+}
+function Get-ProcessScopeWindows {
+    param([int]$wpid)
+    $h = [IntPtr]::Zero
+    try { $h = Get-ScopeWindowHandle $wpid } catch { $h = [IntPtr]::Zero }
+    if ($h -ne [IntPtr]::Zero) {
+        try { $el = ConvertFrom-ScopeHandle $h; if ($null -ne $el) { return $el } } catch { }
+    }
+    # Nothing in the z-order (a window UIA lists that Win32 does not show as visible): UIA's first window of the pid.
+    $first = $null
+    try { $first = Get-FirstPidWindow $wpid } catch { }
+    if ($null -ne $first) { return $first }
+}
+
+# What a miss says when the search covered one window and the process has more: the caller must know the miss is about
+# that window, and how to work in another.
+function Get-ScopeNarrowNote {
+    param([int]$wpid, $scopeWindows)
+    try {
+        $pc = New-Object System.Windows.Automation.PropertyCondition(
+            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
+        )
+        $all = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $pc)
+        $others = 0
+        foreach ($w in $all) { try { if ($w.Current.Name) { $others++ } } catch { } }
+        $others = $others - @($scopeWindows).Count
+        if ($others -le 0) { return '' }
+        $t = ''; try { $t = @($scopeWindows)[0].Current.Name } catch { }
+        $pl = if ($others -eq 1) { '' } else { 's' }
+        return "; only the front window `"$t`" was searched; this app has $others other window$pl - window {`"action`":`"focus`",`"title`":`"...`"} first to work in one"
+    } catch { return '' }
 }
 
 # A window title as compared: format characters (zero-width space, joiners, BOM, soft hyphen: Edge puts a U+200B inside
@@ -1049,7 +1101,7 @@ function Cmd-InvokeElement {
     }
 
     if ($null -eq $element) {
-        return @{ success=$false; error="Element not found: name='$name' id='$automationId' ct='$controlType'" }
+        return @{ success=$false; error=("Element not found: name='$name' id='$automationId' ct='$controlType'" + (Get-ScopeNarrowNote $wpid $scopeWindows)) }
     }
 
     switch ($action) {
@@ -1089,10 +1141,25 @@ function Cmd-InvokeElement {
                         try {
                             $p = $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
                             $was = $p.Current.ExpandCollapseState.ToString()
-                            if ($was -eq 'Expanded') { $p.Collapse(); $now = 'Collapsed' }
-                            elseif ($was -eq 'LeafNode') { throw 'leaf node' }
-                            else { $p.Expand(); $now = 'Expanded' }
-                            return @{ success=$true; action="click"; method="ExpandCollapsePattern"; data=@{ expandState=$now; was=$was } }
+                            if ($was -eq 'LeafNode') { throw 'leaf node' }
+                            # Bounded like Invoke: a disclosure that opens a modal box would hold the bridge.
+                            $r = if ('UiaInvoker' -as [type]) {
+                                if ($was -eq 'Expanded') { [UiaInvoker]::Collapse($p, 1200) } else { [UiaInvoker]::Expand($p, 1200) }
+                            } else { if ($was -eq 'Expanded') { $p.Collapse() } else { $p.Expand() }; 'ok' }
+                            if ($r -eq 'pending') {
+                                return @{ success=$true; action="click"; method="ExpandCollapsePattern";
+                                    data=@{ pending=$true; was=$was; note="expand/collapse still running after 1.2 s - re-read the screen" } }
+                            }
+                            if ($r -ne 'ok') { throw $r.Substring(6) }
+                            # Chromium updates UIA after the call returns: read the state back until it differs, or ~0.5 s.
+                            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+                            $now = $was
+                            do {
+                                $now = $p.Current.ExpandCollapseState.ToString()
+                                if ($now -ne $was) { break }
+                                Start-Sleep -Milliseconds 50
+                            } while ($sw.ElapsedMilliseconds -lt 500)
+                            return @{ success=$true; action="click"; method="ExpandCollapsePattern"; data=@{ expandState=$now; was=$was; expandChanged=($now -ne $was) } }
                         } catch {
                         $rect = $element.Current.BoundingRectangle
                         $why = if ($invokeErr) { "Invoke failed: $invokeErr" } else { "No invoke/toggle/select/expand pattern" }

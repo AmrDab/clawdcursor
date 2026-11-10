@@ -574,24 +574,35 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
     }
 }
 
-/// The windows a find / invoke searches: ONLY the key window when the app has one (the window the agent works in; the names in
-/// its other windows must not reach the caller), every window when it has none. `hung`: the app did not answer at all (not
-/// "it has no windows").
 /// A window title as compared: format characters (zero-width space, joiners, BOM) removed, whitespace collapsed, lower case.
 func titleKey(_ s: String) -> String {
     let kept = String(String.UnicodeScalarView(s.unicodeScalars.filter { $0.properties.generalCategory != .format }))
     return kept.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
 }
 
+/// The windows a find / invoke searches: ONLY the key window when the app has one (the window the agent works in; the names in
+/// its other windows must not reach the caller), plus the main window when a panel or palette is key and the document is main.
+/// Every window when the app has no key window. `hung`: the app did not answer at all (not "it has no windows").
 func windowsToSearch(_ app: NSRunningApplication) -> (windows: [AXUIElement], hung: Bool) {
     let el = appElement(app.processIdentifier)
-    var out: [AXUIElement] = []
     let key = keyWindow(el)
-    if let k = key.window { return ([k], key.hung) }
-    if let all = copyAttr(el, "AXWindows").value as? [AXUIElement] {
-        for w in all where !out.contains(where: { CFEqual($0, w) }) { out.append(w) }
+    if let k = key.window {
+        var out = [k]
+        let (m, _) = copyAttr(el, "AXMainWindow")
+        if let m = m, isElement(m), let mw = m as? AXUIElement, !CFEqual(mw, k) { out.append(mw) }
+        return (out, key.hung)
     }
-    return (out, key.hung)
+    let all = (copyAttr(el, "AXWindows").value as? [AXUIElement]) ?? []
+    return (all, key.hung)
+}
+
+/// What a miss says when the search covered the front window(s) and the app has more: the miss is about those windows.
+func scopeNote(_ app: NSRunningApplication, searched: [AXUIElement]) -> String {
+    let all = (copyAttr(appElement(app.processIdentifier), "AXWindows").value as? [AXUIElement]) ?? []
+    let others = all.filter { w in !searched.contains(where: { CFEqual($0, w) }) }.count
+    if others == 0 || searched.isEmpty { return "" }
+    let title = str(multi(searched[0], ["AXTitle"])["AXTitle"]) ?? ""
+    return "; only the front window \"\(title)\" was searched; this app has \(others) other window\(others == 1 ? "" : "s") - window {\"action\":\"focus\",\"title\":\"...\"} first to work in one"
 }
 
 func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
@@ -1056,7 +1067,7 @@ func cmdInvoke() -> Never {
         if let n = aim.name { what += "name=\"\(n)\" " }
         if let r = aim.role { what += "role=\"\(r)\" " }
         if let i = aim.id { what += "id=\"\(i)\" " }
-        emit(miss(action, "Element not found: \(what.trimmingCharacters(in: .whitespaces))"))
+        emit(miss(action, "Element not found: \(what.trimmingCharacters(in: .whitespaces))" + scopeNote(app, searched: toSearch)))
     }
     // Aimed at a role alone (set-value / focus / get-value), the role must pick exactly one element.
     if byRoleOnly {
