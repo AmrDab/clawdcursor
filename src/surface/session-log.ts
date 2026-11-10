@@ -113,6 +113,7 @@ export class SessionLog {
   private blindSinceVision = false;
   private visionStreak = 0;
   private headerWritten = false;
+  private ended = false;
   /** The call the handler is running now: an exit while it runs names it. */
   private current: { tool: string; action?: string; at: number } | null = null;
 
@@ -189,11 +190,15 @@ export class SessionLog {
    * The server is exiting: say why, and which call it cut off. Synchronous, so it lands before process.exit. A kill
    * (Task Manager, kill -9) or a crash never gets here: the next server reports those (reportUncleanExits).
    */
-  end(reason: string): void {
+  end(reason: string, kind: 'exit' | 'session' = 'exit'): void {
+    if (this.ended) return;
+    this.ended = true;
     const cut = this.current ? { tool: this.current.tool, ...(this.current.action ? { action: this.current.action } : {}),
       ranMs: Date.now() - this.current.at } : undefined;
     live.delete(this);
-    (cut ? logger.warn : logger.info)('mcp.exit', { reason, pid: process.pid, ...(cut ? { cutOff: cut } : {}) });
+    // A daemon's HTTP session closing is not the daemon exiting: it logs `session.end`, and nothing when it made no call.
+    if (kind === 'session' && !this.headerWritten) return;
+    (cut ? logger.warn : logger.info)(kind === 'session' ? 'session.end' : 'mcp.exit', { reason, pid: process.pid, ...(cut ? { cutOff: cut } : {}) });
     if (!this.file || !this.headerWritten) return;  // no call was made: no session file to close
     try { fs.appendFileSync(this.file, JSON.stringify({ type: 'end', t: new Date().toISOString(), reason, ...(cut ? { cutOff: cut } : {}) }) + '\n'); }
     catch { /* best-effort */ }
@@ -265,7 +270,16 @@ export function reportUncleanExits(): void {
       if (!Number.isInteger(pid) || pid === process.pid || isProcessAlive(pid)) continue;
       if (hasEnd(lines)) continue;
       // Two servers starting together would both see no end line and both report: whoever creates the lock reports.
-      try { if (Date.now() - fs.statSync(`${file}.lock`).mtimeMs > STALE_LOCK_MS) fs.rmSync(`${file}.lock`, { force: true }); } catch { /* no lock */ }
+      // Take a stale lock over atomically: only one process can rename it away, and a lock that turns out to be fresh
+      // (another reporter replaced the stale one in between) is put back, not deleted.
+      try {
+        if (Date.now() - fs.statSync(`${file}.lock`).mtimeMs > STALE_LOCK_MS) {
+          const taken = `${file}.lock.stale-${process.pid}`;
+          fs.renameSync(`${file}.lock`, taken);
+          if (Date.now() - fs.statSync(taken).mtimeMs > STALE_LOCK_MS) fs.rmSync(taken, { force: true });
+          else { try { fs.renameSync(taken, `${file}.lock`); } catch { /* it is gone */ } continue; }
+        }
+      } catch { /* no lock, or another process took it over first */ }
       let lock: number;
       try { lock = fs.openSync(`${file}.lock`, 'wx'); } catch { continue; }
       try {

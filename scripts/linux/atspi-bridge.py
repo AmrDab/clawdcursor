@@ -85,11 +85,14 @@ SEARCH_DEADLINE_S = 7.0
 # it and says so. SEARCH_START is when begin_search() was called; _now is replaceable for tests.
 SEARCH_CUT: list = [False]
 SEARCH_START = [0.0]
+# Set by find_target when a cut search saw only weaker matches (substring / hidden) and refused to act on one.
+SEARCH_WEAK = [False]
 _now = time.monotonic
 
 
 def begin_search() -> None:
     SEARCH_CUT[0] = False
+    SEARCH_WEAK[0] = False
     SEARCH_START[0] = _now()
 
 
@@ -600,6 +603,10 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
     def visit(acc: Any, depth: int) -> None:
         if acc is None or search_stop(seen, depth):
             return
+        if len(hits) >= MAX_TREE_NODES:
+            # The list is as long as a tree read may be (each hit costs about ten AT-SPI calls to describe).
+            cut_search('result limit')
+            return
         seen[0] += 1
         if wanted(acc):
             hits.append(acc)
@@ -614,12 +621,21 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
             hits.append(app)
         for top in toplevels_active_first(app):
             visit(top, 1)
-    out = [d for d in (node_to_dict(h) for h in hits) if d is not None]
+    described: list = []
+    for h in hits:
+        # Describing a hit is the expensive part: the deadline holds here too.
+        if _now() - SEARCH_START[0] > SEARCH_DEADLINE_S:
+            cut_search('time limit')
+            break
+        d = node_to_dict(h)
+        if d is not None:
+            described.append(d)
+    out = described
     # Same order and noise rule as a tree read: on-screen first, nameless valueless rows dropped.
     out = [e for e in out if not (e.get("controlType") in NAMELESS_NOISE_ROLES and not e.get("name") and not e.get("value"))]
     out = [e for e in out if on_screen(e)] + [e for e in out if not on_screen(e)]
-    # No match in a search that was cut is not "nothing there".
-    return {"elements": out, **({"partial": True, "reason": SEARCH_CUT[0]} if not out and SEARCH_CUT[0] else {})}
+    # A cut search is not "nothing there" (no hits) and its list is not the whole list (some hits): say so either way.
+    return {"elements": out, **({"partial": True, "reason": SEARCH_CUT[0]} if SEARCH_CUT[0] else {})}
 
 
 def cmd_focused(process_id: Optional[int] = None, window_title: Optional[str] = None,
@@ -654,7 +670,10 @@ def role_alternatives(role: Optional[str]) -> Optional[list]:
 
 
 def role_matches(alts: list, role_name: str) -> bool:
-    return any(a in role_name for a in alts)
+    # Also with the spaces removed on both sides: the caller sends the normalized name ("tooltip", "infobar") for a role
+    # AT-SPI spells with a space ("tool tip", "info bar").
+    squeezed = role_name.replace(' ', '')
+    return any(a in role_name or a.replace(' ', '') in squeezed for a in alts)
 
 
 def find_target(app: Any, name: Optional[str], role: Optional[str]):
@@ -696,6 +715,12 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
     for top in toplevels_active_first(app):
         if visit(top, 1):
             return exact[-1], True
+    # No exact on-screen match was seen. If the walk ran out of budget or time, one may exist beyond the cut, so a weaker
+    # match (substring, hidden) is not acted on: the caller is told to narrow the search. A depth cut is structural, not a
+    # shortage, and does not refuse.
+    if SEARCH_CUT[0] in ('element budget', 'time limit') and (exact or partial):
+        SEARCH_WEAK[0] = True
+        return None, False
     for group in (exact, partial):
         for acc in group:
             if is_showing(acc):
@@ -865,6 +890,10 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
     begin_search()
     target, showing = find_target(app, name, role)
     if target is None:
+        if SEARCH_WEAK[0]:
+            return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
+                    "error": f"search cut ({SEARCH_CUT[0]}) before an exact match: only weaker matches for {name or role} were seen; "
+                             "narrow it with processId or controlType"}
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
                     "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched: {name or role} "

@@ -163,6 +163,28 @@ describe('how a server ended', () => {
     expect(log.some(r => r.msg === 'mcp.exit' && r.level === 'warn' && r.meta.cutOff.tool === 'batch')).toBe(true);
   });
 
+  it('end is idempotent: a second end writes nothing', () => {
+    const s = new SessionLog({ version: 't', surface: 'compact' });
+    s.record('window', 'list', true, 1);
+    s.end('first');
+    s.end('second');
+    const ends = fs.readFileSync(s.file!, 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(l => l.type === 'end');
+    expect(ends).toEqual([expect.objectContaining({ reason: 'first' })]);
+    expect(dayLog().filter(r => r.msg === 'mcp.exit' && r.meta.reason === 'second')).toHaveLength(0);
+  });
+
+  it('a daemon HTTP session closing logs session.end, not mcp.exit; one that made no call logs nothing', () => {
+    const used = new SessionLog({ version: 't', surface: 'compact' });
+    used.record('window', 'list', true, 1);
+    used.end('session-closed-used', 'session');
+    new SessionLog({ version: 't', surface: 'compact' }).end('session-closed-unused', 'session');
+    const log = dayLog();
+    expect(log.filter(r => r.msg === 'session.end' && r.meta.reason === 'session-closed-used')).toHaveLength(1);
+    expect(log.filter(r => r.meta?.reason?.startsWith('session-closed') && r.msg === 'mcp.exit')).toHaveLength(0);
+    expect(log.filter(r => r.meta?.reason === 'session-closed-unused')).toHaveLength(0);
+    expect(fs.readFileSync(used.file!, 'utf8')).toMatch(/"type":"end"/);
+  });
+
   it('a server that was killed is reported once, at the next start', async () => {
     const { reportUncleanExits } = await import('../surface/session-log');
     const dir = process.env.CLAWDCURSOR_SESSION_DIR!;
@@ -271,6 +293,7 @@ describe('the daemon ends its session logs', () => {
   it('every daemon exit path calls it', () => {
     const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
     const daemon = src.slice(src.indexOf('async function runAgentMode'));
+    expect(daemon).toContain("sessionLog.end(reason, 'session')");  // an HTTP session closing is not the daemon exiting
     expect(daemon).toMatch(/onStop: async \(\) => \{\s*endAllSessions\(/);
     expect(daemon).toMatch(/process\.on\('SIGINT', \(\) => \{[\s\S]{0,150}?endAllSessions\(/);
     expect(daemon).toMatch(/process\.on\('SIGTERM', \(\) => \{[\s\S]{0,150}?endAllSessions\(/);

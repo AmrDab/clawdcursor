@@ -573,7 +573,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     await startMcpHttp(mcpServer, app, '/mcp',
       async () => {
         const h = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
-        h.server.onSessionEnd = reason => h.sessionLog.end(reason);
+        h.server.onSessionEnd = reason => h.sessionLog.end(reason, 'session');
         return h.server;
       });
   } catch (err) {

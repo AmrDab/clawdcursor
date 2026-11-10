@@ -679,10 +679,12 @@ export class LinuxAdapter implements PlatformAdapter {
       });
       const data = JSON.parse(stdout) as { elements?: any[]; partial?: boolean; reason?: string };
       let raw = Array.isArray(data.elements) ? data.elements : [];
-      // The bridge ran out of its search budget without a match: a large window, not "nothing there".
-      if (data.partial === true && raw.length === 0) {
+      // The bridge cut its search: no hits is a large window, not "nothing there"; some hits is not the whole list.
+      if (data.partial === true) {
         this.lastFindError = 'partial';
-        this.lastFindNote = `Not found in the part of this window the accessibility search covered (it stopped at its ${cutReason(data.reason)})`;
+        this.lastFindNote = raw.length === 0
+          ? `Not found in the part of this window the accessibility search covered (it stopped at its ${cutReason(data.reason)})`
+          : `This list is incomplete: the accessibility search stopped at its ${cutReason(data.reason)}. Narrow it with name, controlType or processId`;
       }
       // Role filter runs here, on the NORMALIZED role, so "Button" matches a
       // "push button" and "Edit" matches a "text" entry. Raw AT-SPI role
@@ -1704,9 +1706,9 @@ function normalizeAtspiRole(rawRole: string): string {
  * caller passes ("Button", "ControlType.Edit") → a raw AT-SPI substring.
  * Unknown names pass through lowercased.
  */
-/** Why the bridge cut a search, for the note: 'depth limit' | 'element budget' | 'time limit'. */
+/** Why the bridge cut a search, for the note: 'depth limit' | 'element budget' | 'time limit' | 'result limit'. */
 function cutReason(reason: unknown): string {
-  return reason === 'depth limit' || reason === 'time limit' || reason === 'element budget' ? reason : 'element budget';
+  return reason === 'depth limit' || reason === 'time limit' || reason === 'element budget' || reason === 'result limit' ? reason : 'element budget';
 }
 
 function atspiRoleQuery(controlType: string): string {

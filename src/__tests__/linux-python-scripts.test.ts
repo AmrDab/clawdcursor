@@ -141,6 +141,26 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.slow_focused).toMatchObject({ element: null, partial: true, reason: 'time limit' });
   });
 
+  // Review of #331, round 2: the work after the walk had no cap, and normalized multi-word roles never matched.
+  it('the hit list is capped, and the deadline holds while describing hits; both say partial', () => {
+    expect(out.hit_cap.n).toBeLessThanOrEqual(out.hit_cap.max);
+    expect(out.hit_cap).toMatchObject({ partial: true, reason: 'result limit' });
+    expect(out.dict_deadline.n).toBeGreaterThan(0);
+    expect(out.dict_deadline.n).toBeLessThan(30);
+    expect(out.dict_deadline).toMatchObject({ partial: true, reason: 'time limit' });
+  });
+
+  it('a normalized multi-word role (ToolTip, InfoBar) matches its spaced AT-SPI role', () => {
+    expect(out.role_squeeze).toEqual([true, true, false]);
+    expect(out.tooltip_find).toEqual(['Hint']);
+    expect(out.infobar_find).toEqual(['Warn']);
+  });
+
+  it('a search cut before an exact match refuses to act on a weaker one; an uncut search still takes it', () => {
+    expect(out.weak_cut).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/before an exact match.*narrow it with processId or controlType/) });
+    expect(out.weak_uncut).toBe(true);
+  });
+
   it('a search the depth cap cut names the depth limit', () => {
     expect(out.deep_target).toEqual([true, 'depth limit']);
   });

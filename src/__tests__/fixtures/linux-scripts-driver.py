@@ -406,6 +406,40 @@ slow_page.children[-1].states.add(StateType.FOCUSED)
 OUT['slow_focused'] = bridge.cmd_focused(5151)
 bridge._now = real_now
 
+# The hit list is capped (each hit costs about ten AT-SPI calls to describe) and says it was cut.
+items_acc = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('file %d' % i, 'list item') for i in range(2000)])])
+wide_acc = items_acc
+cap_res = bridge.cmd_find(None, 'list item', 5151)
+OUT['hit_cap'] = {'n': len(cap_res['elements']), 'partial': cap_res.get('partial'), 'reason': cap_res.get('reason'), 'max': bridge.MAX_TREE_NODES}
+# The deadline holds while describing hits too: every dict costs a second on a fake clock.
+clock[0] = 0.0
+bridge._now = lambda: clock[0]
+slow_dict_orig = bridge.node_to_dict
+def slow_dict(acc):
+    clock[0] += 1.0
+    return slow_dict_orig(acc)
+bridge.node_to_dict = slow_dict
+few_acc = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('file %d' % i, 'list item') for i in range(30)])])
+wide_acc = few_acc
+slow_res = bridge.cmd_find(None, 'list item', 5151)
+OUT['dict_deadline'] = {'n': len(slow_res['elements']), 'partial': slow_res.get('partial'), 'reason': slow_res.get('reason')}
+bridge.node_to_dict = slow_dict_orig
+bridge._now = real_now
+
+# Multi-word roles outside the role map: the caller sends the normalized name, AT-SPI spells it with a space.
+OUT['role_squeeze'] = [bridge.role_matches(['tooltip'], 'tool tip'), bridge.role_matches(['infobar'], 'info bar'), bridge.role_matches(['button'], 'tool tip')]
+wide_acc = Acc('app', 'application', pid=5151, children=[Acc('win', 'frame', children=[Acc('Hint', 'tool tip'), Acc('Warn', 'info bar'), Acc('Ok', 'push button')])])
+OUT['tooltip_find'] = [e['name'] for e in bridge.cmd_find(None, 'tooltip', 5151)['elements']]
+OUT['infobar_find'] = [e['name'] for e in bridge.cmd_find(None, 'infobar', 5151)['elements']]
+
+# A cut search does not act on a weaker match (substring) when an exact one may lie beyond the cut.
+weak_page = Acc('page', 'document web', children=[Acc('Save as draft', 'push button')] + [Acc('row %d' % i, 'section') for i in range(bridge.MAX_SEARCH_NODES * 2)] + [Acc('Save', 'push button')])
+wide_acc = Acc('app', 'application', pid=5151, children=[weak_page])
+OUT['weak_cut'] = bridge.cmd_invoke('Save', None, 5151, 'click', None)
+small_weak = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Save as draft', 'push button', actions=['click'])])])
+bridge.begin_search()
+OUT['weak_uncut'] = bridge.find_target(small_weak, 'Save', None)[0] is not None
+
 # Depth limit is named as such.
 deep_acc = Acc('app', 'application', pid=5151, children=[chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button'))])
 bridge.begin_search()

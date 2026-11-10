@@ -406,6 +406,17 @@ describe('L7 — findElements scopes to the foreground window pid by default', (
     expect(adapter.lastFindNote).toMatch(/depth limit/);
   });
 
+  it('a cut list that still has hits is flagged incomplete; ToolTip is sent as the role the bridge can match', async () => {
+    h.exec = defaultExec(() => ({ elements: [{ name: 'Hint', controlType: 'tool tip', bounds: { x: 1, y: 2, width: 3, height: 4 } }], partial: true, reason: 'result limit' }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const hits = await adapter.findElements({ controlType: 'ToolTip' });
+    expect(hits).toHaveLength(1);                                   // a spaced raw role survives the adapter's own filter
+    expect(bridgeCalls()[bridgeCalls().length - 1]).toContain('--role=tooltip');
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/incomplete.*result limit/);
+  });
+
   it('a focus search the bridge cut is reported as partial, not as nothing focused', async () => {
     h.exec = defaultExec(() => ({ element: null, partial: true }));
     const adapter = new LinuxAdapter();
