@@ -33,6 +33,9 @@ const uncheckedNote = (): string => lastCaptureUnchecked()
  * ALWAYS image-scaled, so a caller passing a11y-snapshot (physical) coords got
  * them scaled a second time and the pointer landed on a different control.
  */
+/** A screenshot is the last resort: a target with a visible label is reached by name, not by the coordinates this image gives. */
+const LABEL_TAIL = ' If the target has a visible label, click it with smart_click {"target":"<label>"} instead of coordinates.';
+
 /**
  * What to tell the agent after a zoomed view: clicks never take coordinates from the zoomed image — they stay in the space of the
  * full screenshot (or of the screen, for a screen-space region) — so the way back is arithmetic the reply spells out.
@@ -112,7 +115,7 @@ export function getDesktopTools(): ToolDefinition[] {
           const o = shot.origin ?? { x: target!.bounds.x, y: target!.bounds.y };
           setLastFrame({ originX: o.x, originY: o.y, scale: shot.scaleFactor, display: target!.index });
           return {
-            text: `Screenshot: ${shot.width}x${shot.height}px of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}`,
+            text: `Screenshot: ${shot.width}x${shot.height}px of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}${LABEL_TAIL}`,
             image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
           };
         }
@@ -121,7 +124,7 @@ export function getDesktopTools(): ToolDefinition[] {
         const base64 = frame.buffer.toString('base64');
         const note = target && (process.platform === 'win32' || explicit !== undefined) ? displayNote(displays, target) : '';
         return {
-          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}${uncheckedNote()}`,
+          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}${uncheckedNote()}${LABEL_TAIL}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },

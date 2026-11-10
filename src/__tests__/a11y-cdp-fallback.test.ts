@@ -308,7 +308,7 @@ describe('blind hint for the CDP browser (#235)', () => {
     });
     const { text } = await findElement.handler({ name: 'Upgrade', processId: 4321 }, ctx);
     const hint = text.slice(text.indexOf('→'));
-    expect(hint).toMatch(/^→ .*browser \{action:"page_context"\}/);
+    expect(hint).toMatch(/^→ .*browser \{"action":"page_context"\}/);
     expect(hint).toContain('read_text');
     expect(hint).toMatch(/own browser/);
     expect(hint).not.toMatch(/Restarting it|--force-renderer-accessibility/);
@@ -320,7 +320,7 @@ describe('blind hint for the CDP browser (#235)', () => {
       cdpBrowserPid: 1234, cdpMode: 'attached',
     });
     const { text } = await findElement.handler({ name: 'Upgrade', processId: 1234 }, ctx);
-    expect(text).toMatch(/→ .*browser \{action:"page_context"\}/);
+    expect(text).toMatch(/→ .*browser \{"action":"page_context"\}/);
     expect(text).not.toMatch(/own browser/);
   });
 
@@ -340,7 +340,7 @@ describe('blind hint for the CDP browser (#235)', () => {
       cdpConnected: true, cdpPageEvaluate: empty(), cdpBrowserPid: 1234, cdpMode: 'dedicated',
     });
     const { text } = await readScreen.handler({}, ctx);
-    expect(text).toMatch(/→ .*browser \{action:"page_context"\}/);
+    expect(text).toMatch(/→ .*browser \{"action":"page_context"\}/);
     expect(text).not.toMatch(/Restarting it/);
   });
 });

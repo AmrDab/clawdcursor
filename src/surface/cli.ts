@@ -113,6 +113,7 @@ import { e } from './format';
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { endAllSessions } from './session-log';
+import { interactiveConsoleCall, privateRunDir, psOpts, system32Exe } from '../platform/ps-spawn';
 
 const program = new Command();
 
@@ -127,7 +128,7 @@ async function isClawdInstance(port: number): Promise<boolean> {
 }
 
 async function forceKillPort(port: number): Promise<boolean> {
-  const { execSync } = await import('child_process');
+  const { execSync, execFileSync } = await import('child_process');
   const os = await import('os');
 
   // #114: only ever kill processes that are plausibly OURS. The port is
@@ -139,10 +140,9 @@ async function forceKillPort(port: number): Promise<boolean> {
 
   if (os.platform() === 'win32') {
     try {
-      const output = execSync(
-        `netstat -ano | findstr :${port} | findstr LISTENING`,
-        { encoding: 'utf-8' },
-      );
+      // No shell (it would search the working directory and parse the command line): netstat by absolute path, filtered here.
+      const output = execFileSync(system32Exe('netstat.exe'), ['-ano'], { encoding: 'utf-8' })
+        .split(/\r?\n/).filter(l => l.includes(`:${port}`) && l.includes('LISTENING')).join('\n');
       const pids = new Set(
         output.trim().split('\n')
           .map(line => line.trim().split(/\s+/).pop())
@@ -154,14 +154,14 @@ async function forceKillPort(port: number): Promise<boolean> {
       for (const pid of pids) {
         let image = '';
         try {
-          const row = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: 'utf-8' });
+          const row = execFileSync(system32Exe('tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf-8' });
           image = (row.split(',')[0] ?? '').replace(/"/g, '').trim();
         } catch { /* tasklist unavailable — treat as unknown */ }
         if (image && !OURS.test(image)) {
           console.warn(`${e('⚠️', '[WARN]')} Port ${port} is held by "${image}" (pid ${pid}) — not a clawdcursor process; refusing to kill it. Free the port or change server.port.`);
           continue;
         }
-        execSync(`taskkill /F /PID ${pid}`);
+        execFileSync(system32Exe('taskkill.exe'), ['/F', '/PID', String(pid)]);
         console.log(`${e('🐾', '>')} Killed process ${pid}${image ? ` (${image})` : ''}`);
         killedAny = true;
       }
@@ -178,6 +178,8 @@ async function forceKillPort(port: number): Promise<boolean> {
   // systems. Instead: capture lsof output, parse PIDs in JS, and only kill
   // when we have at least one confirmed PID.
   try {
+    // macOS / Linux only: lsof and ps run through /bin/sh, which has no current-directory lookup for them (CWE-427 is the Windows
+    // rule); `port` and `pid` are numbers.
     const lsofOut = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf-8', shell: '/bin/sh' });
     const pids = lsofOut.trim().split(/\s+/)
       .map(s => parseInt(s, 10))
@@ -1126,9 +1128,10 @@ done
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-task-'));
         const tmpScript = path.join(tmpDir, 'task.ps1');
         fs.writeFileSync(tmpScript, scriptContent);
-        spawnExec('powershell.exe', [
-          '-Command', `Start-Process powershell -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','${tmpScript}'`
-        ], { detached: true, stdio: 'ignore' } as any);
+        // execFile gives a child no console of its own, so a short-lived PowerShell Start-Processes the interactive one (absolute path;
+        // the script path crosses as $env:, never interpolated; the console starts in the user's home).
+        const call = interactiveConsoleCall(tmpScript);
+        spawnExec(call.file, call.args, psOpts({ env: call.env, windowsHide: true }));
       } else if (platform === 'darwin') {
         const fs = await import('fs');
         const path = await import('path');
@@ -1311,7 +1314,8 @@ program
     // 7. Unlink global npm command
     try {
       const { execSync } = await import('child_process');
-      execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000 });
+      // Left on PATH on purpose: the user runs this uninstall themselves, and npm is theirs to resolve (not a system program).
+      execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000, cwd: privateRunDir() });
       console.log(`   ${e('🗑️', '[DEL]')}  Removed global clawdcursor command`);
       removed++;
     } catch { /* may not be linked globally */ }

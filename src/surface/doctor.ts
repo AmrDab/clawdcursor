@@ -42,6 +42,7 @@ import { callVisionLLMDirect } from '../llm/client';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
 import { findInstalledCopies, describeCopies } from './installed-copies';
+import { system32Exe } from '../platform/ps-spawn';
 
 const CONFIG_FILE = '.clawdcursor-config.json';
 const execFileAsync = promisify(execFile);
@@ -905,7 +906,7 @@ function buildPipelineFromSelection(
 async function detectGpuInfo(): Promise<string | null> {
   if (process.platform === 'win32') {
     try {
-      const { stdout } = await execFileAsync('nvidia-smi', [
+      const { stdout } = await execFileAsync(system32Exe('nvidia-smi.exe'), [
         '--query-gpu=name,memory.total',
         '--format=csv,noheader,nounits',
       ]);

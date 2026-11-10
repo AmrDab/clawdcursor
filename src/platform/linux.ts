@@ -471,7 +471,8 @@ export class LinuxAdapter implements PlatformAdapter {
         /* fall through */
       }
     }
-    return all[0] ?? null;
+    // No way to ask: the first listed window is a guess, and says so (a guess must not block input, core/control.ts).
+    return all[0] ? { ...all[0], guessed: true } : null;
   }
 
   /** Why the last focusWindow returned false. Taken once. */

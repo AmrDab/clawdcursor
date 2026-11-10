@@ -276,8 +276,8 @@ export function getBatchTools(): ToolDefinition[] {
         'is a precondition checked by RE-PERCEIVING before the step runs: {"window":"notepad"} (foreground ' +
         'window must match) or {"element":"Send"} (a11y element must be present). The batch HALTS on the first ' +
         'failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real ' +
-        'state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you ' +
-        'act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without ' +
+        'state. Every step goes through the same safety gate as a direct call. ' +
+        'Set dryRun:true to pre-scan safety tiers without ' +
         'executing. A confirm-tier step still HALTS the batch by default; ' +
         'allowConfirm:true only proceeds if the operator started the daemon with ' +
         'CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).',

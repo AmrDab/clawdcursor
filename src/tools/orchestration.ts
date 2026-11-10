@@ -10,6 +10,8 @@ import { resolveAlias } from '../core/router/aliases';
 import { pauseGate } from '../core/pause-gate';
 import { foreignOverlayState } from '../core/overlay-state';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
+import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
+import * as os from 'os';
 
 const execFileAsync = promisify(execFile);
 
@@ -128,7 +130,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
             const runningFor = ((Date.now() - entry.startedAt) / 1000).toFixed(0);
             return {
               text: `delegate_to_agent: the agent is BUSY with a different task ("${entry.task.slice(0, 100)}", running ${runningFor}s). ` +
-                    `Poll agent_status (compact: task {action:"status"}), abort it first (abort_task / task {action:"abort"}), ` +
+                    `Poll agent_status (compact: task {"action":"status"}), abort it first (abort_task / task {"action":"abort"}), ` +
                     `or re-call with the SAME task text to keep waiting on it.`,
               isError: true,
             };
@@ -177,7 +179,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
               pausedFor: `${((Date.now() - pause.since) / 1000).toFixed(0)}s`,
               next: 'The agent is waiting for the user at the computer (on-screen prompt with Resume / End task). ' +
                 'Do NOT restart or abort the task. Re-call this tool with the SAME task text to keep waiting. ' +
-                'If the user tells you here that they are done, call task {action:"resume"}.',
+                'If the user tells you here that they are done, call task {"action":"resume"}.',
             }, null, 2),
           };
         }
@@ -192,7 +194,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
               stepsCompleted: st.stepsCompleted,
               stepsTotal: st.stepsTotal,
             },
-            next: 'Task continues in the background. Re-call this tool with the SAME task text to keep waiting (re-attaches — it will NOT restart the task). Or poll agent_status (compact: task {action:"status"}) / abort with abort_task (task {action:"abort"}).',
+            next: 'Task continues in the background. Re-call this tool with the SAME task text to keep waiting (re-attaches — it will NOT restart the task). Or poll agent_status (compact: task {"action":"status"}) / abort with abort_task (task {"action":"abort"}).',
           }, null, 2),
         };
       },
@@ -263,11 +265,11 @@ export function getOrchestrationTools(): ToolDefinition[] {
             const exe = alias?.executable ?? rawName;
             const uwpId = alias?.uwpAppId;
             if (uwpId) {
-              await execFileAsync('explorer.exe', [`shell:AppsFolder\\${uwpId}`], { timeout: 10000 });
+              await execFileAsync(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${uwpId}`], { timeout: 10000, cwd: os.homedir() });
             } else {
               // `exe` is a caller-supplied app name: it arrives as $env:, never as script source (platform/ps-input.ts).
-              await execFileAsync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process -FilePath $env:CLAWD_PS_FILE'],
-                { timeout: 10000, env: { ...process.env, CLAWD_PS_FILE: exe } });
+              await execFileAsync(powershellExe(), ['-NoProfile', '-Command', 'Start-Process -FilePath $env:CLAWD_PS_FILE -WorkingDirectory $env:USERPROFILE'],
+                psOpts({ timeout: 10000, env: { ...process.env, CLAWD_PS_FILE: exe } }));
             }
           } else if (process.platform === 'darwin') {
             await execFileAsync('open', ['-a', alias?.macOSAppName ?? rawName], { timeout: 10000 });

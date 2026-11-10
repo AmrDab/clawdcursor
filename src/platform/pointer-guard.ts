@@ -38,7 +38,9 @@ interface InputGuard {
   /** The agent brought a window up on purpose: the next input binds to it. */
   focused(q: WindowQuery): void;
   /** The agent launched an app: the next input binds to its window (by pid or title), or to whatever opens when unknown. */
-  launched(r?: { pid?: number; title?: string }): void;
+  launched(r?: { pid?: number; title?: string }, appName?: string): void;
+  /** Before an act on an element by name: stopped, or the window it would resolve to is an AI assistant nobody chose. */
+  byName(processId?: number): Promise<void>;
 }
 let inputGuard: InputGuard | null = null;
 /** Inside a guarded call ('agent': its inner steps are already covered), or clawdcursor's own housekeeping ('user'). */
@@ -107,7 +109,16 @@ export function guardInputMethods<T extends object>(target: T): T {
       return r;
     });
   }
-  for (const m of STOP_METHODS) wrap(m, async (g, f, args, nested) => { if (!nested) { g.stopCheck(); announce(m); } return f(...args); });
+  // By-name acts on the window in front are checked like input; reading a value is not an act.
+  wrap('invokeElement', async (g, f, args, nested) => {
+    const q = (args[0] ?? {}) as { processId?: number; action?: string };
+    if (!nested) {
+      if (q.action === 'get-value') g.stopCheck(); else await g.byName(q.processId);
+      announce('invokeElement');
+    }
+    return f(...args);
+  });
+  for (const m of STOP_METHODS.filter(m => m !== 'invokeElement')) wrap(m, async (g, f, args, nested) => { if (!nested) { g.stopCheck(); announce(m); } return f(...args); });
   // The agent's own focus and launches rebind the window it works in, nested or not (a navigate raises its browser).
   // The platform adapter takes a query and answers true/false; the accessibility bridge takes (title, processId) and
   // answers {success}.
@@ -125,7 +136,7 @@ export function guardInputMethods<T extends object>(target: T): T {
     wrap(m, async (g, f, args, nested) => {
       if (!nested) { g.stopCheck(); announce(m); }
       const r = await f(...args) as { pid?: number; title?: string } | undefined;
-      g.launched(r);
+      g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
       return r;
     });
   }

@@ -214,7 +214,7 @@
     },
     {
       "name": "batch",
-      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Use `expect` to guarantee you act on the right window/element instead of guessing. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
+      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -997,7 +997,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -1060,7 +1060,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -1239,7 +1239,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -1374,7 +1374,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -2134,7 +2134,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -2409,7 +2409,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {

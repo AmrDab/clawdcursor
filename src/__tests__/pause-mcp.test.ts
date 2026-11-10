@@ -348,7 +348,7 @@ describe('busy while the running task itself is paused', () => {
     const taskPause = pauseGate.requestWithReply({ message: 'Sign in to Stripe' });   // the daemon's own, keyless
     const r = JSON.parse((await pauseForUser.handler({ message: 'Sign in to B', timeout: 1 }, noCtx)).text);
     expect(r.status).toBe('busy');
-    expect(r.next).toMatch(/task \{action:"status"\}/);
+    expect(r.next).toMatch(/task \{"action":"status"\}/);
     pauseGate.answer('resume');
     await taskPause;
   });

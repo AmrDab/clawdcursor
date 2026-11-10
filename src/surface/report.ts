@@ -15,6 +15,7 @@ import * as readline from 'readline';
 import { getVersion } from './version';
 import { TASK_LOGS_DIR, REPORTS_DIR } from '../paths';
 import { listSessions, readSession, type SessionTally } from './session-log';
+import { system32Exe } from '../platform/ps-spawn';
 
 // ─── Configuration ──────────────────────────────────────────
 
@@ -315,7 +316,7 @@ export async function openInBrowser(url: string): Promise<boolean> {
   try {
     if (process.platform === 'win32') {
       // rundll32 takes the URL verbatim — `start` would split it on & and ^.
-      spawn('rundll32', ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      spawn(system32Exe('rundll32.exe'), ['url.dll,FileProtocolHandler', url], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
     } else {
       spawn(process.platform === 'darwin' ? 'open' : 'xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
     }

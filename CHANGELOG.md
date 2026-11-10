@@ -4,7 +4,33 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
+  Read lines say to act by name and keep `@x,y` for elements with no name; `smart_click` is explained where agents look
+  for it and its miss carries a next step; the sparse-tree hint, `SKILL.md` and `docs/llms.txt` use one SEE/ACT ladder in
+  one call notation (`accessibility {"action":"smart_click","target":"<label>"}`); `computer` comes last, with its
+  screenshot actions at the end of the enum; misses point at `smart_click` or `window list`; `[unverified]` appears only
+  on calls whose effect nothing checked, and a read-back that confirmed it is `[confirmed]`; `expect` is usable from its
+  description; every compound tool description is at most 1,024 characters.
+- **The "little or no accessibility structure" hint needs a sparse tree**, not just a browser window: a browser needs 5
+  named elements inside its page, any other window 5 named elements (a small dialog of named buttons is fine).
+
+### Security
+- **Windows system programs are started by absolute path, from a private directory.** PowerShell (and `reg`, `tasklist`,
+  `taskkill`, `netstat`, `rundll32`, `explorer`) were spawned by bare name, which Windows resolves in the current directory
+  before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one
+  shell `exec` of PowerShell is gone), and fail with a clear error if `SystemRoot` is unset or the file is missing.
+  PowerShell children run in `~/.clawdcursor/run` (mode 0700), not the shell's working directory or the shared temp folder,
+  which also keeps PowerShell's `ModuleAnalysisCache` out of a repository. Apps and terminals clawdcursor opens
+  for the user start in the user's home (not in that private directory, and not wherever clawdcursor ran from); `windir` stands in
+  when `SystemRoot` is unset, and the run directory is refused if it is a symlink and tightened to 0700.
+
 ### Fixed
+- **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
+  (`invoke`, `set_value`, `toggle`, `select`) are refused when the window in front is Claude, ChatGPT, Codex, Cursor,
+  VS Code (and Insiders), Windsurf or Zed, or an app this server was started from (stdio), unless the agent focused or
+  opened it on purpose. A launch that surfaced no window excuses only a window of the app it started. A foreground the
+  adapter only guessed at (Linux without xdotool) never blocks.
 - **`find` and `invoke` stay in the window the agent works in.** With several windows of one process (Edge, Explorer,
   Office), Windows searched every window for `find` (so names from the user's other windows of that app reached the
   agent) and took the first window for `invoke`. Both now search one window: the foreground window when it belongs to the

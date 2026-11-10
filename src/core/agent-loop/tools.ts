@@ -30,11 +30,11 @@ import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../llm/browser-config';
 import { agentBrowserConnectOptions } from '../../llm/browser-config';
-import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence } from '../verify/assertions';
+import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence, EXPECT_DESCRIPTION } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent } from './prompt';
@@ -201,7 +201,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         );
         const rest = ordered.length - (offset + page.length);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
-        const hint = (tree.length < 5 || activeIsBrowser ? `\n${nextStep}` : '') +
+        const hint = (isSparseTree(tree, activeIsBrowser) ? `\n${nextStep}` : '') +
           (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
@@ -271,7 +271,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
             }
             await sleep(150);
-            return { success: refRes.success, text: refRes.success ? `Invoked "${plan.name}" via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
+            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
@@ -334,7 +334,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked ${quoteScreenText(name)} (${used}) → value: "${(res.data as any).value}"`
-                : `Invoked ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
+                : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
             : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
           targetLabel: name,
@@ -2205,6 +2205,11 @@ export function expandNote(data: Record<string, unknown> | undefined): string {
   return data?.expandChanged === false ? ` — still ${state.toLowerCase()} (the state did not change)` : ` — now ${state.toLowerCase()}`;
 }
 
+/** Did the bridge read the state back after an expand / collapse, and find it changed? The marker goes BEFORE the name (result-codes.ts). */
+export function expandReadBack(data: Record<string, unknown> | undefined): boolean {
+  return typeof data?.expandState === 'string' && data.expandChanged !== false;
+}
+
 /** After an invoke that was found but threw ("Invoke failed: ..."): it may have acted, and a disabled element ignores a click. No second click. */
 export function canClickAtBounds(res: { data?: Record<string, unknown> }): boolean {
   return res.data?.reason !== 'invoke_threw' && res.data?.reason !== 'disabled';
@@ -2284,7 +2289,7 @@ function buildWinQuery(args: Record<string, unknown>): { processName?: string; p
  */
 const EXPECT_SCHEMA = {
   type: 'array',
-  description: 'Optional post-conditions to verify after this action (same assertion types as the verify tool: window_title_contains, app_running, element_exists, element_value_contains, clipboard_contains, file_exists, file_contains, ocr_contains, file_changed_since_start). If any FAIL the action returns a DEVIATION and you must adapt. State an OUTCOME you can observe (a window title, a rendered element/chip, a status) — NOT the raw text you typed.',
+  description: EXPECT_DESCRIPTION,
   items: {
     type: 'object',
     properties: { type: { type: 'string', enum: ['window_title_contains', 'app_running', 'element_exists', 'element_value_contains', 'clipboard_contains', 'file_exists', 'file_contains', 'ocr_contains', 'file_changed_since_start'] } },

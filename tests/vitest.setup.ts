@@ -1,10 +1,25 @@
 import { vi } from 'vitest';
 import * as os from 'os';
+import * as fs from 'fs';
 import * as path from 'path';
 
 // Keep test runs out of the user's real ~/.clawdcursor: the structured logger
 // and the MCP session log write here instead.
 process.env.CLAWDCURSOR_LOG_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-logs-${process.pid}`);
+// PowerShell children run from a private directory under the home dir (platform/ps-spawn.ts): tests get their own.
+process.env.CLAWDCURSOR_RUN_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-run-${process.pid}`);
+// Windows system programs are started by absolute path under %SystemRoot% (platform/ps-spawn.ts). Tests that mock the Windows
+// adapters on Linux / macOS need a SystemRoot that has them: an empty stand-in, never executed (child_process is mocked there).
+if (process.platform !== 'win32' && !process.env.SystemRoot) {
+  const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-test-sysroot-'));   // private (0700), unguessable
+  for (const rel of [['System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'], ['System32', 'reg.exe'], ['System32', 'tasklist.exe'],
+    ['System32', 'taskkill.exe'], ['System32', 'netstat.exe'], ['System32', 'rundll32.exe'], ['explorer.exe']]) {
+    const f = path.join(fakeRoot, ...rel);
+    fs.mkdirSync(path.dirname(f), { recursive: true });
+    fs.writeFileSync(f, '');
+  }
+  process.env.SystemRoot = fakeRoot;
+}
 process.env.CLAWDCURSOR_SESSION_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-sessions-${process.pid}`);
 // Tests fake the UI tree; a thin fake must not make every read wait for an app to "wake" (the wake tests pass their own budget).
 process.env.CLAWDCURSOR_WAKE_BUDGET_MS ??= '0';

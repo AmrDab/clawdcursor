@@ -15,7 +15,7 @@ import { untrusted } from '../core/miss-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, nameMissHint } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint } from './blind-hints';
 import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 
 /**
@@ -116,6 +116,13 @@ async function cdpBrowserPid(ctx: ToolContext): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+/** The browser-tools hint when `pid` is the browser clawdcursor is attached to over CDP, else ''. Useful on a read that is not thin. */
+async function cdpStepFor(ctx: ToolContext, pid: number | undefined): Promise<string> {
+  const cdpPid = await cdpBrowserPid(ctx);
+  if (pid === undefined || cdpPid === null || cdpPid !== pid) return '';
+  return nextStepFor(ctx, pid);
 }
 
 /** The blind hint for a thin read of `pid`: the browser tools when it is the CDP browser. */
@@ -235,7 +242,7 @@ export function getA11yTools(): ToolDefinition[] {
           const partial = (ctx.platform.lastTreeTruncated
             ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '')
             + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
-          const nextStep = tree.length < 5 || isBrowser ? await nextStepFor(ctx, active) : '';
+          const nextStep = isSparseTree(tree, isBrowser) ? await nextStepFor(ctx, active) : isBrowser ? await cdpStepFor(ctx, active) : '';
           baseText = [
             'WINDOWS',
             windows.length
@@ -548,7 +555,7 @@ export function getA11yTools(): ToolDefinition[] {
           return {
             text: `${ctx.platform.lastFindNote ?? 'Not found in the readable part of the window.'} — it may be in the part that did not answer; this is not "nothing found". ` +
               'Read what did answer with read_tree (text that is only a value shows there even when find by name misses it), ' +
-              'or smart_click name:"…" / ocr for text you can see.',
+              'or smart_click {"target":"<label>"} / ocr_read_screen for text you can see.',
             isError: true,
           };
         }
@@ -556,7 +563,7 @@ export function getA11yTools(): ToolDefinition[] {
           return {
             text: 'accessibility search TIMED OUT on a very large window (this is not "nothing found"). ' +
               'Narrow it with processId and/or controlType. Or: copy_all_text for the exact page text · ' +
-              'smart_click name:"…" to press a labelled control (OCR fallback) · ocr to read it.',
+              'smart_click {"target":"<label>"} to press a labelled control (OCR fallback) · ocr_read_screen to read it.',
             isError: true,
           };
         }
@@ -575,7 +582,7 @@ export function getA11yTools(): ToolDefinition[] {
         if (ctx.platform?.lastFindError === 'error') {
           return {
             text: 'accessibility search FAILED (the accessibility bridge did not answer — this is not "nothing found"). ' +
-              'Read it another way: copy_all_text for the exact page text · smart_click name:"…" (OCR fallback) · ocr.',
+              'Read it another way: copy_all_text for the exact page text · smart_click {"target":"<label>"} (OCR fallback) · ocr_read_screen.',
             isError: true,
           };
         }

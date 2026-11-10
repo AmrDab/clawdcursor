@@ -221,7 +221,7 @@ describe('stop is a state (#294)', () => {
   it('the stop text reads right after the compact surface renames tools in it (a batch step on the real Mac came out mangled)', async () => {
     const { toCompactNames } = await import('../tools/compact');
     const text = toCompactNames(STOPPED_TEXT, 'computer');
-    expect(text).toContain('call system {action:"pause_for_user"} with a message');
+    expect(text).toContain('call system {"action":"pause_for_user"} with a message');
     expect(text).not.toMatch(/"action":"system/);
   });
 

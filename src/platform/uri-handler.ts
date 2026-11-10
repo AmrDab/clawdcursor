@@ -25,6 +25,7 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { psOpts, powershellExe, system32Exe } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -42,7 +43,7 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
   const userChoicePath = `HKCU\\SOFTWARE\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\${s}\\UserChoice`;
   let progId: string | null = null;
   try {
-    const { stdout } = await execFileAsync('reg', ['query', userChoicePath, '/v', 'ProgId'], { timeout: 3000 });
+    const { stdout } = await execFileAsync(system32Exe('reg.exe'), ['query', userChoicePath, '/v', 'ProgId'], { timeout: 3000 });
     const m = stdout.match(/ProgId\s+REG_SZ\s+(.+?)[\r\n]/);
     if (m) progId = m[1].trim();
   } catch {
@@ -53,7 +54,7 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
   if (progId) {
     const cmdPath = `HKCR\\${progId}\\Shell\\open\\command`;
     try {
-      const { stdout } = await execFileAsync('reg', ['query', cmdPath, '/ve'], { timeout: 3000 });
+      const { stdout } = await execFileAsync(system32Exe('reg.exe'), ['query', cmdPath, '/ve'], { timeout: 3000 });
       const m = stdout.match(/\(Default\)\s+REG_(?:SZ|EXPAND_SZ)\s+(.+?)[\r\n]/);
       if (m) {
         const exe = extractExecutableFromCommand(m[1]);
@@ -103,15 +104,16 @@ function resolveKnownHandlerForScheme(scheme: string): string | null {
   // 1. Already-running New Outlook (`olk.exe`). Pull its path off the
   //    live process when possible — that's the version actually installed.
   try {
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
-    const out = execSync(
-      'wmic process where "name=\'olk.exe\'" get ExecutablePath /value',
-      { timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    // A constant CIM query (wmic is gone from current Windows 11), by absolute path with no shell; no value goes into it.
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    const out = execFileSync(
+      powershellExe(),
+      ['-NoProfile', '-NonInteractive', '-Command', "(Get-CimInstance Win32_Process -Filter \"Name='olk.exe'\" | Select-Object -First 1).ExecutablePath"],
+      psOpts({ timeout: 5000, encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'] }),
     );
-    const m = out.match(/ExecutablePath=(.+)/);
-    if (m && m[1].trim()) return m[1].trim();
+    if (out.trim()) return out.trim().split(/\r?\n/)[0].trim();
   } catch {
-    // wmic missing or olk not running.
+    // PowerShell missing or olk not running.
   }
 
   // 2. Glob WindowsApps for the latest Microsoft.OutlookForWindows install.
@@ -147,7 +149,7 @@ export async function isRegisteredUriScheme(scheme: string): Promise<boolean> {
   const s = scheme.toLowerCase().replace(/[^a-z0-9+.-]/g, ''); // defensive: scheme charset only
   if (!s) return false;
   try {
-    const { stdout } = await execFileAsync('reg', ['query', `HKCR\\${s}`, '/v', 'URL Protocol'], { timeout: 3000 });
+    const { stdout } = await execFileAsync(system32Exe('reg.exe'), ['query', `HKCR\\${s}`, '/v', 'URL Protocol'], { timeout: 3000 });
     return /URL Protocol/i.test(stdout);
   } catch {
     return false;
@@ -181,9 +183,9 @@ export async function shellDispatchUriAndVerify(
   const before = await snapshot();
   try {
     const child = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI'],
-      { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } },
+      powershellExe(),
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI -WorkingDirectory $env:USERPROFILE'],
+      psOpts({ detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
     );
     child.unref();
     child.on('error', () => { /* poll reports no-window */ });
@@ -215,12 +217,12 @@ async function snapshotProcessWindows(processNameLower: string): Promise<Set<str
     // processNameLower flows in from registry / WindowsApps lookups (not
     // LLM-controlled); it still arrives as $env:, never as script source (ps-input.ts).
     const { stdout } = await execFileAsync(
-      'powershell.exe',
+      powershellExe(),
       [
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
         `Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.ProcessName.ToLower() -eq $env:CLAWD_PS_NAME } | ForEach-Object { "$($_.MainWindowHandle)|$($_.MainWindowTitle)" }`,
       ],
-      { timeout: 3000, env: { ...process.env, CLAWD_PS_NAME: processNameLower } },
+      psOpts({ timeout: 3000, env: { ...process.env, CLAWD_PS_NAME: processNameLower } }),
     );
     return new Set(
       stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean),

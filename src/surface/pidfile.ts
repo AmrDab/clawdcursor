@@ -41,6 +41,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { DEFAULT_CONFIG } from '../types';
+import { powershellExe } from '../platform/ps-spawn';
 
 export type LockMode = 'start' | 'mcp' | 'serve';
 
@@ -106,7 +107,7 @@ export function getProcessStartTime(pid: number, timeoutMs = 5000): number | nul
       // to ms-since-epoch is a fixed offset. Going through file time avoids
       // having to parse a CIM-datetime string in JS.
       const out = execFileSync(
-        'powershell',
+        powershellExe(),
         [
           '-NoProfile',
           '-NonInteractive',

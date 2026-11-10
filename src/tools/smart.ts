@@ -22,6 +22,7 @@ import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
+import { isGuardRefusal } from '../core/control';
 import { untrusted } from '../core/miss-text';
 
 // Shared OCR engine singleton — avoids re-initialization per call
@@ -34,6 +35,11 @@ function getOcr(): OcrEngine {
 // ── Known apps with empty accessibility trees ──
 // These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
 /** Spoken names of calculator keys (Windows names, macOS AX identifiers). */
+/** What to do after a smart_click that found no target: read the text on screen, retry with the exact label. In granular names;
+ *  the compact surface renames them (compact.ts renameJsonAdvice: a JSON result skips the result line and the prose rewrite). */
+export const SMART_MISS_NEXT =
+  'ocr_read_screen lists the text on screen with positions; retry smart_click with the exact label. desktop_screenshot only if the target has no text.';
+
 const KEY_NAME_ALIASES: Record<string, string[]> = {
   '0': ['Zero'], '1': ['One'], '2': ['Two'], '3': ['Three'], '4': ['Four'],
   '5': ['Five'], '6': ['Six'], '7': ['Seven'], '8': ['Eight'], '9': ['Nine'],
@@ -296,6 +302,8 @@ export function getSmartTools(): ToolDefinition[] {
             candidates,
             tried: attempted,
             elapsedMs: Date.now() - startedAt,
+            // A raw JSON result skips the result line, so the next step is a field of its own.
+            next: SMART_MISS_NEXT,
           };
           return { text: JSON.stringify(payload), isError: true };
         };
@@ -542,6 +550,7 @@ export function getSmartTools(): ToolDefinition[] {
         type A11yHit =
           | { method: 'invoke'; pending?: boolean; lateInvokeError?: string }
           | { method: 'bounds'; clickPoint: { x: number; y: number }; bounds?: { x: number; y: number; w: number; h: number }; text?: string };
+        let guardRefusal: string | null = null;
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
           try {
@@ -571,6 +580,8 @@ export function getSmartTools(): ToolDefinition[] {
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
             return null;
           } catch (err) {
+            // The guard refused (stopped, foreground changed, an AI assistant in front): the call is refused, not a miss.
+            if (isGuardRefusal(err)) { guardRefusal = err instanceof Error ? err.message : String(err); return null; }
             // Invocation threw (e.g. RPC error on UWP apps) — try to get bounds for coordinate fallback.
             // Not for a plain "not found": a second full-tree search finds
             // nothing either and doubled the wait (live macOS: 24 s).
@@ -626,6 +637,7 @@ export function getSmartTools(): ToolDefinition[] {
           // Cancel the deadline timer once both settle so we don't keep the event loop alive
           Promise.allSettled([ocrPromise, a11yPromise]).then(() => clearTimeout(timer));
         });
+        if (guardRefusal && !parallelResult.a11y) return { text: guardRefusal as string, isError: true };
         const ocrMatch = parallelResult.ocr;
         const a11yResult = parallelResult.a11y;
         const parallelTimedOut = parallelResult.timedOut;
@@ -668,6 +680,7 @@ export function getSmartTools(): ToolDefinition[] {
           try {
             await ctx.desktop.mouseClick(cx, cy);
           } catch (err: any) {
+            if (isGuardRefusal(err)) return { text: err.message, isError: true };
             attempted.push(`ocr_match_click_threw: ${err?.message?.substring(0, 80) || 'unknown'}`);
             return buildFailure('no_clickable_target', 'ocr_match_click_threw');
           }
@@ -723,6 +736,7 @@ export function getSmartTools(): ToolDefinition[] {
           try {
             await ctx.desktop.mouseClick(a.clickPoint.x, a.clickPoint.y);
           } catch (err: any) {
+            if (isGuardRefusal(err)) return { text: err.message, isError: true };
             attempted.push(`a11y_bounds_click_threw: ${err?.message?.substring(0, 80) || 'unknown'}`);
             return buildFailure('no_clickable_target', 'a11y_bounds_click_threw');
           }
@@ -864,7 +878,10 @@ export function getSmartTools(): ToolDefinition[] {
                 name: target,
                 processId: processId || activeWin?.processId,
                 action: 'focus',
-              }).catch(() => ({ success: false } as { success: boolean; clickPoint?: { x: number; y: number } }));
+              }).catch((err: unknown) => {
+                if (isGuardRefusal(err)) throw err;   // refused, not missed: the call says so
+                return { success: false } as { success: boolean; clickPoint?: { x: number; y: number } };
+              });
               if (result.success) {
                 focused = true;
               } else if (result.clickPoint) {
@@ -895,7 +912,7 @@ export function getSmartTools(): ToolDefinition[] {
                 }
               }
             }
-          } catch { /* fall through */ }
+          } catch (err) { if (isGuardRefusal(err)) throw err; /* else fall through */ }
 
           // Try CDP focus (browser)
           if (!focused) {

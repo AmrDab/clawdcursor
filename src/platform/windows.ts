@@ -52,6 +52,8 @@ import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields } from '../core/miss-text';
+import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
+import * as os from 'os';
 
 const execFileAsync = promisify(execFile);
 
@@ -172,7 +174,7 @@ export class WindowsAdapter implements PlatformAdapter {
     let logicalHeight = physicalHeight;
     try {
       const { stdout } = await execFileAsync(
-        'powershell.exe',
+        powershellExe(),
         [
           '-NoProfile',
           '-Command',
@@ -180,7 +182,7 @@ export class WindowsAdapter implements PlatformAdapter {
           '$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; ' +
           '"$($s.Width),$($s.Height)"',
         ],
-        { timeout: PS_TIMEOUT_MS },
+        psOpts({ timeout: PS_TIMEOUT_MS }),
       );
       const [w, h] = stdout.trim().split(',').map(s => parseInt(s, 10));
       if (w > 0 && h > 0) {
@@ -238,7 +240,7 @@ export class WindowsAdapter implements PlatformAdapter {
     // we already have warmed up.
     try {
       const { stdout } = await execFileAsync(
-        'powershell.exe',
+        powershellExe(),
         [
           '-NoProfile',
           '-Command',
@@ -252,7 +254,7 @@ export class WindowsAdapter implements PlatformAdapter {
           '  } ' +
           '} | ConvertTo-Json -Compress',
         ],
-        { timeout: PS_TIMEOUT_MS },
+        psOpts({ timeout: PS_TIMEOUT_MS }),
       );
       const raw = JSON.parse(stdout.trim() || '[]');
       const arr: any[] = Array.isArray(raw) ? raw : [raw];
@@ -547,7 +549,7 @@ export class WindowsAdapter implements PlatformAdapter {
           "' -PassThru | Out-Null;" +
           `$h = ${target};` +
           'if ($h -ne [System.IntPtr]::Zero) { [Win32.NativeMethods]::PostMessage($h, 0x0010, [System.IntPtr]::Zero, [System.IntPtr]::Zero) | Out-Null; "ok" } else { "no-window" }';
-        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: PS_TIMEOUT_MS });
+        const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
         return stdout.trim() === 'ok';
       }
 
@@ -602,8 +604,8 @@ export class WindowsAdapter implements PlatformAdapter {
           `    [Win32.NativeMethods]::ShowWindowAsync($nwh, ${showCmd}) | Out-Null;${forceMin}` +
           '    $ok = $true } }' +
           '  if ($ok) { "ok" } else { "no-window" } }';
-        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps],
-          { timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } });
+        const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps],
+          psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } }));
         return stdout.trim() === 'ok';
       }
 
@@ -673,7 +675,7 @@ export class WindowsAdapter implements PlatformAdapter {
         'if ($nh -lt 0) { $nh = $r.Height - $r.Y }' +
         '[Win32.NativeMethods]::SetWindowPos($h, [System.IntPtr]::Zero, $nx, $ny, $nw, $nh, 0x0004) | Out-Null;' +
         '"ok"';
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: PS_TIMEOUT_MS });
+      const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
       return stdout.trim() === 'ok';
     } catch {
       return false;
@@ -1212,10 +1214,10 @@ export class WindowsAdapter implements PlatformAdapter {
       // non-ASCII text (é, —, ✓, CJK, emoji) came back as '?'. Return the
       // clipboard as base64-encoded UTF-8 instead — survives any codepage.
       const { stdout } = await execFileAsync(
-        'powershell.exe',
+        powershellExe(),
         ['-NoProfile', '-Command',
           '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))'],
-        { timeout: CLIPBOARD_TIMEOUT_MS },
+        psOpts({ timeout: CLIPBOARD_TIMEOUT_MS }),
       );
       return Buffer.from((stdout ?? '').trim(), 'base64').toString('utf8');
     } catch {
@@ -1311,8 +1313,8 @@ export class WindowsAdapter implements PlatformAdapter {
         throw new Error(`launchApp: illegal uwpAppId "${id}"`);
       }
       try {
-        const child = spawn('explorer.exe', [`shell:AppsFolder\\${id}`], {
-          stdio: 'ignore', detached: true, windowsHide: true,
+        const child = spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${id}`], {
+          stdio: 'ignore', detached: true, windowsHide: true, cwd: os.homedir(),
         });
         child.unref();
       } catch {
@@ -1339,12 +1341,15 @@ export class WindowsAdapter implements PlatformAdapter {
     if (opts?.cwd && !/[\r\n\t\x00-\x1f"'`$]/.test(opts.cwd)) {
       env.CLAWD_PS_CWD = opts.cwd;
       cmdParts.push('-WorkingDirectory', '$env:CLAWD_PS_CWD');
+    } else {
+      // An app opened for the user starts in their home, not in clawdcursor's private directory (where this PowerShell runs).
+      cmdParts.push('-WorkingDirectory', '$env:USERPROFILE');
     }
 
     try {
-      const child = spawn('powershell.exe', ['-NoProfile', '-Command', cmdParts.join(' ')], {
+      const child = spawn(powershellExe(), ['-NoProfile', '-Command', cmdParts.join(' ')], psOpts({
         stdio: 'ignore', detached: true, windowsHide: true, env,
-      });
+      }));
       child.unref();
     } catch {
       // Fall through to the lookup — the app may already be running.
