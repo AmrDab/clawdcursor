@@ -4,17 +4,19 @@
  *
  *   confirmed  — the action ran and a check saw its effect (`expect` passed, `verify` passed)
  *   unverified — the action ran; nothing checked its effect
- *   refused    — it did not run: the safety gate, consent, a locked screen, a system dialog owning the keyboard
+ *   refused    — it did not run: consent, the user's Stop or pause, a locked screen, a system dialog owning the keyboard
  *   failed     — it ran into an error, or ran without the expected effect (DEVIATION)
  *
  * Classified from the result text the tools already produce, so every tool gets it without changing any of them. Only
  * the head of a result is read for the error vocabulary: a long body (page text) can contain the same words as content.
  */
 
+import { defuseScreenDelimiters } from './untrusted-screen-content';
+
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
+  | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
@@ -66,10 +68,6 @@ function smartClickFor(text: string, template: string): string | undefined {
 const RULES: Rule[] = [
   { code: 'CONSENT_REQUIRED', outcome: 'refused', test: /needs one-time consent/i,
     hint: 'the user runs `clawdcursor consent --accept` once; no restart needed' },
-  { code: 'SAFETY_BLOCKED', outcome: 'refused', test: /safety block -|^\[block\]/i,
-    hint: 'blocked by the safety gate; do not retry, tell the user' },
-  { code: 'NEEDS_CONFIRMATION', outcome: 'refused', test: /safety confirm -|^\[confirm\]|requires user confirmation/i,
-    hint: 'only the user can do this step; retrying will not help', next: PAUSE('Please <do it> yourself, then Resume') },
   { code: 'KEYBOARD_OWNED', outcome: 'refused', test: /system dialog owns the keyboard/i,
     hint: 'a system dialog has the keyboard; answer or close it first', next: PAUSE('Close the system dialog that has the keyboard') },
   { code: 'SECURE_INPUT', outcome: 'refused', test: /secure input is on/i,
@@ -96,7 +94,7 @@ const RULES: Rule[] = [
     hint: 'the window in front is not the one you were working in; nothing was sent',
     next: { mcp: 'window {"action":"focus","processName":"<your app>"}', agent: 'focus_window {"processName":"<your app>"}' } },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
-    hint: 'this key combination is never sent; do the step another way' },
+    hint: 'it locks the screen or ends the session, so it is never sent; every other shortcut is allowed', next: PAUSE('Please <do this step> yourself') },
   { code: 'DEVIATION', outcome: 'failed', test: /\nDEVIATION: /, whole: true,
     hint: 'it ran but the expected effect was not seen; read the screen before retrying, it may have taken', next: REREAD },
   { code: 'STALE_SCREENSHOT', outcome: 'refused',
@@ -226,7 +224,7 @@ const HEAD = 400;
  */
 export function quoteScreenText(s: string): string {
   // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
-  const defused = s.replace(/<(\/?)\s*untrusted-screen-content\s*>/gi, '‹$1untrusted-screen-content›');
+  const defused = defuseScreenDelimiters(String(s ?? ''));
   return `"${defused.replace(/["\r\n]+/g, "'")}"`;
 }
 function ownWords(text: string): string {

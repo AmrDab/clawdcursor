@@ -38,6 +38,7 @@
  * UIA does on Windows. Follow-up.
  */
 
+import { screenJson } from '../core/untrusted-screen-content';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { psOpts, powershellExe } from '../platform/ps-spawn';
 
@@ -199,7 +200,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
           };
         }
 
-        return { text: JSON.stringify({ candidates, cdpPort }, null, 2) };
+        return { text: screenJson({ candidates, cdpPort }, 2) };
       },
     },
 
@@ -216,7 +217,8 @@ export function getElectronBridgeTools(): ToolDefinition[] {
       },
       category: 'orchestration',
       compactGroup: 'system',
-      safetyTier: 3,
+      safetyTier: 1,
+      destructive: true,
       handler: async ({ appName, port }, ctx: ToolContext): Promise<ToolResult> => {
         await ctx.ensureInitialized();
         if (!ctx.platform) {

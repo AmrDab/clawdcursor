@@ -18,4 +18,4 @@
 
 ## Risk / scope
 
-<!-- Anything reviewers should pay extra attention to: cross-OS behavior, schema changes, anything that touches the SafetyLayer chokepoint. -->
+<!-- Anything reviewers should pay extra attention to: cross-OS behavior, schema changes, anything that touches a guarantee in SECURITY.md (Stop, the pause, the AI-host guard, the hard key list, the HTTP token). -->

@@ -32,7 +32,7 @@ export interface AgentToolContext {
   /** True when an EXTERNAL agent drives these tools over MCP (System A tools
    *  like copy_all_text / smart_click exist there; the internal loop has its own). */
   mcpSurface?: boolean;
-  /** Current active app name — used by SafetyLayer for sensitive-app elevation. */
+  /** Current active app name. */
   activeApp?: string;
   /** The window this subtask should run in (the pipeline's resolved anchor).
    *  Pointer tools use it to RAISE the target before a click when the
@@ -66,11 +66,11 @@ export interface AgentToolContext {
 }
 
 /**
- * A unified tool — executable against PlatformAdapter, safety-evaluable,
+ * A unified tool — executable against PlatformAdapter,
  * LLM-visible. One source of truth for the full toolbox.
  */
 export interface UnifiedTool {
-  /** Tool name as exposed to the LLM (matches the SafetyLayer TOOL_TIER map). */
+  /** Tool name as exposed to the LLM. */
   name: string;
   /** Description the LLM sees. Kept under ~140 chars for token budget. */
   description: string;
@@ -98,6 +98,6 @@ export interface UnifiedToolResult {
   stop?: boolean;
   /** Terminal action exit reason — for the caller. */
   terminalExit?: Extract<AgentExit, 'done' | 'give_up' | 'cannot_read'>;
-  /** Label of the target element, if known — lets SafetyLayer elevate on sensitive labels. */
+  /** Label of the target element, if known. */
   targetLabel?: string;
 }

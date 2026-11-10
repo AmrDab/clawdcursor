@@ -194,7 +194,7 @@
     },
     {
       "name": "batch",
-      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real state. Every step goes through the same safety gate as a direct call. Set dryRun:true to pre-scan safety tiers without executing. A confirm-tier step still HALTS the batch by default; allowConfirm:true only proceeds if the operator started the daemon with CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).",
+      "description": "Run an ORDERED LIST of tool calls in one shot (collapses many round-trips into one). Each step is { name, arguments, expect? } (`args` is accepted for `arguments`). `name`+`arguments` is a normal tool call (compound like {\"name\":\"computer\",\"arguments\":{\"action\":\"type\",\"text\":\"hi\"}} or a granular tool). Optional `expect` is a precondition checked by RE-PERCEIVING before the step runs: {\"window\":\"notepad\"} (foreground window must match) or {\"element\":\"Send\"} (a11y element must be present). The batch HALTS on the first failed precondition, refusal, or step error and returns a per-step trace so you re-plan from real state. A step is refused exactly as a direct call would be (the user has stopped or paused clawdcursor, a dangerous key combo, an AI assistant window in front). Do not batch past an irreversible step the user did not ask for: ask first with system pause_for_user.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -226,14 +226,6 @@
                 "name"
               ]
             }
-          },
-          "allowConfirm": {
-            "type": "boolean",
-            "description": "Request that confirm-tier steps proceed. Only effective if the operator enabled CLAWD_BATCH_ALLOW_CONFIRM=1 on the daemon; otherwise ignored and the batch halts at the confirm step. Never bypasses block-tier."
-          },
-          "dryRun": {
-            "type": "boolean",
-            "description": "Only report each step's safety tier; do not execute."
           },
           "maxSteps": {
             "type": "number",
@@ -940,7 +932,7 @@
     },
     {
       "name": "key_press",
-      "description": "Press a key or key combo. Use \"mod\" for Ctrl/Cmd. Use \"+\" for a chord (e.g. \"mod+s\", \"shift+Tab\"). Space-separate for a sequence (\"Down Down End\"). Examples: \"Return\", \"Tab\", \"Escape\", \"F5\", \"ctrl+a\".",
+      "description": "Press a key or key combo. \"mod\" is this OS's shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use \"+\" for a chord (e.g. \"mod+s\", \"shift+Tab\"). Space-separate for a sequence (\"Down Down End\"). Examples: \"Return\", \"Tab\", \"Escape\", \"F5\", \"mod+a\".",
       "category": "keyboard",
       "parameters": {
         "type": "object",
@@ -1637,7 +1629,7 @@
     },
     {
       "name": "open_app",
-      "description": "Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).",
+      "description": "Open an application by NAME (not a path: to open a file or run a program by path use open_file). Uses the cross-OS app alias table + the PlatformAdapter's launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -1655,7 +1647,7 @@
     },
     {
       "name": "open_file",
-      "description": "Open a file or folder in the OS default application. Uses `open` (macOS), `xdg-open` (Linux), and explorer / ShellExecute (Windows). Tier 2 (mutation): on some platforms \"opening\" a file may execute it (.exe on Windows, .app on macOS, scripts with executable bit on Linux), and the registered handler can be privileged or destructive.",
+      "description": "Open a file or folder in the OS default application. Uses `open` (macOS), `xdg-open` (Linux), and explorer / ShellExecute (Windows). On some platforms \"opening\" a file executes it (.exe on Windows, .app on macOS, scripts with executable bit on Linux), and the registered handler can be privileged or destructive.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -1709,7 +1701,7 @@
     },
     {
       "name": "pause_for_user",
-      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a step your own rules won't let you take such as creating an account, downloading a private key or entering a secret, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping, turning the task down or asking them to come back to this chat. Ask for that ONE step only — e.g. \"Sign in to Glama\" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste (\"Paste your app-specific password into the Terminal, press Enter, then click Resume\"), naming where it goes: never into the prompt's own reply box, whose text reaches you; afterwards pass the saved key's file path or keychain profile name, never the secret. For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{\"type\":\"element_exists\",\"name\":\"Sign out\"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user's click counts there. Shows an on-screen prompt: your message, Resume / End task. While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. A question goes in `message`, with `choices` (2-6 short options, one button each) and/or `input` (a text box): a pick comes back as {status:\"replied\", choice:\"<exact option text>\"}, typed text as {status:\"replied\", reply}. Only the user on screen can pick or type. That answer is never approval of a safety confirmation (Send / Delete / Pay): the safety layer does not read it. Never ask for a password or secret on it. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message, choices and input to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
+      "description": "Hand the desktop to the user for a step only they can do (sign in, a password or 2FA code, a CAPTCHA, a choice only they can make, a step your own rules won't let you take such as creating an account, downloading a private key or entering a secret, a plan limit or upgrade wall — never click Upgrade / Subscribe yourself) instead of stopping, turning the task down or asking them to come back to this chat. Ask for that ONE step only — e.g. \"Sign in to Glama\" — and do everything before and after it yourself (navigating, filling forms, clicking through): keep the user on screen as briefly as possible. A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste (\"Paste your app-specific password into the Terminal, press Enter, then click Resume\"), naming where it goes: never into the prompt's own reply box, whose text reaches you; afterwards pass the saved key's file path or keychain profile name, never the secret. For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{\"type\":\"element_exists\",\"name\":\"Sign out\"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user's click counts there. Shows an on-screen prompt: your message, Resume / End task. While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. A question goes in `message`, with `choices` (2-6 short options, one button each) and/or `input` (a text box): a pick comes back as {status:\"replied\", choice:\"<exact option text>\"}, typed text as {status:\"replied\", reply}. Only the user on screen can pick or type. Use it too before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work): ask, then follow their answer. Never ask for a password or secret on it. BOUNDED: waits up to `timeout` seconds (default 45). {status:\"waiting\"} → the user is still busy: re-call with the SAME message, choices and input to keep waiting (re-attaches, the prompt stays up). {status:\"resumed\"} → re-read the screen, then continue the task. {status:\"ended\"} → the user stopped it: report back.",
       "category": "orchestration",
       "parameters": {
         "type": "object",
@@ -2310,7 +2302,7 @@
     },
     {
       "name": "write_clipboard",
-      "description": "Write text to the OS clipboard. Tier 2 (mutation): overwrites the user's clipboard, which can hijack subsequent copy/paste flows. Reversibility is via a fresh user-initiated copy, not by the agent.",
+      "description": "Write text to the OS clipboard. Overwrites what the user had copied: read it first with read_clipboard if it may matter.",
       "category": "clipboard",
       "parameters": {
         "type": "object",

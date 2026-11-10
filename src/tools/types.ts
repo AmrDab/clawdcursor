@@ -125,20 +125,19 @@ export interface ToolDefinition {
    */
   compactGroup?: CompactGroup;
   /**
-   * Safety tier for the canonical safety gate.
-   *
-   *   0 — read-only (screenshot, a11y snapshot, clipboard read …)
-   *   1 — neutral input (click, type, scroll — reversible, no irreversible side-effect)
-   *   2 — mutation (close window, write clipboard, navigate …)
-   *   3 — destructive / system (cdp_evaluate arbitrary JS, relaunch_with_cdp …)
-   *
-   * When omitted the gate falls back to the `TOOL_TIER` name-lookup table in
-   * `pipeline/safety/layer.ts` for backward-compatibility.
+   * Does the tool only read (0), or does it send input / change something (1)? Not a permission: clawdcursor refuses
+   * nothing by tier. It drives the pill's "touching your screen" state and the MCP readOnlyHint.
    */
-  safetyTier?: 0 | 1 | 2 | 3;
+  safetyTier?: 0 | 1;
+  /**
+   * `true` on a tool that is destructive by itself: it closes a window, overwrites the clipboard, opens a file or URI
+   * (which can run a program), runs page script, restarts an app or sends a report. Announced as MCP destructiveHint.
+   * Ordinary input (click, type, key, scroll) is not marked: what it does depends on where the agent points it.
+   */
+  destructive?: boolean;
   /**
    * MCP tool annotations — hints for clients and directories about what the tool does to the world. When omitted the
-   * MCP server derives readOnlyHint / destructiveHint from `safetyTier`.
+   * MCP server derives readOnlyHint / destructiveHint from `safetyTier` and `destructive` (toolAnnotations).
    */
   annotations?: {
     title?: string;

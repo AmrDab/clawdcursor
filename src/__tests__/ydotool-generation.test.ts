@@ -113,6 +113,43 @@ describe('ydotool 0.1.8 (Ubuntu/Debian)', () => {
 describe('ydotool 1.x (ydotoold)', () => {
   beforeEach(() => { state.help = MODERN_HELP; });
 
+  // Security review of #344: an unknown key after a modifier was TYPED as text with the modifier held, so `super+ll`
+  // passed the hard key list (no key is called "ll") and then typed "l" "l" with Super down: Super+L, the lock.
+  it('an unknown key in a chord is refused, never typed with the modifiers held (super+ll)', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    for (const combo of ['super+ll', 'ctrl+alt+deletee', 'super+lock', 'ctrl+alt+f99']) {
+      await expect(be.keyPress(combo), combo).rejects.toThrow(/Unknown key/);
+    }
+    expect(ydotoolCalls()).toEqual([]);   // no modifier was pressed, nothing was typed
+  });
+
+  // Security scan: with Super held by key_down, `key_press "ll"` (no "+") was typed as text: Super+L twice.
+  it('an unknown multi-character key name is an error even with no "+"', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    for (const name of ['ll', 'lock', 'deletee', 'f99']) await expect(be.keyPress(name), name).rejects.toThrow(/Unknown key/);
+    expect(ydotoolCalls()).toEqual([]);
+  });
+
+  it('key_down and key_up take one known key: a chord or an unknown name throws, so the caller knows nothing was held or released', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    for (const name of ['super+x', 'x+super', 'super+', 'nonsense', 'll', '']) {
+      await expect(be.keyUp(name), `up ${name}`).rejects.toThrow(/Unknown key|one key/);
+      await expect(be.keyDown(name), `down ${name}`).rejects.toThrow(/Unknown key|one key/);
+    }
+    expect(ydotoolCalls()).toEqual([]);
+    await be.keyDown(' Super ');
+    await be.keyUp('super');
+    expect(ydotoolCalls()).toHaveLength(2);
+  });
+
+  it('a lone unknown key is still typed as text, and a known chord still presses', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    await be.keyPress('é');
+    await be.keyPress('super+l');   // the hard key list refuses this one above the backend; the backend itself is not the gate
+    expect(ydotoolCalls()[0]).toEqual(['type', '--', 'é']);
+    expect(ydotoolCalls().length).toBeGreaterThan(1);
+  });
+
   it('keeps the 1.x syntax for moves, clicks and keycodes', async () => {
     const be = await WaylandBackend.detect(hasYdotool);
     await be.mouseMoveAbsolute(100, 200);
@@ -150,5 +187,16 @@ describe('ydotool 1.x (ydotoold)', () => {
     expect(be.kind).toBe('ydotool');
     await be.mouseMoveAbsolute(1, 2);
     expect(ydotoolCalls()).toEqual([['mousemove', '--absolute', '-x', '1', '-y', '2']]);
+  });
+});
+
+describe('wtype (keyboard only)', () => {
+  it('an unknown key in a chord is refused, never typed with the modifiers held', async () => {
+    const be = new WaylandBackend('wtype-keyboard-only');
+    await expect(be.keyPress('super+ll')).rejects.toThrow(/Unknown key/);
+    await expect(be.keyPress('ll')).rejects.toThrow(/Unknown key/);
+    expect(calls.filter(c => c[0] === 'wtype')).toEqual([]);
+    await be.keyPress('ctrl+s');
+    expect(calls.filter(c => c[0] === 'wtype')).toEqual([['wtype', '-M', 'ctrl', 's']]);
   });
 });

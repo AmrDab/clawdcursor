@@ -18,6 +18,7 @@
  */
 import type { PlatformAdapter, UiElement, WindowInfo } from './types';
 import { unguarded } from './pointer-guard';
+import { quoteScreenText } from '../core/result-codes';
 
 const TERMINALS = /^(windowsterminal|wt|cmd|powershell|pwsh|conhost|openconsole|terminal|iterm2?|gnome-terminal(-server)?|konsole|xterm|uxterm|alacritty|kitty|wezterm(-gui)?|tilix|xfce4-terminal|terminator|lxterminal|mate-terminal|hyper|warp|tabby|foot|ghostty)(\.exe)?$/i;
 
@@ -102,7 +103,9 @@ async function accessibilityText(platform: CopyPlatform, pid: number | undefined
 
 export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextResult> {
   const win = await platform.getActiveWindow().catch(() => null);
-  const label = win ? `[${win.processName}] "${win.title}"` : 'the focused window';
+  // The title is the page's to choose and the process name the app's: quoted, so neither can end its quotes or pose as
+  // part of the result.
+  const label = win ? `[${quoteScreenText(String(win.processName ?? ''))}] ${quoteScreenText(String(win.title ?? ''))}` : 'the focused window';
   if (isTerminalWindow(win)) {
     return { ok: false, window: label, text: `Refused: ${label} is a terminal — Ctrl+C there interrupts the running program. Read it with ocr or accessibility instead.` };
   }

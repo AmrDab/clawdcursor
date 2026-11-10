@@ -17,6 +17,11 @@ export interface ShortcutDefinition {
   canonicalIntent: string;
   intents: string[];
   contextHints?: string[];
+  /**
+   * The chord per OS. `default` is the Windows + Linux chord; `darwin`, `linux`, `win32` override it for that OS.
+   * An empty string means the shortcut does not exist on that OS: it is then not listed and not run there — there is
+   * no falling back to another OS's keys. A macOS-only entry is `{ default: '', darwin: … }`.
+   */
   keys: {
     default: string;
     darwin?: string;
@@ -39,8 +44,10 @@ export interface ShortcutLookupOptions {
   maxDistance?: number;
 }
 
+/** Windows / Linux shortcut modifier. */
 const MOD = 'Control';
-const CMD = 'Super';
+/** macOS shortcut modifier (Command). `Control` in a darwin chord is the real Ctrl key. */
+const CMD = 'Cmd';
 
 export const SHORTCUTS: ShortcutDefinition[] = [
   // Navigation
@@ -67,7 +74,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   shortcut('paste', 'editing', 'Paste clipboard', 'paste', ['paste', 'paste here'], { default: `${MOD}+v`, darwin: `${CMD}+v` }),
   shortcut('cut', 'editing', 'Cut selection', 'cut', ['cut'], { default: `${MOD}+x`, darwin: `${CMD}+x` }),
   shortcut('undo', 'editing', 'Undo previous action', 'undo', ['undo'], { default: `${MOD}+z`, darwin: `${CMD}+z` }),
-  shortcut('redo', 'editing', 'Redo previous action', 'redo', ['redo'], { default: `${MOD}+y`, darwin: `${CMD}+Shift+z` }),
+  shortcut('redo', 'editing', 'Redo previous action', 'redo', ['redo'], { default: `${MOD}+y`, darwin: `${CMD}+Shift+z`, linux: `${MOD}+Shift+z` }),
   shortcut('select-all', 'editing', 'Select all content', 'select all', ['select all'], { default: `${MOD}+a`, darwin: `${CMD}+a` }),
   shortcut('find', 'editing', 'Find in current context', 'find', ['search in page', 'find in page', 'find on page', 'find text'], { default: `${MOD}+f`, darwin: `${CMD}+f` }),
   shortcut('replace', 'editing', 'Find and replace', 'replace', ['replace', 'find and replace'], { default: `${MOD}+h`, darwin: `${CMD}+Option+f` }),
@@ -88,9 +95,9 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // NOTE: 'close-window' is defined once, below, with the correct macOS mapping
   // (Cmd+W). A duplicate here used to map it to Cmd+Q on darwin — which QUITS
   // the app, not closes the window — a macOS-specific footgun. Removed.
-  shortcut('minimize-window', 'window', 'Minimize current window', 'minimize window', ['minimize window'], { default: 'Super+Down', darwin: `${CMD}+m` }),
-  shortcut('maximize-window', 'window', 'Maximize current window', 'maximize window', ['maximize window'], { default: 'Super+Up', darwin: 'Control+Super+f' }),
-  shortcut('show-desktop', 'window', 'Show desktop', 'show desktop', ['show desktop', 'go to desktop', 'minimize all'], { default: 'Super+d', darwin: 'Fn+F11' }),
+  shortcut('minimize-window', 'window', 'Minimize current window', 'minimize window', ['minimize window'], { default: 'Super+Down', darwin: `${CMD}+m`, linux: 'Super+h' }),
+  shortcut('maximize-window', 'window', 'Maximize current window', 'maximize window', ['maximize window'], { default: 'Super+Up', darwin: `Control+${CMD}+f` }),
+  shortcut('show-desktop', 'window', 'Show desktop', 'show desktop', ['show desktop', 'go to desktop', 'minimize all'], { default: 'Super+d', darwin: 'F11' }),
 
   // File operations
   shortcut('save', 'file', 'Save current file', 'save', ['save', 'save file'], { default: `${MOD}+s`, darwin: `${CMD}+s` }),
@@ -111,25 +118,24 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   shortcut('tab', 'quick', 'Move to next field', 'press tab', ['tab', 'press tab'], { default: 'Tab' }),
   shortcut('space', 'quick', 'Toggle focused control', 'press space', ['space', 'press space', 'spacebar'], { default: 'Space' }),
   shortcut('delete', 'quick', 'Delete selection', 'press delete', ['delete', 'press delete'], { default: 'Delete' }),
-  shortcut('system-search', 'quick', 'Open system search', 'system search', ['system search', 'open search', 'search apps'], { default: 'Super+s', darwin: `${CMD}+Space` }),
-  shortcut('lock-screen', 'quick', 'Lock current session', 'lock screen', ['lock screen'], { default: 'Super+l', darwin: 'Control+Super+q' }),
+  shortcut('system-search', 'quick', 'Open system search', 'system search', ['system search', 'open search', 'search apps'], { default: '', win32: 'Super+s', linux: 'Super', darwin: `${CMD}+Space` }),
 
   // ─── macOS System Shortcuts (from Apple support.apple.com/en-us/102650) ────
   shortcut('screenshot-full', 'quick', 'Take full screenshot', 'screenshot',
     ['screenshot', 'take screenshot', 'capture screen', 'print screen'],
-    { default: 'Super+Shift+s', darwin: `Shift+${CMD}+3` }),
+    { default: '', win32: 'Super+Shift+s', darwin: `Shift+${CMD}+3` }),
   shortcut('screenshot-selection', 'quick', 'Screenshot selection', 'screenshot selection',
     ['screenshot selection', 'capture area', 'screenshot region'],
-    { default: 'Super+Shift+s', darwin: `Shift+${CMD}+4` }),
+    { default: '', win32: 'Super+Shift+s', darwin: `Shift+${CMD}+4` }),
   shortcut('screenshot-window', 'quick', 'Screenshot or screen recording menu', 'screenshot menu',
     ['screenshot menu', 'screen recording'],
-    { default: 'Super+Shift+s', darwin: `Shift+${CMD}+5` }),
+    { default: '', win32: 'Super+Shift+s', darwin: `Shift+${CMD}+5` }),
   shortcut('spotlight', 'quick', 'Open Spotlight / system search', 'spotlight',
     ['spotlight', 'search apps', 'find app', 'open spotlight'],
-    { default: 'Super+s', darwin: `${CMD}+Space` }),
+    { default: '', win32: 'Super+s', linux: 'Super', darwin: `${CMD}+Space` }),
   shortcut('force-quit', 'window', 'Force quit application', 'force quit',
     ['force quit', 'kill app', 'force close'],
-    { default: 'Alt+F4', darwin: `Option+${CMD}+Escape` }),
+    { default: '', darwin: `Option+${CMD}+Escape` }),
   shortcut('quit-app', 'window', 'Quit current application', 'quit app',
     ['quit app', 'close app', 'exit app'],
     { default: 'Alt+F4', darwin: `${CMD}+q` }),
@@ -138,13 +144,13 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     { default: 'Alt+F4', darwin: `${CMD}+w` }),
   shortcut('close-all-windows', 'window', 'Close all windows of app', 'close all windows',
     ['close all windows', 'close all'],
-    { default: 'Alt+F4', darwin: `Option+${CMD}+w` }),
+    { default: '', darwin: `Option+${CMD}+w` }),
   shortcut('minimize-all', 'window', 'Minimize all windows of app', 'minimize all',
     ['minimize all', 'minimize all windows'],
     { default: 'Super+d', darwin: `Option+${CMD}+m` }),
   shortcut('switch-windows-same-app', 'window', 'Switch between windows of same app', 'switch windows',
     ['switch windows', 'next window', 'cycle windows'],
-    { default: 'Alt+Tab', darwin: `${CMD}+\`` }),
+    { default: '', linux: 'Alt+`', darwin: `${CMD}+\`` }),
   shortcut('preferences', 'quick', 'Open app preferences/settings', 'preferences',
     ['preferences', 'settings', 'app settings', 'open settings'],
     { default: '', darwin: `${CMD}+,` }),
@@ -156,7 +162,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     { default: '', darwin: `Option+${CMD}+h` }),
   shortcut('mission-control', 'window', 'Open Mission Control', 'mission control',
     ['mission control', 'show all windows', 'overview'],
-    { default: 'Super+Tab', darwin: 'Control+Up' }),
+    { default: '', win32: 'Super+Tab', linux: 'Super', darwin: 'Control+Up' }),
   shortcut('app-expose', 'window', 'Show all windows of current app', 'app expose',
     ['app expose', 'show app windows', 'all windows'],
     { default: '', darwin: 'Control+Down' }),
@@ -191,7 +197,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     { default: '', darwin: `Control+${CMD}+d` }),
   shortcut('emoji-picker', 'editing', 'Open emoji/character picker', 'emoji',
     ['emoji', 'emoji picker', 'character viewer', 'special characters'],
-    { default: 'Super+.', darwin: `Control+${CMD}+Space` }),
+    { default: '', win32: 'Super+.', darwin: `Control+${CMD}+Space` }),
 
   // ─── Email shortcuts (generic — Outlook on Windows, Mail.app on macOS, from Apple docs) ────
   shortcut('email-new-message', 'editing', 'Create new email message', 'new email',
@@ -208,7 +214,7 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     { default: `${MOD}+Shift+r`, darwin: `Shift+${CMD}+r` }, ['outlook', 'olk', 'mail', 'thunderbird']),
   shortcut('email-forward', 'editing', 'Forward email', 'forward email',
     ['forward', 'forward email', 'forward message', 'forward this'],
-    { default: `${MOD}+f`, darwin: `Shift+${CMD}+f` }, ['outlook', 'olk', 'mail', 'thunderbird']),
+    { default: `${MOD}+f`, darwin: `Shift+${CMD}+f`, linux: `${MOD}+l` }, ['outlook', 'olk', 'mail', 'thunderbird']),
   shortcut('email-attach', 'editing', 'Attach file to email', 'attach file',
     ['attach file', 'attach', 'add attachment'],
     { default: '', darwin: `Shift+${CMD}+a` }, ['outlook', 'olk', 'mail', 'thunderbird']),
@@ -217,10 +223,10 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     { default: 'Delete' }, ['outlook', 'olk', 'mail', 'thunderbird']),
   shortcut('email-mark-read', 'editing', 'Mark email as read/unread', 'mark as read',
     ['mark as read', 'mark read', 'mark unread', 'mark as unread'],
-    { default: `${MOD}+q`, darwin: `Shift+${CMD}+u` }, ['outlook', 'olk', 'mail', 'thunderbird']),
+    { default: `${MOD}+q`, darwin: `Shift+${CMD}+u`, linux: 'm' }, ['outlook', 'olk', 'mail', 'thunderbird']),
   shortcut('email-check', 'editing', 'Check for new mail', 'check mail',
     ['check mail', 'get mail', 'refresh', 'check for new messages', 'fetch mail'],
-    { default: 'F9', darwin: `Shift+${CMD}+n` }, ['outlook', 'olk', 'mail', 'thunderbird']),
+    { default: 'F9', darwin: `Shift+${CMD}+n`, linux: '' }, ['outlook', 'olk', 'mail', 'thunderbird']),
   shortcut('email-junk', 'editing', 'Move email to junk', 'junk email',
     ['junk', 'mark as junk', 'spam', 'junk email'],
     { default: '', darwin: `Shift+${CMD}+j` }, ['outlook', 'olk', 'mail', 'thunderbird']),
@@ -231,22 +237,22 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // ─── Safari shortcuts (from Apple docs: support.apple.com/guide/safari/cpsh003) ────
   shortcut('safari-new-tab', 'browser', 'New tab in Safari', 'new tab',
     ['new tab', 'open new tab'],
-    { default: `${MOD}+t`, darwin: `${CMD}+t` }, ['safari']),
+    { default: '', darwin: `${CMD}+t` }, ['safari']),
   shortcut('safari-address-bar', 'browser', 'Focus address bar', 'address bar',
     ['address bar', 'url bar', 'location bar'],
-    { default: `${MOD}+l`, darwin: `${CMD}+l` }, ['safari']),
+    { default: '', darwin: `${CMD}+l` }, ['safari']),
   shortcut('safari-next-tab', 'browser', 'Next tab', 'next tab',
     ['next tab', 'switch tab'],
-    { default: `${MOD}+Tab`, darwin: `Control+Tab` }, ['safari']),
+    { default: '', darwin: `Control+Tab` }, ['safari']),
   shortcut('safari-prev-tab', 'browser', 'Previous tab', 'previous tab',
     ['previous tab', 'prev tab'],
-    { default: `${MOD}+Shift+Tab`, darwin: `Control+Shift+Tab` }, ['safari']),
+    { default: '', darwin: `Control+Shift+Tab` }, ['safari']),
   shortcut('safari-close-tab', 'browser', 'Close tab', 'close tab',
     ['close tab'],
-    { default: `${MOD}+w`, darwin: `${CMD}+w` }, ['safari']),
+    { default: '', darwin: `${CMD}+w` }, ['safari']),
   shortcut('safari-reopen-tab', 'browser', 'Reopen last closed tab', 'reopen tab',
     ['reopen tab', 'undo close tab'],
-    { default: `${MOD}+Shift+t`, darwin: `Shift+${CMD}+t` }, ['safari']),
+    { default: '', darwin: `Shift+${CMD}+t` }, ['safari']),
   shortcut('safari-homepage', 'browser', 'Go to homepage', 'go home',
     ['homepage', 'go home', 'home page'],
     { default: '', darwin: `Shift+${CMD}+h` }, ['safari']),
@@ -260,13 +266,13 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   // ─── Notes shortcuts (from Apple docs: support.apple.com/guide/notes/apd46c25187e) ────
   shortcut('notes-new', 'editing', 'Create new note', 'new note',
     ['new note', 'create note'],
-    { default: `${MOD}+n`, darwin: `${CMD}+n` }, ['notes']),
+    { default: '', darwin: `${CMD}+n` }, ['notes']),
   shortcut('notes-new-folder', 'editing', 'Create new folder in Notes', 'new folder',
     ['new folder'],
     { default: '', darwin: `Shift+${CMD}+n` }, ['notes']),
   shortcut('notes-search', 'editing', 'Search all notes', 'search notes',
     ['search notes', 'find note'],
-    { default: `${MOD}+f`, darwin: `Option+${CMD}+f` }, ['notes']),
+    { default: '', darwin: `Option+${CMD}+f` }, ['notes']),
   shortcut('notes-attach', 'editing', 'Attach file to note', 'attach file',
     ['attach', 'attach file'],
     { default: '', darwin: `Shift+${CMD}+a` }, ['notes']),
@@ -281,21 +287,21 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     { default: '', darwin: `Shift+${CMD}+t` }, ['notes']),
   shortcut('notes-link', 'editing', 'Add web link', 'add link',
     ['add link', 'insert link', 'web link'],
-    { default: `${MOD}+k`, darwin: `${CMD}+k` }, ['notes']),
+    { default: '', darwin: `${CMD}+k` }, ['notes']),
 
   // ─── Messages shortcuts (from Apple docs: support.apple.com/guide/messages/ichtc78b3bff) ────
   shortcut('messages-new', 'editing', 'Start new message', 'new message',
     ['new message', 'new text', 'new imessage'],
-    { default: `${MOD}+n`, darwin: `${CMD}+n` }, ['messages']),
+    { default: '', darwin: `${CMD}+n` }, ['messages']),
   shortcut('messages-send', 'editing', 'Send message', 'send message',
     ['send message', 'send text', 'send it'],
-    { default: 'Return', darwin: 'Return' }, ['messages']),
+    { default: '', darwin: 'Return' }, ['messages']),
   shortcut('messages-newline', 'editing', 'New line in message', 'new line',
     ['new line', 'line break'],
-    { default: 'Shift+Return', darwin: 'Option+Return' }, ['messages']),
+    { default: '', darwin: 'Option+Return' }, ['messages']),
   shortcut('messages-search', 'editing', 'Search conversations', 'search messages',
     ['search messages', 'find message', 'search conversations'],
-    { default: `${MOD}+f`, darwin: `${CMD}+f` }, ['messages']),
+    { default: '', darwin: `${CMD}+f` }, ['messages']),
   shortcut('messages-emoji', 'editing', 'Open emoji picker', 'emoji',
     ['emoji', 'emoji picker'],
     { default: '', darwin: `Control+${CMD}+Space` }, ['messages']),
@@ -372,10 +378,16 @@ function contextAllowsShortcut(shortcutDef: ShortcutDefinition, normalizedInput:
   return shortcutDef.contextHints.some(hint => contextSource.includes(hint.toLowerCase()));
 }
 
+/** The chord for `platform`, or '' when the shortcut does not exist there. Never another OS's chord. */
 export function resolveShortcutKey(shortcutDef: ShortcutDefinition, platform: NodeJS.Platform = os.platform()): string {
   const supported = toSupportedPlatform(platform);
   if (!supported) return shortcutDef.keys.default;
   return shortcutDef.keys[supported] ?? shortcutDef.keys.default;
+}
+
+/** The shortcuts that exist on `platform` — the only ones listed, matched or run there. */
+export function shortcutsFor(platform: NodeJS.Platform = os.platform()): ShortcutDefinition[] {
+  return SHORTCUTS.filter(s => resolveShortcutKey(s, platform).trim() !== '');
 }
 
 export function findShortcut(
@@ -390,7 +402,7 @@ export function findShortcut(
 
   let bestFuzzy: { shortcutDef: ShortcutDefinition; intent: string; distance: number } | null = null;
 
-  for (const shortcutDef of SHORTCUTS) {
+  for (const shortcutDef of shortcutsFor(platform)) {
     if (!contextAllowsShortcut(shortcutDef, normalized, options)) continue;
 
     for (const intent of shortcutDef.intents) {

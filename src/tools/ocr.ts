@@ -7,6 +7,7 @@
 
 import { OcrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
+import { screenJson } from '../core/untrusted-screen-content';
 import type { ToolDefinition } from './types';
 import { ocrPointToClickPoint } from './smart';
 
@@ -103,7 +104,7 @@ export function getOcrTools(): ToolDefinition[] {
         });
 
         return {
-          text: JSON.stringify({
+          text: screenJson({
             elementCount: elements.length,
             elements,
             fullText: result.fullText,
@@ -115,7 +116,7 @@ export function getOcrTools(): ToolDefinition[] {
             // factor ignores the origin of a non-primary monitor.
             toMouseClick: 'Click these coordinates as-is with space:"screen". Or better: smart_click {"target":"element text"}.',
             hint: 'Coordinates are screen coordinates (any monitor, any OS). Prefer smart_click {"target":"<label>"}; otherwise pass the coordinates with space:"screen" — no conversion.',
-          }, null, 2),
+          }, 2),
         };
       },
     },

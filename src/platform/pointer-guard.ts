@@ -7,6 +7,7 @@
  * the moment of the press; the platform layer only calls it, so it does not depend on the overlay.
  */
 import { AsyncLocalStorage } from 'async_hooks';
+import { hardKeyRefusal, keysOf } from './hard-keys';
 
 let hook: (() => Promise<void>) | null = null;
 
@@ -140,7 +141,59 @@ export function guardInputMethods<T extends object>(target: T): T {
       return r;
     });
   }
+  guardHardKeys(target);
   return target;
+}
+
+/**
+ * Keys the agent holds down (key_down without its key_up yet), in both input layers: they are one keyboard. Keyed by the
+ * key AS THE AGENT NAMED IT (lower case), with the key it stands for: `key_up rwin` lets go of the right Windows key and
+ * must not make clawdcursor forget the `win` it is still holding. Per server process: a key held through one clawdcursor
+ * process is not known to another.
+ */
+const heldKeys = new Map<string, string>();
+const namedKeys = (combo: unknown): string[] => String(combo ?? '').split('+').map(k => k.trim().toLowerCase()).filter(Boolean);
+
+/**
+ * The hard key list (hard-keys.ts) — its ONE call site. Outermost and unconditional: it runs for nested calls, for
+ * clawdcursor's own housekeeping and with no input guard installed, because no caller has a reason to lock the machine.
+ *  - A key held with key_down counts toward the next press (key_down "win", then key_press "l").
+ *  - So does typed text: with a key held, every typed character is a press of that key with it (key_down "win", type "l").
+ *  - key_up forgets a key only when it names that ONE key, exactly as it was held, and only after the executor released
+ *    it. The executors throw on a chord or an unknown name in key_down / key_up, so nothing is recorded or forgotten for one.
+ */
+function guardHardKeys(target: object): void {
+  const t = target as Record<string, unknown>;
+  for (const m of ['keyPress', 'keyDown', 'keyUp', 'typeText']) {
+    const f = t[m];
+    if (typeof f !== 'function') continue;
+    t[m] = async (...args: unknown[]) => {
+      if (m === 'keyUp') {
+        const r = await f.apply(target, args);
+        // One key, by the name it was held under, and only now that the executor released it. A chord ("win+x"), or
+        // any other name, is not a release of a held key: the executors refuse those, and if one did not, nothing is
+        // forgotten here either.
+        const named = namedKeys(args[0]);
+        if (named.length === 1 && !String(args[0]).includes('+')) heldKeys.delete(named[0]);
+        return r;
+      }
+      const held = [...new Set(heldKeys.values())];
+      // Typed text only matters while something is held: each character is then a chord with the held keys.
+      const presses = m === 'typeText' ? (held.length ? [...String(args[0] ?? '')] : []) : [args[0]];
+      for (const press of presses) {
+        const why = hardKeyRefusal(press, held);
+        if (why) throw new Error(why);
+      }
+      const r = await f.apply(target, args);
+      if (m === 'keyDown') namedKeys(args[0]).forEach((k, i) => heldKeys.set(k, keysOf(args[0])[i] ?? k));
+      return r;
+    };
+  }
+}
+
+/** For tests: forget the held keys. */
+export function _resetHeldKeys(): void {
+  heldKeys.clear();
 }
 
 /**

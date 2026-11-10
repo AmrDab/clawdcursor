@@ -12,13 +12,12 @@
 
 import * as os from 'os';
 import {
-  SHORTCUTS,
+  shortcutsFor,
   findShortcut,
   resolveShortcutKey,
   type ShortcutCategory,
   type ShortcutDefinition,
 } from '../shortcuts';
-import { evaluateInput } from '../core/safety';
 import type { ToolDefinition } from './types';
 
 const VALID_CATEGORIES: ShortcutCategory[] = [
@@ -64,7 +63,7 @@ export function getShortcutTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ category, context }) => {
         const platform = os.platform();
-        let filtered = SHORTCUTS;
+        let filtered = shortcutsFor(platform);   // this OS's shortcuts only
 
         // Filter by category
         if (category) {
@@ -156,7 +155,7 @@ export function getShortcutTools(): ToolDefinition[] {
 
         if (!match) {
           // Return helpful error with similar shortcuts
-          const suggestions = SHORTCUTS
+          const suggestions = shortcutsFor(os.platform())
             .filter(s => !s.contextHints?.length || (contextHint && s.contextHints.some(h => contextHint.toLowerCase().includes(h.toLowerCase()))))
             .slice(0, 10)
             .map(s => `  • "${s.canonicalIntent}" → ${resolveShortcutKey(s, os.platform())} (${s.description})`);
@@ -165,22 +164,6 @@ export function getShortcutTools(): ToolDefinition[] {
             text: `No shortcut matched intent "${intent}". Try one of these:\n${suggestions.join('\n')}\n\nOr use key_press directly with a specific key combo.`,
             isError: true,
           };
-        }
-
-        // The safety gate saw only {intent, context}; the chord exists only now.
-        // Gate it as key_press would (key blocklist), with the intent as the
-        // label (send/delete/…), before pressing it.
-        // Logged under this tool's own name: the keyboard rule reads the `key` argument, not the tool name.
-        const decision = evaluateInput({ toolName: 'shortcuts_execute', args: { key: match.combo }, ctx: { targetLabel: match.canonicalIntent } });
-        if (!decision.allow) {
-          const why = `"${match.canonicalIntent}" presses ${match.combo}: ${decision.reason ?? 'needs approval'}`;
-          return decision.suggestedAction === 'block'
-            ? { text: `shortcuts_execute: safety block - ${why}`, isError: true }
-            : {
-                text: `shortcuts_execute: safety confirm - ${why} (requires user confirmation). ` +
-                      `Surface this to the user; once they approve, press ${match.combo} with key_press — shortcuts_execute will refuse it again.`,
-                isError: true,
-              };
         }
 
         // Execute the matched shortcut

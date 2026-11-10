@@ -990,7 +990,7 @@ program
     ctx.disableVision = resolveConfig().disableVision;
 
     // v0.9 PR7: server construction is shared with the HTTP transport in
-    // src/mcp-server.ts — same registry, same safety gate, same param shape.
+    // src/mcp-server.ts — same registry, same guards, same param shape.
     const { createMcpServer, startMcpStdio } = await import('./mcp-server');
     const { server, toolCount, sessionLog } = await createMcpServer({ compact: opts.compact, ctx });
     await startMcpStdio(server);

@@ -31,7 +31,7 @@ export function getAgentTools(): ToolDefinition[] {
         'Shows an on-screen prompt: your message, Resume / End task. ' +
         'While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. ' +
         'A question goes in `message`, with `choices` (2-6 short options, one button each) and/or `input` (a text box): a pick comes back as {status:"replied", choice:"<exact option text>"}, typed text as {status:"replied", reply}. Only the user on screen can pick or type. ' +
-        'That answer is never approval of a safety confirmation (Send / Delete / Pay): the safety layer does not read it. Never ask for a password or secret on it. ' +
+        'Use it too before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work): ask, then follow their answer. Never ask for a password or secret on it. ' +
         'BOUNDED: waits up to `timeout` seconds (default 45). {status:"waiting"} → the user is still busy: re-call with the SAME message, choices and input to keep waiting (re-attaches, the prompt stays up). ' +
         '{status:"resumed"} → re-read the screen, then continue the task. {status:"ended"} → the user stopped it: report back.',
       parameters: {
@@ -160,7 +160,7 @@ export function getAgentTools(): ToolDefinition[] {
             text: JSON.stringify({
               status: 'replied',
               choice: result.choice,
-              next: 'The user picked this option on the prompt. It is their answer to your question: follow it. It is NOT approval of a Send / Delete / Pay-type action: those still go through the safety layer. Read the screen again before acting.',
+              next: 'The user picked this option on the prompt. It is their answer to your question: follow it, and nothing beyond what it covers. Read the screen again before acting.',
             }),
           };
         }

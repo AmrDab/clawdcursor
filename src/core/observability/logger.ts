@@ -181,7 +181,6 @@ const taskState = {
   currentPath: '' as '' | 'router' | 'agent',
   subtaskIndex: 0,
   subtaskTotal: 0,
-  lastSafety: null as null | { tool: string; decision: string; tier: string; reason?: string },
 };
 
 /** Map event + meta → layer tag used in the pretty output. */
@@ -306,16 +305,6 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
   if (!ttySink) return;
 
   // ── Suppressed noise ───────────────────────────────────────────
-  // allow-decisions flood the log; we only surface blocks/confirms.
-  if (event === 'safety.decision' && meta?.decision === 'allow') {
-    // Stash so the next tool.call can display "· safety=allow" inline.
-    taskState.lastSafety = {
-      tool: String(meta.tool ?? ''),
-      decision: 'allow',
-      tier: String(meta.tier ?? ''),
-    };
-    return;
-  }
   // turn.end is just the closing bracket of turn.start — already implied by
   // the next turn.start or the pipeline.done footer.
   if (event === EVENTS.AGENT_TURN_END) return;
@@ -330,7 +319,6 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
     taskState.currentPath = '';
     taskState.subtaskIndex = 0;
     taskState.subtaskTotal = 0;
-    taskState.lastSafety = null;
 
     const task = String(meta?.task ?? '');
     const cid = String(meta?.correlationId ?? '');
@@ -438,16 +426,11 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
     const tool = String(meta?.tool ?? '');
     const args = (meta?.args ?? {}) as Record<string, unknown>;
     const argsStr = compactArgs(args);
-    const safety = taskState.lastSafety;
-    const safetyInline = safety && safety.decision !== 'allow'
-      ? ` ${colorize(`· safety=${safety.decision}(${safety.tier})`, C.red)}`
-      : '';
-    taskState.lastSafety = null;
     // Observe-vs-act badge so the cheap-first ladder is visible at a glance:
     // which calls read the screen (a11y / OCR / DOM / vision) vs which act.
     const badge = observeActBadge(String(meta?.costClass ?? ''), tool);
     const badgeStr = badge ? colorize(pad(badge.label, 10), badge.color) : pad('', 10);
-    writePrettyLine(`${tagStr} ${colorize('    →', C.cyan)} ${badgeStr} ${colorize(tool, C.bold)}(${argsStr})${safetyInline}`);
+    writePrettyLine(`${tagStr} ${colorize('    →', C.cyan)} ${badgeStr} ${colorize(tool, C.bold)}(${argsStr})`);
     return;
   }
 
@@ -464,14 +447,6 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
   if (event === EVENTS.AGENT_STAGNATION) {
     const window = Number(meta?.window ?? 0);
     writePrettyLine(`${tagStr} ${colorize(`    ⚠ stagnation`, C.yellow)} — last ${window} screens unchanged`);
-    return;
-  }
-
-  // safety block/confirm paths (allow was suppressed above)
-  if (event === 'safety.decision') {
-    const decision = String(meta?.decision ?? '');
-    const rule = String(meta?.rule ?? '');
-    writePrettyLine(`${tagStr} ${colorize(`⛔ ${decision}`, C.red)} — ${rule}`);
     return;
   }
 

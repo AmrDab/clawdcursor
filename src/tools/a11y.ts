@@ -16,7 +16,8 @@ import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint } from './blind-hints';
-import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
+import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
+import { quoteScreenText } from '../core/result-codes';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -312,7 +313,7 @@ export function getA11yTools(): ToolDefinition[] {
         if (ctx.platform) {
           const win = await ctx.platform.getActiveWindow();
           if (!win) return { text: '(no active window)' };
-          return { text: JSON.stringify(win) };
+          return { text: screenJson(win) };
         }
         const win = await ctx.a11y.getActiveWindow();
         if (!win) return { text: '(no active window)' };
@@ -340,11 +341,11 @@ export function getA11yTools(): ToolDefinition[] {
             return { text: `${ctx.platform.lastFindNote ?? 'Search cut.'} - this is not "nothing is focused".`, isError: true };
           }
           if (!el) return { text: '(no focused element)' };
-          return { text: JSON.stringify(el) };
+          return { text: screenJson(el) };
         }
         const el = await ctx.a11y.getFocusedElement();
         if (!el) return { text: '(no focused element)' };
-        return { text: JSON.stringify(el) };
+        return { text: screenJson(el) };
       },
     },
 
@@ -377,7 +378,10 @@ export function getA11yTools(): ToolDefinition[] {
         // Win11 maximized UWP apps report bounds (-14,-14) and block SetForegroundWindow.
         // Skipped when a monitor sits left of / above the primary: there, a
         // maximized window legitimately has negative coordinates.
-        if (!negativeSpace) try {
+        // Not on macOS: Super+Down there is Cmd+Down (the caret jumps to the end of the document), and without display
+        // frames (above) a window on a monitor left of / above the primary would be taken for a phantom. Windows and
+        // Linux are unchanged.
+        if (!negativeSpace && process.platform !== 'darwin') try {
           const allWins = await ctx.a11y.getWindows(true);
           const phantoms = (allWins ?? []).filter((w: any) =>
             w.bounds.x < 0 && w.bounds.y < 0 &&
@@ -574,8 +578,7 @@ export function getA11yTools(): ToolDefinition[] {
         const cdpHits = await queryCdpDom(ctx, { name, limit: 20, processId });
         if (cdpHits && cdpHits.length) {
           const lines = ['(no UIA matches — falling back to CDP DOM; coords are viewport-relative)'];
-          lines.push(...cdpHits.map(formatElement));
-          return { text: lines.join('\n') };
+          return { text: `${lines[0]}\n${wrapUntrustedScreenContent(cdpHits.map(formatElement).join('\n'))}` };
         }
         // A bridge that failed is not "nothing found" — said only after the browser DOM fallback also found nothing.
         if (ctx.platform?.lastFindError === 'error') {
@@ -627,7 +630,7 @@ export function getA11yTools(): ToolDefinition[] {
         // Clipboard content is user/third-party data, not instructions — wrap it
         // so an injected "ignore your task and…" payload is framed as data on the
         // MCP route too (parity with the System B perception wrapping, gauntlet F7).
-        return { text: `<untrusted-screen-content>\n${raw}\n</untrusted-screen-content>` };
+        return { text: wrapUntrustedScreenContent(raw) };
       },
     },
 
@@ -662,19 +665,20 @@ export function getA11yTools(): ToolDefinition[] {
         const scopeNote = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
         const note = [r.note, scopeNote].filter(Boolean).join('\n');
         // Page text is third-party data, not instructions.
-        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys };
+        return { text: `${r.text.length} chars from ${r.window}:\n${wrapUntrustedScreenContent(r.text)}${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys };
       },
     },
 
     {
       name: 'write_clipboard',
-      description: 'Write text to the OS clipboard. Tier 2 (mutation): overwrites the user\'s clipboard, which can hijack subsequent copy/paste flows. Reversibility is via a fresh user-initiated copy, not by the agent.',
+      description: 'Write text to the OS clipboard. Overwrites what the user had copied: read it first with read_clipboard if it may matter.',
       parameters: {
         text: { type: 'string', description: 'Text to write to clipboard', required: true },
       },
       category: 'clipboard',
       compactGroup: 'system',
-      safetyTier: 2,
+      safetyTier: 1,
+      destructive: true,
       handler: async ({ text }, ctx) => {
         await ctx.ensureInitialized();
         if (ctx.platform) {
@@ -695,10 +699,6 @@ export function getA11yTools(): ToolDefinition[] {
         title: { type: 'string', description: 'Window title substring to match', required: false },
       },
       category: 'window',
-      // Tier 1 (input), not 2 (confirm): minimizing is trivially reversible
-      // (restore_window exists) — the confirm-tier was accidental and diverged
-      // from TOOL_TIER('minimize_window')='input' and the compound window
-      // {action:'minimize'} surface, which allowed it freely.
       safetyTier: 1,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
@@ -721,7 +721,7 @@ export function getA11yTools(): ToolDefinition[] {
         const minimizeKey = process.platform === 'darwin' ? 'cmd+m' : 'super+down';
         await ctx.desktop.keyPress(minimizeKey);
 
-        return { text: `Minimized: "${target.title}" [${target.processName}] pid:${target.processId}` };
+        return { text: `Minimized: ${quoteScreenText(String(target.title ?? ''))} [${quoteScreenText(String(target.processName ?? ''))}] pid:${target.processId}` };
       },
     },
   ];

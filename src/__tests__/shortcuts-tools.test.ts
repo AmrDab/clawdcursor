@@ -271,34 +271,19 @@ describe('shortcuts_execute', () => {
   });
 });
 
-// The safety gate sees only {intent, context}; the chord is resolved inside the
-// handler. It used to be pressed with no blocklist or destructive-label check, so
-// "close window" sent Alt+F4 and "send email" sent the send shortcut unconfirmed.
-describe('shortcuts_execute gates the chord it resolves', () => {
+// The chord is resolved inside the handler and pressed through the input layer, where the hard key list is checked
+// (hard-keys.test.ts: "lock screen" is refused there). Nothing else is refused: which shortcut to run is the agent's call.
+describe('shortcuts_execute presses the chord it resolves', () => {
   beforeEach(() => {
     mockKeyPress.mockReset();
     mockGetActiveWindow.mockReset();
     mockGetActiveWindow.mockResolvedValue({ processName: 'OUTLOOK', title: 'Inbox - Outlook' });
   });
 
-  it.each(['send email', 'delete email', 'send message'])('needs confirmation for a destructive intent ("%s")', async (intent) => {
+  it.each(['send email', 'close window'])('presses "%s" — no policy gate on the intent', async (intent) => {
     const result = await getExecuteTool().handler({ intent }, createMockContext());
-    expect(result.isError).toBe(true);
-    expect(result.text).toContain('safety confirm -');
-    expect(mockKeyPress).not.toHaveBeenCalled();
-  });
-
-  it('needs confirmation for a confirm-tier chord (close window → Alt+F4 on Windows)', async () => {
-    // os.platform() reads process.platform.
-    const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
-    Object.defineProperty(process, 'platform', { ...desc, value: 'win32' });
-    try {
-      const result = await getExecuteTool().handler({ intent: 'close window' }, createMockContext());
-      expect(result.isError).toBe(true);
-      expect(result.text).toContain('safety confirm -');
-      expect(result.text).toContain('Alt+F4');
-      expect(mockKeyPress).not.toHaveBeenCalled();
-    } finally { Object.defineProperty(process, 'platform', desc); }
+    expect(result.isError).toBeFalsy();
+    expect(mockKeyPress).toHaveBeenCalledTimes(1);
   });
 
   it('still presses an ordinary shortcut', async () => {

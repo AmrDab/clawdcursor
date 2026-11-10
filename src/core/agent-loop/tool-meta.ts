@@ -71,8 +71,10 @@ export interface ToolMeta {
   category: ToolCategory;
   /** Compact compound group this granular tool belongs to. */
   compactGroup?: CompactGroup;
-  /** Safety tier (0=read-only … 3=destructive). */
-  safetyTier: 0 | 1 | 2 | 3;
+  /** 0 = reads only, 1 = sends input / changes something (ToolDefinition.safetyTier). */
+  safetyTier: 0 | 1;
+  /** `true`: a tool that is destructive by itself (ToolDefinition.destructive). */
+  destructive?: boolean;
   /** Token cost class. */
   costClass: ToolCostClass;
   /**
@@ -360,7 +362,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     paramDescriptions: {
       // MCP surface (key_press) uses the parameter name 'key' for backward-compat.
       // System B now also accepts 'key' as an alias for 'combo' — both are valid.
-      key: 'Key/combo to press (e.g. "Return", "ctrl+a", "F5"). Space-separate combos for a sequence ("Down Down End").',
+      key: 'Key/combo to press (e.g. "Return", "mod+a", "F5"; "mod" is cmd on macOS, ctrl on Windows and Linux). Space-separate combos for a sequence ("Down Down End").',
     },
   },
 
@@ -435,7 +437,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   close_window: {
     category: 'window',
     compactGroup: 'window',
-    safetyTier: 2,
+    safetyTier: 1,
+    destructive: true,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
@@ -512,7 +515,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   open_file: {
     category: 'orchestration',
     compactGroup: 'window',
-    safetyTier: 2,
+    safetyTier: 1,
+    destructive: true,
     costClass: 'act',
     paramDescriptions: {
       path: 'Absolute filesystem path',
@@ -532,7 +536,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   open_uri: {
     category: 'orchestration',
     compactGroup: 'window',
-    safetyTier: 2,
+    safetyTier: 1,
+    destructive: true,
     costClass: 'act',
     paramDescriptions: {
       uri: 'A full URI like "mailto:bob@example.com?subject=hi&body=hello", "tel:+15551234", "slack://channel?team=T123&id=C456", "vscode://file/Users/me/code/x.ts", "https://example.com". Must be properly URL-encoded.',
@@ -633,7 +638,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   write_clipboard: {
     category: 'clipboard',
     compactGroup: 'system',
-    safetyTier: 2,
+    safetyTier: 1,
+    destructive: true,
     costClass: 'act',
     paramDescriptions: {
       text: 'Text to write to clipboard',

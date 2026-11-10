@@ -22,8 +22,7 @@ import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
-import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
-import { resolveAlias } from '../router/aliases';
+import { resolveAlias, appNameRefusal } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
@@ -36,7 +35,7 @@ import { agentBrowserConnectOptions } from '../../platform/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence, EXPECT_DESCRIPTION } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
-import { wrapUntrustedScreenContent } from '../untrusted-screen-content';
+import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-content';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
@@ -217,7 +216,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const active = await ctx.platform.getActiveWindow();
         const lines = windows.slice(0, 20).map(w => {
           const isActive = active && w.processId === active.processId && w.title === active.title;
-          return `${isActive ? '→' : ' '} [${w.processName}] "${w.title}" pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
+          return `${isActive ? '→' : ' '} [${quoteScreenText(String(w.processName ?? ''))}] ${quoteScreenText(String(w.title ?? ''))} pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
         });
         const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
         const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
@@ -332,7 +331,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           success: res.success,
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
-                ? `Invoked ${quoteScreenText(name)} (${used}) → value: "${(res.data as any).value}"`
+                ? `Invoked ${quoteScreenText(name)} (${used}) → value:\n${wrapUntrustedScreenContent(String((res.data as any).value ?? ''))}`
                 : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
             : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
@@ -639,7 +638,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const el = hits[0];
         return {
           success: true,
-          text: JSON.stringify({
+          text: screenJson({
             name: el.name,
             controlType: el.controlType,
             focused: el.focused ?? false,
@@ -935,7 +934,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     {
       name: 'key',
-      description: 'Press a key or key combo. Use "mod" for Ctrl/Cmd. Use "+" for a chord (e.g. "mod+s", "shift+Tab"). Space-separate for a sequence ("Down Down End"). Examples: "Return", "Tab", "Escape", "F5", "ctrl+a".',
+      description: 'Press a key or key combo. "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use "+" for a chord (e.g. "mod+s", "shift+Tab"). Space-separate for a sequence ("Down Down End"). Examples: "Return", "Tab", "Escape", "F5", "mod+a".',
       inputSchema: {
         type: 'object',
         properties: {
@@ -976,17 +975,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const input = raw.trim();
         // (b) "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = input.split(/\s+/);
-        // (c) Hard-block backstop. This carried its own 3-entry copy
-        //     (alt+f4, ctrl+alt+delete, ctrl+alt+del) that omitted win+l and
-        //     every other machine-locking combo, so it caught nothing once the
-        //     SafetyLayer gate was bypassed (GHSA-35pc-g74h-p476). Defer to the
-        //     single blocklist so the two can no longer drift.
-        //     HARD tier only — confirm-tier combos keep their allowConfirm path.
-        for (const c of combos) {
-          if (isBlockedKey(c)) {
-            return { success: false, isError: true, text: `BLOCKED: "${c}" is a dangerous key combo.` };
-          }
-        }
+        // (c) The hard key list (lock / log out / secure attention) is refused in the input layer, for every
+        //     caller: platform/hard-keys.ts, called from guardInputMethods.
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (let i = 0; i < times; i++) {
           for (const c of combos) {
@@ -1012,6 +1002,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       changesScreen: true,
       async execute(args, ctx) {
         const name = String(args.name ?? '');
+        const notAName = appNameRefusal(name);
+        if (notAName) return { success: false, isError: true, text: `open_app: ${notAName}` };
         // Alias resolution lives at the agent-tool layer (PR1 of v0.9):
         // the platform adapter is alias-data-agnostic, so we look up the
         // canonical row here and forward the launch hints through
@@ -1039,6 +1031,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         let res: Awaited<ReturnType<typeof ctx.platform.launchApp>>;
         try {
           res = await ctx.platform.launchApp(launchName, {
+            nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
             alwaysNewInstance: alias?.alwaysNewInstance,
             uwpAppId: alias?.uwpAppId,
             // Pick the searchTerm that gives the OS native launcher (Start
@@ -1294,7 +1287,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           timeout,
         );
         if (!element) return { success: false, text: `wait_for_element: timed out after ${timeout}ms` };
-        return { success: true, text: `Found element: ${element.name} [${element.controlType}] @${element.bounds.x},${element.bounds.y}` };
+        return { success: true, text: `Found element: ${quoteScreenText(String(element.name ?? ''))} [${element.controlType}] @${element.bounds.x},${element.bounds.y}` };
       },
     },
 
@@ -1773,7 +1766,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const map = await finderMap(ctx, args.max_cost);
         if (!map) return { success: false, text: 'find_action_button: no UIMap holder on this context.' };
         const r = findActionButton(map.elements, map.snapshot_id, String(args.intent ?? ''));
-        return { success: r.status === 'ok', text: JSON.stringify(r) };
+        return { success: r.status === 'ok', text: screenJson(r) };
       },
     },
 
@@ -1789,7 +1782,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const map = await finderMap(ctx, args.max_cost);
         if (!map) return { success: false, text: 'find_input_field: no UIMap holder on this context.' };
         const r = findInputField(map.elements, map.snapshot_id, String(args.purpose ?? ''));
-        return { success: r.status === 'ok', text: JSON.stringify(r) };
+        return { success: r.status === 'ok', text: screenJson(r) };
       },
     },
 
@@ -1835,7 +1828,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (!hit) {
             const outside = locateByOcr(target, elements);
             if (outside) {
-              return { success: false, text: `smart_click: "${outside.label}" matched only outside the working window `
+              return { success: false, text: `smart_click: ${quoteScreenText(outside.label)} matched only outside the working window `
                 + `(${anchor.processName}${wb ? '' : ': window not found'}) — not clicked. Focus that window, or read_text to find the target in it.` };
             }
           }
@@ -1851,7 +1844,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         getAgentOcr().invalidateCache();
         const after = await ctx.platform.getActiveWindow().catch(() => null);
         const focusWarn = focusTheftWarning(activation, before, after);
-        return { success: true, text: `smart_click: clicked "${hit.label}" (score ${hit.score.toFixed(2)}) at (${hit.x},${hit.y})${raised}${focusWarn}`, targetLabel: hit.label };
+        return { success: true, text: `smart_click: clicked ${quoteScreenText(hit.label)} (score ${hit.score.toFixed(2)}) at (${hit.x},${hit.y})${raised}${focusWarn}`, targetLabel: hit.label };
       },
     },
 
@@ -1889,7 +1882,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           : mode === 'dedicated'
             ? ' (dedicated agent-owned instance — safe to drive freely). NOTE: this browser has its OWN profile — login state may DIFFER from the window you were driving. If a site demands login here but the on-screen window looked logged in, drive the on-screen window instead (keyboard/OCR) or use relaunch_with_cdp.'
             : '';
-        return { success: true, text: `browser_connect: connected to "${title ?? '(blank)'}" at ${url ?? 'about:blank'}.${provenance} Use browser_navigate to open a URL, browser_read to see the page, browser_click/browser_type to interact.` };
+        return { success: true, text: `browser_connect: connected to ${quoteScreenText(title ?? '(blank)')} at ${quoteScreenText(url ?? 'about:blank')}.${provenance} Use browser_navigate to open a URL, browser_read to see the page, browser_click/browser_type to interact.` };
       },
     },
     {
@@ -2337,7 +2330,7 @@ function focusBreadcrumb(
   const b = before?.title ?? '?';
   const a = after?.title ?? '?';
   if (b === a) return '';
-  return ` · focus "${truncateTitle(b)}"→"${truncateTitle(a)}"`;
+  return ` · focus ${quoteScreenText(truncateTitle(b))}→${quoteScreenText(truncateTitle(a))}`;
 }
 
 /** Roles that take typed text, across UIA / AX / AT-SPI names. */
@@ -2395,7 +2388,7 @@ function focusTheftWarning(
   // more actionable message: point straight at a11y instead of a re-focus
   // dance that would accomplish nothing (the intended window is already up).
   if (activation && activation.action === 'skipped-self-window') {
-    const cover = activation.title ? `"${truncateTitle(activation.title)}"` : activation.processName || 'another window';
+    const cover = activation.title ? quoteScreenText(truncateTitle(activation.title)) : activation.processName || 'another window';
     return ` ⚠ TARGET OCCLUDED — ${cover} covers this pixel; your window is still focused (not stolen)`
       + ` but the click may have hit ${cover} instead. Prefer an a11y/el_NN target (invoke_element/smart_click)`
       + ` over this coordinate, or resize/move the covering window out of the way.`;
@@ -2403,7 +2396,7 @@ function focusTheftWarning(
   const activationFailed = activation && activation.activated === false;
   const foregroundChanged = !!before?.title && !!after?.title && before.title !== after.title;
   if (!activationFailed && !foregroundChanged) return '';
-  const landed = after?.title ? `"${truncateTitle(after.title)}"` : 'an unknown window';
+  const landed = after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown window';
   return ` ⚠ FOCUS NOT CONFIRMED — the click may have landed on ${landed} instead of your target`
     + ` (Windows foreground-lock or coords over a different window). DO NOT type next:`
     + ` re-focus the intended window first (focus_window / window.focus by processId),`

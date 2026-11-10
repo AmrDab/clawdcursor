@@ -40,13 +40,6 @@ vi.mock('../surface/onboarding', () => ({
   runOnboarding: vi.fn().mockResolvedValue(true),
 }));
 
-const mockSafety = vi.fn<unknown[], unknown>(() => undefined);
-// ── Mock the safety gate so WITH-CONSENT tests reach the handler ─────────────
-// evaluateToolCall returns undefined (allow) or a {text} error object.
-vi.mock('../tools/safety-gate', () => ({
-  evaluateToolCall: (...a: unknown[]) => mockSafety(...a),
-}));
-
 // ── Mock controlBanner so touch() is a no-op ────────────────────────────────
 vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
@@ -106,7 +99,6 @@ describe('MCP results carry an outcome line', () => {
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
   });
 
   async function handler(name: string): Promise<HandlerFn> {
@@ -121,13 +113,6 @@ describe('MCP results carry an outcome line', () => {
     mockHasConsent.mockReturnValue(false);
     const r = await (await handler('computer'))({ action: 'click', x: 1, y: 1 });
     expect(text(r)).toMatch(/\n\[refused · CONSENT_REQUIRED · hint: /);
-  });
-
-  it('a safety refusal → refused, with the pause as the safe next call', async () => {
-    mockSafety.mockReturnValue({ text: 'computer: safety confirm - "Pay" needs approval (requires user confirmation).', isError: true });
-    const r = await (await handler('computer'))({ action: 'click', x: 1, y: 1 });
-    expect(r.isError).toBe(true);
-    expect(text(r)).toMatch(/\[refused · NEEDS_CONFIRMATION · .*next: system \{"action":"pause_for_user"/);
   });
 
   it('a bad action → failed · INVALID_ARGS (nothing ran)', async () => {
@@ -155,7 +140,6 @@ describe('screenshot-bound clicks through the MCP wrapper', () => {
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
     (await import('../core/screen-binding')).__resetShotsForTests();
   });
 
@@ -226,7 +210,6 @@ describe('mac report fixes', () => {
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
   });
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
 
@@ -243,7 +226,6 @@ describe('expect is checked on every compound action (live macOS: window focus d
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
   });
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
   const win = { processId: 1, title: 'Notes - Editor', processName: 'editor', bounds: { x: 0, y: 0, width: 10, height: 10 } };
@@ -298,7 +280,6 @@ describe('the user\'s own controls are never a target (owner requirement, live m
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
   });
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
 
@@ -311,9 +292,9 @@ describe('the user\'s own controls are never a target (owner requirement, live m
     expect(text(r)).toMatch(/\[refused · OWN_UI · /);
   });
 
-  // Mac run: stderr showed only the safety gate's `allow` for calls this guard then refused, so the log alone could not
-  // tell a refused call from one that ran.
-  it('a refusal after the safety gate is logged as a refusal', async () => {
+  // Mac run: stderr showed nothing for calls this guard refused, so the log alone could not tell a refused call from one
+  // that ran.
+  it('a guard refusal is logged as a refusal', async () => {
     const warn = vi.spyOn(logger, 'warn');
     await createMcpServer({ ctx: fakeCtx(), compact: true });
     await capturedHandlers.get('accessibility')!({ action: 'read_tree', processId: 4242 });
@@ -328,7 +309,6 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
     (await import('../core/screen-binding')).__resetShotsForTests();
   });
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
@@ -389,7 +369,6 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     vi.clearAllMocks();
     mockClientCaps.mockReturnValue(undefined);
     mockHasConsent.mockReturnValue(true);
-    mockSafety.mockReturnValue(undefined);
   });
   const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
   const shotCtx = () => ({
@@ -426,7 +405,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     const ctx = { ...fakeCtx(), platform: platform as any, a11y: { invalidateCache() {} } as any };
     const { sessionLog } = await createMcpServer({ ctx, compact: true });
     const r = await capturedHandlers.get('system')!({ action: 'copy_all_text' });
-    expect(text(r)).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \[msedge\] "Doc"/);
+    expect(text(r)).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Doc"/);
     expect(sessionLog.summary).toMatchObject({ blind: 1, actOther: 1 });
     await capturedHandlers.get('batch')!({ steps: [{ name: 'system', arguments: { action: 'copy_all_text' } }] });
     expect(sessionLog.summary).toMatchObject({ blind: 2, actOther: 2 });

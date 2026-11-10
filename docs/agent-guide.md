@@ -2,7 +2,7 @@
 
 > **This file is a stub.** The canonical agent-facing documentation is
 > [`SKILL.md`](../SKILL.md) at the repo root. Load that — it has the full
-> compact-tool workflow, compound → granular action reference, safety tiers,
+> compact-tool workflow, compound → granular action reference, safety rules,
 > per-OS capability matrix, and error recovery.
 
 ## One-line summary

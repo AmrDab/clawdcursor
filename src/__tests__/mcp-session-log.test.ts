@@ -26,11 +26,6 @@ vi.mock('../core/banner', async (actual) => ({
   appLabel: (await actual<typeof import('../core/banner')>()).appLabel,
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
 }));
-// Refuse every `computer key` call — on the direct route and inside a batch.
-vi.mock('../tools/safety-gate', () => ({
-  evaluateToolCall: vi.fn((tool: { name: string }, params: Record<string, unknown>) =>
-    tool.name === 'computer' && params.action === 'key' ? { text: 'computer: safety block - blocked key combo' } : undefined),
-}));
 
 type HandlerFn = (params: Record<string, unknown>) => Promise<{ isError?: boolean }>;
 const handlers = new Map<string, HandlerFn>();
@@ -99,12 +94,13 @@ describe('MCP session log', () => {
     expect(calls[1]).not.toHaveProperty('app');
   });
 
-  it('logs a safety-refused call with outcome "refused"', async () => {
-    const r = await handlers.get('computer')!({ action: 'key', key: 'cmd+q' });
+  // pid 4242 is clawdcursor's own pill (the banner mock): the own-UI guard refuses it, on the direct route and in a batch.
+  it('logs a guard-refused call with outcome "refused"', async () => {
+    const r = await handlers.get('accessibility')!({ action: 'read_tree', processId: 4242 });
     expect(r.isError).toBe(true);
     const { calls } = readSession(listSessions()[0]);
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ tool: 'computer', action: 'key', ok: false, outcome: 'refused' });
+    expect(calls[0]).toMatchObject({ tool: 'accessibility', action: 'read_tree', ok: false, outcome: 'refused' });
   });
 
   it('logs a call blocked by the consent prompt with outcome "consent_required"', async () => {
@@ -117,11 +113,11 @@ describe('MCP session log', () => {
   });
 
   it('logs each batch step with its own class and outcome', async () => {
-    await handlers.get('batch')!({ steps: [{ name: 'computer', arguments: { action: 'key', key: 'cmd+q' } }] });
+    await handlers.get('batch')!({ steps: [{ name: 'accessibility', arguments: { action: 'read_tree', processId: 4242 } }] });
     const { calls } = readSession(listSessions()[0]);
     expect(calls).toHaveLength(1);
     expect(calls[0].tool).toBe('batch');
-    expect(calls[0].steps).toEqual([{ tool: 'computer', action: 'key', cls: 'act-other', ok: false, outcome: 'refused' }]);
+    expect(calls[0].steps).toEqual([{ tool: 'accessibility', action: 'read_tree', cls: 'blind', ok: false, outcome: 'refused' }]);
   });
 
   // A batch a guard halted is a refusal, not an error: the report counted it in `errors` and quoted it as the error.

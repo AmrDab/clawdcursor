@@ -58,6 +58,21 @@ All notable changes to Clawd Cursor will be documented in this file.
   `CLAWD_NO_GLOW` is gone with the glow.
 - **The pill and the outline close by themselves when clawdcursor is killed.** A host that hard-kills the process runs no
   exit hook; each drawer now exits when its stdin closes instead of staying on screen.
+- **Keys are OS-aware from the first message.** The server reads the OS once at startup and its instructions say which
+  OS this is and which modifier its shortcuts use ("This computer runs macOS: the shortcut modifier is cmd … not ctrl"),
+  so an agent no longer guesses and sends Windows hotkeys to a Mac. `mod` is the one alias for the OS's modifier (cmd on
+  macOS, ctrl on Windows and Linux); key examples in tool descriptions use it. An agent's explicit `ctrl+x` is still
+  sent as Ctrl on macOS (terminals bind it): nothing is translated.
+  - `shortcuts_list` / `shortcuts_run` offer and run only the shortcuts that exist on the current OS, with its keys. An
+    entry with no chord there is not offered and no longer matches (before, `shortcuts_run` could match a macOS-only
+    intent on Windows and press nothing). Fixed entries: system search, screenshots, the emoji picker and Task View are
+    no longer handed to Linux with Windows chords; "force quit", "close all windows" and "switch windows of the same app"
+    no longer fall back to `Alt+F4` / `Alt+Tab`; Safari, Notes and Messages entries are macOS-only; macOS "show desktop"
+    is `F11` (Fn cannot be sent); Linux gets its own redo, minimize, and Thunderbird forward / mark-read chords (Outlook's
+    `Ctrl+Q` quits Thunderbird).
+  - clawdcursor's own key presses go through `mod`: `type_text`'s paste and the triple-click select-all no longer pick
+    the chord with an inline OS check. The focus-time minimize of a phantom off-screen window (`Super+Down`) now runs on
+    Windows only: on macOS it was `Cmd+Down`.
 - **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
   Read lines say to act by name and keep `@x,y` for elements with no name; `smart_click` is explained where agents look
   for it and its miss carries a next step; the sparse-tree hint, `SKILL.md` and `docs/llms.txt` use one SEE/ACT ladder in
@@ -69,6 +84,67 @@ All notable changes to Clawd Cursor will be documented in this file.
   named elements inside its page, any other window 5 named elements (a small dialog of named buttons is fine).
 
 ### Security
+- **Breaking: the policy gate is removed.** clawdcursor no longer decides which actions an agent may take.
+  - **What was removed.** The SafetyLayer (`src/core/safety.ts`, `src/tools/safety-gate.ts`) and everything it decided:
+    the tool tiers that refused `open_file`, `close_window`, `clipboard_write`, browser `navigate` / `evaluate`,
+    `open_uri` and `relaunch_with_cdp`; the label rules that refused by-name clicks on Send, Delete, Subscribe, Pay and
+    the like; the URI-scheme and sensitive-app rules; the intent bypass; the confirm tier for shortcuts (`Alt+F4`,
+    `Ctrl+W`, `Win+R`, `Cmd+Q`, …); `batch`'s `allowConfirm` and `dryRun` parameters, its `needs_confirm` step status
+    and the `CLAWD_BATCH_ALLOW_CONFIRM` variable; the result codes `SAFETY_BLOCKED` and `NEEDS_CONFIRMATION`; the unused
+    `safety` block of the config.
+  - **Why.** It was not a security boundary. A click by coordinates never went through the label rules, so the gate
+    stopped nothing an agent set on doing, while over MCP a "confirm" was a permanent refusal that blocked ordinary
+    work (opening a Start-menu shortcut, closing a window the user asked to close) and pushed agents from acting by
+    name onto screenshots. It also suggested a protection that was not there.
+  - **What protects you now.** clawdcursor is a tool layer that runs with your own permissions. What to do is decided
+    by your agent and by your MCP host's permission prompts, which read the tool annotations: reads carry
+    `readOnlyHint`; the tools that are destructive by themselves carry `destructiveHint` (`close_window`,
+    `open_file`, `open_uri`, `write_clipboard`, `cdp_evaluate`, `navigate_browser`, `relaunch_with_cdp`,
+    `submit_report`, `batch`, and all six compact tools). No annotation changed from 1.5.27: `safetyTier` is now only
+    0 (read) or 1 (input), and the former tier 2 / 3 tools keep their hint through a `destructive` flag. Agents are told to ask with `pause_for_user` before an
+    irreversible action the user did not ask for. clawdcursor itself still always enforces: the user's **Stop**
+    (`stopped.json`, every process, across restarts), the **pause**, the own-UI guard, **no stray input into an AI
+    assistant's window**, token-authenticated loopback-only HTTP, `<untrusted-screen-content>` wrapping, one-time
+    consent, and the never-type-credentials guidance. The injection fixes (GHSA-9ppf-38v8-h97v, GHSA-r54p-hj6c-2434)
+    are code-execution fixes, not policy, and are unchanged.
+  - **The hard key list** replaces the key blocklist: a handful of OS-level combos are never sent because they lock
+    or end the user's session, or cut the agent off from the desktop. Windows `Win+L`, `Ctrl+Alt+Del`; macOS `Ctrl+Cmd+Q`,
+    `Cmd+Shift+Q`, anything with Power / Eject; Linux `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`,
+    `Ctrl+Alt+F1`–`F12`, SysRq, Power. Only the running OS's list applies; every other shortcut is allowed. It is
+    checked in one place, the input layer under every tool (`guardInputMethods`), on the normalized input, so a tool
+    name, a batch, a named shortcut, a sequence (`esc win+l`), spacing, case, key order, an alias
+    (`cmd`/`meta`/`super`/`win`) or a key held with `key_down` cannot get around it (the bypass classes of
+    GHSA-35pc-g74h-p476 and GHSA-3v3f-5rwv-whc9). `Ctrl+Shift+Esc`, `Cmd+Opt+Esc` and (Linux) `Ctrl+Alt+L` are not on it. The `lock screen` entry of `shortcuts_list` / `shortcuts_run` is gone: it could only ever be refused.
+  - `SECURITY.md` states the threat model, the guarantees, their limits and the scope.
+- **Screen text cannot leave its block.** `read_clipboard` and `copy_all_text` built the `<untrusted-screen-content>`
+  tags by hand around raw text, so a page containing the closing tag followed by fake clawdcursor output escaped the
+  block; `copy_all_text` also put the window title outside it. Every tool result that carries page text, OCR, a tree,
+  the clipboard, a field value, a window or tab title, an element name or a URL now goes through one helper
+  (`untrusted-screen-content.ts`: a block for free text, quotes for a short name, defused JSON for JSON results), which
+  makes the delimiter inert inside the text. Also fixed: `cdp_read_text`, `cdp_evaluate`, `cdp_list_tabs`,
+  `cdp_switch_tab`, `smart_read`, `smart_click`, `find_element`'s DOM fallback, `window list`, `invoke` get-value,
+  `wait_for`, `open_app` / `open_file` / `open_uri` / `navigate` window titles, verification reports, and batch step
+  text cut in the middle of a block.
+- **The hard key list counts held keys correctly.** `key_up` forgot a held key by family before releasing it
+  (`key_down win`, `key_up rwin`, `key_press l` locked the screen): a key is now forgotten only when `key_up` names that
+  same key and the release succeeded. Typed text was not checked at all (`key_down super`, then type `l`): with a key
+  held, every typed character is checked with it. On Wayland an unknown key in a chord was typed as text with the
+  modifiers held (`super+ll`): it is refused, as on X11. Held keys are tracked per server process.
+- **`open_app` takes an application name only, and only starts an installed app.** The name is checked against an
+  allowlist (letters, digits, spaces and `. _ + & ' ( ) # , ! @ -`): a path, a `scheme:` (`ms-settings:`, `search-ms:`,
+  `file:`), a percent-encoded separator, a wildcard or an option-like string is refused and the agent is pointed to
+  `open_file` or `open_uri`, the tools announced as destructive. On Windows the name used to reach
+  `Start-Process -FilePath`, where a path to an `.exe` ran and a `scheme:` went to its protocol handler. A name outside
+  the alias table is now resolved first, read-only, to a program (`.exe` / `.com`) on PATH / App Paths or to an app the
+  Start menu lists under exactly that name (`Get-StartApps`; a packaged app, or a shortcut to a program — not a URL or
+  document shortcut), and only that is started; nothing found means nothing started. Such a name is no longer typed into
+  the Start menu or Spotlight, whose best match can be a document (`payload.exe`); macOS uses `open -a` only, which starts an app known to
+  LaunchServices (that includes an app bundle sitting in Downloads).
+- **More of the same review:** process and app names are quoted like titles (macOS `localizedName` and a Linux
+  `WM_CLASS` are arbitrary strings); near-miss delimiters (`</untrusted-screen-content x>`, `…/>`, no closing bracket)
+  are made inert too, in one linear pass that nested or overlapping tags cannot get through; `key_up` forgets a held key only for that one key by its own name (a chord such as `win+x` forgets
+  nothing); an unknown key name is an error in every executor (Wayland typed `ll` as text, with Super held), and
+  `key_down` / `key_up` throw on a chord or an unknown name instead of doing nothing.
 - **Windows system programs are started by absolute path, from a private directory.** PowerShell (and `reg`, `tasklist`,
   `taskkill`, `netstat`, `rundll32`, `explorer`) were spawned by bare name, which Windows resolves in the current directory
   before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one

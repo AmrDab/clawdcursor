@@ -34,7 +34,7 @@ CI runs typecheck + lint + tests + schema snapshot on every PR across Windows, m
 
 - TypeScript strict mode is on. No `any` unless you have a real reason and a comment explaining it.
 - Business logic does not see `process.platform`. Cross-OS branches live in `src/platform/{windows,macos,linux,wayland-backend}.ts` behind the `PlatformAdapter` interface. If you find yourself writing `if (IS_MAC)` outside `src/platform/`, move it.
-- Every tool call goes through the SafetyLayer (`src/core/safety.ts`). Do not add a tool that bypasses it. Destructive verbs (send, delete, close_window, blocked keyboard combos) must escalate to confirm.
+- clawdcursor does not judge what the agent does; it keeps the guarantees in [SECURITY.md](SECURITY.md). Every synthetic key and click must go through an input layer wrapped by `guardInputMethods` (`src/platform/pointer-guard.ts`): do not add a path to the OS around it. Give a new tool an accurate `safetyTier` (0 = reads only) and say `destructive: true` if it is destructive by itself (closes, overwrites, executes), because MCP hosts build their permission prompts on those annotations.
 - New compact tool actions: define them in `src/tools/compact.ts`, then run `npm run test:mcp-schema-snapshot:update` and commit the snapshot diff. The `argRemap` field is how you alias agent-friendly arg names onto granular tools — see the `key`/`combo` example.
 - Tests live alongside the modules they cover under `src/__tests__/` (Vitest). Prefer integration tests that hit the real adapter over mocks.
 
@@ -47,7 +47,7 @@ App guides for the marketplace live in [`AmrDab/clawdcursor-guides`](https://git
 Conventional-commits-ish. Lowercase type, colon, short imperative. Examples:
 
 ```
-fix(safety): close-window confirm prompt now renders on Wayland
+fix(pause): the pause prompt now renders on Wayland
 feat(compact): add browser({"action":"page_context"})
 docs(readme): correct compact-action enum names
 release(0.8.7): two-line summary
@@ -64,6 +64,6 @@ The "what's new" line in CHANGELOG and SKILL.md gets edited too — small featur
 
 ## What gets merged
 
-Things I'll merge quickly: bug fixes with a clear repro, doc fixes, small PRs that make existing behavior more correct. Things that take longer to land: new tools (need schema review), changes to the SafetyLayer (need threat-model review), anything that adds a top-level dependency.
+Things I'll merge quickly: bug fixes with a clear repro, doc fixes, small PRs that make existing behavior more correct. Things that take longer to land: new tools (need schema review), changes to a guarantee in SECURITY.md (need threat-model review), anything that adds a top-level dependency.
 
 If you've put work into a PR and it's been sitting more than a week, ping the issue or Discord — I have probably just lost track.

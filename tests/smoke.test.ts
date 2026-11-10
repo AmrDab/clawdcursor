@@ -6,7 +6,7 @@
  * streamable-HTTP transport) live in src/http-utility.ts.
  *
  * This test suite proves:
- *   - The default config still has the expected port / host / safety tier
+ *   - The default config still has the expected port
  *   - createUtilityServer wires /health public + /stop auth + /
  *   - The /mcp route refuses anonymous requests (auth gate works)
  */
@@ -14,7 +14,7 @@
 import { describe, expect, it, beforeAll } from 'vitest';
 import request from 'supertest';
 import { createUtilityServer, initServerToken } from '../src/surface/http-utility';
-import { DEFAULT_CONFIG, SafetyTier } from '../src/types';
+import { DEFAULT_CONFIG } from '../src/types';
 import { VERSION } from '../src/surface/version';
 
 let token: string;
@@ -32,7 +32,6 @@ function makeUtilityApp() {
 describe('config defaults', () => {
   it('keeps expected defaults', () => {
     expect(DEFAULT_CONFIG.server.port).toBe(3847);
-    expect(DEFAULT_CONFIG.safety.defaultTier).toBe(SafetyTier.Preview);
   });
 });
 

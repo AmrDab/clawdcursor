@@ -18,7 +18,8 @@ import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
 import { windowOcrRegion } from './ocr';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from './paste-guard';
-import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
+import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
+import { quoteScreenText } from '../core/result-codes';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
@@ -128,7 +129,7 @@ export function getSmartTools(): ToolDefinition[] {
             const el = await ctx.a11y.getFocusedElement();
             if (el) {
               return {
-                text: `[via UI Automation focused element]\n${JSON.stringify(el, null, 2)}`,
+                text: `[via UI Automation focused element]\n${wrapUntrustedScreenContent(JSON.stringify(el, null, 2))}`,
               };
             }
           } catch { /* fall through */ }
@@ -140,12 +141,12 @@ export function getSmartTools(): ToolDefinition[] {
             const elements = await ctx.a11y.findElement({ name: target, processId });
             if (elements?.length) {
               const lines = elements.slice(0, 10).map((el: any) =>
-                `[${el.controlType}] "${el.name}" id:${el.automationId} @${el.bounds.x},${el.bounds.y} ` +
+                `[${el.controlType}] ${quoteScreenText(String(el.name ?? ''))} id:${quoteScreenText(String(el.automationId ?? ''))} @${el.bounds.x},${el.bounds.y} ` +
                 `${el.bounds.width}x${el.bounds.height}` +
-                (el.value ? ` value="${el.value}"` : '') +
+                (el.value ? ` value=${quoteScreenText(String(el.value))}` : '') +
                 (el.isEnabled === false ? ' DISABLED' : '')
               );
-              return { text: `[via UI Automation search]\n${lines.join('\n')}` };
+              return { text: `[via UI Automation search]\n${wrapUntrustedScreenContent(lines.join('\n'))}` };
             }
           } catch { /* fall through */ }
         }
@@ -193,16 +194,16 @@ export function getSmartTools(): ToolDefinition[] {
         // OCR succeeded — return OCR text, attach a11y tree if available
         if (ocrResult) {
           const a11ySuffix = a11yResult
-            ? `\n\n=== A11Y TREE (supplement) ===\n${a11yResult}`
+            ? `\n\n=== A11Y TREE (supplement) ===\n${wrapUntrustedScreenContent(a11yResult)}`
             : '';
           return {
-            text: `[via OCR — ${ocrResult.count} lines, ${ocrResult.ms}ms]\n${ocrResult.text}${a11ySuffix}`,
+            text: `[via OCR — ${ocrResult.count} lines, ${ocrResult.ms}ms]\n${wrapUntrustedScreenContent(ocrResult.text)}${a11ySuffix}`,
           };
         }
 
         // OCR failed but a11y succeeded — return a11y alone
         if (a11yResult) {
-          return { text: `[via UI Automation active window]\n${a11yResult}` };
+          return { text: `[via UI Automation active window]\n${wrapUntrustedScreenContent(a11yResult)}` };
         }
 
         // ── CDP fallback (browser content) ──
@@ -213,7 +214,7 @@ export function getSmartTools(): ToolDefinition[] {
               const title = await page.title().catch(() => '');
               const text = await page.evaluate(() => document.body?.innerText?.substring(0, 5000) || '').catch(() => '');
               if (text) {
-                return { text: `[via CDP — "${title}"]\n${text}` };
+                return { text: `[via CDP — ${quoteScreenText(title)}]\n${wrapUntrustedScreenContent(text)}` };
               }
             }
           }
@@ -305,7 +306,7 @@ export function getSmartTools(): ToolDefinition[] {
             // A raw JSON result skips the result line, so the next step is a field of its own.
             next: SMART_MISS_NEXT,
           };
-          return { text: JSON.stringify(payload), isError: true };
+          return { text: screenJson(payload), isError: true };
         };
 
         // Detect active window and check traits
@@ -651,7 +652,7 @@ export function getSmartTools(): ToolDefinition[] {
           const stillRunning = (a11yResult as { pending?: boolean }).pending
             ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : '';
           const late = (a11yResult as { lateInvokeError?: string }).lateInvokeError;
-          const lateNote = late ? ` Note: an earlier action that was still running later failed: ${late}.` : '';
+          const lateNote = late ? ` Note: an earlier action that was still running later failed:\n${untrusted(late)}` : '';
           return { text: `Clicked "${target}" via UI Automation (invoke_element)${stillRunning}${lateNote}` };
         }
 
@@ -705,7 +706,7 @@ export function getSmartTools(): ToolDefinition[] {
               changed = !flat(after.fullText ?? '').includes(flat(m.sentence))
                 || (awAfter?.title ?? '') !== (activeWin?.title ?? '');
             } catch { /* unverifiable */ }
-            const where = `the word inside the text "${m.sentence}"`;
+            const where = `the word inside the text ${quoteScreenText(m.sentence)}`;
             if (changed === false) {
               // The click WAS performed. Not an error: an error invites a second
               // click, which re-flips a toggle or double-submits (a checkbox whose
@@ -716,10 +717,10 @@ export function getSmartTools(): ToolDefinition[] {
                   + `check the state (accessibility state / read_screen), or find the real control by name (find / compile_ui).`,
               };
             }
-            return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}) — note: that is ${where}, `
+            return { text: `Clicked "${target}" via OCR (matched ${quoteScreenText(m.text)} at ${cx},${cy}) — note: that is ${where}, `
               + `${changed ? 'and the screen changed after the click' : 'and the effect could not be verified'}; check the result.${warningSuffix}` };
           }
-          return { text: `Clicked "${target}" via OCR (matched "${m.text}" at ${cx},${cy}${(cx !== m.x || cy !== m.y) ? ` — DPI-corrected from physical ${m.x},${m.y}` : ''})${warningSuffix}` };
+          return { text: `Clicked "${target}" via OCR (matched ${quoteScreenText(m.text)} at ${cx},${cy}${(cx !== m.x || cy !== m.y) ? ` — DPI-corrected from physical ${m.x},${m.y}` : ''})${warningSuffix}` };
         }
 
         // a11y had bounds but couldn't invoke — coordinate fallback

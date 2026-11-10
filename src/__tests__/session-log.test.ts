@@ -89,9 +89,9 @@ describe('SessionLog', () => {
     expect(log.visionOnlyStreak).toBe(0);
   });
 
-  it('records a safety-refused call with outcome "refused"', () => {
+  it('records a refused call with outcome "refused"', () => {
     const log = new SessionLog({ version: 'x', surface: 'compact' });
-    log.record('computer', 'key', false, 0, 'computer: safety block - blocked key combo', undefined, { outcome: 'refused' });
+    log.record('computer', 'key', false, 0, 'computer: Refused: "win+l" is a dangerous key combo', undefined, { outcome: 'refused' });
     const back = readSession(log.file!);
     expect(back.calls).toHaveLength(1);
     expect(back.calls[0]).toMatchObject({ tool: 'computer', action: 'key', ok: false, outcome: 'refused' });
@@ -256,20 +256,6 @@ describe('what the logs may carry', () => {
     }
     expect(dayLogText()).toMatch(/"code":"NOT_FOUND"/);  // the code stays
     expect(fs.readFileSync(log.file!, 'utf8')).toMatch(/"code":"NOT_FOUND"/);
-  });
-
-  it('safety.decision logs the rule, never the target text', async () => {
-    const { evaluate } = await import('../core/safety');
-    const err = vi.spyOn(process.stderr, 'write');
-    const d = evaluate({ tool: 'mouse_click', args: {}, targetLabel: 'Delete CANARY-invoice for Jane Roe' });
-    const stderr = err.mock.calls.map(c => String(c[0])).join('');
-    err.mockRestore();
-    expect(d.decision).toBe('confirm');
-    expect((d as { reason: string }).reason).toContain('CANARY');   // the caller still tells the user why
-    const day = dayLogText();
-    expect(day).toMatch(/"msg":"safety.decision".*"rule":"label_pattern:/);
-    expect(day).not.toContain('CANARY');
-    expect(stderr).not.toContain('CANARY');
   });
 
   it('a crash stack keeps its frames and drops the message and the home path', () => {

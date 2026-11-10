@@ -75,7 +75,7 @@ describe('the window in front (#294)', () => {
     await d.keyPress('ctrl+t');
     vi.advanceTimersByTime(30_000);   // the wait
     fg = CLAUDE;
-    await expect(d.keyPress('ctrl+l')).rejects.toThrow(/foreground changed: you were working in msedge \(pid 100\), but claude \(pid 200\)/);
+    await expect(d.keyPress('ctrl+l')).rejects.toThrow(/foreground changed: you were working in "msedge" \(pid 100\), but "claude" \(pid 200\)/);
     await expect(d.typeText('https://example.com\n')).rejects.toThrow(/foreground changed/);
     expect(d.sent).toEqual(['key ctrl+t']);
   });
@@ -109,7 +109,7 @@ describe('the window in front (#294)', () => {
     expect(d.sent).toEqual(['click 1,1', 'key a']);
     vi.advanceTimersByTime(10_000);
     fg = CLAUDE;
-    await expect(d.keyPress('b')).rejects.toThrow(/working in notepad/);
+    await expect(d.keyPress('b')).rejects.toThrow(/working in "notepad"/);
   });
 
   it('plain typing does not open that window: a switch right after it is still refused', async () => {
@@ -132,7 +132,7 @@ describe('the window in front (#294)', () => {
 
     d.focusLagMs = 60_000;                 // the focus never takes
     await d.focusWindow(CLAUDE);
-    await expect(d.keyPress('y')).rejects.toThrow(/you focused claude, but notepad/);
+    await expect(d.keyPress('y')).rejects.toThrow(/you focused "claude", but "notepad"/);
   }, 10_000);
 
   it("a launch's own Start-menu keys are not refused, and the next input binds to what opened", async () => {
@@ -148,7 +148,7 @@ describe('the window in front (#294)', () => {
     await d.keyPress('ctrl+l');
     vi.advanceTimersByTime(2_000);
     fg = CLAUDE;
-    await expect(d.typeText('https://example.com\n')).rejects.toThrow(/working in msedge/);
+    await expect(d.typeText('https://example.com\n')).rejects.toThrow(/working in "msedge"/);
   });
 
   it("a wait ends the agent's own-doing window: an app that comes up during it is the user's", async () => {
@@ -158,7 +158,7 @@ describe('the window in front (#294)', () => {
     await d.mouseClick(1, 1);           // could bring another app up…
     await sleepUnlessStopped(30);       // …but the agent waits, and in the wait the user switches
     fg = CLAUDE;
-    await expect(d.keyPress('b')).rejects.toThrow(/working in msedge/);
+    await expect(d.keyPress('b')).rejects.toThrow(/working in "msedge"/);
   });
 
   it('a launch binds to the launched window: after a gap in which the user switched, typing is refused', async () => {
@@ -166,7 +166,7 @@ describe('the window in front (#294)', () => {
     const d = fakeDesktop();
     await d.openApp('notepad');
     fg = CLAUDE;
-    await expect(d.keyPress('x')).rejects.toThrow(/you opened Untitled - Notepad, but claude/);
+    await expect(d.keyPress('x')).rejects.toThrow(/you opened "Untitled - Notepad", but "claude"/);
   }, 10_000);
 
   it("clawdcursor's own housekeeping (the keyboard back after a pause) is neither checked nor bound", async () => {

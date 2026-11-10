@@ -919,7 +919,9 @@ export class MacOSAdapter implements PlatformAdapter {
     // Printable single char — no true "hold" semantics via keystroke; emit a tap (outside ASCII: as itself, #242).
     if ([...key].length === 1) {
       await typeTextMac(this.ax, key, 3_000).catch(() => {});
+      return;
     }
+    throw new Error(`Unknown key: "${key}"`);   // a chord or an unknown name: nothing was held
   }
 
   async keyUp(key: PortableKeyCombo): Promise<void> {
@@ -934,8 +936,11 @@ export class MacOSAdapter implements PlatformAdapter {
     if (code !== undefined) {
       const script = `tell application "System Events" to key up (key code ${code})`;
       await runAppleScript(script, 3_000).catch(() => {});
+      return;
     }
-    // Printable single char: no-op — keystroke doesn't hold.
+    // Printable single char: no-op — keystroke doesn't hold. Anything else (a chord, an unknown name) is an error: the
+    // caller must not believe a key was released (pointer-guard.ts held keys).
+    if ([...key.trim()].length !== 1) throw new Error(`Unknown key: "${key}"`);
   }
 
   private modToAppleScript(name: string): string | null {
@@ -992,6 +997,7 @@ export class MacOSAdapter implements PlatformAdapter {
       cwd?: string;
       uwpAppId?: string;
       searchTerm?: string;
+      nameOnly?: boolean;
     },
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
     // uwpAppId is Windows-only — ignore on macOS.
@@ -1067,11 +1073,15 @@ export class MacOSAdapter implements PlatformAdapter {
       if (found) return found;
     }
 
+    // An agent-typed name (PlatformAdapter.launchApp nameOnly): `open -a` above only ever opens an application
+    // known to LaunchServices (not necessarily one the user installed: a bundle in Downloads counts). Spotlight
+    // opens the best match for the text, which can be a document, so it is not tried.
+    if (opts?.nameOnly) return {};
+
     // Spotlight fallback — universal launcher for anything macOS can find.
     // Mirrors the pattern Windows uses with the Start Menu and the same
     // shape the router's zero-LLM fast path already proves. Keyboard goes
-    // through the platform's internal primitives; not gated by the safety
-    // layer because this is an internal launch detail.
+    // through the platform's internal primitives.
     const viaSpotlight = await this.launchViaSpotlight(name, opts?.searchTerm, before, windowsBefore, opts);
     if (viaSpotlight) return viaSpotlight;
 
@@ -1127,10 +1137,8 @@ export class MacOSAdapter implements PlatformAdapter {
 
   /**
    * Spotlight-driven launch fallback. Cmd+Space, type, Return, then poll.
-   * The Cmd+Space combo is on the safety blocklist for agent-emitted keys,
-   * but here the platform is calling its own keyboard primitives directly
-   * to fulfill its own `launchApp` contract — the safety layer is for
-   * agent actions, not internal platform plumbing.
+   * The platform calls its own keyboard primitives here to fulfill its
+   * own `launchApp` contract.
    */
   private async launchViaSpotlight(
     name: string,

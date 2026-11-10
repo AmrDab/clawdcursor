@@ -17,6 +17,7 @@
  *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
 import * as fs from 'fs';
+import { quoteScreenText } from './result-codes';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
@@ -118,7 +119,8 @@ export function __setForegroundReaderForTests(f: (() => Promise<Foreground | nul
   if (reset) resetBinding();
 }
 
-const name = (f: Foreground) => `${f.processName} (pid ${f.processId})`;
+// A process name is the app's to choose (macOS localizedName, a Linux WM_CLASS): quoted like any other screen text.
+const name = (f: Foreground) => `${quoteScreenText(String(f.processName ?? ''))} (pid ${f.processId})`;
 const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
 const matches = (q: WindowQuery, f: Foreground) =>
   (q.processId !== undefined && q.processId === f.processId)
@@ -145,7 +147,7 @@ async function before(): Promise<void> {
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
     if (!matches(pending, now)) {
-      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${pending.processName ?? pending.title ?? `pid ${pending.processId}`}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
+      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${quoteScreenText(pending.processName ?? pending.title ?? `pid ${pending.processId}`)}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
     explicit = true;
@@ -185,7 +187,7 @@ export function isGuardRefusal(err: unknown): boolean {
 async function refuseAiHost(now: Foreground, explicit: boolean): Promise<void> {
   if (explicit || now.guessed) return;
   const kind = await aiHostKind(now);
-  if (kind) throw new Error(AI_HOST_REFUSAL(now.processName, kind));
+  if (kind) throw new Error(AI_HOST_REFUSAL(quoteScreenText(String(now.processName ?? '')), kind));
 }
 
 /** A launch that surfaced no window excuses a window of the app it started, by name, and nothing else. */

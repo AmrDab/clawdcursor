@@ -9,14 +9,13 @@
  * it contains.
  */
 
+import { wrapUntrustedScreenContent } from './untrusted-screen-content';
+
 export type MissReason = 'not_found' | 'unsupported' | 'invoke_threw' | 'disabled' | 'timeout' | 'no_window' | 'hidden' | 'failed';
 const REASONS: ReadonlySet<string> = new Set<MissReason>(['not_found', 'unsupported', 'invoke_threw', 'disabled', 'timeout', 'no_window', 'hidden', 'failed']);
 
-/** Same escaping as wrapUntrustedScreenContent (agent-loop/prompt.ts): the content cannot close the block. */
-export function untrusted(text: string): string {
-  const safe = text.replace(/<(\/?)\s*untrusted-screen-content\s*>/gi, '‹$1untrusted-screen-content›');
-  return `<untrusted-screen-content>\n${safe}\n</untrusted-screen-content>`;
-}
+/** The one wrapper (untrusted-screen-content.ts): the content cannot close the block. */
+export const untrusted = wrapUntrustedScreenContent;
 
 /** The structured part of a bridge reply that the tools read: whitelisted, bounded, typed. */
 export function structuredMissFields(r: unknown): Record<string, unknown> {

@@ -14,12 +14,13 @@
  * just like the existing `mouse_click`. Window / keyboard tools do not
  * carry coords.
  *
- * Safety tier: tools default to 'input' via `safety/layer.ts` TOOL_TIER;
- * `close_window` is tagged 'destructive' and will require confirm when
- * SafetyLayer surfaces block/confirm.
+ * Every tool here is an input tool (safetyTier 1) unless it only reads; the ones that are destructive by
+ * themselves (`close_window`, `open_file`, `open_uri`) say `destructive: true` (see ToolDefinition.destructive).
  */
 
 import type { ToolDefinition } from './types';
+import { MOD } from '../platform/keys';
+import { screenJson } from '../core/untrusted-screen-content';
 import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
@@ -148,8 +149,7 @@ export function getExtraTools(): ToolDefinition[] {
           const hit = !b || !b.width || !b.height
             || (px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height);
           if (hit && /^(edit|textfield|searchfield|combobox)$/.test(role.replace(/^controltype\./, ''))) {
-            const combo = ctx.platform.platform === 'darwin' ? 'cmd+a' : 'ctrl+a';
-            await ctx.platform.keyPress(combo);
+            await ctx.platform.keyPress(`${MOD}+a`);   // this OS's select-all (keys.ts)
             selectAll = ' + select-all (edit field)';
           }
         } catch { /* best-effort — the triple-click itself already happened */ }
@@ -401,7 +401,7 @@ export function getExtraTools(): ToolDefinition[] {
         'NOT when the window actually closed. NOTE: this closes the WHOLE window — on a ' +
         'tabbed app (modern Notepad, browsers, editors) that can discard MULTIPLE tabs/' +
         'documents at once, including unsaved ones. To close just one tab, prefer the ' +
-        'in-app shortcut (Ctrl/Cmd+W) via the keyboard instead. Confirm-tier by default.',
+        'in-app shortcut (Ctrl/Cmd+W) via the keyboard instead. Ask the user first (pause_for_user) unless they asked for the close.',
       parameters: {
         processName: { type: 'string', description: 'Optional process name match', required: false },
         processId:   { type: 'number', description: 'Optional process id match', required: false },
@@ -409,7 +409,8 @@ export function getExtraTools(): ToolDefinition[] {
       },
       category: 'window',
       compactGroup: 'window',
-      safetyTier: 2,
+      safetyTier: 1,
+      destructive: true,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('close_window');
@@ -552,7 +553,7 @@ export function getExtraTools(): ToolDefinition[] {
       description:
         'Open a file or folder in the OS default application. ' +
         'Uses `open` (macOS), `xdg-open` (Linux), and explorer / ShellExecute (Windows). ' +
-        'Tier 2 (mutation): on some platforms "opening" a file may execute it ' +
+        'On some platforms "opening" a file executes it ' +
         '(.exe on Windows, .app on macOS, scripts with executable bit on Linux), ' +
         'and the registered handler can be privileged or destructive.',
       parameters: {
@@ -560,7 +561,8 @@ export function getExtraTools(): ToolDefinition[] {
       },
       category: 'orchestration',
       compactGroup: 'window',
-      safetyTier: 2,
+      safetyTier: 1,
+      destructive: true,
       handler: async ({ path: filePath }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_file');
@@ -592,13 +594,13 @@ export function getExtraTools(): ToolDefinition[] {
             const title = res?.title ?? '';
             if (!leaf || !windowTextIncludes(title, leaf)) {
               return {
-                text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: "${title || 'none'}"). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
+                text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
                 isError: true,
               };
             }
-            return { text: `Opened folder "${leaf}" (window: "${title}")` };
+            return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
           }
-          return { text: `Opened: ${p}${res?.title ? ` (window: "${res.title}")` : ''}` };
+          return { text: `Opened: ${p}${res?.title ? ` (window: ${quoteScreenText(res.title)})` : ''}` };
         } catch (err) {
           return {
             text: `open_file failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -691,7 +693,8 @@ export function getExtraTools(): ToolDefinition[] {
       },
       category: 'orchestration',
       compactGroup: 'window',
-      safetyTier: 2,
+      safetyTier: 1,
+      destructive: true,
       handler: async ({ uri }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_uri');
@@ -729,7 +732,7 @@ export function getExtraTools(): ToolDefinition[] {
             if (await isRegisteredUriScheme(scheme)) {
               const shell = await shellDispatchUriAndVerify(u, () => ctx.platform!.listWindows(), { waitMs: 5000 });
               if (shell.windowOpened) {
-                return { text: `Opened ${scheme}: via the OS shell handler. New window: "${shell.title ?? '(untitled)'}". (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
+                return { text: `Opened ${scheme}: via the OS shell handler. New window: ${quoteScreenText(shell.title ?? '(untitled)')}. (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
               }
               return {
                 text: `open_uri: dispatched ${scheme}: via the OS shell but no new window appeared within 5s${shell.error ? ` (${shell.error})` : ''}. The handler may have routed into an existing window — verify with list_windows.`,
@@ -754,7 +757,7 @@ export function getExtraTools(): ToolDefinition[] {
               isError: true,
             };
           }
-          return { text: `Opened ${scheme}: in the registered handler. New window appeared: "${launchResult.hwndLabel ?? '(handle unknown)'}". (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
+          return { text: `Opened ${scheme}: in the registered handler. New window appeared: ${quoteScreenText(launchResult.hwndLabel ?? '(handle unknown)')}. (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
         } catch (err) {
           return {
             text: `open_uri failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -920,7 +923,7 @@ export function getExtraTools(): ToolDefinition[] {
         if (!ctx.getLogBuffer) return { text: '[]' };
         const buf = ctx.getLogBuffer();
         const sliced = buf.length > cap ? buf.slice(buf.length - cap) : buf;
-        return { text: JSON.stringify(sliced) };
+        return { text: screenJson(sliced) };
       },
     },
 
@@ -946,7 +949,8 @@ export function getExtraTools(): ToolDefinition[] {
       },
       category: 'orchestration',
       compactGroup: 'system',
-      safetyTier: 2,
+      safetyTier: 1,
+      destructive: true,
       handler: async ({ userNote, logIndex }) => {
         try {
           const { apiSubmitReport } = await import('../surface/report');

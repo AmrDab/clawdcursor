@@ -2,12 +2,6 @@
 // Clawd Cursor — Core Types
 // ============================================
 
-export enum SafetyTier {
-  Auto = 'auto',
-  Preview = 'preview',
-  Confirm = 'confirm',
-}
-
 export interface ScreenFrame {
   width: number;
   height: number;
@@ -53,11 +47,6 @@ export interface ClawdConfig {
   server: {
     port: number;
   };
-  safety: {
-    defaultTier: SafetyTier;
-    confirmPatterns: string[];
-    blockedPatterns: string[];
-  };
   capture: {
     format: 'png' | 'jpeg';
     quality: number;
@@ -79,19 +68,6 @@ export interface ClawdConfig {
 export const DEFAULT_CONFIG: ClawdConfig = {
   server: {
     port: 3847,
-  },
-  safety: {
-    defaultTier: SafetyTier.Preview,
-    confirmPatterns: [
-      'send', 'delete', 'remove', 'purchase', 'buy', 'pay', 'submit',
-      'terminal', 'console', 'cmd\\.exe', 'powershell', 'bash', 'shell',
-      'sudo', 'del /[fq]', 'reboot', 'password', 'credential', 'secret',
-      'sign.?in', 'log.?in', 'authorize', 'transfer', 'wire',
-    ],
-    blockedPatterns: [
-      'format.*disk', 'format c:', 'rm -rf /', 'shutdown', 'shutdown /s',
-      'reboot', 'mkfs', 'dd if=', 'diskpart', ':(){:|:&};:',
-    ],
   },
   capture: {
     format: 'jpeg',

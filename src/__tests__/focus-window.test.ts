@@ -108,40 +108,49 @@ describe('focus_window — Bug 3: processName filtering', () => {
 });
 
 describe('focus_window — Bug 4: off-screen recovery', () => {
-  it('presses super+up when window bounds are off-screen after focus', async () => {
-    // First getWindows call (for processName resolution): on-screen
-    // After focusWindow: still at (-14, -14)
+  // On every OS, by that OS's own chord: Windows / Linux snap with Super+Up, macOS goes full screen with Ctrl+Cmd+F.
+  // The handler reads process.platform at call time, so each OS is exercised here whatever the test runs on (CI caught
+  // the macOS and Linux cases only on their own runners).
+  it.each([['win32', 'super+up'], ['linux', 'super+up'], ['darwin', 'ctrl+cmd+f']] as const)('on %s presses %s when window bounds are off-screen after focus', async (platform, snapKey) => {
+    const onScreen = { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: 100, y: 100, width: 800, height: 600 }, isMinimized: false };
+    // The phantom-window scan reads the window list first — not on macOS, where it does not run (see the next test).
+    if (platform !== 'darwin') mockGetWindows.mockResolvedValueOnce([onScreen]);
     mockGetWindows
-      .mockResolvedValueOnce([
-        // Phantom window scan (no phantoms — small window, on-screen)
-        { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: 100, y: 100, width: 800, height: 600 }, isMinimized: false },
-      ])
-      .mockResolvedValueOnce([
-        // Window lookup for target matching
-        { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: 100, y: 100, width: 800, height: 600 }, isMinimized: false },
-      ])
-      .mockResolvedValueOnce([
-        // After focusWindow, fresh read shows off-screen
-        { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: -14, y: -14, width: 800, height: 600 }, isMinimized: false },
-      ])
-      .mockResolvedValueOnce([
-        // After snap, on-screen
-        { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: 0, y: 0, width: 1920, height: 1080 }, isMinimized: false },
-      ])
-      .mockResolvedValue([
-        { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: 0, y: 0, width: 1920, height: 1080 }, isMinimized: false },
-      ]);
+      .mockResolvedValueOnce([onScreen])                                                   // window lookup for target matching
+      .mockResolvedValueOnce([{ ...onScreen, bounds: { x: -14, y: -14, width: 800, height: 600 } }])   // after focusWindow: off-screen
+      .mockResolvedValue([{ ...onScreen, bounds: { x: 0, y: 0, width: 1920, height: 1080 } }]);       // after the snap: on-screen
 
     mockGetActiveWindow.mockResolvedValue({
       title: 'Notepad', processName: 'notepad', processId: 42,
       bounds: { x: 0, y: 0, width: 1920, height: 1080 },
     });
 
-    const ctx = createCtx();
-    const result = await focusWindow.handler({ processName: 'notepad' }, ctx);
-    const expectedSnapKey = process.platform === 'darwin' ? 'ctrl+cmd+f' : 'super+up';
-    expect(mockKeyPress).toHaveBeenCalledWith(expectedSnapKey);
-    expect(result.isError).toBeUndefined();
+    const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...desc, value: platform });
+    try {
+      const result = await focusWindow.handler({ processName: 'notepad' }, createCtx());
+      expect(mockKeyPress).toHaveBeenCalledWith(snapKey);
+      expect(mockKeyPress).toHaveBeenCalledTimes(1);
+      expect(result.isError).toBeUndefined();
+    } finally { Object.defineProperty(process, 'platform', desc); }
+  });
+
+  // A "phantom" is a huge window at negative coordinates that blocks focus (Win11 maximized UWP). Windows and Linux
+  // minimize it with Super+Down, as before. On macOS that chord is Cmd+Down (caret to the end of the document), and a
+  // window on a monitor left of / above the primary legitimately has negative coordinates there: nothing is pressed.
+  it.each([['win32', true], ['linux', true], ['darwin', false]] as const)('on %s a phantom off-screen window is minimized with super+down: %s', async (platform, minimizes) => {
+    const target = { processId: 42, processName: 'notepad', title: 'Notepad', bounds: { x: 100, y: 100, width: 800, height: 600 }, isMinimized: false };
+    const phantom = { processId: 77, processName: 'ghost', title: 'Ghost', bounds: { x: -14, y: -14, width: 3860, height: 2180 }, isMinimized: false };
+    mockGetWindows.mockResolvedValue([target, phantom]);
+    mockGetActiveWindow.mockResolvedValue({ title: 'Notepad', processName: 'notepad', processId: 42, bounds: target.bounds });
+    const desc = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...desc, value: platform });
+    try {
+      await focusWindow.handler({ processName: 'notepad' }, createCtx());
+      const pressed = mockKeyPress.mock.calls.map(c => c[0]);
+      expect(pressed.includes('super+down')).toBe(minimizes);
+      if (!minimizes) expect(pressed).toEqual([]);
+    } finally { Object.defineProperty(process, 'platform', desc); }
   });
 
   it('does NOT press snap key when window is already on-screen', async () => {

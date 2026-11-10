@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>clawdcursor: safe desktop control for any AI agent</title>
-  <meta name="description" content="Local MCP server that gives any AI agent safe desktop control. Compiles the screen into a UI map (a11y tree + OCR) with stable element ids, acts by id not by pixel, verifies its own actions, routes everything through one safety gate. Windows · macOS · Linux. No cloud.">
+  <meta name="description" content="Local MCP server that gives any AI agent safe desktop control. Compiles the screen into a UI map (a11y tree + OCR) with stable element ids, acts by id not by pixel, verifies its own actions, stops the moment you say so. Windows · macOS · Linux. No cloud.">
   <meta property="og:title" content="clawdcursor. It sees. It acts. It verifies.">
-  <meta property="og:description" content="Safe desktop control for any AI agent. Compiles the screen into a UI map, acts on stable element ids, verifies its own actions, one safety gate. Local · cross-OS · any model.">
+  <meta property="og:description" content="Desktop control for any AI agent. Compiles the screen into a UI map, acts on stable element ids, verifies its own actions, stops when you say so. Local · cross-OS · any model.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://clawdcursor.com/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -35,7 +35,7 @@
                       pause_for_user (hand the desktop to the user for a
                       sign-in / 2FA / CAPTCHA; continue when they click Resume)
       browser       : Chrome DevTools Protocol for Electron/WebView2 apps
-      batch         : run a guarded, safety-gated sequence of the above in one call
+      batch         : run a guarded sequence of the above in one call
 
     ── FLAGSHIP CAPABILITIES ─────────────────────────────────────────────────────
     UI State Compiler: one fused, confidence-scored map of the screen
@@ -82,9 +82,14 @@
                           tools. clawdcursor never runs a model.
 
     ── SAFETY ──────────────────────────────────────────────────────────────────
-    Single safety.evaluate() chokepoint: every tool call routes through it
-    regardless of transport. Sensitive actions auto-elevate to
-    Confirm. Bearer token required on HTTP. Local-only by default.
+    clawdcursor runs with the user's own permissions and does not decide what
+    the agent may do: no safety tiers. That is the agent's call and the MCP
+    host's permission prompts' (tools carry readOnlyHint / destructiveHint).
+    Before an irreversible action the user didn't ask for, ask with
+    system pause_for_user. Always enforced: the user's Stop, the pause, no
+    stray input into an AI assistant's window, and the hard key list (lock /
+    log-out combos are never sent; every other shortcut is allowed).
+    Bearer token required on HTTP. Local-only by default.
     While an agent drives, a banner says what it is doing ("Typing in Edge")
     and a thin amber outline marks the window it works in on every OS (Stop on the banner). At a roadblock the agent pauses: the outline
     turns blue and the banner shows what to do, with Resume / End task.
@@ -441,7 +446,7 @@
   <div class="hero">
     <div class="hero-badge"><div class="pulse"></div> v1.5.27 &middot; answer the agent right from its pause prompt</div>
     <h1>It sees. It acts. It verifies.<br><span class="gr">Desktop control for any AI agent</span></h1>
-    <p>Your agent reads the screen as stable element ids, not pixels, verifies every action, and routes it through one safety gate. Local, any model.</p>
+    <p>Your agent reads the screen as stable element ids, not pixels, verifies every action, and stops the moment you say so. Local, any model.</p>
     <div class="hero-btns">
       <a href="https://github.com/AmrDab/clawdcursor" class="btn-p" id="star-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -551,7 +556,7 @@
       <div class="pipe-step verifier">
         <h4><span class="pipe-num">3</span> Verify &amp; gate</h4>
         <span class="pipe-tag">Reactive + one chokepoint</span>
-        <p>Pass <code style="font-size:0.82em">expect</code> and the action confirms its outcome, reporting a DEVIATION if the UI didn't obey. Every call routes through one safety layer.</p>
+        <p>Pass <code style="font-size:0.82em">expect</code> and the action confirms its outcome, reporting a DEVIATION if the UI didn't obey. A Stop on the pill halts every call.</p>
       </div>
     </div>
 
@@ -597,7 +602,7 @@
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Known steps in a row</td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A model turn + a screenshot per step</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call, every step still safety-checked</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call, every step still guarded (Stop, pause)</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading text</td>
@@ -637,7 +642,7 @@
       <div class="feat-card">
         <div class="feat-icon">📦</div>
         <h4>batch: one round-trip</h4>
-        <p>Collapse N deterministic tool calls into a single guarded, safety-gated batch. N calls &rarr; 1.</p>
+        <p>Collapse N deterministic tool calls into a single guarded batch. N calls &rarr; 1.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">⏸️</div>
@@ -708,7 +713,7 @@
       <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
         <strong style="color:var(--text2);">Compact</strong> (~7,000 tokens of catalog, a third of granular): <code style="font-size:0.9em;color:var(--accent2);">computer({ "action": "key", "combo": "mod+s" })</code>.
         <strong style="color:var(--text2);">Granular:</strong> <code style="font-size:0.9em;color:var(--accent2);">key_press({ "key": "mod+s" })</code>.
-        Both hit the same <code>safety.evaluate()</code> chokepoint. Leave out <code style="color:var(--accent2);">--compact</code> for the granular surface.
+        Both run the same tools behind the same guards. Leave out <code style="color:var(--accent2);">--compact</code> for the granular surface.
         See <a href="https://github.com/AmrDab/clawdcursor/blob/main/schema.snapshot.json" target="_blank" rel="noopener" style="color:var(--accent2);">schema.snapshot.json</a> for every parameter.
       </p>
     </details>

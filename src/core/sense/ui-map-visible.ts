@@ -8,8 +8,8 @@
  * Scrolling sends no input and must not change the foreground window, so the window binding is untouched: the active window
  * is read again after the scroll and the act is refused if its handle, title or bounds differ. The platform finds the element
  * by name and last-seen bounds and refuses an ambiguous one; this module then checks the element it scrolled IS the one
- * referenced (name, role, size) — one check for every caller. The safety gates (own UI, the foreground guard, destructive
- * labels) run where they always did: before the tool, and on the click after.
+ * referenced (name, role, size) — one check for every caller. The guards (own UI, the foreground guard)
+ * run where they always did: before the tool, and on the click after.
  *
  * Names, titles and platform messages are screen content: they enter error text wrapped, never bare.
  */

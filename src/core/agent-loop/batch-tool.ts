@@ -4,19 +4,18 @@
  * Lets the cheap text brain (Haiku) plan SEVERAL known next actions and run them
  * in ONE turn instead of one tool-call per LLM round-trip. Same shape and
  * guarantees as the MCP-side `batch` (src/tools/batch.ts) but over the agent-loop
- * machinery: UnifiedTool catalog, AgentToolContext, and the loop's own
- * `safety.evaluate` chokepoint. Declarative + guarded:
+ * machinery: UnifiedTool catalog and AgentToolContext. Declarative + guarded:
  *
  *   - Each step { name, args, precheck? } is a normal agent-loop tool call
  *     (`arguments` is accepted for `args`, matching the MCP batch).
  *   - Optional `precheck` ({window}|{element}) is re-checked against LIVE state
  *     before the step — so an action can't fire into the wrong window.
  *   - Steps get the SAME per-call treatment as single tool calls (audit
- *     2026-06-10, finding B): el_NN→label resolution for the safety gate,
+ *     2026-06-10, finding B):
  *     activeApp refreshed from a post-step snapshot, outcome-gated UIMap
  *     invalidation, and the Layer C reactive check (assertion-array `expect`
  *     in a step's args is verified, DEVIATION halts the batch).
- *   - Halts on the first guard miss / safety stop / step failure / DEVIATION
+ *   - Halts on the first guard miss / refusal / step failure / DEVIATION
  *     and returns a trace; the loop continues from real state.
  *
  * The token A/B (scripts/measure-batch-tokens.ts) shows this collapses the
@@ -24,9 +23,7 @@
  */
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import { buildUnifiedTools } from './tools';
-import { evaluate as safetyEvaluate, isAllowed } from '../safety';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../own-ui-guard';
-import { refLabel, selectorLabels, gateEachLabel } from '../../tools/safety-gate';
 import { captureSnapshot } from '../sense/snapshot';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
@@ -72,7 +69,7 @@ export function buildBatchTool(): UnifiedTool {
       'against live state before the step: {"window":"notepad"} (that window must be focused) or ' +
       '{"element":"Send"} (that a11y element must exist). An `expect` assertion array inside a ' +
       'step\'s args is verified after that step (DEVIATION halts the batch). The batch STOPS at ' +
-      'the first failed precondition, safety stop, step error, or DEVIATION and returns a ' +
+      'the first failed precondition, refusal, step error, or DEVIATION and returns a ' +
       'per-step trace so you continue from real state. el_NN refs are only safe up to the first ' +
       'screen-changing step — after that the screen moved; target later steps by name. Use it ' +
       'for deterministic stretches (open -> focus -> type -> save). Do NOT put perception-only ' +
@@ -182,20 +179,6 @@ export function buildBatchTool(): UnifiedTool {
           }
         }
 
-        // Every selector invoke_element may act on — the ref's label from the
-        // holder, name, automationId — plus target, same as the loop's 5a
-        // (without the ref label a batched invoke on a "Send"/"Pay" button
-        // skipped the destructive-label rule entirely — audit finding B/H3).
-        const targetLabels = selectorLabels([
-          step.name === 'invoke_element' ? refLabel(a, ctx.uiMaps) : undefined,
-          a.name, a.automationId, a.target,
-        ]);
-        const decision = gateEachLabel(targetLabels, targetLabel => safetyEvaluate({ tool: step.name, args: a, targetLabel, activeApp, userTaskText: ctx.task }));
-        if (!isAllowed(decision)) {
-          trace.push(`  ${i}. [${decision.decision}] ${label}`);
-          const why = 'reason' in decision ? decision.reason : decision.tier;
-          return halt(`batch halted at step ${i}: safety ${decision.decision} (${why}).`);
-        }
         const ownUi = ownUiRefusal(a, isPauseSafeCall(step.name), isStopSafeCall(step.name));
         if (ownUi) {
           trace.push(`  ${i}. [blocked] ${label}`);

@@ -10,10 +10,11 @@
  *     optional precondition guard. No arbitrary code → no injection-as-control-
  *     flow, no element-handle staleness (every step re-queries by name), no
  *     opaque partial-execution blob.
- *   - Every step routes through the SAME `evaluateToolCall` safety gate and the
- *     SAME `getTool().handler` execution path the MCP server uses per call.
+ *   - Every step runs through the SAME `getTool().handler` execution path the MCP server uses per call, behind the
+ *     same guards: the user's Stop and pause, clawdcursor's own UI, the screenshot binding — and, in the input layer
+ *     below every handler, the hard key list and the AI-host guard. A batch is not a way around any of them.
  *   - Between steps the executor RE-PERCEIVES to check each step's `expect`
- *     guard; on any guard miss / safety stop / step error it HALTS and returns
+ *     guard; on any guard miss / refusal / step error it HALTS and returns
  *     a structured trace so the caller re-plans from real state (the morph
  *     ladder's recovery, just coarser).
  *
@@ -21,37 +22,19 @@
  * none of the sandbox's hard problems (see the architecture review).
  */
 import { getTool, getCompactTools } from './registry';
-import { evaluateToolCall } from './safety-gate';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { logger } from '../core/observability/logger';
+import { clipScreenText } from '../core/untrusted-screen-content';
+import { quoteScreenText } from '../core/result-codes';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
  *  — so a batch works whether the caller drives the 97-tool or 6-compound API. */
 function resolveAnyTool(name: string): ToolDefinition | undefined {
   return getTool(name) ?? getCompactTools().find(t => t.name === name);
-}
-
-/**
- * Whether the OPERATOR has opted into letting a batch auto-satisfy confirm-tier
- * steps. Security boundary (GHSA-3v3f-5rwv-whc9): the per-call `allowConfirm`
- * JSON field is caller-controlled — any bearer-token holder or a compromised/
- * malicious agent could set it and execute confirm-gated actions (e.g. `open_uri
- * file:` launching an arbitrary handler) that a direct tools/call would halt on.
- * The confirm tier exists precisely to require a human, and the caller IS the
- * (untrusted) agent, so caller-supplied consent is not consent. We therefore
- * only honor `allowConfirm` when the human running the daemon has enabled it
- * out-of-band via CLAWD_BATCH_ALLOW_CONFIRM=1 (or =true). Default: OFF — a batch
- * halts at a confirm step exactly like a direct call, and reports how to enable
- * it deliberately. This does not weaken the block tier (never bypassable) and
- * does not touch benign/allow-tier steps.
- */
-export function batchAutoConfirmEnabled(): boolean {
-  const v = (process.env.CLAWD_BATCH_ALLOW_CONFIRM || '').trim().toLowerCase();
-  return v === '1' || v === 'true' || v === 'yes';
 }
 
 /** A lightweight, declarative precondition checked (by re-perceiving) before a step runs. */
@@ -79,7 +62,7 @@ export interface BatchStep {
   label?: string;
 }
 
-type StepStatus = 'ok' | 'guard_failed' | 'blocked' | 'needs_confirm' | 'error' | 'unknown_tool' | 'skipped';
+type StepStatus = 'ok' | 'guard_failed' | 'blocked' | 'error' | 'unknown_tool' | 'skipped';
 
 export interface StepOutcome { i: number; label: string; status: StepStatus; text: string; pressedKeys?: boolean; }
 
@@ -114,7 +97,7 @@ async function checkGuard(guard: BatchGuard, ctx: ToolContext): Promise<{ ok: bo
       // NBSP in "Microsoft Edge") that defeats a plain substring compare (#bug
       // 2026-06-11).
       if (!windowTextIncludes(r.text, guard.window)) {
-        return { ok: false, detail: `foreground window is not "${guard.window}" (got: ${(r.text || '').slice(0, 90)})` };
+        return { ok: false, detail: `foreground window is not "${guard.window}" (got: ${quoteScreenText((r.text || '').slice(0, 90))})` };
       }
     }
   }
@@ -135,12 +118,12 @@ async function checkGuard(guard: BatchGuard, ctx: ToolContext): Promise<{ ok: bo
 
 /**
  * Run an ordered list of guarded tool calls, halting on the first guard miss,
- * safety stop, or step error. Reuses the real safety gate + tool handlers.
+ * refusal, or step error. Reuses the real guards + tool handlers.
  */
 export async function executeBatch(
   steps: BatchStep[],
   ctx: ToolContext,
-  opts: { allowConfirm?: boolean; maxSteps?: number } = {},
+  opts: { maxSteps?: number } = {},
 ): Promise<BatchResult> {
   const cap = opts.maxSteps ?? DEFAULT_MAX_STEPS;
   const outcomes: StepOutcome[] = [];
@@ -187,25 +170,6 @@ export async function executeBatch(
       }
     }
 
-    // Safety — identical gate to a normal tools/call (incl. el_NN → label
-    // resolution via the shared holder, same as the direct MCP path).
-    const safetyErr = evaluateToolCall(tool, args, { uiMaps: ctx.uiMaps });
-    if (safetyErr) {
-      const isConfirm = (safetyErr.text || '').includes('safety confirm');
-      // `allowConfirm` is only effective when the OPERATOR enabled it out-of-band
-      // (CLAWD_BATCH_ALLOW_CONFIRM=1). A caller-supplied allowConfirm alone can
-      // NOT satisfy a confirm-tier step — see GHSA-3v3f-5rwv-whc9. Block tier is
-      // never bypassable.
-      const mayAutoConfirm = isConfirm && opts.allowConfirm && batchAutoConfirmEnabled();
-      if (!mayAutoConfirm) {
-        outcomes.push({ i, label, status: isConfirm ? 'needs_confirm' : 'blocked', text: safetyErr.text });
-        const confirmHint = opts.allowConfirm
-          ? `step ${i} needs confirmation — allowConfirm is ignored unless the operator sets CLAWD_BATCH_ALLOW_CONFIRM=1 on the daemon`
-          : `step ${i} needs confirmation (a confirm-tier step cannot run in a batch unless the operator enables CLAWD_BATCH_ALLOW_CONFIRM=1 AND you pass allowConfirm:true)`;
-        return halt(i, isConfirm ? confirmHint : `step ${i} blocked by safety`);
-      }
-    }
-
     // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
     if (isImagePointerCall(tool.name, stepAction, args)) {
       const why = await imagePointerRefusal(ctx, args);
@@ -224,7 +188,7 @@ export async function executeBatch(
       res = { text: `threw: ${e instanceof Error ? e.message : String(e)}`, isError: true };
     }
     if (res.isError) {
-      outcomes.push({ i, label, status: 'error', text: (res.text || '').slice(0, 200), pressedKeys: res.pressedKeys });
+      outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys });
       return halt(i, `step ${i} (${label}) errored`);
     }
 
@@ -237,23 +201,11 @@ export async function executeBatch(
 
     // A screenshot step names its id first, so it survives the step text's truncation.
     const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
-    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${(res.text || '').slice(0, 160)}`, pressedKeys: res.pressedKeys });
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys });
     completed++;
   }
 
   return { total: steps.length, completed, allDone: completed === steps.length, steps: outcomes };
-}
-
-/** Pre-flight: scan each step's safety tier WITHOUT executing. */
-function dryRunScan(steps: BatchStep[]): { i: number; label: string; gate: string }[] {
-  return steps.map((step, i) => {
-    const label = labelFor(step);
-    const tool = resolveAnyTool(step.name);
-    if (!tool) return { i, label, gate: 'unknown-tool' };
-    const err = evaluateToolCall(tool, stepArgs(step));
-    const gate = !err ? 'allow' : (err.text.includes('safety confirm') ? 'confirm' : 'block');
-    return { i, label, gate };
-  });
 }
 
 function renderResult(r: BatchResult): string {
@@ -275,12 +227,9 @@ export function getBatchTools(): ToolDefinition[] {
         '{"name":"computer","arguments":{"action":"type","text":"hi"}} or a granular tool). Optional `expect` ' +
         'is a precondition checked by RE-PERCEIVING before the step runs: {"window":"notepad"} (foreground ' +
         'window must match) or {"element":"Send"} (a11y element must be present). The batch HALTS on the first ' +
-        'failed precondition, safety stop, or step error and returns a per-step trace so you re-plan from real ' +
-        'state. Every step goes through the same safety gate as a direct call. ' +
-        'Set dryRun:true to pre-scan safety tiers without ' +
-        'executing. A confirm-tier step still HALTS the batch by default; ' +
-        'allowConfirm:true only proceeds if the operator started the daemon with ' +
-        'CLAWD_BATCH_ALLOW_CONFIRM=1 (otherwise it is ignored — confirm-tier stays gated).',
+        'failed precondition, refusal, or step error and returns a per-step trace so you re-plan from real ' +
+        'state. A step is refused exactly as a direct call would be (the user has stopped or paused clawdcursor, a dangerous key combo, an AI assistant window in front). ' +
+        'Do not batch past an irreversible step the user did not ask for: ask first with system pause_for_user.',
       parameters: {
         steps: {
           type: 'array',
@@ -297,13 +246,11 @@ export function getBatchTools(): ToolDefinition[] {
             required: ['name'],
           },
         },
-        allowConfirm: { type: 'boolean', description: 'Request that confirm-tier steps proceed. Only effective if the operator enabled CLAWD_BATCH_ALLOW_CONFIRM=1 on the daemon; otherwise ignored and the batch halts at the confirm step. Never bypasses block-tier.', required: false },
-        dryRun: { type: 'boolean', description: 'Only report each step\'s safety tier; do not execute.', required: false },
         maxSteps: { type: 'number', description: `Hard cap on executed steps (default ${DEFAULT_MAX_STEPS}).`, required: false },
       },
       category: 'orchestration',
       compactGroup: 'system',
-      safetyTier: 0, // the batch itself is inert; each STEP is gated individually at runtime.
+      safetyTier: 0, // the batch itself is inert; the pill shows when a STEP acts (batchActs).
       handler: async (params, ctx: ToolContext): Promise<ToolResult> => {
         // `steps` arrives as a JSON string (constrained schema) or, from clients
         // that pass rich JSON, a real array. Accept both.
@@ -325,26 +272,7 @@ export function getBatchTools(): ToolDefinition[] {
           }
         }
 
-        if (params.dryRun) {
-          const scan = dryRunScan(steps);
-          const willStop = scan.find(s => s.gate === 'confirm' || s.gate === 'block' || s.gate === 'unknown-tool');
-          return {
-            text:
-              `batch (dry run): ${steps.length} steps.\n` +
-              scan.map(s => `  ${s.i}. [${s.gate}] ${s.label}`).join('\n') +
-              (willStop
-                ? `\nNote: the batch would halt at step ${willStop.i} ([${willStop.gate}]).` +
-                  (willStop.gate === 'confirm'
-                    ? (batchAutoConfirmEnabled()
-                        ? ' Pass allowConfirm:true to proceed (operator has enabled it).'
-                        : ' Confirm-tier steps cannot run in a batch on this daemon (operator has not set CLAWD_BATCH_ALLOW_CONFIRM=1).')
-                    : '')
-                : '\nAll steps would be allowed.'),
-          };
-        }
-
         const result = await executeBatch(steps, ctx, {
-          allowConfirm: params.allowConfirm === true,
           maxSteps: typeof params.maxSteps === 'number' ? params.maxSteps : undefined,
         });
         return {

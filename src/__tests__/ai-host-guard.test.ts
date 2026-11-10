@@ -52,7 +52,7 @@ afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-const REFUSAL = /the window in front is Claude, an AI assistant — nothing was sent\. Focus your target window first: window \{"action":"focus","title":"…"\}/;
+const REFUSAL = /the window in front is "Claude", an AI assistant — nothing was sent\. Focus your target window first: window \{"action":"focus","title":"…"\}/;
 
 describe('input into an AI assistant the agent did not choose', () => {
   it('the eval: type, a click and a key before any focus are refused, and nothing is sent', async () => {
@@ -98,11 +98,11 @@ describe('input into an AI assistant the agent did not choose', () => {
   it('an editor host is covered too (VS Code reports "Code")', async () => {
     fg = CODE;
     const d = fakeDesktop();
-    await expect(d.keyPress('ctrl+s')).rejects.toThrow(/the window in front is Code, an AI assistant/);
+    await expect(d.keyPress('ctrl+s')).rejects.toThrow(/the window in front is "Code", an AI assistant/);
   });
 
   it('the refusal is classified, with a next call that exists', () => {
-    const c = classifyResult('computer {"action":"type"}: the window in front is Claude, an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}', true, true);
+    const c = classifyResult('computer {"action":"type"}: the window in front is "Claude", an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}', true, true);
     expect(c?.code).toBe('FOREGROUND_CHANGED');
     expect(c?.outcome).toBe('refused');
     expect(c?.next).toBe('window {"action":"list"}');
@@ -209,7 +209,7 @@ describe('the host of this session, found by process ancestry (stdio)', () => {
     __setHostAncestryForTests([500, 400]);
     fg = TERMINAL;
     const d = fakeLayer();
-    await expect(d.typeText('x')).rejects.toThrow(/the window in front is the app this agent runs in \(WindowsTerminal\) — nothing was sent/);
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is the app this agent runs in \("WindowsTerminal"\) — nothing was sent/);
     await d.focusWindow(TERMINAL);
     await d.typeText('x');
     expect(d.sent).toEqual(['type x']);
@@ -249,7 +249,7 @@ describe('review round 3', () => {
     fg = { processId: 230, processName: 'Codex' };
     const d = fakeLayer();
     await d.openApp('Code');
-    await expect(d.typeText('x')).rejects.toThrow(/the window in front is Codex, an AI assistant/);
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is "Codex", an AI assistant/);
     expect(d.sent).toEqual([]);
   });
 
@@ -257,8 +257,8 @@ describe('review round 3', () => {
     __setHostAncestryForTests([500]);
     fg = { processId: 500, processName: 'gnome-terminal-server' };
     const d = fakeLayer();
-    await expect(d.typeText('x')).rejects.toThrow(/the window in front is the app this agent runs in \(gnome-terminal-server\) — nothing was sent/);
-    expect(classifyResult('computer {"action":"type"}: the window in front is the app this agent runs in (gnome-terminal-server) — nothing was sent. Focus your target window first', true, true)?.code).toBe('FOREGROUND_CHANGED');
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is the app this agent runs in \("gnome-terminal-server"\) — nothing was sent/);
+    expect(classifyResult('computer {"action":"type"}: the window in front is the app this agent runs in ("gnome-terminal-server") — nothing was sent. Focus your target window first', true, true)?.code).toBe('FOREGROUND_CHANGED');
     __setHostAncestryForTests(null);
   });
 
@@ -271,7 +271,7 @@ describe('review round 3', () => {
     const outcome = sent.then(() => 'sent', e => String(e.message));
     await new Promise(r => setTimeout(r, 50));
     resolve([500]);
-    expect(await outcome).toMatch(/the app this agent runs in \(gnome-terminal-server\) — nothing was sent/);
+    expect(await outcome).toMatch(/the app this agent runs in \("gnome-terminal-server"\) — nothing was sent/);
     expect(d.sent).toEqual([]);
     __setHostAncestryForTests(null);
   });
@@ -312,7 +312,7 @@ describe('a failed or slow ancestry read is not "no ancestors"', () => {
     warn.mockRestore();
     fg = { processId: 777, processName: 'WindowsTerminal' };
     const d = fakeLayer();
-    await expect(d.typeText('x')).rejects.toThrow(/the app this agent runs in \(WindowsTerminal\)/);
+    await expect(d.typeText('x')).rejects.toThrow(/the app this agent runs in \("WindowsTerminal"\)/);
     fg = { processId: 888, processName: 'notepad' };
     await d.typeText('y');
     expect(d.sent).toEqual(['type y']);

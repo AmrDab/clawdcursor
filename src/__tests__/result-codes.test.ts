@@ -8,13 +8,10 @@ import { classifyResult, renderResultLine, isJsonText } from '../core/result-cod
 describe('classifyResult — errors get a code from the text the tools already write', () => {
   const cases: Array<[string, string, string]> = [
     ['clawdcursor needs one-time consent before it can control the desktop. Run `clawdcursor consent --accept`', 'CONSENT_REQUIRED', 'refused'],
-    ['mouse_click: safety block - destructive label "Delete account"', 'SAFETY_BLOCKED', 'refused'],
-    ['a11y_invoke: safety confirm - "Send" needs approval (requires user confirmation). Next step: surface this', 'NEEDS_CONFIRMATION', 'refused'],
-    ['[confirm] click "Pay": headless run: no human to confirm. DO NOT retry', 'NEEDS_CONFIRMATION', 'refused'],
     ['A system dialog owns the keyboard: "UserNotificationCenter" (pid 311) is frontmost per NSWorkspace.', 'KEYBOARD_OWNED', 'refused'],
     ['secure input is on (held by 1Password, pid 412): macOS sends keys and focus only to it. Close or leave the password field in 1Password, then try again. (focus went to Google Chrome (pid 935), not to Notes (pid 77))', 'SECURE_INPUT', 'refused'],
     ['smart_click failed: the screen is locked — unlock it first', 'SCREEN_LOCKED', 'refused'],
-    ['BLOCKED: "alt+f4" is a dangerous key combo.', 'DANGEROUS_KEY', 'refused'],
+    ['key_press: Refused: "win+l" is a dangerous key combo — super+l locks the screen, so clawdcursor never sends it.', 'DANGEROUS_KEY', 'refused'],
     ['Clicked "Save" at (10,20)\nDEVIATION: 1/1 expected check(s) failed (still failing after a 2s settle window)', 'DEVIATION', 'failed'],
     ['invoke_element ref rejected: unknown snapshot s_12 — call compile_ui first', 'STALE_REF', 'failed'],
     ['computer: unknown action "clik"', 'INVALID_ARGS', 'failed'],
@@ -32,11 +29,11 @@ describe('classifyResult — errors get a code from the text the tools already w
     });
   }
 
-  it('a refusal is never "failed", and every failure but INVALID_ARGS / DANGEROUS_KEY offers a next call', () => {
+  it('a refusal is never "failed", and every failure but INVALID_ARGS offers a next call', () => {
     for (const [text, code] of cases) {
       const c = classifyResult(text, true, true)!;
       expect(c.hint).toBeTruthy();
-      if (!['INVALID_ARGS', 'DANGEROUS_KEY', 'SAFETY_BLOCKED', 'CONSENT_REQUIRED'].includes(code)) expect(c.next).toBeTruthy();
+      if (!['INVALID_ARGS', 'CONSENT_REQUIRED'].includes(code)) expect(c.next).toBeTruthy();
     }
   });
 
@@ -85,8 +82,15 @@ describe('surfaces and rendering', () => {
     expect(isJsonText('Pressed Return')).toBe(false);
   });
 
+  // The policy gate is gone in 1.6: its texts are no longer a refusal vocabulary, and its codes no longer exist.
+  it('the removed gate codes are never produced', () => {
+    for (const t of ['mouse_click: safety block - destructive label "Delete"', 'a11y_invoke: safety confirm - "Send" (requires user confirmation)', '[confirm] click "Pay"']) {
+      expect(['SAFETY_BLOCKED', 'NEEDS_CONFIRMATION']).not.toContain(classifyResult(t, true, true)?.code);
+    }
+  });
+
   it('no vendor or model names in any hint or next call (model-agnostic)', () => {
-    const all = [true, false].flatMap(e => ['x', 'safety confirm - y', 'not found', 'timed out', 'screen is locked']
+    const all = [true, false].flatMap(e => ['x', 'is a dangerous key combo', 'not found', 'timed out', 'screen is locked']
       .map(t => JSON.stringify(classifyResult(t, e, true, 'mcp')) + JSON.stringify(classifyResult(t, e, true, 'agent'))));
     expect(all.join(' ')).not.toMatch(/claude|anthropic|openai|gpt|gemini/i);
   });

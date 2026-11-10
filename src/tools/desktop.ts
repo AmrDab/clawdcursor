@@ -6,18 +6,16 @@
  * The server auto-scales to Windows LOGICAL coordinates via mouseScaleFactor.
  */
 
-import * as os from 'os';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
-import { isBlockedKey } from './playbooks/keys-blocklist';
+import { MOD } from '../platform/keys';
 import { waitForPaste, writeClipboardVerified } from './paste-guard';
 import { lastCaptureUnchecked } from '../platform/native-helper';
 import { unguarded } from '../platform/pointer-guard';
 
-const IS_MAC = os.platform() === 'darwin';
 
 /** The capture went ahead unchecked (#276): a missing grant would look like this image, so the agent is told. */
 const uncheckedNote = (): string => lastCaptureUnchecked()
@@ -415,8 +413,7 @@ export function getDesktopTools(): ToolDefinition[] {
             // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
             if (await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), body)) {
               await new Promise(r => setTimeout(r, 50));
-              // Paste combo is platform-specific
-              await ctx.desktop.keyPress(IS_MAC ? 'super+v' : 'ctrl+v');
+              await ctx.desktop.keyPress(`${MOD}+v`);   // this OS's paste (keys.ts)
               // Before Return and before the clipboard is put back: a slow app would otherwise paste the restored one.
               await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, body);
             } else {
@@ -447,9 +444,9 @@ export function getDesktopTools(): ToolDefinition[] {
 
     {
       name: 'key_press',
-      description: 'Press a keyboard key or key combination. Use "+" for a chord (e.g. "ctrl+s", "shift+enter", "alt+tab"). Separate multiple presses with SPACES to send them in sequence (e.g. "Down Down End", "ctrl+a Delete"). Single keys: "Return", "Tab", "Escape", "Backspace", "Delete", "F1"-"F12", "Left/Right/Up/Down".',
+      description: 'Press a keyboard key or key combination. Use "+" for a chord (e.g. "mod+s", "shift+enter"); "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Separate multiple presses with SPACES to send them in sequence (e.g. "Down Down End", "mod+a Delete"). Single keys: "Return", "Tab", "Escape", "Backspace", "Delete", "F1"-"F12", "Left/Right/Up/Down".',
       parameters: {
-        key: { type: 'string', description: 'Key/combo to press (e.g. "Return", "ctrl+a", "F5"). Space-separate combos for a sequence ("Down Down End").', required: true },
+        key: { type: 'string', description: 'Key/combo to press (e.g. "Return", "mod+a", "F5"). Space-separate combos for a sequence ("Down Down End").', required: true },
       },
       category: 'keyboard',
       compactGroup: 'computer',
@@ -461,19 +458,12 @@ export function getDesktopTools(): ToolDefinition[] {
         // message instead (the `computer` compound names this field `combo`,
         // with `key` accepted as an alias).
         if (typeof key !== 'string' || key.trim() === '') {
-          return { text: 'key_press: "key" is required — the key or combo to press, e.g. "Return" or "ctrl+a". (On the `computer` compound the field is `combo`; `key` is also accepted.)', isError: true };
+          return { text: 'key_press: "key" is required — the key or combo to press, e.g. "Return" or "mod+a". (On the `computer` compound the field is `combo`; `key` is also accepted.)', isError: true };
         }
         // "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = key.trim().split(/\s+/);
-        // Hard-block backstop. This carried its own 3-entry copy that omitted
-        // win+l and every other machine-locking combo (GHSA-35pc-g74h-p476);
-        // it now defers to the single blocklist so the two cannot drift.
-        // HARD tier only — confirm-tier combos keep their allowConfirm path.
-        for (const combo of combos) {
-          if (isBlockedKey(combo)) {
-            return { text: `BLOCKED: "${combo}" is a dangerous key combo.`, isError: true };
-          }
-        }
+        // The hard key list (lock / log out / secure attention) is refused in the input layer, for every caller:
+        // platform/hard-keys.ts, called from guardInputMethods.
         const activeInfo = await activeWindowLabel(ctx);
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (const combo of combos) {

@@ -133,3 +133,22 @@ export function resolveAlias(name: string): (AppAlias & { key: string }) | null 
   if (!hit) return null;
   return { key: k, ...hit };
 }
+
+/**
+ * open_app takes an application NAME, and nothing a shell could read as something else. On Windows a launch name
+ * reaches Start-Process -FilePath, on macOS `open -a`, on Linux an exec: a path runs that file, and `scheme:…`
+ * (`ms-settings:`, `search-ms:`, `file:`) is handed to its protocol handler. Those are open_file's and open_uri's
+ * jobs — the tools announced to MCP hosts as destructive; open_app is not.
+ *
+ * An allowlist, not a blocklist: letters, digits, space and `. _ + & ' ( ) # , ! @ -`, starting with a letter or a
+ * digit. So no `:`, no `/` or `\`, no `%` (percent-encoded separators), no `~`, no wildcard, quote or control character.
+ * Returns the refusal text, or null for a name.
+ */
+const APP_NAME = /^[\p{L}\p{N}][\p{L}\p{N} ._+&'()#,!@-]{0,119}$/u;
+export function appNameRefusal(name: string): string | null {
+  const n = String(name ?? '');
+  if (n.trim() === '' || APP_NAME.test(n.trim()) && n === n.replace(/[\r\n\t]/g, '')) return null;
+  return 'open_app takes an application name only (e.g. "Calculator", "Microsoft Edge"): letters, digits, spaces and . _ + & \' ( ) # , ! @ - . ' +
+    'To open a file or run a program by its path use open_file — window {"action":"open_file","path":"…"}; ' +
+    'for a URI or protocol handler (ms-settings:, mailto:, file:) use open_uri — system {"action":"open_uri","uri":"…"}; for a web address open_url.';
+}

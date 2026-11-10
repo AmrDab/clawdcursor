@@ -291,8 +291,9 @@ export class WaylandBackend {
       } else if (key.length === 1) {
         args.push(key);
       } else {
-        // Unknown key — best-effort type the text.
-        args.push(key);
+        // An unknown key name is an error, as on X11, Windows and macOS — never typed as text: with Super held (in
+        // this chord, or by an earlier key_down) "ll" is Super+L twice, past the hard key list, which knows no key "ll".
+        throw new Error(`Unknown key: "${key}"`);
       }
       await execFileAsync('wtype', args, { timeout: TIMEOUT_MS }).catch(() => {});
       return;
@@ -307,9 +308,10 @@ export class WaylandBackend {
         await execFileAsync('ydotool', ['key', [...mods, name].join('+')], { timeout: TIMEOUT_MS });
         return;
       }
-      // No 0.1.x name for it (e.g. "space" would be read as "s") — type it bare.
+      // "space" has no 0.1.x name ("space" would be read as "s") — type it bare. Any other unknown name is an error.
+      if (key.toLowerCase() !== 'space') throw new Error(`Unknown key: "${key}"`);
       if (mods.length === 0) {
-        const text = key.toLowerCase() === 'space' ? ' ' : key;
+        const text = ' ';
         await execFileAsync('ydotool', ['type', '--', text], { timeout: TIMEOUT_MS });
         return;
       }
@@ -324,6 +326,10 @@ export class WaylandBackend {
     }
     const mainName = parts[parts.length - 1];
     const mainCode = this.keyToCode(mainName);
+    // An unknown key name is an error, as on X11, Windows and macOS, and before any modifier goes down. Typed as text
+    // with Super held (in this chord, or by an earlier key_down), "ll" is Super+L twice — past the hard key list, which
+    // knows no key called "ll". Only a single character with no key code is typed, and only on its own.
+    if (mainCode === null && (parts.length > 1 || [...mainName].length !== 1)) throw new Error(`Unknown key: "${mainName}"`);
 
     try {
       // Press modifiers
@@ -350,17 +356,27 @@ export class WaylandBackend {
   async keyDown(key: string): Promise<void> {
     if (this.kind !== 'ydotool') return;
     if (this.generation === 'legacy') throw legacyUnsupported('holding a key');
-    const code = this.keyToCode(key.toLowerCase());
-    if (code === null) return;
+    const code = this.oneKeyCode(key);
     await execFileAsync('ydotool', ['key', `${code}:1`], { timeout: TIMEOUT_MS });
   }
 
   async keyUp(key: string): Promise<void> {
     if (this.kind !== 'ydotool') return;
     if (this.generation === 'legacy') throw legacyUnsupported('releasing a key');
-    const code = this.keyToCode(key.toLowerCase());
-    if (code === null) return;
+    const code = this.oneKeyCode(key);
     await execFileAsync('ydotool', ['key', `${code}:0`], { timeout: TIMEOUT_MS });
+  }
+
+  /**
+   * key_down / key_up take ONE known key. A chord or an unknown name throws instead of doing nothing: the caller (the
+   * held-key record in pointer-guard.ts) must never believe a key was held or released when it was not.
+   */
+  private oneKeyCode(key: string): number {
+    const name = String(key ?? '').trim().toLowerCase();
+    if (name.includes('+') && name !== '+') throw new Error(`key_down / key_up take one key, not a chord: "${key}"`);
+    const code = name ? this.keyToCode(name) : null;
+    if (code === null) throw new Error(`Unknown key: "${key}"`);
+    return code;
   }
 
   async typeText(text: string): Promise<void> {

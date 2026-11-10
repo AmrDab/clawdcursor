@@ -14,6 +14,7 @@
  */
 
 import { beforePointerPress, isOwnUiPid } from './pointer-guard';
+import { resolveInstalledWindowsApp } from './win-app-resolve';
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import sharp from 'sharp';
@@ -1291,6 +1292,8 @@ export class WindowsAdapter implements PlatformAdapter {
       searchTerm?: string;
       /** Skip the Start-Menu search fallback; return {} if no window surfaces. */
       noStartMenuFallback?: boolean;
+      /** An agent-typed name: start only an installed app (PlatformAdapter.launchApp). */
+      nameOnly?: boolean;
     },
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
     // Reject control chars / backticks / $() that can escape PowerShell quoting
@@ -1323,6 +1326,24 @@ export class WindowsAdapter implements PlatformAdapter {
         await this.focusWindow({ processId: existing.processId }).catch(() => {});
         return { pid: existing.processId, title: existing.title, handle: existing.handle };
       }
+    }
+
+    // Name-only launch (an agent-typed name outside the alias table): resolve it to an installed app first, read-only
+    // (win-app-resolve.ts), and start exactly that. The raw name never reaches Start-Process, where the shell would read
+    // `scheme:` as a URI, and is never typed into the Start menu, whose best match can be a file.
+    if (opts?.nameOnly) {
+      const app = await resolveInstalledWindowsApp(name);
+      if (!app) return {};
+      try {
+        const child = app.path
+          ? spawn(powershellExe(), ['-NoProfile', '-Command', 'Start-Process -FilePath $env:CLAWD_PS_FILE -WorkingDirectory $env:USERPROFILE'],
+              psOpts({ stdio: 'ignore' as const, detached: true, windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: app.path } }))
+          : spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${app.appId}`], { stdio: 'ignore', detached: true, windowsHide: true, cwd: os.homedir() });
+        child.unref();
+      } catch {
+        // Fall through to the lookup — the app may already be running.
+      }
+      return this.foregroundLaunched(await this.findLaunchedWindow(app.name ?? name, windowsBefore, 8_000));
     }
 
     // Route 1: UWP apps via explorer shell:AppsFolder\<id>. This is the Windows-
@@ -1416,8 +1437,7 @@ export class WindowsAdapter implements PlatformAdapter {
    * app the user can find by name in the Start Menu (apps, settings panes,
    * UWP without a known AppsFolder ID, third-party Win32 binaries with an
    * App Paths entry). The keyboard primitives we use here go through the
-   * adapter directly, NOT through the safety layer — this is internal
-   * platform logic, not an agent action.
+   * adapter directly — this is internal platform logic, not an agent action.
    *
    * Tuned to the same cadence as the router's startMenuSearch helper.
    */
