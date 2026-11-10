@@ -443,7 +443,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         });
         return {
           success: res.success,
-          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `Could not expand ${quoteScreenText(name)}.`,
+          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `Could not expand ${quoteScreenText(name)}${failReason(res)}.`,
           targetLabel: name,
         };
       },
@@ -473,7 +473,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         });
         return {
           success: res.success,
-          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `Could not collapse ${quoteScreenText(name)}.`,
+          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `Could not collapse ${quoteScreenText(name)}${failReason(res)}.`,
           targetLabel: name,
         };
       },

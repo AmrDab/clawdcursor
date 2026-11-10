@@ -1,6 +1,7 @@
 // AXFixture — a throwaway AppKit app with KNOWN accessibility data, for
 // mac-ax-live.test.ts. It never takes focus (accessory policy — except the zoomed / minimized modes) and quits by
-// itself after 3 minutes if a test run dies.
+// itself after 15 minutes if a test run dies (it was 3: a full run of the live file takes about 4, because the tests that start an
+// ordinary app wait for an idle machine, and every test after the 3rd minute failed with a fixture that had already quit).
 //
 //   window "Fixture A"  big, behind
 //   window "Fixture B"  small, in front, the app's main window
@@ -21,6 +22,12 @@
 // AXFIXTURE_SYSTEMDIALOG=1: the "Open modal" alert gets the AXSystemDialog subrole - what a permission prompt or an
 // authorization sheet looks like to the accessibility API - instead of the ordinary AXDialog of an app's own alert.
 //
+// AXFIXTURE_MODE=web instead opens one window "Fixture Web": a WKWebView holding a <details><summary>More options</summary>PINEAPPLE</details>
+// and a <select> labelled "Favorite color" (Red / Green / Blue), plus an AppKit pop-up "nativePopup" (Alpha / Beta / Gamma). WebKit's
+// <summary> lists no AXPress and its AXExpanded cannot be set; its <select> shows a page context menu for AXShowMenu - the cases
+// expand / collapse used to report as done. The page also holds an always-visible role="menu" navigation (a menu that is NOT the
+// select's list) and a <button aria-haspopup="listbox"> whose list is a plain AXList, not an AXMenu. An ordinary (not accessory) app: it takes the keyboard focus, so the tests wait for an idle machine.
+//
 // AXFIXTURE_MODE=sidebar instead opens one window "Fixture Sidebar": a list whose rows hold labels that accept AXPress and ignore it
 // (a SwiftUI sidebar), and a "status" label that says which row got selected.
 // AXFIXTURE_MODE=slow instead opens one window "Fixture Slow" with a "Save As…" button, a
@@ -29,6 +36,7 @@
 //
 // Prints "READY <pid>" on stdout once the windows are on screen.
 import AppKit
+import WebKit
 
 let fixtureMode = ProcessInfo.processInfo.environment["AXFIXTURE_MODE"] ?? "normal"
 
@@ -75,7 +83,7 @@ final class SidebarSource: NSObject, NSTableViewDataSource, NSTableViewDelegate 
     }
 }
 
-final class Delegate: NSObject, NSApplicationDelegate {
+final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
     var status: NSTextField!
     let sidebar = SidebarSource()
 
@@ -111,6 +119,24 @@ final class Delegate: NSObject, NSApplicationDelegate {
         return w
     }
 
+    static let webPage = """
+        <!doctype html><html><body style="font: 16px -apple-system, sans-serif">
+        <nav role="menu" aria-label="Site navigation"><a role="menuitem" href="#home">Home</a> <a role="menuitem" href="#docs">Docs</a></nav>
+        <details id="more"><summary>More options</summary><p id="secret">PINEAPPLE</p></details>
+        <p><label for="color">Favorite color</label> <select id="color"><option>Red</option><option>Green</option><option>Blue</option></select></p>
+        <p><button id="lb" aria-haspopup="listbox" aria-expanded="false" onclick="var b=this,l=document.getElementById('lbl'),o=b.getAttribute('aria-expanded')==='true';b.setAttribute('aria-expanded',String(!o));l.hidden=o" onkeydown="if(event.key==='Escape'){this.setAttribute('aria-expanded','false');document.getElementById('lbl').hidden=true}">Pick one</button></p>
+        <ul id="lbl" role="listbox" hidden><li role="option">One</li><li role="option">Two</li></ul>
+        <p><button id="plain" onclick="document.getElementById('out').textContent='Plain was pressed'">Plain button</button></p>
+        <p id="out"></p>
+        </body></html>
+        """
+
+    /// Web mode is ready when the page has loaded (its accessibility tree is built on demand, a moment later).
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        print("READY \(ProcessInfo.processInfo.processIdentifier)")
+        fflush(stdout)
+    }
+
     func applicationDidFinishLaunching(_ note: Notification) {
         let slow = fixtureMode == "slow"
         let sidebarMode = fixtureMode == "sidebar"
@@ -122,6 +148,27 @@ final class Delegate: NSObject, NSApplicationDelegate {
             return v
         }
 
+        if fixtureMode == "web" {
+            let w = window("Fixture Web", NSRect(x: 160, y: 200, width: 520, height: 540))
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 540))
+            let web = WKWebView(frame: NSRect(x: 0, y: 130, width: 520, height: 410))
+            web.navigationDelegate = self
+            web.loadHTMLString(Delegate.webPage, baseURL: nil)
+            box.addSubview(web)
+            let popup = NSPopUpButton(frame: NSRect(x: 20, y: 80, width: 160, height: 28), pullsDown: false)
+            popup.addItems(withTitles: ["Alpha", "Beta", "Gamma"])
+            popup.setAccessibilityIdentifier("nativePopup")
+            box.addSubview(popup)
+            status = NSTextField(labelWithString: "idle")
+            status.frame = NSRect(x: 20, y: 30, width: 300, height: 28)
+            status.setAccessibilityIdentifier("status")
+            box.addSubview(status)
+            w.contentView = box
+            w.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 900) { NSApp.terminate(nil) }
+            return    // READY is printed once the page has loaded
+        }
         if sidebarMode {
             let w = window("Fixture Sidebar", NSRect(x: 160, y: 260, width: 440, height: 340))
             let table = NSTableView(frame: NSRect(x: 0, y: 0, width: 180, height: 150))
@@ -177,14 +224,14 @@ final class Delegate: NSObject, NSApplicationDelegate {
         }
         print("READY \(ProcessInfo.processInfo.processIdentifier)")
         fflush(stdout)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 180) { NSApp.terminate(nil) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 900) { NSApp.terminate(nil) }
     }
 }
 
 let app = NSApplication.shared
 // zoomed / minimized are driven through System Events (scripts/mac/focus-window.jxa), which only sees ordinary apps —
 // and an ordinary app takes the keyboard focus when it starts. The tests that use them wait for an idle machine.
-app.setActivationPolicy(fixtureMode == "zoomed" || fixtureMode == "minimized" ? .regular : .accessory)
+app.setActivationPolicy(fixtureMode == "zoomed" || fixtureMode == "minimized" || fixtureMode == "web" ? .regular : .accessory)
 let delegate = Delegate()
 app.delegate = delegate
 app.run()

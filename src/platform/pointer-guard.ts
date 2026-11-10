@@ -63,6 +63,21 @@ export function unguarded<R>(fn: () => R): R {
   return inInput.run('user', fn);
 }
 
+/**
+ * Run `send` as ONE guarded input: the checks a direct keyPress gets (stop, clawdcursor's own control, the window the agent works
+ * in). For an accessibility action that has to finish with a key - a web <summary> opens on Return - which runs inside an
+ * already guarded invokeElement, whose nested calls are not checked again (below). Passes straight through where no guard is set.
+ */
+export async function guardedInput<R>(method: string, args: unknown[], send: () => Promise<R>): Promise<R> {
+  const g = inputGuard;
+  if (!g || inInput.getStore() === 'user') return send();
+  await g.before();
+  announce(method);
+  const r = await send();
+  g.done(movesFocus(method, args));
+  return r;
+}
+
 /** Synthetic keyboard and mouse input: refused while stopped, and when the agent's window is no longer in front. */
 const INPUT_METHODS = [
   'mouseClick', 'mouseDoubleClick', 'mouseRightClick', 'mouseDrag', 'mouseScroll', 'mouseDown',

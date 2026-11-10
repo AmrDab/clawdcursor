@@ -105,4 +105,106 @@ describe('selectOption', () => {
     expect(r).toMatchObject({ success: true, verified: false });
     expect(r.text).toMatch(/unverified/);
   });
+
+  describe('a pick that is applied a moment after the press returns (WebKit pop-up: the menu is still closing)', () => {
+    /** A dropdown whose value changes only on the Nth read after the pick (0 = never). */
+    function lateControl(applyOnRead: number) {
+      let current = 'Free';
+      let pending: string | null = null;
+      let readsSincePick = 0;
+      const calls: string[] = [];
+      return {
+        calls,
+        invokeElement: vi.fn(async (q: { name?: string; action?: string }) => {
+          calls.push(String(q.action));
+          if (q.action === 'get-value') {
+            if (pending && applyOnRead > 0 && ++readsSincePick >= applyOnRead) { current = pending; pending = null; }
+            return { success: true, data: { value: current } };
+          }
+          if (q.action === 'expand' || q.action === 'collapse') return { success: true };
+          if ((q.action === 'select' || q.action === 'click') && ['Free', 'Pro'].includes(q.name ?? '')) { pending = q.name!; readsSincePick = 0; return { success: true }; }
+          return { success: false };
+        }),
+        findElements: vi.fn(async (q: { name?: string }) =>
+          ['Free', 'Pro', 'Plan'].filter(n => n.toLowerCase().includes(String(q.name).toLowerCase()))
+            .map(n => ({ name: n, controlType: n === 'Plan' ? 'PopUpButton' : 'MenuItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }))),
+      };
+    }
+
+    it('is re-read until it shows the new value - not reported as "Tried to select ... but it now shows"', async () => {
+      const p = lateControl(5);                     // the value shows up on the 5th read after the pick
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' }, { settleMs: 3000 });
+      expect(r).toMatchObject({ success: true, verified: true });
+      expect(r.text).toMatch(/Selected \(read back ✓\) "Pro" in "Plan"\./);
+    });
+
+    it('a control that never shows it is still a failure, once the wait is over', async () => {
+      const p = lateControl(0);
+      const t0 = Date.now();
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' }, { settleMs: 400 });
+      expect(r.success).toBe(false);
+      expect(r.text).toMatch(/Tried to select "Pro" in "Plan", but it now shows "Free"/);
+      expect(Date.now() - t0).toBeLessThan(4000);
+    });
+
+    it('settleMs: 0 reads once, as before', async () => {
+      const p = lateControl(5);
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' }, { settleMs: 0 });
+      expect(r.success).toBe(false);
+    });
+  });
+});
+
+describe('an expand that pressed the control but could not see a list open (review of #335)', () => {
+  /** A dropdown whose expand answers `expand`; nothing it offers matches the value asked for. */
+  function platformWhere(expand: { success: boolean; data?: Record<string, unknown> }) {
+    const calls: string[] = [];
+    return {
+      calls,
+      invokeElement: vi.fn(async (q: { action?: string }) => {
+        calls.push(String(q.action));
+        if (q.action === 'get-value') return { success: true, data: { value: 'Red' } };
+        if (q.action === 'expand') return expand;
+        return { success: true };
+      }),
+      findElements: vi.fn(async (q: { name?: string }) =>
+        q.name === 'Favorite color' ? [{ name: 'Favorite color', controlType: 'PopUpButton', bounds: { x: 0, y: 0, width: 1, height: 1 } }] : []),
+    };
+  }
+
+  it('closes whatever the press may have opened: a collapse follows when no option is found', async () => {
+    const p = platformWhere({ success: false, data: { acted: true } });
+    const r = await selectOption(p as any, { name: 'Favorite color', value: 'Green' }, { settleMs: 0 });
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/no option named exactly "Green"\. Nothing was changed\./);
+    expect(p.calls).toEqual(['get-value', 'expand', 'collapse']);
+  });
+
+  it('an expand that did nothing at all (no press was sent) leaves nothing to close', async () => {
+    const p = platformWhere({ success: false });
+    const r = await selectOption(p as any, { name: 'Favorite color', value: 'Green' }, { settleMs: 0 });
+    expect(r.success).toBe(false);
+    expect(p.calls).toEqual(['get-value', 'expand']);
+  });
+
+  it('a list the platform could not see but that is there is still used: the option is found and chosen', async () => {
+    let current = 'Red';
+    const calls: string[] = [];
+    const p = {
+      calls,
+      invokeElement: vi.fn(async (q: { name?: string; action?: string }) => {
+        calls.push(String(q.action));
+        if (q.action === 'get-value') return { success: true, data: { value: current } };
+        if (q.action === 'expand') return { success: false, data: { acted: true } };
+        if ((q.action === 'select' || q.action === 'click') && q.name === 'Green') { current = 'Green'; return { success: true }; }
+        return { success: true };
+      }),
+      findElements: vi.fn(async (q: { name?: string }) => q.name === 'Favorite color'
+        ? [{ name: 'Favorite color', controlType: 'PopUpButton', bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+        : q.name === 'Green' ? [{ name: 'Green', controlType: 'ListItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }] : []),
+    };
+    const r = await selectOption(p as any, { name: 'Favorite color', value: 'Green' }, { settleMs: 0 });
+    expect(r).toMatchObject({ success: true, verified: true });
+    expect(r.text).toBe('Selected (read back ✓) "Green" in "Favorite color".');
+  });
 });
