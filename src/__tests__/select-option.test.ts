@@ -154,3 +154,57 @@ describe('selectOption', () => {
     });
   });
 });
+
+describe('an expand that pressed the control but could not see a list open (review of #335)', () => {
+  /** A dropdown whose expand answers `expand`; nothing it offers matches the value asked for. */
+  function platformWhere(expand: { success: boolean; data?: Record<string, unknown> }) {
+    const calls: string[] = [];
+    return {
+      calls,
+      invokeElement: vi.fn(async (q: { action?: string }) => {
+        calls.push(String(q.action));
+        if (q.action === 'get-value') return { success: true, data: { value: 'Red' } };
+        if (q.action === 'expand') return expand;
+        return { success: true };
+      }),
+      findElements: vi.fn(async (q: { name?: string }) =>
+        q.name === 'Favorite color' ? [{ name: 'Favorite color', controlType: 'PopUpButton', bounds: { x: 0, y: 0, width: 1, height: 1 } }] : []),
+    };
+  }
+
+  it('closes whatever the press may have opened: a collapse follows when no option is found', async () => {
+    const p = platformWhere({ success: false, data: { acted: true } });
+    const r = await selectOption(p as any, { name: 'Favorite color', value: 'Green' }, { settleMs: 0 });
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/no option named exactly "Green"\. Nothing was changed\./);
+    expect(p.calls).toEqual(['get-value', 'expand', 'collapse']);
+  });
+
+  it('an expand that did nothing at all (no press was sent) leaves nothing to close', async () => {
+    const p = platformWhere({ success: false });
+    const r = await selectOption(p as any, { name: 'Favorite color', value: 'Green' }, { settleMs: 0 });
+    expect(r.success).toBe(false);
+    expect(p.calls).toEqual(['get-value', 'expand']);
+  });
+
+  it('a list the platform could not see but that is there is still used: the option is found and chosen', async () => {
+    let current = 'Red';
+    const calls: string[] = [];
+    const p = {
+      calls,
+      invokeElement: vi.fn(async (q: { name?: string; action?: string }) => {
+        calls.push(String(q.action));
+        if (q.action === 'get-value') return { success: true, data: { value: current } };
+        if (q.action === 'expand') return { success: false, data: { acted: true } };
+        if ((q.action === 'select' || q.action === 'click') && q.name === 'Green') { current = 'Green'; return { success: true }; }
+        return { success: true };
+      }),
+      findElements: vi.fn(async (q: { name?: string }) => q.name === 'Favorite color'
+        ? [{ name: 'Favorite color', controlType: 'PopUpButton', bounds: { x: 0, y: 0, width: 1, height: 1 } }]
+        : q.name === 'Green' ? [{ name: 'Green', controlType: 'ListItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }] : []),
+    };
+    const r = await selectOption(p as any, { name: 'Favorite color', value: 'Green' }, { settleMs: 0 });
+    expect(r).toMatchObject({ success: true, verified: true });
+    expect(r.text).toBe('Selected (read back ✓) "Green" in "Favorite color".');
+  });
+});

@@ -19,6 +19,7 @@ import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process'
 import { getPackageRoot } from '../paths';
 import { macAxBinary } from '../platform/mac-ocr-binary';
 import { runAppleScript, MacKeyboardGuard } from '../platform/mac-keyboard';
+import { selectOption } from '../platform/select-option';
 
 const isMac = process.platform === 'darwin';
 const fixturesEnabled = process.env.CLAWD_LIVE_MAC_TESTS === '1';
@@ -472,6 +473,13 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       return out;
     };
     const summary = async () => (await run(['find', '--pid', String(wPid), '--name', 'More options', '--role', 'AXDisclosureTriangle'])).elements[0];
+    /** Is a list holding all of these options showing? (The page's own navigation menu is always showing, so "any AXMenu" says nothing.) */
+    const listShowing = async (...options: string[]) => {
+      const all = await nodes();
+      return options.every(o => all.some(n => n.controlType === 'AXMenuItem' && n.name === o));
+    };
+    const navShowing = async () => (await nodes()).some(n => n.controlType === 'AXMenuItem' && n.name === 'Docs');
+    const SELECT = ['--name', 'Favorite color', '--role', 'AXPopUpButton'];
 
     beforeAll(async () => {
       if (!usable) return;
@@ -484,17 +492,26 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     }, 25 * 60_000);
     afterAll(() => { wProc?.kill('SIGKILL'); });
 
-    it('a <details> summary: its state is readable, and expand / collapse are read back (from the keyboard: it has no AXPress)', async (ctx) => {
+    it('a <details> summary opens from the keyboard - but only once the caller has allowed the key: without it, nothing is pressed or moved', async (ctx) => {
       if (!wPid) return ctx.skip();
       expect(await summary()).toMatchObject({ expandable: true, expanded: false });
-      const open = await inv('--name', 'More options', '--action', 'expand');
-      expect(open).toMatchObject({ ok: true, success: true, data: { state: 'expanded' } });
-      expect(open.method).not.toBe('AXShowMenu');
+      // 1st call: no key allowed. The helper says which key would finish it and does NOTHING (no focus change, no key).
+      const asks = await inv('--name', 'More options', '--action', 'expand');
+      expect(asks).toMatchObject({ ok: true, success: false, data: { needsKey: 'Return' } });
+      await wait(200);
+      expect(await summary()).toMatchObject({ expanded: false });
+      expect((await nodes()).some(n => n.value === 'PINEAPPLE')).toBe(false);
+      // 2nd call: the caller (macos.ts, after the input guard) allows Return. Focus + Return, to the app in front, read back.
+      const open = await inv('--name', 'More options', '--action', 'expand', '--allow-key', 'Return');
+      expect(open).toMatchObject({ ok: true, success: true, method: 'AXFocused+Return', data: { expandState: 'Expanded' } });
       await wait(300);
       expect((await nodes()).some(n => n.value === 'PINEAPPLE')).toBe(true);          // the hidden text can be read now
       expect(await summary()).toMatchObject({ expandable: true, expanded: true });
+      // already open: no key is needed, none is pressed
       expect(await inv('--name', 'More options', '--action', 'expand')).toMatchObject({ ok: true, success: true, method: 'unchanged' });
-      expect(await inv('--name', 'More options', '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { state: 'collapsed' } });
+      expect(await inv('--name', 'More options', '--action', 'collapse')).toMatchObject({ ok: true, success: false, data: { needsKey: 'Return' } });
+      expect(await summary()).toMatchObject({ expanded: true });
+      expect(await inv('--name', 'More options', '--action', 'collapse', '--allow-key', 'Return')).toMatchObject({ ok: true, success: true, data: { expandState: 'Collapsed' } });
       await wait(300);
       expect((await nodes()).some(n => n.value === 'PINEAPPLE')).toBe(false);
       expect(await summary()).toMatchObject({ expanded: false });
@@ -502,20 +519,69 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
 
     it('a <select>: expand presses it open and shows the options, collapse closes the list - the page\'s context menu never appears', async (ctx) => {
       if (!wPid) return ctx.skip();
-      const aim = ['--name', 'Favorite color', '--role', 'AXPopUpButton'];
-      const open = await inv(...aim, '--action', 'expand');
-      expect(open).toMatchObject({ ok: true, success: true, data: { state: 'expanded' } });
-      expect(open.method).toBe('AXPress');
-      let all = await nodes();
-      for (const option of ['Red', 'Green', 'Blue']) expect(all.some(n => n.controlType === 'AXMenuItem' && n.name === option)).toBe(true);
-      expect(all.some(n => n.name === 'Reload')).toBe(false);
-      expect(await inv(...aim, '--action', 'expand')).toMatchObject({ ok: true, success: true, method: 'unchanged' });   // already open
-      expect(await inv(...aim, '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { state: 'collapsed' } });
+      const open = await inv(...SELECT, '--action', 'expand');
+      expect(open).toMatchObject({ ok: true, success: true, method: 'AXPress', data: { expandState: 'Expanded' } });
+      await wait(200);
+      expect(await listShowing('Red', 'Green', 'Blue')).toBe(true);
+      expect((await nodes()).some(n => n.name === 'Reload')).toBe(false);
+      expect(await inv(...SELECT, '--action', 'expand')).toMatchObject({ ok: true, success: true, method: 'unchanged' });   // already open
+      expect(await inv(...SELECT, '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { expandState: 'Collapsed' } });
       await wait(300);
-      all = await nodes();
-      expect(all.some(n => n.controlType === 'AXMenu')).toBe(false);                  // nothing is left open
-      expect(await inv(...aim, '--action', 'get-value')).toMatchObject({ success: true, value: 'Red' });   // and nothing was chosen
-      expect(await inv(...aim, '--action', 'collapse')).toMatchObject({ ok: true, success: true, method: 'unchanged' });   // closed already
+      expect(await listShowing('Red', 'Green', 'Blue')).toBe(false);                  // nothing is left open
+      expect(await inv(...SELECT, '--action', 'get-value')).toMatchObject({ success: true, value: 'Red' });   // and nothing was chosen
+      expect(await inv(...SELECT, '--action', 'collapse')).toMatchObject({ ok: true, success: true, method: 'unchanged' });   // closed already
+    });
+
+    it('a menu that is not the select\'s list never stands in for it: the page\'s always-visible role="menu" navigation', async (ctx) => {
+      if (!wPid) return ctx.skip();
+      expect(await navShowing()).toBe(true);                                         // the navigation menu is on screen the whole time
+      // expand must PRESS the select (not report "unchanged" because some menu is showing) and its list must open
+      const open = await inv(...SELECT, '--action', 'expand');
+      expect(open).toMatchObject({ ok: true, success: true, method: 'AXPress' });
+      await wait(200);
+      expect(await listShowing('Red', 'Green', 'Blue')).toBe(true);
+      // collapse closes the select's list and leaves the navigation menu alone
+      expect(await inv(...SELECT, '--action', 'collapse')).toMatchObject({ ok: true, success: true });
+      await wait(300);
+      expect(await listShowing('Red', 'Green', 'Blue')).toBe(false);
+      expect(await navShowing()).toBe(true);
+      // and a collapse with the select closed is "unchanged": it does not cancel the navigation menu or send a key to anything
+      expect(await inv(...SELECT, '--action', 'collapse')).toMatchObject({ ok: true, success: true, method: 'unchanged' });
+      expect(await navShowing()).toBe(true);
+    });
+
+    it('another control\'s open list is not this one\'s: opening the select while an AppKit pop-up is open, and closing only the select', async (ctx) => {
+      if (!wPid) return ctx.skip();
+      expect(await inv('--id', 'nativePopup', '--action', 'expand')).toMatchObject({ ok: true, success: true });
+      await wait(200);
+      expect(await listShowing('Alpha', 'Beta', 'Gamma')).toBe(true);
+      try {
+        // (A real second list cannot open while the first one tracks the mouse, so the select is asked while the pop-up's list is up:
+        //  whatever it answers, it must not call the pop-up's list its own.)
+        const open = await inv(...SELECT, '--action', 'expand');
+        if (open.success) expect(await listShowing('Red', 'Green', 'Blue')).toBe(true);
+        else expect(open.error).toMatch(/did not open a list of options/);
+        // collapsing the select must not cancel the pop-up's list
+        const c = await inv(...SELECT, '--action', 'collapse');
+        expect(c.success).toBe(true);
+        if (c.method !== 'unchanged') await wait(300);
+        expect(await listShowing('Alpha', 'Beta', 'Gamma')).toBe(true);
+      } finally {
+        await inv('--id', 'nativePopup', '--action', 'collapse');
+        await inv(...SELECT, '--action', 'collapse');
+      }
+    });
+
+    it('a pop-up button whose list is not an AXMenu (aria-haspopup="listbox"): expand is confirmed by the control\'s own aria-expanded, collapse presses it closed', async (ctx) => {
+      if (!wPid) return ctx.skip();
+      const open = await inv('--name', 'Pick one', '--action', 'expand');
+      expect(open).toMatchObject({ ok: true, success: true, data: { expandState: 'Expanded' } });
+      await wait(300);
+      expect((await nodes()).some(n => n.name === 'Two' || n.value === 'Two')).toBe(true);
+      expect(await inv('--name', 'Pick one', '--action', 'expand')).toMatchObject({ ok: true, success: true, method: 'unchanged' });
+      expect(await inv('--name', 'Pick one', '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { expandState: 'Collapsed' } });
+      await wait(300);
+      expect((await nodes()).some(n => n.name === 'Two' || n.value === 'Two')).toBe(false);
     });
 
     it('a plain web button shows an AXExpanded (false) but is not a disclosure: expand never presses it', async (ctx) => {
@@ -530,14 +596,54 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
     it('an AppKit pop-up: expand shows its list, collapse takes it away', async (ctx) => {
       if (!wPid) return ctx.skip();
       const open = await inv('--id', 'nativePopup', '--action', 'expand');
-      expect(open).toMatchObject({ ok: true, success: true, data: { state: 'expanded' } });
-      let all = await nodes();
-      for (const option of ['Alpha', 'Beta', 'Gamma']) expect(all.some(n => n.controlType === 'AXMenuItem' && n.name === option)).toBe(true);
-      expect(await inv('--id', 'nativePopup', '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { state: 'collapsed' } });
+      expect(open).toMatchObject({ ok: true, success: true, data: { expandState: 'Expanded' } });
+      await wait(200);
+      expect(await listShowing('Alpha', 'Beta', 'Gamma')).toBe(true);
+      expect(await inv('--id', 'nativePopup', '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { expandState: 'Collapsed' } });
       await wait(300);
-      all = await nodes();
-      expect(all.some(n => n.controlType === 'AXMenu')).toBe(false);                  // a closed pop-up has no list
+      expect(await listShowing('Alpha', 'Beta', 'Gamma')).toBe(false);                // a closed pop-up has no list
       expect(await inv('--id', 'nativePopup', '--action', 'get-value')).toMatchObject({ success: true, value: 'Alpha' });   // nothing was chosen
+    });
+
+    describe('select, end to end (selectOption on top of the real helper)', () => {
+      const axRole = (r?: string) => (r ? (r.startsWith('AX') ? r : `AX${r}`) : undefined);
+      const platform = () => ({
+        invokeElement: async (q: any) => {
+          const args = ['--action', q.action];
+          if (q.name) args.push('--name', q.name);
+          if (q.controlType) args.push('--role', axRole(q.controlType)!);
+          if (q.value !== undefined) args.push('--value', q.value);
+          const r = await inv(...args);
+          return { success: r.success === true, data: r.data ?? (r.value !== undefined ? { value: r.value } : undefined), error: r.error };
+        },
+        findElements: async (q: any) => {
+          const r = await run(['find', '--pid', String(wPid), ...(q.name ? ['--name', q.name] : [])]);
+          return (r.elements ?? []).map((e: any) => ({ name: e.name, controlType: String(e.controlType).replace(/^AX/, ''), bounds: e.bounds }));
+        },
+      });
+
+      it('chooses an option, reads it back, and leaves no list open - with the page\'s navigation menu on screen', async (ctx) => {
+        if (!wPid) return ctx.skip();
+        const r = await selectOption(platform() as any, { name: 'Favorite color', value: 'Green', processId: wPid });
+        expect(r).toMatchObject({ success: true, verified: true });
+        expect(r.text).toBe('Selected (read back ✓) "Green" in "Favorite color".');
+        expect(await inv(...SELECT, '--action', 'get-value')).toMatchObject({ value: 'Green' });
+        expect(await listShowing('Red', 'Green', 'Blue')).toBe(false);
+        expect(await navShowing()).toBe(true);
+        // and back
+        expect((await selectOption(platform() as any, { name: 'Favorite color', value: 'Red', processId: wPid })).success).toBe(true);
+        expect(await inv(...SELECT, '--action', 'get-value')).toMatchObject({ value: 'Red' });
+      });
+
+      it('a value that is not an option fails honestly and leaves nothing open', async (ctx) => {
+        if (!wPid) return ctx.skip();
+        const r = await selectOption(platform() as any, { name: 'Favorite color', value: 'Purple', processId: wPid });
+        expect(r.success).toBe(false);
+        expect(r.text).toMatch(/no option named exactly "Purple"\. Nothing was changed\./);
+        await wait(300);
+        expect(await listShowing('Red', 'Green', 'Blue')).toBe(false);
+        expect(await inv(...SELECT, '--action', 'get-value')).toMatchObject({ value: 'Red' });
+      });
     });
   });
 

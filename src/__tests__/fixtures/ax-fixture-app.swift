@@ -25,7 +25,8 @@
 // AXFIXTURE_MODE=web instead opens one window "Fixture Web": a WKWebView holding a <details><summary>More options</summary>PINEAPPLE</details>
 // and a <select> labelled "Favorite color" (Red / Green / Blue), plus an AppKit pop-up "nativePopup" (Alpha / Beta / Gamma). WebKit's
 // <summary> lists no AXPress and its AXExpanded cannot be set; its <select> shows a page context menu for AXShowMenu - the cases
-// expand / collapse used to report as done. An ordinary (not accessory) app: it takes the keyboard focus, so the tests wait for an idle machine.
+// expand / collapse used to report as done. The page also holds an always-visible role="menu" navigation (a menu that is NOT the
+// select's list) and a <button aria-haspopup="listbox"> whose list is a plain AXList, not an AXMenu. An ordinary (not accessory) app: it takes the keyboard focus, so the tests wait for an idle machine.
 //
 // AXFIXTURE_MODE=sidebar instead opens one window "Fixture Sidebar": a list whose rows hold labels that accept AXPress and ignore it
 // (a SwiftUI sidebar), and a "status" label that says which row got selected.
@@ -120,8 +121,11 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
 
     static let webPage = """
         <!doctype html><html><body style="font: 16px -apple-system, sans-serif">
+        <nav role="menu" aria-label="Site navigation"><a role="menuitem" href="#home">Home</a> <a role="menuitem" href="#docs">Docs</a></nav>
         <details id="more"><summary>More options</summary><p id="secret">PINEAPPLE</p></details>
         <p><label for="color">Favorite color</label> <select id="color"><option>Red</option><option>Green</option><option>Blue</option></select></p>
+        <p><button id="lb" aria-haspopup="listbox" aria-expanded="false" onclick="var b=this,l=document.getElementById('lbl'),o=b.getAttribute('aria-expanded')==='true';b.setAttribute('aria-expanded',String(!o));l.hidden=o">Pick one</button></p>
+        <ul id="lbl" role="listbox" hidden><li role="option">One</li><li role="option">Two</li></ul>
         <p><button id="plain" onclick="document.getElementById('out').textContent='Plain was pressed'">Plain button</button></p>
         <p id="out"></p>
         </body></html>
@@ -145,9 +149,9 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         }
 
         if fixtureMode == "web" {
-            let w = window("Fixture Web", NSRect(x: 160, y: 260, width: 520, height: 420))
-            let box = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 420))
-            let web = WKWebView(frame: NSRect(x: 0, y: 130, width: 520, height: 290))
+            let w = window("Fixture Web", NSRect(x: 160, y: 200, width: 520, height: 540))
+            let box = NSView(frame: NSRect(x: 0, y: 0, width: 520, height: 540))
+            let web = WKWebView(frame: NSRect(x: 0, y: 130, width: 520, height: 410))
             web.navigationDelegate = self
             web.loadHTMLString(Delegate.webPage, baseURL: nil)
             box.addSubview(web)
