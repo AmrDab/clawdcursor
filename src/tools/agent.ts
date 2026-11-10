@@ -205,7 +205,7 @@ export function getAgentTools(): ToolDefinition[] {
               next: !pauseGate.current()
                 ? 'Another clawdcursor process has a pause on screen for the user. Wait until it has been answered, then ask again if you still need to.'
                 : pauseGate.isTaskPause()
-                ? 'The running task is paused for the user (its own prompt is on screen). Poll it with task {action:"status"}; ask again once it has been answered.'
+                ? 'The running task is paused for the user (its own prompt is on screen). Poll it with task {"action":"status"}; ask again once it has been answered.'
                 : 'Another pause is already on screen. Wait for it (re-call pause_for_user with ITS message), or have it answered first; then ask again if you still need to.',
             }),
           };

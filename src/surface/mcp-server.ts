@@ -26,6 +26,7 @@ import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
+import { enableHostAncestry } from '../core/ai-hosts';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { isStopped, STOPPED_TEXT } from '../core/control';
 import { logger } from '../core/observability/logger';
@@ -500,6 +501,7 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
     StdioServerTransport: new () => McpTransportLike;
   };
   const transport = new sdkStdio.StdioServerTransport();
+  enableHostAncestry();  // this server's host is the process it was started from (core/ai-hosts.ts)
   await server.connect(transport);
 }
 

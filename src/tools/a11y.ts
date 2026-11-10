@@ -118,6 +118,13 @@ async function cdpBrowserPid(ctx: ToolContext): Promise<number | null> {
   }
 }
 
+/** The browser-tools hint when `pid` is the browser clawdcursor is attached to over CDP, else ''. Useful on a read that is not thin. */
+async function cdpStepFor(ctx: ToolContext, pid: number | undefined): Promise<string> {
+  const cdpPid = await cdpBrowserPid(ctx);
+  if (pid === undefined || cdpPid === null || cdpPid !== pid) return '';
+  return nextStepFor(ctx, pid);
+}
+
 /** The blind hint for a thin read of `pid`: the browser tools when it is the CDP browser. */
 async function nextStepFor(ctx: ToolContext, pid: number | undefined): Promise<string> {
   if (pid === undefined) return SPARSE_NEXT_STEP;
@@ -235,7 +242,7 @@ export function getA11yTools(): ToolDefinition[] {
           const partial = (ctx.platform.lastTreeTruncated
             ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '')
             + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
-          const nextStep = isSparseTree(tree, isBrowser) ? await nextStepFor(ctx, active) : '';
+          const nextStep = isSparseTree(tree, isBrowser) ? await nextStepFor(ctx, active) : isBrowser ? await cdpStepFor(ctx, active) : '';
           baseText = [
             'WINDOWS',
             windows.length

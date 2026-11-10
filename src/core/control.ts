@@ -22,7 +22,7 @@ import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
 import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
 import { windowTextIncludes } from '../tools/window-text';
-import { isAiHostProcess } from './ai-hosts';
+import { isAiHostWindow } from './ai-hosts';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
 let dir: string | null = process.env.VITEST ? null : DATA_DIR;
@@ -82,15 +82,15 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 // ── The window the agent is working in ──
 
-interface Foreground { processId: number; processName: string; title?: string }
+interface Foreground { processId: number; processName: string; title?: string; guessed?: boolean }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
 let pending: (WindowQuery & { opened?: boolean }) | null = null;
 /** The window in front was brought up by the agent (window focus, open_app): it may be an AI-assistant app. */
 let leaseExplicit = false;
-/** The agent launched an app that reported neither pid nor title: the window that opens next is its doing. */
-let openedUnknown = false;
+/** The name of an app the agent launched that surfaced no window: only a window of that app is the agent's doing. */
+let openedName: string | null = null;
 /** When the agent's last focus-moving input or focus call ended. */
 let movedAt = 0;
 /**
@@ -101,12 +101,12 @@ const OWN_MOVE_MS = 5_000;
 /** How long the next input waits for a window the agent just focused to come to the front. */
 const FOCUS_ARRIVAL_MS = 1_000;
 
-function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedUnknown = false; }
+function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, title: w.title || undefined } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, title: w.title || undefined, guessed: w.guessed } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
@@ -152,15 +152,41 @@ async function before(): Promise<void> {
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
   }
-  explicit = explicit || openedUnknown || (leaseExplicit && lease?.processId === now.processId);
-  // An AI assistant's own window (the chat the agent runs in) takes no input the agent did not ask for: a model that typed
-  // before focusing anything sent its text there (eval 2026-11-08). Focusing or opening the app is asking.
-  if (isAiHostProcess(now.processName) && !explicit) {
-    throw new Error(`the window in front is ${now.processName}, an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}`);
-  }
-  openedUnknown = false;
+  explicit = explicit || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
+  await refuseAiHost(now, explicit);
+  openedName = null;
   leaseExplicit = explicit;
   lease = now;
+}
+
+const AI_HOST_REFUSAL = (n: string) =>
+  `the window in front is ${n}, an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}. ` +
+  "If this assistant's window IS your target, focus it with window focus and retry.";
+
+/**
+ * An AI assistant's own window (the chat the agent runs in) takes nothing the agent did not ask for: a model that typed before
+ * focusing anything sent its text there (eval 2026-11-08). Focusing or opening the app is asking. A foreground the adapter
+ * only guessed at (Linux without xdotool) is not evidence of anything, so it never blocks.
+ */
+async function refuseAiHost(now: Foreground, explicit: boolean): Promise<void> {
+  if (explicit || now.guessed) return;
+  if (await isAiHostWindow(now)) throw new Error(AI_HOST_REFUSAL(now.processName));
+}
+
+/** A launch that surfaced no window excuses a window of the app it started, by name, and nothing else. */
+const openedBy = (now: Foreground): boolean => !!openedName && lower(now.processName).includes(openedName);
+
+/**
+ * An act on an element by name (accessibility set_value / invoke / toggle / select) with no process given acts on the window
+ * in front: when that is an AI assistant the agent did not focus or open, it is the chat. A target in another process is
+ * the agent's own choice.
+ */
+async function byName(processId?: number): Promise<void> {
+  stopCheck();
+  const now = await readForeground().catch(() => null);
+  if (!now || (processId !== undefined && processId !== now.processId)) return;
+  const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
+  await refuseAiHost(now, explicit);
 }
 
 /** The app the agent's last input went to (the pill names it), or undefined before the first one. */
@@ -183,14 +209,14 @@ function focused(q: WindowQuery): void {
  * The agent launched an app: its next input binds to the launched window, matched by pid OR title — the window often
  * belongs to another process than the one started (a UWP host, a browser's existing instance, an Electron launcher), and
  * the adapters report the title of the window that came up. When a launch reports neither, the next input binds to
- * whatever opens.
+ * whatever opens; an AI-assistant window is excused only if it is the app that was launched (`appName`).
  */
-function launched(r?: { pid?: number; title?: string }): void {
+function launched(r?: { pid?: number; title?: string }, appName?: string): void {
   movedAt = Date.now();
   if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true }; return; }
   lease = undefined;
   pending = null;
-  openedUnknown = true;
+  openedName = appName ? lower(appName.trim()) || null : null;
 }
 
 /** A wait: the agent declares it does nothing, so a window that comes up during it is the user's, not the agent's (#294). */
@@ -198,4 +224,4 @@ function settle(): void {
   movedAt = 0;
 }
 
-setInputGuard({ stopCheck, before, done, focused, launched });
+setInputGuard({ stopCheck, before, done, focused, launched, byName });

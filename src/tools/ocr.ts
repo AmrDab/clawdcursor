@@ -113,8 +113,8 @@ export function getOcrTools(): ToolDefinition[] {
             ...(read === 'window' ? { window: windowTitle } : {}),
             // Screen coordinates are exact on every monitor; dividing by a scale
             // factor ignores the origin of a non-primary monitor.
-            toMouseClick: 'Click these coordinates as-is with space:"screen". Or better: smart_click("element text").',
-            hint: 'Coordinates are screen coordinates (any monitor, any OS). Prefer smart_click(target); otherwise pass the coordinates with space:"screen" — no conversion.',
+            toMouseClick: 'Click these coordinates as-is with space:"screen". Or better: smart_click {"target":"element text"}.',
+            hint: 'Coordinates are screen coordinates (any monitor, any OS). Prefer smart_click {"target":"<label>"}; otherwise pass the coordinates with space:"screen" — no conversion.',
           }, null, 2),
         };
       },

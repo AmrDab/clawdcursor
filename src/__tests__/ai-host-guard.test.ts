@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import { __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { AI_HOST_PROCESSES, isAiHostProcess } from '../core/ai-hosts';
+import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests } from '../core/ai-hosts';
 import { classifyResult } from '../core/result-codes';
 
 type Win = { processId: number; processName: string; title?: string };
@@ -136,5 +136,110 @@ describe('the AI-assistant list', () => {
     expect(m, 'ForegroundDenylistProcs not found in ps-bridge.ps1').not.toBeNull();
     const names = [...m![1].matchAll(/'([^']+)'/g)].map(x => x[1].toLowerCase());
     expect(names.sort()).toEqual([...AI_HOST_PROCESSES].sort());
+  });
+});
+
+/** An input layer with by-name acts and a launch that can surface nothing, as all three adapters answer when no window was confirmed. */
+function fakeLayer(opts: { launch?: { pid?: number; title?: string } } = {}) {
+  const sent: string[] = [];
+  const d = {
+    sent,
+    async typeText(text: string) { sent.push(`type ${text}`); },
+    async invokeElement(q: { name: string; action?: string; processId?: number }) { sent.push(`${q.action ?? 'click'} ${q.name}`); return { success: true }; },
+    async focusWindow(q: Win) { fg = q; return true; },
+    async openApp(_name: string) { return opts.launch ?? {}; },
+  };
+  return guardInputMethods(d);
+}
+
+describe('a launch that surfaced no window excuses nothing it did not start', () => {
+  it('open_app "Foo" that surfaces nothing, then type, with Claude in front: refused', async () => {
+    const d = fakeLayer();
+    await d.openApp('Foo');
+    await expect(d.typeText('hello')).rejects.toThrow(REFUSAL);
+    expect(d.sent).toEqual([]);
+  });
+
+  it('and not later either: the excuse is for the next input only', async () => {
+    const d = fakeLayer();
+    fg = NOTEPAD;
+    await d.openApp('Foo');
+    await d.typeText('a');
+    fg = CLAUDE;
+    await expect(d.typeText('b')).rejects.toThrow(/foreground changed|an AI assistant/);
+    expect(d.sent).toEqual(['type a']);
+  });
+
+  it('launching the assistant itself, surfacing nothing yet, is asking for it', async () => {
+    const d = fakeLayer();
+    await d.openApp('Claude');
+    await d.typeText('hi');
+    expect(d.sent).toEqual(['type hi']);
+  });
+});
+
+describe('by-name acts (accessibility invoke / set_value / toggle / select)', () => {
+  it('with no process given and Claude in front they are refused, and nothing is sent', async () => {
+    const d = fakeLayer();
+    for (const action of ['click', 'set-value', 'toggle', 'select']) {
+      await expect(d.invokeElement({ name: 'Message', action })).rejects.toThrow(REFUSAL);
+    }
+    await expect(d.invokeElement({ name: 'Message', processId: CLAUDE.processId })).rejects.toThrow(REFUSAL);
+    expect(d.sent).toEqual([]);
+  });
+
+  it('a target in another process, a read, an explicit focus, and a non-assistant in front are all fine', async () => {
+    const d = fakeLayer();
+    await d.invokeElement({ name: 'OK', processId: NOTEPAD.processId });
+    await d.invokeElement({ name: 'Message', action: 'get-value' });
+    await d.focusWindow(CLAUDE);
+    await d.invokeElement({ name: 'Message', action: 'set-value' });
+    fg = NOTEPAD;
+    await d.focusWindow(NOTEPAD);
+    await d.invokeElement({ name: 'Save' });
+    expect(d.sent).toEqual(['click OK', 'get-value Message', 'set-value Message', 'click Save']);
+  });
+});
+
+describe('the host of this session, found by process ancestry (stdio)', () => {
+  const TERMINAL: Win = { processId: 500, processName: 'WindowsTerminal' };
+  afterEach(() => __setHostAncestryForTests(null));
+
+  it('a window of a process this server was started from counts as an AI host, though no list names it', async () => {
+    __setHostAncestryForTests([500, 400]);
+    fg = TERMINAL;
+    const d = fakeLayer();
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is WindowsTerminal, an AI assistant — nothing was sent/);
+    await d.focusWindow(TERMINAL);
+    await d.typeText('x');
+    expect(d.sent).toEqual(['type x']);
+  });
+
+  it('without ancestry (the HTTP daemon) only the list applies', async () => {
+    fg = TERMINAL;
+    const d = fakeLayer();
+    await d.typeText('x');
+    expect(d.sent).toEqual(['type x']);
+  });
+});
+
+describe('a foreground the adapter only guessed at never blocks (Linux without xdotool)', () => {
+  it('Claude as the first listed window, marked guessed: input goes through', async () => {
+    __setForegroundReaderForTests(async () => ({ ...CLAUDE, guessed: true } as Win));
+    const d = fakeLayer();
+    await d.typeText('x');
+    expect(d.sent).toEqual(['type x']);
+  });
+});
+
+describe('the refusal and the list', () => {
+  it('tells an agent whose target IS the assistant how to get in', async () => {
+    const d = fakeLayer();
+    await expect(d.typeText('x')).rejects.toThrow(/If this assistant's window IS your target, focus it with window focus and retry\./);
+  });
+
+  it('VS Code Insiders is "Code - Insiders" on Windows and macOS', () => {
+    expect(isAiHostProcess('Code - Insiders.exe')).toBe(true);
+    expect(isAiHostProcess('Code - Insiders')).toBe(true);
   });
 });

@@ -381,4 +381,4 @@ export function hasDiscriminatingEvidence(
 /** What the `expect` parameter says in a tool's schema: short enough to read from the description alone, with one example. */
 export const EXPECT_DESCRIPTION =
   'Checks run after the action; a failed check returns DEVIATION. Example: [{"type":"window_title_contains","value":"Inbox"}]. ' +
-  'Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.';
+  'Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.';

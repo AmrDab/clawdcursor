@@ -96,7 +96,7 @@ describe('with the screen unlocked nothing changes', () => {
     expect(r.isError).toBe(true);
     expect(JSON.parse(r.text).error).toBe('no_clickable_target');
     // a raw JSON result skips the result line, so it carries its own next step
-    expect(JSON.parse(r.text).next).toBe('system {"action":"ocr"} lists the text on screen with positions; retry smart_click with the exact label. computer screenshot only if the target has no text.');
+    expect(JSON.parse(r.text).next).toBe('ocr_read_screen lists the text on screen with positions; retry smart_click with the exact label. desktop_screenshot only if the target has no text.');
     expect(state.ocrReads).toBeGreaterThan(0);
   });
 

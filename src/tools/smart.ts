@@ -34,9 +34,10 @@ function getOcr(): OcrEngine {
 // ── Known apps with empty accessibility trees ──
 // These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
 /** Spoken names of calculator keys (Windows names, macOS AX identifiers). */
-/** What to do after a smart_click that found no target: read the text on screen, retry with the exact label. */
+/** What to do after a smart_click that found no target: read the text on screen, retry with the exact label. In granular names;
+ *  the compact surface renames them (compact.ts renameJsonAdvice: a JSON result skips the result line and the prose rewrite). */
 export const SMART_MISS_NEXT =
-  'system {"action":"ocr"} lists the text on screen with positions; retry smart_click with the exact label. computer screenshot only if the target has no text.';
+  'ocr_read_screen lists the text on screen with positions; retry smart_click with the exact label. desktop_screenshot only if the target has no text.';
 
 const KEY_NAME_ALIASES: Record<string, string[]> = {
   '0': ['Zero'], '1': ['One'], '2': ['Two'], '3': ['Three'], '4': ['Four'],

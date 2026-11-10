@@ -997,7 +997,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -1060,7 +1060,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -1239,7 +1239,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -1374,7 +1374,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -2134,7 +2134,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {
@@ -2409,7 +2409,7 @@
           },
           "expect": {
             "type": "array",
-            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*.",
+            "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",
             "items": {
               "type": "object",
               "properties": {

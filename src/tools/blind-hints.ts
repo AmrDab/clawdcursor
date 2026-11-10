@@ -2,12 +2,11 @@
  * Shared wording for blind-first perception results, used by both tool
  * surfaces (System A registry tools and the projected agent-loop tools).
  */
-import { hasWebContent } from '../platform/a11y-wake';
 import type { UiElement } from '../platform/types';
 
 /** Act on a listed element by its name; its @x,y are SCREEN coordinates — clicked as image coords they land off-target on a
  *  scaled display, which made blind reads look unreliable. Surface-agnostic: no tool names to rewrite. */
-export const SCREEN_COORDS_NOTE = '(act on these by name: invoke name:"…". The @x,y are screen coordinates, only for an element that has no name: click with space:"screen")';
+export const SCREEN_COORDS_NOTE = '(act on these by name: invoke {"name":"…"}. The @x,y are screen coordinates, only for an element that has no name: click with space:"screen")';
 
 /** Next step when a blind read comes back thin (MCP agents), instead of a
  *  dead end that leaves screenshots as the only option. */
@@ -49,14 +48,33 @@ export function cdpBrowserNextStep(mode: 'dedicated' | 'attached'): string {
 /** A window with at least this many named elements is not "thin": a miss there is a wrong name, not a blind app. */
 const STRUCTURED_MIN = 5;
 
+/** Controls an agent acts on by name. */
+const ACTIONABLE = /^(?:Button|CheckBox|RadioButton|Edit|ComboBox|Hyperlink|MenuItem|ListItem|TabItem|Slider|SplitButton|TreeItem|Spinner|text field|push button|check box|radio button|combo box|link|menu item|list item|page tab)$/i;
+const named = (el: UiElement) => !!(el.name ?? '').trim();
+
+/** Named elements that lie inside a web area (Document). The browser's own find bar, side panel and toolbar are outside it. */
+function namedInsideDocuments(tree: ReadonlyArray<UiElement>): number {
+  const docs = tree.filter(el => el.controlType === 'Document' && el.bounds.width > 0 && el.bounds.height > 0);
+  return tree.filter(el => {
+    if (el.controlType === 'Document' || !named(el) || el.bounds.width <= 0 || el.bounds.height <= 0) return false;
+    const cx = el.bounds.x + el.bounds.width / 2;
+    const cy = el.bounds.y + el.bounds.height / 2;
+    return docs.some(d => cx >= d.bounds.x && cx <= d.bounds.x + d.bounds.width && cy >= d.bounds.y && cy <= d.bounds.y + d.bounds.height);
+  }).length;
+}
+
 /**
- * Is this read sparse enough to say "little or no accessibility structure"? Few named elements, or a browser with no page in
- * its tree (its own tab strip and toolbar are ~59 elements and say nothing about the page). A browser whose tree holds the
- * page is not sparse: the hint sent agents to OCR after every read of a page they could already read by name.
+ * Is this read sparse enough to say "little or no accessibility structure"? A browser: fewer than 5 named
+ * elements INSIDE its web area (its own tab strip and toolbar are ~59 elements and say nothing about the page). Any other
+ * window: fewer than that many named elements, unless it is small and mostly named with something to act on, such as a
+ * three-button dialog. A tree that holds the page is not sparse: the hint sent agents to OCR after every read of a page they
+ * could already read by name.
  */
 export function isSparseTree(tree: ReadonlyArray<UiElement>, isBrowser: boolean): boolean {
-  if (tree.filter(el => (el.name ?? '').trim()).length < STRUCTURED_MIN) return true;
-  return isBrowser && !hasWebContent(tree as UiElement[]);
+  if (isBrowser) return namedInsideDocuments(tree) < STRUCTURED_MIN;
+  const names = tree.filter(named);
+  if (names.length >= STRUCTURED_MIN) return false;
+  return !(names.length > 0 && names.length * 2 >= tree.length && names.some(el => ACTIONABLE.test(el.controlType ?? '')));
 }
 
 /** How alike two element names are, for "did you mean": shared words, containment, then a common prefix. 0 = unrelated. */

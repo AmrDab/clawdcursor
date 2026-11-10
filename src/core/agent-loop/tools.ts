@@ -201,7 +201,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         );
         const rest = ordered.length - (offset + page.length);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
-        const hint = (isSparseTree(tree, activeIsBrowser) ?`\n${nextStep}` : '') +
+        const hint = (isSparseTree(tree, activeIsBrowser) ? `\n${nextStep}` : '') +
           (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
@@ -271,7 +271,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
             }
             await sleep(150);
-            return { success: refRes.success, text: refRes.success ? `Invoked "${plan.name}" via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
+            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
@@ -334,7 +334,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked ${quoteScreenText(name)} (${used}) → value: "${(res.data as any).value}"`
-                : `Invoked ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
+                : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
             : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
           targetLabel: name,
@@ -2202,7 +2202,12 @@ async function boundsToClick(
 export function expandNote(data: Record<string, unknown> | undefined): string {
   const state = data?.expandState;
   if (typeof state !== 'string') return '';
-  return data?.expandChanged === false ? ` — still ${state.toLowerCase()} (the state did not change)` : ` — now ${state.toLowerCase()} (read back ✓)`;
+  return data?.expandChanged === false ? ` — still ${state.toLowerCase()} (the state did not change)` : ` — now ${state.toLowerCase()}`;
+}
+
+/** Did the bridge read the state back after an expand / collapse, and find it changed? The marker goes BEFORE the name (result-codes.ts). */
+export function expandReadBack(data: Record<string, unknown> | undefined): boolean {
+  return typeof data?.expandState === 'string' && data.expandChanged !== false;
 }
 
 /** After an invoke that was found but threw ("Invoke failed: ..."): it may have acted, and a disabled element ignores a click. No second click. */

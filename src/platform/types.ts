@@ -65,6 +65,8 @@ export interface WindowInfo {
   isMinimized: boolean;
   /** Platform-opaque handle for re-targeting. */
   handle?: number | string;
+  /** True when this is the adapter's best guess at the window in front (Linux without xdotool), not what the OS said. */
+  guessed?: boolean;
 }
 
 export interface UiElement {

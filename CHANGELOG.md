@@ -4,7 +4,23 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
+  Read lines say to act by name and keep `@x,y` for elements with no name; `smart_click` is explained where agents look
+  for it and its miss carries a next step; the sparse-tree hint, `SKILL.md` and `docs/llms.txt` use one SEE/ACT ladder in
+  one call notation (`accessibility {"action":"smart_click","target":"<label>"}`); `computer` comes last, with its
+  screenshot actions at the end of the enum; misses point at `smart_click` or `window list`; `[unverified]` appears only
+  on calls whose effect nothing checked, and a read-back that confirmed it is `[confirmed]`; `expect` is usable from its
+  description; every compound tool description is at most 1,024 characters.
+- **The "little or no accessibility structure" hint needs a sparse tree**, not just a browser window: a browser needs 5
+  named elements inside its page, any other window 5 named elements (a small dialog of named buttons is fine).
+
 ### Fixed
+- **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
+  (`invoke`, `set_value`, `toggle`, `select`) are refused when the window in front is Claude, ChatGPT, Codex, Cursor,
+  VS Code (and Insiders), Windsurf or Zed, or an app this server was started from (stdio), unless the agent focused or
+  opened it on purpose. A launch that surfaced no window excuses only a window of the app it started. A foreground the
+  adapter only guessed at (Linux without xdotool) never blocks.
 - **`find` and `invoke` stay in the window the agent works in.** With several windows of one process (Edge, Explorer,
   Office), Windows searched every window for `find` (so names from the user's other windows of that app reached the
   agent) and took the first window for `invoke`. Both now search one window: the foreground window when it belongs to the

@@ -48,9 +48,14 @@ const PAUSE = (msg: string): Record<Surface, string> => ({
 });
 const REREAD: Record<Surface, string> = { mcp: 'accessibility {"action":"compile_ui"}', agent: 'compile_ui {}' };
 
-/** `template` with NAME replaced by the name the caller gave in `a11y invoke "…" missed`, as a JSON string; undefined without one. */
+/**
+ * `template` with NAME replaced, as a JSON string, by the name to click: the closest name a find miss listed ("did you
+ * mean"), else the one the caller gave in `a11y invoke "…" missed`; undefined without either. A listed name is screen text,
+ * so it only ever goes into the call as a quoted JSON string.
+ */
 function smartClickFor(text: string, template: string): string | undefined {
-  const name = /\binvoke "([^"\n]{1,60})" missed/i.exec(text)?.[1];
+  const name = /Closest names:\n<untrusted-screen-content>\n\[[^\]\n]+\] "(.{1,60}?)"(?:\n|<|$)/.exec(text)?.[1]
+    ?? /\binvoke "([^"\n]{1,60})" missed/i.exec(text)?.[1];
   return name ? template.replace('NAME', JSON.stringify(name)) : undefined;
 }
 
@@ -143,7 +148,7 @@ const RULES: Rule[] = [
     hint: 'found, but the action failed', next: REREAD },
   // A window that is not there: list the windows, then focus one.
   { code: 'NOT_FOUND', outcome: 'failed',
-    test: /no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing|no window for that process|window not found/i,
+    test: /no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing|no window for that process|window not found|no window found for process|no matching window|failed to focus: no matching/i,
     hint: 'no such window; list the windows to see what is open',
     next: { mcp: 'window {"action":"list"}', agent: 'list_windows {}' } },
   // An invoke that found no element of that name: the label may be drawn (canvas, image, custom UI) rather than exposed, and
@@ -151,6 +156,14 @@ const RULES: Rule[] = [
   { code: 'NOT_FOUND', outcome: 'failed',
     test: /\binvoke\b[^\n]{0,80}missed — element not found/i,
     hint: 'no element has that name; the label may be drawn, not exposed',
+    next: {
+      mcp: t => smartClickFor(t, 'accessibility {"action":"smart_click","target":NAME}') ?? REREAD.mcp,
+      agent: t => smartClickFor(t, 'smart_click {"target":NAME}') ?? REREAD.agent,
+    } },
+  // A find that matched nothing but listed close names: the first of them is the likely target.
+  { code: 'NOT_FOUND', outcome: 'failed',
+    test: /no element named "" among the \d+ named elements in this window\. closest names/i,
+    hint: 'no element has that name; a close name is listed, the label may also be drawn, not exposed',
     next: {
       mcp: t => smartClickFor(t, 'accessibility {"action":"smart_click","target":NAME}') ?? REREAD.mcp,
       agent: t => smartClickFor(t, 'smart_click {"target":NAME}') ?? REREAD.agent,
@@ -187,10 +200,10 @@ export function isActingAction(compound: string, action: string | undefined): bo
  * noise a model learns to skip.
  */
 const UNVERIFIABLE: Record<string, ReadonlySet<string>> = {
-  computer: new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'type']),
+  computer: new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'type', 'key', 'key_press', 'drag', 'drag_path']),
   accessibility: new Set(['invoke', 'set_value', 'toggle', 'select', 'smart_click', 'smart_type']),
   window: new Set(['close', 'open_app', 'open_file', 'open_url']),
-  system: new Set(['open_uri', 'open_app', 'open_file', 'open_url']),
+  system: new Set(['open_uri', 'open_app', 'open_file', 'open_url', 'shortcuts_run', 'undo']),
   browser: new Set(['click', 'type', 'select_option']),
 };
 export function isUnverifiableAction(compound: string, action: string | undefined): boolean {
@@ -242,7 +255,7 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // quoted element name, which is screen text.
   if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
     || /^(?:Toggled|Selected) \(read back ✓\) "/.test(text)
-    || /^Invoked "[^"\n]*"(?: via a11y(?: \([^)\n]*\))?)? — now [a-z ]+ \(read back ✓\)\./.test(text)) {
+    || /^Invoked \(read back ✓\) "/.test(text)) {
     return { outcome: 'confirmed' };
   }
   // Nothing checked it. Only calls with an effect to check say so.

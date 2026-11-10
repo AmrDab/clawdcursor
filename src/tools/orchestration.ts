@@ -128,7 +128,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
             const runningFor = ((Date.now() - entry.startedAt) / 1000).toFixed(0);
             return {
               text: `delegate_to_agent: the agent is BUSY with a different task ("${entry.task.slice(0, 100)}", running ${runningFor}s). ` +
-                    `Poll agent_status (compact: task {action:"status"}), abort it first (abort_task / task {action:"abort"}), ` +
+                    `Poll agent_status (compact: task {"action":"status"}), abort it first (abort_task / task {"action":"abort"}), ` +
                     `or re-call with the SAME task text to keep waiting on it.`,
               isError: true,
             };
@@ -177,7 +177,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
               pausedFor: `${((Date.now() - pause.since) / 1000).toFixed(0)}s`,
               next: 'The agent is waiting for the user at the computer (on-screen prompt with Resume / End task). ' +
                 'Do NOT restart or abort the task. Re-call this tool with the SAME task text to keep waiting. ' +
-                'If the user tells you here that they are done, call task {action:"resume"}.',
+                'If the user tells you here that they are done, call task {"action":"resume"}.',
             }, null, 2),
           };
         }
@@ -192,7 +192,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
               stepsCompleted: st.stepsCompleted,
               stepsTotal: st.stepsTotal,
             },
-            next: 'Task continues in the background. Re-call this tool with the SAME task text to keep waiting (re-attaches — it will NOT restart the task). Or poll agent_status (compact: task {action:"status"}) / abort with abort_task (task {action:"abort"}).',
+            next: 'Task continues in the background. Re-call this tool with the SAME task text to keep waiting (re-attaches — it will NOT restart the task). Or poll agent_status (compact: task {"action":"status"}) / abort with abort_task (task {"action":"abort"}).',
           }, null, 2),
         };
       },
