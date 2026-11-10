@@ -35,7 +35,7 @@ const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
-import { classifyResult, renderResultLine, isJsonText, isActingAction } from '../core/result-codes';
+import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -113,11 +113,11 @@ export interface McpServerHandle {
  * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
  */
 /** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
-function isActingCall(toolName: string, action: string | undefined): boolean {
-  if (toolName in COMPOUND_ROUTE_INDEX) return isActingAction(toolName, action);
+function isActingCall(toolName: string, action: string | undefined, test: typeof isActingAction = isActingAction): boolean {
+  if (toolName in COMPOUND_ROUTE_INDEX) return test(toolName, action);
   for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
     const route = routes.find(r => r.delegate === toolName);
-    if (route) return isActingAction(compound, route.action);
+    if (route) return test(compound, route.action);
   }
   return false;
 }
@@ -165,13 +165,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'yourself. ' +
       (compact
         // Compact tools carry no per-tool cost prefix, so name the actions.
-        ? 'Perceive BLIND FIRST, in this order: (1) `accessibility read_tree` / `find` / ' +
-          '`compile_ui` — element names + screen positions, cheapest, start here; ' +
-          '(2) `system copy_all_text` for the exact text of a page or document, `system ocr` ' +
-          'when the tree is empty; (3) `computer screenshot` only as a last resort. ' +
-          'ACT BY NAME: `accessibility invoke` / `smart_click` / `set_value` / `select` — ' +
-          'coordinate clicks are the fallback. Accessibility positions are SCREEN ' +
-          'coordinates: click them with `computer click` + space:"screen". '
+        ? 'TO SEE: (1) accessibility read_tree lists the window\'s elements by name; ' +
+          '(2) system copy_all_text gives the exact text of a page; ' +
+          '(3) system ocr reads the screen when read_tree is empty. ' +
+          'TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; ' +
+          '(2) if the name is not found, accessibility smart_click with target = the visible label; ' +
+          '(3) only for a target with no name and no text: computer screenshot, then computer click with x,y from that image. '
         : 'To minimize tokens, follow the cost-class prefix on each tool — ' +
           '[act] < [inspect] < [perceive-text] < [perceive-image]. ' +
           'For perception always escalate in this order: ' +
@@ -211,8 +210,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const sessionLog = new SessionLog({ version: VERSION, surface: compact ? 'compact' : 'granular' });
   watchChildProcesses();  // each child process a call starts is one of its steps (steps.ts)
   const VISION_STREAK_HINT = (n: number) => compact
-    ? `[clawdcursor] ${n} screenshots in a row with no text read. Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
-    : `[clawdcursor] ${n} screenshots in a row with no text read. Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
+    ? `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
+    : `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
     .server?.getClientVersion?.();
 
@@ -322,7 +321,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const callAction = typeof params?.action === 'string' ? params.action : undefined;
         const withOutcome = (text: string, isError: boolean): string => {
           if (tool.name === 'batch' || isJsonText(text)) return text;
-          const c = classifyResult(text, isError, isActingCall(tool.name, callAction));
+          const c = classifyResult(text, isError, isActingCall(tool.name, callAction, isUnverifiableAction), 'mcp', isActingCall(tool.name, callAction));
           return c ? `${text}\n${renderResultLine(c)}` : text;
         };
         // Consent gate (non-fatal): until the user accepts one-time consent,
@@ -427,7 +426,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // 3 screenshots with no text/a11y read in between (and every 5th
         // after), say once what the cheaper, exact path is.
         const streak = sessionLog.visionOnlyStreak;
-        if (cls === 'vision' && !result.isError && streak >= 3 && (streak - 3) % 5 === 0) {
+        // The first screenshot of a session that has read nothing yet is the cheapest moment to say it.
+        const firstBlind = streak === 1 && sessionLog.summary.blind === 0;
+        if (cls === 'vision' && !result.isError && (firstBlind || (streak >= 3 && (streak - 3) % 5 === 0))) {
           result = { ...result, text: `${result.text}\n\n${VISION_STREAK_HINT(streak)}` };
         }
         const content: McpContentBlock[] = [];

@@ -68,8 +68,10 @@ describe('classifyResult — successes', () => {
 describe('surfaces and rendering', () => {
   it('next calls use the caller\'s own tool names', () => {
     const t = 'a11y invoke "X" missed — element not found';
-    expect(classifyResult(t, true, true, 'mcp')?.next).toMatch(/^accessibility \{"action":"compile_ui"\}/);
-    expect(classifyResult(t, true, true, 'agent')?.next).toMatch(/^compile_ui/);
+    expect(classifyResult(t, true, true, 'mcp')?.next).toMatch(/^accessibility \{"action":"smart_click"/);
+    expect(classifyResult(t, true, true, 'agent')?.next).toMatch(/^smart_click/);
+    const other = 'accessibility find: nothing matched';
+    expect(classifyResult(other, true, true, 'mcp')?.next).toMatch(/^accessibility \{"action":"compile_ui"\}/);
   });
 
   it('renders one bracketed line', () => {

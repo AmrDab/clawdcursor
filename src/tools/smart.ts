@@ -34,6 +34,10 @@ function getOcr(): OcrEngine {
 // ── Known apps with empty accessibility trees ──
 // These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
 /** Spoken names of calculator keys (Windows names, macOS AX identifiers). */
+/** What to do after a smart_click that found no target: read the text on screen, retry with the exact label. */
+export const SMART_MISS_NEXT =
+  'system {"action":"ocr"} lists the text on screen with positions; retry smart_click with the exact label. computer screenshot only if the target has no text.';
+
 const KEY_NAME_ALIASES: Record<string, string[]> = {
   '0': ['Zero'], '1': ['One'], '2': ['Two'], '3': ['Three'], '4': ['Four'],
   '5': ['Five'], '6': ['Six'], '7': ['Seven'], '8': ['Eight'], '9': ['Nine'],
@@ -296,6 +300,8 @@ export function getSmartTools(): ToolDefinition[] {
             candidates,
             tried: attempted,
             elapsedMs: Date.now() - startedAt,
+            // A raw JSON result skips the result line, so the next step is a field of its own.
+            next: SMART_MISS_NEXT,
           };
           return { text: JSON.stringify(payload), isError: true };
         };

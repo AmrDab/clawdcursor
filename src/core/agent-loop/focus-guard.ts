@@ -11,6 +11,7 @@
  * target is already foreground — working single-window flows pay nothing.
  */
 import type { AgentToolContext } from './types';
+import { isAiHostProcess } from '../ai-hosts';
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -20,22 +21,6 @@ export function sameProcess(a?: string, b?: string): boolean {
   if (!a || !b) return false;
   const norm = (s: string) => (s.replace(/\\/g, '/').split('/').pop() ?? s).replace(/\.exe$/i, '').toLowerCase();
   return norm(a) === norm(b);
-}
-
-/** AI-host processes we must never RAISE on the agent's behalf. activeApp can
- *  legitimately be the host (the turn-1 snapshot is taken while the launching
- *  editor/chat app is still frontmost); raising it would hand desktop focus to
- *  the controller right before a click — the exact hijack the Windows bridge
- *  denylists in Cmd-ActivateAtPoint, but on macOS/Linux nothing else guards.
- *  Mirrors the bridge's list; extend via CLAWD_FOREGROUND_DENYLIST. Applies to
- *  the activeApp FALLBACK only — an explicit anchor stays authoritative. */
-const HOST_PROC_DENYLIST = new Set(['claude', 'cursor', 'code', 'windsurf']);
-function isHostProcess(name: string): boolean {
-  const norm = (name.replace(/\\/g, '/').split('/').pop() ?? name).replace(/\.exe$/i, '').toLowerCase();
-  if (HOST_PROC_DENYLIST.has(norm)) return true;
-  const extra = process.env.CLAWD_FOREGROUND_DENYLIST;
-  if (extra && extra.split(',').some(e => e.trim().toLowerCase() === norm)) return true;
-  return false;
 }
 
 /**
@@ -55,7 +40,8 @@ export async function ensureTargetForeground(
   // target), which point-based activate-at-point then foregrounds. Raising the
   // working app first puts it topmost so the click lands where the agent reasoned.
   const anchored = ctx.targetWindow?.processName;
-  const fallback = ctx.activeApp && !isHostProcess(ctx.activeApp) ? ctx.activeApp : undefined;
+  // Never raise an AI-assistant host (core/ai-hosts.ts) as the fallback: that would hand desktop focus to the controller.
+  const fallback = ctx.activeApp && !isAiHostProcess(ctx.activeApp) ? ctx.activeApp : undefined;
   const targetProc = anchored ?? fallback;
   if (!targetProc) return '';
   if (foreground && sameProcess(foreground.processName, targetProc)) return '';

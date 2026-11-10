@@ -8,13 +8,19 @@
 How it works: clawdcursor compiles the screen into one fused, confidence-scored UI
 map (accessibility tree + OCR) with stable element ids, and acts on elements by
 name/id in the cheap tiers — dropping to screenshot/vision (which DOES use live
-pixel coords off the current frame) only as a last resort for canvas-only or
-custom-drawn UIs. It verifies each consequential action (reports a DEVIATION instead of a hollow
+pixel coords off the current frame) only as a last resort, for a target with no
+name and no visible text. It verifies each consequential action (reports a DEVIATION instead of a hollow
 "success"), and routes every call through a single safety gate (allow / confirm /
 block). This is the fallback/last-mile layer: prefer a native API, a CLI, direct
 file edits, or existing browser automation when those exist; reach for clawdcursor
 when the only remaining surface is a GUI (a legacy app, a canvas, an app with no
 public API).
+
+## One ladder
+
+SEE: `accessibility {"action":"read_tree"}` → `system {"action":"copy_all_text"}` → `system {"action":"ocr"}`.
+ACT: `accessibility {"action":"invoke","name":"Send"}` or `set_value` → `accessibility {"action":"smart_click","target":"<label>"}` → `computer {"action":"screenshot"}`, then `computer {"action":"click","x":…,"y":…}`.
+Take the next rung only when the one before found nothing. `smart_click` finds a visible label by OCR and clicks it, with no screenshot; a screenshot and a coordinate click are for a target with no name and no visible text.
 
 ## Install
 
@@ -91,11 +97,11 @@ Deprecated (removed in 1.6): use the compound tools below from your own agent; `
 
 ## Tool surface (compact — recommended, ~7,000 tokens of catalog vs ~20,000 granular)
 
-- computer — mouse, keyboard, screenshot (raw I/O)
 - accessibility — drive UI by element name; compile a fused el_NN UI map and act on {element_id, snapshot_id} (survives layout shifts)
-- window — launch, focus, resize apps
 - system — clipboard, OCR, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
+- window — launch, focus, resize apps
 - browser — Chrome DevTools Protocol for Electron / WebView2 apps
+- computer — raw keyboard and mouse (type, keys, scroll, drag); click x,y and screenshot are the last resort
 - task — deprecated (removed in 1.6); drive the compounds above yourself
 - batch — run a guarded, safety-gated sequence of the above in one call
 
@@ -112,7 +118,9 @@ driving and what it is doing ("Typing in Edge") — its Stop button (or a double
 across restarts: every call returns "stopped by the user" until the user's Resume on a
 `system pause_for_user` prompt gives control back. Never lift a stop any other way. Input is
 refused ("foreground changed") when a window other than the one the agent was working
-in is in front; `window focus` binds it to a window on purpose.
+in is in front; `window focus` binds it to a window on purpose. Input is also refused when
+the window in front is an AI assistant (Claude, ChatGPT, Codex, Cursor, VS Code, Windsurf, Zed)
+that the agent did not focus or open on purpose, so text meant for an app never lands in a chat.
 At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
 glow turns blue, the prompt says what to do, and the task continues when the
 user clicks Resume. Outside agents use

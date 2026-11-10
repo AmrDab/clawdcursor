@@ -382,3 +382,34 @@ describe('--no-vision: no screenshot reaches the MCP client\'s model', () => {
     });
   });
 });
+
+describe('the first screenshot of a session that read nothing is nudged to blind reads (steering 1.5.28)', () => {
+  beforeEach(() => {
+    capturedHandlers.clear();
+    vi.clearAllMocks();
+    mockClientCaps.mockReturnValue(undefined);
+    mockHasConsent.mockReturnValue(true);
+    mockSafety.mockReturnValue(undefined);
+  });
+  const text = (r: McpToolResult) => r.content.filter(c => c.type === 'text').map(c => (c as { text: string }).text).join('\n');
+  const shotCtx = () => ({
+    ...fakeCtx(),
+    desktop: { captureForLLM: async () => ({ buffer: Buffer.from('x'), llmWidth: 4, llmHeight: 4, width: 4, height: 4, scaleFactor: 1 }) } as any,
+    platform: { listWindows: vi.fn(async () => []), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as any,
+  });
+
+  it('a screenshot before any text was read says what is cheaper and exact; it points at smart_click for a labelled target', async () => {
+    await createMcpServer({ ctx: shotCtx(), compact: true });
+    const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
+    expect(text(r)).toMatch(/A screenshot before any text was read\. Cheaper and exact:/);
+    expect(text(r)).toMatch(/If the target has a visible label, click it with accessibility \{"action":"smart_click","target":"<label>"\} instead of coordinates\./);
+  });
+
+  it('a screenshot after a blind read in the same session is not nudged', async () => {
+    const ctx = { ...shotCtx(), a11y: { getScreenContext: async () => 'text' } as any };
+    await createMcpServer({ ctx, compact: true });
+    await capturedHandlers.get('accessibility')!({ action: 'read_tree' });
+    const r = await capturedHandlers.get('computer')!({ action: 'screenshot' });
+    expect(text(r)).not.toMatch(/before any text was read/);
+  });
+});

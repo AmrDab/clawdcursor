@@ -22,6 +22,7 @@ import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
 import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
 import { windowTextIncludes } from '../tools/window-text';
+import { isAiHostProcess } from './ai-hosts';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
 let dir: string | null = process.env.VITEST ? null : DATA_DIR;
@@ -86,6 +87,10 @@ interface Foreground { processId: number; processName: string; title?: string }
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
 let pending: (WindowQuery & { opened?: boolean }) | null = null;
+/** The window in front was brought up by the agent (window focus, open_app): it may be an AI-assistant app. */
+let leaseExplicit = false;
+/** The agent launched an app that reported neither pid nor title: the window that opens next is its doing. */
+let openedUnknown = false;
 /** When the agent's last focus-moving input or focus call ended. */
 let movedAt = 0;
 /**
@@ -96,7 +101,7 @@ const OWN_MOVE_MS = 5_000;
 /** How long the next input waits for a window the agent just focused to come to the front. */
 const FOCUS_ARRIVAL_MS = 1_000;
 
-function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; }
+function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedUnknown = false; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
@@ -134,17 +139,27 @@ async function before(): Promise<void> {
   }
   if (isOwnUiPid(now.processId)) throw new Error(`foreground changed: clawdcursor's own on-screen control is in front, not ${lease ? name(lease) : 'an app'} — nothing was sent. Wait for the user, then focus your window with window {"action":"focus"}.`);
   const ownMove = Date.now() - movedAt < OWN_MOVE_MS;
+  let explicit = false;
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
     if (!matches(pending, now)) {
       throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${pending.processName ?? pending.title ?? `pid ${pending.processId}`}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
+    explicit = true;
   } else if (lease && lease.processId !== now.processId && !ownMove) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
   }
+  explicit = explicit || openedUnknown || (leaseExplicit && lease?.processId === now.processId);
+  // An AI assistant's own window (the chat the agent runs in) takes no input the agent did not ask for: a model that typed
+  // before focusing anything sent its text there (eval 2026-11-08). Focusing or opening the app is asking.
+  if (isAiHostProcess(now.processName) && !explicit) {
+    throw new Error(`the window in front is ${now.processName}, an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}`);
+  }
+  openedUnknown = false;
+  leaseExplicit = explicit;
   lease = now;
 }
 
@@ -175,6 +190,7 @@ function launched(r?: { pid?: number; title?: string }): void {
   if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true }; return; }
   lease = undefined;
   pending = null;
+  openedUnknown = true;
 }
 
 /** A wait: the agent declares it does nothing, so a window that comes up during it is the user's, not the agent's (#294). */

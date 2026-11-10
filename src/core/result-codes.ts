@@ -36,7 +36,10 @@ interface Rule {
   /** Look at the whole text, not just its head (DEVIATION is appended after the tool's own text). */
   whole?: boolean;
   hint: string;
-  next?: Partial<Record<Surface, string>>;
+  /** A hint that depends on the surface (tool names differ) wins over `hint`. */
+  hintFor?: Partial<Record<Surface, string>>;
+  /** A call, or a function of the original result text (a concrete name taken from it, never a <placeholder>). */
+  next?: Partial<Record<Surface, string | ((text: string) => string | undefined)>>;
 }
 
 const PAUSE = (msg: string): Record<Surface, string> => ({
@@ -44,6 +47,12 @@ const PAUSE = (msg: string): Record<Surface, string> => ({
   agent: `ask_user {"message":"${msg}"}`,
 });
 const REREAD: Record<Surface, string> = { mcp: 'accessibility {"action":"compile_ui"}', agent: 'compile_ui {}' };
+
+/** `template` with NAME replaced by the name the caller gave in `a11y invoke "…" missed`, as a JSON string; undefined without one. */
+function smartClickFor(text: string, template: string): string | undefined {
+  const name = /\binvoke "([^"\n]{1,60})" missed/i.exec(text)?.[1];
+  return name ? template.replace('NAME', JSON.stringify(name)) : undefined;
+}
 
 /** First match wins: refusals before failures, specific before generic. */
 const RULES: Rule[] = [
@@ -72,6 +81,9 @@ const RULES: Rule[] = [
   { code: 'STOPPED', outcome: 'refused', test: /stopped by the user — they took control back/i,
     hint: 'the user stopped clawdcursor; nothing runs until their Resume gives control back',
     next: PAUSE('<what you want to do next>') },
+  { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent/i,
+    hint: 'the window in front is an AI assistant, not your target; focus your target window first',
+    next: { mcp: 'window {"action":"list"}', agent: 'list_windows {}' } },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,
     hint: 'the window in front is not the one you were working in; nothing was sent',
     next: { mcp: 'window {"action":"focus","processName":"<your app>"}', agent: 'focus_window {"processName":"<your app>"}' } },
@@ -82,6 +94,10 @@ const RULES: Rule[] = [
   { code: 'STALE_SCREENSHOT', outcome: 'refused',
     test: /an older screenshot|none has been taken|was not on screenshot s\d+ is in front/i,
     hint: 'the screen changed since the screenshot these coordinates came from; nothing was clicked',
+    hintFor: {
+      mcp: 'the screen changed since the screenshot these coordinates came from; nothing was clicked; if the target has a label, use accessibility smart_click instead of a new screenshot',
+      agent: 'the screen changed since the screenshot these coordinates came from; nothing was clicked; if the target has a label, use smart_click instead of a new screenshot',
+    },
     next: { mcp: 'computer {"action":"screenshot"}', agent: 'screenshot {}' } },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
@@ -125,6 +141,20 @@ const RULES: Rule[] = [
     hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
   { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
     hint: 'found, but the action failed', next: REREAD },
+  // A window that is not there: list the windows, then focus one.
+  { code: 'NOT_FOUND', outcome: 'failed',
+    test: /no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing|no window for that process|window not found/i,
+    hint: 'no such window; list the windows to see what is open',
+    next: { mcp: 'window {"action":"list"}', agent: 'list_windows {}' } },
+  // An invoke that found no element of that name: the label may be drawn (canvas, image, custom UI) rather than exposed, and
+  // smart_click finds text by OCR. The name is the one the caller gave; without it there is nothing concrete to put in the call.
+  { code: 'NOT_FOUND', outcome: 'failed',
+    test: /\binvoke\b[^\n]{0,80}missed — element not found/i,
+    hint: 'no element has that name; the label may be drawn, not exposed',
+    next: {
+      mcp: t => smartClickFor(t, 'accessibility {"action":"smart_click","target":NAME}') ?? REREAD.mcp,
+      agent: t => smartClickFor(t, 'smart_click {"target":NAME}') ?? REREAD.agent,
+    } },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
     test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing/i,
@@ -151,6 +181,22 @@ export function isActingAction(compound: string, action: string | undefined): bo
   return !!action && !!ACTING[compound]?.has(action);
 }
 
+/**
+ * Calls whose effect only a check can vouch for: `[unverified]` means something for these. Not for a scroll, hover, key
+ * hold, focus, maximize or clipboard write: nothing there is left to confirm, and a line that always says "unverified" is
+ * noise a model learns to skip.
+ */
+const UNVERIFIABLE: Record<string, ReadonlySet<string>> = {
+  computer: new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'type']),
+  accessibility: new Set(['invoke', 'set_value', 'toggle', 'select', 'smart_click', 'smart_type']),
+  window: new Set(['close', 'open_app', 'open_file', 'open_url']),
+  system: new Set(['open_uri', 'open_app', 'open_file', 'open_url']),
+  browser: new Set(['click', 'type', 'select_option']),
+};
+export function isUnverifiableAction(compound: string, action: string | undefined): boolean {
+  return !!action && !!UNVERIFIABLE[compound]?.has(action);
+}
+
 const HEAD = 400;
 
 /**
@@ -172,28 +218,35 @@ function ownWords(text: string): string {
 }
 
 /**
- * Classify a result. `acting`: the call changes something (a click, typing, a window move) — reads are not given an
- * outcome on success, there is nothing to confirm.
+ * Classify a result. `acting`: the call has an effect only a check can vouch for (a click, typing, a launch), so a success
+ * nothing checked is `unverified`. `changes`: the call changes something without being worth an `unverified` line (a focus,
+ * a maximize): it still gets `confirmed` when a check on it passed. A read gets no outcome.
  */
-export function classifyResult(text: string, isError: boolean, acting: boolean, surface: Surface = 'mcp'): ResultClass | null {
+export function classifyResult(text: string, isError: boolean, acting: boolean, surface: Surface = 'mcp', changes = acting): ResultClass | null {
   if (isError) {
     const own = ownWords(text);
     const head = own.slice(0, HEAD);
     const r = RULES.find(rule => rule.test.test(rule.whole ? own : head));
-    if (r) return { outcome: r.outcome, code: r.code, hint: r.hint, next: r.next?.[surface] };
+    if (r) {
+      const n = r.next?.[surface];
+      return { outcome: r.outcome, code: r.code, hint: r.hintFor?.[surface] ?? r.hint, next: typeof n === 'function' ? n(text) : n };
+    }
     return { outcome: 'failed', code: 'UNKNOWN', hint: 'read the screen, then try another way', next: REREAD[surface] };
   }
   // A success is never classified by its words: a page's text can say "not found" or "timed out" as content.
-  if (!acting) return null;
+  if (!acting && !changes) return null;
   // The checks' own wording, at their own positions: a body that happens to contain "VERIFIED" on some line is not one.
   // Only where the checks write them, so nothing inside a result (typed text, a page, a window title) can pose as one:
   // `expect`'s verdict is appended at the very end; `verify` starts its reply; a typing read-back sits in the leading
   // "Typed N chars (…)" before any quoted text; a toggle / select writes `Toggled|Selected (read back ✓)` before the
   // quoted element name, which is screen text.
   if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
-    || /^(?:Toggled|Selected) \(read back ✓\) "/.test(text)) {
+    || /^(?:Toggled|Selected) \(read back ✓\) "/.test(text)
+    || /^Invoked "[^"\n]*"(?: via a11y(?: \([^)\n]*\))?)? — now [a-z ]+ \(read back ✓\)\./.test(text)) {
     return { outcome: 'confirmed' };
   }
+  // Nothing checked it. Only calls with an effect to check say so.
+  if (!acting) return null;
   // No hint: not every tool takes `expect`, and the server instructions already say how to confirm.
   return { outcome: 'unverified' };
 }

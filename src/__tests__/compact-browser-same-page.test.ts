@@ -208,14 +208,14 @@ describe('hints name only tools/actions that exist on the active surface', () =>
     const notConnected = await browser.handler({ action: 'type', label: 'City', text: 'x' }, ctx);
     expect(notConnected.isError).toBe(true);
     expect(notConnected.text).not.toMatch(NOT_ON_COMPACT);
-    expect(notConnected.text).toContain('browser {action:"connect"}');
+    expect(notConnected.text).toContain('browser {"action":"connect"}');
 
     const tabs = await browser.handler({ action: 'list_tabs' }, ctx);
     expect(tabs.text).not.toMatch(NOT_ON_COMPACT);
 
     const conn = await browser.handler({ action: 'connect' }, ctx);
     expect(conn.text).not.toMatch(NOT_ON_COMPACT);
-    expect(conn.text).toContain('browser {action:"navigate"}');
+    expect(conn.text).toContain('browser {"action":"navigate"}');
 
     const nav = await browser.handler({ action: 'navigate', url: FORM_URL }, ctx);
     expect(nav.text).not.toMatch(NOT_ON_COMPACT);

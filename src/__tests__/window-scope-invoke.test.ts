@@ -377,7 +377,7 @@ describe('every echoed name and bridge string is quoted or untrusted', () => {
 
 describe('invoke: expand state, disabled elements, no second click after a throw', () => {
   it('says when an expand did not change the state, like toggle', () => {
-    expect(expandNote({ expandState: 'Expanded', expandChanged: true })).toBe(' — now expanded');
+    expect(expandNote({ expandState: 'Expanded', expandChanged: true })).toBe(' — now expanded (read back ✓)');
     expect(expandNote({ expandState: 'Collapsed', expandChanged: false })).toBe(' — still collapsed (the state did not change)');
     expect(expandNote(undefined)).toBe('');
   });

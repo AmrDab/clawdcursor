@@ -531,7 +531,8 @@ function Cmd-GetScreenContext {
 # driving — worse than a missed click, since a stray keystroke can then land
 # in the host/chat window instead. Extend via CLAWD_FOREGROUND_DENYLIST (comma-
 # separated process names, e.g. "Claude,Cursor,Code,Windsurf,MyIDE").
-$script:ForegroundDenylistProcs = @('Claude', 'Cursor', 'Code', 'Windsurf')
+# The same list as src/core/ai-hosts.ts (ai-hosts.test.ts keeps them equal). Compared case-insensitively.
+$script:ForegroundDenylistProcs = @('claude', 'claude-desktop', 'chatgpt', 'codex', 'cursor', 'code', 'code-insiders', 'windsurf', 'zed', 'zeditor', 'zed-editor')
 if ($env:CLAWD_FOREGROUND_DENYLIST) {
     $script:ForegroundDenylistProcs += ($env:CLAWD_FOREGROUND_DENYLIST -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }

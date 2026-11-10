@@ -2,27 +2,29 @@
  * Shared wording for blind-first perception results, used by both tool
  * surfaces (System A registry tools and the projected agent-loop tools).
  */
+import { hasWebContent } from '../platform/a11y-wake';
+import type { UiElement } from '../platform/types';
 
-/** a11y positions are SCREEN coordinates — clicked as image coords they land
- *  off-target on a scaled display, which made blind reads look unreliable. */
-export const SCREEN_COORDS_NOTE = '(positions are screen coordinates — click them with space:"screen", or act by name)';
+/** Act on a listed element by its name; its @x,y are SCREEN coordinates — clicked as image coords they land off-target on a
+ *  scaled display, which made blind reads look unreliable. Surface-agnostic: no tool names to rewrite. */
+export const SCREEN_COORDS_NOTE = '(act on these by name: invoke name:"…". The @x,y are screen coordinates, only for an element that has no name: click with space:"screen")';
 
 /** Next step when a blind read comes back thin (MCP agents), instead of a
  *  dead end that leaves screenshots as the only option. */
 export const SPARSE_NEXT_STEP =
-  '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
-  'copy_all_text for the exact page text · smart_click name:"…" to press a labelled control (OCR fallback) · ' +
-  'ocr to read it · screenshot only if those fail. ' +
+  '→ Little or no accessibility structure here (common for canvas apps and pages that expose none). ' +
+  'SEE: read_screen → copy_all_text → ocr_read_screen. ' +
+  'ACT: invoke_element / set_field_value by name → smart_click {"target":"<label>"} → desktop_screenshot, then mouse_click with x,y from that image. ' +
   'Electron/Chromium app? Restarting it with --force-renderer-accessibility exposes the whole page (required on Linux).';
 
 /** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface).
  *  A role-only get_value works on Linux but not on Windows, so an unnamed editor goes to copy_all_text. */
 export const CUT_VALUE_NEXT_STEP =
   '→ A value ending in "chars not shown" is cut. Read it whole: copy_all_text for a document or an unnamed editor · ' +
-  'a11y_get_value name:"…" for a named field.';
+  'a11y_get_value {"name":"…"} for a named field.';
 
 export const CUT_VALUE_NEXT_STEP_INTERNAL =
-  '→ A value ending in "chars not shown" is cut. Read a named field whole with a11y_get_value name:"…".';
+  '→ A value ending in "chars not shown" is cut. Read a named field whole with a11y_get_value {"name":"…"}.';
 
 /** The same advice for clawdcursor's internal agent loop, in its own tool names. */
 export const SPARSE_NEXT_STEP_INTERNAL =
@@ -37,7 +39,7 @@ export const SPARSE_NEXT_STEP_INTERNAL =
  */
 export function cdpBrowserNextStep(mode: 'dedicated' | 'attached'): string {
   return '→ This is the browser clawdcursor is attached to over CDP: read and act on its page with ' +
-    'browser {action:"page_context"} (interactive elements) · browser {action:"read_text"} · browser {action:"click"} — ' +
+    'browser {"action":"page_context"} (interactive elements) · browser {"action":"read_text"} · browser {"action":"click"} — ' +
     'they see the whole page, whatever the accessibility tree shows.' +
     (mode === 'dedicated'
       ? " It is clawdcursor's own browser: don't restart it — clawdcursor switches its accessibility on itself."
@@ -46,6 +48,16 @@ export function cdpBrowserNextStep(mode: 'dedicated' | 'attached'): string {
 
 /** A window with at least this many named elements is not "thin": a miss there is a wrong name, not a blind app. */
 const STRUCTURED_MIN = 5;
+
+/**
+ * Is this read sparse enough to say "little or no accessibility structure"? Few named elements, or a browser with no page in
+ * its tree (its own tab strip and toolbar are ~59 elements and say nothing about the page). A browser whose tree holds the
+ * page is not sparse: the hint sent agents to OCR after every read of a page they could already read by name.
+ */
+export function isSparseTree(tree: ReadonlyArray<UiElement>, isBrowser: boolean): boolean {
+  if (tree.filter(el => (el.name ?? '').trim()).length < STRUCTURED_MIN) return true;
+  return isBrowser && !hasWebContent(tree as UiElement[]);
+}
 
 /** How alike two element names are, for "did you mean": shared words, containment, then a common prefix. 0 = unrelated. */
 function nameScore(want: string, have: string): number {
