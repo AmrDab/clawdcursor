@@ -112,7 +112,7 @@ describe('no bare-name system programs and no shell exec of PowerShell in the so
   });
 
   it('reg, tasklist, taskkill, netstat, rundll32, explorer and chcp are not spawned by bare name', () => {
-    const bad = lines.filter(x => /\b(spawn|spawnSync|execFile|execFileSync|execFileAsync|execSync|exec)\(\s*[`'"](reg|reg\.exe|tasklist|taskkill|netstat|rundll32|explorer|explorer\.exe)\b/i.test(x.l));
+    const bad = lines.filter(x => /\b(spawn|spawnSync|execFile|execFileSync|execFileAsync|execSync|exec)\(\s*[`'"](reg|reg\.exe|tasklist|taskkill|netstat|rundll32|explorer|explorer\.exe|chcp|chcp\.com)\b/i.test(x.l));
     expect(bad.map(x => `${x.f}:${x.n}`)).toEqual([]);
   });
 });
