@@ -4,6 +4,48 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+## [1.5.27] - 2026-11-09
+
+### Fixed
+- **Typing goes only where the agent was working.** Windows `set_value`'s keyboard
+  fallback types only when the target's own window is in front, and an owned
+  dialog in front (Save As) counts as that window (#314, #331). A typed value
+  that cannot be read back is reported as not verified instead of set.
+- **A stop always stops, and says so first.** A stop also refuses hover,
+  clipboard writes, page script and tab switches (#319). A stopped call now
+  answers "stopped by the user" before any other refusal (#329).
+- **Ticks, dropdowns and expanders read and change the same way on Windows,
+  macOS and Linux** (#323). `toggle` reports the state it actually reached, or
+  says the change was not confirmed (it reported the state from before the
+  toggle on Chromium) (#329). `select` by name aims at the dropdown, not its
+  label (#329). Actions by name (`focus`, `toggle`, `set_value`, `select`) prefer the control over a label with the same name, a toggle or select that read its result back is reported as confirmed, and a failure says why (#332). `expand`, `collapse` and `toggle` no longer fall back to
+  clicking whatever had the name.
+- **Linux reads deep web pages** (#315): the tree walk reaches 40 levels, and a
+  cut tree is marked partial. Searches have their own budget (5,000 elements,
+  7 s) and say when and why they were cut, instead of "not found" (#331). Names
+  starting with `-` work.
+- **Failures say why** (#317): a Windows bridge command that fails returns its
+  reason, and the click fallback runs.
+- **The compact `accessibility` tool no longer lists actions it cannot run** (#320).
+- **"confirm" alone no longer gates a click** (#321), and the refusal names the
+  real way forward (ask the user with `pause_for_user`).
+- **A bad API key stops only the built-in agent, not the server** (#322).
+- The daemon no longer prints "CDP connected" after a failed connection (#329).
+
+### Added
+- **Logs that explain what happened** (`~/.clawdcursor/logs/`), to fix bugs from
+  (#324, #330, #331):
+  - `tool.done` for every call: tool, action, time, outcome and result code.
+  - `step.slow` for any internal step of 1 s or more (a PowerShell start, a
+    bridge command), and per-call step totals for slow calls.
+  - `mcp.start`, and `mcp.exit` with the reason and the call it cut off. A
+    server that was killed or crashed is reported at the next start.
+  - `control.stop` / `control.resume` with who did it, `pause.end` with the
+    outcome, and `crash`.
+  - No typed text, clipboard, error text, element names or window titles: a
+    failure is logged by its result code. Crash stacks keep only the frames,
+    with your home folder removed.
+
 ### Deprecated
 - **The built-in agent loop is deprecated and will be removed in 1.6.** The
   `task` tool, `submit_task`, `system delegate`, the `clawdcursor agent` model
