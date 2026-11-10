@@ -113,6 +113,7 @@ import { e } from './format';
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { endAllSessions } from './session-log';
+import { powershellExe, system32Exe } from '../platform/ps-spawn';
 
 const program = new Command();
 
@@ -127,7 +128,7 @@ async function isClawdInstance(port: number): Promise<boolean> {
 }
 
 async function forceKillPort(port: number): Promise<boolean> {
-  const { execSync } = await import('child_process');
+  const { execSync, execFileSync } = await import('child_process');
   const os = await import('os');
 
   // #114: only ever kill processes that are plausibly OURS. The port is
@@ -139,10 +140,9 @@ async function forceKillPort(port: number): Promise<boolean> {
 
   if (os.platform() === 'win32') {
     try {
-      const output = execSync(
-        `netstat -ano | findstr :${port} | findstr LISTENING`,
-        { encoding: 'utf-8' },
-      );
+      // No shell (it would search the working directory and parse the command line): netstat by absolute path, filtered here.
+      const output = execFileSync(system32Exe('netstat.exe'), ['-ano'], { encoding: 'utf-8' })
+        .split(/\r?\n/).filter(l => l.includes(`:${port}`) && l.includes('LISTENING')).join('\n');
       const pids = new Set(
         output.trim().split('\n')
           .map(line => line.trim().split(/\s+/).pop())
@@ -154,14 +154,14 @@ async function forceKillPort(port: number): Promise<boolean> {
       for (const pid of pids) {
         let image = '';
         try {
-          const row = execSync(`tasklist /FI "PID eq ${pid}" /FO CSV /NH`, { encoding: 'utf-8' });
+          const row = execFileSync(system32Exe('tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf-8' });
           image = (row.split(',')[0] ?? '').replace(/"/g, '').trim();
         } catch { /* tasklist unavailable — treat as unknown */ }
         if (image && !OURS.test(image)) {
           console.warn(`${e('⚠️', '[WARN]')} Port ${port} is held by "${image}" (pid ${pid}) — not a clawdcursor process; refusing to kill it. Free the port or change server.port.`);
           continue;
         }
-        execSync(`taskkill /F /PID ${pid}`);
+        execFileSync(system32Exe('taskkill.exe'), ['/F', '/PID', String(pid)]);
         console.log(`${e('🐾', '>')} Killed process ${pid}${image ? ` (${image})` : ''}`);
         killedAny = true;
       }
@@ -1126,9 +1126,8 @@ done
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-task-'));
         const tmpScript = path.join(tmpDir, 'task.ps1');
         fs.writeFileSync(tmpScript, scriptContent);
-        spawnExec('powershell.exe', [
-          '-Command', `Start-Process powershell -ArgumentList '-NoExit','-ExecutionPolicy','Bypass','-File','${tmpScript}'`
-        ], { detached: true, stdio: 'ignore' } as any);
+        // A detached PowerShell gets its own console window; the script path is an argument, never part of a command string.
+        spawnExec(powershellExe(), ['-NoExit', '-ExecutionPolicy', 'Bypass', '-File', tmpScript], { detached: true, stdio: 'ignore' } as any);
       } else if (platform === 'darwin') {
         const fs = await import('fs');
         const path = await import('path');

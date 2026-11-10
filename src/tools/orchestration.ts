@@ -10,7 +10,7 @@ import { resolveAlias } from '../core/router/aliases';
 import { pauseGate } from '../core/pause-gate';
 import { foreignOverlayState } from '../core/overlay-state';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
-import { psOpts } from '../platform/ps-spawn';
+import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -264,10 +264,10 @@ export function getOrchestrationTools(): ToolDefinition[] {
             const exe = alias?.executable ?? rawName;
             const uwpId = alias?.uwpAppId;
             if (uwpId) {
-              await execFileAsync('explorer.exe', [`shell:AppsFolder\\${uwpId}`], { timeout: 10000 });
+              await execFileAsync(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${uwpId}`], { timeout: 10000 });
             } else {
               // `exe` is a caller-supplied app name: it arrives as $env:, never as script source (platform/ps-input.ts).
-              await execFileAsync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process -FilePath $env:CLAWD_PS_FILE'],
+              await execFileAsync(powershellExe(), ['-NoProfile', '-Command', 'Start-Process -FilePath $env:CLAWD_PS_FILE'],
                 psOpts({ timeout: 10000, env: { ...process.env, CLAWD_PS_FILE: exe } }));
             }
           } else if (process.platform === 'darwin') {

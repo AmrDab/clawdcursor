@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import { __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests } from '../core/ai-hosts';
+import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests, __setParentPidForTests, parseTable, walkAncestors } from '../core/ai-hosts';
 import { classifyResult } from '../core/result-codes';
 
 type Win = { processId: number; processName: string; title?: string };
@@ -300,11 +300,10 @@ describe('review round 3', () => {
 });
 
 describe('a failed or slow ancestry read is not "no ancestors"', () => {
-  const realPpid = Object.getOwnPropertyDescriptor(process, 'ppid');
-  afterEach(() => { __setHostAncestryForTests(null); if (realPpid) Object.defineProperty(process, 'ppid', realPpid); });
+  afterEach(() => { __setHostAncestryForTests(null); __setParentPidForTests(null); });
 
   it('failed read: logged once with the reason only; the direct parent\'s window is still refused, other windows proceed', async () => {
-    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    __setParentPidForTests(777);
     const warn = vi.spyOn((await import('../core/observability/logger')).logger, 'warn').mockImplementation(() => {});
     await __startHostAncestryReadForTests(async () => { throw new Error('ENOENT'); });
     await __startHostAncestryReadForTests(async () => []);   // a second failure is not logged again
@@ -320,7 +319,7 @@ describe('a failed or slow ancestry read is not "no ancestors"', () => {
   });
 
   it('while the read is pending the direct parent is refused at once, without waiting', async () => {
-    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    __setParentPidForTests(777);
     __setHostAncestryForTests(new Promise<number[]>(() => {}), 60_000);
     fg = { processId: 777, processName: 'WindowsTerminal' };
     await expect(fakeLayer().typeText('x')).rejects.toThrow(/the app this agent runs in/);
@@ -328,12 +327,11 @@ describe('a failed or slow ancestry read is not "no ancestors"', () => {
 });
 
 describe('the direct parent follows the shell exclusions and the creation-time check', () => {
-  const realPpid = Object.getOwnPropertyDescriptor(process, 'ppid');
-  afterEach(() => { __setHostAncestryForTests(null); if (realPpid) Object.defineProperty(process, 'ppid', realPpid); });
+  afterEach(() => { __setHostAncestryForTests(null); __setParentPidForTests(null); });
   const row = (pid: number, ppid: number, created: number, name: string) => ({ pid, ppid, created, name });
 
   it('before the table is read: a terminal parent counts, a desktop shell parent (explorer, launchd, systemd) does not', async () => {
-    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    __setParentPidForTests(777);
     __setHostAncestryForTests(new Promise<number[]>(() => {}), 60_000);
     for (const shell of ['explorer', 'launchd', 'systemd', 'Finder']) {
       fg = { processId: 777, processName: shell };
@@ -346,7 +344,7 @@ describe('the direct parent follows the shell exclusions and the creation-time c
   });
 
   it('once the table is read: an explorer parent is not a host, a real one is, a reused pid (parent newer than child) is not', async () => {
-    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    __setParentPidForTests(777);
     const run = async (parent: ReturnType<typeof row>) => {
       await __startHostAncestryReadForTests(async () => [row(process.pid, 777, 500, 'node'), parent]);
       fg = { processId: 777, processName: parent.name };
@@ -356,5 +354,56 @@ describe('the direct parent follows the shell exclusions and the creation-time c
     expect(await run(row(777, 1, 100, 'explorer.exe'))).toBe('sent');
     expect(await run(row(777, 1, 100, 'WindowsTerminal.exe'))).toBe('refused');
     expect(await run(row(777, 1, 900, 'WindowsTerminal.exe'))).toBe('sent');
+  });
+});
+
+/**
+ * The direct-parent rule is the same on every OS; only the data differs. Each OS's shapes are injected, so the test does not
+ * depend on the machine it runs on (CI failed on Linux and macOS when it leaned on overriding process.ppid).
+ */
+const OS_SHAPES = [
+  { os: 'Windows', win: true, terminal: 'WindowsTerminal.exe', shells: ['explorer.exe', 'svchost.exe'],
+    table: '4100 777 133500000000000000 node.exe\r\n777 1 133400000000000000 WindowsTerminal.exe\r\n' },
+  { os: 'macOS', win: false, terminal: '/Applications/iTerm.app/Contents/MacOS/iTerm2', shells: ['/sbin/launchd', 'Finder'],
+    table: ' 4100   777 node\n  777     1 /Applications/iTerm.app/Contents/MacOS/iTerm2\n' },
+  { os: 'Linux', win: false, terminal: 'gnome-terminal-', shells: ['systemd', 'init'],
+    table: ' 4100   777 node\n  777     1 gnome-terminal-\n' },
+];
+
+describe.each(OS_SHAPES)('direct-parent rule with $os process data', ({ win, terminal, shells, table }) => {
+  afterEach(() => { __setHostAncestryForTests(null); __setParentPidForTests(null); });
+  const run = (name: string) => {
+    __setForegroundReaderForTests(async () => fg);   // a new input binding each time
+    fg = { processId: 777, processName: name };
+    return fakeLayer().typeText('x').then(() => 'sent', () => 'refused');
+  };
+
+  it('the OS table parses into rows the walk understands', () => {
+    const rows = parseTable(table, win);
+    expect(rows.map(r => [r.pid, r.ppid])).toEqual([[4100, 777], [777, 1]]);
+    expect([...walkAncestors(rows.map(r => ({ ...r, created: win ? r.created : 0 })), 4100)]).toEqual([777]);
+  });
+
+  it('read failed: the terminal parent is refused, a desktop shell parent and other windows are not', async () => {
+    __setParentPidForTests(777);
+    await __startHostAncestryReadForTests(async () => { throw new Error('ENOENT'); });
+    expect(await run(terminal)).toBe('refused');
+    for (const shell of shells) expect(await run(shell), shell).toBe('sent');
+    __setForegroundReaderForTests(async () => fg);
+    fg = { processId: 888, processName: 'notepad' };
+    await fakeLayer().typeText('y');
+  });
+
+  it('read still pending: the terminal parent is refused at once, a shell parent is not held up', async () => {
+    __setParentPidForTests(777);
+    __setHostAncestryForTests(new Promise<number[]>(() => {}), 60_000);
+    expect(await run(terminal)).toBe('refused');
+    for (const shell of shells) expect(await run(shell), shell).toBe('sent');
+  });
+
+  it('read done: the table decides (a real terminal ancestor refused, a reused pid not)', async () => {
+    __setParentPidForTests(777);
+    await __startHostAncestryReadForTests(async () => parseTable(table, win).map(r => ({ ...r, pid: r.pid === 4100 ? process.pid : r.pid })));
+    expect(await run(terminal)).toBe('refused');
   });
 });

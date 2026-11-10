@@ -37,7 +37,7 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
-import { psOpts } from '../platform/ps-spawn';
+import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
@@ -209,7 +209,7 @@ class ControlBanner {
       return spawn('python3', [linuxScript(), 'pill', ...pillArgs(mode)], { stdio, env: overlayEnv(mode, { GDK_BACKEND: 'x11' }) });
     }
     const script = path.join(getPackageRoot(), 'scripts', 'banner.ps1');
-    return spawn('powershell.exe', psArgs(script, pillArgs(mode)),
+    return spawn(powershellExe(), psArgs(script, pillArgs(mode)),
       // windowsHide: suppress the console/csc.exe compile flash so the pill spawn
       // can't briefly steal foreground from the app the agent is driving.
       psOpts({ stdio, windowsHide: true, env: overlayEnv(mode) }));
@@ -224,7 +224,7 @@ class ControlBanner {
       return spawn('python3', [linuxScript(), 'glow', ...color], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
     }
     const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
-    return spawn('powershell.exe', psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
+    return spawn(powershellExe(), psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
       psOpts({ stdio, windowsHide: true }));
   };
 

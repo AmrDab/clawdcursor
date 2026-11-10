@@ -12,7 +12,7 @@
  * list alone applies.
  */
 import { execFile } from 'child_process';
-import { psOpts } from '../platform/ps-spawn';
+import { psOpts, powershellExe } from '../platform/ps-spawn';
 import { logger } from './observability/logger';
 
 export const AI_HOST_PROCESSES: readonly string[] = [
@@ -51,13 +51,16 @@ export function sameApp(launched: string | undefined | null, processName: string
 /** Ancestors that own the desktop itself, not an app: a window of theirs is the shell, never "the host". */
 const NOT_A_HOST = new Set(['explorer', 'launchd', 'systemd', 'init', 'services', 'svchost', 'winlogon', 'wininit', 'finder', 'sshd', 'login', 'kernel_task']);
 
-interface ProcRow { pid: number; ppid: number; name: string; /** creation time (Windows file time); 0 when the OS table has none */ created: number }
+export interface ProcRow { pid: number; ppid: number; name: string; /** creation time (Windows file time); 0 when the OS table has none */ created: number }
 
 /** The ancestors once read; null until then. */
 let ancestry: Set<number> | null = null;
 /** The read in flight, if any. An input to a window that is not on the list waits for it (bounded), never decides without it. */
 let ancestryPending: Promise<void> | null = null;
 let ancestryOn = false;
+/** This process's parent. A seam for tests: the real value is the OS's, and a test cannot rely on overriding `process.ppid` on every Node and OS. */
+let parentPid = (): number => process.ppid;
+export function __setParentPidForTests(pid: number | null): void { parentPid = pid === null ? () => process.ppid : () => pid; }
 let failedLogged = false;
 /** How long an input waits for a pending read before it falls back to the list alone. */
 let ancestryWaitMs = 2000;
@@ -97,21 +100,29 @@ export function __setHostAncestryForTests(pids: Iterable<number> | Promise<Itera
   } else ancestry = new Set(pids);
 }
 
+/**
+ * The process table as the OS prints it. Windows (our PowerShell line): "pid ppid creationFileTime Name.exe". macOS and Linux
+ * (`ps -A -o pid=,ppid=,comm=`): "pid ppid command", where macOS prints a full path with spaces and Linux a short name.
+ */
+export function parseTable(stdout: string, win: boolean): ProcRow[] {
+  const rows: ProcRow[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const m = win ? /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*?)\s*$/.exec(line) : /^\s*(\d+)\s+(\d+)\s+()(.*?)\s*$/.exec(line);
+    if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: Number(m[3] || 0), name: m[4] });
+  }
+  return rows;
+}
+
 function readTable(): Promise<ProcRow[]> {
   const win = process.platform === 'win32';
   const [cmd, args] = win
-    ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    ? [powershellExe(), ['-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_Process | ForEach-Object { $c = if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }; "$($_.ProcessId) $($_.ParentProcessId) $c $($_.Name)" }']]
     : ['ps', ['-A', '-o', 'pid=,ppid=,comm=']];
   return new Promise((resolve, reject) => {
     execFile(cmd as string, args as string[], psOpts({ timeout: 8000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }), (err, stdout) => {
       if (err) return reject(new Error(String((err as NodeJS.ErrnoException).code ?? 'process table unreadable')));
-      const rows: ProcRow[] = [];
-      for (const line of String(stdout).split(/\r?\n/)) {
-        const m = win ? /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*?)\s*$/.exec(line) : /^\s*(\d+)\s+(\d+)\s+()(.*?)\s*$/.exec(line);
-        if (m) rows.push({ pid: Number(m[1]), ppid: Number(m[2]), created: Number(m[3] || 0), name: m[4] });
-      }
-      resolve(rows);
+      resolve(parseTable(String(stdout), win));
     });
   });
 }
@@ -162,7 +173,7 @@ export async function aiHostKind(w: { processName?: string | null; processId?: n
   // The direct parent is known without any process-table read, so until the table says otherwise (pending, failed or timed out)
   // it counts, unless its name is a shell the desktop itself owns (explorer, launchd, systemd). Once the table was read, it decides:
   // it also knows the parent's creation time (a reused pid) and name.
-  if (w.processId === process.ppid && !ancestry) return NOT_A_HOST.has(normalize(w.processName ?? '')) ? null : 'ancestor';
+  if (w.processId === parentPid() && !ancestry) return NOT_A_HOST.has(normalize(w.processName ?? '')) ? null : 'ancestor';
   if (!ancestry && ancestryPending) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([ancestryPending, new Promise<void>(r => { timer = setTimeout(r, ancestryWaitMs); })]);

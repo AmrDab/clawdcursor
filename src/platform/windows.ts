@@ -52,7 +52,7 @@ import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields } from '../core/miss-text';
-import { psOpts } from './ps-spawn';
+import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -173,7 +173,7 @@ export class WindowsAdapter implements PlatformAdapter {
     let logicalHeight = physicalHeight;
     try {
       const { stdout } = await execFileAsync(
-        'powershell.exe',
+        powershellExe(),
         [
           '-NoProfile',
           '-Command',
@@ -239,7 +239,7 @@ export class WindowsAdapter implements PlatformAdapter {
     // we already have warmed up.
     try {
       const { stdout } = await execFileAsync(
-        'powershell.exe',
+        powershellExe(),
         [
           '-NoProfile',
           '-Command',
@@ -548,7 +548,7 @@ export class WindowsAdapter implements PlatformAdapter {
           "' -PassThru | Out-Null;" +
           `$h = ${target};` +
           'if ($h -ne [System.IntPtr]::Zero) { [Win32.NativeMethods]::PostMessage($h, 0x0010, [System.IntPtr]::Zero, [System.IntPtr]::Zero) | Out-Null; "ok" } else { "no-window" }';
-        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
+        const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
         return stdout.trim() === 'ok';
       }
 
@@ -603,7 +603,7 @@ export class WindowsAdapter implements PlatformAdapter {
           `    [Win32.NativeMethods]::ShowWindowAsync($nwh, ${showCmd}) | Out-Null;${forceMin}` +
           '    $ok = $true } }' +
           '  if ($ok) { "ok" } else { "no-window" } }';
-        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps],
+        const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps],
           psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } }));
         return stdout.trim() === 'ok';
       }
@@ -674,7 +674,7 @@ export class WindowsAdapter implements PlatformAdapter {
         'if ($nh -lt 0) { $nh = $r.Height - $r.Y }' +
         '[Win32.NativeMethods]::SetWindowPos($h, [System.IntPtr]::Zero, $nx, $ny, $nw, $nh, 0x0004) | Out-Null;' +
         '"ok"';
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
+      const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
       return stdout.trim() === 'ok';
     } catch {
       return false;
@@ -1213,7 +1213,7 @@ export class WindowsAdapter implements PlatformAdapter {
       // non-ASCII text (é, —, ✓, CJK, emoji) came back as '?'. Return the
       // clipboard as base64-encoded UTF-8 instead — survives any codepage.
       const { stdout } = await execFileAsync(
-        'powershell.exe',
+        powershellExe(),
         ['-NoProfile', '-Command',
           '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))'],
         psOpts({ timeout: CLIPBOARD_TIMEOUT_MS }),
@@ -1312,7 +1312,7 @@ export class WindowsAdapter implements PlatformAdapter {
         throw new Error(`launchApp: illegal uwpAppId "${id}"`);
       }
       try {
-        const child = spawn('explorer.exe', [`shell:AppsFolder\\${id}`], {
+        const child = spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${id}`], {
           stdio: 'ignore', detached: true, windowsHide: true,
         });
         child.unref();
@@ -1343,7 +1343,7 @@ export class WindowsAdapter implements PlatformAdapter {
     }
 
     try {
-      const child = spawn('powershell.exe', ['-NoProfile', '-Command', cmdParts.join(' ')], psOpts({
+      const child = spawn(powershellExe(), ['-NoProfile', '-Command', cmdParts.join(' ')], psOpts({
         stdio: 'ignore', detached: true, windowsHide: true, env,
       }));
       child.unref();

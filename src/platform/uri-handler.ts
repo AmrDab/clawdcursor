@@ -25,7 +25,7 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { psOpts } from './ps-spawn';
+import { psOpts, powershellExe, system32Exe } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -43,7 +43,7 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
   const userChoicePath = `HKCU\\SOFTWARE\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\${s}\\UserChoice`;
   let progId: string | null = null;
   try {
-    const { stdout } = await execFileAsync('reg', ['query', userChoicePath, '/v', 'ProgId'], { timeout: 3000 });
+    const { stdout } = await execFileAsync(system32Exe('reg.exe'), ['query', userChoicePath, '/v', 'ProgId'], { timeout: 3000 });
     const m = stdout.match(/ProgId\s+REG_SZ\s+(.+?)[\r\n]/);
     if (m) progId = m[1].trim();
   } catch {
@@ -54,7 +54,7 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
   if (progId) {
     const cmdPath = `HKCR\\${progId}\\Shell\\open\\command`;
     try {
-      const { stdout } = await execFileAsync('reg', ['query', cmdPath, '/ve'], { timeout: 3000 });
+      const { stdout } = await execFileAsync(system32Exe('reg.exe'), ['query', cmdPath, '/ve'], { timeout: 3000 });
       const m = stdout.match(/\(Default\)\s+REG_(?:SZ|EXPAND_SZ)\s+(.+?)[\r\n]/);
       if (m) {
         const exe = extractExecutableFromCommand(m[1]);
@@ -148,7 +148,7 @@ export async function isRegisteredUriScheme(scheme: string): Promise<boolean> {
   const s = scheme.toLowerCase().replace(/[^a-z0-9+.-]/g, ''); // defensive: scheme charset only
   if (!s) return false;
   try {
-    const { stdout } = await execFileAsync('reg', ['query', `HKCR\\${s}`, '/v', 'URL Protocol'], { timeout: 3000 });
+    const { stdout } = await execFileAsync(system32Exe('reg.exe'), ['query', `HKCR\\${s}`, '/v', 'URL Protocol'], { timeout: 3000 });
     return /URL Protocol/i.test(stdout);
   } catch {
     return false;
@@ -182,7 +182,7 @@ export async function shellDispatchUriAndVerify(
   const before = await snapshot();
   try {
     const child = spawn(
-      'powershell.exe',
+      powershellExe(),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI'],
       psOpts({ detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
     );
@@ -216,7 +216,7 @@ async function snapshotProcessWindows(processNameLower: string): Promise<Set<str
     // processNameLower flows in from registry / WindowsApps lookups (not
     // LLM-controlled); it still arrives as $env:, never as script source (ps-input.ts).
     const { stdout } = await execFileAsync(
-      'powershell.exe',
+      powershellExe(),
       [
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
         `Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.ProcessName.ToLower() -eq $env:CLAWD_PS_NAME } | ForEach-Object { "$($_.MainWindowHandle)|$($_.MainWindowTitle)" }`,

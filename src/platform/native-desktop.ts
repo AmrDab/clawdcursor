@@ -25,7 +25,7 @@ import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo } from './mac-screen';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
-import { psOpts } from './ps-spawn';
+import { psOpts, powershellExe } from './ps-spawn';
 
 // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
@@ -117,11 +117,11 @@ export class NativeDesktop extends EventEmitter {
 
     try {
       if (process.platform === 'win32') {
-        const { exec } = await import('child_process');
+        const { execFile } = await import('child_process');
         const { promisify } = await import('util');
-        const execAsync = promisify(exec);
+        const execFileAsync = promisify(execFile);
         const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { "$($_.Bounds.X),$($_.Bounds.Y),$($_.Bounds.Width),$($_.Bounds.Height),$($_.Primary),$($_.DeviceName)" }`;
-        const { stdout } = await execAsync(`powershell -NoProfile -Command "${ps}"`, psOpts({ encoding: 'utf8' as const }));
+        const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ encoding: 'utf8' as const }));
         const lines = stdout.trim().split('\n').filter(Boolean);
         this.monitors = lines.map((line, i) => {
           const [x, y, w, h, primary, name] = line.trim().split(',');

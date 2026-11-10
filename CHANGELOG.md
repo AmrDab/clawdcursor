@@ -15,6 +15,15 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **The "little or no accessibility structure" hint needs a sparse tree**, not just a browser window: a browser needs 5
   named elements inside its page, any other window 5 named elements (a small dialog of named buttons is fine).
 
+### Security
+- **Windows system programs are started by absolute path, from a private directory.** PowerShell (and `reg`, `tasklist`,
+  `taskkill`, `netstat`, `rundll32`, `explorer`) were spawned by bare name, which Windows resolves in the current directory
+  before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one
+  shell `exec` of PowerShell is gone), and fail with a clear error if `SystemRoot` is unset or the file is missing.
+  PowerShell children run in `~/.clawdcursor/run` (mode 0700), not the shell's working directory or the shared temp folder,
+  which also keeps PowerShell's `ModuleAnalysisCache` out of a repository. **Apps clawdcursor launches now start in that
+  private directory, not wherever clawdcursor ran from.**
+
 ### Fixed
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
   (`invoke`, `set_value`, `toggle`, `select`) are refused when the window in front is Claude, ChatGPT, Codex, Cursor,

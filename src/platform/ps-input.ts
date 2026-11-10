@@ -6,7 +6,7 @@
  * $env:CLAWD_PS_* (short values: names, titles, paths) or stdin (clipboard text, any size) instead.
  */
 import { execFile } from 'child_process';
-import { psOpts } from './ps-spawn';
+import { psOpts, powershellExe } from './ps-spawn';
 
 /** Reads base64 UTF-8 from stdin: ASCII on the wire, so no console codepage can mangle it. */
 export const SET_CLIPBOARD_SCRIPT =
@@ -15,7 +15,7 @@ export const SET_CLIPBOARD_SCRIPT =
 /** Run a PowerShell script with `input` on its stdin. */
 export function runPsWithStdin(script: string, input: string, timeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], psOpts({ timeout: timeoutMs }),
+    const child = execFile(powershellExe(), ['-NoProfile', '-NonInteractive', '-Command', script], psOpts({ timeout: timeoutMs }),
       (err, stdout) => (err ? reject(err) : resolve(String(stdout ?? ''))));
     // PowerShell may exit (or be killed at the timeout) before it has read everything: a closed pipe is not our error.
     child.stdin?.on('error', () => { /* reported by the exit callback */ });

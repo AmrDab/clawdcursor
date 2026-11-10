@@ -25,7 +25,7 @@ import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
 import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
 import type { Display } from './types';
-import { psOpts } from './ps-spawn';
+import { psOpts, powershellExe } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -337,7 +337,7 @@ export class OcrEngine {
     } catch (err: any) {
       if (isEngineMissing(err)) throw err;
     }
-    const { stdout } = await execFileAsync('powershell.exe', [
+    const { stdout } = await execFileAsync(powershellExe(), [
       '-NoProfile',
       '-NonInteractive',
       '-ExecutionPolicy', 'Bypass',

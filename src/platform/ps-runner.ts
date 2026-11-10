@@ -15,7 +15,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as readline from 'readline';
 import * as path from 'path';
-import { psOpts } from './ps-spawn';
+import { psOpts, powershellExe } from './ps-spawn';
 import { getPackageRoot } from '../paths';
 import { timeStep } from '../core/observability/steps';
 
@@ -62,7 +62,7 @@ export class PSRunner {
       this.dead  = false;
       this.ready = false;
 
-      const proc = spawn('powershell.exe', [
+      const proc = spawn(powershellExe(), [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',

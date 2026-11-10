@@ -5,6 +5,8 @@ import * as path from 'path';
 // Keep test runs out of the user's real ~/.clawdcursor: the structured logger
 // and the MCP session log write here instead.
 process.env.CLAWDCURSOR_LOG_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-logs-${process.pid}`);
+// PowerShell children run from a private directory under the home dir (platform/ps-spawn.ts): tests get their own.
+process.env.CLAWDCURSOR_RUN_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-run-${process.pid}`);
 process.env.CLAWDCURSOR_SESSION_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-sessions-${process.pid}`);
 // Tests fake the UI tree; a thin fake must not make every read wait for an app to "wake" (the wake tests pass their own budget).
 process.env.CLAWDCURSOR_WAKE_BUDGET_MS ??= '0';
