@@ -589,20 +589,26 @@ func windowsToSearch(_ app: NSRunningApplication) -> (windows: [AXUIElement], hu
     if let k = key.window {
         var out = [k]
         let (m, _) = copyAttr(el, "AXMainWindow")
-        if let m = m, isElement(m), let mw = m as? AXUIElement, !CFEqual(mw, k) { out.append(mw) }
+        if let m = m, isElement(m) { let mw = m as! AXUIElement; if !CFEqual(mw, k) { out.append(mw) } }
         return (out, key.hung)
     }
     let all = (copyAttr(el, "AXWindows").value as? [AXUIElement]) ?? []
     return (all, key.hung)
 }
 
-/// What a miss says when the search covered the front window(s) and the app has more: the miss is about those windows.
+/// What a miss says when the search covered the front window(s) and the app has more: the miss is about those windows. No window
+/// title in it: a title is page-controlled text, and this goes into an error that is classified by its words. Counts visible
+/// standard windows and dialogs only (not minimized ones, palettes or popovers).
 func scopeNote(_ app: NSRunningApplication, searched: [AXUIElement]) -> String {
     let all = (copyAttr(appElement(app.processIdentifier), "AXWindows").value as? [AXUIElement]) ?? []
-    let others = all.filter { w in !searched.contains(where: { CFEqual($0, w) }) }.count
+    let others = all.filter { w in
+        if searched.contains(where: { CFEqual($0, w) }) { return false }
+        let a = multi(w, ["AXSubrole", "AXMinimized"])
+        let sub = str(a["AXSubrole"]) ?? ""
+        return (sub == "AXStandardWindow" || sub == "AXDialog") && bool(a["AXMinimized"]) != true
+    }.count
     if others == 0 || searched.isEmpty { return "" }
-    let title = str(multi(searched[0], ["AXTitle"])["AXTitle"]) ?? ""
-    return "; only the front window \"\(title)\" was searched; this app has \(others) other window\(others == 1 ? "" : "s") - window {\"action\":\"focus\",\"title\":\"...\"} first to work in one"
+    return "; only the front window was searched; this app has \(others) other window\(others == 1 ? "" : "s") - window {\"action\":\"focus\",\"title\":\"...\"} first to work in one"
 }
 
 func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {

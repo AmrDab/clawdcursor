@@ -99,10 +99,20 @@ const RULES: Rule[] = [
     hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
   // The element WAS found; this verb does not apply to it ("TogglePattern not supported", "element cannot expand or collapse").
   // Before NOT_FOUND: an invoke miss is worded "missed — <reason>", and the reason decides which of the two it is.
+  // Found, but the element is switched off: no verb and no click at its bounds will do anything.
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /Invoke failed:[^\n]*(?:not enabled|disabled)|element is (?:not enabled|disabled)/i,
+    hint: 'found it, but it is disabled; the app has to enable it first (a required field, a selection), read its state',
+    next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
+  // Found, and the invoke itself threw: it may have acted before it threw, so do not repeat it or click the same spot.
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /Invoke failed:/i,
+    hint: 'found it, but the invoke threw; it may have taken effect, read the screen before trying again',
+    next: REREAD },
   // First the activation cascade that tried EVERY verb (invoke, toggle, select, expand) and none took: suggesting those verbs
   // again would loop, so the next step is a click at the element's bounds.
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
-    test: /no (?:invoke|click)\/\w+(?:\/\w+)* pattern|Invoke failed:|does not support (?:AXPress|click\(\))|exposes no Action interface/i,
+    test: /no (?:invoke|click)\/\w+(?:\/\w+)* pattern|does not support (?:AXPress|click\(\))|exposes no Action interface/i,
     hint: 'found it, but no activation (invoke / toggle / select / expand) takes on it; it is on screen, so click it at its bounds',
     next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (bounds: accessibility find)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (bounds: find_element)' } },
   // One verb that does not fit this element ("TogglePattern not supported", "cannot expand or collapse").
@@ -139,13 +149,30 @@ export function isActingAction(compound: string, action: string | undefined): bo
 const HEAD = 400;
 
 /**
+ * Text the screen controls (a window title, an element name) must not steer the classification: a window titled "the screen
+ * is locked" would turn any miss into SCREEN_LOCKED. Producers quote such text with quoteScreenText (or put it in an
+ * <untrusted-screen-content> block); the classifier reads the result with quoted spans, `key='value'` spans and untrusted
+ * blocks blanked out, so only clawdcursor's own words are matched.
+ */
+export function quoteScreenText(s: string): string {
+  return `"${s.replace(/["\r\n]+/g, "'")}"`;
+}
+function ownWords(text: string): string {
+  return text
+    .replace(/<untrusted-screen-content>[\s\S]*?<\/untrusted-screen-content>/g, ' ')
+    .replace(/"[^"\n]*"/g, '""')
+    .replace(/\b(\w+)='[^'\n]*'/g, "$1=''");
+}
+
+/**
  * Classify a result. `acting`: the call changes something (a click, typing, a window move) — reads are not given an
  * outcome on success, there is nothing to confirm.
  */
 export function classifyResult(text: string, isError: boolean, acting: boolean, surface: Surface = 'mcp'): ResultClass | null {
   if (isError) {
-    const head = text.slice(0, HEAD);
-    const r = RULES.find(rule => rule.test.test(rule.whole ? text : head));
+    const own = ownWords(text);
+    const head = own.slice(0, HEAD);
+    const r = RULES.find(rule => rule.test.test(rule.whole ? own : head));
     if (r) return { outcome: r.outcome, code: r.code, hint: r.hint, next: r.next?.[surface] };
     return { outcome: 'failed', code: 'UNKNOWN', hint: 'read the screen, then try another way', next: REREAD[surface] };
   }

@@ -478,9 +478,12 @@ dialog.states.add(StateType.ACTIVE)
 # Scope: the active window, plus the open popup (a toplevel of its own, never ACTIVE); not the inactive window; a hidden popup is not.
 open_menu = Acc('File', 'popup menu', pid=7777, children=[Acc('Open', 'menu item', pid=7777)])
 closed_menu = Acc('Edit', 'popup menu', states=HIDDEN, screen=(0, 0, 0, 0), pid=7777)
-scope_app = Acc('editor', 'application', pid=7777, screen=(0, 0, 0, 0), children=[main_win, open_menu, closed_menu, dialog])
+# GTK3: a context menu / combo list lives in a toplevel of role "window" that holds the menu.
+gtk_popup = Acc('', 'window', pid=7777, children=[Acc('Copy', 'menu item', pid=7777)])
+scope_app = Acc('editor', 'application', pid=7777, screen=(0, 0, 0, 0), children=[main_win, open_menu, closed_menu, gtk_popup, dialog])
 OUT['scope_names'] = [t.name for t in bridge.scope_toplevels(scope_app)]
 OUT['scope_tree'] = [e['name'] for e in bridge.cmd_get_tree(7777)['elements']]
+OUT['other_note'] = bridge.other_windows_note(scope_app, [dialog])
 OUT['miss_note'] = bridge.cmd_invoke('Nothing here', None, 7777, 'click', None)
 dialog.states.discard(StateType.ACTIVE)
 OUT['scope_names_none_active'] = [t.name for t in bridge.scope_toplevels(scope_app)]

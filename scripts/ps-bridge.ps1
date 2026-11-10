@@ -335,6 +335,55 @@ function Get-OwnedWindowElements {
 # front is its own root), else the pid's TOPMOST window in z-order. Only that one: no other window of the pid is searched.
 # Returns the window as ONE pipeline item (nothing when the pid has no window), so the caller's @(...) is a flat array.
 # The three seams below are what a test replaces.
+# Shell windows of explorer.exe (desktop, taskbars): never "the window the agent works in", and not app windows to count.
+$script:ShellWindowClasses = @('Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd')
+
+# The pid's visible, uncloaked top-level windows that have an area, the top of the z-order first. Aux = a topmost or
+# tool window (a taskbar, a floating palette): last choice, and not counted as an app window. Owned = a dialog.
+function Get-PidWindowCandidates {
+    param([int]$wpid)
+    $found = @()
+    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
+        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
+        $hp = 0
+        [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$hp)
+        if ($hp -ne $wpid) { continue }
+        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
+        if ($cloaked -ne 0) { continue }
+        if ($script:ShellWindowClasses -contains [ScreenPM]::ClassOf($h)) { continue }
+        try {
+            $r = [System.Windows.Automation.AutomationElement]::FromHandle($h).Current.BoundingRectangle
+            if ($r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) { continue }
+        } catch { continue }
+        $ex = [ScreenPM]::GetWindowLong($h, -20)  # GWL_EXSTYLE
+        $found += [pscustomobject]@{
+            Handle = $h
+            Aux    = ((($ex -band 0x8) -ne 0) -or (($ex -band 0x80) -ne 0))  # WS_EX_TOPMOST, WS_EX_TOOLWINDOW
+            Owned  = ([ScreenPM]::GetWindow($h, 4) -ne [IntPtr]::Zero)
+        }
+    }
+    return ,$found
+}
+
+# The first normal window in z-order; a topmost / tool window only when there is nothing else (Explorer's taskbar is
+# topmost and first in the z-order, so a plain "topmost window of the pid" picked it over a File Explorer window).
+function Select-ScopeWindowHandle {
+    param($candidates)
+    if ($null -eq $candidates) { return [IntPtr]::Zero }
+    foreach ($c in @($candidates)) { if (-not $c.Aux) { return $c.Handle } }
+    foreach ($c in @($candidates)) { return $c.Handle }
+    return [IntPtr]::Zero
+}
+
+# How many normal app windows the pid has besides the one searched: not tool / topmost windows, not shell windows, and not
+# dialogs (a dialog belongs to its owner, which is counted).
+function Get-OtherWindowCount {
+    param($candidates, $scopeHandle)
+    $n = 0
+    foreach ($c in @($candidates)) { if ($null -ne $c -and -not $c.Aux -and -not $c.Owned -and $c.Handle -ne $scopeHandle) { $n++ } }
+    return $n
+}
+
 function Get-ScopeWindowHandle {
     param([int]$wpid)
     $fgH = [Win32UIA]::GetForegroundWindow()
@@ -345,21 +394,7 @@ function Get-ScopeWindowHandle {
         [void][Win32UIA]::GetWindowThreadProcessId($rootH, [ref]$fgPid)
         if ($fgPid -eq $wpid) { return $rootH }
     }
-    # Not in front: the pid's topmost visible, uncloaked window with an area (owned dialogs included).
-    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
-        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
-        $hp = 0
-        [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$hp)
-        if ($hp -ne $wpid) { continue }
-        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
-        if ($cloaked -ne 0) { continue }
-        try {
-            $r = [System.Windows.Automation.AutomationElement]::FromHandle($h).Current.BoundingRectangle
-            if ($r.IsEmpty -or $r.Width -le 0 -or $r.Height -le 0) { continue }
-        } catch { continue }
-        return $h
-    }
-    return [IntPtr]::Zero
+    return (Select-ScopeWindowHandle (Get-PidWindowCandidates $wpid))
 }
 function ConvertFrom-ScopeHandle {
     param($h)
@@ -386,21 +421,17 @@ function Get-ProcessScopeWindows {
 }
 
 # What a miss says when the search covered one window and the process has more: the caller must know the miss is about
-# that window, and how to work in another.
+# that window, and how to work in another. No window title in it: a title is page-controlled text, and this goes into an
+# error that is classified by its words.
 function Get-ScopeNarrowNote {
     param([int]$wpid, $scopeWindows)
     try {
-        $pc = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
-        )
-        $all = [System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $pc)
-        $others = 0
-        foreach ($w in $all) { try { if ($w.Current.Name) { $others++ } } catch { } }
-        $others = $others - @($scopeWindows).Count
+        $sh = [IntPtr]::Zero
+        try { $sh = [IntPtr][int]@($scopeWindows)[0].Current.NativeWindowHandle } catch { }
+        $others = Get-OtherWindowCount (Get-PidWindowCandidates $wpid) $sh
         if ($others -le 0) { return '' }
-        $t = ''; try { $t = @($scopeWindows)[0].Current.Name } catch { }
         $pl = if ($others -eq 1) { '' } else { 's' }
-        return "; only the front window `"$t`" was searched; this app has $others other window$pl - window {`"action`":`"focus`",`"title`":`"...`"} first to work in one"
+        return "; only the front window was searched; this app has $others other window$pl - window {`"action`":`"focus`",`"title`":`"...`"} first to work in one"
     } catch { return '' }
 }
 

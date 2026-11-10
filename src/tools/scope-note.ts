@@ -1,3 +1,5 @@
+import { quoteScreenText } from '../core/result-codes';
+
 /**
  * A find or invoke covers the FRONT window of an app (see scripts/ps-bridge.ps1 Get-ProcessScopeWindows; macOS key window,
  * Linux active window). A miss must say so: otherwise "no elements found" reads as "nothing in the app" when the element is
@@ -14,7 +16,8 @@ export async function narrowedScopeNote(
     const mine = (await platform.listWindows()).filter(w => w.processId === s.processId && (w.title ?? '').trim());
     const others = Math.max(0, mine.length - 1);
     if (others === 0) return generic;
-    return `; only the front window${s.title ? ` "${s.title}"` : ''} was searched; this app has ${others} other window${others === 1 ? '' : 's'}`
+    // The title is page text: quoted (and sanitized), so classifyResult never reads it as clawdcursor's own words.
+    return `; only the front window${s.title ? ` ${quoteScreenText(s.title)}` : ''} was searched; this app has ${others} other window${others === 1 ? '' : 's'}`
       + ' — window {"action":"focus","title":"…"} first to work in one';
   } catch { return generic; }
 }

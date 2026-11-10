@@ -251,14 +251,17 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   });
 
   it('the tree, the no-name find and invoke all cover the same windows: the active one and its open popups', () => {
-    expect(out.scope_names).toEqual(['Save As', 'File']);
+    expect(out.scope_names).toEqual(['Save As', 'File', '']); // the GTK3 "window" popup is in, the closed menu and the main window are not
     expect(out.scope_tree).not.toContain('Print');
-    expect(out.scope_names_none_active).toEqual(['notes.txt - Editor', 'File', 'Edit', 'Save As']);
+    expect(out.scope_names_none_active).toEqual(['notes.txt - Editor', 'File', 'Edit', '', 'Save As']);
   });
 
   it('a miss says only the front window was searched and how to work in another', () => {
     expect(out.miss_note.success).toBe(false);
-    expect(out.miss_note.error).toMatch(/^element not found: Nothing here; only the front window "Save As" was searched; this app has 1 other window - window \{"action":"focus"/);
+    // no window title in it: a title is page text and the error is classified by its words
+    expect(out.miss_note.error).toMatch(/^element not found: Nothing here; only the front window was searched; this app has 1 other window - window \{"action":"focus"/);
+    // only showing normal windows are counted: not the open menu, the hidden menu or the GTK3 popup window
+    expect(out.other_note).toMatch(/^; only the front window was searched; this app has 1 other window - /);
   });
 
   it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {

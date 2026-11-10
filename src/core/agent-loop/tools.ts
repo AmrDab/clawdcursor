@@ -45,6 +45,7 @@ import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
+import { quoteScreenText } from '../result-codes';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -264,7 +265,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             // stop at the first success — identical logic to the by-name path above.
             const { res: refRes, used: refUsed } = await runActivationLadder(
               (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
-            if (!refRes.success) {
+            if (!refRes.success && canClickAtBounds(refRes)) {
               const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
             }
@@ -315,7 +316,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // Found but no pattern took: click the surfaced bounds centre (same
         // fallback the el_NN path and smart_click already have). Live
         // regression 2026-10: `find` saw the Button, invoke reported "missed".
-        if (!res.success && action === 'click') {
+        if (!res.success && action === 'click' && canClickAtBounds(res)) {
           const fallback = await clickBoundsFallback(ctx, name, res.bounds, processId);
           if (fallback) return fallback;
         }
@@ -332,9 +333,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
-                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}${typeof (res.data as { expandState?: unknown } | undefined)?.expandState === 'string' ? ` — now ${(res.data as { expandState: string }).expandState.toLowerCase()}` : ''}.`
+                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
-            : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
+            : `a11y invoke ${quoteScreenText(name)} missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
           targetLabel: name,
         };
       },
@@ -2196,6 +2197,18 @@ async function boundsToClick(
  * asked for), not the last rung's: the last rung is a toggle, and an expandable Button that nothing took was reported as
  * "TogglePattern not supported" (live 2026-11-10) although the element was found.
  */
+/** The state an expand / collapse left the element in, read back by the bridge; says so when it did not change. */
+export function expandNote(data: Record<string, unknown> | undefined): string {
+  const state = data?.expandState;
+  if (typeof state !== 'string') return '';
+  return data?.expandChanged === false ? ` — still ${state.toLowerCase()} (the state did not change)` : ` — now ${state.toLowerCase()}`;
+}
+
+/** After an invoke that was found but threw ("Invoke failed: ..."): it may have acted, and a disabled element ignores a click. No second click. */
+export function canClickAtBounds(res: { data?: Record<string, unknown> }): boolean {
+  return !(typeof res.data?.error === 'string' && /^Invoke failed:/i.test(res.data.error));
+}
+
 export async function runActivationLadder(
   call: (action: InvokeAction) => Promise<{ success: boolean; bounds?: { x: number; y: number; width: number; height: number }; data?: Record<string, unknown> }>,
   ladder: InvokeAction[],

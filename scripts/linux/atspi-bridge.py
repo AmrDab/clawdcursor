@@ -184,14 +184,17 @@ def toplevels_active_first(app: Any) -> list:
 
 
 # Toplevels that belong to the window in use rather than being another window: GTK3 and Qt put an open menu, a combo's list
-# or a tooltip in a toplevel of its own, and it is never ACTIVE.
-POPUP_TOPLEVEL_ROLES = {'menu', 'popup menu', 'tool tip', 'tooltip', 'combo box', 'list'}
+# or a tooltip in a toplevel of its own that is never ACTIVE. GTK3 wraps a context menu or a combo list in a toplevel of role
+# "window" holding the menu; a real application window is a "frame" or "dialog".
+POPUP_TOPLEVEL_ROLES = {'menu', 'popup menu', 'tool tip', 'tooltip', 'combo box', 'list', 'window'}
+APP_WINDOW_ROLES = {'frame', 'dialog', 'alert', 'file chooser', 'document frame'}
 
 
 def scope_toplevels(app: Any) -> list:
     """The windows a find / invoke / tree read covers: only the ACTIVE one when the app has one (the window the agent works
     in, so the names of its other windows never reach the caller), plus the app's open popups (menus, a combo's list,
-    tooltips: toplevels of their own that are never ACTIVE); every window when none is active (the app is not focused)."""
+    tooltips: showing toplevels of their own that are never ACTIVE); every window when none is active (the app is not
+    focused)."""
     tops = toplevels_active_first(app)
     active = [t for t in tops if has_state(t, Atspi.StateType.ACTIVE)]
     if not active:
@@ -203,14 +206,17 @@ def scope_toplevels(app: Any) -> list:
 
 
 def other_windows_note(app: Any, searched: list) -> str:
-    """What a miss says when only the front window was searched and the app has more windows."""
-    tops = toplevels_active_first(app)
-    others = [t for t in tops if t not in searched]
+    """What a miss says when only the front window was searched and the app has more windows. No window title in it: a
+    title is page-controlled text, and this goes into an error that is classified by its words. Counts showing, normal
+    application windows (frame / dialog) only, not hidden popups or tooltips."""
+    others = [t for t in toplevels_active_first(app)
+              if t not in searched
+              and (safe(lambda t=t: t.get_role_name(), '') or '').lower() in APP_WINDOW_ROLES
+              and has_state(t, Atspi.StateType.SHOWING)]
     if not others or not searched:
         return ''
-    title = safe(lambda: searched[0].get_name(), '') or ''
     n = len(others)
-    return (f"; only the front window \"{title}\" was searched; this app has {n} other window{'' if n == 1 else 's'}"
+    return (f"; only the front window was searched; this app has {n} other window{'' if n == 1 else 's'}"
             ' - window {"action":"focus","title":"..."} first to work in one')
 
 

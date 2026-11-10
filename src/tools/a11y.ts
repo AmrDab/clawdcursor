@@ -11,6 +11,7 @@ import type { UiElement, WindowInfo } from '../platform/types';
 import { isBrowserProcess } from '../llm/browser-config';
 import { windowTextIncludes } from './window-text';
 import { narrowedScopeNote } from './scope-note';
+import { quoteScreenText } from '../core/result-codes';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
@@ -583,7 +584,7 @@ export function getA11yTools(): ToolDefinition[] {
         const scopes = ctx.platform?.lastFindScope ?? [];
         const searched = scopes
           .filter(s => s.processId !== undefined)
-          .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` "${s.title}"` : ''}`);
+          .map(s => `pid ${s.processId}${s.processName ? ` [${s.processName}]` : ''}${s.title ? ` ${quoteScreenText(s.title)}` : ''}`);
         const where = searched.length ? `\nsearched: ${searched.join(', ')}${await narrowedScopeNote(ctx.platform, scopes)}` : '';
         const searchedPid = typeof processId === 'number' ? processId
           : scopes.length === 1 ? scopes[0].processId : undefined;
