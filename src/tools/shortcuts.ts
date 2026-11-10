@@ -12,7 +12,7 @@
 
 import * as os from 'os';
 import {
-  SHORTCUTS,
+  shortcutsFor,
   findShortcut,
   resolveShortcutKey,
   type ShortcutCategory,
@@ -63,7 +63,7 @@ export function getShortcutTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ category, context }) => {
         const platform = os.platform();
-        let filtered = SHORTCUTS;
+        let filtered = shortcutsFor(platform);   // this OS's shortcuts only
 
         // Filter by category
         if (category) {
@@ -155,7 +155,7 @@ export function getShortcutTools(): ToolDefinition[] {
 
         if (!match) {
           // Return helpful error with similar shortcuts
-          const suggestions = SHORTCUTS
+          const suggestions = shortcutsFor(os.platform())
             .filter(s => !s.contextHints?.length || (contextHint && s.contextHints.some(h => contextHint.toLowerCase().includes(h.toLowerCase()))))
             .slice(0, 10)
             .map(s => `  • "${s.canonicalIntent}" → ${resolveShortcutKey(s, os.platform())} (${s.description})`);

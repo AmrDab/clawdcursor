@@ -362,7 +362,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     paramDescriptions: {
       // MCP surface (key_press) uses the parameter name 'key' for backward-compat.
       // System B now also accepts 'key' as an alias for 'combo' — both are valid.
-      key: 'Key/combo to press (e.g. "Return", "ctrl+a", "F5"). Space-separate combos for a sequence ("Down Down End").',
+      key: 'Key/combo to press (e.g. "Return", "mod+a", "F5"; "mod" is cmd on macOS, ctrl on Windows and Linux). Space-separate combos for a sequence ("Down Down End").',
     },
   },
 

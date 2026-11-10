@@ -19,6 +19,7 @@
  */
 
 import type { ToolDefinition } from './types';
+import { MOD } from '../platform/keys';
 import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
@@ -147,8 +148,7 @@ export function getExtraTools(): ToolDefinition[] {
           const hit = !b || !b.width || !b.height
             || (px >= b.x && px <= b.x + b.width && py >= b.y && py <= b.y + b.height);
           if (hit && /^(edit|textfield|searchfield|combobox)$/.test(role.replace(/^controltype\./, ''))) {
-            const combo = ctx.platform.platform === 'darwin' ? 'cmd+a' : 'ctrl+a';
-            await ctx.platform.keyPress(combo);
+            await ctx.platform.keyPress(`${MOD}+a`);   // this OS's select-all (keys.ts)
             selectAll = ' + select-all (edit field)';
           }
         } catch { /* best-effort — the triple-click itself already happened */ }

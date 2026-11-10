@@ -24,6 +24,12 @@ export async function findReplace(args: PlaybookArgs): Promise<PlaybookResult> {
     };
   }
 
+  // Windows / Linux editors only: mod+h opens Find & Replace there, and Alt+A is their Replace All accelerator. On
+  // macOS mod+h is Cmd+H, which HIDES the app, and there is no common chord for the panel.
+  if (adapter.platform === 'darwin') {
+    return { success: false, text: 'find-replace: no common Find & Replace shortcut on macOS — use the app\'s Edit ▸ Find menu', steps };
+  }
+
   // 1) Open the Find & Replace panel.
   await adapter.keyPress('mod+h');
   steps.push({ type: 'key', key: 'mod+h', description: 'open find & replace' });

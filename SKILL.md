@@ -256,6 +256,8 @@ Every GUI task follows the same shape regardless of surface:
 4. REPEAT   until done
 ```
 
+**Use this OS's keys.** The server instructions name the OS and its shortcut modifier (cmd on macOS, ctrl on Windows and Linux); `mod` always means that modifier (`mod+s`). Never send another OS's shortcut (no `alt+f4` or `win+r` on a Mac, no `cmd+q` on Windows); `system {"action":"shortcuts_list"}` lists this OS's chords. `ctrl+…` on macOS is sent as the real Ctrl key (right in a terminal, wrong for copy/paste).
+
 **Keystrokes always go to whatever has focus.** If focus is wrong (terminal instead of Excel), your `mod+s` - `Ctrl+S` on Windows/Linux, `Cmd+S` on macOS - saves your terminal session, not the spreadsheet. So: **focus first, act, verify.**
 
 ### Verification ladder (cheapest → most expensive)

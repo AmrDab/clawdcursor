@@ -934,7 +934,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     {
       name: 'key',
-      description: 'Press a key or key combo. Use "mod" for Ctrl/Cmd. Use "+" for a chord (e.g. "mod+s", "shift+Tab"). Space-separate for a sequence ("Down Down End"). Examples: "Return", "Tab", "Escape", "F5", "ctrl+a".',
+      description: 'Press a key or key combo. "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Use "+" for a chord (e.g. "mod+s", "shift+Tab"). Space-separate for a sequence ("Down Down End"). Examples: "Return", "Tab", "Escape", "F5", "mod+a".',
       inputSchema: {
         type: 'object',
         properties: {

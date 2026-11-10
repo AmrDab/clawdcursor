@@ -25,6 +25,7 @@ import { VERSION } from './version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { appLabel, controlBanner } from '../core/banner';
+import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { isStopped, STOPPED_TEXT, actedIn } from '../core/control';
@@ -166,6 +167,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           '(2) use OCR ([perceive-text]) when the tree is empty or sparse; ' +
           '(3) capture a screenshot ([perceive-image]) only as a last resort when both fail. ' +
           'Prefer named-target actions (by a11y name) over pixel coordinates. ') +
+      // The OS is read once, here, when the server starts: the agent knows from its first message which keys to send.
+      osKeysGuide() +
       'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
       'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
       '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +

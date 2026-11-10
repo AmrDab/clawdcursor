@@ -13,6 +13,37 @@
  * `Unknown key: "mod"` (Win/Linux) or silently drop the modifier on macOS.
  */
 const PLATFORM_PRIMARY_MOD = process.platform === 'darwin' ? 'Super' : 'Control';
+
+/**
+ * `mod` — THE way clawdcursor's own code presses this OS's shortcut modifier: Cmd on macOS, Ctrl on Windows and Linux.
+ * Every executor resolves it (this table, the three adapters, the Wayland backend), so a built-in combo is written once
+ * as `mod+v` and is right on every OS. Never write `ctrl+` / `cmd+` in a built-in combo unless the key is that key on
+ * every OS (browsers cycle tabs with Ctrl+Tab on macOS too). An agent's own `ctrl+x` is sent as Ctrl: it is a real key
+ * on a Mac (terminals), so it is never translated.
+ */
+export const MOD = 'mod';
+
+/** How an agent spells this OS's shortcut modifier. */
+export function primaryModifier(platform: NodeJS.Platform = process.platform): 'cmd' | 'ctrl' {
+  return platform === 'darwin' ? 'cmd' : 'ctrl';
+}
+
+/**
+ * One paragraph for the agent, built once when the server starts: which OS this is and which keys its shortcuts use.
+ * Without it an agent guesses, and sends Windows hotkeys to a Mac.
+ */
+export function osKeysGuide(platform: NodeJS.Platform = process.platform): string {
+  if (platform === 'darwin') {
+    return 'This computer runs macOS: the shortcut modifier is cmd (cmd+c, cmd+v, cmd+s, cmd+a, cmd+w, cmd+tab), not ctrl. ' +
+      '`mod` always means this OS\'s modifier, so mod+s is cmd+s here. ctrl is a different key on a Mac: use it only where an app really binds Ctrl ' +
+      '(a terminal\'s ctrl+c, ctrl+tab to cycle browser tabs). opt is the Alt key. Do not send Windows shortcuts (alt+f4, win+r, F5 to reload): use system shortcuts_list for this OS\'s keys. ';
+  }
+  const name = platform === 'win32' ? 'Windows' : 'Linux';
+  const sys = platform === 'win32' ? 'win is the Windows key' : 'super is the Super (Windows-logo) key';
+  return `This computer runs ${name}: the shortcut modifier is ctrl (ctrl+c, ctrl+v, ctrl+s, ctrl+a, ctrl+w), and apps are switched with alt+tab. ` +
+    `\`mod\` always means this OS's modifier, so mod+s is ctrl+s here; ${sys}. ` +
+    'Do not send macOS shortcuts (cmd+q, cmd+space, cmd+w): use system shortcuts_list for this OS\'s keys. ';
+}
 const CMD_MOD = process.platform === 'win32' ? 'Control' : 'Super';
 
 /** Canonical key name map — input (case-insensitive) → normalized name */

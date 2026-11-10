@@ -377,7 +377,9 @@ export function getA11yTools(): ToolDefinition[] {
         // Win11 maximized UWP apps report bounds (-14,-14) and block SetForegroundWindow.
         // Skipped when a monitor sits left of / above the primary: there, a
         // maximized window legitimately has negative coordinates.
-        if (!negativeSpace) try {
+        // Windows only: the phantom is a Windows artefact, and Super+Down is Windows' minimize (Cmd+Down on a Mac moves
+        // the caret to the end of the document).
+        if (!negativeSpace && process.platform === 'win32') try {
           const allWins = await ctx.a11y.getWindows(true);
           const phantoms = (allWins ?? []).filter((w: any) =>
             w.bounds.x < 0 && w.bounds.y < 0 &&

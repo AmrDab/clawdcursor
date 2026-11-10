@@ -58,6 +58,21 @@ All notable changes to Clawd Cursor will be documented in this file.
   `CLAWD_NO_GLOW` is gone with the glow.
 - **The pill and the outline close by themselves when clawdcursor is killed.** A host that hard-kills the process runs no
   exit hook; each drawer now exits when its stdin closes instead of staying on screen.
+- **Keys are OS-aware from the first message.** The server reads the OS once at startup and its instructions say which
+  OS this is and which modifier its shortcuts use ("This computer runs macOS: the shortcut modifier is cmd … not ctrl"),
+  so an agent no longer guesses and sends Windows hotkeys to a Mac. `mod` is the one alias for the OS's modifier (cmd on
+  macOS, ctrl on Windows and Linux); key examples in tool descriptions use it. An agent's explicit `ctrl+x` is still
+  sent as Ctrl on macOS (terminals bind it): nothing is translated.
+  - `shortcuts_list` / `shortcuts_run` offer and run only the shortcuts that exist on the current OS, with its keys. An
+    entry with no chord there is not offered and no longer matches (before, `shortcuts_run` could match a macOS-only
+    intent on Windows and press nothing). Fixed entries: system search, screenshots, the emoji picker and Task View are
+    no longer handed to Linux with Windows chords; "force quit", "close all windows" and "switch windows of the same app"
+    no longer fall back to `Alt+F4` / `Alt+Tab`; Safari, Notes and Messages entries are macOS-only; macOS "show desktop"
+    is `F11` (Fn cannot be sent); Linux gets its own redo, minimize, and Thunderbird forward / mark-read chords (Outlook's
+    `Ctrl+Q` quits Thunderbird).
+  - clawdcursor's own key presses go through `mod`: `type_text`'s paste and the triple-click select-all no longer pick
+    the chord with an inline OS check. The focus-time minimize of a phantom off-screen window (`Super+Down`) now runs on
+    Windows only: on macOS it was `Cmd+Down`.
 - **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
   Read lines say to act by name and keep `@x,y` for elements with no name; `smart_click` is explained where agents look
   for it and its miss carries a next step; the sparse-tree hint, `SKILL.md` and `docs/llms.txt` use one SEE/ACT ladder in
