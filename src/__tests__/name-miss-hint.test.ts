@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { nameMissHint } from '../tools/blind-hints';
-import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
+import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 
 const freeform = ['Show sidebar', 'Go Back', 'Content Hub', 'Insert Text Box', 'Insert Shape', 'Insert Sticky Note',
   'Insert Table', 'Insert Media', 'Share Board', 'New Board'].map(name => ({ name, controlType: 'Button' }));

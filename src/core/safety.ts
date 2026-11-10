@@ -259,7 +259,6 @@ const TOOL_TIER: Record<string, Tier> = {
   'cdp_evaluate': 'system',
   'open_app': 'input',
   'wait': 'read',
-  'delegate_to_agent': 'input',
   // Pipeline-internal actions
   'a11y_click': 'input',
   'a11y_set_value': 'input',
@@ -331,7 +330,6 @@ const TOOL_TIER: Record<string, Tier> = {
   'window': 'input',
   'system': 'input',
   'browser': 'input',
-  'task': 'input',
 };
 
 /**
@@ -383,7 +381,6 @@ function unpackCompoundTool(tool: string, args: Record<string, unknown>): string
       clipboard_read: 'read_clipboard', clipboard_write: 'write_clipboard',
       system_time: 'get_system_time', ocr: 'ocr_read_screen', undo: 'undo_last',
       shortcuts_list: 'shortcuts_list', shortcuts_run: 'shortcuts_execute',
-      delegate: 'delegate_to_agent',
       // v0.8.2
       detect_webview: 'detect_webview_apps',
       relaunch_with_cdp: 'relaunch_with_cdp',
@@ -403,7 +400,6 @@ function unpackCompoundTool(tool: string, args: Record<string, unknown>): string
     const mapped = publicCompoundMap[tool][actionArg];
     if (mapped) return mapped;
   }
-  if (tool === 'task') return 'delegate_to_agent';
 
   if (tool !== 'mouse' && tool !== 'keyboard' && tool !== 'window') return tool;
   const action = typeof args.action === 'string' ? args.action : '';

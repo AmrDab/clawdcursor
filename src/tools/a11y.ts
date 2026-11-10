@@ -8,7 +8,7 @@
 import type { ToolDefinition, ToolContext } from './types';
 import { a11yToMouse } from './types';
 import type { UiElement, WindowInfo } from '../platform/types';
-import { isBrowserProcess } from '../llm/browser-config';
+import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from './window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
@@ -16,7 +16,7 @@ import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint } from './blind-hints';
-import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
+import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns

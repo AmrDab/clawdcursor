@@ -20,7 +20,7 @@ import { validateCostClassMap } from '../tools/cost-class';
 import type { ToolCostClass } from '../tools/types';
 
 const COMPOUND_EXEMPTIONS = new Set([
-  'computer', 'accessibility', 'window', 'system', 'browser', 'task',
+  'computer', 'accessibility', 'window', 'system', 'browser',
 ]);
 
 const VALID_CLASSES: ToolCostClass[] = ['act', 'inspect', 'perceive-text', 'perceive-image'];

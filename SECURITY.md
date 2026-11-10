@@ -19,7 +19,7 @@ If you have not received an acknowledgment within 72 hours, please follow up —
 A useful report tells us:
 
 - The clawdcursor version (`clawdcursor --version`) and the OS + version it's running on.
-- Which surface is affected: MCP stdio (`clawdcursor mcp`), MCP HTTP (`clawdcursor agent` on `127.0.0.1:3847/mcp`), the autonomous `agent` loop, the `guides` marketplace fetch path, the installer, or a dependency.
+- Which surface is affected: MCP stdio (`clawdcursor mcp`), MCP HTTP (`clawdcursor agent` on `127.0.0.1:3847/mcp`), the `guides` marketplace fetch path, the installer, or a dependency.
 - A minimal reproducer or proof-of-concept. Logs from `CLAWD_LOG=debug` are helpful.
 - Your assessment of impact — local privilege use, cross-process exfiltration, remote exposure, etc.
 

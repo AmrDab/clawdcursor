@@ -8,7 +8,7 @@
  * continues with its history intact once the user answers.
  *
  * Answers come from any of: the overlay buttons, `clawdcursor resume`,
- * POST /resume, the dashboard, or the MCP `task {action:"resume"}`.
+ * POST /resume, the dashboard, or the MCP `resume_task` tool.
  *
  * One pause at a time per process. A second request while one is pending
  * waits its turn — except a request with the SAME `key`, which re-attaches to
@@ -22,7 +22,7 @@
  * (it may answer a question, give a code, or change the plan).
  *
  * Who answered matters: the pill, CLI, dashboard and POST /resume are the
- * human ('resumed'); an AI calling task {action:"resume"} is 'resumed_unverified',
+ * human ('resumed'); an AI calling `resume_task` is 'resumed_unverified',
  * so the agent is told the user did NOT confirm it on screen.
  *
  * A pause can also be a small card: `choices` (2-6 short options, one button each) and/or `input` (a text box). A
@@ -226,11 +226,6 @@ class PauseGate {
     return !!done && Date.now() - done.at < RECENT_TTL_MS;
   }
 
-  /** The pause on screen belongs to the running task itself (no re-attach key) — no caller can re-attach to it. */
-  isTaskPause(): boolean {
-    return !!this.pending && this.pending.key === undefined;
-  }
-
   current(): PauseInfo | null {
     return this.pending ? { ...this.pending.info } : null;
   }
@@ -299,7 +294,7 @@ class PauseGate {
   /**
    * Answer the pending pause: Resume continues the run, End task ends it, a reply (the pill's "Something else") continues
    * it with what the user typed, a choice (the index of one of the card's `choices`, as the pill reports it) continues
-   * it with that option's text. `by: 'agent'` (an AI calling task {action:"resume"}) resumes as unverified and can never
+   * it with that option's text. `by: 'agent'` (an AI calling `resume_task`) resumes as unverified and can never
    * choose: a choice is the user's.
    */
   answer(a: PauseAnswer, by: 'user' | 'agent' = 'user', reply?: string, choice?: number): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {

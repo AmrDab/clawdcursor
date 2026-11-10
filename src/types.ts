@@ -48,69 +48,10 @@ export interface ActionSequence {
   description: string;
 }
 
-export interface TaskRequest {
-  task: string;
-  safetyOverride?: SafetyTier;
-}
-
-export interface TaskResult {
-  success: boolean;
-  steps: StepResult[];
-  error?: string;
-  duration: number;
-}
-
-export interface StepResult {
-  action: string;
-  description: string;
-  success: boolean;
-  screenshot?: string;
-  error?: string;
-  timestamp: number;
-  // Structured logging fields:
-  layer?: 'browser' | 'router' | 'smart' | 'ocr' | 'a11y' | 'unified' | 'computer-use' | 'deterministic';
-  method?: string;           // 'a11y_invoke' | 'ocr_click' | 'keyboard' | 'mouse' | 'cdp'
-  coordinates?: [number, number];
-  elementName?: string;
-  elementType?: string;      // 'Button', 'Edit', etc.
-  verified?: boolean;        // post-action verification result
-  latencyMs?: number;
-}
-
-export interface AgentState {
-  status: 'idle' | 'thinking' | 'acting' | 'waiting_confirm' | 'paused';
-  currentTask?: string;
-  currentStep?: string;
-  stepsCompleted: number;
-  stepsTotal: number;
-  /**
-   * Result of the most recent `executeTask()` call. Populated when status
-   * transitions back to `idle`; cleared at the start of the next task. Lets
-   * external pollers (e.g. the `delegate_to_agent` compact tool) read the
-   * outcome of a completed task without holding a reference to the
-   * `executeTask` promise.
-   */
-  lastResult?: TaskResult;
-}
-
 export interface ClawdConfig {
   /** The daemon binds 127.0.0.1 only; there is no host setting (#293). */
   server: {
     port: number;
-  };
-  ai: {
-    provider: string;
-    apiKey?: string;
-    /** Optional OpenAI-compatible endpoint override (skill-host supplied). */
-    baseUrl?: string;
-    /** Optional text-only endpoint/key for decomposition (can differ from vision). */
-    textBaseUrl?: string;
-    textApiKey?: string;
-    /** Optional vision endpoint/key for screenshot reasoning (can differ from text). */
-    visionBaseUrl?: string;
-    visionApiKey?: string;
-    model: string;
-    visionModel: string;
   };
   safety: {
     defaultTier: SafetyTier;
@@ -138,11 +79,6 @@ export interface ClawdConfig {
 export const DEFAULT_CONFIG: ClawdConfig = {
   server: {
     port: 3847,
-  },
-  ai: {
-    provider: 'auto',
-    model: '',
-    visionModel: '',
   },
   safety: {
     defaultTier: SafetyTier.Preview,

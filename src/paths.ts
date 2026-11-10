@@ -25,8 +25,6 @@ export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
 export const UI_KNOWLEDGE_DIR = path.join(DATA_DIR, 'ui-knowledge');
 
 /** Persistent files */
-export const FAVORITES_PATH = path.join(DATA_DIR, '.clawdcursor-favorites.json');
-export const SCHEDULED_TASKS_PATH = path.join(DATA_DIR, 'scheduled-tasks.json');
 export const TOKEN_PATH = path.join(DATA_DIR, 'token');
 
 /**
@@ -36,7 +34,7 @@ export const TOKEN_PATH = path.join(DATA_DIR, 'token');
  * Why: pre-v0.9 every source file lived directly under `src/` so compiled
  * output landed at `dist/<file>.js` and `__dirname/..` always pointed at the
  * package root. After v0.9 PR10's directory restructure, files now live at
- * `dist/<core|tools|platform|llm|surface>/<file>.js`, so `__dirname/..` is
+ * `dist/<core|tools|platform|surface>/<file>.js`, so `__dirname/..` is
  * one level too shallow. This helper walks up until it finds package.json
  * regardless of how deeply nested the calling file is — so any future moves
  * don't break path resolution again.

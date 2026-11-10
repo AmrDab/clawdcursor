@@ -5,6 +5,8 @@
  * Surviving routes (they're operational endpoints, not tools):
  *   GET  /health   — readiness probe (no auth, returns JSON status)
  *   POST /stop     — graceful shutdown (Bearer auth, localhost only)
+ *   GET  /resume   — the pending pause for the user, if any (Bearer auth, localhost only)
+ *   POST /resume   — answer that pause (Bearer auth, localhost only)
  *   GET  /         — single-page dashboard (mountDashboard wires this)
  *
  * Everything else moved to MCP tools and is exposed via the streamable
@@ -131,13 +133,13 @@ export function requireAuth(req: express.Request, res: express.Response, next: e
 
   const memoryOk = timingSafeTokenEqual(received, SERVER_TOKEN);
   let diskOk = false;
-  // /stop and /abort are localhost-only SHUTDOWN controls: accept the current
-  // on-disk token for them even without CLAWD_ALLOW_DISK_TOKEN_DRIFT. The token
-  // file is owner-only (0600) and these endpoints only stop the daemon (no data
+  // /stop is a localhost-only SHUTDOWN control: accept the current
+  // on-disk token for it even without CLAWD_ALLOW_DISK_TOKEN_DRIFT. The token
+  // file is owner-only (0600) and this endpoint only stops the daemon (no data
   // or tool access), so tolerating a drifted disk token here makes
   // `clawdcursor stop` reliable across daemon restarts/churn WITHOUT weakening
   // the powerful /mcp tool surface, which stays strict (in-memory token only).
-  const isShutdownEndpoint = req.path === '/stop' || req.path === '/abort';
+  const isShutdownEndpoint = req.path === '/stop';
   if (!memoryOk && (isShutdownEndpoint || process.env.CLAWD_ALLOW_DISK_TOKEN_DRIFT === '1')) {
     const diskToken = currentDiskToken();
     if (diskToken && diskToken !== SERVER_TOKEN) {
@@ -227,14 +229,8 @@ export function getServerLogBuffer(): LogEntry[] {
 // ── Express app factory ─────────────────────────────────────────────────
 
 export interface UtilityServerOptions {
-  /** Called when /stop is invoked (graceful shutdown). */
-  onStop: () => void | Promise<void>;
-  /**
-   * Called when /abort is invoked (and first on /stop): abort the in-flight
-   * agent task WITHOUT shutting the daemon down. Optional — a tools-only
-   * daemon has no agent to abort.
-   */
-  onAbort?: () => void;
+  /** Called when /stop is invoked, before the process exits (graceful shutdown). */
+  onStop?: () => void | Promise<void>;
   /** Bind host. A non-loopback host disables the dashboard, which embeds the control token. */
   host?: string;
 }
@@ -302,20 +298,17 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     res.json({ status: 'ok', version: VERSION });
   });
 
-  // POST /abort — Bearer-gated, localhost-only: abort the in-flight agent
-  // task WITHOUT shutting the daemon down. Restored route: the legacy REST
-  // surface (src/server.ts) had it, v0.9 PR7.4 deleted it with the rest of
-  // REST — but `clawdcursor stop` still calls /abort first, so stop became
-  // a hard kill that never let the agent acknowledge ("aborted by user").
-  app.post('/abort', requireAuth, (req, res) => {
+  // GET /resume — Bearer-gated, localhost-only: is a pause for the user waiting,
+  // and what does it say. Feeds the dashboard banner. Kept off the public /health
+  // because the message is agent-written text about what the user is doing.
+  app.get('/resume', requireAuth, (req, res) => {
     const ip = req.ip || req.socket.remoteAddress || '';
     const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
     if (!isLocal) {
-      return res.status(403).json({ error: 'Abort is only allowed from localhost' });
+      return res.status(403).json({ error: 'Resume is only allowed from localhost' });
     }
-    console.log(`\n${e('⏹', '--')} Abort requested — stopping the in-flight task...`);
-    try { options.onAbort?.(); } catch { /* non-fatal */ }
-    res.json({ aborted: true });
+    const pause = pauseGate.current();
+    res.json({ waiting: pause !== null, pause });
   });
 
   // POST /resume — Bearer-gated, localhost-only: answer a pause for the user
@@ -353,12 +346,8 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
     res.end(body, () => {
       console.log(`\n${e('👋', '--')} Shutting down (stop command received)...`);
-      // Abort the in-flight agent task FIRST so the loop can settle and
-      // print its "aborted by user" acknowledgment, then give onStop a
-      // bounded grace window before exiting. Previously this exited a flat
-      // 500ms after the response — a hard kill mid-turn with no output.
-      try { options.onAbort?.(); } catch { /* non-fatal */ }
-      const grace = Promise.resolve().then(() => options.onStop()).catch(() => {});
+      // Give onStop a bounded grace window before exiting.
+      const grace = Promise.resolve().then(() => options.onStop?.()).catch(() => {});
       const cap = new Promise<void>(resolve => setTimeout(resolve, 2500));
       void Promise.race([grace, cap]).then(() => process.exit(0));
     });
@@ -380,7 +369,7 @@ export function mountJson404(app: express.Express): void {
   app.use((req, res) => {
     res.status(404).json({
       error: `No such endpoint: ${req.method} ${req.path}`,
-      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'POST /abort', 'POST /resume', 'POST /stop'],
+      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'GET /resume', 'POST /resume', 'POST /stop'],
     });
   });
 }

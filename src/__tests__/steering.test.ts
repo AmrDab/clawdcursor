@@ -87,8 +87,8 @@ describe('2. smart_click is explained, and its miss carries a next step', () => 
 });
 
 describe('3. order, and the computer tool', () => {
-  it('the compact tools come in the order accessibility, system, window, browser, computer, (task), batch', () => {
-    expect(getCompactTools().map(t => t.name)).toEqual(['accessibility', 'system', 'window', 'browser', 'computer', 'task', 'batch']);
+  it('the compact tools come in the order accessibility, system, window, browser, computer, batch', () => {
+    expect(getCompactTools().map(t => t.name)).toEqual(['accessibility', 'system', 'window', 'browser', 'computer', 'batch']);
   });
 
   it('screenshot, screenshot_region and zoom end the computer action enum', () => {
@@ -326,7 +326,6 @@ describe('9. parameter descriptions per compound, and the description limit', ()
 
   it('every compound tool description, and batch, fits in 1,024 characters', () => {
     for (const t of getCompactTools()) {
-      if (t.name === 'task') continue;   // removed in 1.6
       expect(t.description.length, `${t.name} is ${t.description.length}`).toBeLessThanOrEqual(1024);
     }
   });

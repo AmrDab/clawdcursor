@@ -81,19 +81,3 @@ export function psOpts<const T extends object>(options?: T): T & { cwd: string }
   const cwd = (options as { cwd?: string } | undefined)?.cwd;
   return { ...(options as T), cwd: cwd ?? privateRunDir() };
 }
-
-/**
- * The call that opens an interactive PowerShell console running `scriptPath` for the user (`clawdcursor task`). A directly
- * spawned PowerShell has no console of its own through execFile and would wait on a stdin pipe, so a short-lived PowerShell
- * `Start-Process`es the ABSOLUTE powershell path; the script path crosses as $env: (never interpolated), and the console starts
- * in the user's home, not in clawdcursor's private directory.
- */
-export function interactiveConsoleCall(scriptPath: string): { file: string; args: string[]; env: NodeJS.ProcessEnv } {
-  const exe = powershellExe();
-  return {
-    file: exe,
-    args: ['-NoProfile', '-NonInteractive', '-Command',
-      "Start-Process -FilePath $env:CLAWD_PS_EXE -WorkingDirectory $env:USERPROFILE -ArgumentList @('-NoExit', '-ExecutionPolicy', 'Bypass', '-File', ('\"{0}\"' -f $env:CLAWD_PS_SCRIPT))"],
-    env: { ...process.env, CLAWD_PS_EXE: exe, CLAWD_PS_SCRIPT: scriptPath },
-  };
-}

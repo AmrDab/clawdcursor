@@ -9,7 +9,7 @@ import { toolAnnotations } from '../surface/mcp-server';
 describe('MCP tool annotations', () => {
   it('every compact tool has a title and explicit hints', () => {
     const tools = getCompactSurface();
-    expect(tools.map(t => t.name).sort()).toEqual(['accessibility', 'batch', 'browser', 'computer', 'system', 'task', 'window']);
+    expect(tools.map(t => t.name).sort()).toEqual(['accessibility', 'batch', 'browser', 'computer', 'system', 'window']);
     for (const t of tools) {
       const a = toolAnnotations(t);
       expect(a.title, t.name).toBeTruthy();

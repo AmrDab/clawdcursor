@@ -894,9 +894,8 @@ export function getExtraTools(): ToolDefinition[] {
     },
 
     // ── DAEMON DIAGNOSTICS (v0.9 PR7.2) ────────────────────────────
-    // These three tools replace REST endpoints that the dashboard used to
-    // call directly. They're intentionally minimal — clients that want
-    // richer log views should consume task_logs_current instead.
+    // These tools replace REST endpoints that the dashboard used to
+    // call directly. They're intentionally minimal.
 
     {
       name: 'logs_recent',
