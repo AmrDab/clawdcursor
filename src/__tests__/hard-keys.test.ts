@@ -145,7 +145,9 @@ function keyboard() {
     sent,
     keyPress: vi.fn(async (c: string) => { sent.push(`press ${c}`); }),
     keyDown: vi.fn(async (c: string) => { sent.push(`down ${c}`); }),
-    keyUp: vi.fn(async (c: string) => { sent.push(`up ${c}`); }),
+    failNextUp: false,
+    keyUp: vi.fn(async (c: string) => { if (kb.failNextUp) { kb.failNextUp = false; throw new Error('release failed'); } sent.push(`up ${c}`); }),
+    typeText: vi.fn(async (t: string) => { sent.push(`type ${t}`); }),
     async executeKeyboardAction(a: { key: string }) { await kb.keyPress(a.key); },   // NativeDesktop's composite action
     takeInputWarning: () => null,
   };
@@ -191,6 +193,54 @@ describe('one call site: the input layer, below every tool', () => {
     await platform.keyUp(LOCK_HOLD);
     await desktop.keyPress(LOCK_KEY);
     expect(desktop.sent).toEqual([`press ${LOCK_KEY}`]);
+  });
+
+  // Security review of #344: key_up cleared a held key by FAMILY, before the executor ran. `key_up rwin` let go of the
+  // right Windows key only, but forgot the left one clawdcursor was still holding — and the next `l` locked the machine.
+  it('key_up releases only the exact key it names, and only once the executor released it', async () => {
+    const kb = keyboard();
+    await kb.keyDown(LOCK_HOLD);
+    for (const other of process.platform === 'darwin' ? ['rcmd', 'command_r', 'RightCmd', 'meta'] : ['rwin', 'RightSuper', 'super', 'meta']) {
+      await kb.keyUp(other).catch(() => {});
+      await expect(kb.keyPress(LOCK_KEY), `after key_up ${other}`).rejects.toThrow(/dangerous key combo/);
+    }
+    // An executor that fails to release leaves the key held.
+    kb.failNextUp = true;
+    await expect(kb.keyUp(LOCK_HOLD)).rejects.toThrow('release failed');
+    await expect(kb.keyPress(LOCK_KEY)).rejects.toThrow(/dangerous key combo/);
+    // The exact key, released for real: free again.
+    await kb.keyUp(LOCK_HOLD);
+    await kb.keyPress(LOCK_KEY);
+    expect(kb.sent.filter(s => s.startsWith('press'))).toEqual([`press ${LOCK_KEY}`]);
+  });
+
+  it('the same key in another case or with spaces is the same key', async () => {
+    const kb = keyboard();
+    await kb.keyDown(LOCK_HOLD);
+    await kb.keyUp(` ${LOCK_HOLD.toUpperCase()} `);
+    await kb.keyPress(LOCK_KEY);
+    expect(kb.sent).toContain(`press ${LOCK_KEY}`);
+  });
+
+  // Security review of #344: typeText was not checked at all, so `key_down super` then `type "l"` was Super+L.
+  it('typed text is checked against the held keys: key_down, then type the last key', async () => {
+    const kb = keyboard();
+    await kb.keyDown(LOCK_HOLD);
+    for (const text of [LOCK_KEY, LOCK_KEY.toUpperCase(), `hel${LOCK_KEY}o`, `abc
+${LOCK_KEY}`]) {
+      await expect(kb.typeText(text), JSON.stringify(text)).rejects.toThrow(/dangerous key combo/);
+    }
+    expect(kb.sent.filter(s => s.startsWith('type'))).toEqual([]);
+    await kb.typeText('z');                       // a character that completes nothing is still typed
+    await kb.keyUp(LOCK_HOLD);
+    await kb.typeText(`he${LOCK_KEY}${LOCK_KEY}o`);   // nothing held: any text
+    expect(kb.sent.filter(s => s.startsWith('type'))).toEqual(['type z', `type he${LOCK_KEY}${LOCK_KEY}o`]);
+  });
+
+  it('with nothing held, typing is never refused — not even the name of a locking combo', async () => {
+    const kb = keyboard();
+    for (const text of ['win+l', 'ctrl+alt+delete', 'l', 'q', 'Press Ctrl+Cmd+Q to lock']) await kb.typeText(text);
+    expect(kb.sent).toHaveLength(5);
   });
 
   it('it is unconditional: clawdcursor\'s own housekeeping and a missing input guard are refused too', async () => {

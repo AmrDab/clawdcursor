@@ -145,28 +145,42 @@ export function guardInputMethods<T extends object>(target: T): T {
   return target;
 }
 
-/** Keys the agent holds down (key_down without its key_up yet), in both input layers: they are one keyboard. */
-const heldKeys = new Set<string>();
+/**
+ * Keys the agent holds down (key_down without its key_up yet), in both input layers: they are one keyboard. Keyed by the
+ * key AS THE AGENT NAMED IT (lower case), with the key it stands for: `key_up rwin` lets go of the right Windows key and
+ * must not make clawdcursor forget the `win` it is still holding. Per server process: a key held through one clawdcursor
+ * process is not known to another.
+ */
+const heldKeys = new Map<string, string>();
+const namedKeys = (combo: unknown): string[] => String(combo ?? '').split('+').map(k => k.trim().toLowerCase()).filter(Boolean);
 
 /**
  * The hard key list (hard-keys.ts) — its ONE call site. Outermost and unconditional: it runs for nested calls, for
  * clawdcursor's own housekeeping and with no input guard installed, because no caller has a reason to lock the machine.
- * A key held with key_down counts toward the next press (key_down "win", then key_press "l").
+ *  - A key held with key_down counts toward the next press (key_down "win", then key_press "l").
+ *  - So does typed text: with a key held, every typed character is a press of that key with it (key_down "win", type "l").
+ *  - key_up forgets a key only when it names exactly the key that was held, and only after the executor released it.
  */
 function guardHardKeys(target: object): void {
   const t = target as Record<string, unknown>;
-  for (const m of ['keyPress', 'keyDown', 'keyUp']) {
+  for (const m of ['keyPress', 'keyDown', 'keyUp', 'typeText']) {
     const f = t[m];
     if (typeof f !== 'function') continue;
     t[m] = async (...args: unknown[]) => {
       if (m === 'keyUp') {
-        for (const k of keysOf(args[0])) heldKeys.delete(k);
-        return f.apply(target, args);
+        const r = await f.apply(target, args);
+        for (const k of namedKeys(args[0])) heldKeys.delete(k);
+        return r;
       }
-      const why = hardKeyRefusal(args[0], heldKeys);
-      if (why) throw new Error(why);
+      const held = [...new Set(heldKeys.values())];
+      // Typed text only matters while something is held: each character is then a chord with the held keys.
+      const presses = m === 'typeText' ? (held.length ? [...String(args[0] ?? '')] : []) : [args[0]];
+      for (const press of presses) {
+        const why = hardKeyRefusal(press, held);
+        if (why) throw new Error(why);
+      }
       const r = await f.apply(target, args);
-      if (m === 'keyDown') for (const k of keysOf(args[0])) heldKeys.add(k);
+      if (m === 'keyDown') namedKeys(args[0]).forEach((k, i) => heldKeys.set(k, keysOf(args[0])[i] ?? k));
       return r;
     };
   }

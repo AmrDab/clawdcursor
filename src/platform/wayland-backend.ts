@@ -291,7 +291,9 @@ export class WaylandBackend {
       } else if (key.length === 1) {
         args.push(key);
       } else {
-        // Unknown key — best-effort type the text.
+        // Unknown key. Alone, it is typed as text. In a chord it is refused, as the X11 path does: typing "ll" with
+        // Super held is Super+L twice, and the hard key list (which saw no key called "ll") never checked it.
+        if (parts.length > 1) throw new Error(`Unknown key: "${key}"`);
         args.push(key);
       }
       await execFileAsync('wtype', args, { timeout: TIMEOUT_MS }).catch(() => {});
@@ -324,6 +326,9 @@ export class WaylandBackend {
     }
     const mainName = parts[parts.length - 1];
     const mainCode = this.keyToCode(mainName);
+    // An unknown key in a chord is refused before any modifier goes down, as the X11 path does: typed as text with
+    // Super held, "ll" is Super+L twice — past the hard key list, which saw no key called "ll".
+    if (mainCode === null && parts.length > 1) throw new Error(`Unknown key: "${mainName}"`);
 
     try {
       // Press modifiers
