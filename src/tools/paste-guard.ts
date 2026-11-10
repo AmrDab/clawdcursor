@@ -80,9 +80,10 @@ export function typesAsKeys(text: string): boolean {
 }
 
 /**
- * 'match': the field shows the text. 'suffix': it shows the text with more after it — an inline autocomplete suggestion
- * (an address bar), the case where Return would go somewhere else. 'mismatch': it shows other text (the field reformatted
- * it — a phone number, an amount — or the keys went elsewhere). 'unknown': it cannot be told.
+ * 'match': the field shows the text. 'suffix': it shows the text with more around it — an inline autocomplete suggestion
+ * (an address bar), the case where Return would go somewhere else, or old text a replace did not clear. 'mismatch': it
+ * shows other text (the field reformatted it — a phone number, an amount — or the keys went elsewhere). 'unknown': it
+ * cannot be told.
  */
 export type ReadBack = 'match' | 'suffix' | 'mismatch' | 'unknown';
 
@@ -96,13 +97,16 @@ const READ_CAP = 1000;
  * Read the focused field after typing. 'unknown' when it cannot be told — no focused element, a password field (its
  * value is withheld), a field that exposes no text (empty value: many custom controls), or a value at the read cap.
  * Polls briefly: a field can lag the keys. `value` is what the field showed (for the caller to report). Never throws.
+ *
+ * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (only whitespace is normalized) — the
+ * one check behind every value-setting path. A field that merely contains the text ("10030" for "30") is no match.
  */
 export async function readBackTyped(
   focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
   text: string,
-  opts: { maxMs?: number; stepMs?: number; submit?: boolean } = {},
+  opts: { maxMs?: number; stepMs?: number; submit?: boolean; whole?: boolean } = {},
 ): Promise<{ result: ReadBack; value?: string; secure?: boolean }> {
-  const { maxMs = 300, stepMs = 100, submit = false } = opts;
+  const { maxMs = 300, stepMs = 100, submit = false, whole = false } = opts;
   const want = flat(text);
   if (!want) return { result: 'unknown' };
   const t0 = Date.now();
@@ -116,7 +120,7 @@ export async function readBackTyped(
     if (v) {
       // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
       // do — typing into the middle of a document.
-      if (submit ? v.endsWith(want) : v.includes(want)) return { result: 'match', value: v };
+      if (whole ? v === want : submit ? v.endsWith(want) : v.includes(want)) return { result: 'match', value: v };
       last = { result: v.includes(want) ? 'suffix' : 'mismatch', value: v };
     }
     if (Date.now() - t0 >= maxMs) return last;

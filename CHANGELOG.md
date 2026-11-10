@@ -33,6 +33,11 @@ All notable changes to Clawd Cursor will be documented in this file.
   It is left out for browser acts and for by-name acts on a window that is not in front, where it isn't known.
 - **`computer key` takes `repeat`** (1 to 100): the key or sequence is pressed that many times. It was dropped without
   a word and the key pressed once.
+- **`set_value` and a replacing `smart_type` succeed only when the field holds the value.** Every path (native set,
+  keyboard fallback, element ref) ends in one read-back that compares the whole value: a field that ignored select-all
+  and kept its old text (`10030` for `30`) is `READBACK_MISMATCH` with what it shows, not a success or a "read back ✓".
+  A field that reads back is `[confirmed]`; one that cannot be read says NOT verified. A `get_value` miss carries its
+  reason (`NOT_FOUND`, `UNSUPPORTED_ACTION`, `TIMEOUT`) instead of `UNKNOWN`.
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
   (`invoke`, `set_value`, `toggle`, `select`) are refused when the window in front is Claude, ChatGPT, Codex, Cursor,
   VS Code (and Insiders), Windsurf or Zed, or an app this server was started from (stdio), unless the agent focused or

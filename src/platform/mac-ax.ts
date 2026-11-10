@@ -575,11 +575,12 @@ function toInvokeResult(r: any): InvokeResult {
     success: r?.success === true,
     // A refused click reports the element's rect / centre so the caller can fall back to coordinates.
     bounds: r?.bounds ?? (r?.clickPoint ? { x: r.clickPoint.x, y: r.clickPoint.y, width: 1, height: 1 } : undefined),
-    // get-value reports its payload at the top level; consumers read res.data?.value. `refused`: the helper declined to
+    // get-value reports its payload at the top level; consumers read res.data?.value (`method` "name": no value, the
+    // element's own name instead). `refused`: the helper declined to
     // act (ambiguous role, secure field) — callers must not route around that with a guess.
     data: withMissFields(r, r?.refused === true
       ? { ...(r?.data ?? (r?.value !== undefined ? { value: r.value } : {})), refused: true }
-      : r?.data ?? (r?.value !== undefined ? { value: r.value } : undefined)),
+      : r?.data ?? (r?.value !== undefined ? { value: r.value, method: r.method } : undefined)),
     error: typeof r?.error === 'string' ? r.error : undefined,
   };
 }

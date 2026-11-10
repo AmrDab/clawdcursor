@@ -53,6 +53,7 @@ vi.mock('../platform/ocr-engine', () => {
 
 import { getSmartTools } from '../tools/smart';
 import type { ToolContext } from '../tools/types';
+import { classifyResult } from '../core/result-codes';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -824,6 +825,32 @@ describe('Smart Tools', () => {
       await smartType.handler({ text: '.bak', target: 'Save As', mode: 'append' }, createCtx());
       expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual([]);
       expect(mockTypeText).toHaveBeenCalledWith('.bak');
+    });
+
+    // Live (a CAD field that ignores Ctrl+A): replacing "100" with "30" left "1003300", reported "read back ✓".
+    it('replace: a field that only CONTAINS the text is a mismatch, never "read back ✓"', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue({ value: '1003300' });
+      const result = await smartType.handler({ text: '30', target: 'Distance' }, createCtx());
+      mockGetFocusedElement.mockReset();
+      expect(result.isError).toBe(true);
+      expect(result.text).not.toMatch(/read back ✓/);
+      expect(result.text).toMatch(/not the text asked for/);
+      expect(result.text).toContain('1003300');
+      expect(classifyResult(result.text, true, true)?.code).toBe('READBACK_MISMATCH');
+    });
+
+    it('replace: the field holding exactly the text is "read back ✓"; append still matches inside existing text', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue({ value: '30' });
+      const replaced = await smartType.handler({ text: '30', target: 'Distance' }, createCtx());
+      mockGetFocusedElement.mockResolvedValue({ value: '10030' });
+      const appended = await smartType.handler({ text: '30', target: 'Distance', mode: 'append' }, createCtx());
+      mockGetFocusedElement.mockReset();
+      expect(replaced.isError).toBeFalsy();
+      expect(replaced.text).toMatch(/^Typed 2 chars \(keys, read back ✓\)/);
+      expect(appended.isError).toBeFalsy();
+      expect(appended.text).toMatch(/^Typed 2 chars \(keys, read back ✓\)/);
     });
 
     it('without a target, types at the cursor (never selects all of a document)', async () => {

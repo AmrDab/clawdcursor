@@ -19,7 +19,7 @@
  * rank-before-truncate sense layer surface its buttons.
  */
 
-import type { UnifiedTool, AgentToolContext } from './types';
+import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
@@ -371,7 +371,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (plan.via === 'name') {
             const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
             await sleep(150);
-            return { success: res.success, text: res.success ? `Set "${plan.name}" = ${fillValue.length} chars (via ${plan.element.id}).` : `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
+            if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
+            return setResult(ctx, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name });
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
@@ -382,7 +383,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(fillValue);
           await sleep(150);
-          return { success: true, text: `Filled ${plan.element.id} via bounds + select-all + type (${fillValue.length} chars${plan.offView ? ', scrolled into view first' : ''}).`, targetLabel: plan.element.id };
+          return setResult(ctx, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -394,11 +395,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (!name.trim() && !controlType) {
           return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
         }
-        const res = await ctx.platform.invokeElement({
-          name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId, action: 'set-value', value,
-        });
+        const field = { name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId };
+        const res = await ctx.platform.invokeElement({ ...field, action: 'set-value', value });
         await sleep(150);
-        if (res.success) return { success: true, text: `Set ${quoteScreenText(name)} = ${value.length} chars`, targetLabel: name };
+        // `unverified`: the Windows bridge typed it and could not read the field; the focused field is where the keys went.
+        if (res.success) return setResult(ctx, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field);
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
         if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
           const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
@@ -415,7 +416,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         await ctx.platform.keyPress('mod+a');
         await ctx.platform.typeText(value);
         await sleep(150);
-        return { success: true, text: `Set ${quoteScreenText(name)} = ${value.length} chars (keyboard fallback: no settable value).`, targetLabel: name };
+        return setResult(ctx, value, name, ' (keyboard fallback: no settable value)');
       },
     },
 
@@ -576,7 +577,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (editable && types.some(t => !EDITABLE_ROLE.test(t) || /^text$/i.test(t))) controlType = editable;
         }
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'get-value' });
-        if (!res.success) return { success: false, text: `${quoteScreenText(name)} has no readable value.` };
+        if (!res.success) return { success: false, text: `a11y get_value ${quoteScreenText(name)} missed — ${missText(res.data)}.` };
         // The whole value: read_tree points here to read what it cut. Only a huge one is cut again, and says so.
         const value = String((res.data as any)?.value ?? '');
         const shownValue = value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
@@ -2359,6 +2360,30 @@ async function editableTarget(
   const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
   if (!pick?.bounds) return null;
   return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
+}
+
+/**
+ * How every set_field_value path ends: one read-back (readBackTyped, whole value) decides the result. The field must hold
+ * exactly `value`; one that shows other text is a failure that says what it shows, one that cannot be read is said to be
+ * NOT verified. Reads `named` (the field a native set wrote to), or without it the focused field (where the value was typed).
+ */
+async function setResult(
+  ctx: AgentToolContext, value: string, label: string, how: string,
+  named?: { name: string; controlType?: string; processId?: number },
+): Promise<UnifiedToolResult> {
+  const rb = await readBackTyped(async () => {
+    if (!named) return ctx.platform.getFocusedElement();
+    const res = await ctx.platform.invokeElement({ ...named, action: 'get-value' });
+    const d = res.data as { value?: unknown; method?: unknown } | undefined;
+    // A bridge that finds no value answers with the element's NAME (method "Name"): that is not the field's text.
+    return res.success && typeof d?.value === 'string' && !/^name$/i.test(String(d.method)) ? { value: d.value } : null;
+  }, value, { whole: true });
+  const set = `${quoteScreenText(label)} = ${value.length} chars${how}`;
+  if (rb.result === 'match') return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
+  if (rb.result === 'unknown') return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };
+  const cut = (s: string) => quoteScreenText(s.length > 80 ? `${s.slice(0, 79)}…` : s);
+  const kept = rb.result === 'suffix' ? ' — text that was already there was not replaced, or the field added to it' : '';
+  return { success: false, text: `Set ${quoteScreenText(label)} failed: the field shows ${cut(rb.value ?? '')}, not the value asked for (${cut(value)})${kept}.`, targetLabel: label };
 }
 
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */
