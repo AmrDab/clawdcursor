@@ -456,7 +456,7 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 - **Network isolation.** Binds to `127.0.0.1` only; there is no setting that opens it to the network. Verify: `netstat -an | findstr 3847` (Windows) / `| grep 3847` (Unix). To drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side.
 - **Bearer-token auth** on every HTTP request (`~/.clawdcursor/token`).
 - **Sensitive-app policy.** Email, banking, password managers, private messaging auto-elevate to Confirm.
-- **No telemetry by default.** Nothing phones home. Screenshots stay in RAM; with a local model nothing leaves the machine; with a cloud provider, screenshots go only to the endpoint you configured. `clawdcursor report` is opt-in and previews exactly what it sends.
+- **No telemetry by default.** Nothing phones home. Screenshots stay in RAM and go only to the MCP client that asked for them; clawdcursor calls no model itself. `clawdcursor report` is opt-in and previews exactly what it sends.
 - **No screenshots to any model, if you want.** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, which also covers stdio `clawdcursor mcp`) keeps every image from MCP clients; they work from the accessibility tree and OCR text.
 - **Prompt-injection defense.** Screen text is returned inside `<untrusted-screen-content>` tags &mdash; data, never instructions.
 - **Log privacy.** Logs redact password-field values (`AXSecureTextField`, UIA `IsPassword=true`).
@@ -472,7 +472,6 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 | `src/core/` | Sense layer (a11y / snapshot / fingerprint / UI compiler), reactive verification, focus guard, safety gate. |
 | `src/tools/` | 100+ granular tools + 5 compound aggregators + `batch`, playbooks, registry, dispatch. |
 | `src/platform/` | `PlatformAdapter` + Windows / macOS / Linux / Wayland, OCR engine, CDP driver, URI handler. |
-| `src/llm/` | Provider clients (Claude, GPT, Gemini, Llama, Kimi, Ollama, …), credentials, model config. |
 | `src/surface/` | CLI, MCP server (stdio + HTTP), dashboard, doctor, onboarding, control banner. |
 
 The `PlatformAdapter` is the only thing platform code talks to; `safety.evaluate()` is the only way tools execute. Those two seams are the whole point.

@@ -27,6 +27,21 @@ All notable changes to Clawd Cursor will be documented in this file.
     `--provider`, `--model`, `--text-model`, `--vision-model`, `--base-url` and
     `--api-key` flags are gone from `agent` and `start`. The HTTP MCP transport,
     `/stop`, `/resume`, `/health` and token auth are unchanged.
+- **Breaking: all model configuration is gone.** There is no provider, model,
+  API key or base URL setting anywhere: the provider clients and key discovery
+  (`src/llm/`) are gone, and so are the `AI_API_KEY` / `CLAWD_*_MODEL` /
+  `CLAWD_PROVIDER` style variables and the matching keys in
+  `.clawdcursor-config.json` (old files still load; those keys are ignored).
+  `.env.example` is gone. `clawdcursor doctor` is now only a diagnostic (version,
+  installed copies, consent, screen capture, macOS permissions, accessibility,
+  skill registration): it no longer scans or tests providers, stores keys or
+  writes a config, and its `--provider`, `--api-key`, `--no-save` and `--reset`
+  flags are gone. `clawdcursor status` no longer reports an AI config. The config
+  ladder (CLI > project file > user file > env > default) is unchanged for
+  `port`, `debug` and `disableVision`. Configure the model in your agent host.
+- **The dashboard's Tasks and Scheduled tabs**, task form, history and
+  favorites. The dashboard is the pause banner, the log view, the connection
+  status and the Kill button.
 
 ### Changed
 - **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
@@ -81,6 +96,10 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **Window titles match through invisible characters** (the zero-width space in Edge's title) in focus, `expect` and
   scoping, on every OS.
 - **`system copy_all_text` accepts `scope`**, which the `system` schema lists for `ocr`.
+- **The dashboard shows a pause for the user again.** The Resume / End banner was
+  fed by the removed `agent_status` tool. It now reads the pending pause
+  (message, choices) from `GET /resume`, which needs the token like
+  `POST /resume`; the public `/health` is unchanged and carries no pause.
 
 ## [1.5.27] - 2026-11-09
 

@@ -5,6 +5,8 @@
  * Surviving routes (they're operational endpoints, not tools):
  *   GET  /health   — readiness probe (no auth, returns JSON status)
  *   POST /stop     — graceful shutdown (Bearer auth, localhost only)
+ *   GET  /resume   — the pending pause for the user, if any (Bearer auth, localhost only)
+ *   POST /resume   — answer that pause (Bearer auth, localhost only)
  *   GET  /         — single-page dashboard (mountDashboard wires this)
  *
  * Everything else moved to MCP tools and is exposed via the streamable
@@ -296,6 +298,19 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     res.json({ status: 'ok', version: VERSION });
   });
 
+  // GET /resume — Bearer-gated, localhost-only: is a pause for the user waiting,
+  // and what does it say. Feeds the dashboard banner. Kept off the public /health
+  // because the message is agent-written text about what the user is doing.
+  app.get('/resume', requireAuth, (req, res) => {
+    const ip = req.ip || req.socket.remoteAddress || '';
+    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+    if (!isLocal) {
+      return res.status(403).json({ error: 'Resume is only allowed from localhost' });
+    }
+    const pause = pauseGate.current();
+    res.json({ waiting: pause !== null, pause });
+  });
+
   // POST /resume — Bearer-gated, localhost-only: answer a pause for the user
   // (pause-gate.ts). Body {answer: "resume" | "end"}.
   // Used by `clawdcursor resume` and the dashboard buttons.
@@ -354,7 +369,7 @@ export function mountJson404(app: express.Express): void {
   app.use((req, res) => {
     res.status(404).json({
       error: `No such endpoint: ${req.method} ${req.path}`,
-      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'POST /resume', 'POST /stop'],
+      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'GET /resume', 'POST /resume', 'POST /stop'],
     });
   });
 }

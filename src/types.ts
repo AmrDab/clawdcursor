@@ -53,20 +53,6 @@ export interface ClawdConfig {
   server: {
     port: number;
   };
-  ai: {
-    provider: string;
-    apiKey?: string;
-    /** Optional OpenAI-compatible endpoint override (skill-host supplied). */
-    baseUrl?: string;
-    /** Optional text-only endpoint/key for decomposition (can differ from vision). */
-    textBaseUrl?: string;
-    textApiKey?: string;
-    /** Optional vision endpoint/key for screenshot reasoning (can differ from text). */
-    visionBaseUrl?: string;
-    visionApiKey?: string;
-    model: string;
-    visionModel: string;
-  };
   safety: {
     defaultTier: SafetyTier;
     confirmPatterns: string[];
@@ -93,11 +79,6 @@ export interface ClawdConfig {
 export const DEFAULT_CONFIG: ClawdConfig = {
   server: {
     port: 3847,
-  },
-  ai: {
-    provider: 'auto',
-    model: '',
-    visionModel: '',
   },
   safety: {
     defaultTier: SafetyTier.Preview,

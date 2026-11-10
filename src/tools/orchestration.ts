@@ -5,7 +5,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
-import { agentBrowserConnectOptions } from '../llm/browser-config';
+import { agentBrowserConnectOptions } from '../platform/browser-config';
 import { resolveAlias } from '../core/router/aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';

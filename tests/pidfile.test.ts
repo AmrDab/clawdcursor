@@ -216,7 +216,7 @@ describe('daemonPortForClient', () => {
     try {
       plantCwdConfig();
       // The plant works: the config ladder would have picked it up.
-      const { resolveConfig } = await import('../src/llm/config');
+      const { resolveConfig } = await import('../src/config');
       expect(resolveConfig({ userConfigPath: path.join(tmpHome, 'none.json'), envOverride: {} }).port).toBe(6666);
       expect(mod.claimPidFile('start')).toBeNull();   // this process plays the daemon
       mod.recordLockPort('start', 4999);

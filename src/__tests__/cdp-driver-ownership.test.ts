@@ -75,7 +75,7 @@ vi.mock('playwright', () => ({
 }));
 
 import { CDPDriver, agentBrowserArgs } from '../platform/cdp-driver';
-import { AGENT_CDP_PORT, DEFAULT_CDP_PORT } from '../llm/browser-config';
+import { AGENT_CDP_PORT, DEFAULT_CDP_PORT } from '../platform/browser-config';
 
 beforeEach(() => {
   state.livePorts.clear();

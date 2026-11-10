@@ -96,38 +96,7 @@ chmod +x scripts/mac/*.jxa
 
 ---
 
-## 3. Configure AI Provider
-
-### Free (Ollama — local, no API key)
-
-```bash
-# Install Ollama
-brew install ollama
-
-# Pull the model
-ollama pull qwen2.5:7b
-
-# Run the doctor
-npm run doctor -- --provider ollama
-```
-
-### Anthropic (recommended for complex tasks)
-
-```bash
-echo "AI_API_KEY=sk-ant-api03-..." > .env
-npm run doctor
-```
-
-### OpenAI
-
-```bash
-echo "AI_API_KEY=sk-..." > .env
-npm run doctor -- --provider openai
-```
-
----
-
-## 4. Launch with CDP (Browser Automation)
+## 3. Launch with CDP (Browser Automation)
 
 To use the CDPDriver for browser tasks, launch Chrome or Edge with the remote debugging port:
 
@@ -158,7 +127,7 @@ You should see Chrome/Edge version info. If you get "Connection refused", the br
 
 ---
 
-## 5. Start the Agent
+## 4. Start the Agent
 
 ```bash
 npm start
@@ -291,9 +260,6 @@ npm run doctor
 
 # Start agent
 npm start
-
-# Start with Ollama (free)
-npm start -- --provider ollama
 
 # Launch Chrome with CDP
 open -a "Google Chrome" --args --remote-debugging-port=9222
