@@ -3,11 +3,12 @@
  *
  * Why: the only way to know whether agents follow "blind first, then
  * vision" (read the a11y tree / text, act by name; screenshots + coordinate
- * clicks only as a fallback) is to count it. It is also what `clawdcursor
- * report` sends, so a user can report a bad session in one step.
+ * clicks only as a fallback) is to count it. `clawdcursor report` sends a
+ * summary of it (counts, the last calls' tool / action / class, result codes;
+ * not the app names), so a user can report a bad session in one step.
  *
- * Records: tool, action, perception class, ok, duration, and for a failure its
- * result code (NOT_FOUND, TIMEOUT, ...). NEVER error text, typed text, clipboard
+ * Records: tool, action, perception class, ok, duration, the name of the app a
+ * call acted in, and for a failure its result code (NOT_FOUND, TIMEOUT, ...). NEVER error text, typed text, clipboard
  * contents, element names, window titles, URLs or coordinates: error texts carry
  * them. The day log (`tool.done`) follows the same rule. Local only
  * (~/.clawdcursor/sessions/), last 50 sessions kept, off with CLAWDCURSOR_SESSION_LOG=0.
@@ -52,7 +53,7 @@ export function classifyCall(tool: string, action?: string): CallClass {
 export type Outcome = 'ok' | 'empty' | 'partial' | 'timeout' | 'error' | 'refused' | 'consent_required';
 /** One step of a batch, classified like a call of its own. */
 export interface StepCall { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome }
-export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; code?: string; steps?: StepCall[] }
+export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; app?: string; code?: string; steps?: StepCall[] }
 
 /** Derive an outcome from a result's text (no content is stored, only the class). */
 export function outcomeOf(isError: boolean, text: string): Outcome {
@@ -148,7 +149,9 @@ export class SessionLog {
    *  A batch passes its `steps`: each is tallied by its own class instead of the batch's. */
   record(tool: string, action: string | undefined, ok: boolean, ms: number, err?: string,
     client?: { name?: string; version?: string },
-    extra?: { outcome?: Outcome; space?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }>;
+    extra?: { outcome?: Outcome; space?: string;
+      /** The app the call acted in: its name only, never a window title. */
+      app?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }>;
       /** Where the call's time went (steps.ts): name → count + total ms. Day log only, and only for a slow call. */
       timing?: Record<string, StepTotal> }): CallClass {
     const cls = classifyCall(tool, action);
@@ -167,11 +170,11 @@ export class SessionLog {
       const timing = ms >= SLOW_STEP_MS && extra?.timing && Object.keys(extra.timing).length ? { steps: extra.timing } : {};
       // The result code, never the error text: it carries element names, window titles and field contents.
       const code = err ? classifyResult(err, true, false)?.code : undefined;
-      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(code ? { code } : {}), ...timing });
+      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(extra?.app ? { app: extra.app } : {}), ...(code ? { code } : {}), ...timing });
       try {
         this.writeHeader(client);
         const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),
-          outcome, ...(extra?.space ? { space: extra.space } : {}), ...(code ? { code } : {}), ...(steps ? { steps } : {}) };
+          outcome, ...(extra?.space ? { space: extra.space } : {}), ...(extra?.app ? { app: extra.app } : {}), ...(code ? { code } : {}), ...(steps ? { steps } : {}) };
         fs.appendFileSync(this.file, JSON.stringify(line) + '\n');
       } catch { /* never break a tool call over logging */ }
     }

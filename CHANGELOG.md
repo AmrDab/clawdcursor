@@ -26,6 +26,13 @@ All notable changes to Clawd Cursor will be documented in this file.
   when `SystemRoot` is unset, and the run directory is refused if it is a symlink and tightened to 0700.
 
 ### Fixed
+- **The pill names the app by its own name.** On Windows it is the exe's file description ("Clicking in Designcenter
+  NX", not "Clicking in Ugraf"), read once per process; macOS already gave the localized name; elsewhere the process
+  name as before.
+- **The session log says which app a call acted in, by input or by name** (`app`: the app's name only, never a window title).
+  It is left out for browser acts and for by-name acts on a window that is not in front, where it isn't known.
+- **`computer key` takes `repeat`** (1 to 100): the key or sequence is pressed that many times. It was dropped without
+  a word and the key pressed once.
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
   (`invoke`, `set_value`, `toggle`, `select`) are refused when the window in front is Claude, ChatGPT, Codex, Cursor,
   VS Code (and Insiders), Windsurf or Zed, or an app this server was started from (stdio), unless the agent focused or

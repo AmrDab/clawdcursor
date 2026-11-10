@@ -750,6 +750,23 @@ function Cmd-ActivateAtPoint {
     }
 }
 
+# The app's own display name: its exe's file description, else product name ("Designcenter NX" for ugraf.exe).
+# Read once per process; '' when the exe has none or the process may not be opened.
+$script:AppNames = @{}
+function Get-AppName([int]$wpid, [string]$pName) {
+    $key = "$wpid|$pName"
+    if (-not $script:AppNames.ContainsKey($key)) {
+        $n = ''
+        try {
+            $v = [System.Diagnostics.Process]::GetProcessById($wpid).MainModule.FileVersionInfo
+            $n = "$($v.FileDescription)".Trim()
+            if (-not $n) { $n = "$($v.ProductName)".Trim() }
+        } catch {}
+        $script:AppNames[$key] = $n
+    }
+    return $script:AppNames[$key]
+}
+
 # ── Command: get-foreground-window ────────────────────────────────────────────
 function Cmd-GetForegroundWindow {
     $fgWin = [Win32UIA]::GetForegroundWindow()
@@ -777,7 +794,7 @@ function Cmd-GetForegroundWindow {
         }
     } catch {}
     $cls = ''; try { $cls = [ScreenPM]::ClassOf($fgWin) } catch {}
-    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; title=$title; className=$cls; bounds=$bounds; isMinimized=$isMin; success=$true }
+    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; appName=(Get-AppName $wpid $pName); title=$title; className=$cls; bounds=$bounds; isMinimized=$isMin; success=$true }
 }
 
 # ── Command: focus-window ─────────────────────────────────────────────────────

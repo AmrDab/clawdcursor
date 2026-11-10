@@ -70,6 +70,17 @@ describe('SessionLog', () => {
     expect(back.tally).toMatchObject({ calls: 7, vision: 3, blindEmpty: 1, visionAfterBlindMiss: 1 });
   });
 
+  it('records which app a call acted on, when the caller knows it', () => {
+    const log = new SessionLog({ version: 'x', surface: 'compact' });
+    log.record('computer', 'click', true, 80, undefined, undefined, { app: 'Designcenter NX' });
+    log.record('accessibility', 'read_tree', true, 12);
+    const { calls } = readSession(log.file!);
+    expect(calls[0].app).toBe('Designcenter NX');
+    expect(calls[1]).not.toHaveProperty('app');
+    // The app name stays on this machine: `clawdcursor report` sends none of it.
+    expect(JSON.stringify(buildSessionReport(log.file!))).not.toContain('Designcenter');
+  });
+
   it('tracks the screenshot-only streak the nudge keys on', () => {
     const log = new SessionLog({ version: 'x', surface: 'compact' });
     for (let i = 0; i < 3; i++) log.record('computer', 'screenshot', true, 1);

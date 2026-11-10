@@ -1058,6 +1058,12 @@
             "type": "string",
             "description": "Alias for combo — accepted for MCP/compound backward-compatibility."
           },
+          "repeat": {
+            "type": "number",
+            "description": "Press it this many times (default 1).",
+            "minimum": 1,
+            "maximum": 100
+          },
           "expect": {
             "type": "array",
             "description": "Checks run after the action; a failed check returns DEVIATION. Example: [{\"type\":\"window_title_contains\",\"value\":\"Inbox\"}]. Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.",

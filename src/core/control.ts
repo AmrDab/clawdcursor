@@ -82,7 +82,7 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 // ── The window the agent is working in ──
 
-interface Foreground { processId: number; processName: string; title?: string; guessed?: boolean }
+interface Foreground { processId: number; processName: string; appName?: string; title?: string; guessed?: boolean }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
@@ -93,6 +93,8 @@ let leaseExplicit = false;
 let openedName: string | null = null;
 /** When the agent's last focus-moving input or focus call ended. */
 let movedAt = 0;
+/** The window the agent last acted in: an input, or an act by name on the window in front. A new read each time. */
+let acted: Foreground | undefined;
 /**
  * How long after the agent's own focus-moving input a new window in front is still its doing (a launch, a dialog, an
  * activation that lags). Past it, a change is the user's. The issue's switch came during a 30 s wait.
@@ -101,12 +103,12 @@ const OWN_MOVE_MS = 5_000;
 /** How long the next input waits for a window the agent just focused to come to the front. */
 const FOCUS_ARRIVAL_MS = 1_000;
 
-function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; }
+function resetBinding(): void { lease = undefined; acted = undefined; pending = null; movedAt = 0; leaseExplicit = false; openedName = null; }
 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, title: w.title || undefined, guessed: w.guessed } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, guessed: w.guessed } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
@@ -157,6 +159,7 @@ async function before(): Promise<void> {
   openedName = null;
   leaseExplicit = explicit;
   lease = now;
+  acted = now;
 }
 
 const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
@@ -199,11 +202,20 @@ async function byName(processId?: number): Promise<void> {
   if (!now || (processId !== undefined && processId !== now.processId)) return;
   const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
   await refuseAiHost(now, explicit);
+  acted = now;
+}
+
+/**
+ * The app the agent last acted in, by input or by name (the session log names it). Each act keeps its own foreground
+ * read, so the same object back means the agent did not act on the window in front in between.
+ */
+export function actedIn(): { processName: string; appName?: string } | undefined {
+  return acted;
 }
 
 /** The app the agent's last input went to (the pill names it), or undefined before the first one. */
-export function workingIn(): string | undefined {
-  return lease?.processName;
+export function workingIn(): { processName: string; appName?: string } | undefined {
+  return lease;
 }
 
 /** After the input: no read. A focus-moving one opens the window in which a new window in front is the agent's own doing. */
