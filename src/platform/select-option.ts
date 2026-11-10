@@ -73,12 +73,15 @@ export async function selectOption(
   }
 
   const expanded = await platform.invokeElement({ name, controlType, processId, action: 'expand' }).catch(() => null);
-  if (expanded?.success) await sleep(300);
+  // `acted`: the press was sent and no list was seen to open. One may be open anyway (a menu the platform cannot see), so what
+  // follows cleans up as if it had worked.
+  const opened = expanded?.success === true || expanded?.data?.acted === true;
+  if (opened) await sleep(300);
 
   const hits = await platform.findElements({ name: value, processId }).catch(() => []);
   const option = hits.find(h => norm(h.name) === norm(value) && norm(h.name) !== norm(name));
   if (!option) {
-    if (expanded?.success) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
+    if (opened) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
     const near = hits.slice(0, 5).map(h => `"${h.name}"`).join(', ');
     return { success: false, verified: false, text: `"${name}" has no option named exactly "${value}"${near ? ` (similar: ${near})` : ''}. Nothing was changed.` };
   }
@@ -104,7 +107,7 @@ export async function selectOption(
   if (picked && after !== null && norm(after) !== norm(value) && settleMs > 0) after = (await readUntil(readValue, value, settleMs)) ?? after;
   if (after !== null) {
     const ok = norm(after) === norm(value);
-    if (!ok && expanded?.success) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
+    if (!ok && opened) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
     return {
       success: ok,
       verified: true,

@@ -373,18 +373,11 @@ function run(argv) {
                     expandDone = nowExpanded === true;
                 } catch (e) { /* not settable */ }
                 if (expandDone) { result = { success: true, action: 'expand', method: 'AXExpanded' }; break; }
-                try {
-                    // A pop-up or pull-down button shows its list when pressed.
-                    var expandRole = String(targetElement.role());
-                    if (expandRole === 'AXPopUpButton' || expandRole === 'AXMenuButton') {
-                        targetElement.actions['AXPress'].perform();
-                        result = { success: true, action: 'expand', method: 'AXPress' };
-                        break;
-                    }
-                } catch (e2) { /* fall through */ }
+                // A pop-up button is NOT opened here: this fallback cannot close a list it opened (collapse only sets AXExpanded), and
+                // it cannot tell that the list appeared. The accessibility helper (swiftc) opens, checks and closes them.
                 result = {
                     success: false,
-                    error: 'Element does not support expand here (no settable AXExpanded, and it is not a pop-up button) - the accessibility helper is needed to open a disclosure triangle'
+                    error: 'Element does not support expand here (no settable AXExpanded) - the accessibility helper is needed to open a disclosure triangle or a pop-up'
                 };
                 break;
 

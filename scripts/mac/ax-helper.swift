@@ -527,15 +527,15 @@ struct SearchCtx {
 }
 
 /// Breadth-first search of one window: shallow matches first, one batched read per element.
-func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, ctx: inout SearchCtx) {
+func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, until: Date? = nil, ctx: inout SearchCtx) {
     let wantName = aim.name?.lowercased()
     let wantRole = aim.role.map(normRole)
     var level: [AXUIElement] = [root]
     var depth = 0
-    while !level.isEmpty && depth <= maxDepth && !timeUp() && ctx.hits.count < limit {
+    while !level.isEmpty && depth <= maxDepth && !timeUp() && ctx.hits.count < limit && (until == nil || Date() < until!) {
         var next: [AXUIElement] = []
         for el in level {
-            if timeUp() || ctx.hits.count >= limit { break }
+            if timeUp() || ctx.hits.count >= limit || (until != nil && Date() >= until!) { break }
             let (a, readError) = multiChecked(el, searchAttrs)
             if readError != .success { ctx.unreadable += 1; continue }
             let role = str(a["AXRole"]) ?? ""
@@ -785,26 +785,38 @@ func actionNames(_ el: AXUIElement) -> [String] {
     return list
 }
 
-/// One key press delivered to ONE process, not to whatever is in front: a key meant for this element must not land in an app the user
-/// has switched to. False when this process may not post keyboard events.
-func pressKey(_ code: CGKeyCode, to pid: pid_t) -> Bool {
+/// Poll `cond` until it holds or `ms` has passed.
+func waitUntil(_ ms: Int, _ cond: () -> Bool) -> Bool {
+    let end = Date().addingTimeInterval(Double(ms) / 1000)
+    while true {
+        if cond() { return true }
+        if Date() >= end { return false }
+        usleep(60_000)
+    }
+}
+
+/// The key the CALLER has said this call may finish with (--allow-key). The caller sends it through the input guard first (stop, the
+/// window the agent works in, own UI) and only then calls again with the key allowed: this helper never presses a key on its own say-so.
+func keyAllowed(_ key: String) -> Bool { opts["allow-key"] == key }
+
+/// One key press, as a keyboard sends it, to the app in front. Refuses when `pid` is NOT the app in front (a key meant for this
+/// element must not land in another app), and when this process may not post keyboard events.
+func postKeyToFrontmost(_ code: CGKeyCode, pid: pid_t) -> Bool {
     if #available(macOS 10.15, *), !CGPreflightPostEventAccess() { return false }
+    guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else { return false }
     let source = CGEventSource(stateID: .hidSystemState)
-    // The app in front takes the key the way a keyboard's reaches it (as `type` does); an app in the background gets it addressed.
-    let inFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
     for down in [true, false] {
         guard let ev = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { return false }
         ev.flags = []   // a modifier the user happens to hold must not turn Return into something else
-        if inFront { ev.post(tap: .cghidEventTap) } else { ev.postToPid(pid) }
+        ev.post(tap: .cghidEventTap)
     }
     usleep(20_000)
     return true
 }
 
-/// Whether the app's keyboard focus really is this element. A key sent to an app whose focus is elsewhere would press THAT control.
-func hasKeyboardFocus(_ el: AXUIElement, pid: pid_t) -> Bool {
-    guard let f = copyAttr(appElement(pid), "AXFocusedUIElement").value, isElement(f) else { return false }
-    return sameElement(f as! AXUIElement, el)
+func focusedElement(_ pid: pid_t) -> AXUIElement? {
+    guard let f = copyAttr(appElement(pid), "AXFocusedUIElement").value, isElement(f) else { return nil }
+    return (f as! AXUIElement)
 }
 
 /// The same element, reached by two routes (a web page hands out a new reference each time): equal references, or the same role,
@@ -817,66 +829,141 @@ func sameElement(_ a: AXUIElement, _ b: AXUIElement) -> Bool {
     return str(x["AXRole"]) == str(y["AXRole"]) && str(x["AXTitle"]) == str(y["AXTitle"]) && p == q && s == t
 }
 
-let menuHolderRoles: Set<String> = ["AXPopUpButton", "AXMenuButton"]
-
-/// An open pop-up's list: an AXMenu that is on screen and has items. AppKit hangs it under the control; WebKit puts a <select>'s list in
-/// the page's window. (A menu that is merely there, closed, has no size.)
-func visibleMenu(under el: AXUIElement, pid: pid_t) -> AXUIElement? {
-    func shown(_ m: AXUIElement) -> Bool {
-        let a = multi(m, ["AXSize", "AXChildren"])
-        guard let s = axSize(a["AXSize"]), s.width > 0, s.height > 0 else { return false }
-        return ((a["AXChildren"] as? [AXUIElement]) ?? []).contains { k in
-            let b = multi(k, ["AXRole", "AXSize"])
-            return str(b["AXRole"]) == "AXMenuItem" && (axSize(b["AXSize"])?.width ?? 0) > 0
-        }
-    }
-    for k in (copyAttr(el, "AXChildren").value as? [AXUIElement]) ?? [] where str(copyAttr(k, "AXRole").value) == "AXMenu" && shown(k) { return k }
-    guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
-    var found = SearchCtx()
-    for w in windowsToSearch(app).windows where !timeUp() {
-        search(w, Aim(name: nil, role: "menu", id: nil), maxDepth: 10, limit: 80, ctx: &found)
-    }
-    return found.hits.first(where: { $0.role == "AXMenu" && shown($0.element) })?.element
+/// Whether the app's keyboard focus really is this element. A key sent to an app whose focus is elsewhere would press THAT control.
+func hasKeyboardFocus(_ el: AXUIElement, pid: pid_t) -> Bool {
+    guard let f = focusedElement(pid) else { return false }
+    return sameElement(f, el)
 }
 
-/// Wait for a pop-up's list to be on screen (or gone).
-func waitForMenu(under el: AXUIElement, pid: pid_t, shown want: Bool, ms: Int = 900) -> Bool {
-    let end = Date().addingTimeInterval(Double(ms) / 1000)
-    while true {
-        if (visibleMenu(under: el, pid: pid) != nil) == want { return true }
-        if Date() >= end { return false }
-        usleep(80_000)
+/// Whether the focus is on `container` or inside it (the focus of an open list sits on one of its items).
+func focusIsWithin(_ container: AXUIElement, pid: pid_t) -> Bool {
+    guard var cur = focusedElement(pid) else { return false }
+    for _ in 0..<6 {
+        if sameElement(cur, container) { return true }
+        guard let p = copyAttr(cur, "AXParent").value, isElement(p) else { return false }
+        cur = p as! AXUIElement
     }
+    return false
+}
+
+let menuHolderRoles: Set<String> = ["AXPopUpButton", "AXMenuButton"]
+
+struct ShownMenu {
+    let element: AXUIElement
+    let frame: CGRect
+    /// An AXMenu hung under the control itself (AppKit does that for an open pop-up).
+    let child: Bool
+}
+
+func frameOf(_ el: AXUIElement) -> CGRect? {
+    let a = multi(el, ["AXPosition", "AXSize"])
+    guard let p = axPoint(a["AXPosition"]), let s = axSize(a["AXSize"]) else { return nil }
+    return CGRect(origin: p, size: s)
+}
+
+/// The rectangle of an AXMenu that is on screen with items showing, or nil (a menu that is merely there, closed, has no size).
+func shownMenuFrame(_ m: AXUIElement) -> CGRect? {
+    let a = multi(m, ["AXSize", "AXPosition", "AXChildren"])
+    guard let s = axSize(a["AXSize"]), s.width > 0, s.height > 0, let p = axPoint(a["AXPosition"]) else { return nil }
+    let hasItems = ((a["AXChildren"] as? [AXUIElement]) ?? []).contains { k in
+        let b = multi(k, ["AXRole", "AXSize"])
+        return str(b["AXRole"]) == "AXMenuItem" && (axSize(b["AXSize"])?.width ?? 0) > 0
+    }
+    return hasItems ? CGRect(origin: p, size: s) : nil
+}
+
+/// Every menu on screen in the control's window, and the ones hung directly under the control. NOT yet "the control's list": a page's
+/// always-visible role="menu" navigation, a context menu and another open pop-up are menus too (see ownMenu).
+func shownMenus(around el: AXUIElement, pid: pid_t) -> [ShownMenu] {
+    var out: [ShownMenu] = []
+    func add(_ m: AXUIElement, child: Bool) {
+        guard let f = shownMenuFrame(m) else { return }
+        if out.contains(where: { CFEqual($0.element, m) || $0.frame == f }) { return }
+        out.append(ShownMenu(element: m, frame: f, child: child))
+    }
+    for k in (copyAttr(el, "AXChildren").value as? [AXUIElement]) ?? [] where str(copyAttr(k, "AXRole").value) == "AXMenu" { add(k, child: true) }
+    var root: AXUIElement? = nil
+    if let w = copyAttr(el, "AXWindow").value, isElement(w) { root = (w as! AXUIElement) } else { root = keyWindow(appElement(pid)).window }
+    if let r = root {
+        var found = SearchCtx()
+        search(r, Aim(name: nil, role: "menu", id: nil), maxDepth: 10, limit: 80, until: Date().addingTimeInterval(0.8), ctx: &found)
+        for h in found.hits where h.role == "AXMenu" { add(h.element, child: false) }
+    }
+    return out
+}
+
+/// This control's list: a menu hung under the control, or one right next to it (a page's list opens over or under its control).
+/// Not "any menu in the window": that would call a page's navigation menu, a context menu or another pop-up's list this control's.
+func ownMenu(of el: AXUIElement, in menus: [ShownMenu]) -> ShownMenu? {
+    if let c = menus.first(where: { $0.child }) { return c }
+    guard let f = frameOf(el) else { return nil }
+    let zone = f.insetBy(dx: -16, dy: -16)
+    return menus.first { zone.intersects($0.frame) }
 }
 
 /// expand / collapse. Every success is something the element was read to have done: an app that accepts a call and ignores it
 /// (WebKit: AXPress on a <summary> returns success and does nothing) used to be reported as expanded. AXShowMenu is NOT used: on
 /// web content it opens the page's context menu (Reload, Back, ...), and that was reported as "Expanded" too.
-func expandOrCollapse(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
+///
+/// Two things this call never does on its own: press a key (a web <summary> opens on Return, a stuck list closes on Escape) without
+/// --allow-key, which the caller passes only after the input guard has agreed; and treat a menu it cannot tie to this control as its list.
+func expandOrCollapse(_ action: String, _ h: Hit, pid: pid_t, appName: String) -> [String: Any] {
     let el = h.element
     let want = action == "expand"
-    var pid: pid_t = 0
-    AXUIElementGetPid(el, &pid)
     func done(_ method: String) -> [String: Any] {
-        ["ok": true, "success": true, "action": action, "method": method, "data": ["state": want ? "expanded" : "collapsed"]]
+        ["ok": true, "success": true, "action": action, "method": method, "data": ["expandState": want ? "Expanded" : "Collapsed"]]
+    }
+    /// A miss. `acted`: something was pressed or sent, so the caller should clean up with a collapse.
+    func missed(_ message: String, acted: Bool = false) -> [String: Any] {
+        var r = miss(action, message, element: el)
+        if acted { r["data"] = ["acted": true] }
+        return r
+    }
+    /// Not finished: this key would finish it. The caller runs the input guard, then calls again with --allow-key.
+    func needsKey(_ key: String) -> [String: Any] {
+        var r = miss(action, "it needs the \(key) key to finish; the caller sends it through the input guard", element: el)
+        r["data"] = ["needsKey": key]
+        return r
     }
 
-    // A pop-up or pull-down button is "expanded" while its list shows. Pressing it opens the list (AXPress, in AppKit and WebKit alike).
+    // A pop-up or pull-down button is "expanded" while ITS list shows. Pressing it opens the list (AXPress, in AppKit and WebKit alike).
     if menuHolderRoles.contains(h.role) {
-        let showing = visibleMenu(under: el, pid: pid)
+        let before = shownMenus(around: el, pid: pid)
+        let mine = ownMenu(of: el, in: before)
         if want {
-            if showing != nil { return done("unchanged") }
+            if mine != nil || openState(el) == true { return done("unchanged") }
             let p = press(el)
             if p.hung { hungDuringAction(action, appName) }
-            if p.done && waitForMenu(under: el, pid: pid, shown: true) { return done("AXPress") }
-            return miss(action, "pressing it did not open a list of options", element: el)
+            // Only a menu that APPEARED with the press counts, and only if it is this control's; or the control saying it is open.
+            if p.done && waitUntil(900, {
+                if openState(el) == true { return true }
+                let fresh = shownMenus(around: el, pid: pid).filter { n in !before.contains { $0.frame == n.frame } }
+                return ownMenu(of: el, in: fresh) != nil
+            }) { return done("AXPress") }
+            return missed("pressing it did not open a list of options that I could see - if one is open, collapse closes it", acted: p.done)
         }
-        guard let menu = showing else { return done("unchanged") }
-        AXUIElementPerformAction(menu, "AXCancel" as CFString)
-        if waitForMenu(under: el, pid: pid, shown: false, ms: 500) { return done("AXCancel") }
-        // The list is still up, so there IS something to dismiss: Escape, to the app that owns it.
-        if pressKey(53, to: pid), waitForMenu(under: el, pid: pid, shown: false, ms: 500) { return done("Escape") }
-        return miss(action, "the list of options would not close", element: el)
+        if let m = mine {
+            AXUIElementPerformAction(m.element, "AXCancel" as CFString)
+            if waitUntil(500, { ownMenu(of: el, in: shownMenus(around: el, pid: pid)) == nil }) { return done("AXCancel") }
+            // Still up, and it is this control's: Escape - sent through the caller's input guard, to the app in front, with the focus on it.
+            guard keyAllowed("Escape") else { return needsKey("Escape") }
+            guard focusIsWithin(m.element, pid: pid) || hasKeyboardFocus(el, pid: pid) else {
+                return missed("the list of options would not close, and the keyboard focus is not on it, so Escape would go elsewhere", acted: true)
+            }
+            guard postKeyToFrontmost(53, pid: pid) else {
+                return missed("the list of options would not close, and its app is not in front for the Escape key - bring its window forward (window focus) and try again", acted: true)
+            }
+            if waitUntil(500, { ownMenu(of: el, in: shownMenus(around: el, pid: pid)) == nil }) { return done("Escape") }
+            return missed("the list of options would not close", acted: true)
+        }
+        if openState(el) == true {
+            // A list the page draws itself (aria-expanded): pressing the control again closes it.
+            let p = press(el)
+            if p.hung { hungDuringAction(action, appName) }
+            if p.done && settles(el, to: false) { return done("AXPress") }
+            return missed("it shows an open list, but pressing it did not close it", acted: p.done)
+        }
+        return done("unchanged")
     }
 
     let before = openState(el)
@@ -887,28 +974,44 @@ func expandOrCollapse(_ action: String, _ h: Hit, appName: String) -> [String: A
        AXUIElementSetAttributeValue(el, "AXExpanded" as CFString, want ? kCFBooleanTrue : kCFBooleanFalse) == .success,
        settles(el, to: want) { return done("AXExpanded") }
 
-    // 2. The element's own press, when it lists one - for a disclosure triangle (AppKit's presses open). NOT for any other element that
-    // merely shows an AXExpanded: WebKit gives plain buttons one (false), and pressing "Confirm" is not expanding anything.
+    // 2. The element's own press - for a disclosure triangle (AppKit's presses open). NOT for any other element that merely shows an
+    // AXExpanded: WebKit gives plain buttons one (false), and pressing "Confirm" is not expanding anything. Once the press was
+    // accepted there is no Return afterwards: the change may show late, and a second toggle would undo it.
     if h.role == "AXDisclosureTriangle" && actionNames(el).contains("AXPress") {
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
-        if p.done && settles(el, to: want) { return done("AXPress") }
+        if p.done {
+            if settles(el, to: want) { return done("AXPress") }
+            return missed("pressed it, but it did not \(action)", acted: true)
+        }
     }
 
     // 3. The keyboard. A web <summary> lists no AXPress (pressing it does nothing) and its AXExpanded is read-only: what opens it is
-    // focus + Return, sent to its own app and only once that app's focus really is on it.
+    // focus + Return - once the caller has run the input guard, with this app in front and its focus really on the element.
     if h.role == "AXDisclosureTriangle" {
+        guard keyAllowed("Return") else { return needsKey("Return") }
+        let previous = focusedElement(pid)
+        func restoreFocus() { if let p = previous { AXUIElementSetAttributeValue(p, "AXFocused" as CFString, kCFBooleanTrue) } }
         let focused = AXUIElementSetAttributeValue(el, "AXFocused" as CFString, kCFBooleanTrue) == .success
         usleep(60_000)
-        if focused && hasKeyboardFocus(el, pid: pid) && pressKey(36, to: pid) && settles(el, to: want) { return done("AXFocused+Return") }
-        return miss(action, "it did not \(action) by its attribute, its press or the Return key — if its window is not in front, bring it forward (window focus) and try again, or click it", element: el)
+        guard focused && hasKeyboardFocus(el, pid: pid) else {
+            restoreFocus()
+            return missed("could not move the keyboard focus to it - bring its window forward (window focus) and try again, or click it")
+        }
+        guard postKeyToFrontmost(36, pid: pid) else {
+            restoreFocus()
+            return missed("its app is not in front for the Return key (or this process may not post keyboard events) - bring its window forward (window focus) and try again, or click it")
+        }
+        if settles(el, to: want) { return done("AXFocused+Return") }
+        restoreFocus()
+        return missed("pressed Return on it, but it did not \(action)", acted: true)
     }
-    return miss(action, before == nil
+    return missed(before == nil
         ? "the element cannot be \(want ? "expanded" : "collapsed") through accessibility: it shows no open / closed state to set or check"
-        : "the element shows an open / closed state, but accessibility cannot set it - if pressing it opens or closes it, use invoke", element: el)
+        : "the element shows an open / closed state, but accessibility cannot set it - if pressing it opens or closes it, use invoke")
 }
 
-func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
+func perform(_ action: String, _ h: Hit, pid: pid_t, appName: String) -> [String: Any] {
     let el = h.element
     switch action {
     case "click":
@@ -934,7 +1037,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         }
         return ["ok": true, "success": true, "action": action, "value": "", "method": "empty"]
     case "expand", "collapse":
-        return expandOrCollapse(action, h, appName: appName)
+        return expandOrCollapse(action, h, pid: pid, appName: appName)
     case "scroll-to-visible":
         // Scrolls the element's enclosing scroll area; sends no input and raises no window. The reply carries where the
         // element is NOW — the caller checks that it is on screen.
@@ -1202,7 +1305,7 @@ func cmdInvoke() -> Never {
         }
         let pick = scrollTarget(found.hits)
         guard let hit = pick.hit else { emit(refuse(action, pick.error ?? "no element to scroll")) }
-        emit(perform(action, hit, appName: app.localizedName ?? "the app"))
+        emit(perform(action, hit, pid: app.processIdentifier, appName: app.localizedName ?? "the app"))
     }
     guard let best = rankHits(found.hits, action: action).first else {
         if timeUp() || found.unreadable > 0 { fail("timeout", "the element search could not read part of the window — not \"Element not found\"") }
@@ -1231,7 +1334,7 @@ func cmdInvoke() -> Never {
     if !best.exact && (aim.name != nil || aim.id != nil) && (timeUp() || found.unreadable > 0) {
         fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name.isEmpty ? best.ident : best.name)\")\(wayForward)")
     }
-    emit(perform(action, best, appName: app.localizedName ?? "the app"))
+    emit(perform(action, best, pid: app.processIdentifier, appName: app.localizedName ?? "the app"))
 }
 
 // MARK: - type

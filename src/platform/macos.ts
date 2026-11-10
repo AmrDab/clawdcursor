@@ -8,7 +8,7 @@
  *   - Accessibility: osascript JXA for tree queries + permission-check binary for TCC
  */
 
-import { beforePointerPress } from './pointer-guard';
+import { beforePointerPress, guardedInput } from './pointer-guard';
 import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs';
@@ -40,7 +40,7 @@ import { readMainScreenInfo, readDisplayList } from './mac-screen';
 import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
 import {
   defaultMacAx, MacAxError,
-  type AppState, type FrontmostInfo, type MacAx, type SkippedApp,
+  type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
 
 const execFileAsync = promisify(execFile);
@@ -661,10 +661,37 @@ export class MacOSAdapter implements PlatformAdapter {
     }
     // A miss is `{success:false}`; a timeout / locked screen THROWS, because
     // "timed out" is not "element not found or not actionable".
-    const res = await this.ax.invoke({ ...query, action: query.action ?? 'click' });
+    const action = query.action ?? 'click';
+    let res = await this.ax.invoke({ ...query, action });
+    // An expand / collapse the helper could only finish with a key (a web <summary> opens on Return; a list that will not close
+    // takes Escape): the helper never presses one on its own.
+    const key = res.data?.needsKey;
+    if (!res.success && (action === 'expand' || action === 'collapse') && (key === 'Return' || key === 'Escape')) {
+      res = await this.finishWithKey({ ...query, action }, key);
+    }
     // The agent loop reads the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
     // so a refusal's explanation — "matches 2 elements: …" — used to read as "element not found or not actionable".
     return !res.success && res.error ? { ...res, data: { ...res.data, error: res.error } } : res;
+  }
+
+  /**
+   * The key that finishes an expand / collapse goes through the same input guard as any key the agent sends (stop, clawdcursor's
+   * own control, the window the agent works in), only to the app in front, and only if that is the element's own app: never to
+   * whatever happens to be there. The helper checks the same again, and the focus, in the instant before it presses.
+   */
+  private async finishWithKey(
+    query: { name?: string; controlType?: string; automationId?: string; processId?: number; action: 'expand' | 'collapse' },
+    key: 'Return' | 'Escape',
+  ): Promise<InvokeResult> {
+    const front = await this.getActiveWindow().catch(() => null);
+    if (query.processId === undefined || front?.processId !== query.processId) {
+      return {
+        success: false,
+        error: `it needs the ${key} key to ${query.action}, and its app is not in front - bring its window forward (window focus) and try again, or click it`,
+      };
+    }
+    await this.guardKeys(key);    // a system dialog or the lock screen owning the keyboard refuses
+    return guardedInput('keyPress', [key], () => this.ax.invoke({ ...query, allowKey: key }));
   }
 
   /** AXScrollToVisible on the named element (the accessibility helper only). `bounds` is not needed: the helper aims by name. */
