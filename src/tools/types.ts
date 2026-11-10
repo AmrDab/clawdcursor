@@ -232,6 +232,17 @@ export function toMouse(ctx: ToolContext, x: number, y: number, space?: unknown)
   return mapImagePoint(x, y, ctx.getMouseScaleFactor());
 }
 
+/**
+ * Physical pixels per `space:"screen"` unit. "screen" is the space toMouse passes through — what accessibility positions
+ * and clicks use: POINTS on macOS (2 px each on Retina), physical pixels on Windows and Linux (1, every monitor, any DPI).
+ * Captures take physical pixels, so a screen-space region is multiplied by this before it is captured.
+ */
+export function screenToPhysical(ctx: ToolContext): number {
+  const mouse = ctx.getMouseScaleFactor();
+  const physical = ctx.getScreenshotScaleFactor();
+  return mouse > 0 && physical > 0 ? physical / mouse : 1;
+}
+
 /** Image-space LENGTH (relative move, window size) → mouse-space length — scale only, no origin. */
 export function toMouseLength(ctx: ToolContext, v: number): number {
   return mapImageLength(v, ctx.getMouseScaleFactor());

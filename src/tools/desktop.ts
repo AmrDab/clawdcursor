@@ -7,7 +7,7 @@
  */
 
 import type { ToolDefinition, ToolContext } from './types';
-import { toMouse, toImage } from './types';
+import { toMouse, toImage, screenToPhysical } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
@@ -158,8 +158,9 @@ export function getDesktopTools(): ToolDefinition[] {
       handler: async ({ x, y, width, height, space, display }, ctx) => {
         await ctx.ensureInitialized();
         // Region in physical screen px: through the last frame (any monitor)
-        // for image coords; as-is for screen coords. An explicit display
-        // stands in for the last frame: the frame a screenshot of it records.
+        // for image coords; by screenToPhysical for screen coords (points on
+        // macOS). An explicit display stands in for the last frame: the frame
+        // a screenshot of it records.
         let mapping = getLastFrame();
         if (typeof display === 'number') {
           const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
@@ -170,7 +171,7 @@ export function getDesktopTools(): ToolDefinition[] {
           mapping = target!.primary ? null : { originX: b.x, originY: b.y, scale: llmScale(b.width, b.height), display: target!.index };
         }
         const multi = !!mapping;
-        const sf = space === 'screen' ? 1 : ctx.getScreenshotScaleFactor();
+        const sf = space === 'screen' ? screenToPhysical(ctx) : ctx.getScreenshotScaleFactor();
         const p0 = space === 'screen' || !multi ? { x: Math.round(x * sf), y: Math.round(y * sf) } : mapImagePoint(x, y, sf, mapping);
         const w = space === 'screen' || !multi ? Math.round(width * sf) : mapImageLength(width, sf, mapping);
         const h = space === 'screen' || !multi ? Math.round(height * sf) : mapImageLength(height, sf, mapping);
