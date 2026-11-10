@@ -21,8 +21,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one
   shell `exec` of PowerShell is gone), and fail with a clear error if `SystemRoot` is unset or the file is missing.
   PowerShell children run in `~/.clawdcursor/run` (mode 0700), not the shell's working directory or the shared temp folder,
-  which also keeps PowerShell's `ModuleAnalysisCache` out of a repository. **Apps clawdcursor launches now start in that
-  private directory, not wherever clawdcursor ran from.**
+  which also keeps PowerShell's `ModuleAnalysisCache` out of a repository. Apps and terminals clawdcursor opens
+  for the user start in the user's home (not in that private directory, and not wherever clawdcursor ran from); `windir` stands in
+  when `SystemRoot` is unset, and the run directory is refused if it is a symlink and tightened to 0700.
 
 ### Fixed
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts

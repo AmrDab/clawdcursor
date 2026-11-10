@@ -53,6 +53,7 @@ import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields } from '../core/miss-text';
 import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
+import * as os from 'os';
 
 const execFileAsync = promisify(execFile);
 
@@ -1313,7 +1314,7 @@ export class WindowsAdapter implements PlatformAdapter {
       }
       try {
         const child = spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${id}`], {
-          stdio: 'ignore', detached: true, windowsHide: true,
+          stdio: 'ignore', detached: true, windowsHide: true, cwd: os.homedir(),
         });
         child.unref();
       } catch {
@@ -1340,6 +1341,9 @@ export class WindowsAdapter implements PlatformAdapter {
     if (opts?.cwd && !/[\r\n\t\x00-\x1f"'`$]/.test(opts.cwd)) {
       env.CLAWD_PS_CWD = opts.cwd;
       cmdParts.push('-WorkingDirectory', '$env:CLAWD_PS_CWD');
+    } else {
+      // An app opened for the user starts in their home, not in clawdcursor's private directory (where this PowerShell runs).
+      cmdParts.push('-WorkingDirectory', '$env:USERPROFILE');
     }
 
     try {

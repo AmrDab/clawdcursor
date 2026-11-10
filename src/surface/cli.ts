@@ -113,7 +113,7 @@ import { e } from './format';
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { endAllSessions } from './session-log';
-import { powershellExe, system32Exe } from '../platform/ps-spawn';
+import { interactiveConsoleCall, privateRunDir, psOpts, system32Exe } from '../platform/ps-spawn';
 
 const program = new Command();
 
@@ -1128,8 +1128,10 @@ done
         const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-task-'));
         const tmpScript = path.join(tmpDir, 'task.ps1');
         fs.writeFileSync(tmpScript, scriptContent);
-        // A detached PowerShell gets its own console window; the script path is an argument, never part of a command string.
-        spawnExec(powershellExe(), ['-NoExit', '-ExecutionPolicy', 'Bypass', '-File', tmpScript], { detached: true, stdio: 'ignore' } as any);
+        // execFile gives a child no console of its own, so a short-lived PowerShell Start-Processes the interactive one (absolute path;
+        // the script path crosses as $env:, never interpolated; the console starts in the user's home).
+        const call = interactiveConsoleCall(tmpScript);
+        spawnExec(call.file, call.args, psOpts({ env: call.env, windowsHide: true }));
       } else if (platform === 'darwin') {
         const fs = await import('fs');
         const path = await import('path');
@@ -1313,7 +1315,7 @@ program
     try {
       const { execSync } = await import('child_process');
       // Left on PATH on purpose: the user runs this uninstall themselves, and npm is theirs to resolve (not a system program).
-      execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000 });
+      execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000, cwd: privateRunDir() });
       console.log(`   ${e('🗑️', '[DEL]')}  Removed global clawdcursor command`);
       removed++;
     } catch { /* may not be linked globally */ }

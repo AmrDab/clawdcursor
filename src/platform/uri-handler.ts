@@ -104,15 +104,16 @@ function resolveKnownHandlerForScheme(scheme: string): string | null {
   // 1. Already-running New Outlook (`olk.exe`). Pull its path off the
   //    live process when possible — that's the version actually installed.
   try {
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
-    const out = execSync(
-      'wmic process where "name=\'olk.exe\'" get ExecutablePath /value',
-      { timeout: 3000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    // A constant CIM query (wmic is gone from current Windows 11), by absolute path with no shell; no value goes into it.
+    const { execFileSync } = require('node:child_process') as typeof import('node:child_process');
+    const out = execFileSync(
+      powershellExe(),
+      ['-NoProfile', '-NonInteractive', '-Command', "(Get-CimInstance Win32_Process -Filter \"Name='olk.exe'\" | Select-Object -First 1).ExecutablePath"],
+      psOpts({ timeout: 5000, encoding: 'utf8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'] }),
     );
-    const m = out.match(/ExecutablePath=(.+)/);
-    if (m && m[1].trim()) return m[1].trim();
+    if (out.trim()) return out.trim().split(/\r?\n/)[0].trim();
   } catch {
-    // wmic missing or olk not running.
+    // PowerShell missing or olk not running.
   }
 
   // 2. Glob WindowsApps for the latest Microsoft.OutlookForWindows install.
@@ -183,7 +184,7 @@ export async function shellDispatchUriAndVerify(
   try {
     const child = spawn(
       powershellExe(),
-      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI'],
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI -WorkingDirectory $env:USERPROFILE'],
       psOpts({ detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
     );
     child.unref();

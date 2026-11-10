@@ -239,7 +239,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
             // The name arrives as $env:, never as script source (platform/ps-input.ts).
             const child = spawn(powershellExe(), [
               '-NoProfile', '-Command',
-              `Start-Process -FilePath $env:CLAWD_PS_FILE -ArgumentList '${flag}'`,
+              `Start-Process -FilePath $env:CLAWD_PS_FILE -WorkingDirectory $env:USERPROFILE -ArgumentList '${flag}'`,
             ], psOpts({ stdio: 'ignore', detached: true, windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } }));
             child.unref();
           } else {
