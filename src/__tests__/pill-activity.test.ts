@@ -50,6 +50,12 @@ describe('activityLabel / appLabel', () => {
     expect(appLabel('ugraf', ' \n ')).toBe('Ugraf');
     expect(appLabel('x', 'evil\nACTIVITY x')).toBe('evil ACTIVITY x');
   });
+  it('falls back to the known names when the OS gave none (an elevated app), and Explorer is "File Explorer" either way', () => {
+    expect(appLabel('WINWORD.EXE')).toBe('Word');
+    expect(appLabel('powerpnt')).toBe('PowerPoint');
+    expect(appLabel('explorer')).toBe('File Explorer');
+    expect(appLabel('explorer.exe', 'Windows Explorer')).toBe('File Explorer');
+  });
   it('says only what it does for the others, and nothing for unknown methods', () => {
     expect(activityLabel('navigate', 'msedge')).toBe('Opening a page');
     expect(activityLabel('invokeElement', 'msedge')).toBe('Clicking');

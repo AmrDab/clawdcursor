@@ -3,11 +3,12 @@
  *
  * Why: the only way to know whether agents follow "blind first, then
  * vision" (read the a11y tree / text, act by name; screenshots + coordinate
- * clicks only as a fallback) is to count it. It is also what `clawdcursor
- * report` sends, so a user can report a bad session in one step.
+ * clicks only as a fallback) is to count it. `clawdcursor report` sends a
+ * summary of it (counts, the last calls' tool / action / class, result codes;
+ * not the app names), so a user can report a bad session in one step.
  *
- * Records: tool, action, perception class, ok, duration, the name of the app an
- * input went to, and for a failure its result code (NOT_FOUND, TIMEOUT, ...). NEVER error text, typed text, clipboard
+ * Records: tool, action, perception class, ok, duration, the name of the app a
+ * call acted in, and for a failure its result code (NOT_FOUND, TIMEOUT, ...). NEVER error text, typed text, clipboard
  * contents, element names, window titles, URLs or coordinates: error texts carry
  * them. The day log (`tool.done`) follows the same rule. Local only
  * (~/.clawdcursor/sessions/), last 50 sessions kept, off with CLAWDCURSOR_SESSION_LOG=0.
@@ -149,7 +150,7 @@ export class SessionLog {
   record(tool: string, action: string | undefined, ok: boolean, ms: number, err?: string,
     client?: { name?: string; version?: string },
     extra?: { outcome?: Outcome; space?: string;
-      /** The app the call's input went to: its name only, never a window title. */
+      /** The app the call acted in: its name only, never a window title. */
       app?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }>;
       /** Where the call's time went (steps.ts): name → count + total ms. Day log only, and only for a slow call. */
       timing?: Record<string, StepTotal> }): CallClass {

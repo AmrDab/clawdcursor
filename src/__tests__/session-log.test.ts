@@ -77,6 +77,8 @@ describe('SessionLog', () => {
     const { calls } = readSession(log.file!);
     expect(calls[0].app).toBe('Designcenter NX');
     expect(calls[1]).not.toHaveProperty('app');
+    // The app name stays on this machine: `clawdcursor report` sends none of it.
+    expect(JSON.stringify(buildSessionReport(log.file!))).not.toContain('Designcenter');
   });
 
   it('tracks the screenshot-only streak the nudge keys on', () => {

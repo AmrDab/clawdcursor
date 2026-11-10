@@ -225,6 +225,16 @@ describe('agent loop type / key', () => {
     expect(computer.parameters.repeat).toMatchObject({ type: 'number', minimum: 1, maximum: 100 });
   });
 
+  it('`computer {action:"key", repeat}` reaches the keyboard through the compound dispatcher', async () => {
+    const kb = keyboard();
+    const ctx = { ensureInitialized: async () => {}, platform: kb, desktop: { getScreenSize: () => ({ width: 1920, height: 1080 }) },
+      a11y: {}, getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1 } as unknown as ToolContext;
+    const computer = getCompactTools().find(t => t.name === 'computer')!;
+    const r = await computer.handler({ action: 'key', combo: 'Down', repeat: 3 }, ctx);
+    expect(r.isError).toBeFalsy();
+    expect(kb.keyPress.mock.calls.map(c => c[0])).toEqual(['Down', 'Down', 'Down']);
+  });
+
   it('key: the warning is appended', async () => {
     const { ctx } = platformCtx(keyboard({ warning: WARNING }));
     const r = await key.execute({ combo: 'Return' }, ctx);
