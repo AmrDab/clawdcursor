@@ -284,11 +284,12 @@ describe('no full-screen glow', () => {
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
-    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(ps).toContain(style);
+    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    // Not topmost: directly above its window, so the pill stays over it.
-    expect(ps).not.toContain('WS_EX_TOPMOST');
-    expect(ps).toContain('GetWindow(t, 3)');
     expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
+    // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
+    expect(ps).toContain('if (placed && !moved) return;');
+    // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
+    expect(ps).toContain('BeginInvoke((Action)Follow)');
   });
 });

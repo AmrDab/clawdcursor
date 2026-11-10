@@ -53,7 +53,7 @@ All notable changes to Clawd Cursor will be documented in this file.
   is working in gets a 3 px border (amber; blue while it waits for you), scaled per monitor. Nothing is drawn over the
   window's content or on the rest of the screen, and nothing at all when no window is known or that window is not in
   front: the pill alone shows an agent is in control. The border follows the window as it moves, resizes or changes, is
-  click-through, never takes focus, sits below the pill, and stays out of clawdcursor's screenshots and reads (on
+  click-through, never takes focus, and stays out of clawdcursor's screenshots and reads (on
   Linux and on Windows 10 before 2004, where a window cannot be kept out of a capture, it steps aside for each one).
   `CLAWD_NO_GLOW` is gone with the glow.
 - **The pill and the outline close by themselves when clawdcursor is killed.** A host that hard-kills the process runs no

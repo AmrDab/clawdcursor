@@ -8,8 +8,7 @@
 #   TARGET                no window: draw nothing
 #   HIDE <ms>             step aside for a screen capture (only sent after OUTLINE_CAPTURABLE)
 # The border is shown while that window is the one in front and not minimized, and follows it as it moves or resizes
-# (polled every 100 ms). It sits directly above that window in the z-order, so the pill and other always-on-top
-# windows stay above it. It starts with no window. The parent kills this process to remove it; when stdin closes
+# (polled every 100 ms). It starts with no window. The parent kills this process to remove it; when stdin closes
 # (the parent is gone without doing so) it exits by itself.
 #
 # stdout: OUTLINE_CAPTURABLE, once, where Windows cannot keep this window out of a capture (before Windows 10 2004).
@@ -19,6 +18,10 @@
 #   WS_EX_TRANSPARENT  0x00000020  click-through
 #   WS_EX_NOACTIVATE   0x08000000  never steals focus (agent keeps typing)
 #   WS_EX_TOOLWINDOW   0x00000080  no taskbar / alt-tab entry
+#   WS_EX_TOPMOST      0x00000008  stays above the window it outlines. (Only an always-on-top window can be put over
+#                                  the window in front by another process: placed just above it, or at the top of the
+#                                  ordinary windows, the border ended up behind that window's own popups or was
+#                                  re-placed on every poll - measured 2026-11-10.)
 #
 # The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and scripts/linux/overlay.py (`outline`).
 
@@ -31,7 +34,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+$source = @'
 using System;
 using System.Drawing;
 using System.Runtime.InteropServices;
@@ -60,6 +63,7 @@ public class WindowOutline : Form {
             cp.ExStyle |= 0x00000020; // WS_EX_TRANSPARENT (click-through)
             cp.ExStyle |= 0x08000000; // WS_EX_NOACTIVATE
             cp.ExStyle |= 0x00000080; // WS_EX_TOOLWINDOW
+            cp.ExStyle |= 0x00000008; // WS_EX_TOPMOST
             return cp;
         }
     }
@@ -92,6 +96,9 @@ public class WindowOutline : Form {
                     if (p.Length > 1) long.TryParse(p[1], out n);
                     if (p[0] == "TARGET") target = new IntPtr(n);
                     else if (p[0] == "HIDE") Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
+                    else continue;
+                    // At once, not on the next poll: the parent waits only 90 ms after HIDE before it captures.
+                    try { BeginInvoke((Action)Follow); } catch { }
                 }
                 Environment.Exit(0);   // stdin closed: the parent is gone, and a border must not outlive it
             } catch { }
@@ -102,6 +109,12 @@ public class WindowOutline : Form {
         poll.Interval = 100;
         poll.Tick += (s, e) => Follow();
         poll.Start();
+    }
+
+    // Is this window somewhere above `t` in the z-order? (Walks up from `t`: few windows are above the one in front.)
+    bool Above(IntPtr t) {
+        for (IntPtr h = GetWindow(t, 3); h != IntPtr.Zero; h = GetWindow(h, 3)) if (h == Handle) return true; // GW_HWNDPREV
+        return false;
     }
 
     void Follow() {
@@ -115,9 +128,7 @@ public class WindowOutline : Form {
             if (shown) { ShowWindow(Handle, 0); shown = false; } // SW_HIDE
             return;
         }
-        // Directly above the target, not above everything: the pill and other always-on-top windows stay over the border.
-        IntPtr above = GetWindow(t, 3); // GW_HWNDPREV: the window just above the target
-        bool placed = above == Handle;
+        bool placed = Above(t);
         bool moved = !shown || r.Left != last.Left || r.Top != last.Top || r.Right != last.Right || r.Bottom != last.Bottom;
         if (placed && !moved) return;
         int w = r.Right - r.Left, h = r.Bottom - r.Top;
@@ -130,13 +141,32 @@ public class WindowOutline : Form {
             if (w > 2 * b && h > 2 * b) frame.Exclude(new Rectangle(b, b, w - 2 * b, h - 2 * b));
             Region = frame;
         }
-        // SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40, and SWP_NOZORDER 0x04 when it is already just above the target.
-        SetWindowPos(Handle, above, r.Left, r.Top, w, h, placed ? 0x0054u : 0x0050u);
+        // HWND_TOPMOST (-1), raised again only when the target (itself always-on-top, then) has come over it.
+        // SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40, and SWP_NOZORDER 0x04 when it is already above the target.
+        SetWindowPos(Handle, new IntPtr(-1), r.Left, r.Top, w, h, placed ? 0x0054u : 0x0050u);
         last = r;
         shown = true;
     }
 }
 '@
+
+# Compiling the class costs a second or more on every start (csc.exe), so the border came up late. The compiled
+# assembly is kept in ~/.clawdcursor/bin (where the macOS helpers are cached) under a name made from the source, and
+# loaded from there the next time; if that fails for any reason the class is compiled in memory as before.
+try {
+    $sha = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($source))
+    $dir = Join-Path $env:USERPROFILE '.clawdcursor\bin'
+    $dll = Join-Path $dir ('window-outline-' + (-join ($sha[0..7] | ForEach-Object { $_.ToString('x2') })) + '.dll')
+    if (-not (Test-Path $dll)) {
+        [void](New-Item -ItemType Directory -Force $dir)
+        Get-ChildItem $dir -Filter 'window-outline-*.dll' | Remove-Item -Force -ErrorAction SilentlyContinue  # other versions
+        Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition $source -OutputType Library -OutputAssembly "$dll.$PID.tmp"
+        Move-Item -Force "$dll.$PID.tmp" $dll
+    }
+    Add-Type -Path $dll
+} catch {
+    Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition $source
+}
 
 # Per-monitor-v2, like ps-bridge.ps1: the frame bounds and this window's position are PHYSICAL pixels on every monitor.
 [void][WindowOutline]::SetThreadDpiAwarenessContext([IntPtr](-4))
