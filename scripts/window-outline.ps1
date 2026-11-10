@@ -54,6 +54,33 @@ public class WindowOutline : Form {
     [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hWnd, int flags);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out RECT rect, int size);
+    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out int value, int size);
+    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int SetWindowRgn(IntPtr hWnd, IntPtr rgn, bool redraw);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateRoundRectRgn(int left, int top, int right, int bottom, int ellipseW, int ellipseH);
+    [DllImport("gdi32.dll")] static extern int CombineRgn(IntPtr dest, IntPtr a, IntPtr b, int mode);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+
+    // Windows 11 (build 22000 and later) rounds the corners of its windows; Windows 10 has square ones.
+    static readonly bool roundedWindows = Environment.OSVersion.Version.Build >= 22000;
+
+    // The corner radius of the target window, in px at 100% scaling: 8 on Windows 11, 0 (square) for a maximized
+    // window and one that asked not to be rounded. DWMWA_WINDOW_CORNER_PREFERENCE (33) is read where Windows gives
+    // it (1 = DONOTROUND, 3 = ROUNDSMALL, a 4 px radius); where the read fails the window has the default.
+    static int CornerRadiusAt96(IntPtr t) {
+        if (!roundedWindows || IsZoomed(t)) return 0;
+        int pref;
+        if (DwmGetWindowAttribute(t, 33, out pref, 4) != 0) return 8;
+        return pref == 1 ? 0 : pref == 3 ? 4 : 8;
+    }
+
+    // A rectangle with rounded corners (radius 0: a plain one). The far edges of a GDI rounded region are exclusive
+    // and its ellipse is one pixel short of them: hence the + 1.
+    static IntPtr RoundRgn(int left, int top, int right, int bottom, int radius) {
+        return radius <= 0 ? CreateRectRgn(left, top, right, bottom)
+                           : CreateRoundRectRgn(left, top, right + 1, bottom + 1, 2 * radius, 2 * radius);
+    }
 
     protected override bool ShowWithoutActivation { get { return true; } }
     protected override CreateParams CreateParams {
@@ -140,9 +167,17 @@ public class WindowOutline : Form {
             if (GetDpiForMonitor(MonitorFromWindow(t, 2), 0, out dpi, out dpiY) != 0) dpi = 96; // MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI
             int b = Math.Max(2, (int)Math.Round(thickness * dpi / 96.0));
             // Just inside the frame, so a maximized window's border is on screen too. The middle is not part of this window.
-            Region frame = new Region(new Rectangle(0, 0, w, h));
-            if (w > 2 * b && h > 2 * b) frame.Exclude(new Rectangle(b, b, w - 2 * b, h - 2 * b));
-            Region = frame;
+            // Its corners are rounded like the window's, or a wedge of what is behind shows at each one; the inner
+            // radius is smaller by the border's width, so the band is as wide in the corners as along the sides.
+            int radius = (int)Math.Round(CornerRadiusAt96(t) * dpi / 96.0);
+            IntPtr frame = RoundRgn(0, 0, w, h, radius);
+            if (w > 2 * b && h > 2 * b) {
+                IntPtr hole = RoundRgn(b, b, w - b, h - b, radius - b);
+                CombineRgn(frame, frame, hole, 4); // RGN_DIFF
+                DeleteObject(hole);
+            }
+            // The window owns the region from here (and frees the one it had); it is ours to free only if it was refused.
+            if (SetWindowRgn(Handle, frame, true) == 0) DeleteObject(frame);
         }
         // HWND_TOPMOST (-1), raised again only when the target (itself always-on-top, then) has come over it.
         // SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40, and SWP_NOZORDER 0x04 when it is already above the target.

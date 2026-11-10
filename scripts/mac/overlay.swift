@@ -609,6 +609,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         view.wantsLayer = true
         view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor
         view.layer?.borderWidth = 3   // points: AppKit scales it for each display
+        // Rounded like the window's own corners, or a wedge of what is behind shows at each one. The system does not
+        // give a window's radius: about 16 pt for a standard window on macOS 26 (which reports itself as 16 to a
+        // binary built with an older SDK), about 10 pt before.
+        view.layer?.cornerRadius = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
         win.contentView = view
         windows.append(win)
         listenForCommands()
