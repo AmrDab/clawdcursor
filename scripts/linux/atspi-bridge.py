@@ -893,7 +893,7 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
         if SEARCH_WEAK[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
                     "error": f"search cut ({SEARCH_CUT[0]}) before an exact match: only weaker matches for {name or role} were seen; "
-                             "narrow it with processId or controlType"}
+                             "use the element's exact name (a partial name cannot be searched completely in a window this large)"}
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
                     "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched: {name or role} "
@@ -912,9 +912,9 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
 LABEL_ROLE_NAMES = {'label', 'static', 'heading', 'paragraph', 'section', 'caption', 'image', 'separator', 'panel', 'filler'}
 
 
-def collect_scroll_matches(top: Any, name: Optional[str], role: Optional[str]) -> list:
+def collect_scroll_matches(top: Any, name: Optional[str], role: Optional[str]):
     """Every element under `top` named `name` (exact, case-insensitive, padding ignored; substring matches only when there is
-    no exact one) and of `role`. No early exit: ambiguity is the point."""
+    no exact one) and of `role`. No early exit: ambiguity is the point. Returns (matches, matches_are_exact)."""
     name_l = name.lower().strip() if name else None
     roles = role_alternatives(role)
     exact: list = []
@@ -937,7 +937,7 @@ def collect_scroll_matches(top: Any, name: Optional[str], role: Optional[str]) -
             visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
 
     visit(top, 1)
-    return exact or partial
+    return (exact or partial), bool(exact)
 
 
 def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: Optional[int],
@@ -968,18 +968,20 @@ def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: O
     if not tops:
         return {"success": False, "action": action, "error": "the application has no window"}
     begin_search()
-    matches = collect_scroll_matches(tops[0], name, role)
+    matches, exact_seen = collect_scroll_matches(tops[0], name, role)
     if not matches:
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
                     "error": f"search cut ({SEARCH_CUT[0]}): no element named {name} in the part of the active window searched "
                              "(this is not 'no such element')"}
         return {"success": False, "action": action, "error": f"element not found in the active window: {name}"}
-    # Cut by the budget or the clock: the matches seen are not all of them (an exact one, or the one the caller means, may lie
-    # beyond), so none is scrolled to. A depth cut is structural and does not refuse.
-    if SEARCH_CUT[0] in ('element budget', 'time limit'):
+    # Cut by the budget or the clock with only weaker (substring) matches seen: an exact one may lie beyond, so none is
+    # scrolled to. With exact matches the walk proceeds (this walk has no early exit, so a big window is always cut; the
+    # caller's bounds pick among same-named matches). A depth cut is structural and does not refuse.
+    if SEARCH_CUT[0] in ('element budget', 'time limit') and not exact_seen:
         return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                "error": f"search cut ({SEARCH_CUT[0]}) before all matches were seen; narrow it with processId or controlType"}
+                "error": f"search cut ({SEARCH_CUT[0]}) before an exact match was seen; use the element's exact name "
+                         "(a partial name cannot be searched completely in a window this large)"}
     # A label and the field it labels share a name: the field is what a scroll is for. Labels only when nothing else matches.
     actionable = [m for m in matches
                   if (safe(lambda m=m: m.get_role_name(), '') or '').lower() not in LABEL_ROLE_NAMES]

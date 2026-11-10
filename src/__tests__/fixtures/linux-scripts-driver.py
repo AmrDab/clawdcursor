@@ -443,7 +443,10 @@ OUT['weak_uncut'] = bridge.find_target(small_weak, 'Save', None)[0] is not None
 # scroll-into-view: a cut search (budget) does not scroll to the matches it saw; an uncut one does.
 scroll_cut = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Target', 'push button')] + [Acc('row %d' % i, 'section') for i in range(bridge.MAX_SEARCH_NODES * 2)])])
 wide_acc = scroll_cut
-OUT['scroll_after_cut'] = bridge.cmd_scroll_into_view('Target', None, 5151)
+OUT['scroll_after_cut'] = bridge.cmd_scroll_into_view('Target', None, 5151)   # an EXACT match, then a cut: proceeds
+scroll_weak = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Target item', 'push button')] + [Acc('row %d' % i, 'section') for i in range(bridge.MAX_SEARCH_NODES * 2)])])
+wide_acc = scroll_weak
+OUT['scroll_weak_cut'] = bridge.cmd_scroll_into_view('Target', None, 5151)    # substring only, then a cut: refused
 scroll_ok = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Target', 'push button')])])
 wide_acc = scroll_ok
 OUT['scroll_uncut'] = bridge.cmd_scroll_into_view('Target', None, 5151)

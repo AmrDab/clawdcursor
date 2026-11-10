@@ -157,12 +157,14 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   });
 
   it('a search cut before an exact match refuses to act on a weaker one; an uncut search still takes it', () => {
-    expect(out.weak_cut).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/before an exact match.*narrow it with processId or controlType/) });
+    expect(out.weak_cut).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/before an exact match.*use the element's exact name/) });
     expect(out.weak_uncut).toBe(true);
   });
 
-  it('scroll-into-view after a budget cut refuses to scroll to the matches it saw; an uncut search is not refused', () => {
-    expect(out.scroll_after_cut).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/before all matches were seen; narrow it with processId or controlType/) });
+  // Review of #331: the scroll walk has no early exit, so a window over the budget is always cut; an EXACT match still scrolls.
+  it('scroll-into-view after a budget cut proceeds with an exact match and refuses a substring-only one', () => {
+    expect(out.scroll_after_cut.error ?? '').not.toMatch(/search cut/);
+    expect(out.scroll_weak_cut).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/before an exact match was seen; use the element's exact name/) });
     expect(out.scroll_uncut.error ?? '').not.toMatch(/search cut/);
   });
 
