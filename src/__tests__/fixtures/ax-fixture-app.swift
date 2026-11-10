@@ -124,7 +124,7 @@ final class Delegate: NSObject, NSApplicationDelegate, WKNavigationDelegate {
         <nav role="menu" aria-label="Site navigation"><a role="menuitem" href="#home">Home</a> <a role="menuitem" href="#docs">Docs</a></nav>
         <details id="more"><summary>More options</summary><p id="secret">PINEAPPLE</p></details>
         <p><label for="color">Favorite color</label> <select id="color"><option>Red</option><option>Green</option><option>Blue</option></select></p>
-        <p><button id="lb" aria-haspopup="listbox" aria-expanded="false" onclick="var b=this,l=document.getElementById('lbl'),o=b.getAttribute('aria-expanded')==='true';b.setAttribute('aria-expanded',String(!o));l.hidden=o">Pick one</button></p>
+        <p><button id="lb" aria-haspopup="listbox" aria-expanded="false" onclick="var b=this,l=document.getElementById('lbl'),o=b.getAttribute('aria-expanded')==='true';b.setAttribute('aria-expanded',String(!o));l.hidden=o" onkeydown="if(event.key==='Escape'){this.setAttribute('aria-expanded','false');document.getElementById('lbl').hidden=true}">Pick one</button></p>
         <ul id="lbl" role="listbox" hidden><li role="option">One</li><li role="option">Two</li></ul>
         <p><button id="plain" onclick="document.getElementById('out').textContent='Plain was pressed'">Plain button</button></p>
         <p id="out"></p>

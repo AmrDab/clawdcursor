@@ -527,7 +527,7 @@ struct SearchCtx {
 }
 
 /// Breadth-first search of one window: shallow matches first, one batched read per element.
-func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, until: Date? = nil, ctx: inout SearchCtx) {
+func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtExactId: Bool = false, until: Date? = nil, anyOfRoles: Set<String>? = nil, ctx: inout SearchCtx) {
     let wantName = aim.name?.lowercased()
     let wantRole = aim.role.map(normRole)
     var level: [AXUIElement] = [root]
@@ -563,6 +563,7 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
                 exact = exact || sameId(ident, id)
             }
             if let r = wantRole { matches = matches && normRole(role).contains(r) }
+            if let rs = anyOfRoles { matches = matches && rs.contains(role) }
             if matches {
                 ctx.hits.append(Hit(element: el, name: [title, desc, label, help].first(where: { !$0.isEmpty }) ?? "", title: title, desc: desc, ident: ident, role: role,
                                     subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact))
@@ -848,11 +849,15 @@ func focusIsWithin(_ container: AXUIElement, pid: pid_t) -> Bool {
 
 let menuHolderRoles: Set<String> = ["AXPopUpButton", "AXMenuButton"]
 
+enum ListKind { case menu, list }
+
 struct ShownMenu {
     let element: AXUIElement
     let frame: CGRect
     /// An AXMenu hung under the control itself (AppKit does that for an open pop-up).
     let child: Bool
+    /// An AXMenu (items), or an AXList a page draws for a button with aria-haspopup="listbox" (WebKit shows no AXMenu for that).
+    let kind: ListKind
 }
 
 func frameOf(_ el: AXUIElement) -> CGRect? {
@@ -861,44 +866,46 @@ func frameOf(_ el: AXUIElement) -> CGRect? {
     return CGRect(origin: p, size: s)
 }
 
-/// The rectangle of an AXMenu that is on screen with items showing, or nil (a menu that is merely there, closed, has no size).
-func shownMenuFrame(_ m: AXUIElement) -> CGRect? {
+/// The rectangle of an AXMenu / AXList that is on screen with something in it, or nil (a menu that is merely there, closed, has no size).
+func shownListFrame(_ m: AXUIElement, kind: ListKind) -> CGRect? {
     let a = multi(m, ["AXSize", "AXPosition", "AXChildren"])
     guard let s = axSize(a["AXSize"]), s.width > 0, s.height > 0, let p = axPoint(a["AXPosition"]) else { return nil }
-    let hasItems = ((a["AXChildren"] as? [AXUIElement]) ?? []).contains { k in
+    let shown = ((a["AXChildren"] as? [AXUIElement]) ?? []).contains { k in
         let b = multi(k, ["AXRole", "AXSize"])
-        return str(b["AXRole"]) == "AXMenuItem" && (axSize(b["AXSize"])?.width ?? 0) > 0
+        if (axSize(b["AXSize"])?.width ?? 0) <= 0 { return false }
+        return kind == .list || str(b["AXRole"]) == "AXMenuItem"
     }
-    return hasItems ? CGRect(origin: p, size: s) : nil
+    return shown ? CGRect(origin: p, size: s) : nil
 }
 
-/// Every menu on screen in the control's window, and the ones hung directly under the control. NOT yet "the control's list": a page's
-/// always-visible role="menu" navigation, a context menu and another open pop-up are menus too (see ownMenu).
+/// Every menu and list on screen in the control's window, and the ones hung directly under the control. NOT yet "the control's list": a
+/// page's always-visible role="menu" navigation, a context menu and another open pop-up are menus too (see ownMenu).
 func shownMenus(around el: AXUIElement, pid: pid_t) -> [ShownMenu] {
     var out: [ShownMenu] = []
-    func add(_ m: AXUIElement, child: Bool) {
-        guard let f = shownMenuFrame(m) else { return }
+    func add(_ m: AXUIElement, child: Bool, kind: ListKind) {
+        guard let f = shownListFrame(m, kind: kind) else { return }
         if out.contains(where: { CFEqual($0.element, m) || $0.frame == f }) { return }
-        out.append(ShownMenu(element: m, frame: f, child: child))
+        out.append(ShownMenu(element: m, frame: f, child: child, kind: kind))
     }
-    for k in (copyAttr(el, "AXChildren").value as? [AXUIElement]) ?? [] where str(copyAttr(k, "AXRole").value) == "AXMenu" { add(k, child: true) }
+    for k in (copyAttr(el, "AXChildren").value as? [AXUIElement]) ?? [] where str(copyAttr(k, "AXRole").value) == "AXMenu" { add(k, child: true, kind: .menu) }
     var root: AXUIElement? = nil
     if let w = copyAttr(el, "AXWindow").value, isElement(w) { root = (w as! AXUIElement) } else { root = keyWindow(appElement(pid)).window }
     if let r = root {
         var found = SearchCtx()
-        search(r, Aim(name: nil, role: "menu", id: nil), maxDepth: 10, limit: 80, until: Date().addingTimeInterval(0.8), ctx: &found)
-        for h in found.hits where h.role == "AXMenu" { add(h.element, child: false) }
+        search(r, Aim(name: nil, role: nil, id: nil), maxDepth: 10, limit: 120, until: Date().addingTimeInterval(0.8), anyOfRoles: ["AXMenu", "AXList"], ctx: &found)
+        for h in found.hits { add(h.element, child: false, kind: h.role == "AXMenu" ? .menu : .list) }
     }
     return out
 }
 
 /// This control's list: a menu hung under the control, or one right next to it (a page's list opens over or under its control).
 /// Not "any menu in the window": that would call a page's navigation menu, a context menu or another pop-up's list this control's.
-func ownMenu(of el: AXUIElement, in menus: [ShownMenu]) -> ShownMenu? {
+/// `kinds`: which kinds may stand in (a plain AXList counts only where the caller has other evidence - see expandOrCollapse).
+func ownMenu(of el: AXUIElement, in menus: [ShownMenu], kinds: Set<ListKind> = [.menu]) -> ShownMenu? {
     if let c = menus.first(where: { $0.child }) { return c }
     guard let f = frameOf(el) else { return nil }
-    let zone = f.insetBy(dx: -16, dy: -16)
-    return menus.first { zone.intersects($0.frame) }
+    let zone = f.insetBy(dx: -28, dy: -28)
+    return menus.first { kinds.contains($0.kind) && zone.intersects($0.frame) }
 }
 
 /// expand / collapse. Every success is something the element was read to have done: an app that accepts a call and ignores it
@@ -929,39 +936,48 @@ func expandOrCollapse(_ action: String, _ h: Hit, pid: pid_t, appName: String) -
     // A pop-up or pull-down button is "expanded" while ITS list shows. Pressing it opens the list (AXPress, in AppKit and WebKit alike).
     if menuHolderRoles.contains(h.role) {
         let before = shownMenus(around: el, pid: pid)
-        let mine = ownMenu(of: el, in: before)
+        let mine = ownMenu(of: el, in: before)          // menus only: a plain list standing next to the control is not proof that it is open
+        /// Escape, through the caller's input guard, for a list that is still up and is the control's: only to the app in front, with the focus on the control or inside the list.
+        func closeWithEscape(_ list: ShownMenu, gone: @escaping () -> Bool) -> [String: Any] {
+            guard keyAllowed("Escape") else { return needsKey("Escape") }
+            guard hasKeyboardFocus(el, pid: pid) || focusIsWithin(list.element, pid: pid) else {
+                return missed("the list of options would not close, and the keyboard focus is not on it, so Escape would go elsewhere", acted: true)
+            }
+            guard postKeyToFrontmost(53, pid: pid) else {
+                return missed("the list of options would not close, and its app is not in front for the Escape key - bring its window forward (window focus) and try again", acted: true)
+            }
+            if waitUntil(600, gone) { return done("Escape") }
+            return missed("the list of options would not close", acted: true)
+        }
         if want {
             if mine != nil || openState(el) == true { return done("unchanged") }
             let p = press(el)
             if p.hung { hungDuringAction(action, appName) }
-            // Only a menu that APPEARED with the press counts, and only if it is this control's; or the control saying it is open.
+            // Only a list that APPEARED with the press counts, and only if it is this control's (hung under it or next to it - a menu,
+            // or the plain list WebKit shows for aria-haspopup="listbox"); or the control saying it is open.
             if p.done && waitUntil(900, {
                 if openState(el) == true { return true }
                 let fresh = shownMenus(around: el, pid: pid).filter { n in !before.contains { $0.frame == n.frame } }
-                return ownMenu(of: el, in: fresh) != nil
+                return ownMenu(of: el, in: fresh, kinds: [.menu, .list]) != nil
             }) { return done("AXPress") }
             return missed("pressing it did not open a list of options that I could see - if one is open, collapse closes it", acted: p.done)
         }
         if let m = mine {
             AXUIElementPerformAction(m.element, "AXCancel" as CFString)
             if waitUntil(500, { ownMenu(of: el, in: shownMenus(around: el, pid: pid)) == nil }) { return done("AXCancel") }
-            // Still up, and it is this control's: Escape - sent through the caller's input guard, to the app in front, with the focus on it.
-            guard keyAllowed("Escape") else { return needsKey("Escape") }
-            guard focusIsWithin(m.element, pid: pid) || hasKeyboardFocus(el, pid: pid) else {
-                return missed("the list of options would not close, and the keyboard focus is not on it, so Escape would go elsewhere", acted: true)
-            }
-            guard postKeyToFrontmost(53, pid: pid) else {
-                return missed("the list of options would not close, and its app is not in front for the Escape key - bring its window forward (window focus) and try again", acted: true)
-            }
-            if waitUntil(500, { ownMenu(of: el, in: shownMenus(around: el, pid: pid)) == nil }) { return done("Escape") }
-            return missed("the list of options would not close", acted: true)
+            return closeWithEscape(m, gone: { ownMenu(of: el, in: shownMenus(around: el, pid: pid)) == nil })
         }
         if openState(el) == true {
-            // A list the page draws itself (aria-expanded): pressing the control again closes it.
+            // A list the page draws itself that says so (aria-expanded): pressing the control again closes it.
             let p = press(el)
             if p.hung { hungDuringAction(action, appName) }
             if p.done && settles(el, to: false) { return done("AXPress") }
             return missed("it shows an open list, but pressing it did not close it", acted: p.done)
+        }
+        // WebKit says nothing about a button with aria-haspopup="listbox" being open: the list standing next to it is the evidence, and
+        // Escape - the keyboard way to close a listbox - the way. (Pressing the control again would OPEN a list that is not open.)
+        if let l = ownMenu(of: el, in: before, kinds: [.list]) {
+            return closeWithEscape(l, gone: { ownMenu(of: el, in: shownMenus(around: el, pid: pid), kinds: [.list]) == nil })
         }
         return done("unchanged")
     }

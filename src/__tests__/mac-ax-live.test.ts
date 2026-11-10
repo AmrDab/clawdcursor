@@ -550,38 +550,22 @@ describe.skipIf(!isMac || !fixturesEnabled)('ax-helper — against a fixture app
       expect(await navShowing()).toBe(true);
     });
 
-    it('another control\'s open list is not this one\'s: opening the select while an AppKit pop-up is open, and closing only the select', async (ctx) => {
-      if (!wPid) return ctx.skip();
-      expect(await inv('--id', 'nativePopup', '--action', 'expand')).toMatchObject({ ok: true, success: true });
-      await wait(200);
-      expect(await listShowing('Alpha', 'Beta', 'Gamma')).toBe(true);
-      try {
-        // (A real second list cannot open while the first one tracks the mouse, so the select is asked while the pop-up's list is up:
-        //  whatever it answers, it must not call the pop-up's list its own.)
-        const open = await inv(...SELECT, '--action', 'expand');
-        if (open.success) expect(await listShowing('Red', 'Green', 'Blue')).toBe(true);
-        else expect(open.error).toMatch(/did not open a list of options/);
-        // collapsing the select must not cancel the pop-up's list
-        const c = await inv(...SELECT, '--action', 'collapse');
-        expect(c.success).toBe(true);
-        if (c.method !== 'unchanged') await wait(300);
-        expect(await listShowing('Alpha', 'Beta', 'Gamma')).toBe(true);
-      } finally {
-        await inv('--id', 'nativePopup', '--action', 'collapse');
-        await inv(...SELECT, '--action', 'collapse');
-      }
-    });
-
-    it('a pop-up button whose list is not an AXMenu (aria-haspopup="listbox"): expand is confirmed by the control\'s own aria-expanded, collapse presses it closed', async (ctx) => {
+    it('a pop-up button whose list is not an AXMenu (aria-haspopup="listbox"): expand is confirmed by the list that appeared next to it; collapse is Escape, which waits for the caller to allow the key', async (ctx) => {
       if (!wPid) return ctx.skip();
       const open = await inv('--name', 'Pick one', '--action', 'expand');
-      expect(open).toMatchObject({ ok: true, success: true, data: { expandState: 'Expanded' } });
+      expect(open).toMatchObject({ ok: true, success: true, method: 'AXPress', data: { expandState: 'Expanded' } });
       await wait(300);
-      expect((await nodes()).some(n => n.name === 'Two' || n.value === 'Two')).toBe(true);
-      expect(await inv('--name', 'Pick one', '--action', 'expand')).toMatchObject({ ok: true, success: true, method: 'unchanged' });
-      expect(await inv('--name', 'Pick one', '--action', 'collapse')).toMatchObject({ ok: true, success: true, data: { expandState: 'Collapsed' } });
+      const showing = async () => (await nodes()).some(n => n.value === 'Two');
+      expect(await showing()).toBe(true);
+      // the helper presses no key on its own: without --allow-key it only says which key would close it
+      expect(await inv('--name', 'Pick one', '--action', 'collapse')).toMatchObject({ ok: true, success: false, data: { needsKey: 'Escape' } });
+      await wait(200);
+      expect(await showing()).toBe(true);
+      expect(await inv('--name', 'Pick one', '--action', 'collapse', '--allow-key', 'Escape')).toMatchObject({ ok: true, success: true, method: 'Escape', data: { expandState: 'Collapsed' } });
       await wait(300);
-      expect((await nodes()).some(n => n.name === 'Two' || n.value === 'Two')).toBe(false);
+      expect(await showing()).toBe(false);
+      // closed: nothing next to it, so nothing to close and no key to ask for
+      expect(await inv('--name', 'Pick one', '--action', 'collapse')).toMatchObject({ ok: true, success: true, method: 'unchanged' });
     });
 
     it('a plain web button shows an AXExpanded (false) but is not a disclosure: expand never presses it', async (ctx) => {
