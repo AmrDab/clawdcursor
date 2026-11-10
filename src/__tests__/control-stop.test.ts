@@ -132,7 +132,7 @@ describe('the window in front (#294)', () => {
 
     d.focusLagMs = 60_000;                 // the focus never takes
     await d.focusWindow(CLAUDE);
-    await expect(d.keyPress('y')).rejects.toThrow(/you focused claude, but notepad/);
+    await expect(d.keyPress('y')).rejects.toThrow(/you focused "claude", but notepad/);
   }, 10_000);
 
   it("a launch's own Start-menu keys are not refused, and the next input binds to what opened", async () => {
@@ -166,7 +166,7 @@ describe('the window in front (#294)', () => {
     const d = fakeDesktop();
     await d.openApp('notepad');
     fg = CLAUDE;
-    await expect(d.keyPress('x')).rejects.toThrow(/you opened Untitled - Notepad, but claude/);
+    await expect(d.keyPress('x')).rejects.toThrow(/you opened "Untitled - Notepad", but claude/);
   }, 10_000);
 
   it("clawdcursor's own housekeeping (the keyboard back after a pause) is neither checked nor bound", async () => {

@@ -29,6 +29,7 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { quoteScreenText } from '../result-codes';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
 import { isOwnUiPid } from '../../platform/pointer-guard';
@@ -170,19 +171,19 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
     case 'window_title_contains': {
       const wins = await adapter.listWindows();
       const hit = wins.find(w => titleContains(w.title ?? '', a.value));
-      if (hit) return { ok: true, detail: `matched "${truncate(hit.title, 60)}"` };
+      if (hit) return { ok: true, detail: `matched ${quoteScreenText(truncate(hit.title, 60))}` };
       // Only the window being acted on, not every app's title: other windows' titles can carry private text (a document
       // name, a token fragment) and are not the caller's business here.
       const front = await adapter.getActiveWindow().catch(() => null);
       const others = Math.max(0, wins.length - (front ? 1 : 0));
-      const inFront = front ? `the window in front is "${truncate(front.title ?? '', 60)}"` : 'no window is in front';
+      const inFront = front ? `the window in front is ${quoteScreenText(truncate(front.title ?? '', 60))}` : 'no window is in front';
       return { ok: false, detail: `no open window title contains "${a.value}" (${inFront}; ${others} other window${others === 1 ? '' : 's'} open)` };
     }
     case 'app_running': {
       const wins = await adapter.listWindows();
       const hit = wins.find(w => containsCI(w.processName ?? '', a.name));
       return hit
-        ? { ok: true, detail: `process "${hit.processName}" has a window` }
+        ? { ok: true, detail: `process ${quoteScreenText(String(hit.processName ?? ''))} has a window` }
         : { ok: false, detail: `no window belongs to a process matching "${a.name}"` };
     }
     case 'element_exists': {
@@ -197,14 +198,14 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
       if (!res.success) return { ok: false, detail: `"${a.name}" has no readable value` };
       const value = String((res.data as { value?: unknown } | undefined)?.value ?? '');
       return containsCI(value, a.value)
-        ? { ok: true, detail: `"${a.name}" = "${truncate(value, 80)}"` }
-        : { ok: false, detail: `"${a.name}" = "${truncate(value, 80)}" — does not contain "${a.value}"` };
+        ? { ok: true, detail: `"${a.name}" = ${quoteScreenText(truncate(value, 80))}` }
+        : { ok: false, detail: `"${a.name}" = ${quoteScreenText(truncate(value, 80))} — does not contain "${a.value}"` };
     }
     case 'clipboard_contains': {
       const clip = await adapter.readClipboard();
       return containsCI(clip ?? '', a.value)
         ? { ok: true, detail: 'clipboard matches' }
-        : { ok: false, detail: `clipboard is "${truncate(clip ?? '', 60)}" — does not contain "${a.value}"` };
+        : { ok: false, detail: `clipboard is ${quoteScreenText(truncate(clip ?? '', 60))} — does not contain "${a.value}"` };
     }
     case 'file_exists': {
       try {

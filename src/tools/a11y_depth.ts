@@ -18,6 +18,7 @@ import { selectOption } from '../platform/select-option';
 import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
 import { quoteScreenText } from '../core/result-codes';
+import { screenJson } from '../core/untrusted-screen-content';
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -204,7 +205,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         if (hits.length === 0) {
           return { text: `a11y_get_element: no element named ${quoteScreenText(name)} found.`, isError: true };
         }
-        return { text: JSON.stringify(hits[0], null, 2) };
+        return { text: screenJson(hits[0], 2) };
       },
     },
 
@@ -233,7 +234,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           return { text: `a11y_get_value: ${quoteScreenText(name)} exposes no ValuePattern or AXValue.`, isError: true };
         }
         const value = res.data?.value ?? '';
-        return { text: JSON.stringify({ name, value }) };
+        return { text: screenJson({ name, value }) };
       },
     },
 
@@ -274,7 +275,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           expandable: el.expandable ?? false,
           expanded: el.expanded ?? false,
         };
-        return { text: JSON.stringify(state) };
+        return { text: screenJson(state) };
       },
     },
 
@@ -349,7 +350,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
               for (let i = at + 1; i < tree.length && (tree[i].depth ?? -1) > d; i++) kids.push(tree[i]);
               if (kids.length === 0) continue;
               return {
-                text: JSON.stringify({
+                text: screenJson({
                   parent: { name: cand.name, controlType: cand.controlType, bounds: cand.bounds },
                   offscreen: true,
                   note: 'parent is scrolled out of view (no bounds); children taken from the accessibility tree — scroll to see them',
@@ -392,7 +393,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const cap = typeof maxChildren === 'number' ? maxChildren : 50;
         const trimmed = children.slice(0, cap);
         return {
-          text: JSON.stringify({
+          text: screenJson({
             parent: { name: parent.name, controlType: parent.controlType, bounds: parent.bounds },
             children: trimmed.map(c => ({
               name: c.name,

@@ -6,6 +6,8 @@
  */
 
 import type { ToolDefinition } from './types';
+import { quoteScreenText } from '../core/result-codes';
+import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 import { DEFAULT_CDP_PORT } from '../platform/browser-config';
 
 export function getCdpTools(): ToolDefinition[] {
@@ -63,7 +65,7 @@ export function getCdpTools(): ToolDefinition[] {
       handler: async ({ selector, maxLength }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
         const text = await ctx.cdp.readText(selector ?? 'body', maxLength ?? 3000);
-        return { text };
+        return { text: wrapUntrustedScreenContent(String(text ?? '')) };   // page text is the page's, not ours
       },
     },
 
@@ -142,7 +144,8 @@ export function getCdpTools(): ToolDefinition[] {
         try {
           const result = await ctx.cdp.evaluate(javascript);
           const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
-          return { text: text ?? '(undefined)' };
+          // What the script returns is whatever the page makes it return.
+          return { text: `Result:\n${wrapUntrustedScreenContent(text ?? '(undefined)')}` };
         } catch (e: any) {
           return { text: `JS error: ${e.message}`, isError: true };
         }
@@ -180,14 +183,14 @@ export function getCdpTools(): ToolDefinition[] {
           const tabs: Array<{ url: string; title: string; active: boolean }> = await ctx.cdp.listTabs();
           const pages = tabs.filter(t => !t.url.startsWith('edge://') && !t.url.startsWith('chrome://'));
           if (!pages.length) return { text: '(no tabs found)' };
-          return { text: pages.map((t, i) => `${i + 1}.${t.active ? ' *' : ''} "${t.title}" — ${t.url}`).join('\n') };
+          return { text: pages.map((t, i) => `${i + 1}.${t.active ? ' *' : ''} ${quoteScreenText(String(t.title ?? ''))} — ${quoteScreenText(String(t.url ?? ''))}`).join('\n') };
         }
         try {
           const resp = await fetch(`http://127.0.0.1:${DEFAULT_CDP_PORT}/json`);
           const tabs: any[] = await resp.json();
           const pages = tabs.filter((t: any) => t.type === 'page' && !t.url.startsWith('edge://') && !t.url.startsWith('chrome://'));
           if (!pages.length) return { text: '(no tabs found)' };
-          const lines = pages.map((t: any, i: number) => `${i + 1}. "${t.title}" — ${t.url}`);
+          const lines = pages.map((t: any, i: number) => `${i + 1}. ${quoteScreenText(String(t.title ?? ''))} — ${quoteScreenText(String(t.url ?? ''))}`);
           return { text: lines.join('\n') };
         } catch {
           return { text: `Cannot list tabs: not connected and no browser on port ${DEFAULT_CDP_PORT}. Use navigate_browser (opens a URL in the agent's browser) or cdp_connect first.`, isError: true };
@@ -210,7 +213,7 @@ export function getCdpTools(): ToolDefinition[] {
         if (ok) {
           const url = await ctx.cdp.getUrl();
           const title = await ctx.cdp.getTitle();
-          return { text: `Switched to: "${title}" at ${url}` };
+          return { text: `Switched to: ${quoteScreenText(String(title ?? ''))} at ${quoteScreenText(String(url ?? ''))}` };
         }
         return { text: `No tab matching "${target}" found.`, isError: true };
       },

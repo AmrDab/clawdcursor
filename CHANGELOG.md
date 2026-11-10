@@ -115,7 +115,24 @@ All notable changes to Clawd Cursor will be documented in this file.
     name, a batch, a named shortcut, a sequence (`esc win+l`), spacing, case, key order, an alias
     (`cmd`/`meta`/`super`/`win`) or a key held with `key_down` cannot get around it (the bypass classes of
     GHSA-35pc-g74h-p476 and GHSA-3v3f-5rwv-whc9). `Ctrl+Shift+Esc`, `Cmd+Opt+Esc` and (Linux) `Ctrl+Alt+L` are not on it. The `lock screen` entry of `shortcuts_list` / `shortcuts_run` is gone: it could only ever be refused.
-  - `SECURITY.md` states the threat model, the guarantees and the scope.
+  - `SECURITY.md` states the threat model, the guarantees, their limits and the scope.
+- **Screen text cannot leave its block.** `read_clipboard` and `copy_all_text` built the `<untrusted-screen-content>`
+  tags by hand around raw text, so a page containing the closing tag followed by fake clawdcursor output escaped the
+  block; `copy_all_text` also put the window title outside it. Every tool result that carries page text, OCR, a tree,
+  the clipboard, a field value, a window or tab title, an element name or a URL now goes through one helper
+  (`untrusted-screen-content.ts`: a block for free text, quotes for a short name, defused JSON for JSON results), which
+  makes the delimiter inert inside the text. Also fixed: `cdp_read_text`, `cdp_evaluate`, `cdp_list_tabs`,
+  `cdp_switch_tab`, `smart_read`, `smart_click`, `find_element`'s DOM fallback, `window list`, `invoke` get-value,
+  `wait_for`, `open_app` / `open_file` / `open_uri` / `navigate` window titles, verification reports, and batch step
+  text cut in the middle of a block.
+- **The hard key list counts held keys correctly.** `key_up` forgot a held key by family before releasing it
+  (`key_down win`, `key_up rwin`, `key_press l` locked the screen): a key is now forgotten only when `key_up` names that
+  same key and the release succeeded. Typed text was not checked at all (`key_down super`, then type `l`): with a key
+  held, every typed character is checked with it. On Wayland an unknown key in a chord was typed as text with the
+  modifiers held (`super+ll`): it is refused, as on X11. Held keys are tracked per server process.
+- **`open_app` takes an application name only.** A path (a separator, a drive letter, `~`) is refused and the agent is
+  pointed to `open_file`, the tool announced as destructive: on Windows the name reached `Start-Process -FilePath`, so a
+  path to an `.exe` ran it.
 - **Windows system programs are started by absolute path, from a private directory.** PowerShell (and `reg`, `tasklist`,
   `taskkill`, `netstat`, `rundll32`, `explorer`) were spawned by bare name, which Windows resolves in the current directory
   before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one

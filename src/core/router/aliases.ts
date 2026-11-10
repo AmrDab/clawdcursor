@@ -133,3 +133,16 @@ export function resolveAlias(name: string): (AppAlias & { key: string }) | null 
   if (!hit) return null;
   return { key: k, ...hit };
 }
+
+/**
+ * open_app takes an application NAME. A path is refused: on Windows the name reaches Start-Process -FilePath, on macOS
+ * `open -a`, on Linux an exec, and each runs the file a path points to. Running a file is open_file's job, and open_file
+ * is the tool announced to MCP hosts as destructive — open_app is not. Returns the refusal text, or null for a name.
+ */
+export function appNameRefusal(name: string): string | null {
+  const n = String(name ?? '').trim();
+  // A path separator, a drive letter ("C:x"), a home-relative path. Names keep dots, spaces, +, &, (), -.
+  if (!/[\\/]/.test(n) && !/^[a-z]:/i.test(n) && !n.startsWith('~')) return null;
+  return 'open_app takes an application name, not a path (e.g. "Calculator", "Microsoft Edge"). ' +
+    'To open a file or run a program by its path use open_file — window {"action":"open_file","path":"…"} — and for a web address open_url.';
+}

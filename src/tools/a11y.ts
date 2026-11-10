@@ -16,7 +16,8 @@ import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint } from './blind-hints';
-import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
+import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
+import { quoteScreenText } from '../core/result-codes';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns
@@ -312,7 +313,7 @@ export function getA11yTools(): ToolDefinition[] {
         if (ctx.platform) {
           const win = await ctx.platform.getActiveWindow();
           if (!win) return { text: '(no active window)' };
-          return { text: JSON.stringify(win) };
+          return { text: screenJson(win) };
         }
         const win = await ctx.a11y.getActiveWindow();
         if (!win) return { text: '(no active window)' };
@@ -340,11 +341,11 @@ export function getA11yTools(): ToolDefinition[] {
             return { text: `${ctx.platform.lastFindNote ?? 'Search cut.'} - this is not "nothing is focused".`, isError: true };
           }
           if (!el) return { text: '(no focused element)' };
-          return { text: JSON.stringify(el) };
+          return { text: screenJson(el) };
         }
         const el = await ctx.a11y.getFocusedElement();
         if (!el) return { text: '(no focused element)' };
-        return { text: JSON.stringify(el) };
+        return { text: screenJson(el) };
       },
     },
 
@@ -576,8 +577,7 @@ export function getA11yTools(): ToolDefinition[] {
         const cdpHits = await queryCdpDom(ctx, { name, limit: 20, processId });
         if (cdpHits && cdpHits.length) {
           const lines = ['(no UIA matches — falling back to CDP DOM; coords are viewport-relative)'];
-          lines.push(...cdpHits.map(formatElement));
-          return { text: lines.join('\n') };
+          return { text: `${lines[0]}\n${wrapUntrustedScreenContent(cdpHits.map(formatElement).join('\n'))}` };
         }
         // A bridge that failed is not "nothing found" — said only after the browser DOM fallback also found nothing.
         if (ctx.platform?.lastFindError === 'error') {
@@ -629,7 +629,7 @@ export function getA11yTools(): ToolDefinition[] {
         // Clipboard content is user/third-party data, not instructions — wrap it
         // so an injected "ignore your task and…" payload is framed as data on the
         // MCP route too (parity with the System B perception wrapping, gauntlet F7).
-        return { text: `<untrusted-screen-content>\n${raw}\n</untrusted-screen-content>` };
+        return { text: wrapUntrustedScreenContent(raw) };
       },
     },
 
@@ -664,7 +664,7 @@ export function getA11yTools(): ToolDefinition[] {
         const scopeNote = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
         const note = [r.note, scopeNote].filter(Boolean).join('\n');
         // Page text is third-party data, not instructions.
-        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys };
+        return { text: `${r.text.length} chars from ${r.window}:\n${wrapUntrustedScreenContent(r.text)}${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys };
       },
     },
 
@@ -720,7 +720,7 @@ export function getA11yTools(): ToolDefinition[] {
         const minimizeKey = process.platform === 'darwin' ? 'cmd+m' : 'super+down';
         await ctx.desktop.keyPress(minimizeKey);
 
-        return { text: `Minimized: "${target.title}" [${target.processName}] pid:${target.processId}` };
+        return { text: `Minimized: ${quoteScreenText(String(target.title ?? ''))} [${target.processName}] pid:${target.processId}` };
       },
     },
   ];

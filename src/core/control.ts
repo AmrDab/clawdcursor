@@ -17,6 +17,7 @@
  *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
 import * as fs from 'fs';
+import { quoteScreenText } from './result-codes';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
@@ -145,7 +146,7 @@ async function before(): Promise<void> {
   if (pending) {
     // Waited for it above: if it is still not in front, the focus did not take (or the user switched), whatever the clock says.
     if (!matches(pending, now)) {
-      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${pending.processName ?? pending.title ?? `pid ${pending.processId}`}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
+      throw new Error(`foreground changed: you ${pending.opened ? 'opened' : 'focused'} ${quoteScreenText(pending.processName ?? pending.title ?? `pid ${pending.processId}`)}, but ${name(now)} is in front — nothing was sent. Focus it again.`);
     }
     pending = null;
     explicit = true;

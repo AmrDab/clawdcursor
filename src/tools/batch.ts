@@ -27,6 +27,8 @@ import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { logger } from '../core/observability/logger';
+import { clipScreenText } from '../core/untrusted-screen-content';
+import { quoteScreenText } from '../core/result-codes';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -95,7 +97,7 @@ async function checkGuard(guard: BatchGuard, ctx: ToolContext): Promise<{ ok: bo
       // NBSP in "Microsoft Edge") that defeats a plain substring compare (#bug
       // 2026-06-11).
       if (!windowTextIncludes(r.text, guard.window)) {
-        return { ok: false, detail: `foreground window is not "${guard.window}" (got: ${(r.text || '').slice(0, 90)})` };
+        return { ok: false, detail: `foreground window is not "${guard.window}" (got: ${quoteScreenText((r.text || '').slice(0, 90))})` };
       }
     }
   }
@@ -186,7 +188,7 @@ export async function executeBatch(
       res = { text: `threw: ${e instanceof Error ? e.message : String(e)}`, isError: true };
     }
     if (res.isError) {
-      outcomes.push({ i, label, status: 'error', text: (res.text || '').slice(0, 200), pressedKeys: res.pressedKeys });
+      outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys });
       return halt(i, `step ${i} (${label}) errored`);
     }
 
@@ -199,7 +201,7 @@ export async function executeBatch(
 
     // A screenshot step names its id first, so it survives the step text's truncation.
     const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
-    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${(res.text || '').slice(0, 160)}`, pressedKeys: res.pressedKeys });
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys });
     completed++;
   }
 

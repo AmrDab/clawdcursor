@@ -11,6 +11,8 @@
  * the head of a result is read for the error vocabulary: a long body (page text) can contain the same words as content.
  */
 
+import { defuseScreenDelimiters } from './untrusted-screen-content';
+
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
@@ -222,7 +224,7 @@ const HEAD = 400;
  */
 export function quoteScreenText(s: string): string {
   // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
-  const defused = s.replace(/<(\/?)\s*untrusted-screen-content\s*>/gi, '‹$1untrusted-screen-content›');
+  const defused = defuseScreenDelimiters(String(s ?? ''));
   return `"${defused.replace(/["\r\n]+/g, "'")}"`;
 }
 function ownWords(text: string): string {

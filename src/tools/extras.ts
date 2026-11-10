@@ -20,6 +20,7 @@
 
 import type { ToolDefinition } from './types';
 import { MOD } from '../platform/keys';
+import { screenJson } from '../core/untrusted-screen-content';
 import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
@@ -593,13 +594,13 @@ export function getExtraTools(): ToolDefinition[] {
             const title = res?.title ?? '';
             if (!leaf || !windowTextIncludes(title, leaf)) {
               return {
-                text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: "${title || 'none'}"). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
+                text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
                 isError: true,
               };
             }
-            return { text: `Opened folder "${leaf}" (window: "${title}")` };
+            return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
           }
-          return { text: `Opened: ${p}${res?.title ? ` (window: "${res.title}")` : ''}` };
+          return { text: `Opened: ${p}${res?.title ? ` (window: ${quoteScreenText(res.title)})` : ''}` };
         } catch (err) {
           return {
             text: `open_file failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -731,7 +732,7 @@ export function getExtraTools(): ToolDefinition[] {
             if (await isRegisteredUriScheme(scheme)) {
               const shell = await shellDispatchUriAndVerify(u, () => ctx.platform!.listWindows(), { waitMs: 5000 });
               if (shell.windowOpened) {
-                return { text: `Opened ${scheme}: via the OS shell handler. New window: "${shell.title ?? '(untitled)'}". (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
+                return { text: `Opened ${scheme}: via the OS shell handler. New window: ${quoteScreenText(shell.title ?? '(untitled)')}. (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
               }
               return {
                 text: `open_uri: dispatched ${scheme}: via the OS shell but no new window appeared within 5s${shell.error ? ` (${shell.error})` : ''}. The handler may have routed into an existing window — verify with list_windows.`,
@@ -756,7 +757,7 @@ export function getExtraTools(): ToolDefinition[] {
               isError: true,
             };
           }
-          return { text: `Opened ${scheme}: in the registered handler. New window appeared: "${launchResult.hwndLabel ?? '(handle unknown)'}". (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
+          return { text: `Opened ${scheme}: in the registered handler. New window appeared: ${quoteScreenText(launchResult.hwndLabel ?? '(handle unknown)')}. (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
         } catch (err) {
           return {
             text: `open_uri failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -922,7 +923,7 @@ export function getExtraTools(): ToolDefinition[] {
         if (!ctx.getLogBuffer) return { text: '[]' };
         const buf = ctx.getLogBuffer();
         const sliced = buf.length > cap ? buf.slice(buf.length - cap) : buf;
-        return { text: JSON.stringify(sliced) };
+        return { text: screenJson(sliced) };
       },
     },
 

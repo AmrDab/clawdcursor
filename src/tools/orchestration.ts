@@ -3,10 +3,11 @@
  */
 
 import { execFile } from 'child_process';
+import { quoteScreenText } from '../core/result-codes';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
-import { resolveAlias } from '../core/router/aliases';
+import { resolveAlias, appNameRefusal } from '../core/router/aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
 import * as os from 'os';
@@ -26,7 +27,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
   return [
     {
       name: 'open_app',
-      description: 'Open an application by name. Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).',
+      description: 'Open an application by NAME (not a path: to open a file or run a program by path use open_file). Uses the cross-OS app alias table + the PlatformAdapter\'s launchApp (UWP-aware on Windows, `open -a` on macOS, executable or .desktop entry on Linux). Says plainly when no window appeared (still loading vs. not started).',
       parameters: {
         name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")', required: true },
       },
@@ -39,6 +40,8 @@ export function getOrchestrationTools(): ToolDefinition[] {
         if (!rawName) {
           return { text: 'open_app: `name` is required', isError: true };
         }
+        const notAName = appNameRefusal(rawName);
+        if (notAName) return { text: `open_app: ${notAName}`, isError: true };
 
         // Resolve through the canonical alias table so "Notepad" / "notepad" /
         // "Calculator" / "calc" all map to the right launch hints. The MCP
@@ -70,7 +73,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
                 ?? (process.platform === 'darwin' ? alias?.macOSAppName : undefined),
             });
             ctx.a11y.invalidateCache();
-            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window="${res.title}")` };
+            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window=${quoteScreenText(res.title)})` };
             // Running but no window yet: a slow app still loading (Outlook, IDEs).
             // Not an error — an error invites a second launch.
             if (res?.pid) {
@@ -144,7 +147,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
         const where = mode === 'attached'
           ? ' — in the agent\'s own tab of the EXISTING browser (likely the user\'s session; their tabs were not touched)'
           : mode === 'dedicated' ? ' — dedicated agent-owned browser' : '';
-        return { text: `Navigated to: "${title}" at ${r.value ?? url}${where}. Next: cdp_page_context to see the page, cdp_click / cdp_type to interact.` };
+        return { text: `Navigated to: ${quoteScreenText(String(title ?? ''))} at ${quoteScreenText(String(r.value ?? url))}${where}. Next: cdp_page_context to see the page, cdp_click / cdp_type to interact.` };
       },
     },
 
