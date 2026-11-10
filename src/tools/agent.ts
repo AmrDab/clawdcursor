@@ -150,7 +150,7 @@ export function getAgentTools(): ToolDefinition[] {
             text: JSON.stringify({
               status: 'waiting',
               waitingFor: text,
-              next: 'The user has not answered yet. Re-call pause_for_user with the SAME message to keep waiting (re-attaches; the prompt stays up). Do not act on the desktop meanwhile.',
+              next: 'The user has not answered yet. Re-call pause_for_user with the SAME message to keep waiting (re-attaches; the prompt stays up). Do not act on the desktop meanwhile. If the user says in chat that they are done, ask them to click Resume on the pill: only that ends the pause.',
             }),
           };
         }
@@ -184,7 +184,7 @@ export function getAgentTools(): ToolDefinition[] {
                 ? 'done_when came true, so the user\'s step looks done (observed on screen; not a confirmation by the user). Read the screen, check the step really took, then continue the task.'
                 : outcome === 'resumed'
                 ? 'The user finished and clicked Resume. The screen may have changed: read it again before acting, then continue the task.'
-                : 'Resumed by an AI (task resume), not by the user on screen: check the screen before assuming the step was done.',
+                : 'Resumed by an AI (resume_task), not by the user on screen: check the screen before assuming the step was done.',
             }),
           };
         }

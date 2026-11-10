@@ -25,8 +25,6 @@ export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
 export const UI_KNOWLEDGE_DIR = path.join(DATA_DIR, 'ui-knowledge');
 
 /** Persistent files */
-export const FAVORITES_PATH = path.join(DATA_DIR, '.clawdcursor-favorites.json');
-export const SCHEDULED_TASKS_PATH = path.join(DATA_DIR, 'scheduled-tasks.json');
 export const TOKEN_PATH = path.join(DATA_DIR, 'token');
 
 /**

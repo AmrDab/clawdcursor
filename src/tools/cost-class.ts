@@ -54,7 +54,6 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   pause_for_user: 'act', resume_task: 'act',
   // batch is inert itself (each step is gated/costed individually); classify the wrapper cheapest.
   batch: 'act',
-  favorites_add: 'act', favorites_remove: 'act',
 
   // ── inspect ── cheap structured read. ≤2K tok.
   get_screen_size: 'inspect', get_system_time: 'inspect', wait_for_element: 'inspect',
@@ -70,7 +69,6 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
   read_clipboard: 'inspect',
   cdp_evaluate: 'inspect', cdp_wait_for_selector: 'inspect', cdp_list_tabs: 'inspect',
   build_uri: 'inspect', logs_recent: 'inspect',
-  favorites_list: 'inspect',
 
   // ── perceive-text ── a11y/OCR/DOM dumps + tools that read them internally. ≤10K tok.
   read_screen: 'perceive-text', ocr_read_screen: 'perceive-text', smart_read: 'perceive-text',

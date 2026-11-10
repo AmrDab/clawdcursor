@@ -113,6 +113,15 @@ import { privateRunDir, system32Exe } from '../platform/ps-spawn';
 
 const program = new Command();
 
+// Flags and commands that went with the built-in agent (1.6): the failure stays, with one line saying why.
+const REMOVED_IN_16 = /unknown option '--(provider|model|text-model|vision-model|base-url|api-key|no-save|reset)'|unknown command 'task'/;
+program.configureOutput({
+  outputError: (str, write) => {
+    write(str);
+    if (REMOVED_IN_16.test(str)) write('removed in 1.6: clawdcursor no longer runs a model; your agent drives the tools\n');
+  },
+});
+
 async function isClawdInstance(port: number): Promise<boolean> {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
@@ -321,7 +330,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   // ── HTTP utility surface (/, /health, /stop) + MCP transport at /mcp ──
   const app = createUtilityServer({
     host: BIND_HOST,
-    onStop: () => {
+    onStop: async () => {
       endAllSessions('stopped with clawdcursor stop (POST /stop)');  // synchronous: in the log before the exit
     },
   });

@@ -85,7 +85,6 @@
     "picocolors": "^1.1.1",
     "playwright": "^1.64.1",
     "sharp": "^0.35.5",
-    "ws": "^8.22.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {

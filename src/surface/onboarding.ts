@@ -104,11 +104,11 @@ export async function runOnboarding(context: 'start' | 'consent' = 'start', star
 
   const contextNote = context === 'start'
     ? pc.gray('  You are starting:') + '\n' +
-      `${pc.gray('  → AI Agent + MCP HTTP transport on ')}${pc.cyan(`localhost:${startPort}`)}\n` +
+      `${pc.gray('  → MCP HTTP transport on ')}${pc.cyan(`localhost:${startPort}`)}\n` +
       pc.gray('  → Any local process with the bearer token can call tools') + '\n'
     : pc.gray('  This one-time consent covers both transports of clawdcursor:') + '\n' +
       `${pc.gray('  → stdio MCP   ')}${pc.gray('(Claude Code, Cursor, Windsurf, Zed — your editor spawns it)')}\n` +
-      `${pc.gray('  → HTTP MCP    ')}${pc.gray('(')}${pc.cyan('clawdcursor agent')}${pc.gray(' — daemon for the autonomous agent)')}\n`;
+      `${pc.gray('  → HTTP MCP    ')}${pc.gray('(')}${pc.cyan('clawdcursor agent')}${pc.gray(' — local daemon for HTTP-capable agents)')}\n`;
 
   const warningBox = pc.yellow(
     `  ╔${'═'.repeat(63)}╗\n` +

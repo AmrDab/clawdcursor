@@ -11,38 +11,6 @@
 import type { PlatformAdapter, ScreenshotResult } from '../../platform/types';
 import type { CDPDriver } from '../../platform/cdp-driver';
 
-export interface AgentInput {
-  task: string;
-  /** Hard cap on turns. Default 70. */
-  maxTurns?: number;
-  /** Cooperative cancel — polled every turn. */
-  isAborted?: () => boolean;
-  /**
-   * Hard cancel — aborts the in-flight LLM fetch immediately. Without it,
-   * an abort only takes effect at the next isAborted() checkpoint, i.e.
-   * after the current (up to 45s) LLM call returns. Wired by Agent.abort()
-   * so `clawdcursor stop` gets an acknowledgment instead of a hard kill.
-   */
-  abortSignal?: AbortSignal;
-  /**
-   * The window this subtask should run in (resolved by the caller — the
-   * browser for a web subtask, a named open app, etc.). Injected as a
-   * "WORKING WINDOW" anchor telling the agent to refocus it instead of
-   * thrashing. The generic stay-in-window guidance applies even when
-   * this is undefined.
-   */
-  targetWindow?: { title: string; processName: string };
-  /**
-   * Hand the desktop to the human at a roadblock (sign-in, 2FA, CAPTCHA, a
-   * step the agent may not take) and wait for Resume / End task — the run is
-   * suspended, not ended. `{ replied }`: the user typed an answer instead ("Something else" on the
-   * pill). Resolves null when no human can be reached (no
-   * overlay / CLAWD_NO_PAUSE): the loop then keeps its old fail-fast
-   * behaviour. Wired by Agent.
-   */
-  pause?: (req: { message: string; doneWhen?: () => Promise<boolean>; donePollMs?: number }) => Promise<'resumed' | 'resumed_unverified' | 'detected' | 'ended' | 'timeout' | { replied: string } | null>;
-}
-
 export type AgentExit =
   | 'done'
   | 'give_up'

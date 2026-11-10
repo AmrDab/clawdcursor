@@ -3,7 +3,7 @@
  *
  * clawdcursor exposes the SAME capability two ways: an MCP server (typed tools)
  * and a Skill (SKILL.md — the "how to use me" knowledge: fallback positioning,
- * the el_NN UI map, sustainable/autonomous execution via the daemon + `task`).
+ * the el_NN UI map, the SEE/ACT ladder, handing a step to the user).
  * An agent that only gets the MCP tools has the hands but not the playbook.
  *
  * This used to run ONLY inside `clawdcursor doctor`. But doctor configures the

@@ -3,6 +3,15 @@ import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// Tests never touch the owner's real home: os.homedir() (and so ~/.clawdcursor: the auth token, consent, pidfile, stop flag)
+// resolves under a private temp directory. Set before any module computes a path from it. Child processes inherit it.
+// The real home is kept only so home-isolation.test.ts can prove nothing was written there.
+if (!process.env.CLAWD_TEST_REAL_HOME) {
+  process.env.CLAWD_TEST_REAL_HOME = os.homedir();
+  const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-test-home-'));
+  process.env.HOME = testHome;
+  process.env.USERPROFILE = testHome;
+}
 // Keep test runs out of the user's real ~/.clawdcursor: the structured logger
 // and the MCP session log write here instead.
 process.env.CLAWDCURSOR_LOG_DIR ??= path.join(os.tmpdir(), `clawdcursor-test-logs-${process.pid}`);

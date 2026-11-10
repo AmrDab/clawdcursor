@@ -7,21 +7,20 @@ import { describe, it, expect } from 'vitest';
 import { dashboardToolCall } from '../surface/dashboard-tools';
 import { mountDashboard } from '../surface/dashboard';
 
-const GRANULAR = ['read_screen', 'resume_task', 'favorites_list', 'logs_recent'];
+const GRANULAR = ['read_screen', 'resume_task', 'logs_recent'];
 const COMPACT = ['computer', 'accessibility', 'window', 'system', 'browser', 'batch'];
 
 describe('dashboardToolCall', () => {
   it('granular daemon: the granular tools, unchanged', () => {
-    expect(dashboardToolCall(GRANULAR, 'favorites_list', {})).toEqual({ name: 'favorites_list', arguments: {} });
+    expect(dashboardToolCall(GRANULAR, 'logs_recent', {})).toEqual({ name: 'logs_recent', arguments: {} });
   });
 
   it('compact daemon: a tool with no compact equivalent is unavailable (null), not a wrong call', () => {
-    expect(dashboardToolCall(COMPACT, 'favorites_list', {})).toBeNull();
     expect(dashboardToolCall(COMPACT, 'logs_recent', {})).toBeNull();
   });
 
   it('unknown surface (tools/list failed): the granular names, as before', () => {
-    expect(dashboardToolCall([], 'favorites_list', {})).toEqual({ name: 'favorites_list', arguments: {} });
+    expect(dashboardToolCall([], 'logs_recent', {})).toEqual({ name: 'logs_recent', arguments: {} });
   });
 });
 

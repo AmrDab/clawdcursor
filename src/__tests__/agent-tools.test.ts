@@ -1,12 +1,12 @@
 /**
  * agent-tools tests — exercises the MCP tools in tools/agent.ts and friends
- * (screenshot_full, learn_app, submit_report, logs_recent, favorites_*).
+ * (screenshot_full, learn_app, submit_report, logs_recent).
  *
  * These tools are the v0.9 PR7.2 replacements for the legacy REST routes;
  * they share the same shape with REST so dashboard rewires are mechanical.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // ── Mock heavy native deps ───────────────────────────────────────────────
 vi.mock('@nut-tree-fork/nut-js', () => ({
@@ -29,35 +29,8 @@ vi.mock('sharp', () => ({
 }));
 
 import { getAgentTools } from '../tools/agent';
-import { getFavoritesTools } from '../tools/favorites';
 import { getExtraTools } from '../tools/extras';
 import type { ToolContext } from '../tools/registry';
-
-// Minimal in-memory favorites store for the tests.
-let favStore: string[] = [];
-vi.mock('fs', async () => {
-  const actual = await vi.importActual<typeof import('fs')>('fs');
-  return {
-    ...actual,
-    existsSync: (p: string) => {
-      if (typeof p === 'string' && p.includes('favorites')) return favStore.length > 0;
-      return actual.existsSync(p);
-    },
-    readFileSync: ((p: any, enc?: any) => {
-      if (typeof p === 'string' && p.includes('favorites')) {
-        return JSON.stringify(favStore);
-      }
-      return (actual.readFileSync as any)(p, enc);
-    }) as any,
-    writeFileSync: ((p: any, data: any, ..._rest: any[]) => {
-      if (typeof p === 'string' && p.includes('favorites')) {
-        favStore = JSON.parse(String(data));
-        return;
-      }
-      return (actual.writeFileSync as any)(p, data, ..._rest);
-    }) as any,
-  };
-});
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -113,47 +86,6 @@ describe('agent tools — screenshot_full', () => {
     expect(meta.llmWidth).toBe(1280);
     expect(meta.format).toMatch(/^(png|jpeg)$/);
     expect(result.image?.mimeType).toBe(`image/${meta.format}`);
-  });
-});
-
-// ── favorites tools ──────────────────────────────────────────────────────
-
-describe('favorites tools', () => {
-  beforeEach(() => { favStore = []; });
-  const tools = getFavoritesTools();
-
-  it('favorites_list returns [] initially', async () => {
-    const result = await findTool(tools, 'favorites_list').handler({}, makeCtx());
-    expect(result.text).toBe('[]');
-  });
-
-  it('favorites_add inserts a starred task', async () => {
-    const result = await findTool(tools, 'favorites_add').handler({ task: 'open chrome' }, makeCtx());
-    expect(result.isError).toBeFalsy();
-    const parsed = JSON.parse(result.text);
-    expect(parsed.ok).toBe(true);
-    expect(parsed.favorites).toContain('open chrome');
-  });
-
-  it('favorites_add does not duplicate', async () => {
-    favStore = ['open chrome'];
-    const result = await findTool(tools, 'favorites_add').handler({ task: 'open chrome' }, makeCtx());
-    const parsed = JSON.parse(result.text);
-    expect(parsed.favorites.filter((s: string) => s === 'open chrome')).toHaveLength(1);
-  });
-
-  it('favorites_remove removes a starred task', async () => {
-    favStore = ['open chrome', 'open notepad'];
-    const result = await findTool(tools, 'favorites_remove').handler({ task: 'open chrome' }, makeCtx());
-    const parsed = JSON.parse(result.text);
-    expect(parsed.favorites).not.toContain('open chrome');
-    expect(parsed.favorites).toContain('open notepad');
-  });
-
-  it('favorites_remove returns isError when missing', async () => {
-    favStore = [];
-    const result = await findTool(tools, 'favorites_remove').handler({ task: 'nope' }, makeCtx());
-    expect(result.isError).toBe(true);
   });
 });
 

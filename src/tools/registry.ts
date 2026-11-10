@@ -18,7 +18,6 @@ import { getA11yDepthTools } from './a11y_depth';
 import { getElectronBridgeTools } from './electron_bridge';
 import { getCompactTools } from './compact';
 import { getAgentTools } from './agent';
-import { getFavoritesTools } from './favorites';
 import type { ToolDefinition, ToolContext, ToolResult, CompactGroup } from './types';
 import { toOpenAiFunctions, toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
@@ -539,7 +538,6 @@ function granularTools(): ToolDefinition[] {
       ...getA11yDepthTools(),
       ...getElectronBridgeTools(),
       ...getAgentTools(),
-      ...getFavoritesTools(),
     ].filter(t =>
       !WINDOW_MCP_NAMES.has(t.name) &&
       !KEYBOARD_MCP_NAMES.has(t.name) &&

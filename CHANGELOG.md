@@ -27,6 +27,9 @@ All notable changes to Clawd Cursor will be documented in this file.
     `--provider`, `--model`, `--text-model`, `--vision-model`, `--base-url` and
     `--api-key` flags are gone from `agent` and `start`. The HTTP MCP transport,
     `/stop`, `/resume`, `/health` and token auth are unchanged.
+  - The removed flags and `clawdcursor task` now fail as an unknown option or
+    command, followed by "removed in 1.6: clawdcursor no longer runs a model;
+    your agent drives the tools". The same goes for the removed `doctor` flags.
 - **Breaking: all model configuration is gone.** There is no provider, model,
   API key or base URL setting anywhere: the provider clients and key discovery
   (`src/llm/`) are gone, and so are the `AI_API_KEY` / `CLAWD_*_MODEL` /
@@ -40,7 +43,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   ladder (CLI > project file > user file > env > default) is unchanged for
   `port`, `debug` and `disableVision`. Configure the model in your agent host.
 - **The dashboard's Tasks and Scheduled tabs**, task form, history and
-  favorites. The dashboard is the pause banner, the log view, the connection
+  favorites, and with them the granular `favorites_list`, `favorites_add` and
+  `favorites_remove` tools: they stored task strings for the built-in agent.
+  Keep reusable prompts in your agent host. The dashboard is the pause banner, the log view, the connection
   status and the Kill button.
 
 ### Changed
@@ -96,6 +101,8 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **Window titles match through invisible characters** (the zero-width space in Edge's title) in focus, `expect` and
   scoping, on every OS.
 - **`system copy_all_text` accepts `scope`**, which the `system` schema lists for `ocr`.
+- **A waiting `pause_for_user` says how it ends.** If the user tells the agent in chat that they are done, the reply now
+  says to ask them to click Resume on the pill.
 - **The dashboard shows a pause for the user again.** The Resume / End banner was
   fed by the removed `agent_status` tool. It now reads the pending pause
   (message, choices) from `GET /resume`, which needs the token like

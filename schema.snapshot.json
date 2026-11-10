@@ -638,52 +638,6 @@
       "costClass": "inspect"
     },
     {
-      "name": "favorites_add",
-      "description": "Add a task string to the favorites list. No-op if already present. Returns the updated list.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "task": {
-            "type": "string",
-            "description": "Task string to star"
-          }
-        },
-        "required": [
-          "task"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
-      "name": "favorites_list",
-      "description": "Return the list of starred (\"favorite\") task strings. Stored locally at ~/.clawdcursor/.clawdcursor-favorites.json — never sent over the network.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {}
-      },
-      "costClass": "inspect"
-    },
-    {
-      "name": "favorites_remove",
-      "description": "Remove a task string from the favorites list. Returns the updated list.",
-      "category": "orchestration",
-      "parameters": {
-        "type": "object",
-        "properties": {
-          "task": {
-            "type": "string",
-            "description": "Task string to unstar"
-          }
-        },
-        "required": [
-          "task"
-        ]
-      },
-      "costClass": "act"
-    },
-    {
       "name": "find_action_button",
       "description": "Semantically locate the best clickable element for an intent (e.g. \"submit\", \"cancel\", \"search\") over the compiled UI. Returns JSON {status:\"ok\"|\"ambiguous\"|\"none\", snapshot_id, best?, candidates}. On \"ok\", act with invoke_element({element_id: best.element_id, snapshot_id}). Deterministic synonym + text + confidence match.",
       "category": "perception",
