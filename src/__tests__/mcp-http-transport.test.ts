@@ -140,6 +140,30 @@ describe('startMcpHttp one-shot JSON-RPC posts (dashboard / curl / CLI)', () => 
     expect(r.status).toBe(401);
   });
 
+  it('tells the server of a session when its client session closes', async () => {
+    const ended: string[] = [];
+    const app = express();
+    app.use(express.json());
+    const mcp = await startMcpHttp(await makeServer(), app, '/mcp', async () => {
+      const s = await makeServer();
+      s.onSessionEnd = r => ended.push(r);
+      return s;
+    });
+    closeMcp = mcp.close;
+    http = await new Promise<HttpServer>(r => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    const url = new URL(`http://127.0.0.1:${(http.address() as AddressInfo).port}/mcp`);
+    const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
+    const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
+    const transport = new StreamableHTTPClientTransport(url);
+    const client = new Client({ name: 'it', version: '1.0.0' });
+    await client.connect(transport);
+    expect(ended).toEqual([]);
+    await transport.terminateSession();
+    await client.close();
+    await new Promise(r => setTimeout(r, 50));
+    expect(ended).toEqual(['the client session closed']);
+  });
+
   it('an unknown session id is a 404 so the client re-initializes', async () => {
     const { url } = await start();
     const res = await fetch(url, {

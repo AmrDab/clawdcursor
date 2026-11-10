@@ -378,6 +378,56 @@ describe('L7 — findElements scopes to the foreground window pid by default', (
     expect(hits).toHaveLength(1);
     expect(hits[0].controlType).toBe('Button');
   });
+
+  // Review of 1.5.27: a search that ran out of budget in a wide window said "not found".
+  it('a search the bridge cut is reported as partial, not as nothing found', async () => {
+    h.exec = defaultExec(() => ({ elements: [], partial: true }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.findElements({ name: 'Needle' })).toEqual([]);
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/element budget/);
+    h.exec = defaultExec(() => ({ elements: [] }));
+    await adapter.findElements({ name: 'Needle' });
+    expect(adapter.lastFindError).toBeNull();
+  });
+
+  it('names what cut the search, and a role-only find searches in the bridge', async () => {
+    h.exec = defaultExec(() => ({ elements: [], partial: true, reason: 'time limit' }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.findElements({ controlType: 'Button' });
+    const args = bridgeCalls()[bridgeCalls().length - 1];
+    expect(args.find(a => a.startsWith('--role='))).toMatch(/push button/);
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/time limit/);
+    h.exec = defaultExec(() => ({ elements: [], partial: true, reason: 'depth limit' }));
+    await adapter.findElements({ name: 'x' });
+    expect(adapter.lastFindNote).toMatch(/depth limit/);
+  });
+
+  it('a cut list that still has hits is flagged incomplete; ToolTip is sent as the role the bridge can match', async () => {
+    h.exec = defaultExec(() => ({ elements: [{ name: 'Hint', controlType: 'tool tip', bounds: { x: 1, y: 2, width: 3, height: 4 } }], partial: true, reason: 'result limit' }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    const hits = await adapter.findElements({ controlType: 'ToolTip' });
+    expect(hits).toHaveLength(1);                                   // a spaced raw role survives the adapter's own filter
+    expect(bridgeCalls()[bridgeCalls().length - 1]).toContain('--role=tooltip');
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/incomplete.*result limit/);
+  });
+
+  it('a focus search the bridge cut is reported as partial, not as nothing focused', async () => {
+    h.exec = defaultExec(() => ({ element: null, partial: true }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.getFocusedElement()).toBeNull();
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/element budget/);
+    h.exec = defaultExec(() => ({ element: null }));
+    await adapter.getFocusedElement();
+    expect(adapter.lastFindError).toBeNull();
+  });
 });
 
 // ─── L8 ───────────────────────────────────────────────────────────────────────

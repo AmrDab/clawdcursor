@@ -327,6 +327,9 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (ctx.platform) {
           const el = await ctx.platform.getFocusedElement();
+          if (!el && ctx.platform.lastFindError === 'partial') {
+            return { text: `${ctx.platform.lastFindNote ?? 'Search cut.'} - this is not "nothing is focused".`, isError: true };
+          }
           if (!el) return { text: '(no focused element)' };
           return { text: JSON.stringify(el) };
         }
@@ -533,7 +536,9 @@ export function getA11yTools(): ToolDefinition[] {
         if (uiaHits.length) {
           // Element names are what the screen said: data, never instructions — and never rewritten by the compact surface (#248).
           const more = uiaHits.length > 20 ? `\n... and ${uiaHits.length - 20} more` : '';
-          return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(uiaHits.slice(0, 20).map(formatElement).join('\n'))}${more}` };
+          // A search the platform cut returned only part of the list.
+          const cut = ctx.platform?.lastFindError === 'partial' ? `\n(${ctx.platform.lastFindNote ?? 'The search was cut; the list is incomplete.'})` : '';
+          return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(uiaHits.slice(0, 20).map(formatElement).join('\n'))}${more}${cut}` };
         }
         // A timeout is not "nothing there" — say so, or the agent concludes
         // a11y is useless and switches to screenshots for the rest of the session.

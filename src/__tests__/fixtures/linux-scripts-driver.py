@@ -334,9 +334,128 @@ OUT['deep_cut'] = deep_cut[0]
 too_deep_out, too_deep_cut = [], [False]
 bridge.walk(chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button')), too_deep_out, 1, too_deep_cut)
 OUT['too_deep_cut'] = too_deep_cut[0]
-# find_target counts nodes visited, not matches: a name that matches nothing stops after MAX_TREE_NODES nodes.
-wide = Acc('page', 'document web', children=[Acc('row %d' % i, 'section') for i in range(bridge.MAX_TREE_NODES * 2)] + [Acc('Needle', 'push button')])
-OUT['wide_capped'] = bridge.find_target(Acc('app', 'application', children=[wide]), 'Needle', None)[0] is None
+# A search has its own visit budget (MAX_SEARCH_NODES), larger than the tree's output cap: a file manager with
+# 1,000 files still finds its 1,000th row. find_target counts nodes visited, not matches, so a name that matches
+# nothing stops there, and says the search was cut.
+def wide_app(n):
+    page = Acc('page', 'document web', children=[Acc('row %d' % i, 'section') for i in range(n)] + [Acc('Needle', 'push button')])
+    return Acc('app', 'application', pid=5151, children=[page])
+OUT['search_over_tree_cap'] = bridge.MAX_SEARCH_NODES > bridge.MAX_TREE_NODES
+bridge.SEARCH_CUT[0] = False
+OUT['wide_found'] = bridge.find_target(wide_app(bridge.MAX_TREE_NODES * 2), 'Needle', None)[0] is not None
+OUT['wide_found_cut'] = bridge.SEARCH_CUT[0]
+bridge.SEARCH_CUT[0] = False
+OUT['wide_capped'] = bridge.find_target(wide_app(bridge.MAX_SEARCH_NODES * 2), 'Needle', None)[0] is None
+OUT['wide_capped_cut'] = bridge.SEARCH_CUT[0]
+real_active_application = bridge.active_application
+wide_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+bridge.active_application = lambda *a, **k: wide_acc
+OUT['wide_invoke'] = bridge.cmd_invoke('Needle', None, 5151, 'click', None)
+OUT['wide_find'] = bridge.cmd_find('Needle', None, 5151)
+wide_acc = wide_app(bridge.MAX_TREE_NODES * 2)
+OUT['wide_find_small'] = [e['name'] for e in bridge.cmd_find('Needle', None, 5151)['elements']]
+wide_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+OUT['wide_scroll'] = bridge.cmd_scroll_into_view('Needle', None, 5151)
+focus_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+focus_acc.children[0].children[-1].states.add(StateType.FOCUSED)
+wide_acc = focus_acc
+OUT['wide_focused'] = bridge.cmd_focused(5151)
+
+# find builds an element dict (about ten AT-SPI calls) only for hits, not for every node it walks.
+wide_acc = wide_app(1500)
+real_node_to_dict, dict_calls = bridge.node_to_dict, [0]
+def counting_node_to_dict(acc):
+    dict_calls[0] += 1
+    return real_node_to_dict(acc)
+bridge.node_to_dict = counting_node_to_dict
+OUT['find_names'] = [e['name'] for e in bridge.cmd_find('Needle', None, 5151)['elements']]
+OUT['find_dict_calls'] = dict_calls[0]
+# A role-only find searches too, and reports a cut one.
+wide_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+OUT['role_find'] = bridge.cmd_find(None, 'no such role', 5151)
+bridge.node_to_dict = real_node_to_dict
+
+# Deadline: a slow tree ends the search as cut ('time limit') instead of running into the caller's timeout.
+clock = [0.0]
+class SlowAcc(Acc):
+    def get_name(self):
+        clock[0] += 1.0
+        return self.name
+    def get_state_set(self):
+        clock[0] += 1.0
+        return super().get_state_set()
+slow_page = Acc('page', 'document web', children=[SlowAcc('row %d' % i, 'section') for i in range(60)] + [SlowAcc('Needle', 'push button')])
+slow_acc = Acc('app', 'application', pid=5151, children=[slow_page])
+real_now = bridge._now
+bridge._now = lambda: clock[0]
+wide_acc = slow_acc
+def timed(fn):
+    clock[0] = 0.0
+    r = fn()
+    return r
+bridge.begin_search()
+OUT['slow_target'] = [bridge.find_target(slow_acc, 'Needle', None)[0] is None, bridge.SEARCH_CUT[0], clock[0]]
+clock[0] = 0.0
+OUT['slow_find'] = bridge.cmd_find('Needle', None, 5151)
+clock[0] = 0.0
+OUT['slow_invoke'] = bridge.cmd_invoke('Needle', None, 5151, 'click', None)
+clock[0] = 0.0
+OUT['slow_scroll'] = bridge.cmd_scroll_into_view('Needle', None, 5151)
+clock[0] = 0.0
+slow_page.children[-1].states.add(StateType.FOCUSED)
+OUT['slow_focused'] = bridge.cmd_focused(5151)
+bridge._now = real_now
+
+# The hit list is capped (each hit costs about ten AT-SPI calls to describe) and says it was cut.
+items_acc = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('file %d' % i, 'list item') for i in range(2000)])])
+wide_acc = items_acc
+cap_res = bridge.cmd_find(None, 'list item', 5151)
+OUT['hit_cap'] = {'n': len(cap_res['elements']), 'partial': cap_res.get('partial'), 'reason': cap_res.get('reason'), 'max': bridge.MAX_TREE_NODES}
+# The deadline holds while describing hits too: every dict costs a second on a fake clock.
+clock[0] = 0.0
+bridge._now = lambda: clock[0]
+slow_dict_orig = bridge.node_to_dict
+def slow_dict(acc):
+    clock[0] += 1.0
+    return slow_dict_orig(acc)
+bridge.node_to_dict = slow_dict
+few_acc = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('file %d' % i, 'list item') for i in range(30)])])
+wide_acc = few_acc
+slow_res = bridge.cmd_find(None, 'list item', 5151)
+OUT['dict_deadline'] = {'n': len(slow_res['elements']), 'partial': slow_res.get('partial'), 'reason': slow_res.get('reason')}
+bridge.node_to_dict = slow_dict_orig
+bridge._now = real_now
+
+# Multi-word roles outside the role map: the caller sends the normalized name, AT-SPI spells it with a space.
+OUT['role_squeeze'] = [bridge.role_matches(['tooltip'], 'tool tip'), bridge.role_matches(['infobar'], 'info bar'), bridge.role_matches(['button'], 'tool tip')]
+wide_acc = Acc('app', 'application', pid=5151, children=[Acc('win', 'frame', children=[Acc('Hint', 'tool tip'), Acc('Warn', 'info bar'), Acc('Ok', 'push button')])])
+OUT['tooltip_find'] = [e['name'] for e in bridge.cmd_find(None, 'tooltip', 5151)['elements']]
+OUT['infobar_find'] = [e['name'] for e in bridge.cmd_find(None, 'infobar', 5151)['elements']]
+
+# A cut search does not act on a weaker match (substring) when an exact one may lie beyond the cut.
+weak_page = Acc('page', 'document web', children=[Acc('Save as draft', 'push button')] + [Acc('row %d' % i, 'section') for i in range(bridge.MAX_SEARCH_NODES * 2)] + [Acc('Save', 'push button')])
+wide_acc = Acc('app', 'application', pid=5151, children=[weak_page])
+OUT['weak_cut'] = bridge.cmd_invoke('Save', None, 5151, 'click', None)
+small_weak = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Save as draft', 'push button', actions=['click'])])])
+bridge.begin_search()
+OUT['weak_uncut'] = bridge.find_target(small_weak, 'Save', None)[0] is not None
+
+# scroll-into-view: a cut search (budget) does not scroll to the matches it saw; an uncut one does.
+scroll_cut = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Target', 'push button')] + [Acc('row %d' % i, 'section') for i in range(bridge.MAX_SEARCH_NODES * 2)])])
+wide_acc = scroll_cut
+OUT['scroll_after_cut'] = bridge.cmd_scroll_into_view('Target', None, 5151)   # an EXACT match, then a cut: proceeds
+scroll_weak = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Target item', 'push button')] + [Acc('row %d' % i, 'section') for i in range(bridge.MAX_SEARCH_NODES * 2)])])
+wide_acc = scroll_weak
+OUT['scroll_weak_cut'] = bridge.cmd_scroll_into_view('Target', None, 5151)    # substring only, then a cut: refused
+scroll_ok = Acc('app', 'application', pid=5151, children=[Acc('page', 'document web', children=[Acc('Target', 'push button')])])
+wide_acc = scroll_ok
+OUT['scroll_uncut'] = bridge.cmd_scroll_into_view('Target', None, 5151)
+
+# Depth limit is named as such.
+deep_acc = Acc('app', 'application', pid=5151, children=[chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button'))])
+bridge.begin_search()
+OUT['deep_target'] = [bridge.find_target(deep_acc, 'Too deep', None)[0] is None, bridge.SEARCH_CUT[0]]
+bridge.active_application = real_active_application
 
 # Focus: scoped to the app, active window first — never another app's widget.
 OUT['focused_editor'] = bridge.cmd_focused(7777)['element']

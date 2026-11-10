@@ -3,11 +3,11 @@
  * (a11y / text) before screenshots, and let a user report a session in one
  * step — without ever recording typed text, clipboard, names or paths.
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SessionLog, classifyCall, outcomeOf, readSession, listSessions } from '../surface/session-log';
+import { SessionLog, classifyCall, outcomeOf, readSession, listSessions, endAllSessions, safeStack, errorClass } from '../surface/session-log';
 import { buildSessionReport, issueUrl, reportMarkdown } from '../surface/report';
 
 beforeEach(() => {
@@ -133,11 +133,11 @@ describe('session report', () => {
   // Mac run: three calls the pause guard refused showed up as "errors: 3" in the report.
   it('lists guard refusals apart from errors', () => {
     const log = new SessionLog({ version: '9.9.9', surface: 'compact' });
-    log.record('computer', 'key', false, 0, 'computer {action:"key"}: paused — a pause is waiting', undefined, { outcome: 'refused' });
+    log.record('computer', 'key', false, 0, 'computer {action:"key"}: paused — a pause is waiting for the user on screen', undefined, { outcome: 'refused' });
     log.record('computer', 'click', false, 5, 'click failed: no window', undefined, { outcome: 'error' });
     const r = buildSessionReport();
-    expect(r.session?.errors).toEqual(['click failed: no window']);
-    expect(r.session?.refusals).toEqual(['computer {action:"key"}: paused — a pause is waiting']);
+    expect(r.session?.errors).toEqual(['UNKNOWN']);  // a code, never the error text
+    expect(r.session?.refusals).toEqual(['PAUSED']);
     expect(reportMarkdown(r)).toMatch(/errors: 1; refused by a guard: 1/);
   });
 });
@@ -163,6 +163,28 @@ describe('how a server ended', () => {
     expect(log.some(r => r.msg === 'mcp.exit' && r.level === 'warn' && r.meta.cutOff.tool === 'batch')).toBe(true);
   });
 
+  it('end is idempotent: a second end writes nothing', () => {
+    const s = new SessionLog({ version: 't', surface: 'compact' });
+    s.record('window', 'list', true, 1);
+    s.end('first');
+    s.end('second');
+    const ends = fs.readFileSync(s.file!, 'utf8').trim().split('\n').map(l => JSON.parse(l)).filter(l => l.type === 'end');
+    expect(ends).toEqual([expect.objectContaining({ reason: 'first' })]);
+    expect(dayLog().filter(r => r.msg === 'mcp.exit' && r.meta.reason === 'second')).toHaveLength(0);
+  });
+
+  it('a daemon HTTP session closing logs session.end, not mcp.exit; one that made no call logs nothing', () => {
+    const used = new SessionLog({ version: 't', surface: 'compact' });
+    used.record('window', 'list', true, 1);
+    used.end('session-closed-used', 'session');
+    new SessionLog({ version: 't', surface: 'compact' }).end('session-closed-unused', 'session');
+    const log = dayLog();
+    expect(log.filter(r => r.msg === 'session.end' && r.meta.reason === 'session-closed-used')).toHaveLength(1);
+    expect(log.filter(r => r.meta?.reason?.startsWith('session-closed') && r.msg === 'mcp.exit')).toHaveLength(0);
+    expect(log.filter(r => r.meta?.reason === 'session-closed-unused')).toHaveLength(0);
+    expect(fs.readFileSync(used.file!, 'utf8')).toMatch(/"type":"end"/);
+  });
+
   it('a server that was killed is reported once, at the next start', async () => {
     const { reportUncleanExits } = await import('../surface/session-log');
     const dir = process.env.CLAWDCURSOR_SESSION_DIR!;
@@ -181,5 +203,175 @@ describe('how a server ended', () => {
     expect(exits).toHaveLength(1);
     expect(exits[0].meta).toMatchObject({ reason: expect.stringMatching(/killed or crashed/), lastFinishedCall: { tool: "computer", action: "type" } });
     expect(fs.readFileSync(old, 'utf8')).not.toMatch(/"end"/);
+  });
+});
+
+describe('what the logs may carry', () => {
+  const dayLogText = () => {
+    const dir = process.env.CLAWDCURSOR_LOG_DIR!;
+    return fs.readdirSync(dir).filter(f => f.endsWith('.log')).map(f => fs.readFileSync(path.join(dir, f), 'utf8')).join('');
+  };
+
+  it('error text (window titles, field contents, paths) reaches neither the day log, stderr nor the session file', () => {
+    const err = vi.spyOn(process.stderr, 'write');
+    const log = new SessionLog({ version: 't', surface: 'compact' });
+    log.record('window', 'focus', false, 3, "Window not found: title='CANARY-title Q3 salaries'");
+    log.record('accessibility', 'set_value', false, 3, "set-value did not stick (got 'CANARY-field hunter2') in C:\\Users\\x\\CANARY-dir");
+    const stderr = err.mock.calls.map(c => String(c[0])).join('');
+    err.mockRestore();
+    for (const text of [dayLogText(), stderr, fs.readFileSync(log.file!, 'utf8')]) {
+      expect(text).not.toContain('CANARY');
+      expect(text).not.toContain('hunter2');
+    }
+    expect(dayLogText()).toMatch(/"code":"NOT_FOUND"/);  // the code stays
+    expect(fs.readFileSync(log.file!, 'utf8')).toMatch(/"code":"NOT_FOUND"/);
+  });
+
+  it('safety.decision logs the rule, never the target text', async () => {
+    const { evaluate } = await import('../core/safety');
+    const err = vi.spyOn(process.stderr, 'write');
+    const d = evaluate({ tool: 'mouse_click', args: {}, targetLabel: 'Delete CANARY-invoice for Jane Roe' });
+    const stderr = err.mock.calls.map(c => String(c[0])).join('');
+    err.mockRestore();
+    expect(d.decision).toBe('confirm');
+    expect((d as { reason: string }).reason).toContain('CANARY');   // the caller still tells the user why
+    const day = dayLogText();
+    expect(day).toMatch(/"msg":"safety.decision".*"rule":"label_pattern:/);
+    expect(day).not.toContain('CANARY');
+    expect(stderr).not.toContain('CANARY');
+  });
+
+  it('a crash stack keeps its frames and drops the message and the home path', () => {
+    const home = os.homedir();
+    const out = safeStack(`Error: Window not found: title='CANARY'\n    at f (${home}${path.sep}proj${path.sep}a.js:1:2)\n    at g (C:\\Users\\other\\b.js:3:4)`);
+    expect(out).not.toContain('CANARY');
+    expect(out).not.toContain(home);
+    expect(out).not.toContain('other');
+    expect(out.split('\n')).toHaveLength(2);
+  });
+});
+
+describe('errorClass', () => {
+  it('names the class of an Error and the typeof of anything else, never the message', () => {
+    class WindowError extends Error { constructor(m: string) { super(m); this.name = 'WindowError'; } }
+    expect(errorClass(new WindowError("title='CANARY'"))).toBe('WindowError');
+    expect(errorClass(new TypeError('CANARY'))).toBe('TypeError');
+    expect(errorClass("CANARY string")).toBe('string');
+    expect(errorClass({ message: 'CANARY' })).toBe('object');
+    expect(errorClass(undefined)).toBe('undefined');
+  });
+  it('crash logs it too', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
+    expect(src.slice(src.indexOf("process.on('uncaughtException'"), src.indexOf("process.on('unhandledRejection'"))).toMatch(/errorClass\(/);
+  });
+});
+
+describe('unhandledRejection', () => {
+  it('logs the code and stack frames, never the message', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
+    const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf('In server mode'));
+    expect(h).toMatch(/safeStack\(/);
+    expect(h).toMatch(/errorClass\(/);
+    expect(h).not.toMatch(/\.message/);
+    expect(h).not.toMatch(/String\(reason\)/);
+    expect(h).not.toMatch(/, reason\)/);
+  });
+});
+
+describe('the daemon ends its session logs', () => {
+  it('endAllSessions closes every session that wrote a file, once', () => {
+    const used = new SessionLog({ version: 't', surface: 'compact' });
+    used.record('window', 'list', true, 1);
+    const unused = new SessionLog({ version: 't', surface: 'compact' });
+    endAllSessions('SIGTERM');
+    endAllSessions('SIGTERM');
+    const lines = fs.readFileSync(used.file!, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+    expect(lines.filter(l => l.type === 'end')).toEqual([expect.objectContaining({ reason: 'SIGTERM' })]);
+    expect(fs.existsSync(unused.file!)).toBe(false);
+  });
+
+  it('every daemon exit path calls it', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
+    const daemon = src.slice(src.indexOf('async function runAgentMode'));
+    expect(daemon).toContain("sessionLog.end(reason, 'session')");  // an HTTP session closing is not the daemon exiting
+    expect(daemon).toMatch(/onStop: async \(\) => \{\s*endAllSessions\(/);
+    expect(daemon).toMatch(/process\.on\('SIGINT', \(\) => \{[\s\S]{0,150}?endAllSessions\(/);
+    expect(daemon).toMatch(/process\.on\('SIGTERM', \(\) => \{[\s\S]{0,150}?endAllSessions\(/);
+  });
+
+  const deadFile = () => {
+    const dead = 2147483001;
+    const file = path.join(process.env.CLAWDCURSOR_SESSION_DIR!, `session-2026-01-01T00-00-00-000Z-${dead}.jsonl`);
+    fs.writeFileSync(file, JSON.stringify({ type: 'session', started: 'x', pid: dead }) + '\n' + JSON.stringify({ t: 'y', tool: 'window', ok: true }) + '\n');
+    return file;
+  };
+
+  it('a live process we may not signal (EPERM, an elevated server) is not reported', async () => {
+    const { isProcessAlive } = await import('../surface/pidfile');
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const file = deadFile();
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('perm'), { code: 'EPERM' }); });
+    try {
+      expect(isProcessAlive(2147483001)).toBe(true);
+      reportUncleanExits();
+    } finally { kill.mockRestore(); }
+    expect(fs.readFileSync(file, 'utf8')).not.toMatch(/"end"/);
+    expect(isProcessAlive(2147483001)).toBe(false);  // ESRCH: really gone
+  });
+
+  it('a server that another is already reporting is left to it', async () => {
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const file = deadFile();
+    fs.writeFileSync(`${file}.lock`, '');
+    reportUncleanExits();
+    expect(fs.readFileSync(file, 'utf8')).not.toMatch(/"end"/);
+    fs.rmSync(`${file}.lock`);
+    reportUncleanExits();
+    reportUncleanExits();
+    expect(fs.readFileSync(file, 'utf8').match(/"type":"end"/g)).toHaveLength(1);
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+  });
+  // /stop ends the sessions, then waits up to 2.5 s for a running call: its line lands after the end line.
+  it('a file with any end line is ended, even when a call finished after it', async () => {
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const file = deadFile();
+    fs.appendFileSync(file, JSON.stringify({ type: 'end', reason: 'stop' }) + '\n' + JSON.stringify({ t: 'z', tool: 'computer', ok: true }) + '\n');
+    reportUncleanExits();
+    expect(fs.readFileSync(file, 'utf8').match(/"type":"end"/g)).toHaveLength(1);
+  });
+
+  it('a lock left by a dead reporter goes stale; an orphan lock is pruned', async () => {
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const file = deadFile();
+    fs.writeFileSync(`${file}.lock`, '');
+    const old = new Date(Date.now() - 120_000);
+    fs.utimesSync(`${file}.lock`, old, old);
+    reportUncleanExits();
+    expect(fs.readFileSync(file, 'utf8')).toMatch(/"type":"end"/);
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+    // a takeover that died after its rename leaves a stale-<pid> file; old ones go, fresh ones stay
+    const dir = process.env.CLAWDCURSOR_SESSION_DIR!;
+    const leftOld = path.join(dir, 'session-2020-01-01T00-00-00-000Z-1.jsonl.lock.stale-99');
+    const leftNew = path.join(dir, 'session-2020-01-01T00-00-00-000Z-2.jsonl.lock.stale-99');
+    fs.writeFileSync(leftOld, ''); fs.writeFileSync(leftNew, '');
+    fs.utimesSync(leftOld, old, old);
+    const orphan = path.join(process.env.CLAWDCURSOR_SESSION_DIR!, 'session-2020-01-01T00-00-00-000Z-1.jsonl.lock');
+    fs.writeFileSync(orphan, '');
+    new SessionLog({ version: 't', surface: 'compact' });
+    expect(fs.existsSync(orphan)).toBe(false);
+    expect(fs.existsSync(leftOld)).toBe(false);
+    expect(fs.existsSync(leftNew)).toBe(true);
+  });
+});
+
+describe('session files', () => {
+  it('two sessions made in the same millisecond get their own files', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-01-15T10:00:00.000Z'));
+    try {
+      const a = new SessionLog({ version: 't', surface: 'compact' });
+      const b = new SessionLog({ version: 't', surface: 'compact' });
+      expect(a.file).not.toBe(b.file);
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -1102,20 +1102,38 @@ function Cmd-InvokeElement {
             #    it (Cmd-FocusWindow), so with another app in front the Ctrl+A and the text
             #    landed there, reported as success. Not refused: the caller then clicks the
             #    field (which brings its window forward) and types.
+            #    The check is on the WINDOW, not the process: two windows of one process
+            #    (Explorer, Notepad, Edge) share a pid, so the front window of the target's
+            #    process is not necessarily the target's. The target's top-level window (GA_ROOT of its
+            #    nearest handled ancestor) must be the foreground window; one that
+            #    cannot be resolved (no handle, as with some UWP hosts) is refused the same way.
             try {
                 Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
                 $target.SetFocus()
                 Start-Sleep -Milliseconds 60
-                $fgPid = [uint32]0
-                [void][Win32UIA]::GetWindowThreadProcessId([Win32UIA]::GetForegroundWindow(), [ref]$fgPid)
-                if ($fgPid -ne [uint32]$target.Current.ProcessId) {
+                # Nearest ancestor (the target included) with a window handle. Not the walk to the desktop: an owned
+                # window (Save As, a message box) is a UIA child of its OWNER, so that walk ends at the owner while
+                # the foreground window is the dialog itself. GA_ROOT of both sides compares real top-level windows.
+                $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                $hwnd = [int64]0
+                $up = $target
+                for ($hop = 0; $hop -lt 80 -and $null -ne $up; $hop++) {
+                    $hwnd = [int64]$up.Current.NativeWindowHandle
+                    if ($hwnd -ne 0) { break }
+                    $up = $walker.GetParent($up)
+                }
+                $topHwnd = if ($hwnd -ne 0) { [int64][Win32UIA]::GetAncestor([IntPtr]$hwnd, 2) } else { [int64]0 }
+                $fgRoot = [int64][Win32UIA]::GetAncestor([Win32UIA]::GetForegroundWindow(), 2)
+                if ($topHwnd -eq 0 -or $fgRoot -ne $topHwnd) {
                     return @{ success=$false; error="no settable value, and its window is not in front to type into" }
                 }
                 $esc = [regex]::Replace($value, '([+^%~(){}\[\]])', '{$1}')
                 [System.Windows.Forms.SendKeys]::SendWait("^a"); Start-Sleep -Milliseconds 30
                 [System.Windows.Forms.SendKeys]::SendWait($esc); Start-Sleep -Milliseconds 60
                 $after = & $readVal $target
-                if ($after -eq $value -or $null -eq $after) { return @{ success=$true; action="set-value"; value=$value; method="keyboard" } }
+                if ($after -eq $value) { return @{ success=$true; action="set-value"; value=$value; method="keyboard" } }
+                # Typed into the right window but the field cannot be read back: not a confirmed set.
+                if ($null -eq $after) { return @{ success=$true; unverified=$true; action="set-value"; value=$value; method="keyboard" } }
                 return @{ success=$false; error="set-value did not stick (got '$after')" }
             } catch {
                 return @{ success=$false; error="set-value failed (ValuePattern + keyboard): $($_.Exception.Message)" }

@@ -79,6 +79,7 @@ export class LinuxAdapter implements PlatformAdapter {
   private binaryCache = new Map<string, boolean>();
   /** Why the last find came back short, and whether the last tree read was cut (parity with Windows / macOS). */
   lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastFindNote: string | null = null;
   lastTreeTruncated = false;
   private lastCursor: { x: number; y: number } | null = null;
   /**
@@ -661,11 +662,14 @@ export class LinuxAdapter implements PlatformAdapter {
 
   async findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]> {
     this.lastFindError = null;
+    this.lastFindNote = null;
     if (!this.atspiAvailable) return [];
     try {
       const args = ['--cmd', 'find'];
       // `--name=…`: a name starting with '-' ("--Select--") would otherwise be read by argparse as an option.
       if (query.name) args.push(`--name=${query.name}`);
+      // A role-only find searches in the bridge too (its search budget and its partial report), not an unfiltered walk.
+      if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
       // Without a pid the bridge guesses the app (focused-descendant
       // heuristic, else the first app on the bus) and searched the wrong
       // one. Scope to the foreground window like Windows / macOS do.
@@ -673,8 +677,15 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { elements?: any[] };
+      const data = JSON.parse(stdout) as { elements?: any[]; partial?: boolean; reason?: string };
       let raw = Array.isArray(data.elements) ? data.elements : [];
+      // The bridge cut its search: no hits is a large window, not "nothing there"; some hits is not the whole list.
+      if (data.partial === true) {
+        this.lastFindError = 'partial';
+        this.lastFindNote = raw.length === 0
+          ? `Not found in the part of this window the accessibility search covered (it stopped at its ${cutReason(data.reason)})`
+          : `This list is incomplete: the accessibility search stopped at its ${cutReason(data.reason)}. Narrow it with name, controlType or processId`;
+      }
       // Role filter runs here, on the NORMALIZED role, so "Button" matches a
       // "push button" and "Edit" matches a "text" entry. Raw AT-SPI role
       // substrings still match for callers that pass them.
@@ -736,6 +747,8 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
+    this.lastFindError = null;
+    this.lastFindNote = null;
     if (!this.atspiAvailable) return null;
     try {
       // Scoped to the foreground app: toolkits keep FOCUSED on the last
@@ -745,8 +758,15 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'focused', ...scope], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { element?: any };
-      if (!data.element) return null;
+      const data = JSON.parse(stdout) as { element?: any; partial?: boolean; reason?: string };
+      if (!data.element) {
+        // The bridge ran out of its search budget before finding the focus: not "nothing is focused".
+        if (data.partial === true) {
+          this.lastFindError = 'partial';
+          this.lastFindNote = `No focused element in the part of this window the accessibility search covered (it stopped at its ${cutReason(data.reason)})`;
+        }
+        return null;
+      }
       const [el] = await this.offsetWindowRelative([data.element], [this.normalizeAtspiElement(data.element)]);
       return el;
     } catch {
@@ -1686,6 +1706,11 @@ function normalizeAtspiRole(rawRole: string): string {
  * caller passes ("Button", "ControlType.Edit") → a raw AT-SPI substring.
  * Unknown names pass through lowercased.
  */
+/** Why the bridge cut a search, for the note: 'depth limit' | 'element budget' | 'time limit' | 'result limit'. */
+function cutReason(reason: unknown): string {
+  return reason === 'depth limit' || reason === 'time limit' || reason === 'element budget' || reason === 'result limit' ? reason : 'element budget';
+}
+
 function atspiRoleQuery(controlType: string): string {
   const want = controlType.replace(/^ControlType\./, '').toLowerCase();
   // EVERY raw role that maps here, as "a|b|c" alternatives: Edit is "text"

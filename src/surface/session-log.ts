@@ -6,10 +6,11 @@
  * clicks only as a fallback) is to count it. It is also what `clawdcursor
  * report` sends, so a user can report a bad session in one step.
  *
- * Records: tool, action, perception class, ok, duration, a short redacted
- * error. NEVER typed text, clipboard contents, element names, window titles,
- * URLs or coordinates. Local only (~/.clawdcursor/sessions/), last 50
- * sessions kept, off with CLAWDCURSOR_SESSION_LOG=0.
+ * Records: tool, action, perception class, ok, duration, and for a failure its
+ * result code (NOT_FOUND, TIMEOUT, ...). NEVER error text, typed text, clipboard
+ * contents, element names, window titles, URLs or coordinates: error texts carry
+ * them. The day log (`tool.done`) follows the same rule. Local only
+ * (~/.clawdcursor/sessions/), last 50 sessions kept, off with CLAWDCURSOR_SESSION_LOG=0.
  */
 import * as fs from 'fs';
 import * as os from 'os';
@@ -17,6 +18,7 @@ import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from '../core/observability/logger';
 import { SLOW_STEP_MS, type StepTotal } from '../core/observability/steps';
+import { classifyResult } from '../core/result-codes';
 import { isProcessAlive } from './pidfile';
 
 export type CallClass = 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
@@ -50,7 +52,7 @@ export function classifyCall(tool: string, action?: string): CallClass {
 export type Outcome = 'ok' | 'empty' | 'partial' | 'timeout' | 'error' | 'refused' | 'consent_required';
 /** One step of a batch, classified like a call of its own. */
 export interface StepCall { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome }
-export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; err?: string; steps?: StepCall[] }
+export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; code?: string; steps?: StepCall[] }
 
 /** Derive an outcome from a result's text (no content is stored, only the class). */
 export function outcomeOf(isError: boolean, text: string): Outcome {
@@ -77,17 +79,32 @@ export interface SessionTally {
 }
 
 const KEEP = 50;
-const SECRET = [/sk-[A-Za-z0-9_-]{16,}/g, /(bearer|token|key)[\s:=]+[A-Za-z0-9_.-]{12,}/gi, /[\w.%+-]+@[\w.-]+\.[a-z]{2,}/gi];
+let sessionSeq = 0;
 
 export function sessionDir(): string {
   return process.env.CLAWDCURSOR_SESSION_DIR || path.join(DATA_DIR, 'sessions');
 }
 
-function redact(s: string): string {
-  let out = s.slice(0, 160);
-  for (const re of SECRET) out = out.replace(re, '[redacted]');
+/** Replace the user's home directory (and any other /Users/x, C:\Users\x) with `~`. */
+export function stripHome(s: string): string {
   const home = os.homedir();
-  return out.split(home).join('~').replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, '~').replace(/\/(home|Users)\/[^/\s]+/g, '~');
+  return s.split(home).join('~').replace(/[A-Za-z]:\\Users\\[^\\\s]+/g, '~').replace(/\/(home|Users)\/[^/\s]+/g, '~');
+}
+
+/** An error's stack frames only, home path stripped: its name and message can carry user content. */
+export function safeStack(stack: unknown): string {
+  return stripHome(String(stack ?? '').split('\n').filter(l => /^\s*at /.test(l)).join('\n'));
+}
+
+/** What was thrown, safely: an Error's class name (TypeError, ...), else the typeof of a thrown non-Error. */
+export function errorClass(e: unknown): string {
+  return e instanceof Error ? String(e.name).slice(0, 40) : typeof e;
+}
+
+/** Servers that have a session file to close; the daemon ends them all when it exits. */
+const live = new Set<SessionLog>();
+export function endAllSessions(reason: string): void {
+  for (const s of [...live]) if (s.used) s.end(reason);
 }
 
 export class SessionLog {
@@ -97,19 +114,33 @@ export class SessionLog {
   private blindSinceVision = false;
   private visionStreak = 0;
   private headerWritten = false;
+  private ended = false;
   /** The call the handler is running now: an exit while it runs names it. */
   private current: { tool: string; action?: string; at: number } | null = null;
+
+  /** True once the session file exists (a call ran or started). */
+  get used(): boolean { return this.headerWritten; }
 
   /** `persist: false` keeps only the in-memory tally (used to replay a file). */
   constructor(private meta: { version: string; surface: string }, persist = true) {
     if (!persist || process.env.CLAWDCURSOR_SESSION_LOG === '0') { this.file = null; return; }
     const dir = sessionDir();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    this.file = path.join(dir, `session-${stamp}-${process.pid}.jsonl`);
+    // The counter: a daemon makes one per HTTP session, and two in the same millisecond shared a file.
+    this.file = path.join(dir, `session-${stamp}-${process.pid}-${++sessionSeq}.jsonl`);
+    live.add(this);
     try {
       fs.mkdirSync(dir, { recursive: true });
       const old = fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.endsWith('.jsonl')).sort();
       for (const f of old.slice(0, Math.max(0, old.length - (KEEP - 1)))) fs.rmSync(path.join(dir, f), { force: true });
+      // A stale-lock takeover that died between its rename and its delete leaves a `.lock.stale-<pid>` file.
+      for (const f of fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.includes('.jsonl.lock.stale-'))) {
+        try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 60_000) fs.rmSync(path.join(dir, f), { force: true }); } catch { /* gone */ }
+      }
+      // A report lock whose session file is gone (pruned, or the reporter died) has nothing left to guard.
+      for (const f of fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.endsWith('.jsonl.lock'))) {
+        if (!fs.existsSync(path.join(dir, f.slice(0, -'.lock'.length)))) fs.rmSync(path.join(dir, f), { force: true });
+      }
     } catch { /* logging must never break a tool call */ }
   }
 
@@ -134,11 +165,13 @@ export class SessionLog {
     if (this.file) {
       // The day log gets the same line, so one file shows what ran, how long it took and how it ended.
       const timing = ms >= SLOW_STEP_MS && extra?.timing && Object.keys(extra.timing).length ? { steps: extra.timing } : {};
-      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(err ? { err: redact(err) } : {}), ...timing });
+      // The result code, never the error text: it carries element names, window titles and field contents.
+      const code = err ? classifyResult(err, true, false)?.code : undefined;
+      logger.info('tool.done', { tool, ...(action ? { action } : {}), ms: Math.round(ms), outcome, ...(code ? { code } : {}), ...timing });
       try {
         this.writeHeader(client);
         const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),
-          outcome, ...(extra?.space ? { space: extra.space } : {}), ...(err ? { err: redact(err) } : {}), ...(steps ? { steps } : {}) };
+          outcome, ...(extra?.space ? { space: extra.space } : {}), ...(code ? { code } : {}), ...(steps ? { steps } : {}) };
         fs.appendFileSync(this.file, JSON.stringify(line) + '\n');
       } catch { /* never break a tool call over logging */ }
     }
@@ -163,10 +196,15 @@ export class SessionLog {
    * The server is exiting: say why, and which call it cut off. Synchronous, so it lands before process.exit. A kill
    * (Task Manager, kill -9) or a crash never gets here: the next server reports those (reportUncleanExits).
    */
-  end(reason: string): void {
+  end(reason: string, kind: 'exit' | 'session' = 'exit'): void {
+    if (this.ended) return;
+    this.ended = true;
     const cut = this.current ? { tool: this.current.tool, ...(this.current.action ? { action: this.current.action } : {}),
       ranMs: Date.now() - this.current.at } : undefined;
-    (cut ? logger.warn : logger.info)('mcp.exit', { reason, pid: process.pid, ...(cut ? { cutOff: cut } : {}) });
+    live.delete(this);
+    // A daemon's HTTP session closing is not the daemon exiting: it logs `session.end`, and nothing when it made no call.
+    if (kind === 'session' && !this.headerWritten) return;
+    (cut ? logger.warn : logger.info)(kind === 'session' ? 'session.end' : 'mcp.exit', { reason, pid: process.pid, ...(cut ? { cutOff: cut } : {}) });
     if (!this.file || !this.headerWritten) return;  // no call was made: no session file to close
     try { fs.appendFileSync(this.file, JSON.stringify({ type: 'end', t: new Date().toISOString(), reason, ...(cut ? { cutOff: cut } : {}) }) + '\n'); }
     catch { /* best-effort */ }
@@ -221,6 +259,14 @@ export function readSession(file: string): { header: Record<string, unknown> | n
  * file has calls but no `end` line, and their process is gone. Logged once each (an `end` line is added), at the next start.
  * Files from before the header carried a pid are skipped: their ending was never recorded.
  */
+/** Any `end` line means it ended: a call that finished in /stop's grace window appends after the end line. */
+function hasEnd(lines: string[]): boolean {
+  return lines.some(l => { try { return JSON.parse(l).type === 'end'; } catch { return false; } });
+}
+
+/** A lock older than this was left by a reporter that died holding it. */
+const STALE_LOCK_MS = 60_000;
+
 export function reportUncleanExits(): void {
   for (const file of listSessions()) {
     try {
@@ -228,13 +274,33 @@ export function reportUncleanExits(): void {
       const header = JSON.parse(lines[0] ?? '{}');
       const pid = header.type === 'session' ? Number(header.pid) : NaN;
       if (!Number.isInteger(pid) || pid === process.pid || isProcessAlive(pid)) continue;
-      const last = JSON.parse(lines[lines.length - 1]);
-      if (last.type === 'end') continue;
-      // Only the header: it was killed during its first call.
-      const lastCall = last.type === 'session' ? undefined : { tool: last.tool, ...(last.action ? { action: last.action } : {}), at: last.t };
-      const reason = 'killed or crashed: no clean exit was recorded';
-      logger.warn('mcp.exit', { reason, pid, detectedAt: 'next start', ...(lastCall ? { lastFinishedCall: lastCall } : {}) });
-      fs.appendFileSync(file, JSON.stringify({ type: 'end', t: new Date().toISOString(), reason, detectedAtNextStart: true }) + '\n');
+      if (hasEnd(lines)) continue;
+      // Two servers starting together would both see no end line and both report: whoever creates the lock reports.
+      // Take a stale lock over atomically: only one process can rename it away, and a lock that turns out to be fresh
+      // (another reporter replaced the stale one in between) is put back, not deleted.
+      try {
+        if (Date.now() - fs.statSync(`${file}.lock`).mtimeMs > STALE_LOCK_MS) {
+          const taken = `${file}.lock.stale-${process.pid}`;
+          fs.renameSync(`${file}.lock`, taken);
+          if (Date.now() - fs.statSync(taken).mtimeMs > STALE_LOCK_MS) fs.rmSync(taken, { force: true });
+          else { try { fs.renameSync(taken, `${file}.lock`); } catch { /* it is gone */ } continue; }
+        }
+      } catch { /* no lock, or another process took it over first */ }
+      let lock: number;
+      try { lock = fs.openSync(`${file}.lock`, 'wx'); } catch { continue; }
+      try {
+        const now = fs.readFileSync(file, 'utf8').split('\n').filter(l => l.trim());
+        if (hasEnd(now)) continue;  // the other server finished between our read and the lock
+        const last = JSON.parse(now[now.length - 1]);
+        // Only the header: it was killed during its first call.
+        const lastCall = last.type === 'session' ? undefined : { tool: last.tool, ...(last.action ? { action: last.action } : {}), at: last.t };
+        const reason = 'killed or crashed: no clean exit was recorded';
+        logger.warn('mcp.exit', { reason, pid, detectedAt: 'next start', ...(lastCall ? { lastFinishedCall: lastCall } : {}) });
+        fs.appendFileSync(file, JSON.stringify({ type: 'end', t: new Date().toISOString(), reason, detectedAtNextStart: true }) + '\n');
+      } finally {
+        fs.closeSync(lock);
+        fs.rmSync(`${file}.lock`, { force: true });
+      }
     } catch { /* unreadable file: skip */ }
   }
 }

@@ -72,6 +72,8 @@ export interface McpServerLike {
     handler: (params: Record<string, unknown>) => Promise<McpToolResult>,
   ): void;
   connect(transport: McpTransportLike): Promise<void>;
+  /** Called once when the client session this server was made for closes. */
+  onSessionEnd?: (reason: string) => void;
 }
 
 /** The slice of an SDK transport that clawdcursor drives. */
@@ -594,7 +596,11 @@ export async function startMcpHttp(
       onsessioninitialized: id => { sessions.set(id, { transport, open: 0, lastActive: Date.now() }); },
     });
     transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
-    await (await createServer!()).connect(transport);
+    const srv = await createServer!();
+    // A session's server is not reused: when its client goes away its session log is closed (the daemon's `live` set stays small).
+    const closed = transport.onclose;
+    transport.onclose = () => { closed?.(); srv.onSessionEnd?.('the client session closed'); };
+    await srv.connect(transport);
     await transport.handleRequest?.(req, res, body);
   };
 

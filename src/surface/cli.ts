@@ -23,10 +23,15 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
     console.debug('[clawdcursor] uncaughtException swallowed (known-benign): setTypeOfService EINVAL on macOS/Node v25+');
     return;
   }
-  console.error(`Uncaught exception: ${err?.stack ?? err}`);
+  // Stack frames only, home path stripped: an error's name and message can carry window titles and field contents,
+  // and the MCP host keeps stderr.
+  let frames = '';
+  let cls = 'unknown';
+  try { const sl = require('./session-log'); frames = sl.safeStack(err?.stack); cls = sl.errorClass(err); } catch { /* none */ }
+  console.error(`Uncaught exception (${cls}${err?.code ? `, ${err.code}` : ''}):\n${frames}`);
   try {
     const { logger } = require('../core/observability/logger');
-    logger.error('crash', { msg: err?.message ?? String(err), stack: err?.stack });
+    logger.error('crash', { name: cls, ...(err?.code ? { code: err.code } : {}), stack: frames });
   } catch { /* stderr above has it */ }
   process.exit(1);
 });
@@ -41,13 +46,16 @@ process.on('unhandledRejection', (reason: any) => {
   try {
     // Lazy-require to avoid pulling the pipeline module at cold CLI startup.
     const { logger } = require('../core/observability/logger');
-    const msg = reason instanceof Error ? reason.message : String(reason);
-    const stack = reason instanceof Error ? reason.stack : undefined;
-    logger.error('unhandledRejection', { msg, stack });
+    // Code and stack frames only, home path stripped (same rule as `crash`): the message can carry user content.
+    const code = reason instanceof Error ? (reason as NodeJS.ErrnoException).code : undefined;
+    const sl = require('./session-log');
+    const frames = sl.safeStack(reason instanceof Error ? reason.stack : undefined);
+    const cls = sl.errorClass(reason);
+    logger.error('unhandledRejection', { name: cls, ...(code ? { code } : {}), stack: frames });
+    console.error(`unhandledRejection (${cls}${code ? `, ${code}` : ''}):\n${frames}`);
   } catch {
-    // Logger itself failed — fall back to stderr.
-
-    console.error('unhandledRejection (logger unavailable):', reason);
+    // Logger itself failed — say that much, still without the message.
+    console.error('unhandledRejection (logger unavailable)');
   }
   // In server mode, (process.env.CLAWD_SERVER_MODE === '1') keep running.
   // In CLI / one-shot mode, exit to surface the bug.
@@ -104,6 +112,7 @@ import { e } from './format';
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
+import { endAllSessions } from './session-log';
 
 const program = new Command();
 
@@ -434,6 +443,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
       agent?.abort();
     },
     onStop: async () => {
+      endAllSessions('stopped with clawdcursor stop (POST /stop)');  // synchronous: in the log before the exit
       try {
         // Lazy require — only attempt when agent existed (scheduler bound).
         if (agent) {
@@ -561,7 +571,11 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     // A server per SDK-client session and per concurrent one-shot post —
     // one shared server refused every request while another held it.
     await startMcpHttp(mcpServer, app, '/mcp',
-      async () => (await createMcpServer({ compact: compactSurface, ctx: toolCtx })).server);
+      async () => {
+        const h = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
+        h.server.onSessionEnd = reason => h.sessionLog.end(reason, 'session');
+        return h.server;
+      });
   } catch (err) {
     console.warn('MCP HTTP transport not loaded:', (err as Error).message);
   }
@@ -669,11 +683,13 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
 
   process.on('SIGINT', () => {
     console.log(`\n${e('👋', '--')} Shutting down...`);
+    endAllSessions('SIGINT (Ctrl+C)');
     releasePidFile('start');
     agent?.disconnect();
     process.exit(0);
   });
   process.on('SIGTERM', () => {
+    endAllSessions('SIGTERM (a kill or the system stopped the daemon)');
     releasePidFile('start');
     agent?.disconnect();
     process.exit(0);
