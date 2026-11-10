@@ -150,10 +150,14 @@ describe('a name outside the alias table only ever starts an installed app', () 
       expect(hit, name).not.toBeNull();
       if (hit?.appId) expect(isAppShapedStartEntry(hit.appId, hit.target), name).toBe(true);
     }
-    for (const name of ['Calc', 'Microsoft', 'Uninstall', 'a', 'alculato']) {
+    // A prefix of real entries, and a name that cannot exist. (Not "Uninstall" or "a": a machine may well have a
+    // Start-menu entry called exactly that, and an exact name is allowed to resolve.)
+    const noSuch = `zz-no-such-app-${Math.random().toString(36).slice(2, 12)}`;
+    for (const name of ['Microsoft', noSuch]) {
       const hit = await resolveInstalledWindowsApp(name);
       expect(hit?.appId, name).toBeUndefined();   // only a real program of that name on PATH could answer
     }
+    expect(await resolveInstalledWindowsApp(noSuch)).toBeNull();
   }, 120_000);
 
   it('Windows: a name-only launch starts the resolved program or app id, and never types into the Start menu', () => {

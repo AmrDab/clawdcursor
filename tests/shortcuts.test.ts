@@ -18,8 +18,14 @@ describe('shortcuts registry', () => {
   it('uses platform-specific variants', () => {
     const refresh = SHORTCUTS.find(s => s.id === 'refresh');
     expect(refresh).toBeTruthy();
-    expect(resolveShortcutKey(refresh!, 'darwin')).toBe('Super+r');
+    // macOS chords name the Command key as an agent writes it (`Cmd`); every macOS executor reads `cmd` and `super`
+    // as Command, and keys.ts resolves both to the same key there.
+    expect(resolveShortcutKey(refresh!, 'darwin')).toBe('Cmd+r');
     expect(resolveShortcutKey(refresh!, 'linux')).toBe('F5');
+    expect(resolveShortcutKey(refresh!, 'win32')).toBe('F5');
+    // The platform is read at call time, never cached at import: the same call answers per platform.
+    const copy = SHORTCUTS.find(s => s.id === 'copy')!;
+    expect([resolveShortcutKey(copy, 'darwin'), resolveShortcutKey(copy, 'linux'), resolveShortcutKey(copy, 'win32')]).toEqual(['Cmd+c', 'Control+c', 'Control+c']);
   });
 
   it('supports fuzzy matching for minor typos', () => {
