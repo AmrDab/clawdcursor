@@ -1007,15 +1007,16 @@ export function getSmartTools(): ToolDefinition[] {
         const how = `${viaKeys ? 'keys' : 'paste'}${rb.result === 'match' ? ', read back ✓' : ''}`;
         const fieldShows = rb.value !== undefined
           ? ` It shows: ${wrapUntrustedScreenContent(rb.value.length > 80 ? `${rb.value.slice(0, 79)}…` : rb.value)}` : '';
-        const differs = rb.result === 'suffix' || rb.result === 'mismatch';
-        const readBack = !differs ? ''
-          : replace
-            ? ` ⚠ read back: the field shows different text, not the text asked for (old text that was not replaced, an autocomplete suggestion, or the field reformatted it).${fieldShows}`
-            : ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`;
+        // A replace that left other text in the field (not the text with a suggestion after it) did not do what was asked.
+        const failed = replace && rb.result === 'mismatch';
+        const readBack = failed
+          ? ` ⚠ read back: the field shows different text, not the text asked for (its old text was not replaced, or the field rewrote it).${fieldShows}`
+          : rb.result === 'suffix' || rb.result === 'mismatch'
+            ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
+            : '';
         return {
-          text: `Typed ${[...text].length} chars (${how})${target ? ` into "${target}"` : ''}${replace && !differs ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}`,
-          // A replace that did not leave the field holding the text did not do what was asked.
-          ...(replace && differs ? { isError: true } : {}),
+          text: `Typed ${[...text].length} chars (${how})${target ? ` into "${target}"` : ''}${replace && !failed ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}`,
+          ...(failed ? { isError: true } : {}),
         };
       },
     },

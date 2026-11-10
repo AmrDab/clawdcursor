@@ -4,8 +4,6 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { getA11yDepthTools } from '../tools/a11y_depth';
-import type { ToolContext } from '../tools/types';
 
 function platform() {
   return {
@@ -29,14 +27,6 @@ describe('set_value with no field name types nothing', () => {
       expect(p.mouseClick).not.toHaveBeenCalled();
     });
   }
-
-  it('MCP set_field_value', async () => {
-    const p = platform();
-    const tool = getA11yDepthTools().find(t => t.name === 'set_field_value')!;
-    const r = await tool.handler({ name: '', value: 'x' }, { ensureInitialized: async () => {}, platform: p } as unknown as ToolContext);
-    expect(r.isError).toBe(true);
-    expect(p.typeText).not.toHaveBeenCalled();
-  });
 
   it('a named field still falls back to the keyboard when it has no settable value', async () => {
     const p = platform();

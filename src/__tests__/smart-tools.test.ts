@@ -840,6 +840,17 @@ describe('Smart Tools', () => {
       expect(classifyResult(result.text, true, true)?.code).toBe('READBACK_MISMATCH');
     });
 
+    it('replace: an inline autocomplete suggestion after the text is a warning, not a failure', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue({ value: 'github.com/login' });
+      const result = await smartType.handler({ text: 'github.com', target: 'Address and search bar' }, createCtx());
+      mockGetFocusedElement.mockReset();
+      expect(result.isError).toBeFalsy();
+      expect(result.text).not.toMatch(/read back ✓/);
+      expect(result.text).toMatch(/⚠ read back/);
+      expect(result.text).toContain('github.com/login');
+    });
+
     it('replace: the field holding exactly the text is "read back ✓"; append still matches inside existing text', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
       mockGetFocusedElement.mockResolvedValue({ value: '30' });

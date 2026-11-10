@@ -113,7 +113,7 @@ const RULES: Rule[] = [
     hint: 'the field does not show exactly what was typed, so it was not submitted; check it — press Return if it is right, fix it if not', next: REREAD },
   // A set / replace whose field holds something else: old text that was not cleared ("10030" for "30"), or a reformat.
   { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field shows .*, not the (?:value|text) asked for/i,
-    hint: 'the field does not hold what was asked for; read it, clear it another way (select its text, delete), then set it again', next: REREAD },
+    hint: 'the field holds the text quoted in the result, not what was asked for: this call did not replace its old text, and the same call will not either; select the old text in the field (double-click or triple-click it), then type', next: REREAD },
   { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,
     hint: 'the same call kept repeating without progress; change the approach' },
   { code: 'INVALID_ARGS', outcome: 'failed',

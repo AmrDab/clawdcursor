@@ -19,7 +19,7 @@
  * rank-before-truncate sense layer surface its buttons.
  */
 
-import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
+import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
@@ -41,7 +41,7 @@ import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, typesAsKeys } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
@@ -372,7 +372,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
             await sleep(150);
             if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
-            return setResult(ctx, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name });
+            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name });
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
@@ -383,7 +383,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(fillValue);
           await sleep(150);
-          return setResult(ctx, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
+          return setResult(ctx.platform, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -399,7 +399,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const res = await ctx.platform.invokeElement({ ...field, action: 'set-value', value });
         await sleep(150);
         // `unverified`: the Windows bridge typed it and could not read the field; the focused field is where the keys went.
-        if (res.success) return setResult(ctx, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field);
+        if (res.success) return setResult(ctx.platform, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field);
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
         if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
           const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
@@ -416,7 +416,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         await ctx.platform.keyPress('mod+a');
         await ctx.platform.typeText(value);
         await sleep(150);
-        return setResult(ctx, value, name, ' (keyboard fallback: no settable value)');
+        return setResult(ctx.platform, value, name, ' (keyboard fallback: no settable value)');
       },
     },
 
@@ -2360,30 +2360,6 @@ async function editableTarget(
   const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
   if (!pick?.bounds) return null;
   return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
-}
-
-/**
- * How every set_field_value path ends: one read-back (readBackTyped, whole value) decides the result. The field must hold
- * exactly `value`; one that shows other text is a failure that says what it shows, one that cannot be read is said to be
- * NOT verified. Reads `named` (the field a native set wrote to), or without it the focused field (where the value was typed).
- */
-async function setResult(
-  ctx: AgentToolContext, value: string, label: string, how: string,
-  named?: { name: string; controlType?: string; processId?: number },
-): Promise<UnifiedToolResult> {
-  const rb = await readBackTyped(async () => {
-    if (!named) return ctx.platform.getFocusedElement();
-    const res = await ctx.platform.invokeElement({ ...named, action: 'get-value' });
-    const d = res.data as { value?: unknown; method?: unknown } | undefined;
-    // A bridge that finds no value answers with the element's NAME (method "Name"): that is not the field's text.
-    return res.success && typeof d?.value === 'string' && !/^name$/i.test(String(d.method)) ? { value: d.value } : null;
-  }, value, { whole: true });
-  const set = `${quoteScreenText(label)} = ${value.length} chars${how}`;
-  if (rb.result === 'match') return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
-  if (rb.result === 'unknown') return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };
-  const cut = (s: string) => quoteScreenText(s.length > 80 ? `${s.slice(0, 79)}…` : s);
-  const kept = rb.result === 'suffix' ? ' — text that was already there was not replaced, or the field added to it' : '';
-  return { success: false, text: `Set ${quoteScreenText(label)} failed: the field shows ${cut(rb.value ?? '')}, not the value asked for (${cut(value)})${kept}.`, targetLabel: label };
 }
 
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */

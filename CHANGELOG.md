@@ -34,10 +34,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **`computer key` takes `repeat`** (1 to 100): the key or sequence is pressed that many times. It was dropped without
   a word and the key pressed once.
 - **`set_value` and a replacing `smart_type` succeed only when the field holds the value.** Every path (native set,
-  keyboard fallback, element ref) ends in one read-back that compares the whole value: a field that ignored select-all
-  and kept its old text (`10030` for `30`) is `READBACK_MISMATCH` with what it shows, not a success or a "read back ✓".
-  A field that reads back is `[confirmed]`; one that cannot be read says NOT verified. A `get_value` miss carries its
-  reason (`NOT_FOUND`, `UNSUPPORTED_ACTION`, `TIMEOUT`) instead of `UNKNOWN`.
+  keyboard fallback, element ref) ends in one read-back of the whole field. The same text (whitespace and case aside) is
+  `[confirmed]`, as is an emptied field after a clear; a number is compared as a number, so `30.0`, `30,00` and `30 mm`
+  hold `30` while `300` and `10030` do not. Text with more after it (an inline suggestion) succeeds but says NOT
+  verified and quotes the field, as does a field that cannot be read. Anything else (a field that ignored select-all and
+  kept its old text) is `READBACK_MISMATCH` with what the field shows, not a success or a "read back ✓". A `get_value`
+  miss carries its reason (`NOT_FOUND`, `UNSUPPORTED_ACTION`, `TIMEOUT`) instead of `UNKNOWN`.
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
   (`invoke`, `set_value`, `toggle`, `select`) are refused when the window in front is Claude, ChatGPT, Codex, Cursor,
   VS Code (and Insiders), Windsurf or Zed, or an app this server was started from (stdio), unless the agent focused or

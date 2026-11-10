@@ -28,27 +28,45 @@ function ctxWith(invoke: (q: any) => any, focused?: string) {
   };
   return { ctx: { platform: p } as any, p };
 }
-const set = (ctx: any) => setTool.execute({ name: 'Distance', value: '30', processId: 7 }, ctx);
+const set = (ctx: any, value = '30') => setTool.execute({ name: 'Distance', value, processId: 7 }, ctx);
 
 describe('readBackTyped — whole value', () => {
   const f = (value: string) => async () => ({ value });
   const whole = async (shown: string, want: string) => (await readBackTyped(f(shown), want, { whole: true, maxMs: 0 })).result;
 
-  it('text that merely CONTAINS the value is not a match', async () => {
-    expect(await whole('10030', '30')).toBe('suffix');
-    expect(await whole('1003300', '30')).toBe('suffix');
-    expect(await whole('30.00', '30')).toBe('suffix');
-    expect(await whole('100', '30')).toBe('mismatch');
-  });
-
-  it('only trivial whitespace is normalized', async () => {
+  it('the same text is a match: whitespace and case aside', async () => {
     expect(await whole(' 30\r\n', '30')).toBe('match');
     expect(await whole('a  b', 'a b')).toBe('match');
-    expect(await whole('3 0', '30')).toBe('mismatch');
+    expect(await whole('REPORT.TXT', 'report.txt')).toBe('match');   // the Windows bridge's own -eq ignores case too
+  });
+
+  it('a number is compared as a number: the field may format it or add a unit', async () => {
+    for (const shown of ['30.0', '30.00', '30,00', '30 mm', '30mm', '+30']) expect(await whole(shown, '30')).toBe('match');
+    expect(await whole('-2.50 m', '-2.5')).toBe('match');
+    // old text that was not replaced, or another number: never a match, and never "starts with it"
+    for (const shown of ['10030', '1003300', '300', '30.5', '30,5', '3 0', '100', '30/11/2026', 'x30']) {
+      expect(await whole(shown, '30')).toBe('mismatch');
+    }
+  });
+
+  it('text with more after it (an autocomplete suggestion) is "suffix"; anything else a mismatch', async () => {
+    expect(await whole('github.com/login', 'github.com')).toBe('suffix');
+    expect(await whole('see github.com', 'github.com')).toBe('mismatch');
+    expect(await whole('oldnew', 'new')).toBe('mismatch');
+    expect(await whole('11/10/2026', '2026-11-10')).toBe('mismatch');
+  });
+
+  it('a clear is confirmed by an empty field, and fails on one that still shows text', async () => {
+    expect(await whole('', '')).toBe('match');
+    expect(await whole('100', '')).toBe('mismatch');
+    // a field that cannot be read at all is still unknown
+    expect((await readBackTyped(async () => null, '', { whole: true, maxMs: 0 })).result).toBe('unknown');
+    expect((await readBackTyped(f(''), '30', { whole: true, maxMs: 0 })).result).toBe('unknown');
   });
 
   it('without `whole` the text anywhere in the field still matches (typing into a document)', async () => {
     expect((await readBackTyped(f('10030'), '30', { maxMs: 0 })).result).toBe('match');
+    expect((await readBackTyped(f(''), '', { maxMs: 0 })).result).toBe('unknown');
   });
 });
 
@@ -62,7 +80,36 @@ describe('set_field_value — one read-back decides every path', () => {
     expect(r.success).toBe(false);
     expect(r.text).toContain('the field shows "10030", not the value asked for ("30")');
     expect(r.text).toMatch(/was not replaced/);
-    expect(classifyResult(r.text, true, true)?.code).toBe('READBACK_MISMATCH');
+    const c = classifyResult(r.text, true, true);
+    expect(c?.code).toBe('READBACK_MISMATCH');
+    // the hint must not send the agent back to the same call
+    expect(c?.hint).toMatch(/did not replace/);
+    expect(c?.hint).not.toMatch(/set it again|retry/i);
+  });
+
+  it('Linux reads a numeric field back as a float ("30.0"), a field may add a unit: confirmed', async () => {
+    for (const shown of ['30.0', '30.00', '30 mm']) {
+      const { ctx } = ctxWith(q => q.action === 'get-value' ? { success: true, data: { value: shown } } : { success: true });
+      const r = await set(ctx);
+      expect(r.success).toBe(true);
+      expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'confirmed' });
+    }
+  });
+
+  it('a field that shows the value with more after it (autocomplete) succeeds, NOT verified, and says what it shows', async () => {
+    const { ctx } = ctxWith(() => noValuePattern, 'github.com/login');
+    const r = await set(ctx, 'github.com');
+    expect(r.success).toBe(true);
+    expect(r.text).toMatch(/NOT verified/);
+    expect(r.text).toContain('"github.com/login"');
+    expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'unverified' });
+  });
+
+  it('a clear that reads back empty is confirmed', async () => {
+    const { ctx } = ctxWith(q => q.action === 'get-value' ? { success: true, data: { value: '' } } : { success: true });
+    const r = await set(ctx, '');
+    expect(r.success).toBe(true);
+    expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'confirmed' });
   });
 
   it('keyboard fallback that leaves exactly the value is confirmed', async () => {
