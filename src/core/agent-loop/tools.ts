@@ -41,7 +41,7 @@ import { wrapUntrustedScreenContent } from './prompt';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, typesAsKeys } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
@@ -371,7 +371,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (plan.via === 'name') {
             const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
             await sleep(150);
-            return { success: res.success, text: res.success ? `Set "${plan.name}" = ${fillValue.length} chars (via ${plan.element.id}).` : `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
+            if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
+            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name });
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
@@ -382,7 +383,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(fillValue);
           await sleep(150);
-          return { success: true, text: `Filled ${plan.element.id} via bounds + select-all + type (${fillValue.length} chars${plan.offView ? ', scrolled into view first' : ''}).`, targetLabel: plan.element.id };
+          return setResult(ctx.platform, fillValue, plan.element.id, ` (via bounds + select-all + type${plan.offView ? ', scrolled into view first' : ''})`);
         }
         const name = String(args.name ?? '');
         const value = String(args.value ?? '');
@@ -394,11 +395,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (!name.trim() && !controlType) {
           return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
         }
-        const res = await ctx.platform.invokeElement({
-          name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId, action: 'set-value', value,
-        });
+        const field = { name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId };
+        const res = await ctx.platform.invokeElement({ ...field, action: 'set-value', value });
         await sleep(150);
-        if (res.success) return { success: true, text: `Set ${quoteScreenText(name)} = ${value.length} chars`, targetLabel: name };
+        // `unverified`: the Windows bridge typed it and could not read the field; the focused field is where the keys went.
+        if (res.success) return setResult(ctx.platform, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field);
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
         if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
           const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
@@ -415,7 +416,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         await ctx.platform.keyPress('mod+a');
         await ctx.platform.typeText(value);
         await sleep(150);
-        return { success: true, text: `Set ${quoteScreenText(name)} = ${value.length} chars (keyboard fallback: no settable value).`, targetLabel: name };
+        return setResult(ctx.platform, value, name, ' (keyboard fallback: no settable value)');
       },
     },
 
@@ -576,7 +577,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (editable && types.some(t => !EDITABLE_ROLE.test(t) || /^text$/i.test(t))) controlType = editable;
         }
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'get-value' });
-        if (!res.success) return { success: false, text: `${quoteScreenText(name)} has no readable value.` };
+        if (!res.success) return { success: false, text: `a11y get_value ${quoteScreenText(name)} missed — ${missText(res.data)}.` };
         // The whole value: read_tree points here to read what it cut. Only a huge one is cut again, and says so.
         const value = String((res.data as any)?.value ?? '');
         const shownValue = value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;

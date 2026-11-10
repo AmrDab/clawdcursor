@@ -1,5 +1,5 @@
 /**
- * Save As dialog reliability — unit tests for fixes #122, #123.
+ * Save As dialog reliability — unit tests for fix #123.
  *
  * These tests cover the deterministic logic changes without requiring a
  * live GUI (native input / UIA calls are mocked or exercised via pure math).
@@ -16,60 +16,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-
-// ─── Bug #122: set_field_value widest-element heuristic ───────────────────
-//
-// When multiple UIA elements share the same name (label + input), the
-// fallback path must click the widest one (the actual input, not the label).
-// Test the "widest bounds" selection logic from a11y_depth.ts.
-
-interface MockElement {
-  name: string;
-  controlType: string;
-  bounds: { x: number; y: number; width: number; height: number };
-}
-
-function pickWidestElement(elements: MockElement[]): MockElement | undefined {
-  if (elements.length === 0) return undefined;
-  return elements.reduce((best, el) =>
-    (el.bounds?.width ?? 0) > (best.bounds?.width ?? 0) ? el : best,
-    elements[0],
-  );
-}
-
-describe('#122 set_field_value fallback: widest-element selection', () => {
-  it('selects the ComboBox (wide) over the Text label (narrow)', () => {
-    const elements: MockElement[] = [
-      { name: 'File name:', controlType: 'ControlType.Text',     bounds: { x: 258, y: 928, width: 115,  height: 23 } },
-      { name: 'File name:', controlType: 'ControlType.ComboBox', bounds: { x: 373, y: 928, width: 1054, height: 23 } },
-    ];
-    const picked = pickWidestElement(elements);
-    expect(picked?.controlType).toBe('ControlType.ComboBox');
-    expect(picked?.bounds.width).toBe(1054);
-  });
-
-  it('falls back to the only element when there is just one', () => {
-    const elements: MockElement[] = [
-      { name: 'File name:', controlType: 'ControlType.Edit', bounds: { x: 376, y: 931, width: 1031, height: 17 } },
-    ];
-    const picked = pickWidestElement(elements);
-    expect(picked?.controlType).toBe('ControlType.Edit');
-  });
-
-  it('returns undefined for empty list', () => {
-    expect(pickWidestElement([])).toBeUndefined();
-  });
-
-  it('computes correct click-centre from widest element bounds', () => {
-    const el: MockElement = { name: 'File name:', controlType: 'ControlType.ComboBox',
-      bounds: { x: 373, y: 928, width: 1054, height: 23 } };
-    const cx = Math.round(el.bounds.x + el.bounds.width / 2);
-    const cy = Math.round(el.bounds.y + el.bounds.height / 2);
-    // centre of (373, 928, 1054×23): cx = 373 + 527 = 900, cy = 928 + round(11.5) = 940
-    expect(cx).toBe(900);
-    expect(cy).toBe(940);
-  });
-});
 
 // ─── Bug #123: activate-at-point ensures foreground before click ───────────
 //

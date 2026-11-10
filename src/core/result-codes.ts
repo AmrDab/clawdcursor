@@ -111,6 +111,9 @@ const RULES: Rule[] = [
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
   { code: 'READBACK_MISMATCH', outcome: 'failed', test: /but the field shows .* — Return not pressed/i,
     hint: 'the field does not show exactly what was typed, so it was not submitted; check it — press Return if it is right, fix it if not', next: REREAD },
+  // A set / replace whose field holds something else: old text that was not cleared ("10030" for "30"), or a reformat.
+  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field shows .*, not the (?:value|text) asked for/i,
+    hint: 'the field holds the text quoted in the result, not what was asked for: this call did not replace its old text, and the same call will not either; select the old text in the field (double-click or triple-click it), then type', next: REREAD },
   { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,
     hint: 'the same call kept repeating without progress; change the approach' },
   { code: 'INVALID_ARGS', outcome: 'failed',
@@ -254,10 +257,10 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // The checks' own wording, at their own positions: a body that happens to contain "VERIFIED" on some line is not one.
   // Only where the checks write them, so nothing inside a result (typed text, a page, a window title) can pose as one:
   // `expect`'s verdict is appended at the very end; `verify` starts its reply; a typing read-back sits in the leading
-  // "Typed N chars (…)" before any quoted text; a toggle / select writes `Toggled|Selected (read back ✓)` before the
+  // "Typed N chars (…)" before any quoted text; a toggle / select / set writes `Toggled|Selected|Set (read back ✓)` before the
   // quoted element name, which is screen text.
   if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
-    || /^(?:Toggled|Selected) \(read back ✓\) "/.test(text)
+    || /^(?:Toggled|Selected|Set) \(read back ✓\) "/.test(text)
     || /^Invoked \(read back ✓\) "/.test(text)) {
     return { outcome: 'confirmed' };
   }

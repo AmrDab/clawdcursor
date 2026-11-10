@@ -895,7 +895,8 @@ export class WindowsAdapter implements PlatformAdapter {
           ...(result?.data ?? {}),
           // The miss's machine-readable reason and its screen-derived values, as fields (see core/miss-text.ts).
           ...structuredMissFields(result),
-          ...(result?.value !== undefined && !result?.data ? { value: result.value } : {}),
+          // `method` tells a real value from the bridge's last resort (get-value "Name": the element's own name).
+          ...(result?.value !== undefined && !result?.data ? { value: result.value, method: result.method } : {}),
           ...(typeof result?.error === 'string' ? { error: result.error } : {}),
           ...(typeof result?.lateInvokeError === 'string' ? { lateInvokeError: result.lateInvokeError } : {}),
           // A keyboard set-value that typed into the right window but could not read the field back.

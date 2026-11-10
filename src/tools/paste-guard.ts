@@ -5,7 +5,11 @@
  * timeout or error was swallowed — and the Ctrl+V that followed then pasted the USER'S clipboard into the focused field.
  * Seen live (2026-10-19): typing a URL + Enter into Edge's address bar submitted the user's own clipboard contents as a
  * web search, twice. Every paste path checks the clipboard first and types the text instead when it does not hold it.
+ *
+ * What was typed or set is then read back from the field (readBackTyped, setResult).
  */
+import type { PlatformAdapter } from '../platform/types';
+import { quoteScreenText } from '../core/result-codes';
 
 /** Clipboards differ in line endings and trailing whitespace (Windows reads come back trimmed). */
 const same = (a: string, b: string): boolean => a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim();
@@ -81,8 +85,8 @@ export function typesAsKeys(text: string): boolean {
 
 /**
  * 'match': the field shows the text. 'suffix': it shows the text with more after it — an inline autocomplete suggestion
- * (an address bar), the case where Return would go somewhere else. 'mismatch': it shows other text (the field reformatted
- * it — a phone number, an amount — or the keys went elsewhere). 'unknown': it cannot be told.
+ * (an address bar), the case where Return would go somewhere else — or, for a replaced field, in another format.
+ * 'mismatch': it shows other text (the field rewrote it, or the keys went elsewhere). 'unknown': it cannot be told.
  */
 export type ReadBack = 'match' | 'suffix' | 'mismatch' | 'unknown';
 
@@ -92,19 +96,49 @@ const flat = (s: string): string => s.replace(/\s+/g, ' ').trim();
 /** Windows reads a field without a value pattern through TextPattern, capped at 1000 characters: past that, no verdict. */
 const READ_CAP = 1000;
 
+/** A plain number at the start of a text; a comma may be its decimal mark. */
+const NUMBER = /^[-+]?\d+(?:[.,]\d+)?/;
+
+/**
+ * Does a field that was to hold `want`, and nothing else, hold it? The one rule behind every value-setting path (both
+ * texts flattened; case is ignored, as the Windows bridge's own check does):
+ *   - the same text is a 'match';
+ *   - a NUMBER is compared as a number, against the number the field starts with (after a currency sign): "30.0",
+ *     "30,00", "30 mm" and "$30.00" hold 30 (AT-SPI reads a value back as a float, a field adds decimals or a unit),
+ *     "300" and "10030" do not — and for a number "starts with it" proves nothing;
+ *   - a 'suffix' cannot be told from a success: other text with more AFTER it (an inline autocomplete suggestion), or
+ *     the same letters and digits in another format ("1,000" for 1000, "(555) 123-4567", a card number in groups);
+ *   - anything else is a 'mismatch' (old text that was not replaced, a rewrite).
+ */
+function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
+  const v = shown.toLowerCase(), w = want.toLowerCase();
+  if (v === w) return 'match';
+  const numeric = NUMBER.exec(w)?.[0] === w;
+  if (numeric) {
+    const amount = v.replace(/^\p{Sc}\s*/u, '');
+    const n = NUMBER.exec(amount)?.[0];
+    if (n !== undefined && !/\d/.test(amount.slice(n.length)) && Number(n.replace(',', '.')) === Number(w.replace(',', '.'))) return 'match';
+  }
+  const bare = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, '');
+  return (!numeric && w && v.startsWith(w)) || (bare(w) && bare(v) === bare(w)) ? 'suffix' : 'mismatch';
+}
+
 /**
  * Read the focused field after typing. 'unknown' when it cannot be told — no focused element, a password field (its
  * value is withheld), a field that exposes no text (empty value: many custom controls), or a value at the read cap.
  * Polls briefly: a field can lag the keys. `value` is what the field showed (for the caller to report). Never throws.
+ *
+ * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue). A clear (empty text)
+ * fails on a field that still shows text, and is never confirmed: an empty read is also what an unreadable field gives.
  */
 export async function readBackTyped(
   focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
   text: string,
-  opts: { maxMs?: number; stepMs?: number; submit?: boolean } = {},
+  opts: { maxMs?: number; stepMs?: number; submit?: boolean; whole?: boolean } = {},
 ): Promise<{ result: ReadBack; value?: string; secure?: boolean }> {
-  const { maxMs = 300, stepMs = 100, submit = false } = opts;
+  const { maxMs = 300, stepMs = 100, submit = false, whole = false } = opts;
   const want = flat(text);
-  if (!want) return { result: 'unknown' };
+  if (!want && !whole) return { result: 'unknown' };
   const t0 = Date.now();
   let last: { result: ReadBack; value?: string } = { result: 'unknown' };
   for (;;) {
@@ -116,10 +150,40 @@ export async function readBackTyped(
     if (v) {
       // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
       // do — typing into the middle of a document.
-      if (submit ? v.endsWith(want) : v.includes(want)) return { result: 'match', value: v };
-      last = { result: v.includes(want) ? 'suffix' : 'mismatch', value: v };
+      const result = whole ? holdsValue(v, want)
+        : (submit ? v.endsWith(want) : v.includes(want)) ? 'match' : v.includes(want) ? 'suffix' : 'mismatch';
+      if (result === 'match') return { result, value: v };
+      last = { result, value: v };
     }
     if (Date.now() - t0 >= maxMs) return last;
     await new Promise(r => setTimeout(r, stepMs));
+  }
+}
+
+/**
+ * How every set_field_value path ends: one read-back (readBackTyped, whole value) decides the result. A field that holds
+ * the value is confirmed; one that shows it with more after it or in another format, or cannot be read, is a success
+ * said to be NOT verified; any other text is a failure that says what the field shows. Reads `named` (the field a
+ * native set wrote to), or without it the focused field (where the value was typed).
+ */
+export async function setResult(
+  platform: Pick<PlatformAdapter, 'getFocusedElement' | 'invokeElement'>, value: string, label: string, how: string,
+  named?: { name: string; controlType?: string; processId?: number },
+): Promise<{ success: boolean; text: string; targetLabel: string }> {
+  const rb = await readBackTyped(async () => {
+    if (!named) return platform.getFocusedElement();
+    const res = await platform.invokeElement({ ...named, action: 'get-value' });
+    const d = res.data as { value?: unknown; method?: unknown } | undefined;
+    // A bridge that finds no value answers with the element's NAME (method "Name"): that is not the field's text.
+    return res.success && typeof d?.value === 'string' && !/^name$/i.test(String(d.method)) ? { value: d.value } : null;
+  }, value, { whole: true });
+  const set = `${quoteScreenText(label)} = ${value.length} chars${how}`;
+  const cut = (s: string) => quoteScreenText(s.length > 80 ? `${s.slice(0, 79)}…` : s);
+  const shows = `the field shows ${cut(rb.value ?? '')}`;
+  switch (rb.result) {
+    case 'match': return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
+    case 'unknown': return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };
+    case 'suffix': return { success: true, text: `Set ${set} — ${shows}, which may be the value in another format, or with a suggestion or old text after it: NOT verified.`, targetLabel: label };
+    default: return { success: false, text: `Set ${quoteScreenText(label)} failed: ${shows}, not the value asked for (${cut(value)}) — its old text was not replaced, or the field rewrote it.`, targetLabel: label };
   }
 }

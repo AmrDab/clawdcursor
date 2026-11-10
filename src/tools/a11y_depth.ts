@@ -18,7 +18,6 @@ import { selectOption } from '../platform/select-option';
 import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
 import { quoteScreenText } from '../core/result-codes';
-import { missText, untrusted } from '../core/miss-text';
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -103,114 +102,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
           text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `a11y_collapse failed for ${quoteScreenText(name)}.`,
           isError: !res.success,
         };
-      },
-    },
-
-    // ── ValuePattern (text fields, combos, set value directly) ──
-
-    {
-      name: 'set_field_value',
-      description:
-        'Set the value of a named text field directly via accessibility — more ' +
-        'reliable than focus+type for forms (no IME issues, no autocomplete races). ' +
-        'Uses UIA ValuePattern on Windows and AXValue on macOS. Referenced as the ' +
-        'delegate for the compact `accessibility({"action":"set_value", ...})` route.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name of the field', required: true },
-        value:       { type: 'string', description: 'Value to write', required: true },
-        controlType: { type: 'string', description: 'Optional role filter (e.g. "Edit")', required: false },
-        processId:   { type: 'number', description: 'Scope to a process', required: false },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async ({ name, value, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('set_field_value');
-        const safeNameStr = String(name ?? '');
-        const safeValue = String(value ?? '');
-        // No name and no role: no field to set — the keyboard fallback would type into whichever field it found.
-        if (!safeNameStr.trim() && !controlType) {
-          return { text: 'set_field_value failed: name the field (its accessibility name). To type into the focused field, use type_text.', isError: true };
-        }
-        const pid = await resolveProcessId(ctx, processId);
-        controlType = await preferControl(ctx.platform, 'set-value', { name: safeNameStr, controlType, processId: pid });
-        const res = await ctx.platform.invokeElement({
-          name: safeNameStr,
-          controlType,
-          processId: pid,
-          action: 'set-value',
-          value: safeValue,
-        });
-        if (res.success) {
-          const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
-          // Typed into the right window, but the field could not be read back (the Windows keyboard fallback).
-          if (res.data?.unverified === true) {
-            return { text: `Typed "${preview}" into ${quoteScreenText(safeNameStr)} by keyboard, but the field could not be read back: NOT verified. Read it to check.` };
-          }
-          return { text: `Set ${quoteScreenText(safeNameStr)} = "${preview}".` };
-        }
-
-        // A refusal is final. "Nothing settable here" falls through to the keyboard below; "I will not pick a field for you"
-        // (a role that several fields share, a secure field) must not: that fallback clicks the widest match and types into it.
-        if (res.data?.refused === true) {
-          return {
-            text: `set_field_value refused for ${quoteScreenText(safeNameStr)}: ${typeof res.data.error === 'string' ? untrusted(res.data.error) : 'the platform declined to act on it'}`,
-            isError: true,
-          };
-        }
-
-        // No value pattern on this element (Win11 XAML composites such as the
-        // Save As filename box; Chrome text fields on Linux, which expose
-        // neither EditableText nor Value). Fall back on every OS: focus the
-        // element, select-all, type the new value — but ONLY once the field
-        // was really focused or located, never into whatever has focus.
-        {
-          // Try UIA focus first (brings keyboard to element without a click)
-          const focusRes = await ctx.platform.invokeElement({
-            name: safeNameStr,
-            controlType,
-            processId: pid,
-            action: 'focus',
-          });
-
-          // If we have bounds (either from focus result or from a find),
-          // click the element centre to ensure it really has keyboard focus.
-          // When multiple elements share the same name (e.g. a Text label
-          // and a ComboBox input both named "File name:"), prefer the widest
-          // one — the actual input is always wider than its label.
-          let bounds = focusRes.bounds;
-          if (!bounds) {
-            const found = await ctx.platform.findElements({
-              name: safeNameStr,
-              controlType,
-              processId: pid,
-            });
-            if (found.length > 0) {
-              const widest = found.reduce((best, el) =>
-                (el.bounds?.width ?? 0) > (best.bounds?.width ?? 0) ? el : best, found[0]);
-              bounds = widest.bounds;
-            }
-          }
-          const located = !!bounds && bounds.width > 0;
-          if (!focusRes.success && !located) {
-            return { text: `set_field_value failed for ${quoteScreenText(safeNameStr)}: ${res.data?.error !== undefined ? missText(res.data) : 'no settable value'}, and the field could not be focused to type into it.`, isError: true };
-          }
-          if (located) {
-            const cx = Math.round(bounds!.x + bounds!.width / 2);
-            const cy = Math.round(bounds!.y + bounds!.height / 2);
-            await ctx.platform.mouseClick(cx, cy);
-          }
-
-          // Select all existing content, then type the replacement value.
-          // mod, NOT ctrl: on macOS Ctrl+A moves the caret to line start, so
-          // the value used to be PREPENDED to the old text instead of
-          // replacing it. mod = Cmd on macOS, Ctrl elsewhere.
-          await ctx.platform.keyPress('mod+a');
-          await ctx.platform.typeText(safeValue);
-          const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
-          return { text: `Set ${quoteScreenText(safeNameStr)} = "${preview}" (via keyboard fallback).` };
-        }
       },
     },
 
