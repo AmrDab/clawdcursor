@@ -54,9 +54,12 @@ const REREAD: Record<Surface, string> = { mcp: 'accessibility {"action":"compile
  * so it only ever goes into the call as a quoted JSON string.
  */
 function smartClickFor(text: string, template: string): string | undefined {
+  // The result line is trusted text, and a listed name is screen text: quoted like any other (quoteScreenText), never raw.
+  const clean = (n: string | undefined) => (n === undefined ? undefined : quoteScreenText(n).slice(1, -1));
   const name = /Closest names:\n<untrusted-screen-content>\n\[[^\]\n]+\] "(.{1,60}?)"(?:\n|<|$)/.exec(text)?.[1]
     ?? /\binvoke "([^"\n]{1,60})" missed/i.exec(text)?.[1];
-  return name ? template.replace('NAME', JSON.stringify(name)) : undefined;
+  const safe = clean(name);
+  return safe ? template.replace('NAME', JSON.stringify(safe)) : undefined;
 }
 
 /** First match wins: refusals before failures, specific before generic. */
@@ -86,7 +89,7 @@ const RULES: Rule[] = [
   { code: 'STOPPED', outcome: 'refused', test: /stopped by the user — they took control back/i,
     hint: 'the user stopped clawdcursor; nothing runs until their Resume gives control back',
     next: PAUSE('<what you want to do next>') },
-  { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent/i,
+  { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent|the app this agent runs in \(.*\) — nothing was sent/i,
     hint: 'the window in front is an AI assistant, not your target; focus your target window first',
     next: { mcp: 'window {"action":"list"}', agent: 'list_windows {}' } },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,

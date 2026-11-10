@@ -209,7 +209,7 @@ describe('the host of this session, found by process ancestry (stdio)', () => {
     __setHostAncestryForTests([500, 400]);
     fg = TERMINAL;
     const d = fakeLayer();
-    await expect(d.typeText('x')).rejects.toThrow(/the window in front is WindowsTerminal, an AI assistant — nothing was sent/);
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is the app this agent runs in \(WindowsTerminal\) — nothing was sent/);
     await d.focusWindow(TERMINAL);
     await d.typeText('x');
     expect(d.sent).toEqual(['type x']);
@@ -241,5 +241,35 @@ describe('the refusal and the list', () => {
   it('VS Code Insiders is "Code - Insiders" on Windows and macOS', () => {
     expect(isAiHostProcess('Code - Insiders.exe')).toBe(true);
     expect(isAiHostProcess('Code - Insiders')).toBe(true);
+  });
+});
+
+describe('review round 3', () => {
+  it('a launch of "Code" that surfaced nothing does not excuse Codex', async () => {
+    fg = { processId: 230, processName: 'Codex' };
+    const d = fakeLayer();
+    await d.openApp('Code');
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is Codex, an AI assistant/);
+    expect(d.sent).toEqual([]);
+  });
+
+  it('a host found by ancestry is named as the app this agent runs in', async () => {
+    __setHostAncestryForTests([500]);
+    fg = { processId: 500, processName: 'gnome-terminal-server' };
+    const d = fakeLayer();
+    await expect(d.typeText('x')).rejects.toThrow(/the window in front is the app this agent runs in \(gnome-terminal-server\) — nothing was sent/);
+    expect(classifyResult('computer {"action":"type"}: the window in front is the app this agent runs in (gnome-terminal-server) — nothing was sent. Focus your target window first', true, true)?.code).toBe('FOREGROUND_CHANGED');
+    __setHostAncestryForTests(null);
+  });
+
+  it('an input that arrives before the ancestry read has finished goes by the list alone and does not wait', async () => {
+    __setHostAncestryForTests([500], false);
+    fg = { processId: 500, processName: 'gnome-terminal-server' };
+    const d = fakeLayer();
+    await d.typeText('x');   // not yet known: not blocked, not delayed
+    expect(d.sent).toEqual(['type x']);
+    fg = CLAUDE;
+    await expect(d.typeText('y')).rejects.toThrow(/Claude, an AI assistant|foreground changed/);
+    __setHostAncestryForTests(null);
   });
 });

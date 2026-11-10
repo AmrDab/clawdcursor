@@ -423,7 +423,19 @@ export function renameJsonAdvice(text: string, compound: string): string {
     const renamed = toCompactNames(v, compound);
     if (renamed !== v) { o[k] = renamed; changed = true; }
   }
-  return changed ? JSON.stringify(o, null, t.includes('\n') ? 2 : undefined) : text;
+  if (!changed) return text;
+  const indent = t.includes('\n') ? 2 : undefined;
+  // Re-serializing is exact only when it gives back the same text: an integer past 2^53 would lose digits. Then the advice
+  // strings are replaced in the text itself, each at its own key.
+  if (JSON.stringify(JSON.parse(t), null, indent) === t) return JSON.stringify(o, null, indent);
+  let out = text;
+  for (const k of ADVICE_FIELDS) {
+    const old = JSON.parse(t)[k];
+    if (typeof old !== 'string' || o[k] === old) continue;
+    const m = new RegExp(`("${k}"\\s*:\\s*)${JSON.stringify(old).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).exec(out);
+    if (m) out = out.slice(0, m.index) + m[1] + JSON.stringify(o[k]) + out.slice(m.index + m[0].length);
+  }
+  return out;
 }
 
 async function dispatchCompound(

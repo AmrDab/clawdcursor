@@ -22,7 +22,7 @@ import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
 import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
 import { windowTextIncludes } from '../tools/window-text';
-import { isAiHostWindow } from './ai-hosts';
+import { aiHostKind, sameApp } from './ai-hosts';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
 let dir: string | null = process.env.VITEST ? null : DATA_DIR;
@@ -159,9 +159,20 @@ async function before(): Promise<void> {
   lease = now;
 }
 
-const AI_HOST_REFUSAL = (n: string) =>
-  `the window in front is ${n}, an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}. ` +
+const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
+  `the window in front is ${kind === 'list' ? `${n}, an AI assistant` : `the app this agent runs in (${n})`} — nothing was sent. ` +
+  'Focus your target window first: window {"action":"focus","title":"…"}. ' +
   "If this assistant's window IS your target, focus it with window focus and retry.";
+
+/**
+ * Is this error one of the guard's refusals (stopped, foreground changed, an AI assistant in front)? A tool that catches
+ * errors from the input layer to try another way must let these through unchanged: the call was refused, it did not fail.
+ */
+export function isGuardRefusal(err: unknown): boolean {
+  const m = err instanceof Error ? err.message : String(err);
+  return m.startsWith('stopped by the user') || m.startsWith('foreground changed: ')
+    || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);
+}
 
 /**
  * An AI assistant's own window (the chat the agent runs in) takes nothing the agent did not ask for: a model that typed before
@@ -170,11 +181,12 @@ const AI_HOST_REFUSAL = (n: string) =>
  */
 async function refuseAiHost(now: Foreground, explicit: boolean): Promise<void> {
   if (explicit || now.guessed) return;
-  if (await isAiHostWindow(now)) throw new Error(AI_HOST_REFUSAL(now.processName));
+  const kind = aiHostKind(now);
+  if (kind) throw new Error(AI_HOST_REFUSAL(now.processName, kind));
 }
 
 /** A launch that surfaced no window excuses a window of the app it started, by name, and nothing else. */
-const openedBy = (now: Foreground): boolean => !!openedName && lower(now.processName).includes(openedName);
+const openedBy = (now: Foreground): boolean => sameApp(openedName, now.processName);
 
 /**
  * An act on an element by name (accessibility set_value / invoke / toggle / select) with no process given acts on the window
@@ -216,7 +228,7 @@ function launched(r?: { pid?: number; title?: string }, appName?: string): void 
   if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true }; return; }
   lease = undefined;
   pending = null;
-  openedName = appName ? lower(appName.trim()) || null : null;
+  openedName = appName?.trim() || null;
 }
 
 /** A wait: the agent declares it does nothing, so a window that comes up during it is the user's, not the agent's (#294). */

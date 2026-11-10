@@ -52,29 +52,33 @@ const STRUCTURED_MIN = 5;
 const ACTIONABLE = /^(?:Button|CheckBox|RadioButton|Edit|ComboBox|Hyperlink|MenuItem|ListItem|TabItem|Slider|SplitButton|TreeItem|Spinner|text field|push button|check box|radio button|combo box|link|menu item|list item|page tab)$/i;
 const named = (el: UiElement) => !!(el.name ?? '').trim();
 
-/** Named elements that lie inside a web area (Document). The browser's own find bar, side panel and toolbar are outside it. */
-function namedInsideDocuments(tree: ReadonlyArray<UiElement>): number {
+/** Elements that lie inside a web area (Document). The browser's own find bar, side panel and toolbar are outside it. */
+function insideDocuments(tree: ReadonlyArray<UiElement>): UiElement[] {
   const docs = tree.filter(el => el.controlType === 'Document' && el.bounds.width > 0 && el.bounds.height > 0);
   return tree.filter(el => {
-    if (el.controlType === 'Document' || !named(el) || el.bounds.width <= 0 || el.bounds.height <= 0) return false;
+    if (el.controlType === 'Document' || el.bounds.width <= 0 || el.bounds.height <= 0) return false;
     const cx = el.bounds.x + el.bounds.width / 2;
     const cy = el.bounds.y + el.bounds.height / 2;
     return docs.some(d => cx >= d.bounds.x && cx <= d.bounds.x + d.bounds.width && cy >= d.bounds.y && cy <= d.bounds.y + d.bounds.height);
-  }).length;
+  });
+}
+
+/** Enough to act on: 5 named elements, or a small set that is mostly named with a control to act on (a dialog, a login form). */
+function hasStructure(els: ReadonlyArray<UiElement>): boolean {
+  const names = els.filter(named);
+  if (names.length >= STRUCTURED_MIN) return true;
+  return names.length > 0 && names.length * 2 >= els.length && names.some(el => ACTIONABLE.test(el.controlType ?? ''));
 }
 
 /**
- * Is this read sparse enough to say "little or no accessibility structure"? A browser: fewer than 5 named
- * elements INSIDE its web area (its own tab strip and toolbar are ~59 elements and say nothing about the page). Any other
- * window: fewer than that many named elements, unless it is small and mostly named with something to act on, such as a
- * three-button dialog. A tree that holds the page is not sparse: the hint sent agents to OCR after every read of a page they
+ * Is this read sparse enough to say "little or no accessibility structure"? A browser is judged by what is INSIDE its web
+ * area (its own tab strip and toolbar are ~59 elements and say nothing about the page), any other window by the whole tree.
+ * Either is sparse with fewer than 5 named elements, unless it is small and mostly named with something to act on: a
+ * three-button dialog, a login form. A tree that holds the page is not sparse: the hint sent agents to OCR after every read of a page they
  * could already read by name.
  */
 export function isSparseTree(tree: ReadonlyArray<UiElement>, isBrowser: boolean): boolean {
-  if (isBrowser) return namedInsideDocuments(tree) < STRUCTURED_MIN;
-  const names = tree.filter(named);
-  if (names.length >= STRUCTURED_MIN) return false;
-  return !(names.length > 0 && names.length * 2 >= tree.length && names.some(el => ACTIONABLE.test(el.controlType ?? '')));
+  return !hasStructure(isBrowser ? insideDocuments(tree) : tree);
 }
 
 /** How alike two element names are, for "did you mean": shared words, containment, then a common prefix. 0 = unrelated. */
