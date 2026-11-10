@@ -560,7 +560,7 @@
     },
     {
       "name": "copy_all_text",
-      "description": "Read ALL text of the focused window / web page EXACTLY. Reads through accessibility with no keystrokes and nothing selected: the document's text, else the names and values in the window's tree. Exact characters (IDs, amounts, codes) — prefer it over OCR for reading pages and documents. Only a window whose tree cannot be read at all gets select-all + copy (the clipboard is restored): the result then says it pressed Ctrl+A and Ctrl+C there, and the content stays selected. Refuses in terminals (Ctrl+C would interrupt them). Never presses select-all while focus is in an editable field, an editor document or a list, or in a window whose tree has no text (a drawn view) — use ocr there. Focus the right window first.",
+      "description": "Read the text of the focused web page or document EXACTLY (IDs, amounts, codes) — prefer it over OCR for pages and documents. Reads the document's text through accessibility: no keystrokes, nothing selected. Where that cannot be read: a browser page gets select-all + copy (the clipboard is restored; the result says which keys it pressed, and the page stays selected) unless focus is in a field or a list; any other window gets no keys and returns the names and values in its accessibility tree, labelled \"names only\" — that is not the document's text, use ocr for the content. Refuses in terminals. Focus the right window first.",
       "category": "clipboard",
       "parameters": {
         "type": "object",

@@ -686,7 +686,7 @@ export class AccessibilityBridge {
 
         if (combined.uiTree) {
           context += combined.truncated
-            ? '\nFOCUSED WINDOW UI TREE (PARTIAL — the walk hit its time budget on a very large window; for exact page text use system copy_all_text):\n'
+            ? '\nFOCUSED WINDOW UI TREE (PARTIAL — the walk hit its time budget on a very large window; for a web page or document use system copy_all_text, for anything else system ocr):\n'
             : '\nFOCUSED WINDOW UI TREE:\n';
           context += this.formatTree(
             Array.isArray(combined.uiTree) ? combined.uiTree : [combined.uiTree],

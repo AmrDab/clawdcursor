@@ -164,8 +164,13 @@ export class SessionLog {
     this.tally.calls++;
     if (outcome === 'refused' || outcome === 'consent_required') this.tally.refused++;
     else if (!ok) this.tally.errors++;
-    if (steps?.length) for (const s of steps) this.tallyClass(s.cls, s.outcome);
-    else this.tallyClass(cls, outcome);
+    // A read that pressed keys is an action, and when it worked it is text read as well: both are tallied.
+    const tally = (c: { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome }) => {
+      this.tallyClass(c.cls, c.outcome);
+      if (c.ok && c.cls !== 'blind' && classifyCall(c.tool, c.action) === 'blind') this.tallyClass('blind', c.outcome);
+    };
+    if (steps?.length) steps.forEach(tally);
+    else tally({ tool, action, cls, ok, outcome });
 
     if (this.file) {
       // The day log gets the same line, so one file shows what ran, how long it took and how it ended.

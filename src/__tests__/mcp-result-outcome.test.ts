@@ -414,24 +414,25 @@ describe('the first screenshot of a session that read nothing is nudged to blind
   });
 
   // Live 2026-11-10: copy_all_text pressed Ctrl+A / Ctrl+C in the app and the session log still called it a blind read.
-  it('copy_all_text that had to press keys is logged as an action, alone and as a batch step; one that read the tree stays blind', async () => {
+  it('copy_all_text that pressed keys is logged as an action and as text read, alone and as a batch step; one that read the tree is only a blind read', async () => {
     let clip = 'mine';
+    let processName = 'msedge';
     const platform = {
-      getActiveWindow: vi.fn(async () => ({ processName: 'someapp', title: 'Doc', processId: 1 })),
+      getActiveWindow: vi.fn(async () => ({ processName, title: 'Doc', processId: 1 })),
       keyPress: vi.fn(async (k: string) => { if (k === 'mod+c') clip = 'page text'; }),
       readClipboard: vi.fn(async () => clip), writeClipboard: vi.fn(async (t: string) => { clip = t; }),
-      getUiTree: vi.fn(async () => [] as unknown[]),
+      getUiTree: vi.fn(async () => [{ name: 'Total: 42' }]),
     };
     const ctx = { ...fakeCtx(), platform: platform as any, a11y: { invalidateCache() {} } as any };
     const { sessionLog } = await createMcpServer({ ctx, compact: true });
     const r = await capturedHandlers.get('system')!({ action: 'copy_all_text' });
-    expect(text(r)).toMatch(/Pressed Ctrl\+A and Ctrl\+C in \[someapp\] "Doc"/);
-    expect(sessionLog.summary).toMatchObject({ blind: 0, actOther: 1 });
+    expect(text(r)).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \[msedge\] "Doc"/);
+    expect(sessionLog.summary).toMatchObject({ blind: 1, actOther: 1 });
     await capturedHandlers.get('batch')!({ steps: [{ name: 'system', arguments: { action: 'copy_all_text' } }] });
-    expect(sessionLog.summary).toMatchObject({ blind: 0, actOther: 2 });
-    platform.getUiTree.mockResolvedValue([{ name: 'Total: 42' }]);
+    expect(sessionLog.summary).toMatchObject({ blind: 2, actOther: 2 });
+    processName = 'someapp';
     await capturedHandlers.get('system')!({ action: 'copy_all_text' });
-    expect(sessionLog.summary).toMatchObject({ blind: 1, actOther: 2 });
+    expect(sessionLog.summary).toMatchObject({ blind: 3, actOther: 2 });
     expect(platform.keyPress).toHaveBeenCalledTimes(4);
   });
 });

@@ -1,15 +1,16 @@
 /**
  * Read ALL text of the focused window. First through accessibility, with no
  * keystrokes, nothing selected and the clipboard untouched: the document's
- * text (Windows: UIA TextPattern), then the names and values in the window's
- * tree. Only a window whose tree cannot be read at all gets select-all, copy,
- * read the clipboard, put the user's clipboard back — and the result says so.
+ * text (Windows: UIA TextPattern). Where that can't be read, a browser page
+ * gets select-all, copy, read the clipboard, put the user's clipboard back —
+ * and the result says so. Any other window gets no keys: the names and values
+ * in its tree, labelled as names only.
  *
  * Why: OCR garbles identifiers (l→1, o→0) and accessibility trees can be empty
  * or time out on big web apps; the copied text is the page's real characters.
  * A field session reading Stripe got every ID and amount right this way.
- * Why the keys come last: select-all acts on whatever the app selects, not only
- * text (live, Siemens NX: it selected every feature and opened NX's Copy dialog).
+ * Why keys only in a browser: elsewhere select-all acts on whatever the app
+ * selects (live, Siemens NX: every feature, then NX's own Copy dialog opened).
  *
  * Refuses in terminals — Ctrl+C there interrupts the running program. A
  * sentinel written before the copy tells "copied nothing" apart from "the
@@ -83,7 +84,7 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const CLIPBOARD_WAIT_MS = 1500;
 
 type CopyPlatform = Pick<PlatformAdapter, 'getActiveWindow' | 'keyPress' | 'readClipboard' | 'writeClipboard'>
-  & Partial<Pick<PlatformAdapter, 'getUiTree' | 'getFocusedElement' | 'getPageText'>>;
+  & Partial<Pick<PlatformAdapter, 'getUiTree' | 'getFocusedElement' | 'getPageText' | 'lastTreeTruncated'>>;
 
 /**
  * Drop U+FFFC, the mark a document's text uses where an embedded object (an image, a link, a frame) sits. UIA TextPattern
@@ -96,12 +97,10 @@ export function withoutObjectMarks(text: string): string {
   return text.replace(/\r\n?/g, '\n').replace(/￼/g, '').replace(/^[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n');
 }
 
-/** The window's text from its accessibility tree: names (and values) in tree order. Null when the tree could not be read
- *  (no reader, the read failed, or it has no elements); '' when it was read and holds no text. */
-async function accessibilityText(platform: CopyPlatform, pid: number | undefined): Promise<string | null> {
-  if (!platform.getUiTree) return null;
+/** The window's text from its accessibility tree: names (and values) in tree order. */
+async function accessibilityText(platform: CopyPlatform, pid: number | undefined): Promise<string> {
+  if (!platform.getUiTree) return '';
   const tree = await platform.getUiTree(pid).catch(() => []);
-  if (!tree.length) return null;
   const lines: string[] = [];
   for (const el of tree) {
     const name = (el.name ?? '').trim();
@@ -126,24 +125,30 @@ export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextRe
     if (text.trim()) return { ok: true, window: label, source: 'document', text };
   }
 
-  // Second choice: the names and values in the window's tree — still no keystrokes. A read must not change the app, and
-  // select-all + copy does: it replaces the app's selection and runs the app's own Copy command.
-  const treeText = await accessibilityText(platform, win?.processId || undefined);
-  if (treeText) {
-    return { ok: true, window: label, source: 'accessibility', text: `(${label} has no document text to read; this is its accessibility text: element names and values in tree order, not the exact page text. No keys were pressed.)\n${treeText}` };
-  }
-  // A tree that was read and holds no text is a drawn view (a canvas, a 3D model): select-all there selects the app's own
-  // objects, not text. Keys are for a window whose tree cannot be read at all.
-  if (treeText === '') {
-    return { ok: false, window: label, text: `Not pressing Ctrl+A in ${label}: its accessibility tree has no text, so its content is drawn rather than text — select-all there would select the app's own objects. Read it with ocr instead.` };
+  // THE rule for keys: select-all + copy is pressed only where select-all is known to mean "the text" — a browser, with focus
+  // not in a field or a list (#249). Anywhere else it acts on whatever the app selects (NX: every feature), so no key is
+  // pressed there, whether the tree read worked, came back empty or failed.
+  const processName = String(win?.processName ?? '').trim();
+  let hazard: string | null = null;
+  if (BROWSERS.test(processName)) {
+    const focused = platform.getFocusedElement ? await platform.getFocusedElement().catch(() => null) : null;
+    hazard = selectAllHazard(focused, processName, String(win?.className ?? ''));
+    if (!hazard) return copyWithKeys(platform, label);
   }
 
-  // Ctrl+A acts on whatever has focus — never on an editor's content or a list of items (#249).
-  const focused = platform.getFocusedElement ? await platform.getFocusedElement().catch(() => null) : null;
-  const hazard = selectAllHazard(focused, String(win?.processName ?? ''), String(win?.className ?? ''));
-  if (hazard) {
-    return { ok: false, window: label, text: `Not pressing Ctrl+A in ${label}: ${hazard}. Its accessibility tree could not be read either — read it with ocr instead.` };
+  // No keys: the names and values in the window's tree, labelled as what they are.
+  const why = hazard ? ` (${hazard}; to copy a web page exactly, click its content first, then retry)` : '';
+  const treeText = await accessibilityText(platform, win?.processId || undefined);
+  if (!treeText) {
+    return { ok: false, window: label, text: `Could not read text from ${label}: it has no document text, and its accessibility tree gave none (it is empty, or the read failed). No keys were pressed${why}. Read it with ocr instead.` };
   }
+  const partial = platform.lastTreeTruncated ? ' — PARTIAL (the walk stopped at its size or time limit)' : '';
+  return { ok: true, window: label, source: 'accessibility',
+    text: `(names only, not the document's text: the element names and values in the accessibility tree of ${label}${partial}. No keys were pressed${why}. Use ocr for the content.)\n${treeText}` };
+}
+
+/** Select-all, copy, read the clipboard, put the user's clipboard back. The result says the keys were pressed. */
+async function copyWithKeys(platform: CopyPlatform, label: string): Promise<CopyAllTextResult> {
 
   const prior = await platform.readClipboard().catch(() => '');
   const sentinel = `⁣clawdcursor-copy-${Date.now()}`;
@@ -163,7 +168,8 @@ export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextRe
     await unguarded(() => platform.writeClipboard(prior)).catch(() => { /* best effort */ });
   }
 
-  const pressed = `Pressed Ctrl+A and Ctrl+C in ${label} (its accessibility tree could not be read)`;
+  const mod = process.platform === 'darwin' ? 'Cmd' : 'Ctrl';
+  const pressed = `Pressed ${mod}+A and ${mod}+C in ${label} (its document text could not be read through accessibility)`;
   if (!copied || copied === sentinel) {
     return { ok: false, window: label, pressedKeys: true, text: `${pressed} and nothing was copied: no selectable text, or the app blocks select-all / copy. The keys may have changed what is selected there or opened a dialog — check the window before acting. Read it with ocr instead.` };
   }
