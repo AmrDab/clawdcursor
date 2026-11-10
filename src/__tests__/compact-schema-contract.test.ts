@@ -59,7 +59,7 @@ describe('compact schema ↔ delegate contract', () => {
 
   it('every compound publishes `expect`, so it reaches the dispatcher instead of being stripped by the MCP layer', () => {
     for (const c of getCompactSurface()) {
-      if (c.name === 'batch' || c.name === 'task') continue;
+      if (c.name === 'batch') continue;
       expect(Object.keys(c.parameters), c.name).toContain('expect');
     }
   });

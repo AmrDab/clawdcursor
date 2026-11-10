@@ -4,6 +4,30 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+- **Breaking: the built-in agent loop is gone.** clawdcursor no longer calls a
+  model itself. It is a tool layer: your own agent (Claude Code, Claude Desktop,
+  Codex, Cursor, a local Llama, …) drives the MCP tools.
+  - Gone: the `task` compound tool (the compact surface is now `accessibility`,
+    `system`, `window`, `browser`, `computer`, `batch`), the granular
+    `submit_task`, `agent_status`, `abort_task`, `delegate_to_agent`,
+    `task_logs_list`, `task_logs_current` and `get_system_prompt` tools, the
+    `system` actions `delegate` and `system_prompt`, the scheduler
+    (`scheduled_task_*`), the `clawdcursor task` command and the daemon's
+    `POST /abort` route.
+  - Use instead: call the compact tools step by step from your agent, or `batch`
+    for a known sequence in one call; `system pause_for_user` to hand a step to
+    the user; your agent host's own scheduler for recurring work; `clawdcursor
+    stop` (or the on-screen pill) to stop. With `task {"action":"resume"}` gone,
+    a pause on the compact surface ends only by the user (Resume on screen,
+    `clawdcursor resume`, the dashboard) or its `done_when`; the granular
+    `resume_task` stays.
+  - `clawdcursor agent` is now only the HTTP MCP server: no model, no key, no
+    provider check. `--no-llm` is still accepted and does nothing; the
+    `--provider`, `--model`, `--text-model`, `--vision-model`, `--base-url` and
+    `--api-key` flags are gone from `agent` and `start`. The HTTP MCP transport,
+    `/stop`, `/resume`, `/health` and token auth are unchanged.
+
 ### Changed
 - **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
   Read lines say to act by name and keep `@x,y` for elements with no name; `smart_click` is explained where agents look

@@ -27,11 +27,8 @@ const OVERLAY_NAME = /^clawd-overlay(-[0-9a-f]+)?$/i;
  * unverified — it cannot pass for the user's answer. */
 const PAUSE_SAFE = new Set([
   'system:pause_for_user', 'pause_for_user', 'ask_user',
-  'task:status', 'agent_status', 'task:abort', 'abort_task', 'task:resume', 'resume_task',
+  'resume_task',
   'done', 'give_up',
-  // Re-calling a paused delegated task with the same text is how a caller keeps waiting (orchestration.ts); it never
-  // starts a new run while a pause is up.
-  'task:run', 'delegate_to_agent',
   // Waiting and reporting touch nothing on screen.
   'computer:wait', 'wait', 'system:report',
 ]);
@@ -43,7 +40,7 @@ export function isPauseSafeCall(toolName: string, action?: string): boolean {
 /** While the user has stopped clawdcursor: only asking them for control back, and reporting. Not even waiting or reading. */
 const STOP_SAFE = new Set([
   'system:pause_for_user', 'pause_for_user', 'ask_user',
-  'task:status', 'agent_status', 'task:abort', 'abort_task', 'done', 'give_up', 'system:report',
+  'done', 'give_up', 'system:report',
 ]);
 
 export function isStopSafeCall(toolName: string, action?: string): boolean {

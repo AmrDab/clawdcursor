@@ -167,9 +167,6 @@ npm start
 Or with specific options:
 
 ```bash
-# With Ollama (free, local)
-npm start -- --provider ollama
-
 # With debug screenshots
 npm start -- --debug
 
@@ -177,34 +174,9 @@ npm start -- --debug
 npm start -- --port 4000
 ```
 
-### Send a task
+### Drive it
 
-Two ways. From the CLI:
-
-```bash
-clawdcursor task "Open Safari and go to google.com"
-```
-
-Or via MCP HTTP (JSON-RPC, what an external AI agent would use):
-
-```bash
-TOKEN=$(cat ~/.clawdcursor/token)
-curl -s -X POST http://127.0.0.1:3847/mcp \
-  -H "Content-Type: application/json" \
-  -H "Accept: application/json, text/event-stream" \
-  -H "Authorization: Bearer $TOKEN" \
-  -d '{
-    "jsonrpc": "2.0",
-    "id": 1,
-    "method": "tools/call",
-    "params": {
-      "name": "submit_task",
-      "arguments": {"task": "Open Safari and go to google.com"}
-    }
-  }'
-```
-
-The legacy REST `/task` endpoint was deleted in v0.9 — every former REST endpoint is now an MCP tool. See `docs/internal/v0.9-design.md` for the full mapping.
+clawdcursor never runs a model; connect your own agent to `http://127.0.0.1:3847/mcp` (MCP over HTTP, `Authorization: Bearer $(cat ~/.clawdcursor/token)`) and call its tools, or register `clawdcursor mcp` with your editor.
 
 ---
 

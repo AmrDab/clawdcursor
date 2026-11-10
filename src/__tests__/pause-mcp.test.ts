@@ -1,7 +1,5 @@
 /**
  * Pause for the user — the outside-AI (MCP) side:
- *   - delegate_to_agent reports {status:"paused", waitingFor} while the task
- *     waits for the user (so the caller waits instead of restarting)
  *   - pause_for_user: bounded wait → {status:"waiting"}, re-call re-attaches,
  *     Resume → {status:"resumed"}; unavailable → clear error
  *   - resume_task answers the pause
@@ -15,7 +13,6 @@ import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import { controlBanner } from '../core/banner';
 import { pauseGate } from '../core/pause-gate';
-import { getOrchestrationTools, __resetInflightDelegationForTests } from '../tools/orchestration';
 import { getAgentTools } from '../tools/agent';
 import { createUtilityServer, initServerToken } from '../surface/http-utility';
 
@@ -31,7 +28,6 @@ class FakeChild extends EventEmitter {
   kill(): boolean { this.emit('exit', 0); return true; }
 }
 
-const delegate = getOrchestrationTools().find(t => t.name === 'delegate_to_agent')!;
 const pauseForUser = getAgentTools().find(t => t.name === 'pause_for_user')!;
 const resumeTask = getAgentTools().find(t => t.name === 'resume_task')!;
 const noCtx = {} as ToolContext;
@@ -43,41 +39,12 @@ beforeEach(() => {
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
   controlBanner.__setGlowSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
-  __resetInflightDelegationForTests();
 });
 
 afterEach(() => {
   pauseGate.__resetForTests();
   controlBanner.__resetForTests();
   process.env.CLAWD_NO_PAUSE = '1';
-});
-
-describe('delegate_to_agent while the task is paused', () => {
-  it('returns {status:"paused", waitingFor} with "keep waiting, do not restart"', async () => {
-    let state = { status: 'idle' } as Record<string, unknown>;
-    let finish!: (r: unknown) => void;
-    const ctx = {
-      agent: {
-        executeTask: () => new Promise(r => { finish = r; }),
-        getState: () => state,
-      },
-    } as unknown as ToolContext;
-
-    const call = delegate.handler({ task: 'star the repo', timeout: 1 }, ctx); // starts the task
-    // ...which then pauses for the user while the caller is waiting
-    const p = pauseGate.request({ message: 'Sign in to GitHub, then click Resume' });
-    state = { status: 'paused', currentStep: 'Sign in to GitHub, then click Resume' };
-    const r = await call;
-    const body = JSON.parse(r.text);
-    expect(r.isError).toBeFalsy();
-    expect(body.status).toBe('paused');
-    expect(body.waitingFor).toBe('Sign in to GitHub, then click Resume');
-    expect(body.next).toMatch(/Do NOT restart/);
-
-    pauseGate.answer('resume');
-    await p;
-    finish({ success: true, steps: [], duration: 1 });
-  });
 });
 
 describe('pause_for_user', () => {
@@ -340,16 +307,5 @@ describe('pause_for_user never queues behind another pause', () => {
     expect(JSON.parse((await call).text).status).toBe('waiting');
     pauseGate.answer('resume');
     await first;
-  });
-});
-
-describe('busy while the running task itself is paused', () => {
-  it('points at task status — re-calling with its message could never re-attach (it has no key)', async () => {
-    const taskPause = pauseGate.requestWithReply({ message: 'Sign in to Stripe' });   // the daemon's own, keyless
-    const r = JSON.parse((await pauseForUser.handler({ message: 'Sign in to B', timeout: 1 }, noCtx)).text);
-    expect(r.status).toBe('busy');
-    expect(r.next).toMatch(/task \{"action":"status"\}/);
-    pauseGate.answer('resume');
-    await taskPause;
   });
 });

@@ -8,7 +8,6 @@
  *      produces the same result as calling the granular tool directly.
  *   3. The 6 compound names are exactly the expected set.
  *   4. actionCatalog (as used in compact descriptions) lists every route action.
- *   5. The `task` compound delegates to `delegate_to_agent` with instruction→task remap.
  *   6. getTools({ palette: 'compact' }) === getCompactSurface().
  *   7. getTools({ compactGroup: X }) returns only tools whose .compactGroup === X.
  */
@@ -178,7 +177,6 @@ const ACTION_MAP: ActionRoute[] = [
   { compound: 'system', action: 'undo',              delegate: 'undo_last' },
   { compound: 'system', action: 'shortcuts_list',    delegate: 'shortcuts_list' },
   { compound: 'system', action: 'shortcuts_run',     delegate: 'shortcuts_execute' },
-  { compound: 'system', action: 'delegate',          delegate: 'delegate_to_agent' },
   { compound: 'system', action: 'detect_webview',    delegate: 'detect_webview_apps' },
   { compound: 'system', action: 'relaunch_with_cdp', delegate: 'relaunch_with_cdp' },
   // browser
@@ -194,8 +192,6 @@ const ACTION_MAP: ActionRoute[] = [
   { compound: 'browser', action: 'switch_tab',     delegate: 'cdp_switch_tab' },
   { compound: 'browser', action: 'scroll',         delegate: 'cdp_scroll' },
   { compound: 'browser', action: 'navigate',       delegate: 'navigate_browser' },
-  // task — special: instruction→task remap, single pseudo-action
-  { compound: 'task', action: '__task__', delegate: 'delegate_to_agent', argRemap: { instruction: 'task' } },
 ];
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -235,7 +231,7 @@ describe('compact-as-transform invariants', () => {
     const compactTools = getCompactTools();
     const names = compactTools.map(t => t.name).sort();
     expect(names).toEqual(
-      ['accessibility', 'batch', 'browser', 'computer', 'system', 'task', 'window'],
+      ['accessibility', 'batch', 'browser', 'computer', 'system', 'window'],
     );
   });
 
@@ -244,7 +240,6 @@ describe('compact-as-transform invariants', () => {
     const compactTools = getCompactTools();
     const compoundGroups: Record<string, string[]> = {};
     for (const route of ACTION_MAP) {
-      if (route.action === '__task__') continue; // task is special
       if (!compoundGroups[route.compound]) compoundGroups[route.compound] = [];
       compoundGroups[route.compound].push(route.action);
     }
@@ -256,35 +251,6 @@ describe('compact-as-transform invariants', () => {
         expect(tool.description).toContain(action);
       }
     }
-  });
-
-  // ── 4. task compound delegates to delegate_to_agent with instruction→task ─
-  it('4. task compound: missing action dispatches delegate_to_agent with instruction→task remap', async () => {
-    const compactTools = getCompactTools();
-    const taskTool = compactTools.find(t => t.name === 'task')!;
-    expect(taskTool).toBeDefined();
-
-    // The task compound only exposes `instruction` parameter
-    expect(taskTool.parameters).toHaveProperty('instruction');
-
-    // Calling it should attempt to delegate to delegate_to_agent.
-    // Since delegate_to_agent tries to fetch http://127.0.0.1:3847/task,
-    // it will fail with ECONNREFUSED. We assert it returns an isError result
-    // (i.e., the dispatch reached delegate_to_agent and it returned an error),
-    // NOT a "unknown action" or "delegate not registered" error.
-    const ctx = makeCtx();
-    const result = await taskTool.handler({ instruction: 'test task' }, ctx);
-    // Must be an error (agent not running in test), but NOT a compound dispatch error
-    expect(result.isError).toBe(true);
-    expect(result.text).not.toContain('unknown action');
-    expect(result.text).not.toContain('not registered');
-    // Should contain an agent-related message (ECONNREFUSED → "not running" or similar)
-    expect(
-      result.text.includes('not running') ||
-      result.text.includes('ECONNREFUSED') ||
-      result.text.includes('agent') ||
-      result.text.includes('clawdcursor'),
-    ).toBe(true);
   });
 
   // ── 5. dispatch produces same result as calling granular tool directly ───
@@ -452,18 +418,8 @@ describe('compact-as-transform invariants', () => {
     expect(names).toContain('write_clipboard');
     expect(names).toContain('get_system_time');
     expect(names).toContain('ocr_read_screen');
-    // delegate_to_agent's PRIMARY group is 'task' (it powers the whole task compound).
-    // It also appears in system.delegate via ACTION_MAP, but a granular tool can
-    // only carry one compactGroup — we assign 'task' as canonical.
-    expect(names).not.toContain('delegate_to_agent');
     expect(names).toContain('detect_webview_apps');
     expect(names).toContain('relaunch_with_cdp');
-  });
-
-  it('9d. getTools({ compactGroup: "task" }) returns delegate_to_agent', () => {
-    const tools = getTools({ compactGroup: 'task' });
-    const names = tools.map(t => t.name);
-    expect(names).toContain('delegate_to_agent');
   });
 
   // ── 10. granular tools not in any compactGroup ──────────────────────────

@@ -26,7 +26,7 @@
     binds to 127.0.0.1. Bearer-token auth on every HTTP request.
 
     ── TOOL SURFACE (PUBLIC) ────────────────────────────────────────────────────
-    7 compact compound tools, ~7,000 tokens of catalog (granular: ~20,000). RECOMMENDED.
+    6 compact compound tools, ~7,000 tokens of catalog (granular: ~20,000). RECOMMENDED.
       computer      : mouse, keyboard, screenshot (raw I/O)
       accessibility : drive UI by element name; compile a fused el_NN UI map
                       and act on {element_id, snapshot_id} (survives layout shifts)
@@ -35,7 +35,6 @@
                       pause_for_user (hand the desktop to the user for a
                       sign-in / 2FA / CAPTCHA; continue when they click Resume)
       browser       : Chrome DevTools Protocol for Electron/WebView2 apps
-      task          : hand off a full task to the built-in autonomous loop
       batch         : run a guarded, safety-gated sequence of the above in one call
 
     ── FLAGSHIP CAPABILITIES ─────────────────────────────────────────────────────
@@ -63,9 +62,8 @@
       clawdcursor grant              # macOS only: approve Accessibility + Screen Recording
       ── Editor-hosted agent (Claude Code/Cursor/…): that's ALL the setup.
          Add the MCP entry below; your editor spawns `clawdcursor mcp` itself.
-      ── Autonomous daemon ONLY: also run `clawdcursor doctor` (configures the
-         daemon's built-in LLM), then `clawdcursor agent`. `doctor` is NOT
-         needed to drive clawdcursor over MCP from your own agent.
+      ── HTTP daemon: `clawdcursor agent`. `doctor` is NOT needed to drive
+         clawdcursor over MCP from your own agent.
 
     ── PICK A MODE ─────────────────────────────────────────────────────────────
     `clawdcursor mcp`   : stdio MCP server. Use when AI lives in your editor
@@ -80,12 +78,8 @@
                           npx and bundles the usage skill. One step, no config.
 
     `clawdcursor agent` : HTTP MCP daemon on 127.0.0.1:3847/mcp. Use when
-                          clawdcursor brings its own LLM brain (configured via
-                          doctor) for unattended/scheduled autonomous runs.
-
-    `clawdcursor agent --no-llm` : same daemon, tool surface only (no built-in
-                          brain). Use when your agent has its own brain and
-                          just wants HTTP tools.
+                          your agent is headless or remote and wants HTTP
+                          tools. clawdcursor never runs a model.
 
     ── SAFETY ──────────────────────────────────────────────────────────────────
     Single safety.evaluate() chokepoint: every tool call routes through it
@@ -527,10 +521,9 @@
       </div>
       <div class="mode-card a">
         <h3>clawdcursor agent <span style="font-size:0.7rem;font-weight:500;color:var(--text3);letter-spacing:0.04em;">HTTP daemon</span></h3>
-        <p style="margin:8px 0 12px;color:var(--text2);font-size:0.85rem;line-height:1.5;">HTTP MCP on <code style="font-size:0.85em">127.0.0.1:3847/mcp</code>. <code style="font-size:0.85em;color:var(--accent2)">doctor</code> then <code style="font-size:0.85em;color:var(--accent2)">agent</code> runs the built-in autonomous loop; <code style="font-size:0.85em;color:var(--accent2)">agent --no-llm</code> serves tools only when your agent has its own brain.</p>
+        <p style="margin:8px 0 12px;color:var(--text2);font-size:0.85rem;line-height:1.5;">HTTP MCP on <code style="font-size:0.85em">127.0.0.1:3847/mcp</code>. <code style="font-size:0.85em;color:var(--accent2)">agent</code> serves the tools to a headless or remote agent; clawdcursor never runs a model.</p>
         <div class="mode-stats">
           <div><div class="mode-stat-val">:3847</div><div class="mode-stat-lbl">HTTP MCP</div></div>
-          <div><div class="mode-stat-val">13+</div><div class="mode-stat-lbl">Providers</div></div>
         </div>
       </div>
     </div>
@@ -669,8 +662,8 @@
     <details class="cli-details">
       <summary class="cli-summary">
         <span class="sect-label" style="margin-bottom:0;">Tools</span>
-        <span class="cli-summary-title">7 compact tools + 100+ granular <span class="cli-summary-chev" aria-hidden="true">›</span></span>
-        <span class="cli-summary-sub">The 7 compounds are the recommended surface. The 100+ granular tools cover compatibility and debugging.</span>
+        <span class="cli-summary-title">6 compact tools + 100+ granular <span class="cli-summary-chev" aria-hidden="true">›</span></span>
+        <span class="cli-summary-sub">The 6 compact tools are the recommended surface. The 100+ granular tools cover compatibility and debugging.</span>
       </summary>
 
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;margin-top:18px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
@@ -701,17 +694,12 @@
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">system</code></td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Clipboard, OCR, shortcuts, undo, webview detection, CDP relaunch, task delegation. The meta surface for an external brain.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>clipboard_read</code> · <code>clipboard_write</code> · <code>system_time</code> · <code>ocr</code> · <code>undo</code> · <code>shortcuts_list</code> · <code>shortcuts_run</code> · <code>delegate</code> · <code>detect_webview</code> · <code>relaunch_with_cdp</code> · <code>system_prompt</code> · <code>pause_for_user</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>clipboard_read</code> · <code>clipboard_write</code> · <code>system_time</code> · <code>ocr</code> · <code>undo</code> · <code>shortcuts_list</code> · <code>shortcuts_run</code> · <code>detect_webview</code> · <code>relaunch_with_cdp</code> · <code>pause_for_user</code></td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">browser</code></td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Chrome DevTools Protocol: real DOM access for Electron / WebView2 apps whose a11y tree is sparse.</td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>connect</code> · <code>page_context</code> · <code>read_text</code> · <code>click</code> · <code>type</code> · <code>select_option</code> · <code>evaluate</code> · <code>wait_for</code> · <code>list_tabs</code> · <code>switch_tab</code> · <code>scroll</code></td>
-            </tr>
-            <tr>
-              <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">task</code></td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Hand the whole task to the autonomous loop. <strong>Daemon mode only</strong>: needs <code>clawdcursor agent</code> with an LLM configured.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>run</code> · <code>status</code> · <code>abort</code> · <code>resume</code></td>
             </tr>
           </tbody>
         </table>
@@ -739,15 +727,14 @@
         <pre style="background:transparent;font-size:0.82rem;line-height:1.55;color:var(--text);overflow-x:auto;"><code><span style="color:var(--text3)"># Install &amp; setup</span>
 clawdcursor consent          <span style="color:var(--text3)"># one-time desktop-control authorization (always required)</span>
 clawdcursor grant            <span style="color:var(--text3)"># macOS only: Accessibility + Screen Recording prompts. MCP setup ends here.</span>
-clawdcursor doctor           <span style="color:var(--text3)"># ONLY for `agent` mode: configures the daemon's built-in LLM (+ diagnostics)</span>
+clawdcursor doctor           <span style="color:var(--text3)"># setup diagnostics (not needed for MCP)</span>
 clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions, AI config)</span>
 clawdcursor versions         <span style="color:var(--text3)"># every installed copy and its version</span>
 
 <span style="color:var(--text3)"># Run</span>
 clawdcursor mcp              <span style="color:var(--text3)"># stdio MCP server for editor hosts</span>
-clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with 7 compound tools (recommended)</span>
-clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP daemon at :3847/mcp, optional built-in LLM</span>
-clawdcursor agent --no-llm   <span style="color:var(--text3)"># tool surface only: your agent brings its own brain</span>
+clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with 6 compound tools (recommended)</span>
+clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP daemon at :3847/mcp (your agent drives the tools)</span>
 clawdcursor resume           <span style="color:var(--text3)"># continue a task paused for you (--end to stop it)</span>
 clawdcursor stop             <span style="color:var(--text3)"># stop every running mode</span>
 clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawdcursor config and data</span></code></pre>

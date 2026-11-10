@@ -120,7 +120,6 @@ const manifest = {
     { name: 'system', description: 'Clipboard, OCR, named shortcuts, system time and opening links.' },
     { name: 'browser', description: 'Drive a browser page through the DevTools Protocol: navigate, read, click, type.' },
     { name: 'batch', description: 'Run several steps in one call, each with optional preconditions.' },
-    { name: 'task', description: 'Hand a whole task to clawdcursor\'s own agent (needs it configured separately).' },
   ],
   tools_generated: false,
   keywords: ['desktop', 'automation', 'computer-use', 'accessibility', 'gui', 'browser', 'windows', 'macos', 'linux'],

@@ -37,7 +37,7 @@ import { agentBrowserConnectOptions } from '../../llm/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence, EXPECT_DESCRIPTION } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
-import { wrapUntrustedScreenContent } from './prompt';
+import { wrapUntrustedScreenContent } from '../untrusted-screen-content';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';

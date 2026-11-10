@@ -137,7 +137,7 @@ Three things here are genuinely rare:
 
 1. **Cheapest-tier-first perception, fully local.** Accessibility tree (free) → OCR (cheap) → screenshot (expensive — the *only* tier that puts pixels in the model's context; "screenshot" and "vision" are the same step). The agent climbs only when it must, so token cost tracks task difficulty &mdash; and with a local model, nothing leaves the machine. Vision-centric agents (OmniParser, UI-TARS) need a screenshot in the model for *every* observation.
 2. **It verifies.** Pass `expect` on a consequential action and Clawd Cursor re-checks the live screen (with a short settle window for async UIs) and reports a **DEVIATION** instead of a hollow "success." A completed task can't be marked done on evidence that was already true before it acted.
-3. **One safety gate.** Every call &mdash; from an editor over stdio, an external agent over HTTP, or the built-in loop &mdash; routes through a single `safety.evaluate()` chokepoint (allow / confirm / block) before it touches the desktop. The agent cannot bypass it.
+3. **One safety gate.** Every call &mdash; from an editor over stdio, or an external agent over HTTP &mdash; routes through a single `safety.evaluate()` chokepoint (allow / confirm / block) before it touches the desktop. The agent cannot bypass it.
 
 Plus: whenever an agent is driving, an on-screen **banner that says what it is doing** ("Typing in Edge") and an amber **glow around the screen edges**, on Windows, macOS and Linux &mdash; **press Stop on the banner to stop.** A stop holds until you give control back: the agent's next request comes up as a prompt, and only your **Resume** lets it act again (or run `clawdcursor resume`). Keys and clicks also go only to the window the agent was working in: if you switch apps while it waits, its next input is refused instead of landing in your window. When the agent needs you (a sign-in, a 2FA code), the glow turns blue and the banner says what to do, with **Resume** and **End task**. A human at the machine always knows, and always has a kill switch.
 
@@ -293,8 +293,7 @@ curl -fsSL https://clawdcursor.com/install.sh | bash
 </details>
 
 > **Notes.** You never run `clawdcursor mcp` yourself — the host spawns it over stdio
-> on demand. `clawdcursor doctor` is **not** part of MCP setup; it only configures the
-> built-in LLM for the autonomous `agent` daemon. On macOS, **Accessibility is
+> on demand. `clawdcursor doctor` is **not** part of MCP setup; it is a diagnostic. On macOS, **Accessibility is
 > required** (primary control path); **Screen Recording is optional** (vision fallback
 > only). For editor permission allowlists, use the server-level wildcard
 > `mcp__clawdcursor` rather than per-tool entries — it survives tool renames.
@@ -317,16 +316,12 @@ See the [changelog](CHANGELOG.md) for the full release history, or the [latest r
 
 ## How it works
 
-**Where the brain lives** decides how you run it. Both modes can run side-by-side.
+**Clawd Cursor never runs a model.** Your agent (Claude Code, Codex, Cursor, OpenClaw, the Agent SDK, your own loop) is the brain; Clawd Cursor is the tool layer it drives. Both ways of connecting can run side-by-side.
 
-> **Deprecated in 1.5.27:** the built-in LLM loop (`task`, `submit_task`, `system delegate` and the `clawdcursor agent` model set up by `doctor`) will be removed in 1.6, and clawdcursor will no longer call a model itself. Drive the MCP tools from your own agent instead (Claude Code, Codex, Cursor, …). The daemon's HTTP MCP transport stays for remote use.
-
-| Brain lives… | Mode | Command | What you call |
-|---|---|---|---|
-| In your editor (Claude Code, Cursor, Windsurf, Zed) | Direct tools | `clawdcursor mcp` | Each tool, via stdio MCP |
-| In a headless agent with its own LLM (OpenClaw, Agent SDK, your loop) | Direct tools | `clawdcursor agent --no-llm` | Same, over HTTP MCP |
-| Inside Clawd Cursor itself (scheduled / "submit and walk away") &mdash; *deprecated, removed in 1.6* | Thin agent loop | `clawdcursor agent` + `doctor`-configured LLM | `task` / `submit_task` |
-| External brain that delegates sub-tasks to the built-in loop &mdash; *deprecated, removed in 1.6* | Direct + delegation | `clawdcursor agent` + your client | `task({instruction:…})` to hand off |
+| Your agent runs… | Command | What you call |
+|---|---|---|
+| In your editor (Claude Code, Cursor, Windsurf, Zed) | `clawdcursor mcp` | Each tool, via stdio MCP |
+| Headless or remote (OpenClaw, Agent SDK, your loop) | `clawdcursor agent` | Same tools, over HTTP MCP on `127.0.0.1:3847/mcp` |
 
 ### The loop
 
@@ -334,7 +329,7 @@ Read the a11y tree (cheap) → act on named targets → verify from fresh observ
 
 ```mermaid
 flowchart TB
-    task["User task"] --> loop["Agent LLM loop<br/>plans · chooses tools · verifies"]
+    task["User task"] --> loop["Your agent<br/>plans · chooses tools · verifies"]
     loop --> observe{"Cheapest observation<br/>that answers the question"}
 
     observe -- "obs·a11y — free" --> a11y["A11y tree<br/>(structured text + el_NN handles)"]
@@ -348,7 +343,7 @@ flowchart TB
     vision --> act
 
     act["Act<br/>click/type/key/drag · invoke/set_value · open_app · batch"] --> safety
-    safety["Single safety gate<br/>safety.evaluate() → allow / confirm / block"] -- allowed --> tools["Tool registry<br/>100+ granular + 7 compound"]
+    safety["Single safety gate<br/>safety.evaluate() → allow / confirm / block"] -- allowed --> tools["Tool registry<br/>100+ granular + 6 compound"]
     safety -- needs user --> confirm["Human confirmation"] --> tools
     safety -- denied --> blocked["blocked"]
 
@@ -371,22 +366,19 @@ flowchart TB
 
 **`batch` for deterministic stretches.** When the next N steps are known, collapse them into one call &mdash; each step still routes through the safety gate; on any guard miss or error the batch halts with a per-step trace.
 
-**Task delegation (deprecated, removed in 1.6).** With an LLM configured on the daemon, an external agent can hand off at any point: `task({"instruction":"…"})`. The built-in loop takes the wheel and reports back &mdash; offload grunt work to a cheaper model without burning your own context.
-
 ---
 
 ## The toolbox
 
-Two catalogs ship side-by-side. The **toolbox** is 7 compound tools, each with an `action` enum covering ~10–20 verbs (about 7,000 tokens for the whole catalog, schemas included &mdash; about a third of the granular surface's ~20,000; the `computer_20250124` shape editor hosts already know). The **granular** surface is the 100+ underlying primitives, one schema per verb (for runtimes that need top-level tools, or for debugging). Both run through the same `safety.evaluate()` chokepoint; the full catalog is always visible via MCP `tools/list`.
+Two catalogs ship side-by-side. The **toolbox** is 6 compound tools, each with an `action` enum covering ~10–20 verbs (about 7,000 tokens for the whole catalog, schemas included &mdash; about a third of the granular surface's ~20,000; the `computer_20250124` shape editor hosts already know). The **granular** surface is the 100+ underlying primitives, one schema per verb (for runtimes that need top-level tools, or for debugging). Both run through the same `safety.evaluate()` chokepoint; the full catalog is always visible via MCP `tools/list`.
 
 | Toolbox | Actions |
 |---|---|
 | `computer` | `screenshot`, `click`, `double_click`, `right_click`, `triple_click`, `hover`, `move`, `scroll`, `scroll_horizontal`, `drag`, `drag_path`, `type`, `key`, `wait` |
 | `accessibility` | `read_tree`, `find`, `get_element`, `focused`, `invoke`, `focus`, `set_value`, `get_value`, `expand`, `collapse`, `toggle`, `select`, `state`, `list_children`, `wait_for`, `compile_ui`, `find_button`, `find_field`, `smart_click`, `smart_type`, `smart_read` |
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
-| `system` | `copy_all_text`, `ocr`, `clipboard_read`, `clipboard_write`, `shortcuts_list`, `shortcuts_run`, `undo`, `pause_for_user`, `report`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_webview`, `relaunch_with_cdp`, `delegate`, `system_time`, `system_prompt` |
+| `system` | `copy_all_text`, `ocr`, `clipboard_read`, `clipboard_write`, `shortcuts_list`, `shortcuts_run`, `undo`, `pause_for_user`, `report`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_webview`, `relaunch_with_cdp`, `system_time` |
 | `browser` | `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
-| `task` | `run` (default; **bounded-sync** &mdash; waits up to `timeout`s, returns `{status:"running"}` + progress if longer, re-call to keep waiting), `status`, `abort`, `resume` (continue a task paused for the user). Delegates to the built-in loop. Requires `clawdcursor agent` with an LLM. Deprecated, removed in 1.6. |
 | `batch` | `{steps:[…]}` &mdash; collapse N calls into one round-trip; each step `{name, arguments, expect?}`, re-perceived and safety-gated, halts with a trace on any miss. |
 
 ```js
@@ -465,7 +457,7 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 - **Bearer-token auth** on every HTTP request (`~/.clawdcursor/token`).
 - **Sensitive-app policy.** Email, banking, password managers, private messaging auto-elevate to Confirm.
 - **No telemetry by default.** Nothing phones home. Screenshots stay in RAM; with a local model nothing leaves the machine; with a cloud provider, screenshots go only to the endpoint you configured. `clawdcursor report` is opt-in and previews exactly what it sends.
-- **No screenshots to any model, if you want.** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, which also covers stdio `clawdcursor mcp`) keeps every image from the built-in agent and from MCP clients; they work from the accessibility tree and OCR text.
+- **No screenshots to any model, if you want.** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, which also covers stdio `clawdcursor mcp`) keeps every image from MCP clients; they work from the accessibility tree and OCR text.
 - **Prompt-injection defense.** Screen text is returned inside `<untrusted-screen-content>` tags &mdash; data, never instructions.
 - **Log privacy.** Logs redact password-field values (`AXSecureTextField`, UIA `IsPassword=true`).
 
@@ -477,8 +469,8 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
 | Directory | What lives here |
 |---|---|
-| `src/core/` | Thin agent loop (`runAgent`), sense layer (a11y / snapshot / fingerprint / UI compiler), reactive verification, focus guard, safety gate. |
-| `src/tools/` | 100+ granular tools + 7 compound aggregators + `batch`, playbooks, registry, dispatch. |
+| `src/core/` | Sense layer (a11y / snapshot / fingerprint / UI compiler), reactive verification, focus guard, safety gate. |
+| `src/tools/` | 100+ granular tools + 5 compound aggregators + `batch`, playbooks, registry, dispatch. |
 | `src/platform/` | `PlatformAdapter` + Windows / macOS / Linux / Wayland, OCR engine, CDP driver, URI handler. |
 | `src/llm/` | Provider clients (Claude, GPT, Gemini, Llama, Kimi, Ollama, …), credentials, model config. |
 | `src/surface/` | CLI, MCP server (stdio + HTTP), dashboard, doctor, onboarding, control banner. |
@@ -494,17 +486,16 @@ For humans diagnosing an install. Agents connect via MCP.
 ```
 clawdcursor consent         Manage desktop-control consent (--accept / --revoke / --status)
 clawdcursor grant           Grant macOS permissions (interactive, macOS only)
-clawdcursor doctor          Configure the AI provider for `agent` mode (+ diagnostics)
+clawdcursor doctor          Setup diagnostics
 clawdcursor status          Readiness check (consent, permissions, AI config)
 clawdcursor versions        Every installed copy and its version (global, Claude Desktop extension, Claude Code plugin)
 clawdcursor resume          Continue a task paused for you (same as the on-screen Resume); --end to stop it
 clawdcursor mcp             stdio MCP server — editor hosts spawn this; you don't
-clawdcursor agent           Daemon: HTTP MCP on :3847, optional built-in thin loop
-clawdcursor agent --no-llm  Daemon, tool surface only (no built-in brain)
+clawdcursor agent           Daemon: HTTP MCP on :3847 (your agent drives the tools)
 clawdcursor stop            Stop every running mode
 clawdcursor uninstall       Remove all config and data
 
-Options:  --port <n> (default 3847) · --compact · --no-banner · --provider <name> · --accept
+Options:  --port <n> (default 3847) · --compact · --no-banner · --accept
 ```
 
 ---

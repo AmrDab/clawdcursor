@@ -18,7 +18,7 @@ import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../llm/browser-config';
 import { windowOcrRegion } from './ocr';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from './paste-guard';
-import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
+import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';

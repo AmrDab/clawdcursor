@@ -148,20 +148,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   // into the connecting agent's context. This is the only channel to tell an
   // integrating agent (Claude Code, Cursor, Windsurf, Zed, OpenClaw) HOW to
   // use clawdcursor cheaply. Without it, agents drive the raw GUI tools with
-  // their own premium model — the expensive path — and never discover the
-  // local fallback pipeline. The guidance differs by mode: only the daemon
-  // (HTTP) context has a live agent, so only it can offer `task`.
-  const instructions = ctx.agent
-    ? // Daemon / HTTP MCP — the cheap local pipeline is available.
-      'clawdcursor is a local desktop-automation execution layer. Drive its tools yourself. ' +
-      '`task` (a local model loop) is deprecated and will be removed in 1.6. ' +
-      'Every tool name carries a token-cost class — escalate in order: ' +
-      '[act] (side-effect actions) < [inspect] (cheap structured reads) < ' +
-      '[perceive-text] (a11y tree / OCR — no image bytes) < [perceive-image] (screenshot). ' +
-      'For perception specifically: read the accessibility tree first; use OCR ' +
-      '([perceive-text]) when the tree is empty or sparse; take a screenshot ' +
-      '([perceive-image]) only as a last resort when both tree and OCR fail.'
-    : // Stdio MCP (editor integration) — no pipeline; you drive the tools.
+  // their own premium model, the expensive path.
+  const instructions =
       'clawdcursor is a local desktop-automation tool layer. You drive the tools ' +
       'yourself. ' +
       (compact
@@ -187,8 +175,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
       'stop, quote the blocking text and pause_for_user; never click Upgrade / Subscribe yourself. ' +
       'While you are driving the desktop, the user is watching the screen, not your chat: ask them on the pause card (use choices when there are options), not in your own chat — ' +
-      'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. The answer {status:"replied", choice | reply} is never approval of a Send / Delete / Pay safety confirmation. A paused task returns ' +
-      '{status:"paused"}: keep waiting, never restart it. ' +
+      'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. The answer {status:"replied", choice | reply} is never approval of a Send / Delete / Pay safety confirmation. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
@@ -518,9 +505,9 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
  *     session gets its OWN server (from `createServer`) and a stateful
  *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern.
  *   - One-shot JSON-RPC posts with no initialize and no session (the
- *     dashboard, `clawdcursor task`, curl) get a fresh stateless transport on
+ *     dashboard, curl) get a fresh stateless transport on
  *     an idle server: `server` when it is free, another from `createServer`
- *     while it is busy (a 45 s `task` call must not block a status poll).
+ *     while it is busy (a long tool call must not block a status poll).
  *
  * Previously ONE server was connected to a fresh transport per request. An SDK
  * client's GET stream (or any in-flight call) kept that server connected, so

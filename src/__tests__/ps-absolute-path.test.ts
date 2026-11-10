@@ -22,7 +22,7 @@ vi.mock('child_process', async orig => {
   };
 });
 
-import { powershellExe, system32Exe, windowsDirExe, psOpts, privateRunDir, interactiveConsoleCall, __setSystemRootForTests } from '../platform/ps-spawn';
+import { powershellExe, system32Exe, windowsDirExe, psOpts, privateRunDir, __setSystemRootForTests } from '../platform/ps-spawn';
 import { runPsWithStdin } from '../platform/ps-input';
 
 let root: string;
@@ -159,21 +159,6 @@ describe('review round: windir, a hardened run dir, the interactive console, lau
       expect(fs.lstatSync(dir).isSymbolicLink()).toBe(false);
       expect(fs.statSync(dir).mode & 0o777).toBe(0o700);
     });
-  });
-
-  it('the interactive console (clawdcursor task): the absolute PowerShell Start-Processes the absolute PowerShell, the script path is $env: data', () => {
-    const script = "C:\\Users\\a b\\x'; calc; '\\task.ps1";
-    const c = interactiveConsoleCall(script);
-    expect(c.file).toBe(powershellExe());
-    expect(c.env.CLAWD_PS_EXE).toBe(powershellExe());
-    expect(c.env.CLAWD_PS_SCRIPT).toBe(script);
-    const command = c.args[c.args.indexOf('-Command') + 1];
-    expect(command).toContain('Start-Process -FilePath $env:CLAWD_PS_EXE');
-    expect(command).toContain('-WorkingDirectory $env:USERPROFILE');
-    expect(command).toContain('$env:CLAWD_PS_SCRIPT');
-    expect(command).not.toContain('calc');          // the script path is never part of the command text
-    expect(command).not.toContain(script);
-    expect(c.args).not.toContain(script);
   });
 
   it('apps and terminals opened for the user start in their home, not in the private run dir', () => {

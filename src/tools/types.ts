@@ -57,14 +57,6 @@ export interface ToolContext {
    */
   platform?: import('../platform/types').PlatformAdapter;
   /**
-   * The autonomous Agent — present in `clawdcursor agent` (the daemon)
-   * and undefined when run via stdio MCP without a running agent.
-   * Used by submit_task / abort_task / agent_status / task_logs_*.
-   * v0.9 PR7.2: was previously implicit on `agent.x` accesses inside
-   * REST handlers; now it lives on ToolContext so MCP tools can use it.
-   */
-  agent?: import('../core/agent').Agent;
-  /**
    * Optional log buffer accessor — populated by the daemon's createServer.
    * MCP `logs_recent` reads through this; null/missing means logs are not
    * captured (e.g. stdio MCP).
@@ -83,7 +75,7 @@ export interface ToolContext {
 }
 
 /** The 6 compact compound tool names */
-export type CompactGroup = 'computer' | 'accessibility' | 'window' | 'system' | 'browser' | 'task';
+export type CompactGroup = 'computer' | 'accessibility' | 'window' | 'system' | 'browser';
 
 /**
  * What kind of evidence a tool produces and how token-expensive its
