@@ -73,6 +73,17 @@ describe('2. by-name actions prefer the control over its label', () => {
     expect(p.invokeElement).toHaveBeenCalledWith(expect.objectContaining({ action: 'toggle', controlType: 'CheckBox' }));
   });
 
+  it('set_field_value keyboard fallback focuses the Edit, not the same-named label', async () => {
+    const p = {
+      ...plat([label, edit], (q: any) => (q.action === 'focus' ? { success: true, bounds: edit.bounds } : { success: false })),
+      mouseClick: vi.fn(async () => {}), keyPress: vi.fn(async () => {}), typeText: vi.fn(async () => {}),
+    };
+    await mcpTool('set_field_value').handler({ name: 'Your name', value: 'x', processId: 1 }, { ensureInitialized: async () => {}, platform: p } as any);
+    const focusCalls = p.invokeElement.mock.calls.map((c: any) => c[0]).filter((q: any) => q.action === 'focus');
+    expect(focusCalls).toHaveLength(1);
+    expect(focusCalls[0].controlType).toBe('Edit');
+  });
+
   it('is unchanged for a single match, a given controlType, or no suitable role; spellings per OS', async () => {
     expect(await preferControl(plat([edit]), 'focus', { name: 'Your name' })).toBeUndefined();
     expect(await preferControl(plat([label, edit]), 'focus', { name: 'Your name', controlType: 'Text' })).toBe('Text');
