@@ -12,7 +12,6 @@
  *   - native addons: @nut-tree-fork/* (libnut), sharp (libvips)
  *   - packages that locate their own files/binaries at runtime: playwright,
  *     playwright-core, clipboardy (fallback exes)
- *   - ws's optional native accelerators
  * Lazy `await import()` sites stay lazy — esbuild keeps them as deferred
  * module initialisers, so platform code still loads only on the OS that
  * needs it.
@@ -43,7 +42,6 @@ const result = await build({
   legalComments: 'none',
   external: [
     '@nut-tree-fork/*', 'sharp', 'playwright', 'playwright-core', 'clipboardy',
-    'bufferutil', 'utf-8-validate',
   ],
 });
 if (result.errors.length) process.exit(1);

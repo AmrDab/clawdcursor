@@ -1,4 +1,4 @@
-import { vi } from 'vitest';
+import { vi, afterAll } from 'vitest';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -11,6 +11,13 @@ if (!process.env.CLAWD_TEST_REAL_HOME) {
   const testHome = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-test-home-'));
   process.env.HOME = testHome;
   process.env.USERPROFILE = testHome;
+  process.env.CLAWD_TEST_HOME = testHome;
+}
+// One temp home per worker, removed when the worker's test file is done (and made again if the worker runs another file).
+const testHomeDir = process.env.CLAWD_TEST_HOME;
+if (testHomeDir) {
+  fs.mkdirSync(testHomeDir, { recursive: true });
+  afterAll(() => { try { fs.rmSync(testHomeDir, { recursive: true, force: true, maxRetries: 2 }); } catch { /* best effort */ } });
 }
 // Keep test runs out of the user's real ~/.clawdcursor: the structured logger
 // and the MCP session log write here instead.

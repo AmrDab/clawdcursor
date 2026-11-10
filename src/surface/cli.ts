@@ -759,7 +759,7 @@ program
     // 1. Remove config files in project root
     const configFiles = [
       path.join(clawdRoot, '.clawdcursor-config.json'),
-      path.join(clawdRoot, '.clawdcursor-favorites.json'),
+      path.join(clawdRoot, '.clawdcursor-favorites.json'),   // written by installs before 1.6
       path.join(clawdRoot, '.env'),
     ];
     for (const f of configFiles) safeRemove(f, path.basename(f));
