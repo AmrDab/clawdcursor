@@ -103,8 +103,9 @@ async function accessibilityText(platform: CopyPlatform, pid: number | undefined
 
 export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextResult> {
   const win = await platform.getActiveWindow().catch(() => null);
-  // The title is the page's to choose: quoted, so it cannot end its quotes or pose as part of the result.
-  const label = win ? `[${win.processName}] ${quoteScreenText(String(win.title ?? ''))}` : 'the focused window';
+  // The title is the page's to choose and the process name the app's: quoted, so neither can end its quotes or pose as
+  // part of the result.
+  const label = win ? `[${quoteScreenText(String(win.processName ?? ''))}] ${quoteScreenText(String(win.title ?? ''))}` : 'the focused window';
   if (isTerminalWindow(win)) {
     return { ok: false, window: label, text: `Refused: ${label} is a terminal — Ctrl+C there interrupts the running program. Read it with ocr or accessibility instead.` };
   }

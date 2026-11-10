@@ -216,7 +216,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const active = await ctx.platform.getActiveWindow();
         const lines = windows.slice(0, 20).map(w => {
           const isActive = active && w.processId === active.processId && w.title === active.title;
-          return `${isActive ? '→' : ' '} [${w.processName}] ${quoteScreenText(String(w.title ?? ''))} pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
+          return `${isActive ? '→' : ' '} [${quoteScreenText(String(w.processName ?? ''))}] ${quoteScreenText(String(w.title ?? ''))} pid=${w.processId} ${w.bounds.width}×${w.bounds.height}`;
         });
         const more = windows.length > 20 ? `\n… +${windows.length - 20} more windows` : '';
         const partial = ctx.platform.lastWindowListPartial ? `\n${ctx.platform.lastWindowListPartial}` : '';
@@ -1031,6 +1031,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         let res: Awaited<ReturnType<typeof ctx.platform.launchApp>>;
         try {
           res = await ctx.platform.launchApp(launchName, {
+            nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
             alwaysNewInstance: alias?.alwaysNewInstance,
             uwpAppId: alias?.uwpAppId,
             // Pick the searchTerm that gives the OS native launcher (Start

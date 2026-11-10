@@ -159,7 +159,8 @@ const namedKeys = (combo: unknown): string[] => String(combo ?? '').split('+').m
  * clawdcursor's own housekeeping and with no input guard installed, because no caller has a reason to lock the machine.
  *  - A key held with key_down counts toward the next press (key_down "win", then key_press "l").
  *  - So does typed text: with a key held, every typed character is a press of that key with it (key_down "win", type "l").
- *  - key_up forgets a key only when it names exactly the key that was held, and only after the executor released it.
+ *  - key_up forgets a key only when it names that ONE key, exactly as it was held, and only after the executor released
+ *    it. The executors throw on a chord or an unknown name in key_down / key_up, so nothing is recorded or forgotten for one.
  */
 function guardHardKeys(target: object): void {
   const t = target as Record<string, unknown>;
@@ -169,7 +170,11 @@ function guardHardKeys(target: object): void {
     t[m] = async (...args: unknown[]) => {
       if (m === 'keyUp') {
         const r = await f.apply(target, args);
-        for (const k of namedKeys(args[0])) heldKeys.delete(k);
+        // One key, by the name it was held under, and only now that the executor released it. A chord ("win+x"), or
+        // any other name, is not a release of a held key: the executors refuse those, and if one did not, nothing is
+        // forgotten here either.
+        const named = namedKeys(args[0]);
+        if (named.length === 1 && !String(args[0]).includes('+')) heldKeys.delete(named[0]);
         return r;
       }
       const held = [...new Set(heldKeys.values())];

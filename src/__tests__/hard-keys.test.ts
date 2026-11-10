@@ -190,7 +190,7 @@ describe('one call site: the input layer, below every tool', () => {
     await expect(platform.keyPress(LOCK_KEY)).rejects.toThrow(/dangerous key combo/);
     await expect(desktop.keyPress(LOCK_KEY)).rejects.toThrow(/dangerous key combo/);   // one keyboard: the other layer sees the held key
     await expect(desktop.keyDown(LOCK_KEY)).rejects.toThrow(/dangerous key combo/);
-    await platform.keyUp(LOCK_HOLD);
+    for (const k of LOCK_HOLD.split('+')) await platform.keyUp(k);
     await desktop.keyPress(LOCK_KEY);
     expect(desktop.sent).toEqual([`press ${LOCK_KEY}`]);
   });
@@ -209,15 +209,30 @@ describe('one call site: the input layer, below every tool', () => {
     await expect(kb.keyUp(LOCK_HOLD)).rejects.toThrow('release failed');
     await expect(kb.keyPress(LOCK_KEY)).rejects.toThrow(/dangerous key combo/);
     // The exact key, released for real: free again.
-    await kb.keyUp(LOCK_HOLD);
+    for (const k of LOCK_HOLD.split('+')) await kb.keyUp(k);
     await kb.keyPress(LOCK_KEY);
     expect(kb.sent.filter(s => s.startsWith('press'))).toEqual([`press ${LOCK_KEY}`]);
+  });
+
+  // Security scan: after the executor returned, key_up forgot EVERY key its argument named. A chord ("win+x") or a name
+  // the executor does not release is not a release of the held key.
+  it('key_up of a chord, or of a name that is not the held key, forgets nothing', async () => {
+    const kb = keyboard();
+    const [hold] = LOCK_HOLD.split('+').slice(-1);          // the Super / Command key on this OS
+    await kb.keyDown(LOCK_HOLD);
+    for (const up of [`${hold}+x`, `x+${hold}`, `${hold}+${hold}`, `${hold}+`, 'x', 'nonsense-key']) {
+      await kb.keyUp(up).catch(() => {});
+      await expect(kb.keyPress(LOCK_KEY), `after key_up ${up}`).rejects.toThrow(/dangerous key combo/);
+    }
+    for (const k of LOCK_HOLD.split('+')) await kb.keyUp(k);   // one key at a time, by its own name
+    await kb.keyPress(LOCK_KEY);
+    expect(kb.sent).toContain(`press ${LOCK_KEY}`);
   });
 
   it('the same key in another case or with spaces is the same key', async () => {
     const kb = keyboard();
     await kb.keyDown(LOCK_HOLD);
-    await kb.keyUp(` ${LOCK_HOLD.toUpperCase()} `);
+    for (const k of LOCK_HOLD.split('+')) await kb.keyUp(` ${k.toUpperCase()} `);
     await kb.keyPress(LOCK_KEY);
     expect(kb.sent).toContain(`press ${LOCK_KEY}`);
   });
@@ -232,7 +247,7 @@ ${LOCK_KEY}`]) {
     }
     expect(kb.sent.filter(s => s.startsWith('type'))).toEqual([]);
     await kb.typeText('z');                       // a character that completes nothing is still typed
-    await kb.keyUp(LOCK_HOLD);
+    for (const k of LOCK_HOLD.split('+')) await kb.keyUp(k);
     await kb.typeText(`he${LOCK_KEY}${LOCK_KEY}o`);   // nothing held: any text
     expect(kb.sent.filter(s => s.startsWith('type'))).toEqual(['type z', `type he${LOCK_KEY}${LOCK_KEY}o`]);
   });

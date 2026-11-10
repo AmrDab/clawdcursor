@@ -919,7 +919,9 @@ export class MacOSAdapter implements PlatformAdapter {
     // Printable single char — no true "hold" semantics via keystroke; emit a tap (outside ASCII: as itself, #242).
     if ([...key].length === 1) {
       await typeTextMac(this.ax, key, 3_000).catch(() => {});
+      return;
     }
+    throw new Error(`Unknown key: "${key}"`);   // a chord or an unknown name: nothing was held
   }
 
   async keyUp(key: PortableKeyCombo): Promise<void> {
@@ -934,8 +936,11 @@ export class MacOSAdapter implements PlatformAdapter {
     if (code !== undefined) {
       const script = `tell application "System Events" to key up (key code ${code})`;
       await runAppleScript(script, 3_000).catch(() => {});
+      return;
     }
-    // Printable single char: no-op — keystroke doesn't hold.
+    // Printable single char: no-op — keystroke doesn't hold. Anything else (a chord, an unknown name) is an error: the
+    // caller must not believe a key was released (pointer-guard.ts held keys).
+    if ([...key.trim()].length !== 1) throw new Error(`Unknown key: "${key}"`);
   }
 
   private modToAppleScript(name: string): string | null {
@@ -992,6 +997,7 @@ export class MacOSAdapter implements PlatformAdapter {
       cwd?: string;
       uwpAppId?: string;
       searchTerm?: string;
+      nameOnly?: boolean;
     },
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
     // uwpAppId is Windows-only — ignore on macOS.
@@ -1066,6 +1072,10 @@ export class MacOSAdapter implements PlatformAdapter {
       const found = await this.confirmLaunch(name, before, windowsBefore, opts);
       if (found) return found;
     }
+
+    // An agent-typed name (PlatformAdapter.launchApp nameOnly): `open -a` above only ever opens an application. Spotlight
+    // opens the best match for the text, which can be a document, so it is not tried.
+    if (opts?.nameOnly) return {};
 
     // Spotlight fallback — universal launcher for anything macOS can find.
     // Mirrors the pattern Windows uses with the Start Menu and the same

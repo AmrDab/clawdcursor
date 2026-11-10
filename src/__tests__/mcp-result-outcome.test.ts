@@ -405,7 +405,7 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     const ctx = { ...fakeCtx(), platform: platform as any, a11y: { invalidateCache() {} } as any };
     const { sessionLog } = await createMcpServer({ ctx, compact: true });
     const r = await capturedHandlers.get('system')!({ action: 'copy_all_text' });
-    expect(text(r)).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \[msedge\] "Doc"/);
+    expect(text(r)).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Doc"/);
     expect(sessionLog.summary).toMatchObject({ blind: 1, actOther: 1 });
     await capturedHandlers.get('batch')!({ steps: [{ name: 'system', arguments: { action: 'copy_all_text' } }] });
     expect(sessionLog.summary).toMatchObject({ blind: 2, actOther: 2 });

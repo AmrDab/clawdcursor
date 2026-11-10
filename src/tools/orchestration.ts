@@ -67,6 +67,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           }
           try {
             const res = await ctx.platform.launchApp(launchName, {
+              nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
               alwaysNewInstance: alias?.alwaysNewInstance,
               uwpAppId: alias?.uwpAppId,
               searchTerm: alias?.searchTerm

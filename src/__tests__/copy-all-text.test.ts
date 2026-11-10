@@ -138,15 +138,15 @@ describe('copyAllText', () => {
   it('when keys are pressed the result says which keys and where — on success and on failure, with the real key on macOS', async () => {
     const ok = await copyAllText(fakePlatform({ processName: 'msedge' }) as any);
     expect(ok).toMatchObject({ ok: true, source: 'clipboard', pressedKeys: true });
-    expect(ok.note).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \[msedge\] "Stripe"/);
+    expect(ok.note).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Stripe"/);
     const failed = await copyAllText(fakePlatform({ processName: 'msedge', pageText: null }) as any);
     expect(failed).toMatchObject({ ok: false, pressedKeys: true });
-    expect(failed.text).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \[msedge\] "Stripe"/);
+    expect(failed.text).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Stripe"/);
     const real = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     try {
       const mac = await copyAllText(fakePlatform({ processName: 'Safari' }) as any);
-      expect(mac.note).toMatch(/Pressed Cmd\+A and Cmd\+C in \[Safari\]/);
+      expect(mac.note).toMatch(/Pressed Cmd\+A and Cmd\+C in \["Safari"\]/);
       expect(mac.note).not.toMatch(/Ctrl/);
     } finally {
       Object.defineProperty(process, 'platform', real);

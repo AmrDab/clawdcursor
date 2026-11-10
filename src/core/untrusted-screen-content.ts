@@ -11,11 +11,19 @@
  * Each defuses the delimiter inside the text, so content can neither close a block early nor open a fake one.
  */
 
+/** The delimiter as written, and anything a lenient reader could take for it: attributes, `/>`, no closing bracket. */
 const DELIMITER = /<\s*(\/?)\s*untrusted-screen-content\s*>/gi;
+const NEAR_MISS = /<(\s*\/?\s*untrusted-screen-content)([^>]*>)?/gi;
 
-/** The text with every spelling of the delimiter made inert (‹…›): it stays readable and can pair with nothing. */
+/**
+ * The text with every spelling of the delimiter made inert (‹…›): it stays readable and can pair with nothing. The
+ * exact tag keeps its shape; a near miss (`</untrusted-screen-content x>`, `<untrusted-screen-content/>`, a tag with no
+ * `>`) loses both brackets, opening and closing tag alike, case-insensitively.
+ */
 export function defuseScreenDelimiters(text: string): string {
-  return text.replace(DELIMITER, '‹$1untrusted-screen-content›');
+  return text
+    .replace(DELIMITER, '‹$1untrusted-screen-content›')
+    .replace(NEAR_MISS, (_m, tag: string, rest?: string) => `‹${tag}${rest ? `${rest.slice(0, -1)}›` : ''}`);
 }
 
 /**

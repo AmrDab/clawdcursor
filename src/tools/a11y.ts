@@ -720,7 +720,7 @@ export function getA11yTools(): ToolDefinition[] {
         const minimizeKey = process.platform === 'darwin' ? 'cmd+m' : 'super+down';
         await ctx.desktop.keyPress(minimizeKey);
 
-        return { text: `Minimized: ${quoteScreenText(String(target.title ?? ''))} [${target.processName}] pid:${target.processId}` };
+        return { text: `Minimized: ${quoteScreenText(String(target.title ?? ''))} [${quoteScreenText(String(target.processName ?? ''))}] pid:${target.processId}` };
       },
     },
   ];

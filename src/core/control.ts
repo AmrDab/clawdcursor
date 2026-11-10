@@ -119,7 +119,8 @@ export function __setForegroundReaderForTests(f: (() => Promise<Foreground | nul
   if (reset) resetBinding();
 }
 
-const name = (f: Foreground) => `${f.processName} (pid ${f.processId})`;
+// A process name is the app's to choose (macOS localizedName, a Linux WM_CLASS): quoted like any other screen text.
+const name = (f: Foreground) => `${quoteScreenText(String(f.processName ?? ''))} (pid ${f.processId})`;
 const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
 const matches = (q: WindowQuery, f: Foreground) =>
   (q.processId !== undefined && q.processId === f.processId)
@@ -186,7 +187,7 @@ export function isGuardRefusal(err: unknown): boolean {
 async function refuseAiHost(now: Foreground, explicit: boolean): Promise<void> {
   if (explicit || now.guessed) return;
   const kind = await aiHostKind(now);
-  if (kind) throw new Error(AI_HOST_REFUSAL(now.processName, kind));
+  if (kind) throw new Error(AI_HOST_REFUSAL(quoteScreenText(String(now.processName ?? '')), kind));
 }
 
 /** A launch that surfaced no window excuses a window of the app it started, by name, and nothing else. */

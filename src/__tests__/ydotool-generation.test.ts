@@ -123,6 +123,25 @@ describe('ydotool 1.x (ydotoold)', () => {
     expect(ydotoolCalls()).toEqual([]);   // no modifier was pressed, nothing was typed
   });
 
+  // Security scan: with Super held by key_down, `key_press "ll"` (no "+") was typed as text: Super+L twice.
+  it('an unknown multi-character key name is an error even with no "+"', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    for (const name of ['ll', 'lock', 'deletee', 'f99']) await expect(be.keyPress(name), name).rejects.toThrow(/Unknown key/);
+    expect(ydotoolCalls()).toEqual([]);
+  });
+
+  it('key_down and key_up take one known key: a chord or an unknown name throws, so the caller knows nothing was held or released', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    for (const name of ['super+x', 'x+super', 'super+', 'nonsense', 'll', '']) {
+      await expect(be.keyUp(name), `up ${name}`).rejects.toThrow(/Unknown key|one key/);
+      await expect(be.keyDown(name), `down ${name}`).rejects.toThrow(/Unknown key|one key/);
+    }
+    expect(ydotoolCalls()).toEqual([]);
+    await be.keyDown(' Super ');
+    await be.keyUp('super');
+    expect(ydotoolCalls()).toHaveLength(2);
+  });
+
   it('a lone unknown key is still typed as text, and a known chord still presses', async () => {
     const be = await WaylandBackend.detect(hasYdotool);
     await be.keyPress('é');
@@ -175,6 +194,7 @@ describe('wtype (keyboard only)', () => {
   it('an unknown key in a chord is refused, never typed with the modifiers held', async () => {
     const be = new WaylandBackend('wtype-keyboard-only');
     await expect(be.keyPress('super+ll')).rejects.toThrow(/Unknown key/);
+    await expect(be.keyPress('ll')).rejects.toThrow(/Unknown key/);
     expect(calls.filter(c => c[0] === 'wtype')).toEqual([]);
     await be.keyPress('ctrl+s');
     expect(calls.filter(c => c[0] === 'wtype')).toEqual([['wtype', '-M', 'ctrl', 's']]);

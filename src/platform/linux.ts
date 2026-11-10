@@ -1199,7 +1199,9 @@ export class LinuxAdapter implements PlatformAdapter {
     // Printable char without nut-js Key mapping — type it (no hold semantics).
     if (key.length === 1) {
       await this.typeText(key).catch(() => {});
+      return;
     }
+    throw new Error(`Unknown key: "${key}"`);   // a chord or an unknown name: nothing was held
   }
 
   async keyUp(key: PortableKeyCombo): Promise<void> {
@@ -1216,8 +1218,11 @@ export class LinuxAdapter implements PlatformAdapter {
     const k = this.resolveKey(lower.length === 1 ? lower : lower);
     if (k !== null) {
       await keyboard.releaseKey(k).catch(() => {});
+      return;
     }
-    // Printable non-mapped: no-op — nothing was held.
+    // A single printable char with no key mapping: no-op — nothing was held. Anything else (a chord, an unknown name)
+    // is an error: the caller must not believe a key was released (pointer-guard.ts held keys).
+    if ([...key.trim()].length !== 1) throw new Error(`Unknown key: "${key}"`);
   }
 
   private resolveModifier(name: string): Key | null {
@@ -1340,6 +1345,8 @@ export class LinuxAdapter implements PlatformAdapter {
       cwd?: string;
       uwpAppId?: string;
       searchTerm?: string;
+      /** Nothing to change here: a name is only ever an executable on PATH or a .desktop entry (xdg-open is for URLs and paths). */
+      nameOnly?: boolean;
     },
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
     // uwpAppId is Windows-only — ignore on Linux. searchTerm currently has no

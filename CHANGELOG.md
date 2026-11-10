@@ -130,9 +130,19 @@ All notable changes to Clawd Cursor will be documented in this file.
   same key and the release succeeded. Typed text was not checked at all (`key_down super`, then type `l`): with a key
   held, every typed character is checked with it. On Wayland an unknown key in a chord was typed as text with the
   modifiers held (`super+ll`): it is refused, as on X11. Held keys are tracked per server process.
-- **`open_app` takes an application name only.** A path (a separator, a drive letter, `~`) is refused and the agent is
-  pointed to `open_file`, the tool announced as destructive: on Windows the name reached `Start-Process -FilePath`, so a
-  path to an `.exe` ran it.
+- **`open_app` takes an application name only, and only starts an installed app.** The name is checked against an
+  allowlist (letters, digits, spaces and `. _ + & ' ( ) # , ! @ -`): a path, a `scheme:` (`ms-settings:`, `search-ms:`,
+  `file:`), a percent-encoded separator, a wildcard or an option-like string is refused and the agent is pointed to
+  `open_file` or `open_uri`, the tools announced as destructive. On Windows the name used to reach
+  `Start-Process -FilePath`, where a path to an `.exe` ran and a `scheme:` went to its protocol handler. A name outside
+  the alias table is now resolved first, read-only, to a program on PATH / App Paths or to an app the Start menu lists
+  (`Get-StartApps`), and only that is started; nothing found means nothing started. Such a name is no longer typed into
+  the Start menu or Spotlight, whose best match can be a document (`payload.exe`); macOS uses `open -a` only.
+- **More of the same review:** process and app names are quoted like titles (macOS `localizedName` and a Linux
+  `WM_CLASS` are arbitrary strings); near-miss delimiters (`</untrusted-screen-content x>`, `…/>`, no closing bracket)
+  are made inert too; `key_up` forgets a held key only for that one key by its own name (a chord such as `win+x` forgets
+  nothing); an unknown key name is an error in every executor (Wayland typed `ll` as text, with Super held), and
+  `key_down` / `key_up` throw on a chord or an unknown name instead of doing nothing.
 - **Windows system programs are started by absolute path, from a private directory.** PowerShell (and `reg`, `tasklist`,
   `taskkill`, `netstat`, `rundll32`, `explorer`) were spawned by bare name, which Windows resolves in the current directory
   before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one

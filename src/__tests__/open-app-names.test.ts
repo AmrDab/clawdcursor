@@ -7,6 +7,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { appNameRefusal } from '../core/router/aliases';
 import { getOrchestrationTools } from '../tools/orchestration';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { resolveInstalledWindowsApp } from '../platform/win-app-resolve';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { ToolContext } from '../tools/types';
 
 const PATHS = [
@@ -14,11 +18,28 @@ const PATHS = [
   '/usr/bin/gnome-calculator', '/Applications/Calculator.app', '~/Downloads/installer', 'Downloads/setup.exe', 'sub\\tool.exe',
   'file:///C:/x.exe', 'https://example.com/app', '%TEMP%\\x.exe', '$HOME/x',
 ];
+// Security scan: a protocol handler is not an app name either. Start-Process / open / xdg-open hand `scheme:…` to the
+// registered handler, which is what open_uri does — and open_uri is the tool announced as destructive.
+const URIS = [
+  'ms-settings:', 'ms-settings:privacy-webcam', 'search-ms:query=x&crumb=location:C%3A', 'file:x', 'javascript:alert(1)', 'shell:AppsFolder',
+  'calculator:', 'mailto:a@b.c', 'vscode:extension/x', 'x-apple.systempreferences:com.apple.preference.security', 'Notepad:', ':x', 'a:b:c',
+];
+// Not names either: percent-encoded separators, wildcards (a lookup would expand them), option-like or quoted strings,
+// control characters.
+const ODD = ['a%5Cb.exe', 'a%2Fb', '%2e%2e%5Cx', 'ms-settings%3A', '*', 'note*', 'calc?', '[a-z]otepad', '-ArgumentList', '--help', '"calc"', 'a|b', 'a<b', 'a>b', 'calc\nnotepad', 'calc\u0000', 'a;b', 'a`b', '$(calc)'];
 const NAMES = ['Designcenter', 'Calculator', 'Microsoft Edge', 'notepad', 'Notepad++', 'Visual Studio Code', 'calc.exe', 'Designcenter NX 2506', '7-Zip', 'Adobe Acrobat (64-bit)', 'TextEdit', 'gnome-calculator', 'AT&T Connect', "Sam's Notes", 'Zed', 'olk'];
 
 describe('appNameRefusal', () => {
   it.each(PATHS)('refuses the path %s and points to open_file', (p) => {
-    expect(appNameRefusal(p)).toMatch(/takes an application name, not a path.*open_file/);
+    expect(appNameRefusal(p)).toMatch(/takes an application name.*open_file/);
+  });
+
+  it.each(URIS)('refuses the protocol handler %s and points to open_uri', (u) => {
+    expect(appNameRefusal(u)).toMatch(/takes an application name.*open_uri/);
+  });
+
+  it.each(ODD)('refuses %j', (o) => {
+    expect(appNameRefusal(o)).toMatch(/takes an application name/);
   });
 
   it.each(NAMES)('accepts the name %s', (n) => {
@@ -36,19 +57,21 @@ describe('open_app refuses a path before anything is launched, on every OS', () 
   const mcp = getOrchestrationTools().find(t => t.name === 'open_app')!;
   const agent = buildUnifiedTools().find(t => t.name === 'open_app')!;
 
-  it.each(PATHS)('MCP open_app: %s', async (p) => {
+  it.each([...PATHS, ...URIS, ...ODD])('MCP open_app: %j', async (p) => {
     launchApp.mockClear();
     const r = await mcp.handler({ name: p }, ctx);
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/open_file/);
+    expect(r.text).toMatch(/open_uri/);
     expect(launchApp).not.toHaveBeenCalled();
   });
 
-  it.each(PATHS)('agent-loop open_app: %s', async (p) => {
+  it.each([...PATHS, ...URIS, ...ODD])('agent-loop open_app: %j', async (p) => {
     launchApp.mockClear();
     const r = await agent.execute({ name: p }, { platform: { platform: process.platform, launchApp } } as never);
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/open_file/);
+    expect(r.text).toMatch(/open_uri/);
     expect(launchApp).not.toHaveBeenCalled();
   });
 
@@ -57,5 +80,59 @@ describe('open_app refuses a path before anything is launched, on every OS', () 
     const r = await mcp.handler({ name: n }, ctx);
     expect(r.isError).toBeFalsy();
     expect(launchApp).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A launch name outside the alias table is resolved to an INSTALLED APP first, and only that is started. Nothing is
+// handed to a shell that could read it as a URI or a file, and no launcher search is typed: Start-menu search and
+// Spotlight open the best match for the text, which can be a document called "payload.exe" (security re-review).
+describe('a name outside the alias table only ever starts an installed app', () => {
+  const launchApp = vi.fn(async (..._a: unknown[]) => ({ pid: 1, title: 'x' }));
+  const ctx = { ensureInitialized: async () => {}, platform: { platform: process.platform, launchApp }, a11y: { invalidateCache: () => {} } } as unknown as ToolContext;
+  const mcp = getOrchestrationTools().find(t => t.name === 'open_app')!;
+  const agent = buildUnifiedTools().find(t => t.name === 'open_app')!;
+  const src = (file: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'platform', file), 'utf8');
+
+  it('open_app marks a non-alias name as name-only, and an alias-table name as trusted', async () => {
+    launchApp.mockClear();
+    await mcp.handler({ name: 'Designcenter' }, ctx);
+    await agent.execute({ name: 'payload.exe' }, { platform: { platform: process.platform, launchApp } } as never);
+    await mcp.handler({ name: 'Calculator' }, ctx);
+    expect(launchApp.mock.calls[0][1]).toMatchObject({ nameOnly: true });
+    expect(launchApp.mock.calls[1][1]).toMatchObject({ nameOnly: true });
+    expect((launchApp.mock.calls[2][1] as { nameOnly?: boolean }).nameOnly).toBeFalsy();
+  });
+
+  it('the Windows resolver never looks up a string the shell could read as a URI or a path', async () => {
+    for (const n of [...URIS, ...PATHS, ...ODD]) expect(await resolveInstalledWindowsApp(n), n).toBeNull();
+  });
+
+  it.runIf(process.platform === 'win32')('live (read-only): a program on PATH resolves to its full path, a Start-menu app to its app id, anything else to nothing', async () => {
+    const notepad = await resolveInstalledWindowsApp('notepad');
+    expect(notepad?.path ?? notepad?.appId).toBeTruthy();
+    if (notepad?.path) expect(notepad.path).toMatch(/^[A-Za-z]:\\.+\.exe$/i);
+    expect(await resolveInstalledWindowsApp('no-such-app-clawdcursor-test')).toBeNull();
+    expect(await resolveInstalledWindowsApp('payload.exe')).toBeNull();
+  }, 60_000);
+
+  it('Windows: a name-only launch starts the resolved program or app id, and never types into the Start menu', () => {
+    const w = src('windows.ts');
+    const nameOnly = w.slice(w.indexOf('// Name-only launch'), w.indexOf('// Route 1:'));
+    expect(nameOnly).toMatch(/resolveInstalledWindowsApp\(name\)/);
+    expect(nameOnly).toMatch(/if \(!app\) return \{\};/);
+    expect(nameOnly).not.toMatch(/launchViaStartMenuSearch|CLAWD_PS_FILE: name\b/);
+    // Everything after it is for trusted names only.
+    expect(w.slice(w.indexOf('// Route 1:'), w.indexOf('private async foregroundLaunched')).match(/launchViaStartMenuSearch/g)?.length).toBeGreaterThan(0);
+  });
+
+  it('macOS: a name-only launch uses `open -a` (applications only) and never types into Spotlight', () => {
+    const m = src('macos.ts');
+    const tail = m.slice(m.indexOf("const args = ['-a', name];"), m.indexOf('const viaSpotlight = await this.launchViaSpotlight'));
+    expect(tail).toMatch(/if \(opts\?\.nameOnly\) return \{\};/);
+  });
+
+  it('Linux: an app name is only ever an executable on PATH or a .desktop entry; xdg-open is for URLs and paths', () => {
+    const l = src('linux.ts');
+    expect(l).toMatch(/\(opts\?\.url \|\| \/\[\/:\]\/\.test\(name\)\) && await this\.hasBinary\('xdg-open'\)/);
   });
 });
