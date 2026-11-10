@@ -144,6 +144,18 @@ describe('AccessibilityBridge on Linux', () => {
     expect(ctx).not.toContain('Save'); // hidden 0x0 menu item is noise
   });
 
+  it('screen context without the window list names no window: only the tree that was asked for', async () => {
+    adapter.getUiTree.mockResolvedValue([{ name: '7', controlType: 'Button', bounds: { x: 116, y: 549, width: 64, height: 44 } }]);
+    const { AccessibilityBridge } = await import('../platform/accessibility');
+    const bridge = new AccessibilityBridge();
+    const ctx = await bridge.getScreenContext(4242, false);
+    expect(ctx).toContain('[Button] "7" @116,549');
+    expect(ctx).not.toContain('WINDOWS');
+    expect(ctx).not.toContain('Calculator');
+    // the same read, served from the cache, still gives the list to a caller that asks for it
+    expect(await bridge.getScreenContext(4242)).toContain('[gnome-calculator] "Calculator" pid:4242');
+  });
+
   it('screen context says why when the AT-SPI bridge is unavailable', async () => {
     adapter.checkPermissions.mockResolvedValue({ input: true, accessibility: false, screenRecording: true });
     const { AccessibilityBridge } = await import('../platform/accessibility');

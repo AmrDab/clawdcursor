@@ -151,19 +151,26 @@ export class SessionLog {
     client?: { name?: string; version?: string },
     extra?: { outcome?: Outcome; space?: string;
       /** The app the call acted in: its name only, never a window title. */
-      app?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome }>;
+      app?: string; steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome; cls?: CallClass }>;
+      /** What the call turned out to be, when its name does not say: a read that had to press keys is an action. */
+      cls?: CallClass;
       /** Where the call's time went (steps.ts): name → count + total ms. Day log only, and only for a slow call. */
       timing?: Record<string, StepTotal> }): CallClass {
-    const cls = classifyCall(tool, action);
+    const cls = extra?.cls ?? classifyCall(tool, action);
     const outcome = extra?.outcome ?? (ok ? 'ok' : 'error');
     this.current = null;
     const steps: StepCall[] | undefined = extra?.steps?.map(s => ({ tool: s.tool, ...(s.action ? { action: s.action } : {}),
-      cls: classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error') }));
+      cls: s.cls ?? classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error') }));
     this.tally.calls++;
     if (outcome === 'refused' || outcome === 'consent_required') this.tally.refused++;
     else if (!ok) this.tally.errors++;
-    if (steps?.length) for (const s of steps) this.tallyClass(s.cls, s.outcome);
-    else this.tallyClass(cls, outcome);
+    // A read that pressed keys is an action, and when it worked it is text read as well: both are tallied.
+    const tally = (c: { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome }) => {
+      this.tallyClass(c.cls, c.outcome);
+      if (c.ok && c.cls !== 'blind' && classifyCall(c.tool, c.action) === 'blind') this.tallyClass('blind', c.outcome);
+    };
+    if (steps?.length) steps.forEach(tally);
+    else tally({ tool, action, cls, ok, outcome });
 
     if (this.file) {
       // The day log gets the same line, so one file shows what ran, how long it took and how it ended.
@@ -253,7 +260,7 @@ export function readSession(file: string): { header: Record<string, unknown> | n
     }
   } catch { /* missing file */ }
   const replay = new SessionLog({ version: '', surface: '' }, false);
-  for (const c of calls) replay.record(c.tool, c.action, c.ok, c.ms, undefined, undefined, { outcome: c.outcome, steps: c.steps });
+  for (const c of calls) replay.record(c.tool, c.action, c.ok, c.ms, undefined, undefined, { outcome: c.outcome, steps: c.steps, cls: c.cls });
   return { header: header[0] ?? null, calls, tally: replay.summary };
 }
 

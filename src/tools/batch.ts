@@ -81,7 +81,7 @@ export interface BatchStep {
 
 type StepStatus = 'ok' | 'guard_failed' | 'blocked' | 'needs_confirm' | 'error' | 'unknown_tool' | 'skipped';
 
-export interface StepOutcome { i: number; label: string; status: StepStatus; text: string; }
+export interface StepOutcome { i: number; label: string; status: StepStatus; text: string; pressedKeys?: boolean; }
 
 export interface BatchResult {
   total: number;
@@ -224,7 +224,7 @@ export async function executeBatch(
       res = { text: `threw: ${e instanceof Error ? e.message : String(e)}`, isError: true };
     }
     if (res.isError) {
-      outcomes.push({ i, label, status: 'error', text: (res.text || '').slice(0, 200) });
+      outcomes.push({ i, label, status: 'error', text: (res.text || '').slice(0, 200), pressedKeys: res.pressedKeys });
       return halt(i, `step ${i} (${label}) errored`);
     }
 
@@ -237,7 +237,7 @@ export async function executeBatch(
 
     // A screenshot step names its id first, so it survives the step text's truncation.
     const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
-    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${(res.text || '').slice(0, 160)}` });
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${(res.text || '').slice(0, 160)}`, pressedKeys: res.pressedKeys });
     completed++;
   }
 
@@ -352,7 +352,7 @@ export function getBatchTools(): ToolDefinition[] {
           isError: !result.allDone,
           steps: result.steps.map(s => {
             const a = stepArgs(steps[s.i]).action;
-            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text };
+            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys };
           }),
         };
       },

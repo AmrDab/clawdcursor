@@ -418,13 +418,14 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const steps = result.steps?.filter(s => s.status !== 'skipped').map(s => ({
           tool: s.tool, action: s.action, ok: s.status === 'ok',
           outcome: s.status === 'blocked' || s.status === 'needs_confirm' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
+          ...(s.pressedKeys ? { cls: 'act-other' as const } : {}),
         }));
         // A batch halts at its first failed step, so a halt a guard caused is a refusal, not an error.
         const batchRefused = result.isError && steps?.[steps.length - 1]?.outcome === 'refused';
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome: batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
-            app: app(), steps, timing: run.steps });
+            app: app(), steps, timing: run.steps, ...(result.pressedKeys ? { cls: 'act-other' as const } : {}) });
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
         // 3 screenshots with no text/a11y read in between (and every 5th
