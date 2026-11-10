@@ -85,8 +85,8 @@ export function typesAsKeys(text: string): boolean {
 
 /**
  * 'match': the field shows the text. 'suffix': it shows the text with more after it — an inline autocomplete suggestion
- * (an address bar), the case where Return would go somewhere else. 'mismatch': it shows other text (the field reformatted
- * it — a phone number, an amount — or the keys went elsewhere). 'unknown': it cannot be told.
+ * (an address bar), the case where Return would go somewhere else — or, for a replaced field, in another format.
+ * 'mismatch': it shows other text (the field rewrote it, or the keys went elsewhere). 'unknown': it cannot be told.
  */
 export type ReadBack = 'match' | 'suffix' | 'mismatch' | 'unknown';
 
@@ -102,22 +102,25 @@ const NUMBER = /^[-+]?\d+(?:[.,]\d+)?/;
 /**
  * Does a field that was to hold `want`, and nothing else, hold it? The one rule behind every value-setting path (both
  * texts flattened; case is ignored, as the Windows bridge's own check does):
- *   - the same text is a 'match'; so is an empty field after a clear;
- *   - a NUMBER is compared as a number, against the number the field starts with: "30.0", "30,00" and "30 mm" hold 30
- *     (AT-SPI reads a value back as a float, a field adds decimals or a unit), "300" and "10030" do not — and for a
- *     number "starts with it" proves nothing, so it is never a 'suffix';
- *   - other text with more AFTER it is a 'suffix' (an inline autocomplete suggestion): it cannot be told from a success;
- *   - anything else is a 'mismatch' (old text that was not replaced, a reformat).
+ *   - the same text is a 'match';
+ *   - a NUMBER is compared as a number, against the number the field starts with (after a currency sign): "30.0",
+ *     "30,00", "30 mm" and "$30.00" hold 30 (AT-SPI reads a value back as a float, a field adds decimals or a unit),
+ *     "300" and "10030" do not — and for a number "starts with it" proves nothing;
+ *   - a 'suffix' cannot be told from a success: other text with more AFTER it (an inline autocomplete suggestion), or
+ *     the same letters and digits in another format ("1,000" for 1000, "(555) 123-4567", a card number in groups);
+ *   - anything else is a 'mismatch' (old text that was not replaced, a rewrite).
  */
 function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
   const v = shown.toLowerCase(), w = want.toLowerCase();
   if (v === w) return 'match';
-  if (NUMBER.exec(w)?.[0] === w) {
-    const n = NUMBER.exec(v)?.[0];
-    const same = n !== undefined && !/\d/.test(v.slice(n.length)) && Number(n.replace(',', '.')) === Number(w.replace(',', '.'));
-    return same ? 'match' : 'mismatch';
+  const numeric = NUMBER.exec(w)?.[0] === w;
+  if (numeric) {
+    const amount = v.replace(/^\p{Sc}\s*/u, '');
+    const n = NUMBER.exec(amount)?.[0];
+    if (n !== undefined && !/\d/.test(amount.slice(n.length)) && Number(n.replace(',', '.')) === Number(w.replace(',', '.'))) return 'match';
   }
-  return w && v.startsWith(w) ? 'suffix' : 'mismatch';
+  const bare = (s: string) => s.replace(/[^\p{L}\p{N}]/gu, '');
+  return (!numeric && w && v.startsWith(w)) || (bare(w) && bare(v) === bare(w)) ? 'suffix' : 'mismatch';
 }
 
 /**
@@ -125,8 +128,8 @@ function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
  * value is withheld), a field that exposes no text (empty value: many custom controls), or a value at the read cap.
  * Polls briefly: a field can lag the keys. `value` is what the field showed (for the caller to report). Never throws.
  *
- * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue). Only then can an empty
- * text be checked: a field that reads empty was cleared.
+ * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue). A clear (empty text)
+ * fails on a field that still shows text, and is never confirmed: an empty read is also what an unreadable field gives.
  */
 export async function readBackTyped(
   focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
@@ -142,9 +145,9 @@ export async function readBackTyped(
     let el: { value?: string; secure?: boolean } | null | undefined = null;
     try { el = await focused(); } catch { /* unreadable */ }
     if (el?.secure) return { result: 'unknown', secure: true };
-    const readable = typeof el?.value === 'string' && el.value.length < READ_CAP;
-    const v = readable ? flat(el!.value!) : '';
-    if (v || (readable && !want)) {
+    const raw = typeof el?.value === 'string' ? el.value : '';
+    const v = raw.length >= READ_CAP ? '' : flat(raw);
+    if (v) {
       // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
       // do — typing into the middle of a document.
       const result = whole ? holdsValue(v, want)
@@ -159,9 +162,9 @@ export async function readBackTyped(
 
 /**
  * How every set_field_value path ends: one read-back (readBackTyped, whole value) decides the result. A field that holds
- * the value is confirmed; one that shows it with more after it, or cannot be read, is a success said to be NOT verified;
- * any other text is a failure that says what the field shows. Reads `named` (the field a native set wrote to), or
- * without it the focused field (where the value was typed).
+ * the value is confirmed; one that shows it with more after it or in another format, or cannot be read, is a success
+ * said to be NOT verified; any other text is a failure that says what the field shows. Reads `named` (the field a
+ * native set wrote to), or without it the focused field (where the value was typed).
  */
 export async function setResult(
   platform: Pick<PlatformAdapter, 'getFocusedElement' | 'invokeElement'>, value: string, label: string, how: string,
@@ -180,7 +183,7 @@ export async function setResult(
   switch (rb.result) {
     case 'match': return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
     case 'unknown': return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };
-    case 'suffix': return { success: true, text: `Set ${set} — ${shows}, the value with more after it (a suggestion, a unit): NOT verified.`, targetLabel: label };
+    case 'suffix': return { success: true, text: `Set ${set} — ${shows}, which may be the value in another format, or with a suggestion or old text after it: NOT verified.`, targetLabel: label };
     default: return { success: false, text: `Set ${quoteScreenText(label)} failed: ${shows}, not the value asked for (${cut(value)}) — its old text was not replaced, or the field rewrote it.`, targetLabel: label };
   }
 }

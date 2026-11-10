@@ -41,10 +41,10 @@ describe('readBackTyped — whole value', () => {
   });
 
   it('a number is compared as a number: the field may format it or add a unit', async () => {
-    for (const shown of ['30.0', '30.00', '30,00', '30 mm', '30mm', '+30']) expect(await whole(shown, '30')).toBe('match');
+    for (const shown of ['30.0', '30.00', '30,00', '30 mm', '30mm', '+30', '$30.00', '€ 30']) expect(await whole(shown, '30')).toBe('match');
     expect(await whole('-2.50 m', '-2.5')).toBe('match');
     // old text that was not replaced, or another number: never a match, and never "starts with it"
-    for (const shown of ['10030', '1003300', '300', '30.5', '30,5', '3 0', '100', '30/11/2026', 'x30']) {
+    for (const shown of ['10030', '1003300', '300', '30.5', '30,5', '100', '30/11/2026', 'x30']) {
       expect(await whole(shown, '30')).toBe('mismatch');
     }
   });
@@ -56,10 +56,18 @@ describe('readBackTyped — whole value', () => {
     expect(await whole('11/10/2026', '2026-11-10')).toBe('mismatch');
   });
 
-  it('a clear is confirmed by an empty field, and fails on one that still shows text', async () => {
-    expect(await whole('', '')).toBe('match');
+  it('the same letters and digits in another format (separators, a mask) is "suffix": it cannot be told from a success', async () => {
+    for (const shown of ['1,000', '1.000', '1 000']) expect(await whole(shown, '1000')).toBe('suffix');
+    expect(await whole('(555) 123-4567', '5551234567')).toBe('suffix');
+    expect(await whole('4111 1111 1111 1111', '4111111111111111')).toBe('suffix');
+    expect(await whole('AB-12 cd', 'ab12cd')).toBe('suffix');
+    expect(await whole('--', '++')).toBe('mismatch');
+  });
+
+  // An empty read is what an unreadable field gives too (Win11 RichEdit's ValuePattern is always ""): never a proof.
+  it('a clear is never confirmed by an empty read, and fails on a field that still shows text', async () => {
+    expect(await whole('', '')).toBe('unknown');
     expect(await whole('100', '')).toBe('mismatch');
-    // a field that cannot be read at all is still unknown
     expect((await readBackTyped(async () => null, '', { whole: true, maxMs: 0 })).result).toBe('unknown');
     expect((await readBackTyped(f(''), '30', { whole: true, maxMs: 0 })).result).toBe('unknown');
   });
@@ -105,11 +113,23 @@ describe('set_field_value — one read-back decides every path', () => {
     expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'unverified' });
   });
 
-  it('a clear that reads back empty is confirmed', async () => {
-    const { ctx } = ctxWith(q => q.action === 'get-value' ? { success: true, data: { value: '' } } : { success: true });
-    const r = await set(ctx, '');
+  it('a field that shows the value in another format succeeds, NOT verified, and says what it shows', async () => {
+    const { ctx } = ctxWith(q => q.action === 'get-value' ? { success: true, data: { value: '1,000' } } : { success: true });
+    const r = await set(ctx, '1000');
     expect(r.success).toBe(true);
-    expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'confirmed' });
+    expect(r.text).toMatch(/NOT verified/);
+    expect(r.text).toContain('"1,000"');
+    expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'unverified' });
+  });
+
+  it('a clear that reads back empty is NOT verified (an unreadable field reads empty too); text still there fails', async () => {
+    const empty = ctxWith(q => q.action === 'get-value' ? { success: true, data: { value: '' } } : { success: true });
+    const r = await set(empty.ctx, '');
+    expect(r.success).toBe(true);
+    expect(r.text).toMatch(/NOT verified/);
+    expect(classifyResult(r.text, false, true)).toEqual({ outcome: 'unverified' });
+    const kept = ctxWith(q => q.action === 'get-value' ? { success: true, data: { value: 'old text' } } : { success: true });
+    expect((await set(kept.ctx, '')).success).toBe(false);
   });
 
   it('keyboard fallback that leaves exactly the value is confirmed', async () => {

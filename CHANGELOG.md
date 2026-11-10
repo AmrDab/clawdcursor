@@ -35,9 +35,10 @@ All notable changes to Clawd Cursor will be documented in this file.
   a word and the key pressed once.
 - **`set_value` and a replacing `smart_type` succeed only when the field holds the value.** Every path (native set,
   keyboard fallback, element ref) ends in one read-back of the whole field. The same text (whitespace and case aside) is
-  `[confirmed]`, as is an emptied field after a clear; a number is compared as a number, so `30.0`, `30,00` and `30 mm`
-  hold `30` while `300` and `10030` do not. Text with more after it (an inline suggestion) succeeds but says NOT
-  verified and quotes the field, as does a field that cannot be read. Anything else (a field that ignored select-all and
+  `[confirmed]`; a number is compared as a number, so `30.0`, `30,00`, `30 mm` and `$30.00` hold `30` while `300` and
+  `10030` do not. Text with more after it (an inline suggestion) or in another format (`1,000` for `1000`, a phone or
+  card number in groups) succeeds but says NOT verified and quotes the field, as does a field that cannot be read (an
+  empty read never confirms a clear). Anything else (a field that ignored select-all and
   kept its old text) is `READBACK_MISMATCH` with what the field shows, not a success or a "read back ✓". A `get_value`
   miss carries its reason (`NOT_FOUND`, `UNSUPPORTED_ACTION`, `TIMEOUT`) instead of `UNKNOWN`.
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
