@@ -115,6 +115,14 @@ describe('a list is "this control\'s" only when it is tied to the control', () =
     expect(fn).toMatch(/kinds: Set<ListKind> = \[\.menu\]/);
   });
 
+  it('a content list of the page (<ul>, <ol>) is never the list of a control: collapse must not send Escape for a list that was never open', () => {
+    const fn = swift.slice(swift.indexOf('func shownMenus('), swift.indexOf('func ownMenu('));
+    expect(swift).toMatch(/let contentListSubroles: Set<String> = \["AXContentList", "AXDefinitionList", "AXDescriptionList"\]/);
+    expect(fn).toMatch(/for h in found\.hits where h\.role == "AXMenu" \|\| !contentListSubroles\.contains\(h\.subrole\) \{ add\(/);
+    // the only way a plain list gets into the set
+    expect(fn.match(/kind: [^)]*\.list\)/g) ?? []).toHaveLength(1);
+  });
+
   it('expand counts only a menu that appeared with the press, or the control saying it is open', () => {
     const body = expandBody();
     expect(body).toMatch(/!before\.contains \{ \$0\.frame == n\.frame \}/);

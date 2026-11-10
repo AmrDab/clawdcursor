@@ -879,6 +879,9 @@ let menuHolderRoles: Set<String> = ["AXPopUpButton", "AXMenuButton"]
 
 enum ListKind { case menu, list }
 
+/// What WebKit and AppKit call a list that is page content, not a listbox of options.
+let contentListSubroles: Set<String> = ["AXContentList", "AXDefinitionList", "AXDescriptionList"]
+
 struct ShownMenu {
     let element: AXUIElement
     let frame: CGRect
@@ -921,7 +924,9 @@ func shownMenus(around el: AXUIElement, pid: pid_t) -> [ShownMenu] {
     if let r = root {
         var found = SearchCtx()
         search(r, Aim(name: nil, role: nil, id: nil), maxDepth: 10, limit: 120, until: Date().addingTimeInterval(0.8), anyOfRoles: ["AXMenu", "AXList"], ctx: &found)
-        for h in found.hits { add(h.element, child: false, kind: h.role == "AXMenu" ? .menu : .list) }
+        // Not a page's own content list (<ul>, <ol>, role="list": subrole AXContentList, or a definition list): one of those next to
+        // the control, or around it, is not its pop-up, and collapse would send Escape for a list that was never open.
+        for h in found.hits where h.role == "AXMenu" || !contentListSubroles.contains(h.subrole) { add(h.element, child: false, kind: h.role == "AXMenu" ? .menu : .list) }
     }
     return out
 }
