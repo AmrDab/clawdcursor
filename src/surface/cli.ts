@@ -178,6 +178,8 @@ async function forceKillPort(port: number): Promise<boolean> {
   // systems. Instead: capture lsof output, parse PIDs in JS, and only kill
   // when we have at least one confirmed PID.
   try {
+    // macOS / Linux only: lsof and ps run through /bin/sh, which has no current-directory lookup for them (CWE-427 is the Windows
+    // rule); `port` and `pid` are numbers.
     const lsofOut = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf-8', shell: '/bin/sh' });
     const pids = lsofOut.trim().split(/\s+/)
       .map(s => parseInt(s, 10))
@@ -1310,6 +1312,7 @@ program
     // 7. Unlink global npm command
     try {
       const { execSync } = await import('child_process');
+      // Left on PATH on purpose: the user runs this uninstall themselves, and npm is theirs to resolve (not a system program).
       execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000 });
       console.log(`   ${e('🗑️', '[DEL]')}  Removed global clawdcursor command`);
       removed++;

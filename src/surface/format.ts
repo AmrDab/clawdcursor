@@ -15,8 +15,10 @@ export const canEmoji = (() => {
   if (process.env.TERM_PROGRAM === 'vscode') return true;
   // Check if console codepage is UTF-8
   try {
-    const { execSync } = require('child_process');
-    const cp = execSync('chcp', { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+    // chcp.com by absolute path, no shell: cmd.exe would look for chcp in the current directory first (CWE-427).
+    const { execFileSync } = require('child_process');
+    const { system32Exe } = require('../platform/ps-spawn');
+    const cp = execFileSync(system32Exe('chcp.com'), [], { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
     return cp.includes('65001');
   } catch {
     return false;
