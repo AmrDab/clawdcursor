@@ -8,6 +8,8 @@
  *     nothing on the rest of the screen, nothing at all while no window is known
  *     or that window is not in front. Spawned/killed in lockstep with the pill;
  *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
+ * Both exit by themselves when their stdin closes: a host that hard-kills this
+ * process must not leave them on screen.
  *
  * One contract, three drawers (same modes, same stdout lines):
  *   - Windows: scripts/banner.ps1 + scripts/window-outline.ps1 (WinForms)
@@ -230,7 +232,7 @@ class ControlBanner {
       psOpts({ stdio, windowsHide: true, env: overlayEnv(mode) }));
   };
   private outlineSpawner: Spawner = (mode) => {
-    const stdio: ['pipe', 'ignore', 'ignore'] = ['pipe', 'ignore', 'ignore']; // stdin names the window; no stdout contract
+    const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin names the window; stdout: OUTLINE_CAPTURABLE
     const color = mode.paused ? ['--color', PAUSED_OUTLINE] : [];
     if (process.platform === 'darwin') {
       return spawn(macOverlayBinary.cached(macScript())!, ['outline', ...color], { stdio });
@@ -247,12 +249,21 @@ class ControlBanner {
    * Hide the pill for a moment so an agent's click under it reaches the app instead (it comes back by itself after `ms`).
    * The pill is a real window at the top centre — where browsers keep their tab strip and address bar. Called before every
    * synthetic mouse press, drag or scroll (pointer-guard.ts). The outline is click-through and stays — except
-   * `forCapture`, where the OS cannot keep a window out of a capture (Linux): then it steps aside too.
+   * `forCapture`, where the OS cannot keep a window out of a capture: then it steps aside too.
    */
   async dodge(ms = DODGE_MS, forCapture = false): Promise<void> {
     const pill = send(this.child, `HIDE ${ms}`);
     const outline = forCapture && send(this.outlineChild, `HIDE ${ms}`);
     if (pill || outline) await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+  }
+
+  // The Windows and macOS overlays keep themselves out of captures (WDA_EXCLUDEFROMCAPTURE, sharingType none + the
+  // helper's filter). Linux cannot, and Windows 10 before 2004 cannot either: there the outline says OUTLINE_CAPTURABLE.
+  private capturable = process.platform === 'linux';
+
+  /** Before a screenshot or OCR: where the overlay would be in the capture, the pill and the outline step aside. */
+  async beforeCapture(): Promise<void> {
+    if (this.capturable) await this.dodge(DODGE_MS, true);
   }
 
   private working: WorkingWindow | undefined;
@@ -459,6 +470,7 @@ class ControlBanner {
     this.target = '';
     this.publish();
     child.stdin?.on?.('error', () => { /* the outline is gone */ });
+    child.stdout?.on?.('data', d => { if (String(d).includes('OUTLINE_CAPTURABLE')) this.capturable = true; });
     child.on('error', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
     child.on('exit', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
     if (this.working) this.setWorkingWindow(this.working);
@@ -525,6 +537,7 @@ class ControlBanner {
     this.forceHide();
     this.pinned = false;
     this.onStopRequested = undefined;
+    this.capturable = process.platform === 'linux';
     this.holds = 0;
     this.idleWhileHeld = false;
   }
@@ -542,6 +555,5 @@ setOnAgentInput(method => {
   if (label) controlBanner.setActivity(label);
   controlBanner.setWorkingWindow(workingWindow());
 });
-// Captures: the Windows and macOS overlays exclude themselves from capture (WDA_EXCLUDEFROMCAPTURE, sharingType none +
-// the helper's filter); the Linux one cannot, so the pill and the outline step aside for the capture.
-if (process.platform === 'linux') setBeforeCapture(() => controlBanner.dodge(DODGE_MS, true));
+// Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
+setBeforeCapture(() => controlBanner.beforeCapture());

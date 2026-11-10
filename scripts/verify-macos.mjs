@@ -252,7 +252,7 @@ const OVERLAY = path.join(ROOT, 'scripts', 'mac', 'overlay.swift');
 const frontApp = () => { try { return sh('osascript', ['-l', 'JavaScript', '-e', "ObjC.import('AppKit'); $.NSWorkspace.sharedWorkspace.frontmostApplication.localizedName.js"]); } catch { return '?'; } };
 /** Run the overlay; resolve with its first stdout line, its exit code, or 'timeout'. */
 const runOverlay = (bin, args, env, waitMs) => new Promise(resolve => {
-  const child = spawn(bin, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bin, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] }); // stdin open: the overlay exits when it closes
   let out = '';
   const timer = setTimeout(() => { child.kill(); resolve('timeout'); }, waitMs);
   child.stdout.on('data', d => { out += d; if (out.includes('\n')) { clearTimeout(timer); child.kill(); resolve(out.trim()); } });

@@ -233,6 +233,34 @@ describe('the outline around the window the agent works in', () => {
   });
 });
 
+describe('captures where the OS cannot keep the overlay out', () => {
+  it('an outline that says OUTLINE_CAPTURABLE (Windows 10 before 2004) steps aside with the pill before a capture', async () => {
+    vi.useRealTimers();
+    controlBanner.pin();
+    if (process.platform !== 'linux') {
+      await controlBanner.beforeCapture();
+      expect(outlines[0].written).toEqual([]);   // excluded by the OS: nothing to hide
+    }
+    outlines[0].stdout.write('OUTLINE_CAPTURABLE\n');
+    await new Promise(r => setImmediate(r));
+    await controlBanner.beforeCapture();
+    expect(spawned[0].written).toEqual(['HIDE 1500']);
+    expect(outlines[0].written).toEqual(['HIDE 1500']);
+  });
+});
+
+// A host that hard-kills this process runs no exit hook: every drawer leaves when its stdin closes.
+describe('no overlay outlives its parent', () => {
+  const read = (...p: string[]) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', ...p), 'utf8');
+  it('every drawer exits on stdin EOF, the pill included', () => {
+    for (const ps of [read('banner.ps1'), read('window-outline.ps1')]) {
+      expect(ps).toMatch(/while \(\(line = Console\.In\.ReadLine\(\)\) != null\) \{[\s\S]*?\n {16}\}\n {16}Environment\.Exit\(0\);/);
+    }
+    expect(read('mac', 'overlay.swift')).toMatch(/if data\.isEmpty \{[^}]*NSApp\.terminate\(nil\)/);
+    expect(read('linux', 'overlay.py').match(/if not chunk:\n\s+Gtk\.main_quit\(\)/g)).toHaveLength(2);
+  });
+});
+
 // The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
 describe('no full-screen glow', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -256,8 +284,11 @@ describe('no full-screen glow', () => {
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
-    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
+    for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
+    // Not topmost: directly above its window, so the pill stays over it.
+    expect(ps).not.toContain('WS_EX_TOPMOST');
+    expect(ps).toContain('GetWindow(t, 3)');
     expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
   });
 });

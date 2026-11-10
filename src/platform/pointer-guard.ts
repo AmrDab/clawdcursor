@@ -163,8 +163,8 @@ function movesFocus(method: string, args: unknown[]): boolean {
 
 /**
  * Runs before every screen capture (screenshot, OCR). The pill and outline are for the person at the screen, never part of
- * what the agent sees: where the OS can exclude a window from capture (Windows, macOS) the overlay does so itself, and
- * the banner registers no hook; elsewhere (Linux) the hook hides them for the moment of the capture.
+ * what the agent sees: where the OS can exclude a window from capture (Windows, macOS) the overlay does so itself;
+ * elsewhere (Linux, Windows 10 before 2004) the banner's hook hides them for the moment of the capture.
  */
 let captureHook: (() => Promise<void>) | null = null;
 

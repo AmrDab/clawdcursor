@@ -27,7 +27,9 @@
 //                  else: no fill, nothing on the rest of the screen; clicks pass
 //                  straight through it. stdin: "TARGET <handle> <pid>" names the
 //                  process (a bare "TARGET": none). The border is drawn around the
-//                  frontmost window while it is that process's, and follows it.
+//                  process's frontmost window while that app is in front, and follows it.
+//
+// When stdin closes (the parent is gone) the process exits.
 //
 // The parent kills the process to hide it. The app is an accessory (no Dock
 // icon) and the pill is a non-activating panel, so neither may take focus from
@@ -278,7 +280,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var pending = ""
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil; return }   // EOF: the parent closed the pipe
+            if data.isEmpty {   // EOF: the parent is gone, and neither the pill nor the outline may outlive it
+                handle.readabilityHandler = nil
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+                return
+            }
             pending += String(decoding: data, as: UTF8.self)
             while let nl = pending.firstIndex(of: "\n") {
                 let line = pending[..<nl].trimmingCharacters(in: .whitespaces)
@@ -574,14 +580,17 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
     var targetPid = 0
 
-    /// The frame, in AppKit coordinates, of the frontmost ordinary window when it is the target process's.
+    /// The frame, in AppKit coordinates, of the target process's frontmost ordinary window while that app is in front.
+    /// The windows are listed only then (the list is front to back).
     func targetFrame() -> NSRect? {
         guard targetPid != 0,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
-              let front = list.first(where: { ($0[kCGWindowLayer as String] as? Int) == 0 }),   // front to back
-              (front[kCGWindowOwnerPID as String] as? Int) == targetPid,
+              let front = list.first(where: {
+                  ($0[kCGWindowOwnerPID as String] as? Int) == targetPid && ($0[kCGWindowLayer as String] as? Int) == 0
+              }),
               let bounds = front[kCGWindowBounds as String] as? NSDictionary,
-              let rect = CGRect(dictionaryRepresentation: bounds),
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
               let primary = NSScreen.screens.first else { return nil }
         // Quartz measures down from the top of the primary display, AppKit up from its bottom.
         return NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
@@ -593,7 +602,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content
         win.hasShadow = false
         win.ignoresMouseEvents = true // click-through
-        win.level = .screenSaver
+        win.level = .floating   // above ordinary windows, below the pill and the menu bar
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         win.sharingType = .none  // the outline is not captured either
         let view = NSView()

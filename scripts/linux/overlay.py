@@ -33,6 +33,8 @@ by src/core/banner.ts:
                      names the window (a bare "TARGET": none); the border is drawn
                      while that is the active window, and follows it. "HIDE <ms>"
                      steps aside for a screen capture.
+
+When stdin closes (the parent is gone) the process exits.
   overlay.py --probe prints "ok" when GTK can open the display (banner.ts uses
                      this to decide whether the overlay is available).
 
@@ -477,7 +479,8 @@ def run_pill():
         except OSError:
             return False
         if not chunk:
-            return False  # EOF: the parent closed the pipe
+            Gtk.main_quit()  # EOF: the parent is gone, and a pill must not outlive it
+            return False
         hide_state['buf'] += chunk
         while b'\n' in hide_state['buf']:
             raw, hide_state['buf'] = hide_state['buf'].split(b'\n', 1)
@@ -509,7 +512,20 @@ def run_outline(color, thickness):
     r, g, b = hex_rgb(color)
     screen = Gdk.Screen.get_default()
     win, _composited = popup(1, 1)
-    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b''}
+    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0)}
+
+    def shadow(xid, scale):
+        # A client-decorated GTK window draws its shadow inside its own X window and says how wide it is in
+        # _GTK_FRAME_EXTENTS (left, right, top, bottom, device pixels). Without xprop the border sits outside the shadow.
+        if not shutil.which('xprop'):
+            return (0, 0, 0, 0)
+        try:
+            out = subprocess.run(['xprop', '-id', str(xid), '_GTK_FRAME_EXTENTS'],
+                                 capture_output=True, text=True, timeout=1).stdout
+            sides = tuple(int(v) // scale for v in out.split('=')[1].split(','))
+            return sides if len(sides) == 4 else (0, 0, 0, 0)
+        except Exception:
+            return (0, 0, 0, 0)  # the property is not set: server-side decorations
 
     def draw(_w, cr):
         cr.set_operator(cairo.OPERATOR_SOURCE)
@@ -520,14 +536,20 @@ def run_outline(color, thickness):
     win.connect('draw', draw)
 
     def frame():
-        """The target's frame, decorations included, while it is the active window."""
+        """The target's visible frame (decorations included, a GTK shadow not) while it is the active window."""
         if not state['xid'] or time.monotonic() < state['hidden_until']:
             return None
         active = screen.get_active_window()
         if active is None or active.get_xid() != state['xid']:
             return None
         e = active.get_frame_extents()
-        return (e.x, e.y, e.width, e.height) if e.width > 0 and e.height > 0 else None
+        sized = (state['xid'], e.width, e.height)
+        if sized != state['sized']:  # asked again only when the window changes or resizes (a maximized one has no shadow)
+            state['sized'] = sized
+            state['shadow'] = shadow(state['xid'], max(1, active.get_scale_factor()))
+        left, right, top, bottom = state['shadow']
+        w, h = e.width - left - right, e.height - top - bottom
+        return (e.x + left, e.y + top, w, h) if w > 0 and h > 0 else None
 
     def follow():
         rect = frame()
@@ -569,7 +591,8 @@ def run_outline(color, thickness):
         except OSError:
             return False
         if not chunk:
-            return False  # EOF: the parent closed the pipe
+            Gtk.main_quit()  # EOF: the parent is gone, and a border must not outlive it
+            return False
         state['buf'] += chunk
         while b'\n' in state['buf']:
             raw, state['buf'] = state['buf'].split(b'\n', 1)

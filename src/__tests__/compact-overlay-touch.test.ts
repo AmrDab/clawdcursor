@@ -1,7 +1,7 @@
 /**
  * The overlay follows what an action DOES, not the compound it came through
  * (live Mac review 2026-10-15): `accessibility` is a tier-0 compound, so the
- * blind-mode actions on it — invoke, set_value — never showed the glow, while
+ * blind-mode actions on it — invoke, set_value — never showed the overlay, while
  * `system` (tier 1) lit it for pure reads like ocr.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
