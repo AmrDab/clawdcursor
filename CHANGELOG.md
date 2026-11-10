@@ -116,6 +116,14 @@ All notable changes to Clawd Cursor will be documented in this file.
   fed by the removed `agent_status` tool. It now reads the pending pause
   (message, choices) from `GET /resume`, which needs the token like
   `POST /resume`; the public `/health` is unchanged and carries no pause.
+- **macOS: opening a web `<details>` section and choosing from a web dropdown work.** `expand` used to say "Expanded"
+  when it had only opened the page's context menu (AXShowMenu), `collapse` failed, and `select` on a `<select>` found
+  no options and left that menu open. Expand and collapse are now read back before they report success; a web
+  `<summary>` (no AXPress, read-only AXExpanded) is opened from the keyboard, focus + Return sent to its own app;
+  a pop-up button opens with AXPress and closes with AXCancel; `state` of a disclosure triangle reports
+  `expandable` / `expanded`; an open pop-up's options appear in `find` / `read_tree`; `select` re-reads a control that
+  still shows the old value for up to 1.5 s before calling a late-updating pick a failure; and a failed expand or
+  collapse says why. An element that is not a disclosure triangle is never pressed to expand it.
 
 ## [1.5.27] - 2026-11-09
 

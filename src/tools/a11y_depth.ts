@@ -72,7 +72,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid, action: 'expand',
         });
         return {
-          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `a11y_expand failed for ${quoteScreenText(name)}.`,
+          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `a11y_expand failed for ${quoteScreenText(name)}${failReason(res)}.`,
           isError: !res.success,
         };
       },
@@ -99,7 +99,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid, action: 'collapse',
         });
         return {
-          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `a11y_collapse failed for ${quoteScreenText(name)}.`,
+          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `a11y_collapse failed for ${quoteScreenText(name)}${failReason(res)}.`,
           isError: !res.success,
         };
       },
