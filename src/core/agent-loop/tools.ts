@@ -944,6 +944,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           // `key_press.key` and the compound surface alias).
           combo: { type: 'string', description: 'Key/combo to press (e.g. "Return", "mod+s"). Space-separate for a sequence.' },
           key: { type: 'string', description: 'Alias for combo — accepted for MCP/compound backward-compatibility.' },
+          repeat: { type: 'number', minimum: 1, maximum: 100, description: 'Press it this many times (default 1).' },
           expect: EXPECT_SCHEMA,
         },
         // Neither is required at the JSON-Schema level so the validator passes
@@ -967,6 +968,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (typeof raw !== 'string') {
           return { success: false, isError: true, text: `key: "combo" must be a string, e.g. "Return" or "mod+s" — got ${Array.isArray(raw) ? 'an array' : typeof raw}.` };
         }
+        // A batch step skips schema validation: the bound is checked here too.
+        const times = args.repeat ?? 1;
+        if (typeof times !== 'number' || !Number.isInteger(times) || times < 1 || times > 100) {
+          return { success: false, isError: true, text: 'key: "repeat" must be a whole number from 1 to 100.' };
+        }
         const input = raw.trim();
         // (b) "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = input.split(/\s+/);
@@ -982,12 +988,14 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           }
         }
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
-        for (const c of combos) {
-          await ctx.platform.keyPress(c);
-          if (combos.length > 1) await sleep(50); // brief gap between sequence steps
+        for (let i = 0; i < times; i++) {
+          for (const c of combos) {
+            await ctx.platform.keyPress(c);
+            if (combos.length * times > 1) await sleep(50); // brief gap between sequence steps
+          }
         }
         await sleep(150);
-        return { success: true, text: `Pressed ${input}${inputWarningNote(ctx)}` };
+        return { success: true, text: `Pressed ${input}${times > 1 ? ` ×${times}` : ''}${inputWarningNote(ctx)}` };
       },
     },
 

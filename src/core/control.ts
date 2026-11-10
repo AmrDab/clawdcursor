@@ -82,7 +82,7 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 // ── The window the agent is working in ──
 
-interface Foreground { processId: number; processName: string; title?: string; guessed?: boolean }
+interface Foreground { processId: number; processName: string; appName?: string; title?: string; guessed?: boolean }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
@@ -106,7 +106,7 @@ function resetBinding(): void { lease = undefined; pending = null; movedAt = 0; 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, title: w.title || undefined, guessed: w.guessed } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, guessed: w.guessed } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
@@ -201,9 +201,12 @@ async function byName(processId?: number): Promise<void> {
   await refuseAiHost(now, explicit);
 }
 
-/** The app the agent's last input went to (the pill names it), or undefined before the first one. */
-export function workingIn(): string | undefined {
-  return lease?.processName;
+/**
+ * The app the agent's last input went to (the pill and the session log name it), or undefined before the first one.
+ * Every input binds a fresh foreground read, so the same object back means no input was sent in between.
+ */
+export function workingIn(): { processName: string; appName?: string } | undefined {
+  return lease;
 }
 
 /** After the input: no read. A focus-moving one opens the window in which a new window in front is the agent's own doing. */

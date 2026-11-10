@@ -378,7 +378,11 @@ export class WindowsAdapter implements PlatformAdapter {
       const fg = await psRunner.run({ cmd: 'get-foreground-window' }) as any;
       if (!fg || fg.success === false) return null;
 
-      const className = typeof fg.className === 'string' && fg.className ? fg.className : undefined;
+      // What only this answer carries: the window class, and the app's own display name.
+      const extra = {
+        ...(typeof fg.className === 'string' && fg.className ? { className: fg.className } : {}),
+        ...(typeof fg.appName === 'string' && fg.appName ? { appName: fg.appName } : {}),
+      };
       // The bridge answers with the focused window's own bounds / minimized
       // state: no need to enumerate every window (200+ ms) and, unlike the
       // first same-process match below, it IS the window that has focus.
@@ -392,14 +396,14 @@ export class WindowsAdapter implements PlatformAdapter {
             bounds: fg.bounds,
             isMinimized: !!fg.isMinimized,
           }),
-          ...(className ? { className } : {}),
+          ...extra,
         };
       }
 
       // Older bridge / no bounds: find the same window in the full list.
       const all = await this.listWindows();
       const match = all.find(w => w.processId === fg.processId);
-      if (match) return className ? { ...match, className } : match;
+      if (match) return { ...match, ...extra };
 
       return {
         ...this.normalizeWindow({
@@ -410,7 +414,7 @@ export class WindowsAdapter implements PlatformAdapter {
           bounds: { x: 0, y: 0, width: 0, height: 0 },
           isMinimized: false,
         }),
-        ...(className ? { className } : {}),
+        ...extra,
       };
     } catch {
       return null;

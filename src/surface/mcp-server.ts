@@ -28,7 +28,7 @@ import { evaluateToolCall } from '../tools/safety-gate';
 import { controlBanner } from '../core/banner';
 import { enableHostAncestry } from '../core/ai-hosts';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
-import { isStopped, STOPPED_TEXT } from '../core/control';
+import { isStopped, STOPPED_TEXT, workingIn } from '../core/control';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
@@ -388,6 +388,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action), isStopSafeCall(tool.name, action));
         if (ownUi) return refuse('own_ui', ownUi);
         const started = Date.now();
+        const wasIn = workingIn();
+        // The app this call's input went to, by name: an input binds a new foreground read, so the same one means it sent none.
+        const actedIn = () => { const w = workingIn(); return w && w !== wasIn ? w.appName || w.processName : undefined; };
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
         const run = await withSteps(tool.name, action, () => tool.handler(params, ctx));  // where the call's time went
@@ -399,7 +402,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           // stream. Convert to a clean isError result.
           const err = run.error;
           const msg = err instanceof Error ? err.message : String(err);
-          sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg), timing: run.steps });
+          sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg), app: actedIn(), timing: run.steps });
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
         }
         let result = run.result;
@@ -421,7 +424,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome: batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
-            steps, timing: run.steps });
+            app: actedIn(), steps, timing: run.steps });
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
         // 3 screenshots with no text/a11y read in between (and every 5th

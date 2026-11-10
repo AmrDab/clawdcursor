@@ -57,6 +57,9 @@ export interface ScreenshotResult {
 export interface WindowInfo {
   title: string;
   processName: string;
+  /** The app's own display name when the OS reports one apart from the process name (Windows: the exe's file
+   *  description, "Designcenter NX" for ugraf.exe). macOS already gives the localized name as `processName`. */
+  appName?: string;
   processId: number;
   /** Native window class when the platform reports it (Windows) — e.g. tells a
    *  console window from a GUI window owned by a shell process. */

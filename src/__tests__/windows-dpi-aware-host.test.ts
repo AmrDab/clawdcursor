@@ -78,6 +78,13 @@ describe('getActiveWindow', () => {
     expect(sent('get-screen-context')).toHaveLength(0);
   });
 
+  it("carries the app's display name from the bridge, and leaves it out when the bridge has none", async () => {
+    bridge.fg = { ...FG, processName: 'ugraf', appName: 'Designcenter NX' };
+    expect((await new WindowsAdapter().getActiveWindow())?.appName).toBe('Designcenter NX');
+    bridge.fg = { ...FG, appName: '' };
+    expect(await new WindowsAdapter().getActiveWindow()).not.toHaveProperty('appName');
+  });
+
   it('it is the focused window even when the same process has another window listed first', async () => {
     bridge.fg = FG;
     bridge.windows = [{ title: 'Other Notepad window', processName: 'notepad', processId: 42, bounds: { x: 0, y: 0, width: 100, height: 100 }, isMinimized: false }];

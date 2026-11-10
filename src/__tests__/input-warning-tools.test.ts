@@ -9,6 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getDesktopTools } from '../tools/desktop';
 import { getSmartTools } from '../tools/smart';
+import { getCompactTools } from '../tools/compact';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import type { ToolContext } from '../tools/types';
 
@@ -194,6 +195,34 @@ describe('agent loop type / key', () => {
     const { ctx, clip } = platformCtx(keyboard({ refuse: true }));
     await expect(type.execute({ text: 'hunter2 correct horse' }, ctx)).rejects.toThrow(/system dialog/i);
     expect(clip.state.value).toBe('PRIOR');
+  });
+
+  // Live 2026-11-10: `computer key` with repeat pressed the key once; the argument was dropped without a word.
+  it('presses the key, or the whole sequence, `repeat` times', async () => {
+    const kb = keyboard();
+    const { ctx } = platformCtx(kb);
+    const r = await key.execute({ combo: 'Down', repeat: 3 }, ctx);
+    expect(kb.keyPress.mock.calls.map(c => c[0])).toEqual(['Down', 'Down', 'Down']);
+    expect(r.text).toContain('Pressed Down ×3');
+    kb.keyPress.mockClear();
+    await key.execute({ combo: 'Down End', repeat: 2 }, ctx);
+    expect(kb.keyPress.mock.calls.map(c => c[0])).toEqual(['Down', 'End', 'Down', 'End']);
+  });
+
+  it('refuses a repeat that is not a whole number from 1 to 100, and presses nothing', async () => {
+    const kb = keyboard();
+    const { ctx } = platformCtx(kb);
+    for (const repeat of [0, 101, 2.5, 'many']) {
+      const r = await key.execute({ combo: 'Down', repeat }, ctx);
+      expect(r.isError).toBe(true);
+      expect(r.text).toMatch(/"repeat" must be a whole number from 1 to 100/);
+    }
+    expect(kb.keyPress).not.toHaveBeenCalled();
+  });
+
+  it('the `computer` compound publishes repeat, so the MCP validator does not strip it', () => {
+    const computer = getCompactTools().find(t => t.name === 'computer')!;
+    expect(computer.parameters.repeat).toMatchObject({ type: 'number', minimum: 1, maximum: 100 });
   });
 
   it('key: the warning is appended', async () => {

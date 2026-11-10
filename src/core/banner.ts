@@ -72,23 +72,27 @@ const ACTIVITY: Record<string, [string, boolean]> = {
   setWindowState: ['Arranging windows', false], setWindowBounds: ['Arranging windows', false],
   maximizeWindow: ['Arranging windows', false], restoreWindow: ['Arranging windows', false],
 };
-const APP_NAMES: Record<string, string> = {
-  msedge: 'Edge', chrome: 'Chrome', firefox: 'Firefox', explorer: 'File Explorer', code: 'VS Code',
-  winword: 'Word', excel: 'Excel', powerpnt: 'PowerPoint', outlook: 'Outlook',
-};
+// Only where the OS gave no display name (Linux, a process the bridge may not open): process names that say little.
+const APP_NAMES: Record<string, string> = { msedge: 'Edge', chrome: 'Chrome', firefox: 'Firefox', code: 'VS Code' };
+const oneLine = (s: string | undefined) => (s ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
 
-/** A process name as a person knows the app: "msedge.exe" → "Edge", "notepad" → "Notepad". */
-export function appLabel(processName: string | undefined): string | undefined {
-  const base = (processName ?? '').replace(/\.(exe|app)$/i, '').replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
+/**
+ * The app as a person knows it: its own display name when the OS gave one ("Designcenter NX" for ugraf.exe), as it is;
+ * else from the process name: "msedge.exe" → "Edge", "notepad" → "Notepad".
+ */
+export function appLabel(processName: string | undefined, appName?: string): string | undefined {
+  const own = oneLine(appName);
+  if (own) return own;
+  const base = oneLine((processName ?? '').replace(/\.(exe|app)$/i, ''));
   if (!base || /^pid \d+$/.test(base)) return undefined;
   return APP_NAMES[base.toLowerCase()] ?? base.charAt(0).toUpperCase() + base.slice(1);
 }
 
 /** "Typing in Edge" — what the running pill shows for an input method; undefined for a method it has no words for. */
-export function activityLabel(method: string, processName?: string): string | undefined {
+export function activityLabel(method: string, processName?: string, appName?: string): string | undefined {
   const a = ACTIVITY[method];
   if (!a) return undefined;
-  const app = a[1] ? appLabel(processName) : undefined;
+  const app = a[1] ? appLabel(processName, appName) : undefined;
   return app ? `${a[0]} in ${app}` : a[0];
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
@@ -386,7 +390,7 @@ class ControlBanner {
     let forPause: number | undefined;
     try {
       child = this.spawner(this.paused
-        ? { paused: this.paused, app: appLabel(workingIn()) }
+        ? { paused: this.paused, app: appLabel(workingIn()?.processName, workingIn()?.appName) }
         : { activity: this.activity || undefined });
       // Which pause this pill answers. Its answer counts while that pause is the
       // current one, even if the process already exited (stdout can drain after
@@ -513,7 +517,7 @@ setBeforePointerPress(() => controlBanner.dodge());
 setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pids]);
 // Every guarded input says what it does: the running pill reads "Typing in Edge", not just "in progress".
 setOnAgentInput(method => {
-  const label = activityLabel(method, workingIn());
+  const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   if (label) controlBanner.setActivity(label);
 });
 // Captures: the Windows and macOS overlays exclude themselves from capture (WDA_EXCLUDEFROMCAPTURE, sharingType none +

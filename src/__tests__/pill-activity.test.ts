@@ -42,6 +42,14 @@ describe('activityLabel / appLabel', () => {
     expect(activityLabel('mouseClick', 'notepad')).toBe('Clicking in Notepad');
     expect(activityLabel('keyPress', 'Google Chrome')).toBe('Pressing keys in Google Chrome');
   });
+  // Live 2026-11-10: Siemens Designcenter (ugraf.exe) showed as "Clicking in Ugraf".
+  it("uses the app's own display name when the OS gave one, as it is", () => {
+    expect(activityLabel('mouseClick', 'ugraf', 'Designcenter NX')).toBe('Clicking in Designcenter NX');
+    expect(appLabel('msedge', 'Microsoft Edge')).toBe('Microsoft Edge');
+    expect(appLabel('paintdotnet', 'paint.net')).toBe('paint.net');
+    expect(appLabel('ugraf', ' \n ')).toBe('Ugraf');
+    expect(appLabel('x', 'evil\nACTIVITY x')).toBe('evil ACTIVITY x');
+  });
   it('says only what it does for the others, and nothing for unknown methods', () => {
     expect(activityLabel('navigate', 'msedge')).toBe('Opening a page');
     expect(activityLabel('invokeElement', 'msedge')).toBe('Clicking');

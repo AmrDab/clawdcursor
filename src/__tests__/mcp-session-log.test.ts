@@ -44,6 +44,8 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
 import { createMcpServer } from '../surface/mcp-server';
 import { listSessions, readSession } from '../surface/session-log';
 import { logger } from '../core/observability/logger';
+import { __setForegroundReaderForTests } from '../core/control';
+import { guardInputMethods } from '../platform/pointer-guard';
 import type { ToolContext } from '../tools/registry';
 
 const ctx = { desktop: {}, a11y: {}, cdp: {}, platform: undefined, getMouseScaleFactor: () => 1,
@@ -58,6 +60,25 @@ beforeEach(async () => {
 });
 
 describe('MCP session log', () => {
+  // Live 2026-11-10: a run could not be traced, the log never said which app a call acted on.
+  it('names the app an input went to (its display name, never the window title), and only on the call that sent it', async () => {
+    __setForegroundReaderForTests(async () => ({ processId: 7, processName: 'ugraf', appName: 'Designcenter NX', title: 'secret.prt' }));
+    (ctx as { platform: unknown }).platform = guardInputMethods({ keyDown: async () => {}, keyUp: async () => {} });
+    try {
+      await handlers.get('computer')!({ action: 'key_down', combo: 'shift' });
+      await handlers.get('computer')!({ action: 'key_up', combo: 'shift' });   // not a guarded input: no window was read
+    } finally {
+      (ctx as { platform: unknown }).platform = undefined;
+      __setForegroundReaderForTests(async () => null);
+    }
+    const file = listSessions()[0];
+    const { calls } = readSession(file);
+    expect(calls[0]).toMatchObject({ action: 'key_down', ok: true, app: 'Designcenter NX' });
+    expect(calls[1]).toMatchObject({ action: 'key_up', ok: true });
+    expect(calls[1]).not.toHaveProperty('app');
+    expect(fs.readFileSync(file, 'utf8')).not.toContain('secret');
+  });
+
   it('logs a safety-refused call with outcome "refused"', async () => {
     const r = await handlers.get('computer')!({ action: 'key', key: 'cmd+q' });
     expect(r.isError).toBe(true);
