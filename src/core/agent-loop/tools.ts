@@ -44,7 +44,7 @@ import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
-import { preferControl, notSelectableReason } from '../../platform/prefer-control';
+import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -2167,12 +2167,6 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
  * Used by every agent-internal tool that calls `findElements` or
  * `invokeElement` with an optional `processId` arg.
  */
-/** `: <reason>` from an adapter's failed result (`error` or `data.error`), or '' when it gave none. */
-function failReason(res: { error?: unknown; data?: Record<string, unknown> }): string {
-  const e = res.error ?? res.data?.error;
-  return typeof e === 'string' && e.trim() ? `: ${e.trim().replace(/[.\s]+$/, '')}` : '';
-}
-
 async function resolveAgentPid(
   args: Record<string, unknown>,
   ctx: AgentToolContext,

@@ -15,7 +15,7 @@
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { selectOption } from '../platform/select-option';
-import { preferControl, notSelectableReason } from '../platform/prefer-control';
+import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
 
 function needPlatform(tool: string): ToolResult {
@@ -236,7 +236,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'toggle',
         });
-        if (!res.success) return { text: `a11y_toggle failed for "${name}".`, isError: true };
+        if (!res.success) return { text: `a11y_toggle failed for "${name}"${failReason(res)}.`, isError: true };
         const state = res.data?.toggleState ?? 'unknown';
         // The bridges read the state back until it changes; if it never did, the new state was not seen and the old one
         // must not be reported as the result.
@@ -279,9 +279,8 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid, action: 'select',
         });
         if (res.success) return { text: `Selected "${name}".` };
-        const why = res.data?.error ? `: ${res.data.error}` : '';
         const notItem = await notSelectableReason(ctx.platform, { name: String(name), controlType, processId: pid });
-        return { text: `a11y_select failed for "${name}"${why}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
+        return { text: `a11y_select failed for "${name}"${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
       },
     },
 

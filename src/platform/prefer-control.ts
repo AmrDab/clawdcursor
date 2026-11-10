@@ -23,13 +23,20 @@ const TOGGLES = /^(checkbox|radiobutton|switch|togglebutton|checkmenuitem|menuit
 /** Items a plain `select name:"X"` (no value) can pick. */
 const SELECTABLE = /^(listitem|tabitem|tab|radiobutton|menuitem|treeitem|dataitem|row|cell|radiomenuitem|option)$/;
 
+/** `: <reason>` from an adapter's failed result (`error` or `data.error`), or '' when it gave none. */
+export function failReason(res: { error?: unknown; data?: Record<string, unknown> }): string {
+  const e = res.error ?? res.data?.error;
+  return typeof e === 'string' && e.trim() ? `: ${e.trim().replace(/[.\s]+$/, '')}` : '';
+}
+
 export const holdsOptions = (r?: string) => HOLDS_OPTIONS.test(role(r));
 export const isSelectableItem = (r?: string) => SELECTABLE.test(role(r));
 
 const WANTED: Record<ByNameAction, RegExp[]> = {
   focus: [EDITABLE, FOCUSABLE],
   'set-value': [EDITABLE, FOCUSABLE],
-  toggle: [TOGGLES],
+  // WinUI toggle switches report as UIA Button, GTK toggle buttons map to Button: only when nothing better matches.
+  toggle: [TOGGLES, /^button$/],
   select: [HOLDS_OPTIONS],
 };
 

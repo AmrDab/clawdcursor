@@ -113,3 +113,23 @@ describe('3. failures keep the platform reason', () => {
     expect(m.text).toMatch(/not a list item or tab to select.*pass value/);
   });
 });
+
+describe('follow-ups', () => {
+  it('toggle falls back to a Button (WinUI / GTK) only when no checkbox, radio or switch matches', async () => {
+    const t = { name: 'Wi-Fi', controlType: 'Text' };
+    expect(await preferControl(plat([t, { name: 'Wi-Fi', controlType: 'Button' }]), 'toggle', { name: 'Wi-Fi' })).toBe('Button');
+    expect(await preferControl(plat([t, { name: 'Wi-Fi', controlType: 'Button' }, { name: 'Wi-Fi', controlType: 'CheckBox' }]), 'toggle', { name: 'Wi-Fi' })).toBe('CheckBox');
+    expect(await preferControl(plat([t, { name: 'Wi-Fi', controlType: 'Image' }]), 'toggle', { name: 'Wi-Fi' })).toBeUndefined();
+  });
+
+  it('MCP toggle / select / focus failures keep the reason from res.error or res.data.error', async () => {
+    const ctx = (p: any) => ({ ensureInitialized: async () => {}, platform: p }) as any;
+    const viaError = plat([], () => ({ success: false, error: 'Element not found' }));
+    const viaData = plat([], () => ({ success: false, data: { error: 'exists but is not visible' } }));
+    expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('a11y_toggle failed for "X": Element not found.');
+    expect((await mcpTool('a11y_select').handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('a11y_select failed for "X": Element not found.');
+    expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaData))).text).toBe('a11y_toggle failed for "X": exists but is not visible.');
+    const focus = (await import('../tools/extras')).getExtraTools().find((t: any) => t.name === 'focus_element')!;
+    expect((await focus.handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('Focus failed for "X": Element not found.');
+  });
+});
