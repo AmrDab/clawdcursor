@@ -71,8 +71,10 @@ export interface ToolMeta {
   category: ToolCategory;
   /** Compact compound group this granular tool belongs to. */
   compactGroup?: CompactGroup;
-  /** Safety tier (0=read-only … 3=destructive). */
-  safetyTier: 0 | 1 | 2 | 3;
+  /** 0 = reads only, 1 = sends input / changes something (ToolDefinition.safetyTier). */
+  safetyTier: 0 | 1;
+  /** `false`: an input tool that cannot destroy anything by itself (ToolDefinition.destructive). */
+  destructive?: boolean;
   /** Token cost class. */
   costClass: ToolCostClass;
   /**
@@ -164,6 +166,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'perception',
     compactGroup: 'accessibility',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name to match',
@@ -176,6 +179,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'perception',
     compactGroup: 'accessibility',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name',
@@ -314,6 +318,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'mouse',
     compactGroup: 'computer',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       x: 'X coordinate in image-space',
@@ -327,6 +332,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'mouse',
     compactGroup: 'computer',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       x: 'X coordinate in image-space',
@@ -370,6 +376,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'orchestration',
     compactGroup: 'system',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       name: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")',
@@ -380,6 +387,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     compactGroup: 'window',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Process name to focus (e.g. "notepad", "msedge")',
@@ -392,6 +400,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     compactGroup: 'window',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
@@ -412,6 +421,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // Tier 1 (input): minimizing is reversible — the tier extras.ts and the
     // window compound already give it. This projected copy still said 2.
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
@@ -424,6 +434,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     compactGroup: 'window',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
@@ -435,7 +446,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   close_window: {
     category: 'window',
     compactGroup: 'window',
-    safetyTier: 2,
+    safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
@@ -448,6 +459,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     compactGroup: 'window',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       x: 'New X (top-left origin, logical px)',
@@ -472,6 +484,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     compactGroup: 'window',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       index: 'Jump to tab N (1-based, 1-9). If omitted, direction must be provided.',
@@ -485,6 +498,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'perception',
     compactGroup: 'accessibility',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name of the element',
@@ -512,7 +526,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   open_file: {
     category: 'orchestration',
     compactGroup: 'window',
-    safetyTier: 2,
+    safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
       path: 'Absolute filesystem path',
@@ -523,6 +537,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'orchestration',
     compactGroup: 'window',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       url: 'https:// or http:// URL',
@@ -532,7 +547,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   open_uri: {
     category: 'orchestration',
     compactGroup: 'window',
-    safetyTier: 2,
+    safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
       uri: 'A full URI like "mailto:bob@example.com?subject=hi&body=hello", "tel:+15551234", "slack://channel?team=T123&id=C456", "vscode://file/Users/me/code/x.ts", "https://example.com". Must be properly URL-encoded.',
@@ -565,6 +580,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'mouse',
     compactGroup: 'computer',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       dx: 'X offset in image-space pixels',
@@ -586,6 +602,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'mouse',
     compactGroup: 'computer',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       button: 'Which button (default: left)',
@@ -606,6 +623,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'keyboard',
     compactGroup: 'computer',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     paramDescriptions: {
       key: 'Key token',
@@ -633,7 +651,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
   write_clipboard: {
     category: 'clipboard',
     compactGroup: 'system',
-    safetyTier: 2,
+    safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
       text: 'Text to write to clipboard',
@@ -697,6 +715,7 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'browser',
     compactGroup: 'browser',
     safetyTier: 1,
+    destructive: false,
     costClass: 'act',
     // browser_connect has no parameters
   },

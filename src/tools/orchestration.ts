@@ -33,6 +33,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'window',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ name }, ctx) => {
         await ctx.ensureInitialized();
         const rawName = String(name ?? '');
@@ -124,7 +125,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
       },
       category: 'orchestration',
       compactGroup: 'window',
-      safetyTier: 2,
+      safetyTier: 1,
       handler: async ({ url }, ctx) => {
         await ctx.ensureInitialized();
         // Go through the ONE driver with the SAME attach/launch policy as

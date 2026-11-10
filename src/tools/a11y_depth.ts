@@ -64,6 +64,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
       category: 'perception',
       compactGroup: 'accessibility',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_expand');
@@ -91,6 +92,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
       category: 'perception',
       compactGroup: 'accessibility',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_collapse');

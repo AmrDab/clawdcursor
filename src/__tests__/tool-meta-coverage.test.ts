@@ -125,7 +125,7 @@ describe('TOOL_META coverage (Step 1 — enforced)', () => {
     const VALID_COST_CLASSES = new Set([
       'act', 'inspect', 'perceive-text', 'perceive-image',
     ]);
-    const VALID_SAFETY_TIERS = new Set([0, 1, 2, 3]);
+    const VALID_SAFETY_TIERS = new Set([0, 1]);   // read vs input: no tier refuses anything
 
     const bad: string[] = [];
     for (const [name, meta] of Object.entries(TOOL_META)) {

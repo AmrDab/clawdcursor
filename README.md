@@ -1,8 +1,8 @@
 <h1 align="center">Clawd Cursor</h1>
 
 <p align="center">
-  <strong>Safe desktop control for any AI agent.</strong> Compiles the screen into a UI map and acts on elements by stable id (screenshot/vision only as a last resort),<br>
-  <strong>verifies its own actions</strong>, and gates everything through one safety checkpoint. Local &middot; cross-OS &middot; any model.
+  <strong>Desktop control for any AI agent.</strong> Compiles the screen into a UI map and acts on elements by stable id (screenshot/vision only as a last resort),<br>
+  <strong>verifies its own actions</strong>, and stops the moment you say so. Local &middot; cross-OS &middot; any model.
 </p>
 
 <p align="center">
@@ -101,7 +101,7 @@
 - **The glow and banner on every OS.** macOS and Linux now get the same screen-edge glow and banner as Windows: amber while the agent works, blue while it waits for you. Double-click the banner to stop everything.
 - **Blind mode on macOS caught up with Windows.** A native accessibility helper lists windows in 0.3 s (was 11 s) and reads a window's tree in 0.06&ndash;0.2 s. Typing is refused while a system dialog owns the keyboard, and the agent is told when another app's dialog took its keys.
 - **Sharper blind mode on Windows and Linux.** Classic controls no longer read as blank panes, the open dialog is what gets read, no 10 s stall on buttons that open a modal, the right field is found by name, and focusing a window no longer un-maximizes it.
-- **Upgrade walls are a roadblock.** Clicks on `Upgrade`, `Subscribe` or `Start trial` need confirmation.
+- **Upgrade walls are a roadblock.** The agent is told to stop at `Upgrade`, `Subscribe` or `Start trial` and ask you on the pause prompt.
 - **Know what you're running.** `clawdcursor versions` lists every installed copy (global npm, Claude Desktop extension, Claude Code plugin), and the installers say what they updated.
 
 Everything else is in the [changelog](CHANGELOG.md).
@@ -128,7 +128,7 @@ The desktop-agent space is crowded. The closest **install-and-go** peers are [Wi
 | Cross-OS (Windows + macOS + Linux)       | ✅                      | &mdash;     | &mdash;        | varies               | sandbox      |
 | Perception **without a vision model**    | ✅ compiled a11y + OCR map | DOM      | a11y tree      | ❌ vision-centric     | ❌ vision    |
 | **Verifies its own actions** (deviation) | ✅                      | &mdash;     | &mdash;        | &mdash;              | &mdash;      |
-| Single safety chokepoint (allow/confirm/block) | ✅                | &mdash;     | &mdash;        | &mdash;              | &mdash;      |
+| A Stop that holds (every process, across restarts) | ✅            | &mdash;     | &mdash;        | &mdash;              | &mdash;      |
 | Any model / vendor                       | ✅                      | ✅          | not an agent   | model-specific       | Claude only  |
 | MCP-native (one config, any host)        | ✅                      | library     | test framework | &mdash;              | tool-use API |
 | Local-only, no cloud required            | ✅                      | ✅          | ✅             | needs a model        | screens → cloud |
@@ -137,7 +137,7 @@ Three things here are genuinely rare:
 
 1. **Cheapest-tier-first perception, fully local.** Accessibility tree (free) → OCR (cheap) → screenshot (expensive — the *only* tier that puts pixels in the model's context; "screenshot" and "vision" are the same step). The agent climbs only when it must, so token cost tracks task difficulty &mdash; and with a local model, nothing leaves the machine. Vision-centric agents (OmniParser, UI-TARS) need a screenshot in the model for *every* observation.
 2. **It verifies.** Pass `expect` on a consequential action and Clawd Cursor re-checks the live screen (with a short settle window for async UIs) and reports a **DEVIATION** instead of a hollow "success." A completed task can't be marked done on evidence that was already true before it acted.
-3. **One safety gate.** Every call &mdash; from an editor over stdio, or an external agent over HTTP &mdash; routes through a single `safety.evaluate()` chokepoint (allow / confirm / block) before it touches the desktop. The agent cannot bypass it.
+3. **You stay in control, and the roles are clear.** clawdcursor is a tool layer that runs with your own permissions: what to do is decided by your agent and by your MCP host's permission prompts, which clawdcursor feeds with accurate read-only / destructive tool annotations. What clawdcursor guarantees itself is small and holds for every call: a Stop that every process honours, a pause only you can answer, no stray input into the AI assistant's own window, and a short list of key combos (lock, log out) it never sends. See [SECURITY.md](SECURITY.md).
 
 Plus: whenever an agent is driving, an on-screen **banner that says what it is doing** ("Typing in Edge") and a thin amber **outline around the window it is working in** (nothing over the window, nothing on the rest of the screen), on Windows, macOS and Linux &mdash; **press Stop on the banner to stop.** A stop holds until you give control back: the agent's next request comes up as a prompt, and only your **Resume** lets it act again (or run `clawdcursor resume`). Keys and clicks also go only to the window the agent was working in: if you switch apps while it waits, its next input is refused instead of landing in your window. When the agent needs you (a sign-in, a 2FA code), the outline turns blue and the banner says what to do, with **Resume** and **End task**. A human at the machine always knows, and always has a kill switch.
 
@@ -306,9 +306,9 @@ The perception + verification core (the **UI State Compiler**, since v1.5.0):
 
 - **`compile_ui`** fuses the accessibility tree and OCR into one confidence-scored map of the screen, every element tagged with a stable `el_NN` id. Act on an element by `{element_id, snapshot_id}` instead of pixels &mdash; near-free in tokens, and it survives DPI, resize, and layout shifts. `find_button` / `find_field` locate a target by meaning and hand you the id.
 - **Reactive verification.** `expect` on an action → Clawd Cursor confirms the outcome on the live screen and returns a **DEVIATION** when the UI didn't obey.
-- **Cross-platform parity.** The compiler, secure-field redaction, and coordinate handling run on Windows, macOS, and Linux; the external-agent (MCP) surface resolves `el_NN` refs through the safety gate and discloses when it attached to your existing browser.
+- **Cross-platform parity.** The compiler, secure-field redaction, and coordinate handling run on Windows, macOS, and Linux; the external-agent (MCP) surface resolves `el_NN` refs and discloses when it attached to your existing browser.
 
-> Set-of-Mark-style element IDs and a11y/OCR fusion aren't new ideas on their own &mdash; what's rare is doing them **locally, a11y-first (no vision model required), with a built-in verification gate and one safety chokepoint**, across three operating systems, behind a single MCP config.
+> Set-of-Mark-style element IDs and a11y/OCR fusion aren't new ideas on their own &mdash; what's rare is doing them **locally, a11y-first (no vision model required), with a built-in verification gate and a Stop that holds**, across three operating systems, behind a single MCP config.
 
 See the [changelog](CHANGELOG.md) for the full release history, or the [latest release](https://github.com/AmrDab/clawdcursor/releases/latest).
 
@@ -342,10 +342,9 @@ flowchart TB
     dom --> act
     vision --> act
 
-    act["Act<br/>click/type/key/drag · invoke/set_value · open_app · batch"] --> safety
-    safety["Single safety gate<br/>safety.evaluate() → allow / confirm / block"] -- allowed --> tools["Tool registry<br/>100+ granular + 6 compound"]
-    safety -- needs user --> confirm["Human confirmation"] --> tools
-    safety -- denied --> blocked["blocked"]
+    act["Act<br/>click/type/key/drag · invoke/set_value · open_app · batch"] --> guards
+    guards["Guards<br/>Stop · pause · AI-host window · hard key list"] -- ok --> tools["Tool registry<br/>100+ granular + 6 compound"]
+    guards -- refused --> blocked["refused"]
 
     tools --> desktop["Real desktop"]
     desktop --> verify{"expect → does state match?"}
@@ -358,13 +357,13 @@ flowchart TB
     classDef actNode fill:#ffedd5,stroke:#ea580c,color:#0f172a;
     classDef stop fill:#fee2e2,stroke:#dc2626,color:#0f172a;
     class loop,verify agentNode;
-    class safety,confirm,tools gate;
+    class guards,tools gate;
     class observe,a11y,ocr,dom,vision obsNode;
     class act actNode;
     class blocked stop;
 ```
 
-**`batch` for deterministic stretches.** When the next N steps are known, collapse them into one call &mdash; each step still routes through the safety gate; on any guard miss or error the batch halts with a per-step trace.
+**`batch` for deterministic stretches.** When the next N steps are known, collapse them into one call &mdash; each step is refused exactly as a direct call would be (Stop, the pause, a locking key combo); on any guard miss or error the batch halts with a per-step trace.
 
 ---
 
@@ -379,7 +378,7 @@ Two catalogs ship side-by-side. The **toolbox** is 6 compound tools, each with a
 | `window` | `list`, `active`, `focus`, `maximize`, `minimize`, `restore`, `close`, `resize`, `list_displays`, `screen_size`, `open_app`, `open_file`, `open_url`, `switch_tab`, `navigate` |
 | `system` | `copy_all_text`, `ocr`, `clipboard_read`, `clipboard_write`, `shortcuts_list`, `shortcuts_run`, `undo`, `pause_for_user`, `report`, `build_uri`, `open_uri`, `open_app`, `open_file`, `open_url`, `detect_webview`, `relaunch_with_cdp`, `system_time` |
 | `browser` | `connect`, `page_context`, `read_text`, `click`, `type`, `select_option`, `evaluate`, `wait_for`, `list_tabs`, `switch_tab`, `scroll` |
-| `batch` | `{steps:[…]}` &mdash; collapse N calls into one round-trip; each step `{name, arguments, expect?}`, re-perceived and safety-gated, halts with a trace on any miss. |
+| `batch` | `{steps:[…]}` &mdash; collapse N calls into one round-trip; each step `{name, arguments, expect?}`, re-perceived and guarded like a direct call, halts with a trace on any miss. |
 
 ```js
 computer({ action: "key", combo: "mod+s" })          // Cmd+S / Ctrl+S, resolved per-OS
@@ -446,22 +445,20 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 
 ## Safety & privacy
 
-| Tier | Actions | Behavior |
-|---|---|---|
-| **Allow** | Reading, opening apps, navigation, typing into non-sensitive fields, minimize | Executes immediately |
-| **Confirm** | Sends, deletes, purchases, transfers, close-window/quit-app & show-desktop key combos, sensitive apps | Pauses for approval (`batch({allowConfirm:true})` to authorize) |
-| **Block** | `Ctrl+Alt+Del`, lock / log-out / force-quit / shutdown key sequences | Refused outright (no path) |
+clawdcursor runs with **your own permissions** and has no policy of its own about what the agent may do: since 1.6 there is no allow / confirm / block gate. That decision belongs to your agent and to your MCP host's permission prompts, which read clawdcursor's tool annotations (`readOnlyHint` on reads, `destructiveHint` on anything that clicks, types, presses keys, closes, opens or overwrites). Agents are told to ask you with `pause_for_user` before an irreversible action you did not ask for. What clawdcursor always enforces itself:
 
+- **Stop.** Double-click the pill, or `clawdcursor stop`: every process stops, a running batch included, and stays stopped across restarts until you resume.
+- **The hard key list.** The few combos that lock the machine or end the session are never sent (Windows `Win+L`, `Ctrl+Alt+Del`; macOS `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, Power; Linux `Super+L`, `Ctrl+Alt+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`), however they are spelled. Every other shortcut is allowed.
+- **No stray input into the AI assistant's window**, or into a window you switched to.
 - **Pauses instead of pushing through.** At a sign-in, 2FA, CAPTCHA or plan-limit page the agent hands the desktop to you (blue prompt, Resume / End task) instead of guessing. A pause times out after 15 minutes (`CLAWD_PAUSE_TIMEOUT_MIN`); `CLAWD_NO_PAUSE=1` turns pausing off.
 - **Network isolation.** Binds to `127.0.0.1` only; there is no setting that opens it to the network. Verify: `netstat -an | findstr 3847` (Windows) / `| grep 3847` (Unix). To drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side.
 - **Bearer-token auth** on every HTTP request (`~/.clawdcursor/token`).
-- **Sensitive-app policy.** Email, banking, password managers, private messaging auto-elevate to Confirm.
 - **No telemetry by default.** Nothing phones home. Screenshots stay in RAM and go only to the MCP client that asked for them; clawdcursor calls no model itself. `clawdcursor report` is opt-in and previews exactly what it sends.
 - **No screenshots to any model, if you want.** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, which also covers stdio `clawdcursor mcp`) keeps every image from MCP clients; they work from the accessibility tree and OCR text.
 - **Prompt-injection defense.** Screen text is returned inside `<untrusted-screen-content>` tags &mdash; data, never instructions.
 - **Log privacy.** Logs redact password-field values (`AXSecureTextField`, UIA `IsPassword=true`).
 
-See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
+See [SECURITY.md](SECURITY.md) for the full threat model and private vulnerability reporting.
 
 ---
 
@@ -469,12 +466,12 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
 | Directory | What lives here |
 |---|---|
-| `src/core/` | Sense layer (a11y / snapshot / fingerprint / UI compiler), reactive verification, focus guard, safety gate. |
+| `src/core/` | Sense layer (a11y / snapshot / fingerprint / UI compiler), reactive verification, the Stop / pause / AI-host guards. |
 | `src/tools/` | 100+ granular tools + 5 compound aggregators + `batch`, playbooks, registry, dispatch. |
 | `src/platform/` | `PlatformAdapter` + Windows / macOS / Linux / Wayland, OCR engine, CDP driver, URI handler. |
 | `src/surface/` | CLI, MCP server (stdio + HTTP), dashboard, doctor, onboarding, control banner. |
 
-The `PlatformAdapter` is the only thing platform code talks to; `safety.evaluate()` is the only way tools execute. Those two seams are the whole point.
+The `PlatformAdapter` is the only thing platform code talks to; `guardInputMethods` is the one place every synthetic key and click passes (Stop, the window check, the hard key list). Those two seams are the whole point.
 
 ---
 

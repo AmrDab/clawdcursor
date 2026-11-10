@@ -8,7 +8,7 @@ body:
       value: |
         Thanks for taking the time to report a bug.
 
-        **Before filing:** if this is a security issue (privilege escalation, token theft, safety-layer bypass), please use [private vulnerability reporting](https://github.com/AmrDab/clawdcursor/security/advisories/new) instead — see [SECURITY.md](https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md).
+        **Before filing:** if this is a security issue (code execution, token theft, a bypass of the Stop control or another guarantee in SECURITY.md), please use [private vulnerability reporting](https://github.com/AmrDab/clawdcursor/security/advisories/new) instead — see [SECURITY.md](https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md).
   - type: input
     id: version
     attributes:

@@ -221,7 +221,7 @@ export function unifiedToToolResult(r: UnifiedToolResult): ToolResult {
  *   - name: TOOL_META[t.name].mcpName ?? t.name
  *   - description: t.description (System B already has good descriptions)
  *   - parameters: via jsonSchemaToParamDefs(t.inputSchema)
- *   - category, compactGroup, safetyTier, costClass, cheaperAlternatives: from TOOL_META
+ *   - category, compactGroup, safetyTier, destructive, costClass, cheaperAlternatives: from TOOL_META
  *   - handler: bridges ToolContext → AgentToolContext → t.execute() → ToolResult
  *
  * Terminal actions (done, give_up, cannot_read) and vision compound tools
@@ -294,6 +294,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     category: meta.category,
     compactGroup: meta.compactGroup,
     safetyTier: meta.safetyTier,
+    destructive: meta.destructive,
     costClass: meta.costClass,
     cheaperAlternatives: meta.cheaperAlternatives,
     honorsExpect: true,

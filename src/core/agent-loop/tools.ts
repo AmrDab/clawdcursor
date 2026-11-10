@@ -22,7 +22,6 @@ import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
-import { isBlockedKey } from '../../tools/playbooks/keys-blocklist';
 import { resolveAlias } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
@@ -976,17 +975,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const input = raw.trim();
         // (b) "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = input.split(/\s+/);
-        // (c) Hard-block backstop. This carried its own 3-entry copy
-        //     (alt+f4, ctrl+alt+delete, ctrl+alt+del) that omitted win+l and
-        //     every other machine-locking combo, so it caught nothing once the
-        //     SafetyLayer gate was bypassed (GHSA-35pc-g74h-p476). Defer to the
-        //     single blocklist so the two can no longer drift.
-        //     HARD tier only — confirm-tier combos keep their allowConfirm path.
-        for (const c of combos) {
-          if (isBlockedKey(c)) {
-            return { success: false, isError: true, text: `BLOCKED: "${c}" is a dangerous key combo.` };
-          }
-        }
+        // (c) The hard key list (lock / log out / secure attention) is refused in the input layer, for every
+        //     caller: platform/hard-keys.ts, called from guardInputMethods.
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (let i = 0; i < times; i++) {
           for (const c of combos) {

@@ -1416,8 +1416,7 @@ export class WindowsAdapter implements PlatformAdapter {
    * app the user can find by name in the Start Menu (apps, settings panes,
    * UWP without a known AppsFolder ID, third-party Win32 binaries with an
    * App Paths entry). The keyboard primitives we use here go through the
-   * adapter directly, NOT through the safety layer — this is internal
-   * platform logic, not an agent action.
+   * adapter directly — this is internal platform logic, not an agent action.
    *
    * Tuned to the same cadence as the router's startMenuSearch helper.
    */

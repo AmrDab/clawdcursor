@@ -6,7 +6,7 @@
  *   - a click on the pill prints BANNER_CHOICE <index>; the TEXT comes from the gate, never from the pill
  *   - a choice settles as {status:"replied", choice:"<exact text>"}; typed text stays {status:"replied", reply}
  *   - only the user can choose: an agent's answer never carries a choice, and its resume stays unverified
- *   - a choice is not a safety approval: nothing in the safety layer reads the pause gate
+ *   - a choice cannot lift a guard: the input layer (Stop, the hard key list, the AI-host guard) never reads the pause gate
  *   - no choices / input = the plain prompt (same info, same env, same results as before)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,8 +19,7 @@ import type { ChildProcess } from 'child_process';
 import { controlBanner, overlayEnv, parseChoiceLine, type OverlayMode } from '../core/banner';
 import { pauseGate, parsePauseCard } from '../core/pause-gate';
 import { getAgentTools } from '../tools/agent';
-import { getCompactSurface, getTool } from '../tools/registry';
-import { evaluateToolCall } from '../tools/safety-gate';
+import { getCompactSurface } from '../tools/registry';
 import type { ToolContext } from '../tools/types';
 
 class FakeChild extends EventEmitter {
@@ -155,9 +154,9 @@ describe('pause_for_user tool: arguments', () => {
     expect(system.description).toMatch(/not in your own chat/);
   });
 
-  it('tells agents to ask on the card, not in their chat, and that a choice never approves a safety confirmation', () => {
+  it('tells agents to ask on the card, not in their chat, and before an irreversible action the user did not ask for', () => {
     expect(pauseForUser.description).toMatch(/the user is watching the screen, not your chat: ask them on this prompt \(use `choices` when there are options\), not in your own chat/);
-    expect(pauseForUser.description).toMatch(/never approval of a safety confirmation \(Send \/ Delete \/ Pay/);
+    expect(pauseForUser.description).toMatch(/before an irreversible action the user did not ask for \(sending, deleting, paying, closing unsaved work\): ask, then follow their answer/);
   });
 });
 
@@ -171,7 +170,7 @@ describe('choice mapping', () => {
     expect(r.status).toBe('replied');
     expect(r.choice).toBe('No, wait');
     expect(r).not.toHaveProperty('reply');
-    expect(r.next).toMatch(/NOT approval/);
+    expect(r.next).toMatch(/their answer to your question: follow it, and nothing beyond what it covers/);
     expect(pauseGate.current()).toBeNull();
   });
 
@@ -295,20 +294,10 @@ describe('who can answer', () => {
   });
 });
 
-describe('a choice is not a safety approval', () => {
-  it('confirm-tier actions stay confirm-tier after the user picked "Yes, send"', async () => {
-    const call = body({ message: 'Close the window?', choices: ['Yes, close it', 'No'] });
-    await flush();
-    say('BANNER_CHOICE 0');
-    expect((await call).choice).toBe('Yes, close it');
-    // The same gate every MCP / REST call goes through: unchanged by what was picked.
-    expect(evaluateToolCall(getTool('close_window')!, {})?.text).toContain('safety confirm');
-    expect(evaluateToolCall(getTool('key_press')!, { key: 'alt+f4' })?.text).toContain('safety confirm');
-  });
-
-  it('the safety layer and the batch gate never touch the pause gate', () => {
+describe('a choice cannot lift a guard', () => {
+  it('the input layer and the batch executor never read the pause gate for a go-ahead', () => {
     const src = join(dirname(fileURLToPath(import.meta.url)), '..');
-    for (const file of ['core/safety.ts', 'tools/safety-gate.ts', 'tools/batch.ts', 'core/agent-loop/tools.ts']) {
+    for (const file of ['platform/hard-keys.ts', 'platform/pointer-guard.ts', 'tools/batch.ts', 'core/agent-loop/tools.ts']) {
       expect(readFileSync(join(src, file), 'utf8'), file).not.toMatch(/pause-gate|pauseGate/);
     }
   });

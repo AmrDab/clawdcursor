@@ -24,7 +24,6 @@ import type { ZodTypeAny } from 'zod';
 import { VERSION } from './version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
 import { getAllTools, getCompactSurface } from '../tools/registry';
-import { evaluateToolCall } from '../tools/safety-gate';
 import { appLabel, controlBanner } from '../core/banner';
 import { enableHostAncestry } from '../core/ai-hosts';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
@@ -175,7 +174,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       'and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. A plan limit or upgrade wall is a roadblock too: ' +
       'stop, quote the blocking text and pause_for_user; never click Upgrade / Subscribe yourself. ' +
       'While you are driving the desktop, the user is watching the screen, not your chat: ask them on the pause card (use choices when there are options), not in your own chat — ' +
-      'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. The answer {status:"replied", choice | reply} is never approval of a Send / Delete / Pay safety confirmation. ' +
+      'system {action:"pause_for_user", message, choices:[...], input:{placeholder?, multiline?}}. Before an irreversible action the user did not ask for (sending, deleting, paying, closing unsaved work), ask there first and follow the answer {status:"replied", choice | reply}: clawdcursor does not judge what you do, so that decision is yours. ' +
       'Drive UI symbolically: compile_ui / find_button / find_field return a stable ' +
       '{element_id, snapshot_id} you pass to invoke/set_value — it survives layout shifts, so ' +
       'prefer it over pixel coordinates. Pass `expect` on consequential actions so a failed one ' +
@@ -215,8 +214,8 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const answer = await host.elicitInput({
           message:
             'clawdcursor needs your OK once before it can control this computer. ' +
-            'It lets the AI use your mouse, keyboard and screen. Dangerous key combos stay ' +
-            'blocked and destructive actions still ask first.',
+            'It lets the AI use your mouse, keyboard and screen, with your own permissions. ' +
+            'You can stop it at any time from the on-screen pill, and it never sends the key combos that lock the screen or log you out.',
           requestedSchema: {
             type: 'object',
             properties: {
@@ -330,21 +329,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             isError: true,
           };
         }
-        // The user's stop comes right after consent and before every other refusal (safety confirm, screen binding, own UI):
-        // an agent told "no screenshot taken" or "confirm first" never learns the user took control back (control.ts).
+        // The user's stop comes right after consent and before every other refusal (screen binding, own UI):
+        // an agent told "no screenshot taken" never learns the user took control back (control.ts).
         if (isStopped() && !isStopSafeCall(tool.name, callAction)) {
           const label = callAction ? `${tool.name} {action:"${callAction}"}` : tool.name;
           logger.warn('safety.refused', { tool: tool.name, action: callAction, guard: 'stopped', reason: STOPPED_TEXT });
           sessionLog.record(tool.name, callAction, false, 0, STOPPED_TEXT, clientInfo(), { outcome: 'refused' });
           return { content: [{ type: 'text', text: withOutcome(`${label}: ${STOPPED_TEXT}`, true) }], isError: true };
-        }
-        // Pass the holder so el_NN refs resolve to their element label for
-        // the destructive-label rule (Send/Delete/Pay) on the MCP route too.
-        const safetyError = evaluateToolCall(tool, params ?? {}, { uiMaps: ctx.uiMaps });
-        if (safetyError) {
-          sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
-            safetyError.text, clientInfo(), { outcome: 'refused' });
-          return { content: [{ type: 'text', text: withOutcome(safetyError.text, true) }], isError: true };
         }
         // Transparency: any consequential (mutating) tool call from an
         // EXTERNAL agent pokes the on-screen control banner — it shows on the
@@ -356,8 +347,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // is not there cannot be double-clicked (#294).
         if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
         const action = typeof params?.action === 'string' ? params.action : undefined;
-        // The safety gate above has already logged `safety.decision allow`; a guard that refuses after it logs its own
-        // verdict, so the audit log never shows a refused call as allowed.
+        // A guard that refuses logs its own verdict.
         const refuse = (guard: string, why: string): McpToolResult => {
           const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
           logger.warn('safety.refused', { tool: tool.name, action, guard, reason: why });
@@ -404,7 +394,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // A batch: one row per step class, not one act-other row. Steps the cap skipped never ran.
         const steps = result.steps?.filter(s => s.status !== 'skipped').map(s => ({
           tool: s.tool, action: s.action, ok: s.status === 'ok',
-          outcome: s.status === 'blocked' || s.status === 'needs_confirm' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
+          outcome: s.status === 'blocked' ? 'refused' as const : outcomeOf(s.status !== 'ok', s.text),
           ...(s.pressedKeys ? { cls: 'act-other' as const } : {}),
         }));
         // A batch halts at its first failed step, so a halt a guard caused is a refusal, not an error.
@@ -457,13 +447,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
  * an upgrade is caught by CI rather than silently re-breaking Gemini.
  */
 /**
- * MCP tool annotations: the tool's own, else derived from its safety tier — tier 0 reads only; tier 2+ (closing windows,
- * overwriting the clipboard, arbitrary JS) can destroy something.
+ * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool can destroy something (a click
+ * lands on whatever is under it, a key does whatever the app binds it to) unless it declares `destructive: false`.
+ * MCP hosts decide from these hints what to ask the user before a call: clawdcursor itself does not judge the action.
  */
-export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier'>): NonNullable<ToolDefinition['annotations']> {
+export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier' | 'destructive'>): NonNullable<ToolDefinition['annotations']> {
   if (tool.annotations) return tool.annotations;
-  const tier = tool.safetyTier ?? 1;
-  return tier === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tier >= 2 };
+  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive !== false };
 }
 
 function stripRootSchemaDialect(server: McpServerLike): void {

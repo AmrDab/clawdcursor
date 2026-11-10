@@ -1,21 +1,17 @@
 /**
  * Guarded action-sequence executor (src/tools/batch.ts).
- * Registry + safety gate are mocked so we test the ORCHESTRATION logic in
- * isolation: ordered execution, precondition guards (re-perceive), safety
- * halting, error halting, the trace, dry-run, and the step cap.
+ * The registry is mocked so we test the ORCHESTRATION logic in isolation: ordered execution, precondition guards
+ * (re-perceive), halting on a refusal or an error, the trace, and the step cap — and that a batch is not a way around
+ * the user's Stop or the hard key list (GHSA-3v3f-5rwv-whc9).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-// ── Mock the two collaborators the executor reuses ──────────────────────────
+// ── Mock the collaborator the executor reuses ───────────────────────────────
 const tools: Record<string, any> = {};
-let safetyFor: (name: string, args: any) => any = () => null; // null = allow
 
 vi.mock('../tools/registry', () => ({
   getTool: (name: string) => tools[name],
   getCompactTools: () => [],
-}));
-vi.mock('../tools/safety-gate', () => ({
-  evaluateToolCall: (tool: any, args: any) => safetyFor(tool.name, args),
 }));
 
 let pausePending: null | { message: string } = null;
@@ -23,6 +19,8 @@ vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pausePending 
 
 import { executeBatch, getBatchTools } from '../tools/batch';
 import { stopControl, sleepUnlessStopped, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
+import { guardInputMethods } from '../platform/pointer-guard';
+import { getDesktopTools } from '../tools/desktop';
 
 const tool = (name: string, handler: any) => ({ name, parameters: {}, safetyTier: 1, handler });
 const okTool = (name: string) => tool(name, vi.fn(async () => ({ text: `${name} ok` })));
@@ -30,7 +28,6 @@ const ctx = {} as any;
 
 beforeEach(() => {
   for (const k of Object.keys(tools)) delete tools[k];
-  safetyFor = () => null;
   pausePending = null;
 });
 
@@ -85,13 +82,6 @@ describe('executeBatch — the user stops clawdcursor mid-batch (#294)', () => {
     expect(r.steps[0]).toMatchObject({ status: 'blocked', text: STOPPED_TEXT });
   });
 
-  it('the stop is reported before a safety confirm on the same step', async () => {
-    tools.set_clipboard = okTool('set_clipboard');
-    safetyFor = () => ({ text: 'safety confirm: needs confirmation', isError: true });
-    stopControl('pill');
-    const r = await executeBatch([{ name: 'set_clipboard', arguments: { text: 'x' } }], ctx);
-    expect(r.steps[0]).toMatchObject({ status: 'blocked', text: STOPPED_TEXT });
-  });
 });
 
 describe('executeBatch — happy path', () => {
@@ -110,14 +100,11 @@ describe('executeBatch — happy path', () => {
 
   // Live blind test: a step written with the agent-loop's `args` key ran with
   // NO arguments here. Both spellings are accepted on both batch surfaces.
-  it('accepts `args` as an alias of `arguments` (handler, safety gate and label)', async () => {
+  it('accepts `args` as an alias of `arguments` (handler and label)', async () => {
     tools.type_text = okTool('type_text');
-    const seen: any[] = [];
-    safetyFor = (_n, a) => { seen.push(a); return null; };
     const r = await executeBatch([{ name: 'type_text', args: { action: 'x', text: 'hi' } } as any], ctx);
     expect(r.allDone).toBe(true);
     expect(tools.type_text.handler).toHaveBeenCalledWith({ action: 'x', text: 'hi' }, ctx);
-    expect(seen).toEqual([{ action: 'x', text: 'hi' }]);
     expect(r.steps[0].label).toBe('type_text.x');
   });
 });
@@ -190,72 +177,63 @@ describe('executeBatch — guards (re-perceive precondition)', () => {
   });
 });
 
-describe('executeBatch — safety', () => {
-  const ENV_KEY = 'CLAWD_BATCH_ALLOW_CONFIRM';
-  let prevEnv: string | undefined;
-  beforeEach(() => { prevEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY]; });
-  afterEach(() => { if (prevEnv === undefined) delete process.env[ENV_KEY]; else process.env[ENV_KEY] = prevEnv; });
+// GHSA-3v3f-5rwv-whc9: `allowConfirm:true` on a batch carried confirm-tier steps past the gate. The confirm tier, the
+// flag, its env switch and dryRun are gone in 1.6. What a batch must still not get around: the user's Stop and the
+// hard key list. Both sit below the batch (own-ui-guard per step, the input layer under every handler).
+describe('a batch is not a way around the Stop or the hard key list (GHSA-3v3f-5rwv-whc9)', () => {
+  afterEach(() => __setControlDirForTests(null));
+  const batchTool = () => getBatchTools()[0];
+  const LOCK = process.platform === 'darwin' ? 'ctrl+cmd+q' : 'win+l';
+  /** The real key_press tool over a guarded keyboard, as the MCP server wires it. */
+  function realKeyPress() {
+    const sent: string[] = [];
+    const desktop = guardInputMethods({ keyPress: async (c: string) => { sent.push(c); }, takeInputWarning: () => null });
+    const keyCtx = { ensureInitialized: async () => {}, desktop, a11y: { getActiveWindow: async () => null, invalidateCache: () => {} } } as any;
+    tools.key_press = getDesktopTools().find(t => t.name === 'key_press')!;
+    return { sent, keyCtx };
+  }
 
-  it('halts at a confirm-tier step by default (no allowConfirm)', async () => {
+  it('the tool no longer takes allowConfirm or dryRun', () => {
+    expect(Object.keys(batchTool().parameters).sort()).toEqual(['maxSteps', 'steps']);
+    expect(batchTool().description).not.toMatch(/allowConfirm|dryRun|confirm-tier|CLAWD_BATCH_ALLOW_CONFIRM/);
+  });
+
+  it.each([{}, { allowConfirm: true }, { allowConfirm: true, dryRun: false }])('a locking key combo in a step is refused, with %j', async (flags) => {
+    const { sent, keyCtx } = realKeyPress();
+    const r = await batchTool().handler({ steps: [{ name: 'key_press', arguments: { key: LOCK } }], ...flags }, keyCtx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/dangerous key combo/);
+    expect(sent).toEqual([]);
+  });
+
+  it('the sequence form is refused inside a batch too, and the batch halts there', async () => {
+    const { sent, keyCtx } = realKeyPress();
+    tools.type_text = okTool('type_text');
+    const r = await executeBatch([{ name: 'key_press', arguments: { key: `esc ${LOCK}` } }, { name: 'type_text', arguments: { text: 'x' } }], keyCtx);
+    expect(r.steps[0].status).toBe('error');
+    expect(sent).toEqual(['esc']);
+    expect(tools.type_text.handler).not.toHaveBeenCalled();
+  });
+
+  it('after the user stops clawdcursor, allowConfirm changes nothing: no step runs', async () => {
     tools.close_window = okTool('close_window');
-    safetyFor = (name) => name === 'close_window' ? { text: 'close_window: safety confirm - destructive', isError: true } : null;
-
-    const blocked = await executeBatch([{ name: 'close_window' }], ctx);
-    expect(blocked.steps[0].status).toBe('needs_confirm');
+    stopControl('pill');
+    const r = await batchTool().handler({ steps: [{ name: 'close_window' }], allowConfirm: true }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain(STOPPED_TEXT);
     expect(tools.close_window.handler).not.toHaveBeenCalled();
   });
 
-  // GHSA-3v3f-5rwv-whc9: a caller-supplied allowConfirm must NOT bypass the
-  // confirm tier on its own — only the operator env flag unlocks it.
-  it('SECURITY: caller allowConfirm alone does NOT bypass confirm tier', async () => {
+  it('with no stop and no locking combo, a step that used to be confirm-tier simply runs', async () => {
     tools.close_window = okTool('close_window');
-    safetyFor = (name) => name === 'close_window' ? { text: 'close_window: safety confirm - destructive', isError: true } : null;
-    // env NOT set (cleared in beforeEach) → the exploit path
-    const attempt = await executeBatch([{ name: 'close_window' }], ctx, { allowConfirm: true });
-    expect(attempt.allDone).toBe(false);
-    expect(attempt.steps[0].status).toBe('needs_confirm');
-    expect(tools.close_window.handler).not.toHaveBeenCalled();
-  });
-
-  it('proceeds only when operator env flag AND caller allowConfirm are both set', async () => {
-    tools.close_window = okTool('close_window');
-    safetyFor = (name) => name === 'close_window' ? { text: 'close_window: safety confirm - destructive', isError: true } : null;
-
-    process.env[ENV_KEY] = '1';
-    // operator enabled, but caller did NOT ask → still halts
-    const noAsk = await executeBatch([{ name: 'close_window' }], ctx);
-    expect(noAsk.steps[0].status).toBe('needs_confirm');
-    expect(tools.close_window.handler).not.toHaveBeenCalled();
-
-    // both present → proceeds
-    const allowed = await executeBatch([{ name: 'close_window' }], ctx, { allowConfirm: true });
-    expect(allowed.allDone).toBe(true);
-    expect(tools.close_window.handler).toHaveBeenCalled();
-  });
-
-  it('always halts at a hard block, even with the operator flag + allowConfirm', async () => {
-    process.env[ENV_KEY] = '1';
-    tools.dangerous = okTool('dangerous');
-    safetyFor = () => ({ text: 'dangerous: safety block - not allowed', isError: true });
-    const r = await executeBatch([{ name: 'dangerous' }], ctx, { allowConfirm: true });
-    expect(r.steps[0].status).toBe('blocked');
-    expect(tools.dangerous.handler).not.toHaveBeenCalled();
+    const r = await executeBatch([{ name: 'close_window' }], ctx);
+    expect(r.allDone).toBe(true);
+    expect(tools.close_window.handler).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('batch tool — dry run + parsing', () => {
+describe('batch tool — parsing', () => {
   const batchTool = () => getBatchTools()[0];
-
-  it('dry run reports tiers without executing', async () => {
-    tools.open_app = okTool('open_app');
-    tools.close_window = okTool('close_window');
-    safetyFor = (name) => name === 'close_window' ? { text: 'safety confirm - x', isError: true } : null;
-    const r = await batchTool().handler({ steps: [{ name: 'open_app' }, { name: 'close_window' }], dryRun: true }, ctx);
-    expect(r.text).toMatch(/dry run/);
-    expect(r.text).toMatch(/\[allow\] open_app/);
-    expect(r.text).toMatch(/\[confirm\] close_window/);
-    expect(tools.open_app.handler).not.toHaveBeenCalled(); // dry run executes nothing
-  });
 
   it('accepts steps as a JSON string', async () => {
     tools.open_app = okTool('open_app');

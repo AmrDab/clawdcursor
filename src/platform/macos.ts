@@ -1070,8 +1070,7 @@ export class MacOSAdapter implements PlatformAdapter {
     // Spotlight fallback — universal launcher for anything macOS can find.
     // Mirrors the pattern Windows uses with the Start Menu and the same
     // shape the router's zero-LLM fast path already proves. Keyboard goes
-    // through the platform's internal primitives; not gated by the safety
-    // layer because this is an internal launch detail.
+    // through the platform's internal primitives.
     const viaSpotlight = await this.launchViaSpotlight(name, opts?.searchTerm, before, windowsBefore, opts);
     if (viaSpotlight) return viaSpotlight;
 
@@ -1127,10 +1126,8 @@ export class MacOSAdapter implements PlatformAdapter {
 
   /**
    * Spotlight-driven launch fallback. Cmd+Space, type, Return, then poll.
-   * The Cmd+Space combo is on the safety blocklist for agent-emitted keys,
-   * but here the platform is calling its own keyboard primitives directly
-   * to fulfill its own `launchApp` contract — the safety layer is for
-   * agent actions, not internal platform plumbing.
+   * The platform calls its own keyboard primitives here to fulfill its
+   * own `launchApp` contract.
    */
   private async launchViaSpotlight(
     name: string,

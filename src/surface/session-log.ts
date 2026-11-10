@@ -48,7 +48,7 @@ export function classifyCall(tool: string, action?: string): CallClass {
 }
 
 /** What a call produced: `empty` / `timeout` blind reads are where agents give up on blind perception.
- *  `refused`: the safety gate stopped it before it ran. `consent_required`: the
+ *  `refused`: a guard (the user's Stop or pause, the own-UI or AI-host guard, a dangerous key) stopped it before it ran. `consent_required`: the
  *  one-time consent prompt stopped it before it ran. */
 export type Outcome = 'ok' | 'empty' | 'partial' | 'timeout' | 'error' | 'refused' | 'consent_required';
 /** One step of a batch, classified like a call of its own. */

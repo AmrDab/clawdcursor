@@ -1430,7 +1430,7 @@ export class LinuxAdapter implements PlatformAdapter {
    * After a launch, wait for the new window to surface using diff-and-poll.
    * Replaces the previous fixed-delay-then-single-scan, which lost slow-
    * starting apps (Electron-based apps, Java apps, Wine apps) and made the
-   * agent fall back to keyboard shortcuts that are blocked by safety.
+   * agent fall back to keyboard shortcuts.
    *
    * Linux's `spawn(name, …)` directly produces the target app's PID (unlike
    * Windows / macOS where the spawn target is a launcher), so when `pid` is

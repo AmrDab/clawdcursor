@@ -36,12 +36,6 @@ vi.mock('../surface/onboarding', () => ({
   runOnboarding: vi.fn().mockResolvedValue(true),
 }));
 
-// ── Mock the safety gate so WITH-CONSENT tests reach the handler ─────────────
-// evaluateToolCall returns undefined (allow) or a {text} error object.
-vi.mock('../tools/safety-gate', () => ({
-  evaluateToolCall: vi.fn().mockReturnValue(undefined), // always allow
-}));
-
 // ── Mock controlBanner so touch() is a no-op ────────────────────────────────
 vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
@@ -99,11 +93,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { stopControl, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
-import { evaluateToolCall } from '../tools/safety-gate';
+import { controlBanner } from '../core/banner';
 
 /**
  * The user's stop (control.ts) is the first refusal after consent. Live 2026-11 (Windows, 1.5.27 candidate): with the stop
- * active, `computer move` was refused with "no screenshot taken" and `system clipboard_write` with a safety confirm, so the
+ * active, `computer move` was refused with "no screenshot taken" and `system clipboard_write` with another refusal, so the
  * agent never learned the user had stopped it.
  */
 describe('the stop comes before every other refusal in the MCP tool wrapper', () => {
@@ -127,14 +121,12 @@ describe('the stop comes before every other refusal in the MCP tool wrapper', ()
     return capturedHandlers;
   }
 
-  it('a safety-confirm call says "stopped", not "confirm"', async () => {
-    vi.mocked(evaluateToolCall).mockReturnValue({ text: 'safety confirm: clipboard write needs confirmation', isError: true } as any);
+  it('a clipboard write says "stopped", and its handler never runs', async () => {
     stopControl('pill');
     const r = await (await handlers()).get('system')!({ action: 'clipboard_write', text: 'x' });
     expect(r.isError).toBe(true);
     expect(text(r)).toContain(STOPPED_TEXT);
-    expect(text(r)).not.toContain('safety confirm');
-    expect(evaluateToolCall).not.toHaveBeenCalled();
+    expect(controlBanner.hold).not.toHaveBeenCalled();   // taken right before a handler runs
   });
 
   it('a screenshot-bound pointer call (no screenshot taken) says "stopped", not "no screenshot"', async () => {
@@ -145,16 +137,9 @@ describe('the stop comes before every other refusal in the MCP tool wrapper', ()
     expect(text(r)).not.toMatch(/no screenshot/i);
   });
 
-  it('without the stop, the safety refusal is still what the agent sees', async () => {
-    vi.mocked(evaluateToolCall).mockReturnValue({ text: 'safety confirm: clipboard write needs confirmation', isError: true } as any);
-    const r = await (await handlers()).get('system')!({ action: 'clipboard_write', text: 'x' });
-    expect(text(r)).toContain('safety confirm');
-  });
-
   it('what the stop allows (asking the user) is not refused by it', async () => {
-    vi.mocked(evaluateToolCall).mockReturnValue(undefined);
     stopControl('pill');
     await (await handlers()).get('system')!({ action: 'pause_for_user', message: 'May I continue?' }).catch(() => null);
-    expect(evaluateToolCall).toHaveBeenCalled();
+    expect(controlBanner.hold).toHaveBeenCalled();
   });
 });

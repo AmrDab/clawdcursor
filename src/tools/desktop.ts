@@ -12,7 +12,6 @@ import { toMouse, toImage } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
-import { isBlockedKey } from './playbooks/keys-blocklist';
 import { waitForPaste, writeClipboardVerified } from './paste-guard';
 import { lastCaptureUnchecked } from '../platform/native-helper';
 import { unguarded } from '../platform/pointer-guard';
@@ -297,6 +296,7 @@ export function getDesktopTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
         const p = toMouse(ctx, x, y, space);
@@ -336,6 +336,7 @@ export function getDesktopTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ x, y, direction, amount }, ctx) => {
         await ctx.ensureInitialized();
         const p = toMouse(ctx, x, y);
@@ -465,15 +466,8 @@ export function getDesktopTools(): ToolDefinition[] {
         }
         // "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = key.trim().split(/\s+/);
-        // Hard-block backstop. This carried its own 3-entry copy that omitted
-        // win+l and every other machine-locking combo (GHSA-35pc-g74h-p476);
-        // it now defers to the single blocklist so the two cannot drift.
-        // HARD tier only — confirm-tier combos keep their allowConfirm path.
-        for (const combo of combos) {
-          if (isBlockedKey(combo)) {
-            return { text: `BLOCKED: "${combo}" is a dangerous key combo.`, isError: true };
-          }
-        }
+        // The hard key list (lock / log out / secure attention) is refused in the input layer, for every caller:
+        // platform/hard-keys.ts, called from guardInputMethods.
         const activeInfo = await activeWindowLabel(ctx);
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (const combo of combos) {

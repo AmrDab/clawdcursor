@@ -7,6 +7,7 @@
  * the moment of the press; the platform layer only calls it, so it does not depend on the overlay.
  */
 import { AsyncLocalStorage } from 'async_hooks';
+import { hardKeyRefusal, keysOf } from './hard-keys';
 
 let hook: (() => Promise<void>) | null = null;
 
@@ -140,7 +141,40 @@ export function guardInputMethods<T extends object>(target: T): T {
       return r;
     });
   }
+  guardHardKeys(target);
   return target;
+}
+
+/** Keys the agent holds down (key_down without its key_up yet), in both input layers: they are one keyboard. */
+const heldKeys = new Set<string>();
+
+/**
+ * The hard key list (hard-keys.ts) — its ONE call site. Outermost and unconditional: it runs for nested calls, for
+ * clawdcursor's own housekeeping and with no input guard installed, because no caller has a reason to lock the machine.
+ * A key held with key_down counts toward the next press (key_down "win", then key_press "l").
+ */
+function guardHardKeys(target: object): void {
+  const t = target as Record<string, unknown>;
+  for (const m of ['keyPress', 'keyDown', 'keyUp']) {
+    const f = t[m];
+    if (typeof f !== 'function') continue;
+    t[m] = async (...args: unknown[]) => {
+      if (m === 'keyUp') {
+        for (const k of keysOf(args[0])) heldKeys.delete(k);
+        return f.apply(target, args);
+      }
+      const why = hardKeyRefusal(args[0], heldKeys);
+      if (why) throw new Error(why);
+      const r = await f.apply(target, args);
+      if (m === 'keyDown') for (const k of keysOf(args[0])) heldKeys.add(k);
+      return r;
+    };
+  }
+}
+
+/** For tests: forget the held keys. */
+export function _resetHeldKeys(): void {
+  heldKeys.clear();
 }
 
 /**

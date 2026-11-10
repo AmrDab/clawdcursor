@@ -1,19 +1,14 @@
 /**
  * The autonomous loop's `batch` tool (src/core/agent-loop/batch-tool.ts).
- * buildUnifiedTools + the loop safety are mocked so we test the executor's
+ * buildUnifiedTools is mocked so we test the executor's
  * orchestration over the agent-loop machinery in isolation.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const unified: Record<string, any> = {};
-let safetyFn: (a: any) => any = () => ({ decision: 'allow', tier: 'input' });
 
 vi.mock('../core/agent-loop/tools', () => ({
   buildUnifiedTools: () => Object.values(unified),
-}));
-vi.mock('../core/safety', () => ({
-  evaluate: (a: any) => safetyFn(a),
-  isAllowed: (d: any) => d.decision === 'allow',
 }));
 
 import { buildBatchTool } from '../core/agent-loop/batch-tool';
@@ -24,7 +19,6 @@ const run = (steps: any, args: any = {}) => buildBatchTool().execute({ steps: JS
 
 beforeEach(() => {
   for (const k of Object.keys(unified)) delete unified[k];
-  safetyFn = () => ({ decision: 'allow', tier: 'input' });
   // read_screen used by guards — default: empty tree
   unified.read_screen = uTool('read_screen', vi.fn(async () => ({ success: true, text: '(empty a11y tree)' })));
 });
@@ -108,43 +102,6 @@ describe('agent batch — guards (re-perceive)', () => {
 });
 
 describe('agent batch — per-step parity with the single-call pipeline (audit 2026-06-10 finding B)', () => {
-  it('resolves an el_NN ref to its label for the safety gate (batched Send is gated like a single call)', async () => {
-    unified.invoke_element = uTool('invoke_element');
-    const seenLabels: Array<string | undefined> = [];
-    safetyFn = (a) => { seenLabels.push(a.targetLabel); return { decision: 'allow', tier: 'input' }; };
-    const uiMaps = {
-      resolve: vi.fn(() => ({
-        ok: true,
-        map: { elements: [{ id: 'el_7', text: 'Send', normalized_text: 'send' }] },
-      })),
-      invalidate: vi.fn(),
-    };
-    await buildBatchTool().execute(
-      { steps: [{ name: 'invoke_element', args: { element_id: 'el_7', snapshot_id: 'obs_3' } }] },
-      { ...ctx, uiMaps } as any,
-    );
-    expect(seenLabels).toContain('Send');
-  });
-
-  it('gates every selector invoke_element may act on: the ref beside a benign name, and automationId', async () => {
-    unified.invoke_element = uTool('invoke_element');
-    const seenLabels: Array<string | undefined> = [];
-    safetyFn = (a) => { seenLabels.push(a.targetLabel); return { decision: 'allow', tier: 'input' }; };
-    const uiMaps = {
-      resolve: vi.fn(() => ({ ok: true, map: { elements: [{ id: 'el_7', text: 'Send', normalized_text: 'send' }] } })),
-      invalidate: vi.fn(),
-    };
-    await buildBatchTool().execute(
-      { steps: [
-        { name: 'invoke_element', args: { name: 'Reply', element_id: 'el_7', snapshot_id: 'obs_3' } },
-        { name: 'invoke_element', args: { automationId: 'Send' } },
-      ] },
-      { ...ctx, uiMaps } as any,
-    );
-    // Each selector is evaluated on its own: step 0 -> 'Send' (the ref) and 'Reply'; step 1 -> 'Send'.
-    expect(seenLabels).toEqual(['Send', 'Reply', 'Send']);
-  });
-
   it('invalidates the UIMap holder after a successful screen-changing step', async () => {
     unified.click = { ...uTool('click'), changesScreen: true };
     const uiMaps = { resolve: vi.fn(), invalidate: vi.fn() };
@@ -213,16 +170,7 @@ describe('agent batch — per-step parity with the single-call pipeline (audit 2
   });
 });
 
-describe('agent batch — safety + cap + parsing', () => {
-  it('halts at a step the loop safety blocks', async () => {
-    unified.invoke_element = uTool('invoke_element');
-    safetyFn = (a) => a.tool === 'invoke_element' ? { decision: 'confirm', tier: 'destructive', reason: 'Send' } : { decision: 'allow', tier: 'input' };
-    const r = await run([{ name: 'invoke_element', args: { name: 'Send' } }]);
-    expect(r.success).toBe(false);
-    expect(r.text).toMatch(/safety confirm/);
-    expect(unified.invoke_element.execute).not.toHaveBeenCalled();
-  });
-
+describe('agent batch — cap + parsing', () => {
   it('caps at 10 steps', async () => {
     unified.t = uTool('t');
     const r = await run(Array.from({ length: 12 }, () => ({ name: 't' })));

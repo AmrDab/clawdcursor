@@ -131,7 +131,8 @@ export async function runOnboarding(context: 'start' | 'consent' = 'start', star
     '  ●  Only run on a machine you control',
     '  ●  Only connect AI models you trust',
     '  ●  Server binds to localhost only (127.0.0.1)',
-    '  ●  Dangerous key combos (Alt+F4, Ctrl+Alt+Del) are blocked',
+    '  ●  It acts with your own permissions: what it does is up to the AI you connect and its permission prompts',
+    '  ●  You can stop it at any time from the on-screen pill; it never locks the screen or logs you out',
   ].map(line => pc.gray(line)).join('\n');
 
   const divider = '  ' + '─'.repeat(58);

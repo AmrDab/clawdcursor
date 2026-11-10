@@ -8,8 +8,7 @@
  * by replacing `server.tool()` with a spy. We then invoke those callbacks
  * directly (no SDK needed), controlling consent via the vi.mock, and assert:
  *   1. NO-CONSENT  → isError:true + consent-prompt text, handler NOT called.
- *   2. WITH-CONSENT → handler IS called (safety-gate proceeds; we mock it to
- *      return a clean allow so the call succeeds).
+ *   2. WITH-CONSENT → the call goes on to the handler.
  *
  * We do NOT use a source-guard approach because the real behaviour is
  * straightforward to exercise without heavy SDK setup.
@@ -51,12 +50,6 @@ vi.mock('../surface/onboarding', () => ({
   writeConsentFile: vi.fn(),
   revokeConsent: vi.fn(),
   runOnboarding: vi.fn().mockResolvedValue(true),
-}));
-
-// ── Mock the safety gate so WITH-CONSENT tests reach the handler ─────────────
-// evaluateToolCall returns undefined (allow) or a {text} error object.
-vi.mock('../tools/safety-gate', () => ({
-  evaluateToolCall: vi.fn().mockReturnValue(undefined), // always allow
 }));
 
 // ── Mock controlBanner so touch() is a no-op ────────────────────────────────
@@ -158,17 +151,16 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
       mockHasConsent.mockReturnValue(false);
 
       // Spy on the tool handler to verify it's never reached.
-      // We can detect this via the safety gate: if the gate is reached,
-      // evaluateToolCall would be called. We verify it's NOT called.
-      const { evaluateToolCall } = await import('../tools/safety-gate');
-      const gateSpy = vi.mocked(evaluateToolCall);
+      // The call takes the pill (controlBanner.hold) right before its handler runs:
+      // if that happened, the consent check was passed.
+      const { controlBanner } = await import('../core/banner');
+      const gateSpy = vi.mocked(controlBanner.hold);
       gateSpy.mockClear();
 
       const handler = await buildAndGetHandler();
       await handler({});
 
-      // evaluateToolCall sits immediately AFTER the consent gate — if it was
-      // called, the consent check was bypassed (regression).
+      // If the pill was taken, the consent check was bypassed (regression).
       expect(gateSpy).not.toHaveBeenCalled();
     });
   });
@@ -194,27 +186,21 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
       // is past the consent gate.
     });
 
-    it('passes through to the safety gate (evaluateToolCall is reached)', async () => {
-      // The decisive proof that the consent gate let a call through is that
-      // evaluateToolCall (which sits immediately after the consent check) is
-      // called. With consent=false the test above confirmed it's NOT called.
-      // With consent=true it MUST be called.
-      //
-      // We don't need to fully execute the tool handler — the gate is what we're
-      // testing. We already mock evaluateToolCall to return undefined (allow), so
-      // the call will proceed to tool.handler. We verify the gate was crossed by
-      // checking evaluateToolCall was invoked.
+    it('passes through to the handler (the call takes the pill)', async () => {
+      // The decisive proof that the consent gate let a call through is that the
+      // call takes the pill (controlBanner.hold), which happens right before its
+      // handler runs. With consent=false the test above confirmed it does NOT.
       mockHasConsent.mockReturnValue(true);
 
-      const { evaluateToolCall } = await import('../tools/safety-gate');
-      const gateSpy = vi.mocked(evaluateToolCall);
+      const { controlBanner } = await import('../core/banner');
+      const gateSpy = vi.mocked(controlBanner.hold);
       gateSpy.mockClear();
 
       const handler = await buildAndGetHandler();
       // Handler may throw/return error from the real tool, but that's after the gate.
       await handler({}).catch(() => { /* tool errors are not the concern here */ });
 
-      // evaluateToolCall was reached — the consent gate did NOT short-circuit.
+      // The handler was reached — the consent gate did NOT short-circuit.
       expect(gateSpy).toHaveBeenCalledTimes(1);
     });
   });
@@ -282,7 +268,7 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
       mockHasConsent.mockReturnValue(false);
       mockClientCaps.mockReturnValue({ elicitation: {} });
       mockElicitInput.mockResolvedValue({ action: 'accept', content: { allow: true } });
-      const { evaluateToolCall } = await import('../tools/safety-gate');
+      const { controlBanner } = await import('../core/banner');
       const { writeConsentFile } = await import('../surface/onboarding');
       const handler = await buildAndGetHandler();
 
@@ -290,14 +276,14 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
 
       expect(mockElicitInput).toHaveBeenCalledTimes(1);
       expect(vi.mocked(writeConsentFile)).toHaveBeenCalledWith('mcp-elicitation');
-      expect(vi.mocked(evaluateToolCall)).toHaveBeenCalled();
+      expect(vi.mocked(controlBanner.hold)).toHaveBeenCalled();
     });
 
     it('a decline keeps the gate shut and is not re-asked on every call', async () => {
       mockHasConsent.mockReturnValue(false);
       mockClientCaps.mockReturnValue({ elicitation: {} });
       mockElicitInput.mockResolvedValue({ action: 'decline' });
-      const { evaluateToolCall } = await import('../tools/safety-gate');
+      const { controlBanner } = await import('../core/banner');
       const handler = await buildAndGetHandler();
 
       const first = await handler({});
@@ -306,18 +292,18 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
       expect(first.isError).toBe(true);
       expect(second.isError).toBe(true);
       expect(mockElicitInput).toHaveBeenCalledTimes(1);
-      expect(vi.mocked(evaluateToolCall)).not.toHaveBeenCalled();
+      expect(vi.mocked(controlBanner.hold)).not.toHaveBeenCalled();
     });
 
     it('"accept" with the box unticked is not consent', async () => {
       mockHasConsent.mockReturnValue(false);
       mockClientCaps.mockReturnValue({ elicitation: {} });
       mockElicitInput.mockResolvedValue({ action: 'accept', content: { allow: false } });
-      const { evaluateToolCall } = await import('../tools/safety-gate');
+      const { controlBanner } = await import('../core/banner');
       const handler = await buildAndGetHandler();
 
       expect((await handler({})).isError).toBe(true);
-      expect(vi.mocked(evaluateToolCall)).not.toHaveBeenCalled();
+      expect(vi.mocked(controlBanner.hold)).not.toHaveBeenCalled();
     });
 
     it('a host without elicitation gets the terminal instructions, unasked', async () => {

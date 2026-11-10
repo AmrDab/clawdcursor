@@ -2,7 +2,7 @@
  * macOS keyPress builds an AppleScript program from the caller's key combo.
  * An unknown key or modifier used to be spliced in raw, so a crafted name could
  * close the string literal and run arbitrary AppleScript (`do shell script`),
- * bypassing the key blocklist and safety gate. Unknown tokens are now refused
+ * with the user's privileges (GHSA-r54p-hj6c-2434). Unknown tokens are now refused
  * before osascript runs (parity with the Windows adapter), and the numbers that
  * reach window scripts are coerced. Valid combos must be unchanged.
  */

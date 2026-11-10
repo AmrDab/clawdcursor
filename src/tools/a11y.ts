@@ -359,6 +359,7 @@ export function getA11yTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 
@@ -653,6 +654,7 @@ export function getA11yTools(): ToolDefinition[] {
       category: 'clipboard',
       compactGroup: 'system',
       safetyTier: 1,
+      destructive: false,
       handler: async ({ scope }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
@@ -668,13 +670,13 @@ export function getA11yTools(): ToolDefinition[] {
 
     {
       name: 'write_clipboard',
-      description: 'Write text to the OS clipboard. Tier 2 (mutation): overwrites the user\'s clipboard, which can hijack subsequent copy/paste flows. Reversibility is via a fresh user-initiated copy, not by the agent.',
+      description: 'Write text to the OS clipboard. Overwrites what the user had copied: read it first with read_clipboard if it may matter.',
       parameters: {
         text: { type: 'string', description: 'Text to write to clipboard', required: true },
       },
       category: 'clipboard',
       compactGroup: 'system',
-      safetyTier: 2,
+      safetyTier: 1,
       handler: async ({ text }, ctx) => {
         await ctx.ensureInitialized();
         if (ctx.platform) {
@@ -695,11 +697,9 @@ export function getA11yTools(): ToolDefinition[] {
         title: { type: 'string', description: 'Window title substring to match', required: false },
       },
       category: 'window',
-      // Tier 1 (input), not 2 (confirm): minimizing is trivially reversible
-      // (restore_window exists) — the confirm-tier was accidental and diverged
-      // from TOOL_TIER('minimize_window')='input' and the compound window
-      // {action:'minimize'} surface, which allowed it freely.
+      // Minimizing is trivially reversible (restore_window exists): not destructive.
       safetyTier: 1,
+      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 

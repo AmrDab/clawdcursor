@@ -13,8 +13,8 @@
  *   take 2–6 seconds to surface a window in the a11y tree on a cold start.
  *   The 800ms scan misses them, returns `{}`, and the agent sees
  *   "Launched X (no window surfaced yet)" — so it falls back to keyboard
- *   shortcuts. Most of those shortcuts (`win+r`, `cmd+space`, `win+d`, etc.)
- *   are blocked by the safety layer for good reasons, so the agent gets stuck.
+ *   shortcuts (`win+r`, `cmd+space`, `win+d`, etc.), a slower and less reliable
+ *   route than waiting for the window.
  *
  *   The router (`src/core/router/router.ts`) already had the right pattern
  *   for its zero-LLM fast path — diff before/after, poll for a NEW window —

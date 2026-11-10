@@ -69,6 +69,37 @@ All notable changes to Clawd Cursor will be documented in this file.
   named elements inside its page, any other window 5 named elements (a small dialog of named buttons is fine).
 
 ### Security
+- **Breaking: the policy gate is removed.** clawdcursor no longer decides which actions an agent may take.
+  - **What was removed.** The SafetyLayer (`src/core/safety.ts`, `src/tools/safety-gate.ts`) and everything it decided:
+    the tool tiers that refused `open_file`, `close_window`, `clipboard_write`, browser `navigate` / `evaluate`,
+    `open_uri` and `relaunch_with_cdp`; the label rules that refused by-name clicks on Send, Delete, Subscribe, Pay and
+    the like; the URI-scheme and sensitive-app rules; the intent bypass; the confirm tier for shortcuts (`Alt+F4`,
+    `Ctrl+W`, `Win+R`, `Cmd+Q`, …); `batch`'s `allowConfirm` and `dryRun` parameters, its `needs_confirm` step status
+    and the `CLAWD_BATCH_ALLOW_CONFIRM` variable; the result codes `SAFETY_BLOCKED` and `NEEDS_CONFIRMATION`; the unused
+    `safety` block of the config.
+  - **Why.** It was not a security boundary. A click by coordinates never went through the label rules, so the gate
+    stopped nothing an agent set on doing, while over MCP a "confirm" was a permanent refusal that blocked ordinary
+    work (opening a Start-menu shortcut, closing a window the user asked to close) and pushed agents from acting by
+    name onto screenshots. It also suggested a protection that was not there.
+  - **What protects you now.** clawdcursor is a tool layer that runs with your own permissions. What to do is decided
+    by your agent and by your MCP host's permission prompts, which read the tool annotations: reads carry
+    `readOnlyHint`; every tool that clicks, types, presses keys, closes a window, opens a file or URI, writes the
+    clipboard or runs page script carries `destructiveHint` (on the granular surface, clicks, typing and key presses
+    were announced as non-destructive before; they are not). Agents are told to ask with `pause_for_user` before an
+    irreversible action the user did not ask for. clawdcursor itself still always enforces: the user's **Stop**
+    (`stopped.json`, every process, across restarts), the **pause**, the own-UI guard, **no stray input into an AI
+    assistant's window**, token-authenticated loopback-only HTTP, `<untrusted-screen-content>` wrapping, one-time
+    consent, and the never-type-credentials guidance. The injection fixes (GHSA-9ppf-38v8-h97v, GHSA-r54p-hj6c-2434)
+    are code-execution fixes, not policy, and are unchanged.
+  - **The hard key list** replaces the key blocklist: a handful of OS-level combos are never sent because they lock
+    the machine, end the session or are reserved by the OS. Windows `Win+L`, `Ctrl+Alt+Del`; macOS `Ctrl+Cmd+Q`,
+    `Cmd+Shift+Q`, anything with Power / Eject; Linux `Super+L`, `Ctrl+Alt+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`,
+    `Ctrl+Alt+F1`–`F12`, SysRq, Power. Only the running OS's list applies; every other shortcut is allowed. It is
+    checked in one place, the input layer under every tool (`guardInputMethods`), on the normalized input, so a tool
+    name, a batch, a named shortcut, a sequence (`esc win+l`), spacing, case, key order, an alias
+    (`cmd`/`meta`/`super`/`win`) or a key held with `key_down` cannot get around it (the bypass classes of
+    GHSA-35pc-g74h-p476 and GHSA-3v3f-5rwv-whc9). `Ctrl+Shift+Esc` and `Cmd+Opt+Esc` are no longer refused.
+  - `SECURITY.md` states the threat model, the guarantees and the scope.
 - **Windows system programs are started by absolute path, from a private directory.** PowerShell (and `reg`, `tasklist`,
   `taskkill`, `netstat`, `rundll32`, `explorer`) were spawned by bare name, which Windows resolves in the current directory
   before PATH (CWE-427). They now run from `%SystemRoot%` by full path, through `execFile` with an argument array (the one

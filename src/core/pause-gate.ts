@@ -28,8 +28,8 @@
  * A pause can also be a small card: `choices` (2-6 short options, one button each) and/or `input` (a text box). A
  * picked option settles as 'replied' with `choice` (the exact option text, looked up here from the index the pill
  * reports, never taken from the pill). Only the user on screen can pick: an agent's answer never carries a choice.
- * A choice answers the agent's QUESTION. It is not an approval and nothing in the safety layer reads it (safety.ts,
- * safety-gate.ts and batch.ts never touch this gate), so it cannot lift a confirm-tier block (Send / Delete / Pay).
+ * A choice answers the agent's QUESTION; the agent acts on it. No guard in clawdcursor reads it: it cannot lift the
+ * user's Stop, the hard key list or the AI-host guard.
  *
  * Only offered when a human can see it: the overlay must be able to show, and
  * CLAWD_NO_PAUSE=1 restores the old fail-fast behaviour (CI / unattended runs).
