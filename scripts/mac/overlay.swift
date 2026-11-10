@@ -1,6 +1,6 @@
 // ClawdCursor on-screen overlay for macOS (AppKit).
 //
-// Same contract as scripts/banner.ps1 + scripts/edge-glow.ps1 on Windows and
+// Same contract as scripts/banner.ps1 + scripts/window-outline.ps1 on Windows and
 // scripts/linux/overlay.py, driven by src/core/banner.ts. Compiled once with
 // `swiftc -O` into ~/.clawdcursor/bin (like the OCR helper).
 //
@@ -22,9 +22,14 @@
 //                  text field on the card from the start (a click into it takes
 //                  the keyboard; Esc gives it back), replacing "Something else".
 //                  In a multiline field Return adds a line, Cmd+Return sends.
-//   overlay glow [--color #RRGGBB] [--duration SEC]
-//                  a pulsing glow on every edge of every display; clicks pass
-//                  straight through it.
+//   overlay outline [--color #RRGGBB]
+//                  a thin border around the window the agent works in, and nothing
+//                  else: no fill, nothing on the rest of the screen; clicks pass
+//                  straight through it. stdin: "TARGET <handle> <pid>" names the
+//                  process (a bare "TARGET": none). The border is drawn around the
+//                  process's frontmost window while that app is in front, and follows it.
+//
+// When stdin closes (the parent is gone) the process exits.
 //
 // The parent kills the process to hide it. The app is an accessory (no Dock
 // icon) and the pill is a non-activating panel, so neither may take focus from
@@ -142,7 +147,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     init(mode: String) { self.mode = mode }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if mode == "pill" { pill() } else { glow() }
+        if mode == "pill" { pill() } else { windowOutline() }
         giveFocusBack()
         // Activation can also land a moment after launch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { giveFocusBack() }
@@ -275,7 +280,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var pending = ""
         FileHandle.standardInput.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            if data.isEmpty { handle.readabilityHandler = nil; return }   // EOF: the parent closed the pipe
+            if data.isEmpty {   // EOF: the parent is gone, and neither the pill nor the outline may outlive it
+                handle.readabilityHandler = nil
+                DispatchQueue.main.async { NSApp.terminate(nil) }
+                return
+            }
             pending += String(decoding: data, as: UTF8.self)
             while let nl = pending.firstIndex(of: "\n") {
                 let line = pending[..<nl].trimmingCharacters(in: .whitespaces)
@@ -285,6 +294,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line.hasPrefix("ACTIVITY ") {
                     let text = String(line.dropFirst(9))
                     DispatchQueue.main.async { self?.setActivity(text) }
+                } else if line == "TARGET" || line.hasPrefix("TARGET ") {
+                    let parts = line.split(separator: " ")
+                    let pid = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
+                    DispatchQueue.main.async { self?.targetPid = pid }
                 }
             }
         }
@@ -564,70 +577,52 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
-    func glow() {
-        let color = option("--color", "#f59e0b")
-        let thickness = CGFloat(Double(option("--thickness", "80")) ?? 80)
-        let period = (Double(option("--period", "1600")) ?? 1600) / 1000
-        let minAlpha = Float((Double(option("--min-alpha", "60")) ?? 60) / 255)
-        let peak = CGFloat((Double(option("--peak-alpha", "200")) ?? 200) / 255)
-        let duration = Double(option("--duration", "0")) ?? 0
-        let edge = hexColor(color, alpha: peak).cgColor
-        let clear = hexColor(color, alpha: 0).cgColor
+    /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
+    var targetPid = 0
 
-        for screen in NSScreen.screens {
-            let f = screen.frame
-            let win = NSWindow(contentRect: f, styleMask: .borderless, backing: .buffered, defer: false)
-            win.isOpaque = false
-            win.backgroundColor = .clear
-            win.hasShadow = false
-            win.ignoresMouseEvents = true // click-through
-            win.level = .screenSaver
-            win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-            win.sharingType = .none  // the glow is not captured either
-            let view = NSView(frame: NSRect(origin: .zero, size: f.size))
-            view.wantsLayer = true
-            let root = CALayer()
-            root.frame = view.bounds
-            let t = min(thickness, f.width / 2, f.height / 2)
-            let w = f.width, h = f.height
-            // Layer unit coordinates on macOS: (0,0) is bottom-left.
-            let bands: [(CGRect, CGPoint, CGPoint)] = [
-                (CGRect(x: 0, y: h - t, width: w, height: t), CGPoint(x: 0.5, y: 1), CGPoint(x: 0.5, y: 0)), // top
-                (CGRect(x: 0, y: 0, width: w, height: t), CGPoint(x: 0.5, y: 0), CGPoint(x: 0.5, y: 1)),     // bottom
-                (CGRect(x: 0, y: 0, width: t, height: h), CGPoint(x: 0, y: 0.5), CGPoint(x: 1, y: 0.5)),     // left
-                (CGRect(x: w - t, y: 0, width: t, height: h), CGPoint(x: 1, y: 0.5), CGPoint(x: 0, y: 0.5)), // right
-            ]
-            for (rect, start, end) in bands {
-                let g = CAGradientLayer()
-                g.frame = rect
-                g.colors = [edge, clear]
-                g.startPoint = start
-                g.endPoint = end
-                root.addSublayer(g)
-            }
-            let pulse = CABasicAnimation(keyPath: "opacity")
-            pulse.fromValue = minAlpha
-            pulse.toValue = Float(1)
-            pulse.duration = period / 2
-            pulse.autoreverses = true
-            pulse.repeatCount = .infinity
-            pulse.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            root.add(pulse, forKey: "pulse")
-            view.layer?.addSublayer(root)
-            win.contentView = view
-            win.setFrame(f, display: true)
-            win.orderFrontRegardless()
-            windows.append(win)
-        }
-        if duration > 0 {
-            DispatchQueue.main.asyncAfter(deadline: .now() + duration) { NSApp.terminate(nil) }
+    /// The frame, in AppKit coordinates, of the target process's frontmost ordinary window while that app is in front.
+    /// The windows are listed only then (the list is front to back).
+    func targetFrame() -> NSRect? {
+        guard targetPid != 0,
+              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
+              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
+              let front = list.first(where: {
+                  ($0[kCGWindowOwnerPID as String] as? Int) == targetPid && ($0[kCGWindowLayer as String] as? Int) == 0
+              }),
+              let bounds = front[kCGWindowBounds as String] as? NSDictionary,
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+              let primary = NSScreen.screens.first else { return nil }
+        // Quartz measures down from the top of the primary display, AppKit up from its bottom.
+        return NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    func windowOutline() {
+        let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
+        win.isOpaque = false
+        win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content
+        win.hasShadow = false
+        win.ignoresMouseEvents = true // click-through
+        win.level = .floating   // above ordinary windows, below the pill and the menu bar
+        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        win.sharingType = .none  // the outline is not captured either
+        let view = NSView()
+        view.wantsLayer = true
+        view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor
+        view.layer?.borderWidth = 3   // points: AppKit scales it for each display
+        win.contentView = view
+        windows.append(win)
+        listenForCommands()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let frame = self?.targetFrame() else { win.orderOut(nil); return }
+            if win.frame != frame { win.setFrame(frame, display: true) }
+            if !win.isVisible { win.orderFrontRegardless() }
         }
     }
 }
 
 let mode = CommandLine.arguments.dropFirst().first ?? ""
-guard mode == "pill" || mode == "glow" else {
-    FileHandle.standardError.write("usage: overlay pill | glow [--color #RRGGBB] [--duration SEC]\n".data(using: .utf8)!)
+guard mode == "pill" || mode == "outline" else {
+    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB]\n".data(using: .utf8)!)
     exit(2)
 }
 let app = NSApplication.shared

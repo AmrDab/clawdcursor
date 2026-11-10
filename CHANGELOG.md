@@ -49,6 +49,15 @@ All notable changes to Clawd Cursor will be documented in this file.
   status and the Kill button.
 
 ### Changed
+- **A thin outline around the agent's window replaces the glow on every screen edge.** While an agent drives, the window it
+  is working in gets a 3 px border (amber; blue while it waits for you), scaled per monitor. Nothing is drawn over the
+  window's content or on the rest of the screen, and nothing at all when no window is known or that window is not in
+  front: the pill alone shows an agent is in control. The border follows the window as it moves, resizes or changes, is
+  click-through, never takes focus, and stays out of clawdcursor's screenshots and reads (on
+  Linux and on Windows 10 before 2004, where a window cannot be kept out of a capture, it steps aside for each one).
+  `CLAWD_NO_GLOW` is gone with the glow.
+- **The pill and the outline close by themselves when clawdcursor is killed.** A host that hard-kills the process runs no
+  exit hook; each drawer now exits when its stdin closes instead of staying on screen.
 - **Agents are steered through the blind pipeline** (wording, order and result text; no tool or action added or removed).
   Read lines say to act by name and keep `@x,y` for elements with no name; `smart_click` is explained where agents look
   for it and its miss carries a next step; the sparse-tree hint, `SKILL.md` and `docs/llms.txt` use one SEE/ACT ladder in

@@ -92,7 +92,7 @@ export const cachedMacOcrBinary = ocrBinary.cached;
 export const compileMacOcrBinary = ocrBinary.compile;
 export const resetMacOcrBinaryState = ocrBinary.reset;
 
-/** The on-screen overlay (glow + pill), scripts/mac/overlay.swift. */
+/** The on-screen overlay (outline + pill), scripts/mac/overlay.swift. */
 export const macOverlayBinary = swiftBinary('clawd-overlay');
 
 /** The accessibility helper (windows, UI trees, find/invoke), scripts/mac/ax-helper.swift. */

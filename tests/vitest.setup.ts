@@ -42,7 +42,7 @@ process.env.CLAWDCURSOR_WAKE_BUDGET_MS ??= '0';
 // A pause would put the real overlay on screen and wait for a human. Off by
 // default; the pause tests turn it on with a fake banner spawner.
 process.env.CLAWD_NO_PAUSE ??= '1';
-// Same for the overlay itself (pill + glow): tests that need it enable it with fake spawners.
+// Same for the overlay itself (pill + outline): tests that need it enable it with fake spawners.
 process.env.CLAWD_NO_BANNER ??= '1';
 // The compiled macOS accessibility helper (scripts/mac/ax-helper.swift) reads the REAL desktop — never in unit
 // tests, where a Mac that happens to have it built would otherwise change what the osascript-path tests see.

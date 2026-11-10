@@ -2,7 +2,7 @@
 // macOS verification on a real Mac: Retina coordinate scale (#154), the warm OCR
 // path, the accessibility wake, the accessibility helper (window list / active
 // window / tree), the macOS-only unit tests, and the on-screen
-// overlay (glow + pill, pause for the user — interactive, last).
+// overlay (outline + pill, pause for the user — interactive, last).
 // Run from the repo root after `npm ci && npm run build`:
 //   node scripts/verify-macos.mjs                 # auto-detects a running Electron app
 //   node scripts/verify-macos.mjs --app "Slack"   # or name one (System Events process name)
@@ -243,7 +243,7 @@ try {
   const m = /Tests\s+(.*)/.exec(out); line('PASS', 'macOS-only unit tests', m ? m[1].replace(/\x1b\[[0-9;]*m/g, '') : 'passed');
 } catch (err) { const o = String(err.stdout || err.message); line('FAIL', 'macOS-only unit tests', (o.match(/FAIL.*|×.*/g) || [o.slice(-300)]).slice(0, 3).join(' | ').replace(/\x1b\[[0-9;]*m/g, '')); }
 
-// ── 9. the on-screen overlay (glow + pill) and the pause prompt — interactive ─
+// ── 9. the on-screen overlay (outline + pill) and the pause prompt — interactive ─
 const { macOverlayBinary } = require(dist('platform/mac-ocr-binary.js'));
 const { spawn } = await import('node:child_process');
 const OVERLAY = path.join(ROOT, 'scripts', 'mac', 'overlay.swift');
@@ -252,7 +252,7 @@ const OVERLAY = path.join(ROOT, 'scripts', 'mac', 'overlay.swift');
 const frontApp = () => { try { return sh('osascript', ['-l', 'JavaScript', '-e', "ObjC.import('AppKit'); $.NSWorkspace.sharedWorkspace.frontmostApplication.localizedName.js"]); } catch { return '?'; } };
 /** Run the overlay; resolve with its first stdout line, its exit code, or 'timeout'. */
 const runOverlay = (bin, args, env, waitMs) => new Promise(resolve => {
-  const child = spawn(bin, args, { env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(bin, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] }); // stdin open: the overlay exits when it closes
   let out = '';
   const timer = setTimeout(() => { child.kill(); resolve('timeout'); }, waitMs);
   child.stdout.on('data', d => { out += d; if (out.includes('\n')) { clearTimeout(timer); child.kill(); resolve(out.trim()); } });
@@ -266,9 +266,13 @@ else {
   line(overlayBin ? 'PASS' : 'FAIL', 'compile overlay (scripts/mac/overlay.swift)', overlayBin ? `${ms(t0)} ms` : 'compile failed — run: swiftc -O scripts/mac/overlay.swift -o /tmp/o  to see the error');
 }
 if (overlayBin) {
-  console.log('\n  → Watch your screens: a BLUE glow should pulse on every edge of every display for 5 s.');
-  const g = await runOverlay(overlayBin, ['glow', '--color', '#3b82f6', '--duration', '5'], {}, 20_000);
-  line(g === 'exit 0' ? 'PASS' : 'FAIL', 'glow runs on every display and exits on time', `${g} (check by eye: did all ${sh('osascript', ['-l', 'JavaScript', '-e', "ObjC.import('AppKit'); $.NSScreen.screens.count"])} screen(s) glow blue?)`);
+  console.log('\n  → Watch the window in front: a thin BLUE border should sit around it for 5 s — no tint, nothing on the rest of the screen.');
+  const frontPid = sh('osascript', ['-l', 'JavaScript', '-e', "ObjC.import('AppKit'); $.NSWorkspace.sharedWorkspace.frontmostApplication.processIdentifier"]);
+  const o = spawn(overlayBin, ['outline', '--color', '#3b82f6'], { stdio: ['pipe', 'ignore', 'ignore'] });
+  o.stdin.write(`TARGET 0 ${frontPid}\n`);
+  await new Promise(r => setTimeout(r, 5000));
+  line(o.exitCode === null ? 'PASS' : 'FAIL', 'outline runs around the window in front', `pid ${frontPid} (check by eye: a blue border around that window only, following it when moved?)`);
+  o.kill();
 
   const before = frontApp();
   console.log('\n  → A pill saying "ClawdCursor paused - your turn" is at the top of your main screen. Click RESUME (60 s).');
@@ -287,14 +291,14 @@ if (overlayBin) {
   if (s === 'timeout') line('SKIP', 'running pill: double-click to stop', 'no double-click within 30 s');
   else line(s === 'BANNER_STOP' ? 'PASS' : 'FAIL', 'running pill: double-click prints BANNER_STOP', s);
 
-  // End to end through clawdcursor itself: the pause gate draws the blue glow + pill via banner.ts.
+  // End to end through clawdcursor itself: the pause gate draws the blue outline + pill via banner.ts.
   await macOverlayBinary.compile(OVERLAY); // the real cache in ~/.clawdcursor/bin, which banner.ts uses
   delete process.env.CLAWD_NO_PAUSE; delete process.env.CLAWD_NO_BANNER;
   const { pauseGate } = require(dist('core/pause-gate.js'));
   const { controlBanner } = require(dist('core/banner.js'));
   if (!pauseGate.available()) line('FAIL', 'clawdcursor pause (end to end)', 'pauseGate.available() is false — the overlay binary is not usable');
   else {
-    console.log('\n  → Last one, through clawdcursor itself: blue glow + pill again. Click RESUME (60 s).');
+    console.log('\n  → Last one, through clawdcursor itself: the blue pill again. Click RESUME (60 s).');
     let t;
     const outcome = await Promise.race([
       pauseGate.request({ message: 'clawdcursor Mac check (end to end): click Resume.' }),

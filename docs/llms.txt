@@ -117,7 +117,7 @@ in is in front; `window focus` binds it to a window on purpose. Input is also re
 the window in front is an AI assistant (Claude, ChatGPT, Codex, Cursor, VS Code, Windsurf, Zed)
 that the agent did not focus or open on purpose, so text meant for an app never lands in a chat.
 At a roadblock (sign-in, 2FA, CAPTCHA) the agent pauses instead of failing: the
-glow turns blue, the prompt says what to do, and the task continues when the
+prompt turns blue and says what to do, and the task continues when the
 user clicks Resume. Outside agents use
 `system pause_for_user` (ask for the one step only the user can do, and pass `done_when` so the pause ends as soon as they finish); `clawdcursor resume` answers from a terminal.
 While you are driving the desktop, the user is watching the screen, not your chat: ask them on

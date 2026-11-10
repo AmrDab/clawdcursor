@@ -29,21 +29,21 @@ class FakeChild extends EventEmitter {
 }
 
 let pills: Array<{ child: FakeChild; mode: OverlayMode }>;
-let glows: Array<{ child: FakeChild; mode: OverlayMode }>;
+let outlines: Array<{ child: FakeChild; mode: OverlayMode }>;
 const livePill = () => pills.filter(p => !p.child.killed);
 const say = (line: string) => livePill().slice(-1)[0].child.stdout.write(line + '\n');
 const flush = () => new Promise(r => setImmediate(r));
 
 beforeEach(() => {
   pills = [];
-  glows = [];
+  outlines = [];
   delete process.env.CLAWD_NO_PAUSE;
   delete process.env.CLAWD_PAUSE_TIMEOUT_MIN;
   pauseGate.__resetForTests();
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(mode => { const c = new FakeChild(); pills.push({ child: c, mode }); return c as unknown as ChildProcess; });
-  controlBanner.__setGlowSpawnerForTests(mode => { const c = new FakeChild(); glows.push({ child: c, mode }); return c as unknown as ChildProcess; });
+  controlBanner.__setOutlineSpawnerForTests(mode => { const c = new FakeChild(); outlines.push({ child: c, mode }); return c as unknown as ChildProcess; });
 });
 
 afterEach(() => {
@@ -72,7 +72,7 @@ describe('pauseGate', () => {
     expect(pills[0].child.killed).toBe(true);                 // running pill replaced
     const paused = livePill()[0];
     expect(paused.mode.paused?.message).toBe('Sign in to GitHub, then click Resume');
-    expect(glows.filter(g => !g.child.killed)[0].mode.paused?.message).toBe('Sign in to GitHub, then click Resume');
+    expect(outlines.filter(o => !o.child.killed)[0].mode.paused?.message).toBe('Sign in to GitHub, then click Resume');
     expect(pauseGate.current()?.message).toBe('Sign in to GitHub, then click Resume');
 
     say('BANNER_RESUME');

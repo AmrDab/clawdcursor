@@ -48,7 +48,7 @@ func captureFullScreenSCK(outputPath: String) -> Bool {
                 semaphore.signal()
                 return
             }
-            // clawdcursor's own on-screen overlay (the pill and the glow, the `clawd-overlay` process) is for the person
+            // clawdcursor's own on-screen overlay (the pill and the outline, the `clawd-overlay` process) is for the person
             // at the screen, never part of what the agent sees: it sat over apps' toolbars and hid them in captures.
             // (The overlay also sets sharingType = .none, which the older CGWindowList path honours.)
             let ownOverlay = content.applications.filter {

@@ -83,6 +83,7 @@ public class NoActivateBannerForm : Form {
                         try { BeginInvoke((Action)(() => ActivityChanged(text))); } catch { }
                     }
                 }
+                Environment.Exit(0);   // stdin closed: the parent is gone, and a pill must not outlive it
             } catch { }
         });
         t.IsBackground = true;
