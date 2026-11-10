@@ -327,6 +327,9 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (ctx.platform) {
           const el = await ctx.platform.getFocusedElement();
+          if (!el && ctx.platform.lastFindError === 'partial') {
+            return { text: `${ctx.platform.lastFindNote ?? 'Search cut.'} - this is not "nothing is focused".`, isError: true };
+          }
           if (!el) return { text: '(no focused element)' };
           return { text: JSON.stringify(el) };
         }

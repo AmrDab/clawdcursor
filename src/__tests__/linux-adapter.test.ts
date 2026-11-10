@@ -391,6 +391,18 @@ describe('L7 — findElements scopes to the foreground window pid by default', (
     await adapter.findElements({ name: 'Needle' });
     expect(adapter.lastFindError).toBeNull();
   });
+
+  it('a focus search the bridge cut is reported as partial, not as nothing focused', async () => {
+    h.exec = defaultExec(() => ({ element: null, partial: true }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.getFocusedElement()).toBeNull();
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/element budget/);
+    h.exec = defaultExec(() => ({ element: null }));
+    await adapter.getFocusedElement();
+    expect(adapter.lastFindError).toBeNull();
+  });
 });
 
 // ─── L8 ───────────────────────────────────────────────────────────────────────

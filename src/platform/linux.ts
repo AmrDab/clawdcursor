@@ -743,6 +743,8 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   async getFocusedElement(): Promise<UiElement | null> {
+    this.lastFindError = null;
+    this.lastFindNote = null;
     if (!this.atspiAvailable) return null;
     try {
       // Scoped to the foreground app: toolkits keep FOCUSED on the last
@@ -752,8 +754,15 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'focused', ...scope], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { element?: any };
-      if (!data.element) return null;
+      const data = JSON.parse(stdout) as { element?: any; partial?: boolean };
+      if (!data.element) {
+        // The bridge ran out of its search budget before finding the focus: not "nothing is focused".
+        if (data.partial === true) {
+          this.lastFindError = 'partial';
+          this.lastFindNote = 'No focused element in the first part of this window (the accessibility search stopped at its element budget)';
+        }
+        return null;
+      }
       const [el] = await this.offsetWindowRelative([data.element], [this.normalizeAtspiElement(data.element)]);
       return el;
     } catch {

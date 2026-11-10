@@ -215,6 +215,17 @@ describe('what the logs may carry', () => {
   });
 });
 
+describe('unhandledRejection', () => {
+  it('logs the code and stack frames, never the message', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
+    const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf('In server mode'));
+    expect(h).toMatch(/safeStack\(/);
+    expect(h).not.toMatch(/\.message/);
+    expect(h).not.toMatch(/String\(reason\)/);
+    expect(h).not.toMatch(/, reason\)/);
+  });
+});
+
 describe('the daemon ends its session logs', () => {
   it('endAllSessions closes every session that wrote a file, once', () => {
     const used = new SessionLog({ version: 't', surface: 'compact' });

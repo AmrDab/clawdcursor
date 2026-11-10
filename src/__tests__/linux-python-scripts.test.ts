@@ -121,6 +121,11 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.wide_capped_cut).toBe(true);
     expect(out.wide_invoke).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/not found in the first \d+ elements/) });
     expect(out.wide_find).toMatchObject({ elements: [], partial: true });
+    expect(out.wide_focused).toMatchObject({ element: null, partial: true });
+  });
+
+  it('scroll-into-view says the search was cut instead of "not found"', () => {
+    expect(out.wide_scroll).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/^search cut/) });
   });
 
   it('invoke toggle reports the new state', () => {

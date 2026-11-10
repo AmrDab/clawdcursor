@@ -853,7 +853,10 @@ def collect_scroll_matches(top: Any, name: Optional[str], role: Optional[str]) -
     seen = [0]
 
     def visit(acc: Any, depth: int) -> None:
-        if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES:
+        if acc is None or depth > MAX_TREE_DEPTH:
+            return
+        if seen[0] > MAX_SEARCH_NODES:
+            SEARCH_CUT[0] = True
             return
         seen[0] += 1
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
@@ -898,8 +901,13 @@ def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: O
     tops = toplevels_active_first(app)
     if not tops:
         return {"success": False, "action": action, "error": "the application has no window"}
+    SEARCH_CUT[0] = False
     matches = collect_scroll_matches(tops[0], name, role)
     if not matches:
+        if SEARCH_CUT[0]:
+            return {"success": False, "action": action, "partial": True,
+                    "error": f"search cut: no element named {name} in the first {MAX_SEARCH_NODES} elements of the active window "
+                             "(the window is larger; this is not 'no such element')"}
         return {"success": False, "action": action, "error": f"element not found in the active window: {name}"}
     # A label and the field it labels share a name: the field is what a scroll is for. Labels only when nothing else matches.
     actionable = [m for m in matches

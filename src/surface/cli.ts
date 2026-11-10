@@ -45,13 +45,14 @@ process.on('unhandledRejection', (reason: any) => {
   try {
     // Lazy-require to avoid pulling the pipeline module at cold CLI startup.
     const { logger } = require('../core/observability/logger');
-    const msg = reason instanceof Error ? reason.message : String(reason);
-    const stack = reason instanceof Error ? reason.stack : undefined;
-    logger.error('unhandledRejection', { msg, stack });
+    // Code and stack frames only, home path stripped (same rule as `crash`): the message can carry user content.
+    const code = (reason as NodeJS.ErrnoException | undefined)?.code;
+    const frames = require('./session-log').safeStack(reason instanceof Error ? reason.stack : undefined);
+    logger.error('unhandledRejection', { ...(code ? { code } : {}), stack: frames });
+    console.error(`unhandledRejection${code ? ` (${code})` : ''}:\n${frames}`);
   } catch {
-    // Logger itself failed — fall back to stderr.
-
-    console.error('unhandledRejection (logger unavailable):', reason);
+    // Logger itself failed — say that much, still without the message.
+    console.error('unhandledRejection (logger unavailable)');
   }
   // In server mode, (process.env.CLAWD_SERVER_MODE === '1') keep running.
   // In CLI / one-shot mode, exit to surface the bug.

@@ -354,6 +354,12 @@ OUT['wide_invoke'] = bridge.cmd_invoke('Needle', None, 5151, 'click', None)
 OUT['wide_find'] = bridge.cmd_find('Needle', None, 5151)
 wide_acc = wide_app(bridge.MAX_TREE_NODES * 2)
 OUT['wide_find_small'] = [e['name'] for e in bridge.cmd_find('Needle', None, 5151)['elements']]
+wide_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+OUT['wide_scroll'] = bridge.cmd_scroll_into_view('Needle', None, 5151)
+focus_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+focus_acc.children[0].children[-1].states.add(StateType.FOCUSED)
+wide_acc = focus_acc
+OUT['wide_focused'] = bridge.cmd_focused(5151)
 bridge.active_application = real_active_application
 
 # Focus: scoped to the app, active window first — never another app's widget.
