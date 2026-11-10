@@ -251,7 +251,8 @@ function ConvertTo-UINode {
     }
 
     $rect = $cur.BoundingRectangle
-    $bounds = if ([double]::IsInfinity($rect.X) -or [double]::IsInfinity($rect.Y) -or $rect.X -lt -100 -or $rect.Y -lt -100) {
+    # Negative coordinates are real: a monitor left of / above the primary. The adapter decides what is on no monitor.
+    $bounds = if ([double]::IsInfinity($rect.X) -or [double]::IsInfinity($rect.Y)) {
         @{ x = 0; y = 0; width = 0; height = 0 }
     } else {
         @{ x = [Math]::Round($rect.X); y = [Math]::Round($rect.Y); width = [Math]::Round($rect.Width); height = [Math]::Round($rect.Height) }

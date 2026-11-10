@@ -143,13 +143,12 @@ export function getLastFrame(): FrameMapping | null { return lastFrame; }
 
 /** Image-space point → mouse-space point for the last frame. `mouseScale` is the
  *  primary display's image→mouse factor, used when the last frame was the primary. */
-export function mapImagePoint(x: number, y: number, mouseScale: number): { x: number; y: number } {
-  const f = lastFrame;
+export function mapImagePoint(x: number, y: number, mouseScale: number, f = lastFrame): { x: number; y: number } {
   if (!f) return { x: Math.round(x * mouseScale), y: Math.round(y * mouseScale) };
   return { x: Math.round(f.originX + x * f.scale), y: Math.round(f.originY + y * f.scale) };
 }
 
 /** Image-space length (width, distance) → mouse-space length for the last frame. */
-export function mapImageLength(v: number, mouseScale: number): number {
-  return Math.round(v * (lastFrame ? lastFrame.scale : mouseScale));
+export function mapImageLength(v: number, mouseScale: number, f = lastFrame): number {
+  return Math.round(v * (f ? f.scale : mouseScale));
 }

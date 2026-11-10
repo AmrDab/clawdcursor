@@ -48,7 +48,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { llmSize } from '../core/agent-loop/coord-scale';
-import { setWorkingPoint } from './display-target';
+import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields } from '../core/miss-text';
@@ -722,6 +722,16 @@ export class WindowsAdapter implements PlatformAdapter {
       const nodes = Array.isArray(tree) ? tree : [tree];
       const flat: UiElement[] = [];
       for (const n of nodes) this.flattenTree(n, flat);
+      // A rect on no monitor (a minimized window's -32000, a gap between monitors) is not a position: flag the
+      // element offscreen instead, as the Linux adapter does. Both sides are physical virtual-desktop pixels.
+      const displays = await this.listDisplays().catch(() => [] as Display[]);
+      if (displays.length) {
+        for (const el of flat) {
+          if (onAnyDisplay(displays, el.bounds)) continue;
+          el.bounds = { x: 0, y: 0, width: 0, height: 0 };
+          el.offscreen = true;
+        }
+      }
       return flat;
     } catch {
       return [];

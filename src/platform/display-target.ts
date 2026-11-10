@@ -25,6 +25,12 @@ export function displayAt(displays: Display[], x: number, y: number): Display | 
     && x < d.bounds.x + d.bounds.width && y < d.bounds.y + d.bounds.height) ?? null;
 }
 
+/** Whether the rect overlaps some display — the one rule for "on screen", any layout (negative origins, gaps). */
+export function onAnyDisplay(displays: Display[], b: { x: number; y: number; width: number; height: number }): boolean {
+  return displays.some(d => b.x < d.bounds.x + d.bounds.width && b.x + b.width > d.bounds.x
+    && b.y < d.bounds.y + d.bounds.height && b.y + b.height > d.bounds.y);
+}
+
 /**
  * Pick the display to capture: an explicit index wins; otherwise the display
  * clawdcursor last worked on; otherwise the primary.

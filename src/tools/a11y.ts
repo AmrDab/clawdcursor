@@ -13,7 +13,7 @@ import { windowTextIncludes } from './window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
 import { copyAllText } from '../platform/copy-all-text';
-import { setWorkingPoint } from '../platform/display-target';
+import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint } from './blind-hints';
 import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
@@ -370,8 +370,7 @@ export function getA11yTools(): ToolDefinition[] {
         const displays = ctx.platform && process.platform !== 'darwin' ? await ctx.platform.listDisplays().catch(() => []) : [];
         const negativeSpace = displays.some(d => d.bounds.x < 0 || d.bounds.y < 0);
         const onScreen = (b: { x: number; y: number; width: number; height: number }) => displays.length
-          ? displays.some(d => b.x < d.bounds.x + d.bounds.width && b.x + b.width > d.bounds.x
-            && b.y < d.bounds.y + d.bounds.height && b.y + b.height > d.bounds.y)
+          ? onAnyDisplay(displays, b)
           : (b.x >= 0 && b.y >= 0);
 
         // Fix: minimize phantom off-screen full-screen windows that steal focus.
