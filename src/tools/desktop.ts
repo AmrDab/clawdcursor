@@ -9,8 +9,9 @@
 import * as os from 'os';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage } from './types';
-import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
+import type { Display } from '../platform/types';
 import { isBlockedKey } from './playbooks/keys-blocklist';
 import { waitForPaste, writeClipboardVerified } from './paste-guard';
 import { lastCaptureUnchecked } from '../platform/native-helper';
@@ -40,11 +41,29 @@ const LABEL_TAIL = ' If the target has a visible label, click it with smart_clic
  * What to tell the agent after a zoomed view: clicks never take coordinates from the zoomed image — they stay in the space of the
  * full screenshot (or of the screen, for a screen-space region) — so the way back is arithmetic the reply spells out.
  */
-function zoomNote(r: { x: number; y: number; width: number; height: number; space?: string }, outW: number, outH: number): string {
+function zoomNote(r: { x: number; y: number; width: number; height: number; space?: string; display?: number }, outW: number, outH: number): string {
   const conv = `x = ${r.x} + zx·${r.width}/${outW}, y = ${r.y} + zy·${r.height}/${outH}`;
-  return r.space === 'screen'
-    ? ` Clicks stay in full-screen coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} — click it with space:"screen".`
+  if (r.space === 'screen') {
+    return ` Clicks stay in full-screen coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} — click it with space:"screen".`;
+  }
+  // An explicit display does not change which monitor image-space clicks land on: that is the latest screenshot's.
+  return typeof r.display === 'number'
+    ? ` Clicks stay in full-screenshot coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} in the image space of display #${r.display}'s screenshot. Clicks land on the monitor of the latest screenshot: take a screenshot with display:${r.display} first if it showed another one.`
     : ` Clicks stay in full-screenshot coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} in the screenshot's image space.`;
+}
+
+/** Why an explicit `display` cannot be shown (screenshot and zoom share the selector), or null. */
+function displayRefusal(displays: Display[], explicit: number | undefined, target: Display | null): string | null {
+  if (explicit === undefined) return null;
+  if (!target) {
+    return `No display #${explicit}. Displays: ${displays.map(d => `#${d.index} ${d.bounds.width}x${d.bounds.height} at (${d.bounds.x},${d.bounds.y})`).join(', ') || 'none found'}.`;
+  }
+  // macOS captures the main display only (for now) — say so rather than
+  // label the main display's image as display N.
+  if (process.platform === 'darwin' && !target.primary) {
+    return `display:${explicit} is not supported on macOS yet — screenshots show the main display. Omit display.`;
+  }
+  return null;
 }
 
 export const SPACE_PARAM = {
@@ -96,14 +115,8 @@ export function getDesktopTools(): ToolDefinition[] {
         const explicit = typeof display === 'number' ? display : undefined;
         const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
         const target = pickDisplay(displays, explicit);
-        if (explicit !== undefined && !target) {
-          return { text: `No display #${explicit}. Displays: ${displays.map(d => `#${d.index} ${d.bounds.width}x${d.bounds.height} at (${d.bounds.x},${d.bounds.y})`).join(', ') || 'none found'}.`, isError: true };
-        }
-        // macOS captures the main display only (for now) — say so rather than
-        // label the main display's image as display N.
-        if (process.platform === 'darwin' && explicit !== undefined && target && !target.primary) {
-          return { text: `display:${explicit} is not supported on macOS yet — screenshots show the main display. Omit display.`, isError: true };
-        }
+        const refusal = displayRefusal(displays, explicit, target);
+        if (refusal) return { text: refusal, isError: true };
         // Any monitor other than the primary. Windows captures it through the
         // bridge (nut-js only grabs the primary); Linux X11 crops it from the
         // root window when asked for explicitly. Coordinates read off this
@@ -139,26 +152,37 @@ export function getDesktopTools(): ToolDefinition[] {
         width: { type: 'number', description: 'Width in image-space pixels', required: true },
         height: { type: 'number', description: 'Height in image-space pixels', required: true },
         space: SPACE_PARAM,
+        display: { type: 'number', description: 'Monitor whose screenshot the image-space region was read off (index from window list_displays). Default: the monitor of the latest screenshot.', required: false },
       },
       category: 'perception',
       compactGroup: 'computer',
       safetyTier: 0,
-      handler: async ({ x, y, width, height, space }, ctx) => {
+      handler: async ({ x, y, width, height, space, display }, ctx) => {
         await ctx.ensureInitialized();
         // Region in physical screen px: through the last frame (any monitor)
-        // for image coords; as-is for screen coords.
-        const multi = !!getLastFrame();
+        // for image coords; as-is for screen coords. An explicit display
+        // stands in for the last frame: the frame a screenshot of it records.
+        let mapping = getLastFrame();
+        if (typeof display === 'number') {
+          const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
+          const target = pickDisplay(displays, display);
+          const refusal = displayRefusal(displays, display, target);
+          if (refusal) return { text: refusal, isError: true };
+          const b = target!.bounds;
+          mapping = target!.primary ? null : { originX: b.x, originY: b.y, scale: llmScale(b.width, b.height), display: target!.index };
+        }
+        const multi = !!mapping;
         const sf = space === 'screen' ? 1 : ctx.getScreenshotScaleFactor();
-        const p0 = space === 'screen' || !multi ? { x: Math.round(x * sf), y: Math.round(y * sf) } : mapImagePoint(x, y, sf);
-        const w = space === 'screen' || !multi ? Math.round(width * sf) : mapImageLength(width, sf);
-        const h = space === 'screen' || !multi ? Math.round(height * sf) : mapImageLength(height, sf);
+        const p0 = space === 'screen' || !multi ? { x: Math.round(x * sf), y: Math.round(y * sf) } : mapImagePoint(x, y, sf, mapping);
+        const w = space === 'screen' || !multi ? Math.round(width * sf) : mapImageLength(width, sf, mapping);
+        const h = space === 'screen' || !multi ? Math.round(height * sf) : mapImageLength(height, sf, mapping);
         if (process.platform === 'win32' && ctx.platform) {
           // Windows: the bridge captures any rectangle on any monitor; if it is
           // down, fall back to the primary-display capture below.
           const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
           if (shot) {
             return {
-              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space }, shot.width, shot.height)}`,
+              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space, display }, shot.width, shot.height)}`,
               image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
             };
           }
@@ -166,7 +190,7 @@ export function getDesktopTools(): ToolDefinition[] {
         const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');
         return {
-          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
+          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space, display }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },

@@ -1,7 +1,7 @@
 # banner.ps1 — "ClawdCursor — desktop control in progress" indicator.
 #
-# A small, always-on-top, borderless pill at the top-center of the primary
-# screen: a pulsing amber dot, what the agent is doing ("Typing in Edge"), the
+# A small, always-on-top, borderless pill at the top-center of the monitor the
+# agent is working on: a pulsing amber dot, what the agent is doing ("Typing in Edge"), the
 # time since it appeared, and a Stop button. Shown by the daemon while an
 # agent is actively driving the desktop, so a human at the machine ALWAYS
 # knows automation is live (transparency requirement — same spirit as the
@@ -144,11 +144,14 @@ function New-RoundPath([int]$w, [int]$h, [int]$r) {
 }
 function Set-Round($c, [int]$r) { $c.Region = New-Object System.Drawing.Region((New-RoundPath $c.Width $c.Height $r)) }
 
-# Top-center of the primary screen, 8px below the edge; rounded corners and a thin outline.
+# Top-center of the monitor the foreground window is on (where the agent is working; the primary when there is
+# none), 8px below the edge; rounded corners and a thin outline.
 $script:radius = 18
 function Set-PillShape($f, [int]$r) {
     $script:radius = $r
-    $screen = [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    $fg = [NoActivateBannerForm]::GetForegroundWindow()
+    $screen = if ($fg -ne [IntPtr]::Zero) { [System.Windows.Forms.Screen]::FromHandle($fg).WorkingArea }
+              else { [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea }
     $f.Location = New-Object System.Drawing.Point(
         [int]($screen.X + ($screen.Width - $f.Width) / 2), [int]($screen.Y + 8))
     Set-Round $f $r
@@ -440,10 +443,11 @@ function Update-Layout {
     $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.PreferredWidth + 6
     $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.PreferredWidth + 10
     $stop.Location = New-Object System.Drawing.Point($x, 7);          $x += $stop.Width + 7
-    if ($form.Width -ne $x) { $form.Width = $x; Set-PillShape $form 19 }
+    $form.Width = $x
+    # Every time, not only on a new width: the work may have moved to another monitor.
+    Set-PillShape $form 19
 }
 Update-Layout
-Set-PillShape $form 19
 
 $form.add_ActivityChanged([Action[string]]{ param($t) $activity.Text = $t; Update-Layout })
 

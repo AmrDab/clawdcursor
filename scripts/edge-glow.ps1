@@ -76,6 +76,18 @@ public class GlowOverlay : Form {
     [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(
         IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst, ref SIZE psize,
         IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    // The same call with no source: only the global alpha changes, the bitmap is not copied again.
+    [DllImport("user32.dll", EntryPoint = "UpdateLayeredWindow")] static extern bool UpdateLayeredAlpha(
+        IntPtr hwnd, IntPtr hdcDst, IntPtr pptDst, IntPtr psize,
+        IntPtr hdcSrc, IntPtr pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
+    [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(POINT p, int flags);
+    [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
+    // The scaling of the monitor at a point, as a DPI (96 = 100%).
+    public static uint DpiAt(int x, int y) {
+        uint dx, dy;
+        return GetDpiForMonitor(MonitorFromPoint(new POINT(x, y), 2), 0, out dx, out dy) == 0 ? dx : 96; // MONITOR_DEFAULTTONEAREST, MDT_EFFECTIVE_DPI
+    }
 
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; public POINT(int x,int y){X=x;Y=y;} }
     [StructLayout(LayoutKind.Sequential)] public struct SIZE  { public int cx, cy; public SIZE(int x,int y){cx=x;cy=y;} }
@@ -85,6 +97,7 @@ public class GlowOverlay : Form {
 
     IntPtr screenDc, memDc, hBitmap, oldBitmap;
     Bitmap bmp;
+    bool pushed;
 
     public void SetBitmap(Bitmap b) {
         bmp = b;
@@ -94,18 +107,23 @@ public class GlowOverlay : Form {
         oldBitmap = SelectObject(memDc, hBitmap);
     }
 
-    // Re-push the same bitmap with a new global alpha → smooth pulse.
+    // The bitmap goes up once; after that only the global alpha changes → smooth pulse. (Copying a full-screen
+    // bitmap every tick cost ~9 ms a tick on a 3840x2400 monitor.)
     public void Push(byte alpha) {
         if (bmp == null) return;
-        SIZE size = new SIZE(bmp.Width, bmp.Height);
-        POINT src = new POINT(0, 0);
-        POINT dst = new POINT(this.Left, this.Top);
         BLENDFUNCTION blend = new BLENDFUNCTION();
         blend.BlendOp = 0;              // AC_SRC_OVER
         blend.BlendFlags = 0;
         blend.SourceConstantAlpha = alpha;
         blend.AlphaFormat = 1;          // AC_SRC_ALPHA
-        UpdateLayeredWindow(this.Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, 2); // ULW_ALPHA
+        if (pushed) {
+            UpdateLayeredAlpha(this.Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0, ref blend, 2); // ULW_ALPHA
+            return;
+        }
+        SIZE size = new SIZE(bmp.Width, bmp.Height);
+        POINT src = new POINT(0, 0);
+        POINT dst = new POINT(this.Left, this.Top);
+        pushed = UpdateLayeredWindow(this.Handle, screenDc, ref dst, ref size, memDc, ref src, 0, ref blend, 2); // ULW_ALPHA
     }
 
     public void Cleanup() {
@@ -134,12 +152,19 @@ function New-Band($g, $p1, $p2, $colorAt1, $colorAt2, $rect) {
     $br.Dispose()
 }
 
+# Per-monitor-v2, like ps-bridge.ps1: screen bounds and window positions are PHYSICAL pixels on every monitor.
+# Unaware, a layered window is placed at the system scale whatever monitor it is meant for: beside a 225% primary,
+# the window for a 100% monitor at (2796,-1080) 1920x1080 went to (6291,-2430) 4320x2430 — on no monitor at all.
+[void][GlowOverlay]::SetThreadDpiAwarenessContext([IntPtr](-4))
+
 $forms = @()
 foreach ($screen in [System.Windows.Forms.Screen]::AllScreens) {
     $scr = $screen.Bounds
     $W   = $scr.Width
     $H   = $scr.Height
-    $T   = [Math]::Min($Thickness, [Math]::Min([int]($W/2), [int]($H/2)))
+    # $Thickness is in 96-dpi units: the same visual depth on a 225% monitor and a 100% one.
+    $T   = [int]($Thickness * [GlowOverlay]::DpiAt($scr.X, $scr.Y) / 96)
+    $T   = [Math]::Min($T, [Math]::Min([int]($W/2), [int]($H/2)))
 
     # Render the edge glow into an ARGB bitmap once.
     $bmp = New-Object System.Drawing.Bitmap($W, $H, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)

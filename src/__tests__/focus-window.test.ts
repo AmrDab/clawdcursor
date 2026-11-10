@@ -179,6 +179,23 @@ describe('focus_window — Bug 4: off-screen recovery', () => {
   });
 });
 
+describe('focus_window — a window on a monitor above the primary', () => {
+  // Live Win11 2026-11-10: the retry click was skipped for any window with a negative x or y.
+  it.skipIf(process.platform === 'darwin')('retries the focus click there too', async () => {
+    const D = (index: number, x: number, y: number, width: number, height: number, primary = false) =>
+      ({ index, label: `D${index}`, primary, bounds: { x, y, width, height }, physicalSize: { width, height }, dpiRatio: 1 });
+    const win = { processId: 7, processName: 'ugraf', title: 'Designcenter', bounds: { x: 2790, y: -1086, width: 1932, height: 1044 }, isMinimized: false };
+    mockGetWindows.mockResolvedValue([win]);
+    // The window takes the foreground only on the second click.
+    mockGetActiveWindow.mockImplementation(async () => mockMouseClick.mock.calls.length >= 2
+      ? win : { title: 'Other', processName: 'other', processId: 1, bounds: { x: 0, y: 0, width: 800, height: 600 } });
+    const ctx = createCtx({ platform: { listDisplays: async () => [D(0, 0, 0, 3840, 2400, true), D(1, 2796, -1080, 1920, 1080)] } } as never);
+    const res = await focusWindow.handler({ processName: 'ugraf' }, ctx);
+    expect(mockMouseClick).toHaveBeenCalledTimes(2);
+    expect(res.text).toContain('Focused (retry)');
+  });
+});
+
 describe('focus_window — owned dialogs', () => {
   // Live Win11 2026-10-14: `window focus` could not reach Notepad's Save as
   // dialog. Once the bridge finds owned dialogs, the tool must not "assert

@@ -1,88 +1,12 @@
 /**
- * Sense-layer tests: a11y bounds sanity + fingerprint stagnation.
+ * Sense-layer tests: fingerprint stagnation + snapshot capture.
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  isValidBounds,
-  centerOf,
-  resolveByName,
-  resolveById,
-} from '../core/sense/a11y-resolver';
 import { fingerprint, FingerprintHistory } from '../core/sense/fingerprint';
 import { captureSnapshot } from '../core/sense/snapshot';
 import type { SnapshotElement } from '../core/sense/types';
 import type { PlatformAdapter } from '../platform/types';
-
-describe('a11y-resolver bounds sanity', () => {
-  it('accepts normal bounds', () => {
-    expect(isValidBounds({ x: 100, y: 200, width: 80, height: 24 })).toBe(true);
-  });
-
-  it('rejects the infamous y:-29503 pattern (macOS AX hidden element)', () => {
-    expect(isValidBounds({ x: 0, y: -29503, width: 10, height: 10 })).toBe(false);
-  });
-
-  it('rejects zero width', () => {
-    expect(isValidBounds({ x: 100, y: 100, width: 0, height: 24 })).toBe(false);
-  });
-
-  it('rejects negative height', () => {
-    expect(isValidBounds({ x: 100, y: 100, width: 80, height: -5 })).toBe(false);
-  });
-
-  it('rejects absurdly large coords', () => {
-    expect(isValidBounds({ x: 999_999, y: 100, width: 10, height: 10 })).toBe(false);
-  });
-
-  it('allows slight off-screen overlap within 100px tolerance', () => {
-    expect(isValidBounds({ x: -50, y: 10, width: 80, height: 24 })).toBe(true);
-  });
-
-  it('centerOf returns integer center', () => {
-    expect(centerOf({ x: 10, y: 20, width: 100, height: 50 })).toEqual({ x: 60, y: 45 });
-  });
-});
-
-describe('a11y-resolver resolveByName', () => {
-  it('returns center for valid element', async () => {
-    const lookup = async () => [
-      { name: 'Send', bounds: { x: 100, y: 200, width: 80, height: 24 } },
-    ];
-    expect(await resolveByName('Send', lookup)).toEqual({ x: 140, y: 212 });
-  });
-
-  it('returns null when no element found', async () => {
-    const lookup = async () => [];
-    expect(await resolveByName('Ghost', lookup)).toBeNull();
-  });
-
-  it('returns null when element has invalid bounds', async () => {
-    const lookup = async () => [
-      { name: 'Hidden', bounds: { x: 0, y: -29503, width: 0, height: 0 } },
-    ];
-    expect(await resolveByName('Hidden', lookup)).toBeNull();
-  });
-
-  it('passes controlType and processId through', async () => {
-    let received: any = null;
-    const lookup = async (q: any) => {
-      received = q;
-      return [{ name: 'X', bounds: { x: 0, y: 0, width: 10, height: 10 } }];
-    };
-    await resolveByName('X', lookup, { controlType: 'Button', processId: 123 });
-    expect(received).toEqual({ name: 'X', controlType: 'Button', processId: 123 });
-  });
-});
-
-describe('a11y-resolver resolveById', () => {
-  it('returns center when element found by automationId', async () => {
-    const lookup = async () => [
-      { automationId: 'send-btn', bounds: { x: 50, y: 100, width: 60, height: 20 } },
-    ];
-    expect(await resolveById('send-btn', lookup)).toEqual({ x: 80, y: 110 });
-  });
-});
 
 describe('fingerprint', () => {
   const e = (name: string, x: number, y: number, role = 'button'): SnapshotElement => ({

@@ -50,3 +50,65 @@ describe('the space parameter text', () => {
     expect(SPACE_PARAM.description).toMatch(/macOS/);
   });
 });
+
+// `computer zoom` ignored `display` although `screenshot` takes it (live 2026-11-10): the region was read against
+// whichever monitor the last screenshot showed. With `display`, it is read against THAT monitor's screenshot.
+describe('zoom with display', () => {
+  const D = (index: number, x: number, y: number, width: number, height: number, primary = false) =>
+    ({ index, label: `D${index}`, primary, bounds: { x, y, width, height }, physicalSize: { width, height }, dpiRatio: 1 });
+  const displays = [D(0, 0, 0, 3840, 2400, true), D(1, 2796, -1080, 1920, 1080)];
+  const withDisplays = () => {
+    const captureRegionForLLM = vi.fn(async () => ({ buffer: Buffer.from('x'), llmWidth: 700, llmHeight: 420 }));
+    return {
+      captureRegionForLLM,
+      ctx: {
+        ensureInitialized: async () => {},
+        getScreenshotScaleFactor: () => 3,
+        desktop: { captureRegionForLLM },
+        platform: { listDisplays: async () => displays, screenshot: async () => { throw new Error('no bridge'); } },
+      } as never,
+    };
+  };
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  const onWindows = async (run: () => Promise<void>) => {
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    try { await run(); } finally { Object.defineProperty(process, 'platform', platform); }
+  };
+
+  it('declares the display parameter screenshot has', () => {
+    const shot = getDesktopTools().find(t => t.name === 'desktop_screenshot')!;
+    expect(shot.parameters.display.type).toBe('number');
+    expect(region.parameters.display?.type).toBe('number');
+  });
+
+  it('maps an image-space region onto the named monitor, negative origin included', () => onWindows(async () => {
+    const { ctx, captureRegionForLLM } = withDisplays();
+    const r = await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 1 }, ctx);
+    expect(r.isError).toBeFalsy();
+    // 1920x1080 fits 1280 on its long edge at 1.5 screen px per image px.
+    expect(captureRegionForLLM).toHaveBeenCalledWith(2796 + 150, -1080 + 75, 300, 180);
+  }));
+
+  it('the reply names the display the coordinates belong to, and that clicks follow the latest screenshot', () => onWindows(async () => {
+    const { ctx } = withDisplays();
+    const r = await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 1 }, ctx);
+    expect(r.text).toContain("display #1's screenshot");
+    expect(r.text).toMatch(/screenshot with display:1 first/);
+    const plain = await region.handler({ x: 100, y: 50, width: 200, height: 120 }, ctx);
+    expect(plain.text).not.toMatch(/display #/);
+  }));
+
+  it('the primary display maps by the plain screenshot scale', () => onWindows(async () => {
+    const { ctx, captureRegionForLLM } = withDisplays();
+    await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 0 }, ctx);
+    expect(captureRegionForLLM).toHaveBeenCalledWith(300, 150, 600, 360);
+  }));
+
+  it('refuses a display that does not exist, as screenshot does', () => onWindows(async () => {
+    const { ctx, captureRegionForLLM } = withDisplays();
+    const r = await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 7 }, ctx);
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain('No display #7');
+    expect(captureRegionForLLM).not.toHaveBeenCalled();
+  }));
+});

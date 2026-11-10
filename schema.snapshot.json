@@ -654,6 +654,10 @@
               "screen",
               "image"
             ]
+          },
+          "display": {
+            "type": "number",
+            "description": "Monitor whose screenshot the image-space region was read off (index from window list_displays). Default: the monitor of the latest screenshot."
           }
         },
         "required": [
