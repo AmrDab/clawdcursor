@@ -30,6 +30,7 @@ All notable changes to Clawd Cursor will be documented in this file.
   NX", not "Clicking in Ugraf"), read once per process; macOS already gave the localized name; elsewhere the process
   name as before.
 - **The session log says which app a call acted in, by input or by name** (`app`: the app's name only, never a window title).
+  It is left out for browser acts and for by-name acts on a window that is not in front, where it isn't known.
 - **`computer key` takes `repeat`** (1 to 100): the key or sequence is pressed that many times. It was dropped without
   a word and the key pressed once.
 - **Input never lands in an AI assistant's window by accident.** `type`, `key`, click, drag, scroll and by-name acts
