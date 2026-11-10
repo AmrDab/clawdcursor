@@ -100,6 +100,21 @@ describe('SessionLog', () => {
     expect(back.tally).toMatchObject({ errors: 0, refused: 1 });
   });
 
+  // Live 2026-11-10: copy_all_text pressed Ctrl+A / Ctrl+C in the app and the log still called it a blind read.
+  it('a read that pressed keys is logged as an action, not a blind read — alone, as a batch step, and when read back', () => {
+    const log = new SessionLog({ version: 'x', surface: 'compact' });
+    log.record('system', 'copy_all_text', true, 400, undefined, undefined, { cls: 'act-other' });
+    log.record('batch', undefined, true, 900, undefined, undefined, { steps: [
+      { tool: 'system', action: 'copy_all_text', ok: true, cls: 'act-other' },
+      { tool: 'system', action: 'copy_all_text', ok: true },
+    ] });
+    expect(log.summary).toMatchObject({ calls: 2, blind: 1, actOther: 2 });
+    const back = readSession(log.file!);
+    expect(back.calls[0].cls).toBe('act-other');
+    expect(back.calls[1].steps!.map(s => s.cls)).toEqual(['act-other', 'blind']);
+    expect(back.tally).toMatchObject({ blind: 1, actOther: 2 });
+  });
+
   it('classifies batch steps one by one (not one act-other row)', () => {
     const log = new SessionLog({ version: 'x', surface: 'compact' });
     log.record('batch', undefined, false, 900, undefined, undefined, { outcome: 'error', steps: [

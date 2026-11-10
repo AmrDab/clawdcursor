@@ -720,6 +720,14 @@ describe('Smart Tools', () => {
       expect(result.text).toContain('Full a11y tree here...');
     });
 
+    // Live 2026-11-10: a read of one app came back with the title of every open window (Outlook, Edge, ...).
+    it('asks for the tree of the window it reads only, never the list of all open windows', async () => {
+      mockGetScreenContext.mockResolvedValue('Full a11y tree here...\nWith multiple lines\nAnd buttons');
+      await smartRead.handler({ scope: 'window' }, createCtx());
+      expect(mockGetScreenContext).toHaveBeenCalledTimes(1);
+      expect(mockGetScreenContext.mock.calls[0][1]).toBe(false);
+    });
+
     it('reads focused element for focused scope', async () => {
       mockGetFocusedElement.mockResolvedValue({
         name: 'Search',

@@ -45,7 +45,7 @@ describe('copyAllText', () => {
     const p = fakePlatform({ processName: 'someapp', pageText: null, prior: 'old secret' });
     const r = await copyAllText(p as any);
     expect(r.ok).toBe(false);
-    expect(r.text).toMatch(/Nothing was copied/);
+    expect(r.text).toMatch(/nothing was copied/);
     expect(r.text).not.toContain('old secret');
     expect(p.clip).toBe('old secret');
   });
@@ -88,19 +88,49 @@ describe('copyAllText', () => {
     expect(r.text).toContain('Search box: about');
   });
 
-  it('falls back to accessibility text when nothing was copied', async () => {
-    const p = { ...fakePlatform({ processName: 'someapp', pageText: null }), getUiTree: vi.fn(async () => tree) };
+  // Live 2026-11-10 (Siemens NX, a feature selected): the read pressed Ctrl+A / Ctrl+C, which selected every feature and
+  // opened NX's own Copy dialog. A read presses nothing while the tree can be read.
+  it('a window whose tree has text is read from the tree: no keystroke, clipboard untouched', async () => {
+    const p = { ...fakePlatform({ processName: 'someapp' }), getUiTree: vi.fn(async () => tree) };
     const r = await copyAllText(p as any);
-    expect(p.keys).toEqual(['mod+a', 'mod+c']);
+    expect(p.keys).toEqual([]);
+    expect(p.writeClipboard).not.toHaveBeenCalled();
     expect(r).toMatchObject({ ok: true, source: 'accessibility' });
+    expect(r.pressedKeys).toBeUndefined();
     expect(r.text).toContain('Edition');
+  });
+
+  it('a readable tree with no text in it (a drawn view) gets no select-all: it says so and points at ocr', async () => {
+    const drawn = [{ name: '', controlType: 'Window', bounds: { x: 0, y: 0, width: 800, height: 600 } }, { name: ' ', controlType: 'Pane', bounds: { x: 1, y: 1, width: 9, height: 9 } }];
+    const p = { ...fakePlatform({ processName: 'someapp' }), getUiTree: vi.fn(async () => drawn) };
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual([]);
+    expect(p.writeClipboard).not.toHaveBeenCalled();
+    expect(r.ok).toBe(false);
+    expect(r.text).toMatch(/Not pressing Ctrl\+A/);
+    expect(r.text).toMatch(/ocr/);
+  });
+
+  it('when keys are the only route, the result says which keys were pressed and where — on success and on failure', async () => {
+    for (const getUiTree of [undefined, vi.fn(async () => []), vi.fn(async () => { throw new Error('walk timed out'); })]) {
+      const p = { ...fakePlatform({ processName: 'msedge' }), ...(getUiTree ? { getUiTree } : {}) };
+      const r = await copyAllText(p as any);
+      expect(p.keys).toEqual(['mod+a', 'mod+c']);
+      expect(r).toMatchObject({ ok: true, source: 'clipboard', pressedKeys: true });
+      expect(r.note).toMatch(/Pressed Ctrl\+A and Ctrl\+C in \[msedge\] "Stripe"/);
+    }
+    const p = fakePlatform({ processName: 'someapp', pageText: null });
+    const r = await copyAllText(p as any);
+    expect(r).toMatchObject({ ok: false, pressedKeys: true });
+    expect(r.text).toMatch(/Pressed Ctrl\+A and Ctrl\+C in \[someapp\] "Stripe"/);
   });
 
   // #249: Ctrl+A acts on whatever has focus. In an editor it selected the whole document and left it selected, so the
   // agent's next keystroke replaced all of it; in a mail list it selected every message.
+  // The tree could not be read here, so keys are the only route left: the focus decides whether they may be pressed.
   const withFocus = (processName: string, focused: unknown) => ({
     ...fakePlatform({ processName }),
-    getUiTree: vi.fn(async () => tree),
+    getUiTree: vi.fn(async () => []),
     getFocusedElement: vi.fn(async () => focused as any),
   });
 
@@ -111,22 +141,14 @@ describe('copyAllText', () => {
     ['msedge', { controlType: 'Edit', name: 'Address and search bar' }, /editable field/],
     ['olk', { controlType: 'ListItem', name: 'Inbox message from Sarah' }, /every item/],
     ['explorer', { controlType: 'DataItem', name: 'report.pdf' }, /every item/],
-  ])('%s with focus on %o: no select-all, accessibility text instead, and it says why', async (proc, focused, why) => {
+  ])('%s with focus on %o: no select-all, it refuses and says why', async (proc, focused, why) => {
     const p = withFocus(proc, focused);
-    const r = await copyAllText(p as any);
-    expect(p.keys).toEqual([]);
-    expect(r).toMatchObject({ ok: true, source: 'accessibility' });
-    expect(r.text).toMatch(/not pressing Ctrl\+A/);
-    expect(r.text).toMatch(why);
-    expect(p.clip).toBe('user clipboard');
-  });
-
-  it('a hazard with an empty accessibility tree refuses rather than pressing Ctrl+A', async () => {
-    const p = { ...withFocus('notepad', { controlType: 'Edit', name: 'Text editor' }), getUiTree: vi.fn(async () => []) };
     const r = await copyAllText(p as any);
     expect(p.keys).toEqual([]);
     expect(r.ok).toBe(false);
     expect(r.text).toMatch(/Not pressing Ctrl\+A/);
+    expect(r.text).toMatch(why);
+    expect(p.clip).toBe('user clipboard');
   });
 
   it('a web page (the browser document has focus) is still copied exactly, and the result says the page is now selected', async () => {

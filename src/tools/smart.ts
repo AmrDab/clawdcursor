@@ -182,7 +182,7 @@ export function getSmartTools(): ToolDefinition[] {
           if (!hasA11y || scope === 'screen') return null;
           try {
             const active = processId ?? activeWin?.processId;
-            const context = await ctx.a11y.getScreenContext(active);
+            const context = await ctx.a11y.getScreenContext(active, false);
             if (context && context.length > 50) return context;
           } catch { /* */ }
           return null;

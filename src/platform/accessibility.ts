@@ -132,6 +132,8 @@ interface WindowCache {
 }
 
 interface ScreenContextCache {
+  /** The "WINDOWS:" section — every open window, so only for a caller that asks for it. */
+  windowList: string;
   context: string;
   timestamp: number;
 }
@@ -651,15 +653,17 @@ export class AccessibilityBridge {
   /**
    * Get a text summary of the UI for the LLM.
    * Always reads fresh on Windows (PSRunner is cheap); respects 2s cache otherwise.
+   * `withWindowList: false` leaves out the list of every open window: a read of one window names no other app.
    */
-  async getScreenContext(focusedProcessId?: number): Promise<string> {
+  async getScreenContext(focusedProcessId?: number, withWindowList = true): Promise<string> {
     if (
       this.screenContextCache &&
       Date.now() - this.screenContextCache.timestamp < this.SCREEN_CONTEXT_CACHE_TTL
     ) {
-      return this.screenContextCache.context;
+      return (withWindowList ? this.screenContextCache.windowList : '') + this.screenContextCache.context;
     }
 
+    let windowList = '';
     let context = '';
 
     try {
@@ -672,11 +676,11 @@ export class AccessibilityBridge {
 
         if (combined.windows?.length) {
           this.windowCache = { windows: combined.windows, timestamp: Date.now() };
-          context += 'WINDOWS:\n';
+          windowList += 'WINDOWS:\n';
           for (const w of combined.windows) {
-            context += `  ${w.isMinimized ? '🔽' : '🟢'} [${w.processName}] "${w.title}" pid:${w.processId}`;
-            if (!w.isMinimized) context += ` at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}`;
-            context += '\n';
+            windowList += `  ${w.isMinimized ? '🔽' : '🟢'} [${w.processName}] "${w.title}" pid:${w.processId}`;
+            if (!w.isMinimized) windowList += ` at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}`;
+            windowList += '\n';
           }
         }
 
@@ -692,11 +696,11 @@ export class AccessibilityBridge {
       } else if (IS_MAC) {
         // macOS — separate script calls
         const windows = await this.getWindows();
-        context += 'WINDOWS:\n';
+        windowList += 'WINDOWS:\n';
         for (const w of windows) {
-          context += `  ${w.isMinimized ? '🔽' : '🟢'} [${w.processName}] "${w.title}" pid:${w.processId}`;
-          if (!w.isMinimized) context += ` at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}`;
-          context += '\n';
+          windowList += `  ${w.isMinimized ? '🔽' : '🟢'} [${w.processName}] "${w.title}" pid:${w.processId}`;
+          if (!w.isMinimized) windowList += ` at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}`;
+          windowList += '\n';
         }
         if (focusedProcessId) {
           // A failure lands in the "[A11y tree unavailable: …]" note below instead of vanishing.
@@ -713,9 +717,9 @@ export class AccessibilityBridge {
         } else {
           const windows = await adapter.listWindows().catch(() => []);
           if (windows.length) {
-            context += 'WINDOWS:\n';
+            windowList += 'WINDOWS:\n';
             for (const w of windows) {
-              context += `  🟢 [${w.processName}] "${w.title}" pid:${w.processId} at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}\n`;
+              windowList += `  🟢 [${w.processName}] "${w.title}" pid:${w.processId} at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}\n`;
             }
           }
           // On-screen elements only: closed menus / hidden toolbars report 0x0.
@@ -751,12 +755,12 @@ export class AccessibilityBridge {
       } catch { /* non-critical */ }
     }
 
-    if (!context.trim()) {
+    if (!windowList.trim() && !context.trim()) {
       return '(Accessibility unavailable)';
     }
 
-    this.screenContextCache = { context, timestamp: Date.now() };
-    return context;
+    this.screenContextCache = { windowList, context, timestamp: Date.now() };
+    return (withWindowList ? windowList : '') + context;
   }
 
   private static readonly INTERACTIVE_TYPES = new Set([

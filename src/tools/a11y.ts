@@ -635,13 +635,14 @@ export function getA11yTools(): ToolDefinition[] {
     {
       name: 'copy_all_text',
       description:
-        'Read ALL text of the focused window / web page EXACTLY. Reads the document through accessibility ' +
-        'first (no keystrokes, nothing selected); where that is unavailable, select-all + copy, then the ' +
-        'clipboard is restored. Exact characters (IDs, amounts, codes) — prefer it over OCR for ' +
-        'reading pages and documents. Refuses in terminals (Ctrl+C would interrupt them). Never presses ' +
-        'select-all while focus is in an editable field, an editor document or a list — it returns the ' +
-        'accessibility text then. After a select-all copy the content stays selected (the result says so); ' +
-        'focus the right window first.',
+        'Read ALL text of the focused window / web page EXACTLY. Reads through accessibility with no ' +
+        'keystrokes and nothing selected: the document\'s text, else the names and values in the window\'s ' +
+        'tree. Exact characters (IDs, amounts, codes) — prefer it over OCR for ' +
+        'reading pages and documents. Only a window whose tree cannot be read at all gets select-all + copy ' +
+        '(the clipboard is restored): the result then says it pressed Ctrl+A and Ctrl+C there, and the content ' +
+        'stays selected. Refuses in terminals (Ctrl+C would interrupt them). Never presses ' +
+        'select-all while focus is in an editable field, an editor document or a list, or in a window whose ' +
+        'tree has no text (a drawn view) — use ocr there. Focus the right window first.',
       // `ocr`'s parameter, declared here too: the `system` schema lists it, so models pass it with every read.
       parameters: {
         scope: {
@@ -658,12 +659,12 @@ export function getA11yTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
         const r = await copyAllText(ctx.platform);
-        if (!r.ok) return { text: r.text, isError: true };
+        if (!r.ok) return { text: r.text, isError: true, pressedKeys: r.pressedKeys };
         ctx.a11y.invalidateCache();
         const scopeNote = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
         const note = [r.note, scopeNote].filter(Boolean).join('\n');
         // Page text is third-party data, not instructions.
-        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${note ? `\n${note}` : ''}` };
+        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys };
       },
     },
 
