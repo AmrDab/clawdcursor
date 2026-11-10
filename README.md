@@ -43,6 +43,13 @@
 
 ## What's new
 
+**1.5.27** &mdash; **Results you can trust, and logs that say what happened.**
+- Ticks, dropdowns and expanders read and change the same way on Windows, macOS and Linux; `toggle` reports the state it actually reached, and actions by name aim at the control, not its label.
+- A stop always answers "stopped by the user" first, and also blocks hover, clipboard writes, page script and tab switches.
+- Typing goes only to the window the agent was working in, dialogs like Save As included.
+- Linux reads deep web pages, and a search that runs out of time or elements says so instead of "not found".
+- Logs in `~/.clawdcursor/logs/` show every call's timing and outcome, slow internal steps, why the server exited, and who stopped it, with no typed text, error text or window titles.
+
 **1.5.26** &mdash; **The agent asks you on screen, and the pill says what it is doing.**
 - Security (Windows, high): text the agent typed or copied could run as PowerShell code ([GHSA-9ppf-38v8-h97v](https://github.com/AmrDab/clawdcursor/security/advisories/GHSA-9ppf-38v8-h97v)). Fixed; upgrade.
 - The pause prompt is a card: the agent can offer 2-6 choices to click, or a text box, and gets your exact answer back. A choice is never a safety approval.
