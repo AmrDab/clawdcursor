@@ -85,6 +85,8 @@ describe('the one wrapper', () => {
   });
 
   // Security review: 400 KB of unclosed near-miss tags took 3.3 s under a regex with a greedy tail. One linear pass.
+  // The bound is loose on purpose: the linear pass takes a few ms, the regression took seconds (16 s at 1 MB); a tight
+  // 200 ms failed on a slow CI runner (244 ms).
   it('a megabyte of near-miss tags is defused in linear time', () => {
     for (const unit of ['<untrusted-screen-content', '</untrusted-screen-content ', '<   /   untrusted-screen-content', '<<<<<<<<', '<          ', '</ </ </ ']) {
       const big = unit.repeat(Math.ceil(1_000_000 / unit.length));
@@ -93,7 +95,7 @@ describe('the one wrapper', () => {
       const ms = performance.now() - started;
       expect(out).not.toMatch(/<\s*\/?\s*untrusted-screen-content/i);
       expect(out.length).toBe(big.length);
-      expect(ms, `${unit.trim()} took ${ms.toFixed(0)} ms`).toBeLessThan(200);
+      expect(ms, `${unit.trim()} took ${ms.toFixed(0)} ms`).toBeLessThan(2000);
     }
   });
 
