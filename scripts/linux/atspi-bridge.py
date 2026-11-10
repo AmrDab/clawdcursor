@@ -205,19 +205,17 @@ def scope_toplevels(app: Any) -> list:
     return active + popups
 
 
-def other_windows_note(app: Any, searched: list) -> str:
-    """What a miss says when only the front window was searched and the app has more windows. No window title in it: a
-    title is page-controlled text, and this goes into an error that is classified by its words. Counts showing, normal
-    application windows (frame / dialog) only, not hidden popups or tooltips."""
-    others = [t for t in toplevels_active_first(app)
-              if t not in searched
-              and (safe(lambda t=t: t.get_role_name(), '') or '').lower() in APP_WINDOW_ROLES
-              and has_state(t, Atspi.StateType.SHOWING)]
-    if not others or not searched:
-        return ''
-    n = len(others)
-    return (f"; only the front window was searched; this app has {n} other window{'' if n == 1 else 's'}"
-            ' - window {"action":"focus","title":"..."} first to work in one')
+def other_windows_count(app: Any, searched: list) -> int:
+    """How many other showing, normal application windows (frame / dialog; not hidden popups or tooltips) the app has besides
+    those searched. Returned as a number in the reply's `otherWindows` field: the reply carries structured fields (reason,
+    otherWindows), never a sentence with page text in it, because the caller classifies by `reason` and a window title or an
+    element name is page controlled text."""
+    if not searched:
+        return 0
+    return len([t for t in toplevels_active_first(app)
+                if t not in searched
+                and (safe(lambda t=t: t.get_role_name(), '') or '').lower() in APP_WINDOW_ROLES
+                and has_state(t, Atspi.StateType.SHOWING)])
 
 
 def node_to_dict(acc: Any) -> Optional[dict]:
@@ -812,6 +810,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         used = do_named_action(acc, 'click')
         if used is None:
             out["error"] = "element exposes no Action interface"
+            out["reason"], out["cascade"] = "unsupported", True
         else:
             out["success"], out["method"] = True, used
 
@@ -873,6 +872,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         before = checked_state(acc, role)
         if before is None:
             out["error"] = "not a checkbox, radio, switch or toggle button"
+            out["reason"] = "unsupported"
         else:
             used = do_named_action(acc, 'toggle')
             if used is None:
@@ -899,6 +899,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
             used = do_named_action(acc, 'select')
             if used is None:
                 out["error"] = "no Selection interface on parent and no Action"
+                out["reason"] = "unsupported"
             else:
                 out["success"], out["method"] = True, used
 
@@ -910,6 +911,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         if not has_state(acc, Atspi.StateType.EXPANDABLE) and action not in named:
             # Not an expander: the click fallback in do_named_action pressed it (a "select" on a Save button saved).
             out["error"] = "element cannot expand or collapse"
+            out["reason"] = "unsupported"
         elif has_state(acc, Atspi.StateType.EXPANDED) == want:
             out["success"], out["method"] = True, "already"
         else:
@@ -937,20 +939,20 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
     if target is None:
         if SEARCH_WEAK[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                    "error": f"search cut ({SEARCH_CUT[0]}) before an exact match: only weaker matches for {name or role} were seen; "
+                    "error": f"search cut ({SEARCH_CUT[0]}) before an exact match: only weaker matches were seen; "
                              "use the element's exact name (a partial name cannot be searched completely in a window this large)"}
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                    "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched: {name or role} "
+                    "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched "
                              "(this is not 'no such element')"}
-        return {"success": False, "action": action,
-                "error": f"element not found: {name or role}" + other_windows_note(app, scope_toplevels(app))}
+        return {"success": False, "action": action, "reason": "not_found", "error": "element not found",
+                "otherWindows": other_windows_count(app, scope_toplevels(app))}
     if not showing and action != 'get-value':
         # Acting on a hidden element (closed menu, hidden toolbar, 0x0) and
         # calling it a success is how a Save dialog went unsaved. No bounds:
         # a coordinate fallback onto a hidden element is just as wrong.
-        return {"success": False, "action": action, "notVisible": True,
-                "error": f"element '{name or role}' exists but is not visible on screen "
+        return {"success": False, "action": action, "notVisible": True, "reason": "hidden",
+                "error": "the element exists but is not visible on screen "
                          "(hidden or 0x0, e.g. in a closed menu) — nothing was done"}
     return perform_action(target, action, value)
 
@@ -1018,9 +1020,9 @@ def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: O
     if not matches:
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                    "error": f"search cut ({SEARCH_CUT[0]}): no element named {name} in the part of the active window searched "
+                    "error": f"search cut ({SEARCH_CUT[0]}): no such element in the part of the active window searched "
                              "(this is not 'no such element')"}
-        return {"success": False, "action": action, "error": f"element not found in the active window: {name}"}
+        return {"success": False, "action": action, "reason": "not_found", "error": "element not found in the active window"}
     # Cut by the budget or the clock with only weaker (substring) matches seen: an exact one may lie beyond, so none is
     # scrolled to. With exact matches the walk proceeds (this walk has no early exit, so a big window is always cut; the
     # caller's bounds pick among same-named matches). A depth cut is structural and does not refuse.

@@ -51,6 +51,7 @@ import { llmSize } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
+import { structuredMissFields } from '../core/miss-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -865,8 +866,10 @@ export class WindowsAdapter implements PlatformAdapter {
         // element_value_contains actually see the value (review 2026-06-11).
         // The miss's reason and a late failure of an earlier invoke ride in data too: the tools read res.data.error /
         // res.data.lateInvokeError to tell the agent WHY, instead of "not found or not actionable".
-        data: (result?.data || result?.value !== undefined || result?.error || result?.lateInvokeError || result?.unverified === true) ? {
+        data: (result?.data || result?.value !== undefined || result?.error || result?.reason || result?.lateInvokeError || result?.unverified === true) ? {
           ...(result?.data ?? {}),
+          // The miss's machine-readable reason and its screen-derived values, as fields (see core/miss-text.ts).
+          ...structuredMissFields(result),
           ...(result?.value !== undefined && !result?.data ? { value: result.value } : {}),
           ...(typeof result?.error === 'string' ? { error: result.error } : {}),
           ...(typeof result?.lateInvokeError === 'string' ? { lateInvokeError: result.lateInvokeError } : {}),

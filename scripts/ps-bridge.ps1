@@ -420,19 +420,16 @@ function Get-ProcessScopeWindows {
     if ($null -ne $first) { return $first }
 }
 
-# What a miss says when the search covered one window and the process has more: the caller must know the miss is about
-# that window, and how to work in another. No window title in it: a title is page-controlled text, and this goes into an
-# error that is classified by its words.
-function Get-ScopeNarrowNote {
+# How many other normal app windows the process has besides the one searched, for a miss to report as a number. The reply
+# carries structured fields (reason, detail, otherWindows), never a sentence with page text in it: the caller classifies a
+# result by its reason, and a window title or an exception message is page / app controlled text.
+function Get-ScopeOtherWindows {
     param([int]$wpid, $scopeWindows)
     try {
         $sh = [IntPtr]::Zero
         try { $sh = [IntPtr][int]@($scopeWindows)[0].Current.NativeWindowHandle } catch { }
-        $others = Get-OtherWindowCount (Get-PidWindowCandidates $wpid) $sh
-        if ($others -le 0) { return '' }
-        $pl = if ($others -eq 1) { '' } else { 's' }
-        return "; only the front window was searched; this app has $others other window$pl - window {`"action`":`"focus`",`"title`":`"...`"} first to work in one"
-    } catch { return '' }
+        return [int](Get-OtherWindowCount (Get-PidWindowCandidates $wpid) $sh)
+    } catch { return 0 }
 }
 
 # A window title as compared: format characters (zero-width space, joiners, BOM, soft hyphen: Edge puts a U+200B inside
@@ -1070,7 +1067,7 @@ function Cmd-InvokeElement {
     $value       = if ($cmd.value)       { $cmd.value }          else { "" }
 
     $scopeWindows = @(Get-ProcessScopeWindows $wpid)
-    if ($scopeWindows.Count -eq 0) { return @{ success=$false; error="No window for pid $wpid" } }
+    if ($scopeWindows.Count -eq 0) { return @{ success=$false; reason="no_window"; error="No window for pid $wpid" } }
 
     # Find element: prefer automationId (exact), then fuzzy name walk. The window the agent works in first (see
     # Get-ProcessScopeWindows); the other windows of the pid only when none is in front.
@@ -1132,7 +1129,7 @@ function Cmd-InvokeElement {
     }
 
     if ($null -eq $element) {
-        return @{ success=$false; error=("Element not found: name='$name' id='$automationId' ct='$controlType'" + (Get-ScopeNarrowNote $wpid $scopeWindows)) }
+        return @{ success=$false; reason="not_found"; otherWindows=(Get-ScopeOtherWindows $wpid $scopeWindows); error="Element not found" }
     }
 
     switch ($action) {
@@ -1193,8 +1190,11 @@ function Cmd-InvokeElement {
                             return @{ success=$true; action="click"; method="ExpandCollapsePattern"; data=@{ expandState=$now; was=$was; expandChanged=($now -ne $was) } }
                         } catch {
                         $rect = $element.Current.BoundingRectangle
-                        $why = if ($invokeErr) { "Invoke failed: $invokeErr" } else { "No invoke/toggle/select/expand pattern" }
-                        return @{ success=$false; action="click"; error=$why;
+                        $why = if ($invokeErr) { "Invoke failed" } else { "No invoke/toggle/select/expand pattern" }
+                        $disabled = $false; try { $disabled = -not $element.Current.IsEnabled } catch { }
+                        $why2 = if ($disabled) { 'disabled' } elseif ($invokeErr) { 'invoke_threw' } else { 'unsupported' }
+                        return @{ success=$false; action="click"; error=$why; reason=$why2;
+                            detail=$(if ($invokeErr) { [string]$invokeErr } else { $null }); cascade=($why2 -eq 'unsupported');
                             clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)};
                             bounds=@{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
                         }
@@ -1273,9 +1273,9 @@ function Cmd-InvokeElement {
                 if ($after -eq $value) { return @{ success=$true; action="set-value"; value=$value; method="keyboard" } }
                 # Typed into the right window but the field cannot be read back: not a confirmed set.
                 if ($null -eq $after) { return @{ success=$true; unverified=$true; action="set-value"; value=$value; method="keyboard" } }
-                return @{ success=$false; error="set-value did not stick (got '$after')" }
+                return @{ success=$false; reason="failed"; detail="set-value did not stick (got '$after')"; error="set-value did not stick" }
             } catch {
-                return @{ success=$false; error="set-value failed (ValuePattern + keyboard): $($_.Exception.Message)" }
+                return @{ success=$false; reason="failed"; detail=[string]$_.Exception.Message; error="set-value failed (ValuePattern + keyboard)" }
             }
         }
         "get-value" {
@@ -1326,19 +1326,19 @@ function Cmd-InvokeElement {
         }
         "focus" {
             try { $element.SetFocus(); return @{ success=$true; action="focus" } }
-            catch { return @{ success=$false; error="SetFocus failed: $($_.Exception.Message)" } }
+            catch { return @{ success=$false; reason="failed"; detail=[string]$_.Exception.Message; error="SetFocus failed" } }
         }
         "expand" {
             try {
                 $p = $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
                 $p.Expand(); return @{ success=$true; action="expand" }
-            } catch { return @{ success=$false; error="ExpandCollapsePattern not supported" } }
+            } catch { return @{ success=$false; reason="unsupported"; error="ExpandCollapsePattern not supported" } }
         }
         "collapse" {
             try {
                 $p = $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
                 $p.Collapse(); return @{ success=$true; action="collapse" }
-            } catch { return @{ success=$false; error="ExpandCollapsePattern not supported" } }
+            } catch { return @{ success=$false; reason="unsupported"; error="ExpandCollapsePattern not supported" } }
         }
         "toggle" {
             try {
@@ -1355,13 +1355,13 @@ function Cmd-InvokeElement {
                     Start-Sleep -Milliseconds 50
                 } while ($sw.ElapsedMilliseconds -lt 500)
                 return @{ success=$true; action="toggle"; data=@{ toggleState=$state; toggleChanged=($state -ne $before) } }
-            } catch { return @{ success=$false; error="TogglePattern not supported" } }
+            } catch { return @{ success=$false; reason="unsupported"; error="TogglePattern not supported" } }
         }
         "select" {
             try {
                 $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
                 $p.Select(); return @{ success=$true; action="select" }
-            } catch { return @{ success=$false; error="SelectionItemPattern not supported" } }
+            } catch { return @{ success=$false; reason="unsupported"; error="SelectionItemPattern not supported" } }
         }
         default { return @{ success=$false; error="Unknown action: $action" } }
     }

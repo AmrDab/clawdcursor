@@ -101,7 +101,7 @@ const RULES: Rule[] = [
   // Before NOT_FOUND: an invoke miss is worded "missed — <reason>", and the reason decides which of the two it is.
   // Found, but the element is switched off: no verb and no click at its bounds will do anything.
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
-    test: /Invoke failed:[^\n]*(?:not enabled|disabled)|element is (?:not enabled|disabled)/i,
+    test: /element is (?:not enabled|disabled)/i,
     hint: 'found it, but it is disabled; the app has to enable it first (a required field, a selection), read its state',
     next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
   // Found, and the invoke itself threw: it may have acted before it threw, so do not repeat it or click the same spot.
@@ -155,7 +155,9 @@ const HEAD = 400;
  * blocks blanked out, so only clawdcursor's own words are matched.
  */
 export function quoteScreenText(s: string): string {
-  return `"${s.replace(/["\r\n]+/g, "'")}"`;
+  // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
+  const defused = s.replace(/<(\/?)\s*untrusted-screen-content\s*>/gi, '‹$1untrusted-screen-content›');
+  return `"${defused.replace(/["\r\n]+/g, "'")}"`;
 }
 function ownWords(text: string): string {
   return text

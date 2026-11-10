@@ -8,6 +8,7 @@
  * a lone label must be reported rather than clicked.
  */
 import type { PlatformAdapter } from './types';
+import { missText, untrusted } from '../core/miss-text';
 
 export type ByNameAction = 'focus' | 'set-value' | 'toggle' | 'select';
 
@@ -25,8 +26,11 @@ const SELECTABLE = /^(listitem|tabitem|tab|radiobutton|menuitem|treeitem|dataite
 
 /** `: <reason>` from an adapter's failed result (`error` or `data.error`), or '' when it gave none. */
 export function failReason(res: { error?: unknown; data?: Record<string, unknown> }): string {
+  // A bridge reply with a reason is told in our words (the app's detail inside an untrusted block); one without is shown
+  // inside an untrusted block, so nothing the screen or the app said can pass for clawdcursor's own words.
+  if (typeof res.data?.reason === 'string') return `: ${missText(res.data)}`;
   const e = res.error ?? res.data?.error;
-  return typeof e === 'string' && e.trim() ? `: ${e.trim().replace(/[.\s]+$/, '')}` : '';
+  return typeof e === 'string' && e.trim() ? `: ${untrusted(e.trim().replace(/[.\s]+$/, ''))}` : '';
 }
 
 export const holdsOptions = (r?: string) => HOLDS_OPTIONS.test(role(r));

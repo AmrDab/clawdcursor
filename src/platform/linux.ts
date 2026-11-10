@@ -52,6 +52,7 @@ import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
+import { structuredMissFields } from '../core/miss-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -823,6 +824,7 @@ export class LinuxAdapter implements PlatformAdapter {
       if (result?.toggleChanged !== undefined) data.toggleChanged = result.toggleChanged;
       // e.g. "exists but is not visible on screen" — say why, not just "missed".
       if (result?.success !== true && typeof result?.error === 'string') data.error = result.error;
+      if (result?.success !== true) Object.assign(data, structuredMissFields(result));
       return {
         success: result?.success === true,
         ...(bounds ? { bounds } : {}),

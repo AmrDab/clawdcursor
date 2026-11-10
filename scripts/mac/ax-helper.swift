@@ -596,19 +596,17 @@ func windowsToSearch(_ app: NSRunningApplication) -> (windows: [AXUIElement], hu
     return (all, key.hung)
 }
 
-/// What a miss says when the search covered the front window(s) and the app has more: the miss is about those windows. No window
-/// title in it: a title is page-controlled text, and this goes into an error that is classified by its words. Counts visible
-/// standard windows and dialogs only (not minimized ones, palettes or popovers).
-func scopeNote(_ app: NSRunningApplication, searched: [AXUIElement]) -> String {
+/// How many other windows the app has besides those searched, for a miss to report as a number (a field of the reply, never a
+/// sentence with a window title in it). Counts visible standard windows and dialogs only (not minimized ones, palettes or popovers).
+func otherWindowCount(_ app: NSRunningApplication, searched: [AXUIElement]) -> Int {
     let all = (copyAttr(appElement(app.processIdentifier), "AXWindows").value as? [AXUIElement]) ?? []
-    let others = all.filter { w in
+    if searched.isEmpty { return 0 }
+    return all.filter { w in
         if searched.contains(where: { CFEqual($0, w) }) { return false }
         let a = multi(w, ["AXSubrole", "AXMinimized"])
         let sub = str(a["AXSubrole"]) ?? ""
         return (sub == "AXStandardWindow" || sub == "AXDialog") && bool(a["AXMinimized"]) != true
     }.count
-    if others == 0 || searched.isEmpty { return "" }
-    return "; only the front window was searched; this app has \(others) other window\(others == 1 ? "" : "s") - window {\"action\":\"focus\",\"title\":\"...\"} first to work in one"
 }
 
 func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
@@ -652,8 +650,13 @@ func elementRect(_ el: AXUIElement) -> (rect: [String: Int], point: [String: Int
     return (rect(p, s), ["x": finite(p.x + s.width / 2), "y": finite(p.y + s.height / 2)])
 }
 
-func miss(_ action: String, _ message: String, element el: AXUIElement? = nil) -> [String: Any] {
+/// `reason` is the machine-readable kind of miss (not_found | unsupported | invoke_threw | disabled | timeout | no_window |
+/// failed); `extra` carries screen-derived values (detail, otherWindows) as fields. The caller classifies by `reason`, never by
+/// the words of `error`, which a window title or an app's own message could imitate.
+func miss(_ action: String, _ message: String, element el: AXUIElement? = nil, reason: String? = nil, extra: [String: Any] = [:]) -> [String: Any] {
     var r: [String: Any] = ["ok": true, "success": false, "action": action, "error": message]
+    if let reason = reason { r["reason"] = reason }
+    for (k, v) in extra { r[k] = v }
     if let el = el, let g = elementRect(el) { r["bounds"] = g.rect; r["clickPoint"] = g.point }
     return r
 }
@@ -770,7 +773,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
-        return miss(action, "the element does not support AXPress (AXError \(p.code)) — click its coordinates instead", element: el)
+        return miss(action, "the element does not support AXPress (AXError \(p.code)) — click its coordinates instead", element: el, reason: "unsupported", extra: ["cascade": true])
     case "focus":
         let r = AXUIElementSetAttributeValue(el, "AXFocused" as CFString, kCFBooleanTrue)
         return r == .success ? ["ok": true, "success": true, "action": action] : miss(action, "could not focus the element (AXError \(r.rawValue))", element: el)
@@ -797,13 +800,13 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
             if p.hung { hungDuringAction(action, appName) }
             if p.done { return pressed(action, method: "AXShowMenu", pending: p.pending) }
         }
-        return miss(action, "the element does not support \(action) (no AXExpanded)", element: el)
+        return miss(action, "the element does not support \(action) (no AXExpanded)", element: el, reason: "unsupported")
     case "scroll-to-visible":
         // Scrolls the element's enclosing scroll area; sends no input and raises no window. The reply carries where the
         // element is NOW — the caller checks that it is on screen.
         let p = press(el, "AXScrollToVisible")
         if p.hung { hungDuringAction(action, appName) }
-        if !p.done { return miss(action, "the element does not support AXScrollToVisible (AXError \(p.code))", element: el) }
+        if !p.done { return miss(action, "the element does not support AXScrollToVisible (AXError \(p.code))", element: el, reason: "unsupported") }
         Thread.sleep(forTimeInterval: 0.15)
         // name and role: what was scrolled, so the caller can check it is the element it meant.
         var r = pressed(action, method: "AXScrollToVisible", pending: false, extra: ["name": h.name, "role": h.role])
@@ -813,7 +816,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         let beforeValue = str(copyAttr(el, "AXValue").value)
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
-        if !p.done { return miss(action, "the element does not support toggle (no AXPress; AXError \(p.code))", element: el) }
+        if !p.done { return miss(action, "the element does not support toggle (no AXPress; AXError \(p.code))", element: el, reason: "unsupported") }
         if p.pending { return pressed(action, method: "AXPress", pending: true, extra: ["toggleState": "unknown"]) }
         // Apps update AXValue after the press returns: read it back until it differs from before, or ~0.5 s.
         var after = beforeValue
@@ -833,7 +836,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }
-        return miss(action, "the element does not support select (no AXSelected / AXPress)", element: el)
+        return miss(action, "the element does not support select (no AXSelected / AXPress)", element: el, reason: "unsupported")
     default:
         return miss(action, "unknown action: \(action)")
     }
@@ -1073,7 +1076,7 @@ func cmdInvoke() -> Never {
         if let n = aim.name { what += "name=\"\(n)\" " }
         if let r = aim.role { what += "role=\"\(r)\" " }
         if let i = aim.id { what += "id=\"\(i)\" " }
-        emit(miss(action, "Element not found: \(what.trimmingCharacters(in: .whitespaces))" + scopeNote(app, searched: toSearch)))
+        emit(miss(action, "Element not found", reason: "not_found", extra: ["otherWindows": otherWindowCount(app, searched: toSearch)]))
     }
     // Aimed at a role alone (set-value / focus / get-value), the role must pick exactly one element.
     if byRoleOnly {

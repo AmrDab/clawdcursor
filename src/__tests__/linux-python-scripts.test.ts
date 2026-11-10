@@ -256,12 +256,15 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.scope_names_none_active).toEqual(['notes.txt - Editor', 'File', 'Edit', '', 'Save As']);
   });
 
-  it('a miss says only the front window was searched and how to work in another', () => {
-    expect(out.miss_note.success).toBe(false);
-    // no window title in it: a title is page text and the error is classified by its words
-    expect(out.miss_note.error).toMatch(/^element not found: Nothing here; only the front window was searched; this app has 1 other window - window \{"action":"focus"/);
+  it('a miss carries a machine-readable reason and the other-window count as fields, with no name or title in its sentence', () => {
+    expect(out.miss_note).toMatchObject({ success: false, reason: 'not_found', otherWindows: 1, error: 'element not found' });
     // only showing normal windows are counted: not the open menu, the hidden menu or the GTK3 popup window
-    expect(out.other_note).toMatch(/^; only the front window was searched; this app has 1 other window - /);
+    expect(out.other_count).toBe(1);
+  });
+
+  it('a hostile element name never reaches the reply\'s sentences (it used to be interpolated, unquoted)', () => {
+    expect(out.hostile_miss.reason).toBe('not_found');
+    expect(JSON.stringify(out.hostile_miss)).not.toMatch(/screen is locked|timed out|Invoke failed/);
   });
 
   it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {

@@ -46,6 +46,7 @@ import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
 import { quoteScreenText } from '../result-codes';
+import { missText } from '../miss-text';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -335,7 +336,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
                 ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
                 : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
-            : `a11y invoke ${quoteScreenText(name)} missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
+            : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
           targetLabel: name,
         };
       },
@@ -2206,7 +2207,7 @@ export function expandNote(data: Record<string, unknown> | undefined): string {
 
 /** After an invoke that was found but threw ("Invoke failed: ..."): it may have acted, and a disabled element ignores a click. No second click. */
 export function canClickAtBounds(res: { data?: Record<string, unknown> }): boolean {
-  return !(typeof res.data?.error === 'string' && /^Invoke failed:/i.test(res.data.error));
+  return res.data?.reason !== 'invoke_threw' && res.data?.reason !== 'disabled';
 }
 
 export async function runActivationLadder(
@@ -2222,8 +2223,9 @@ export async function runActivationLadder(
   }
   // The click rung is the one that read the element: its reason AND its bounds (for the coordinate fallback) stand.
   if (!res.success) {
-    res = { ...res, bounds: first.bounds ?? res.bounds,
-      ...(first.data?.error !== undefined ? { data: { ...res.data, error: first.data.error } } : {}) };
+    const keep: Record<string, unknown> = {};
+    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
+    res = { ...res, bounds: first.bounds ?? res.bounds, ...(Object.keys(keep).length ? { data: { ...res.data, ...keep } } : {}) };
   }
   return { res, used };
 }

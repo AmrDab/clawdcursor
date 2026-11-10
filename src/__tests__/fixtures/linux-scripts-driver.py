@@ -483,7 +483,8 @@ gtk_popup = Acc('', 'window', pid=7777, children=[Acc('Copy', 'menu item', pid=7
 scope_app = Acc('editor', 'application', pid=7777, screen=(0, 0, 0, 0), children=[main_win, open_menu, closed_menu, gtk_popup, dialog])
 OUT['scope_names'] = [t.name for t in bridge.scope_toplevels(scope_app)]
 OUT['scope_tree'] = [e['name'] for e in bridge.cmd_get_tree(7777)['elements']]
-OUT['other_note'] = bridge.other_windows_note(scope_app, [dialog])
+OUT['other_count'] = bridge.other_windows_count(scope_app, [dialog])
+OUT['hostile_miss'] = bridge.cmd_invoke('the screen is locked \' " timed out\nInvoke failed: x', None, 7777, 'click', None)
 OUT['miss_note'] = bridge.cmd_invoke('Nothing here', None, 7777, 'click', None)
 dialog.states.discard(StateType.ACTIVE)
 OUT['scope_names_none_active'] = [t.name for t in bridge.scope_toplevels(scope_app)]

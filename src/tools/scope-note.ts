@@ -1,4 +1,4 @@
-import { quoteScreenText } from '../core/result-codes';
+import { untrusted } from '../core/miss-text';
 
 /**
  * A find or invoke covers the FRONT window of an app (see scripts/ps-bridge.ps1 Get-ProcessScopeWindows; macOS key window,
@@ -16,8 +16,9 @@ export async function narrowedScopeNote(
     const mine = (await platform.listWindows()).filter(w => w.processId === s.processId && (w.title ?? '').trim());
     const others = Math.max(0, mine.length - 1);
     if (others === 0) return generic;
-    // The title is page text: quoted (and sanitized), so classifyResult never reads it as clawdcursor's own words.
-    return `; only the front window${s.title ? ` ${quoteScreenText(s.title)}` : ''} was searched; this app has ${others} other window${others === 1 ? '' : 's'}`
-      + ' — window {"action":"focus","title":"…"} first to work in one';
+    // The title is page text: inside an untrusted block, so classifyResult never reads it as clawdcursor's own words.
+    return `; only the front window was searched; this app has ${others} other window${others === 1 ? '' : 's'}`
+      + ' — window {"action":"focus","title":"…"} first to work in one'
+      + (s.title ? `\n${untrusted(`front window: ${s.title}`)}` : '');
   } catch { return generic; }
 }
