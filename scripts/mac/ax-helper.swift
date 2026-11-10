@@ -384,9 +384,11 @@ let alwaysKeepRoles: Set<String> = [
 /// Controls whose label is often a child AXStaticText rather than their own title.
 let labelPeekRoles: Set<String> = ["AXButton", "AXCheckBox", "AXRadioButton", "AXMenuItem", "AXTab", "AXLink", "AXPopUpButton"]
 
-/// A leaf's children are decoration, except an open popover: AppKit hangs it under the control that presented it.
+/// A leaf's children are decoration, except what it has put on screen: an open popover, or the list of an open pop-up button (an
+/// AXMenu). AppKit hangs both under the control that presented them; a closed pop-up has no menu child, so nothing is added to a
+/// tree until a list is really showing - and then its options (Alpha / Beta / Gamma) can be found and chosen.
 /// Within the time budget: a leaf can have many children (a text area's runs), each a round-trip to a possibly hung app.
-func presentedPopovers(_ kids: [AXUIElement]) -> [AXUIElement] { kids.filter { !timeUp() && str(copyAttr($0, "AXRole").value) == "AXPopover" } }
+func presentedPopovers(_ kids: [AXUIElement]) -> [AXUIElement] { kids.filter { !timeUp() && ["AXPopover", "AXMenu"].contains(str(copyAttr($0, "AXRole").value) ?? "") } }
 
 /// AppKit stamps generated ids ("_NS:833") on unlabeled elements; a node is not worth keeping just for one.
 func isGeneratedIdentifier(_ id: String) -> Bool {
@@ -479,7 +481,7 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     if bool(a["AXEnabled"]) == false { node["enabled"] = false }
     if bool(a["AXFocused"]) == true { node["focused"] = true }
     if bool(a["AXSelected"]) == true { node["selected"] = true }
-    if let ex = bool(a["AXExpanded"]) { node["expandable"] = true; node["expanded"] = ex }
+    if let ex = openState(role: role, expanded: a["AXExpanded"], value: a["AXValue"]) { node["expandable"] = true; node["expanded"] = ex }
     if !children.isEmpty { node["children"] = children }
     return node
 }
@@ -587,7 +589,7 @@ func windowsToSearch(_ app: NSRunningApplication) -> (windows: [AXUIElement], hu
 }
 
 func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
-    let a = multi(h.element, ["AXPosition", "AXSize", "AXValue", "AXEnabled", "AXFocused", "AXSelected"])
+    let a = multi(h.element, ["AXPosition", "AXSize", "AXValue", "AXEnabled", "AXFocused", "AXSelected", "AXExpanded"])
     let secure = h.subrole == "AXSecureTextField"
     var d: [String: Any] = [
         "name": h.name, "automationId": h.ident, "controlType": h.role,
@@ -599,6 +601,8 @@ func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
     if bool(a["AXEnabled"]) == false { d["enabled"] = false }
     if bool(a["AXFocused"]) == true { d["focused"] = true }
     if bool(a["AXSelected"]) == true { d["selected"] = true }
+    // Same rule as the tree: a disclosure triangle's open state is its AXValue, so `state` of a web <summary> is not "not expandable".
+    if let open = openState(role: h.role, expanded: a["AXExpanded"], value: a["AXValue"]) { d["expandable"] = true; d["expanded"] = open }
     return d
 }
 
@@ -608,6 +612,9 @@ let actionRoles: [String: [String]] = [
     "get-value": ["textfield", "textarea", "combobox", "searchfield", "statictext"],
     "toggle": ["checkbox", "radiobutton", "switch"],
     "click": ["button", "menuitem", "menubuttonitem", "link", "radiobutton", "checkbox", "popupbutton", "cell", "row", "tab"],
+    // What can be opened: the triangle or pop-up, not the label that shares its name.
+    "expand": ["disclosuretriangle", "popupbutton", "menubutton", "combobox", "button"],
+    "collapse": ["disclosuretriangle", "popupbutton", "menubutton", "combobox", "button"],
     // What a scroll is for: the field, not the label that shares its name.
     "scroll-to-visible": ["textfield", "textarea", "combobox", "searchfield", "checkbox", "radiobutton", "popupbutton", "button", "link", "cell", "row", "tab"],
 ]
@@ -737,6 +744,170 @@ func scrollTarget(_ hits: [Hit]) -> (hit: Hit?, error: String?) {
     return (best.hit, nil)
 }
 
+// MARK: - Expand / collapse
+
+/// A yes/no the way AX spells it: AXExpanded is a CFBoolean; a disclosure triangle's AXValue is a CFBoolean (WebKit) or 0 / 1 (AppKit).
+func flag(_ v: CFTypeRef?) -> Bool? {
+    guard let v = v else { return nil }
+    if CFGetTypeID(v) == CFBooleanGetTypeID() { return CFBooleanGetValue((v as! CFBoolean)) }
+    if CFGetTypeID(v) == CFNumberGetTypeID() {
+        let n = (v as! NSNumber).intValue
+        return n == 1 ? true : n == 0 ? false : nil
+    }
+    return nil
+}
+
+/// Whether an expandable element is open, or nil when it shows no open / closed state. A disclosure triangle keeps it in AXValue
+/// (0 closed, 1 open): WebKit's <summary> is one, and its AXExpanded can be read but not set. Everything else uses AXExpanded.
+func openState(role: String, expanded: CFTypeRef?, value: CFTypeRef?) -> Bool? {
+    if role == "AXDisclosureTriangle", let v = flag(value) { return v }
+    return bool(expanded)
+}
+
+func openState(_ el: AXUIElement) -> Bool? {
+    let a = multi(el, ["AXRole", "AXExpanded", "AXValue"])
+    return openState(role: str(a["AXRole"]) ?? "", expanded: a["AXExpanded"], value: a["AXValue"])
+}
+
+/// The state changes a moment AFTER the action returns (the app handles it on its own run loop): wait for it rather than report the old one.
+func settles(_ el: AXUIElement, to want: Bool, ms: Int = 800) -> Bool {
+    let end = Date().addingTimeInterval(Double(ms) / 1000)
+    while true {
+        if openState(el) == want { return true }
+        if Date() >= end { return false }
+        usleep(40_000)
+    }
+}
+
+func actionNames(_ el: AXUIElement) -> [String] {
+    var names: CFArray?
+    guard AXUIElementCopyActionNames(el, &names) == .success, let list = names as? [String] else { return [] }
+    return list
+}
+
+/// One key press delivered to ONE process, not to whatever is in front: a key meant for this element must not land in an app the user
+/// has switched to. False when this process may not post keyboard events.
+func pressKey(_ code: CGKeyCode, to pid: pid_t) -> Bool {
+    if #available(macOS 10.15, *), !CGPreflightPostEventAccess() { return false }
+    let source = CGEventSource(stateID: .hidSystemState)
+    // The app in front takes the key the way a keyboard's reaches it (as `type` does); an app in the background gets it addressed.
+    let inFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+    for down in [true, false] {
+        guard let ev = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down) else { return false }
+        ev.flags = []   // a modifier the user happens to hold must not turn Return into something else
+        if inFront { ev.post(tap: .cghidEventTap) } else { ev.postToPid(pid) }
+    }
+    usleep(20_000)
+    return true
+}
+
+/// Whether the app's keyboard focus really is this element. A key sent to an app whose focus is elsewhere would press THAT control.
+func hasKeyboardFocus(_ el: AXUIElement, pid: pid_t) -> Bool {
+    guard let f = copyAttr(appElement(pid), "AXFocusedUIElement").value, isElement(f) else { return false }
+    return sameElement(f as! AXUIElement, el)
+}
+
+/// The same element, reached by two routes (a web page hands out a new reference each time): equal references, or the same role,
+/// title and rectangle.
+func sameElement(_ a: AXUIElement, _ b: AXUIElement) -> Bool {
+    if CFEqual(a, b) { return true }
+    let attrs = ["AXRole", "AXTitle", "AXPosition", "AXSize"]
+    let x = multi(a, attrs), y = multi(b, attrs)
+    guard let p = axPoint(x["AXPosition"]), let q = axPoint(y["AXPosition"]), let s = axSize(x["AXSize"]), let t = axSize(y["AXSize"]) else { return false }
+    return str(x["AXRole"]) == str(y["AXRole"]) && str(x["AXTitle"]) == str(y["AXTitle"]) && p == q && s == t
+}
+
+let menuHolderRoles: Set<String> = ["AXPopUpButton", "AXMenuButton"]
+
+/// An open pop-up's list: an AXMenu that is on screen and has items. AppKit hangs it under the control; WebKit puts a <select>'s list in
+/// the page's window. (A menu that is merely there, closed, has no size.)
+func visibleMenu(under el: AXUIElement, pid: pid_t) -> AXUIElement? {
+    func shown(_ m: AXUIElement) -> Bool {
+        let a = multi(m, ["AXSize", "AXChildren"])
+        guard let s = axSize(a["AXSize"]), s.width > 0, s.height > 0 else { return false }
+        return ((a["AXChildren"] as? [AXUIElement]) ?? []).contains { k in
+            let b = multi(k, ["AXRole", "AXSize"])
+            return str(b["AXRole"]) == "AXMenuItem" && (axSize(b["AXSize"])?.width ?? 0) > 0
+        }
+    }
+    for k in (copyAttr(el, "AXChildren").value as? [AXUIElement]) ?? [] where str(copyAttr(k, "AXRole").value) == "AXMenu" && shown(k) { return k }
+    guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
+    var found = SearchCtx()
+    for w in windowsToSearch(app).windows where !timeUp() {
+        search(w, Aim(name: nil, role: "menu", id: nil), maxDepth: 10, limit: 80, ctx: &found)
+    }
+    return found.hits.first(where: { $0.role == "AXMenu" && shown($0.element) })?.element
+}
+
+/// Wait for a pop-up's list to be on screen (or gone).
+func waitForMenu(under el: AXUIElement, pid: pid_t, shown want: Bool, ms: Int = 900) -> Bool {
+    let end = Date().addingTimeInterval(Double(ms) / 1000)
+    while true {
+        if (visibleMenu(under: el, pid: pid) != nil) == want { return true }
+        if Date() >= end { return false }
+        usleep(80_000)
+    }
+}
+
+/// expand / collapse. Every success is something the element was read to have done: an app that accepts a call and ignores it
+/// (WebKit: AXPress on a <summary> returns success and does nothing) used to be reported as expanded. AXShowMenu is NOT used: on
+/// web content it opens the page's context menu (Reload, Back, ...), and that was reported as "Expanded" too.
+func expandOrCollapse(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
+    let el = h.element
+    let want = action == "expand"
+    var pid: pid_t = 0
+    AXUIElementGetPid(el, &pid)
+    func done(_ method: String) -> [String: Any] {
+        ["ok": true, "success": true, "action": action, "method": method, "data": ["state": want ? "expanded" : "collapsed"]]
+    }
+
+    // A pop-up or pull-down button is "expanded" while its list shows. Pressing it opens the list (AXPress, in AppKit and WebKit alike).
+    if menuHolderRoles.contains(h.role) {
+        let showing = visibleMenu(under: el, pid: pid)
+        if want {
+            if showing != nil { return done("unchanged") }
+            let p = press(el)
+            if p.hung { hungDuringAction(action, appName) }
+            if p.done && waitForMenu(under: el, pid: pid, shown: true) { return done("AXPress") }
+            return miss(action, "pressing it did not open a list of options", element: el)
+        }
+        guard let menu = showing else { return done("unchanged") }
+        AXUIElementPerformAction(menu, "AXCancel" as CFString)
+        if waitForMenu(under: el, pid: pid, shown: false, ms: 500) { return done("AXCancel") }
+        // The list is still up, so there IS something to dismiss: Escape, to the app that owns it.
+        if pressKey(53, to: pid), waitForMenu(under: el, pid: pid, shown: false, ms: 500) { return done("Escape") }
+        return miss(action, "the list of options would not close", element: el)
+    }
+
+    let before = openState(el)
+    if before == want { return done("unchanged") }
+
+    // 1. The attribute, where the app lets it be set. It has to stick: a set that was accepted and ignored is not an expand.
+    if settable(el, "AXExpanded"),
+       AXUIElementSetAttributeValue(el, "AXExpanded" as CFString, want ? kCFBooleanTrue : kCFBooleanFalse) == .success,
+       settles(el, to: want) { return done("AXExpanded") }
+
+    // 2. The element's own press, when it lists one - for a disclosure triangle (AppKit's presses open). NOT for any other element that
+    // merely shows an AXExpanded: WebKit gives plain buttons one (false), and pressing "Confirm" is not expanding anything.
+    if h.role == "AXDisclosureTriangle" && actionNames(el).contains("AXPress") {
+        let p = press(el)
+        if p.hung { hungDuringAction(action, appName) }
+        if p.done && settles(el, to: want) { return done("AXPress") }
+    }
+
+    // 3. The keyboard. A web <summary> lists no AXPress (pressing it does nothing) and its AXExpanded is read-only: what opens it is
+    // focus + Return, sent to its own app and only once that app's focus really is on it.
+    if h.role == "AXDisclosureTriangle" {
+        let focused = AXUIElementSetAttributeValue(el, "AXFocused" as CFString, kCFBooleanTrue) == .success
+        usleep(60_000)
+        if focused && hasKeyboardFocus(el, pid: pid) && pressKey(36, to: pid) && settles(el, to: want) { return done("AXFocused+Return") }
+        return miss(action, "it did not \(action) by its attribute, its press or the Return key — if its window is not in front, bring it forward (window focus) and try again, or click it", element: el)
+    }
+    return miss(action, before == nil
+        ? "the element cannot be \(want ? "expanded" : "collapsed") through accessibility: it shows no open / closed state to set or check"
+        : "the element shows an open / closed state, but accessibility cannot set it - if pressing it opens or closes it, use invoke", element: el)
+}
+
 func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
     let el = h.element
     switch action {
@@ -763,16 +934,7 @@ func perform(_ action: String, _ h: Hit, appName: String) -> [String: Any] {
         }
         return ["ok": true, "success": true, "action": action, "value": "", "method": "empty"]
     case "expand", "collapse":
-        let want = action == "expand"
-        if settable(el, "AXExpanded"), AXUIElementSetAttributeValue(el, "AXExpanded" as CFString, want ? kCFBooleanTrue : kCFBooleanFalse) == .success {
-            return ["ok": true, "success": true, "action": action, "method": "AXExpanded"]
-        }
-        if want {
-            let p = press(el, "AXShowMenu")
-            if p.hung { hungDuringAction(action, appName) }
-            if p.done { return pressed(action, method: "AXShowMenu", pending: p.pending) }
-        }
-        return miss(action, "the element does not support \(action) (no AXExpanded)", element: el)
+        return expandOrCollapse(action, h, appName: appName)
     case "scroll-to-visible":
         // Scrolls the element's enclosing scroll area; sends no input and raises no window. The reply carries where the
         // element is NOW — the caller checks that it is on screen.

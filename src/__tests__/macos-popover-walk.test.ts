@@ -22,8 +22,8 @@ describe('ax-helper.swift walks into a popover a leaf control presented', () => 
     expect(list('leafRoles')).toContain('"AXMenuButton"');
   });
 
-  it('presentedPopovers keeps only AXPopover children', () => {
-    expect(src).toMatch(/func presentedPopovers\([^)]*\)[^\n]*\.filter \{[^\n]*"AXRole"[^\n]*== "AXPopover"/);
+  it('presentedPopovers keeps only AXPopover children - and the AXMenu an open pop-up button shows', () => {
+    expect(src).toMatch(/func presentedPopovers\([^)]*\)[^\n]*\.filter \{[^\n]*\["AXPopover", "AXMenu"\]\.contains\([^\n]*"AXRole"/);
   });
 
   for (const fn of ['buildNode', 'search']) {

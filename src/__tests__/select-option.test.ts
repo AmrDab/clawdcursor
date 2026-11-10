@@ -105,4 +105,52 @@ describe('selectOption', () => {
     expect(r).toMatchObject({ success: true, verified: false });
     expect(r.text).toMatch(/unverified/);
   });
+
+  describe('a pick that is applied a moment after the press returns (WebKit pop-up: the menu is still closing)', () => {
+    /** A dropdown whose value changes only on the Nth read after the pick (0 = never). */
+    function lateControl(applyOnRead: number) {
+      let current = 'Free';
+      let pending: string | null = null;
+      let readsSincePick = 0;
+      const calls: string[] = [];
+      return {
+        calls,
+        invokeElement: vi.fn(async (q: { name?: string; action?: string }) => {
+          calls.push(String(q.action));
+          if (q.action === 'get-value') {
+            if (pending && applyOnRead > 0 && ++readsSincePick >= applyOnRead) { current = pending; pending = null; }
+            return { success: true, data: { value: current } };
+          }
+          if (q.action === 'expand' || q.action === 'collapse') return { success: true };
+          if ((q.action === 'select' || q.action === 'click') && ['Free', 'Pro'].includes(q.name ?? '')) { pending = q.name!; readsSincePick = 0; return { success: true }; }
+          return { success: false };
+        }),
+        findElements: vi.fn(async (q: { name?: string }) =>
+          ['Free', 'Pro', 'Plan'].filter(n => n.toLowerCase().includes(String(q.name).toLowerCase()))
+            .map(n => ({ name: n, controlType: n === 'Plan' ? 'PopUpButton' : 'MenuItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }))),
+      };
+    }
+
+    it('is re-read until it shows the new value - not reported as "Tried to select ... but it now shows"', async () => {
+      const p = lateControl(5);                     // the value shows up on the 5th read after the pick
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' }, { settleMs: 3000 });
+      expect(r).toMatchObject({ success: true, verified: true });
+      expect(r.text).toMatch(/Selected \(read back ✓\) "Pro" in "Plan"\./);
+    });
+
+    it('a control that never shows it is still a failure, once the wait is over', async () => {
+      const p = lateControl(0);
+      const t0 = Date.now();
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' }, { settleMs: 400 });
+      expect(r.success).toBe(false);
+      expect(r.text).toMatch(/Tried to select "Pro" in "Plan", but it now shows "Free"/);
+      expect(Date.now() - t0).toBeLessThan(4000);
+    });
+
+    it('settleMs: 0 reads once, as before', async () => {
+      const p = lateControl(5);
+      const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' }, { settleMs: 0 });
+      expect(r.success).toBe(false);
+    });
+  });
 });

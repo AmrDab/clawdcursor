@@ -9,7 +9,9 @@
  *   3. require an option whose name EXACTLY matches `value` — bridge name
  *      matching is fuzzy, and "Pro" must never click a "Profile" button,
  *   4. select it (SelectionItem / AT-SPI Selection), else press it,
- *   5. read the control back and report whether it now shows `value`.
+ *   5. read the control back and report whether it now shows `value`. A pick is applied a moment AFTER the press returns (a menu
+ *      that is still closing, a page script), so a control that still shows the old value is re-read for `settleMs` before the
+ *      pick is called a failure (macOS WebKit: "Tried to select Green, but it now shows Red" while the page already showed Green).
  */
 import type { PlatformAdapter } from './types';
 import { findControls } from './prefer-control';
@@ -23,11 +25,27 @@ export interface SelectOptionResult {
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/** Re-read until the control shows `want` or `ms` is up. Returns the last value it could read (null: it never could). */
+async function readUntil(read: () => Promise<string | null>, want: string, ms: number): Promise<string | null> {
+  let last: string | null = null;
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    await sleep(150);
+    const v = await read();
+    if (v !== null) last = v;
+    if (v !== null && norm(v) === norm(want)) return v;
+  }
+  return last;
+}
+
 export async function selectOption(
   platform: Pick<PlatformAdapter, 'invokeElement' | 'findElements'>,
   q: { name: string; value: string; controlType?: string; processId?: number },
+  opts: { settleMs?: number } = {},
 ): Promise<SelectOptionResult> {
   const { name, value, processId } = q;
+  const settleMs = opts.settleMs ?? 1500;
   let controlType = q.controlType;
   // Without a role the bridge takes the first element with that name, and a form's label ("Favorite color") is found before
   // its combo box. Aim at the one that can hold options; if only labels or the like have the name, say so.
@@ -82,6 +100,8 @@ export async function selectOption(
     }
     if (!option.controlType) break;
   }
+  // Still the old value after the last attempt: give the control time to show the new one before calling this a failure.
+  if (picked && after !== null && norm(after) !== norm(value) && settleMs > 0) after = (await readUntil(readValue, value, settleMs)) ?? after;
   if (after !== null) {
     const ok = norm(after) === norm(value);
     if (!ok && expanded?.success) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);

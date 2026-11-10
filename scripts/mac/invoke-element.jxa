@@ -361,34 +361,44 @@ function run(argv) {
             // doesn't support the attribute is important — UIA-style
             // pattern-query equivalents don't exist on AX, so we just
             // attempt the assignment and catch.
+            // Success is only reported for a change that was read back. AXShowMenu is NOT a way to expand: on web content it opens
+            // the page's context menu (Reload, Back, ...) and was reported as "Expanded". The compiled helper (ax-helper.swift) also
+            // opens a web <summary> from the keyboard; this slower fallback cannot, and says so.
             case 'expand':
+                var expandDone = false;
                 try {
                     targetElement.attributes['AXExpanded'].value = true;
-                    result = { success: true, action: 'expand' };
-                } catch (e) {
-                    try {
-                        // Menu-style elements respond to AXShowMenu action.
-                        targetElement.actions['AXShowMenu'].perform();
-                        result = { success: true, action: 'expand', method: 'AXShowMenu' };
-                    } catch (e2) {
-                        result = {
-                            success: false,
-                            error: 'Element does not support expand (no AXExpanded attribute or AXShowMenu action)'
-                        };
+                    var nowExpanded = null;
+                    try { nowExpanded = targetElement.attributes['AXExpanded'].value(); } catch (re) {}
+                    expandDone = nowExpanded === true;
+                } catch (e) { /* not settable */ }
+                if (expandDone) { result = { success: true, action: 'expand', method: 'AXExpanded' }; break; }
+                try {
+                    // A pop-up or pull-down button shows its list when pressed.
+                    var expandRole = String(targetElement.role());
+                    if (expandRole === 'AXPopUpButton' || expandRole === 'AXMenuButton') {
+                        targetElement.actions['AXPress'].perform();
+                        result = { success: true, action: 'expand', method: 'AXPress' };
+                        break;
                     }
-                }
+                } catch (e2) { /* fall through */ }
+                result = {
+                    success: false,
+                    error: 'Element does not support expand here (no settable AXExpanded, and it is not a pop-up button) - the accessibility helper is needed to open a disclosure triangle'
+                };
                 break;
 
             case 'collapse':
+                var collapseDone = false;
                 try {
                     targetElement.attributes['AXExpanded'].value = false;
-                    result = { success: true, action: 'collapse' };
-                } catch (e) {
-                    result = {
-                        success: false,
-                        error: 'Element does not support collapse (no AXExpanded attribute)'
-                    };
-                }
+                    var nowCollapsed = null;
+                    try { nowCollapsed = targetElement.attributes['AXExpanded'].value(); } catch (re) {}
+                    collapseDone = nowCollapsed === false;
+                } catch (e) { /* not settable */ }
+                result = collapseDone
+                    ? { success: true, action: 'collapse', method: 'AXExpanded' }
+                    : { success: false, error: 'Element does not support collapse here (no settable AXExpanded)' };
                 break;
 
             case 'toggle':

@@ -451,7 +451,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         });
         return {
           success: res.success,
-          text: res.success ? `Expanded "${name}".` : `Could not expand "${name}".`,
+          text: res.success ? `Expanded "${name}".` : `Could not expand "${name}"${failReason(res)}.`,
           targetLabel: name,
         };
       },
@@ -481,7 +481,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         });
         return {
           success: res.success,
-          text: res.success ? `Collapsed "${name}".` : `Could not collapse "${name}".`,
+          text: res.success ? `Collapsed "${name}".` : `Could not collapse "${name}"${failReason(res)}.`,
           targetLabel: name,
         };
       },
