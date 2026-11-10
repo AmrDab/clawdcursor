@@ -97,7 +97,7 @@ describe('2. by-name actions prefer the control over its label', () => {
 
 describe('3. failures keep the platform reason', () => {
   it('Could not focus / select carry the reason, so the classifier sees NOT_FOUND', async () => {
-    const p = plat([], () => ({ success: false, data: { error: 'Element not found' } }));
+    const p = plat([], () => ({ success: false, data: { reason: 'not_found', error: 'Element not found' } }));
     const f = await agentTool('focus_element').execute({ name: 'Nope' }, { platform: p } as any);
     expect(f.text).toBe('Could not focus "Nope": Element not found.');
     expect(classifyResult(f.text, true, true)?.code).toBe('NOT_FOUND');
@@ -124,11 +124,13 @@ describe('follow-ups', () => {
 
   it('MCP toggle / select / focus failures keep the reason from res.error or res.data.error', async () => {
     const ctx = (p: any) => ({ ensureInitialized: async () => {}, platform: p }) as any;
-    const viaError = plat([], () => ({ success: false, error: 'Element not found' }));
+    const viaError = plat([], () => ({ success: false, error: 'Element not found', data: { reason: 'not_found' } }));
     const viaData = plat([], () => ({ success: false, data: { error: 'exists but is not visible' } }));
     expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('a11y_toggle failed for "X": Element not found.');
     expect((await mcpTool('a11y_select').handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('a11y_select failed for "X": Element not found.');
-    expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaData))).text).toBe('a11y_toggle failed for "X": exists but is not visible.');
+    // a reply with no machine-readable reason is shown inside an untrusted block, never classified by its words
+    expect((await mcpTool('a11y_toggle').handler({ name: 'X', processId: 1 }, ctx(viaData))).text)
+      .toBe('a11y_toggle failed for "X": <untrusted-screen-content>\nexists but is not visible\n</untrusted-screen-content>.');
     const focus = (await import('../tools/extras')).getExtraTools().find((t: any) => t.name === 'focus_element')!;
     expect((await focus.handler({ name: 'X', processId: 1 }, ctx(viaError))).text).toBe('Focus failed for "X": Element not found.');
   });

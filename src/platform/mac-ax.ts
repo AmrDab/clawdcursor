@@ -33,6 +33,7 @@ import { getPackageRoot } from '../paths';
 import { macAxBinary } from './mac-ocr-binary';
 import type { InvokeAction, UiElement, WindowInfo } from './types';
 import { isOwnUiPid } from './pointer-guard';
+import { structuredMissFields } from '../core/miss-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -563,6 +564,12 @@ export interface InvokeResult {
   error?: string;
 }
 
+/** The helper's machine-readable reason and its screen-derived values (core/miss-text.ts), merged into the reply's data. */
+function withMissFields(r: any, data: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  const f = structuredMissFields(r);
+  return Object.keys(f).length ? { ...(data ?? {}), ...f } : data;
+}
+
 function toInvokeResult(r: any): InvokeResult {
   return {
     success: r?.success === true,
@@ -570,9 +577,9 @@ function toInvokeResult(r: any): InvokeResult {
     bounds: r?.bounds ?? (r?.clickPoint ? { x: r.clickPoint.x, y: r.clickPoint.y, width: 1, height: 1 } : undefined),
     // get-value reports its payload at the top level; consumers read res.data?.value. `refused`: the helper declined to
     // act (ambiguous role, secure field) — callers must not route around that with a guess.
-    data: r?.refused === true
+    data: withMissFields(r, r?.refused === true
       ? { ...(r?.data ?? (r?.value !== undefined ? { value: r.value } : {})), refused: true }
-      : r?.data ?? (r?.value !== undefined ? { value: r.value } : undefined),
+      : r?.data ?? (r?.value !== undefined ? { value: r.value } : undefined)),
     error: typeof r?.error === 'string' ? r.error : undefined,
   };
 }

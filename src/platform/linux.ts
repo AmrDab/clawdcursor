@@ -51,6 +51,8 @@ import type {
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
+import { windowTextIncludes } from '../tools/window-text';
+import { structuredMissFields } from '../core/miss-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -494,7 +496,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const match = windows.find(w => {
         if (query.processId !== undefined && w.processId === query.processId) return true;
         if (query.processName && w.processName.toLowerCase() === query.processName.toLowerCase()) return true;
-        if (query.title && w.title.toLowerCase().includes(query.title.toLowerCase())) return true;
+        if (query.title && windowTextIncludes(w.title, query.title)) return true;
         return false;
       });
 
@@ -621,7 +623,7 @@ export class LinuxAdapter implements PlatformAdapter {
     const match = windows.find(w => {
       if (query.processId !== undefined && w.processId === query.processId) return true;
       if (query.processName && w.processName.toLowerCase() === query.processName.toLowerCase()) return true;
-      if (query.title && w.title.toLowerCase().includes(query.title.toLowerCase())) return true;
+      if (query.title && windowTextIncludes(w.title, query.title)) return true;
       return false;
     });
     if (match && typeof match.handle === 'number') {
@@ -822,6 +824,7 @@ export class LinuxAdapter implements PlatformAdapter {
       if (result?.toggleChanged !== undefined) data.toggleChanged = result.toggleChanged;
       // e.g. "exists but is not visible on screen" — say why, not just "missed".
       if (result?.success !== true && typeof result?.error === 'string') data.error = result.error;
+      if (result?.success !== true) Object.assign(data, structuredMissFields(result));
       return {
         success: result?.success === true,
         ...(bounds ? { bounds } : {}),
@@ -1365,7 +1368,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const existing = windowsBefore.find(w =>
         w.processName.toLowerCase() === target ||
         w.processName.toLowerCase().includes(target) ||
-        w.title.toLowerCase().includes(target),
+        windowTextIncludes(w.title, target),
       );
       if (existing) {
         await this.focusWindow({ processId: existing.processId }).catch(() => {});

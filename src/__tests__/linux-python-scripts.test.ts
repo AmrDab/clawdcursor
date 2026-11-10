@@ -244,6 +244,29 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.hidden_only_done).toEqual([]);
   });
 
+  it('invoke / find look only in the ACTIVE window: an element of the inactive one is not found, not touched', () => {
+    expect(out.other_window.success).toBe(false);
+    expect(String(out.other_window.error)).toMatch(/not found/i);
+    expect(out.other_window_done).toEqual([]);
+  });
+
+  it('the tree, the no-name find and invoke all cover the same windows: the active one and its open popups', () => {
+    expect(out.scope_names).toEqual(['Save As', 'File', '']); // the GTK3 "window" popup is in, the closed menu and the main window are not
+    expect(out.scope_tree).not.toContain('Print');
+    expect(out.scope_names_none_active).toEqual(['notes.txt - Editor', 'File', 'Edit', '', 'Save As']);
+  });
+
+  it('a miss carries a machine-readable reason and the other-window count as fields, with no name or title in its sentence', () => {
+    expect(out.miss_note).toMatchObject({ success: false, reason: 'not_found', otherWindows: 1, error: 'element not found' });
+    // only showing normal windows are counted: not the open menu, the hidden menu or the GTK3 popup window
+    expect(out.other_count).toBe(1);
+  });
+
+  it('a hostile element name never reaches the reply\'s sentences (it used to be interpolated, unquoted)', () => {
+    expect(out.hostile_miss.reason).toBe('not_found');
+    expect(JSON.stringify(out.hostile_miss)).not.toMatch(/screen is locked|timed out|Invoke failed/);
+  });
+
   it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {
     expect(out.text_view.value).toBe('hello world');
     expect(out.get_value).toMatchObject({ success: true, value: '42' });
@@ -268,9 +291,9 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('B7 tree: on-screen first (active dialog leading), hidden after, nameless rows dropped', () => {
     const names = out.tree.map((t: [string, string]) => `${t[1]}:${t[0]}`);
     expect(names).toEqual([
-      'file chooser:Save As', 'text:Name', 'push button:Save', 'frame:notes.txt - Editor', 'text:',
-      // hidden: the 0x0 application node, the closed menu, the hidden toolbar
-      'application:editor', 'menu item:Save      ', 'menu item:Print', 'push button:Save',
+      'file chooser:Save As', 'text:Name', 'push button:Save',
+      // hidden: the 0x0 application node and the dialog's hidden item; the inactive main window is not read at all
+      'application:editor', 'menu item:Preview',
     ]);
   });
 

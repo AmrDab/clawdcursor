@@ -564,7 +564,16 @@
       "category": "clipboard",
       "parameters": {
         "type": "object",
-        "properties": {}
+        "properties": {
+          "scope": {
+            "type": "string",
+            "description": "\"window\" (default, and all this reads): the focused window's document. \"screen\" is accepted and reads the same; for the text of the whole screen use ocr.",
+            "enum": [
+              "screen",
+              "window"
+            ]
+          }
+        }
       },
       "costClass": "perceive-text"
     },

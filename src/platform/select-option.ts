@@ -13,6 +13,7 @@
  */
 import type { PlatformAdapter } from './types';
 import { findControls } from './prefer-control';
+import { quoteScreenText } from '../core/result-codes';
 
 export interface SelectOptionResult {
   success: boolean;
@@ -36,7 +37,7 @@ export async function selectOption(
     if (named.length) {
       if (!held) {
         const roles = [...new Set(named.map(h => h.controlType))].join(', ');
-        return { success: false, verified: false, text: `No dropdown or list named "${name}"; only ${roles} matched (a label or another element, not something with options). Nothing was changed.` };
+        return { success: false, verified: false, text: `No dropdown or list named ${quoteScreenText(name)}; only ${roles} matched (a label or another element, not something with options). Nothing was changed.` };
       }
       controlType = held;
     }
@@ -51,7 +52,7 @@ export async function selectOption(
 
   const before = await readValue();
   if (before !== null && norm(before) === norm(value)) {
-    return { success: true, verified: true, text: `Selected (read back ✓) "${value}" in "${name}" (it already showed that).` };
+    return { success: true, verified: true, text: `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)} (it already showed that).` };
   }
 
   const expanded = await platform.invokeElement({ name, controlType, processId, action: 'expand' }).catch(() => null);
@@ -61,8 +62,8 @@ export async function selectOption(
   const option = hits.find(h => norm(h.name) === norm(value) && norm(h.name) !== norm(name));
   if (!option) {
     if (expanded?.success) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
-    const near = hits.slice(0, 5).map(h => `"${h.name}"`).join(', ');
-    return { success: false, verified: false, text: `"${name}" has no option named exactly "${value}"${near ? ` (similar: ${near})` : ''}. Nothing was changed.` };
+    const near = hits.slice(0, 5).map(h => `${quoteScreenText(h.name)}`).join(', ');
+    return { success: false, verified: false, text: `${quoteScreenText(name)} has no option named exactly ${quoteScreenText(value)}${near ? ` (similar: ${near})` : ''}. Nothing was changed.` };
   }
 
   // The option's own role first (keeps fuzzy name matching off look-alikes);
@@ -88,14 +89,14 @@ export async function selectOption(
     return {
       success: ok,
       verified: true,
-      text: ok ? `Selected (read back ✓) "${value}" in "${name}".` : `Tried to select "${value}" in "${name}", but it now shows "${after}".`,
+      text: ok ? `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)}.` : `Tried to select ${quoteScreenText(value)} in ${quoteScreenText(name)}, but it now shows ${quoteScreenText(after)}.`,
     };
   }
   return {
     success: picked,
     verified: false,
     text: picked
-      ? `Selected "${value}" in "${name}" (the control exposes no readable value, so this is unverified — check the screen).`
-      : `Found option "${value}" but could not select or press it.`,
+      ? `Selected ${quoteScreenText(value)} in ${quoteScreenText(name)} (the control exposes no readable value, so this is unverified — check the screen).`
+      : `Found option ${quoteScreenText(value)} but could not select or press it.`,
   };
 }

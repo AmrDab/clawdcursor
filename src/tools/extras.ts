@@ -25,6 +25,7 @@ import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
 import { windowTextIncludes } from './window-text';
 import { preferControl, failReason } from '../platform/prefer-control';
+import { quoteScreenText } from '../core/result-codes';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -506,7 +507,7 @@ export function getExtraTools(): ToolDefinition[] {
           name: String(name), controlType, processId, action: 'focus',
         });
         return {
-          text: result.success ? `Focused "${name}" via accessibility.` : `Focus failed for "${name}"${failReason(result)}.`,
+          text: result.success ? `Focused ${quoteScreenText(name)} via accessibility.` : `Focus failed for ${quoteScreenText(name)}${failReason(result)}.`,
           isError: !result.success,
         };
       },

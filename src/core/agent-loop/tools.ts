@@ -45,6 +45,8 @@ import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
+import { quoteScreenText } from '../result-codes';
+import { missText, untrusted } from '../miss-text';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -262,14 +264,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             // A ref to a ListItem / combo-item / checkbox may not support
             // InvokePattern, so we try the three activation verbs in order and
             // stop at the first success — identical logic to the by-name path above.
-            const refLadder: InvokeAction[] = ['click', 'select', 'toggle'];
-            let refRes = await ctx.platform.invokeElement({ name: plan.name, action: refLadder[0] });
-            let refUsed: InvokeAction = refLadder[0];
-            for (let i = 1; i < refLadder.length && !refRes.success; i++) {
-              refUsed = refLadder[i];
-              refRes = await ctx.platform.invokeElement({ name: plan.name, action: refUsed });
-            }
-            if (!refRes.success) {
+            const { res: refRes, used: refUsed } = await runActivationLadder(
+              (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
+            if (!refRes.success && canClickAtBounds(refRes)) {
               const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
             }
@@ -315,16 +312,12 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
-        let res = await ctx.platform.invokeElement({ name, controlType, processId, action: ladder[0], value });
-        let used: InvokeAction = ladder[0];
-        for (let i = 1; i < ladder.length && !res.success; i++) {
-          used = ladder[i];
-          res = await ctx.platform.invokeElement({ name, controlType, processId, action: used, value });
-        }
+        const { res, used } = await runActivationLadder(
+          (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value }), ladder);
         // Found but no pattern took: click the surfaced bounds centre (same
         // fallback the el_NN path and smart_click already have). Live
         // regression 2026-10: `find` saw the Button, invoke reported "missed".
-        if (!res.success && action === 'click') {
+        if (!res.success && action === 'click' && canClickAtBounds(res)) {
           const fallback = await clickBoundsFallback(ctx, name, res.bounds, processId);
           if (fallback) return fallback;
         }
@@ -335,15 +328,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // An EARLIER still-running invoke that failed after the bridge stopped
         // waiting reports its error on the next invoke reply.
         const late = (res.data as { lateInvokeError?: unknown } | undefined)?.lateInvokeError;
-        const lateNote = typeof late === 'string' && late ? ` Note: an earlier action that was still running later failed: ${late}.` : '';
+        const lateNote = typeof late === 'string' && late ? ` Note: an earlier action that was still running later failed: ${untrusted(late)}.` : '';
         return {
           success: res.success,
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
-                ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
-                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}.`
+                ? `Invoked ${quoteScreenText(name)} (${used}) → value: "${(res.data as any).value}"`
+                : `Invoked ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
-            : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
+            : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
           targetLabel: name,
         };
       },
@@ -405,24 +398,24 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId, action: 'set-value', value,
         });
         await sleep(150);
-        if (res.success) return { success: true, text: `Set "${name}" = ${value.length} chars`, targetLabel: name };
+        if (res.success) return { success: true, text: `Set ${quoteScreenText(name)} = ${value.length} chars`, targetLabel: name };
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
         if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
           const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
-          return { success: false, text: `Set "${name}" refused — ${why}.`, targetLabel: name };
+          return { success: false, text: `Set ${quoteScreenText(name)} refused — ${untrusted(why)}.`, targetLabel: name };
         }
         // No settable value (a Chrome field on Linux exposes neither EditableText
         // nor Value; Win11 XAML composites): type into the INPUT — never its
         // same-named label, never into whatever happens to have focus.
         const target = await editableTarget(ctx, name, controlType, processId);
         if (!target) {
-          return { success: false, text: `Set "${name}" failed: no settable value and no editable field named "${name}" to type into.`, targetLabel: name };
+          return { success: false, text: `Set ${quoteScreenText(name)} failed: no settable value and no editable field named ${quoteScreenText(name)} to type into.`, targetLabel: name };
         }
         await ctx.platform.mouseClick(target.x, target.y);
         await ctx.platform.keyPress('mod+a');
         await ctx.platform.typeText(value);
         await sleep(150);
-        return { success: true, text: `Set "${name}" = ${value.length} chars (keyboard fallback: no settable value).`, targetLabel: name };
+        return { success: true, text: `Set ${quoteScreenText(name)} = ${value.length} chars (keyboard fallback: no settable value).`, targetLabel: name };
       },
     },
 
@@ -451,7 +444,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         });
         return {
           success: res.success,
-          text: res.success ? `Expanded "${name}".` : `Could not expand "${name}".`,
+          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `Could not expand ${quoteScreenText(name)}.`,
           targetLabel: name,
         };
       },
@@ -481,7 +474,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         });
         return {
           success: res.success,
-          text: res.success ? `Collapsed "${name}".` : `Could not collapse "${name}".`,
+          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `Could not collapse ${quoteScreenText(name)}.`,
           targetLabel: name,
         };
       },
@@ -508,13 +501,13 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           name, controlType: typeof args.controlType === 'string' ? args.controlType : undefined, processId,
         });
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'toggle' });
-        if (!res.success) return { success: false, text: `Could not toggle "${name}"${failReason(res)}.`, targetLabel: name };
+        if (!res.success) return { success: false, text: `Could not toggle ${quoteScreenText(name)}${failReason(res)}.`, targetLabel: name };
         const state = (res.data as any)?.toggleState ?? 'unknown';
         const changed = (res.data as any)?.toggleChanged;
         if (changed === false) {
-          return { success: true, text: `Toggled "${name}" but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.`, targetLabel: name };
+          return { success: true, text: `Toggled ${quoteScreenText(name)} but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.`, targetLabel: name };
         }
-        return { success: true, text: changed === true ? `Toggled (read back ✓) "${name}" → ${state}.` : `Toggled "${name}" → ${state}.`, targetLabel: name };
+        return { success: true, text: changed === true ? `Toggled (read back ✓) ${quoteScreenText(name)} → ${state}.` : `Toggled ${quoteScreenText(name)} → ${state}.`, targetLabel: name };
       },
     },
 
@@ -549,7 +542,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const notItem = res.success ? undefined : await notSelectableReason(ctx.platform, { name, controlType, processId });
         return {
           success: res.success,
-          text: res.success ? `Selected "${name}".` : `Could not select "${name}"${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`,
+          text: res.success ? `Selected ${quoteScreenText(name)}.` : `Could not select ${quoteScreenText(name)}${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`,
           targetLabel: name,
         };
       },
@@ -583,11 +576,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           if (editable && types.some(t => !EDITABLE_ROLE.test(t) || /^text$/i.test(t))) controlType = editable;
         }
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'get-value' });
-        if (!res.success) return { success: false, text: `"${name}" has no readable value.` };
+        if (!res.success) return { success: false, text: `${quoteScreenText(name)} has no readable value.` };
         // The whole value: read_tree points here to read what it cut. Only a huge one is cut again, and says so.
         const value = String((res.data as any)?.value ?? '');
         const shownValue = value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
-        return { success: true, text: wrapUntrustedScreenContent(`"${name}" = "${shownValue}"`) };
+        return { success: true, text: wrapUntrustedScreenContent(`${quoteScreenText(name)} = "${shownValue}"`) };
       },
     },
 
@@ -642,7 +635,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
           processId: await resolveAgentPid(args, ctx),
         });
-        if (hits.length === 0) return { success: false, text: `No element named "${name}".` };
+        if (hits.length === 0) return { success: false, text: `No element named ${quoteScreenText(name)}.` };
         const el = hits[0];
         return {
           success: true,
@@ -1048,17 +1041,17 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
               ?? (platform === 'darwin' ? alias?.macOSAppName : undefined),
           });
         } catch (err) {
-          return { success: false, text: `Failed to launch "${name}": ${err instanceof Error ? err.message : String(err)}` };
+          return { success: false, text: `Failed to launch ${quoteScreenText(name)}: ${err instanceof Error ? err.message : String(err)}` };
         }
         await sleep(800);
-        if (res.title) return { success: true, text: `Opened "${name}" (pid=${res.pid}, window="${res.title}")` };
+        if (res.title) return { success: true, text: `Opened ${quoteScreenText(name)} (pid=${res.pid}, window="${res.title}")` };
         // Running but no window yet: a slow app still loading. Not a failure —
         // a failure invites a second launch.
         if (res.pid) {
-          return { success: true, text: `Started "${name}" (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+          return { success: true, text: `Started ${quoteScreenText(name)} (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
         }
         // No process and no window is not a launch: say so instead of "Launched".
-        return { success: false, text: `Could not confirm "${name}" opened — no window appeared. Check list_windows before acting on it.` };
+        return { success: false, text: `Could not confirm ${quoteScreenText(name)} opened — no window appeared. Check list_windows before acting on it.` };
       },
     },
 
@@ -1260,7 +1253,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const result = await ctx.platform.invokeElement({ name, controlType, processId, action: 'focus' });
         return {
           success: result.success,
-          text: result.success ? `Focused "${name}" via a11y.` : `Could not focus "${name}"${failReason(result)}.`,
+          text: result.success ? `Focused ${quoteScreenText(name)} via a11y.` : `Could not focus ${quoteScreenText(name)}${failReason(result)}.`,
           targetLabel: name,
         };
       },
@@ -2201,6 +2194,44 @@ async function boundsToClick(
 }
 
 /**
+ * Try the activation verbs in order until one takes. A miss reports the FIRST verb's reason (the generic "click" the caller
+ * asked for), not the last rung's: the last rung is a toggle, and an expandable Button that nothing took was reported as
+ * "TogglePattern not supported" (live 2026-11-10) although the element was found.
+ */
+/** The state an expand / collapse left the element in, read back by the bridge; says so when it did not change. */
+export function expandNote(data: Record<string, unknown> | undefined): string {
+  const state = data?.expandState;
+  if (typeof state !== 'string') return '';
+  return data?.expandChanged === false ? ` — still ${state.toLowerCase()} (the state did not change)` : ` — now ${state.toLowerCase()}`;
+}
+
+/** After an invoke that was found but threw ("Invoke failed: ..."): it may have acted, and a disabled element ignores a click. No second click. */
+export function canClickAtBounds(res: { data?: Record<string, unknown> }): boolean {
+  return res.data?.reason !== 'invoke_threw' && res.data?.reason !== 'disabled';
+}
+
+export async function runActivationLadder(
+  call: (action: InvokeAction) => Promise<{ success: boolean; bounds?: { x: number; y: number; width: number; height: number }; data?: Record<string, unknown> }>,
+  ladder: InvokeAction[],
+): Promise<{ res: Awaited<ReturnType<typeof call>>; used: InvokeAction }> {
+  const first = await call(ladder[0]);
+  let res = first;
+  let used = ladder[0];
+  for (let i = 1; i < ladder.length && !res.success; i++) {
+    used = ladder[i];
+    res = await call(used);
+  }
+  // The click rung is the one that read the element: its reason AND its bounds (for the coordinate fallback) stand.
+  if (!res.success) {
+    const keep: Record<string, unknown> = {};
+    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
+    res = { ...res, bounds: first.bounds ?? res.bounds, ...(Object.keys(keep).length ? { data: { ...res.data, ...keep } } : {}) };
+  }
+  return { res, used };
+}
+
+
+/**
  * Coordinate fallback for the activate intent when the element was FOUND
  * but exposes no invoke/toggle/select pattern: click the centre of the
  * bounds the adapter surfaced — but ONLY when they are sane (finite,
@@ -2232,7 +2263,7 @@ async function clickBoundsFallback(
   if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
   await ctx.platform.mouseClick(cx, cy);
   await sleep(150);
-  return { success: true, text: `Clicked "${name}" via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
+  return { success: true, text: `Clicked ${quoteScreenText(name)} via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
 }
 
 function buildWinQuery(args: Record<string, unknown>): { processName?: string; processId?: number; title?: string } | undefined {

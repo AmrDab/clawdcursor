@@ -16,7 +16,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
-  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -97,6 +97,34 @@ const RULES: Rule[] = [
   // MCP's navigate attaches by itself; the built-in agent's needs browser_connect first.
   { code: 'NOT_CONNECTED', outcome: 'failed', test: /not connected|no browser (?:is )?connected|ECONNREFUSED/i,
     hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
+  // The element WAS found; this verb does not apply to it ("TogglePattern not supported", "element cannot expand or collapse").
+  // Before NOT_FOUND: an invoke miss is worded "missed — <reason>", and the reason decides which of the two it is.
+  // Found, but the element is switched off: no verb and no click at its bounds will do anything.
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /element is (?:not enabled|disabled)/i,
+    hint: 'found it, but it is disabled; the app has to enable it first (a required field, a selection), read its state',
+    next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
+  // Found, and the invoke itself threw: it may have acted before it threw, so do not repeat it or click the same spot.
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /Invoke failed:/i,
+    hint: 'found it, but the invoke threw; it may have taken effect, read the screen before trying again',
+    next: REREAD },
+  // First the activation cascade that tried EVERY verb (invoke, toggle, select, expand) and none took: suggesting those verbs
+  // again would loop, so the next step is a click at the element's bounds.
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /no (?:invoke|click)\/\w+(?:\/\w+)* pattern|does not support (?:AXPress|click\(\))|exposes no Action interface/i,
+    hint: 'found it, but no activation (invoke / toggle / select / expand) takes on it; it is on screen, so click it at its bounds',
+    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (bounds: accessibility find)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (bounds: find_element)' } },
+  // One verb that does not fit this element ("TogglePattern not supported", "cannot expand or collapse").
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /Pattern not supported|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|element does not support (?:expand|collapse|toggle|select|AXScrollToVisible)|exposes (?:no|neither) (?:EditableText|Value)|no Selection interface/i,
+    hint: 'found it, but it cannot be done that way (toggled / selected / set / expanded); try invoke / expand / toggle / select, or read its state',
+    next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
+  // Found, but not on screen / the action itself failed: not "the name may differ".
+  { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /the element exists but is not visible on screen/i,
+    hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
+  { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
+    hint: 'found, but the action failed', next: REREAD },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
     test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing/i,
@@ -126,13 +154,32 @@ export function isActingAction(compound: string, action: string | undefined): bo
 const HEAD = 400;
 
 /**
+ * Text the screen controls (a window title, an element name) must not steer the classification: a window titled "the screen
+ * is locked" would turn any miss into SCREEN_LOCKED. Producers quote such text with quoteScreenText (or put it in an
+ * <untrusted-screen-content> block); the classifier reads the result with quoted spans, `key='value'` spans and untrusted
+ * blocks blanked out, so only clawdcursor's own words are matched.
+ */
+export function quoteScreenText(s: string): string {
+  // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
+  const defused = s.replace(/<(\/?)\s*untrusted-screen-content\s*>/gi, '‹$1untrusted-screen-content›');
+  return `"${defused.replace(/["\r\n]+/g, "'")}"`;
+}
+function ownWords(text: string): string {
+  return text
+    .replace(/<untrusted-screen-content>[\s\S]*?<\/untrusted-screen-content>/g, ' ')
+    .replace(/"[^"\n]*"/g, '""')
+    .replace(/\b(\w+)='[^'\n]*'/g, "$1=''");
+}
+
+/**
  * Classify a result. `acting`: the call changes something (a click, typing, a window move) — reads are not given an
  * outcome on success, there is nothing to confirm.
  */
 export function classifyResult(text: string, isError: boolean, acting: boolean, surface: Surface = 'mcp'): ResultClass | null {
   if (isError) {
-    const head = text.slice(0, HEAD);
-    const r = RULES.find(rule => rule.test.test(rule.whole ? text : head));
+    const own = ownWords(text);
+    const head = own.slice(0, HEAD);
+    const r = RULES.find(rule => rule.test.test(rule.whole ? own : head));
     if (r) return { outcome: r.outcome, code: r.code, hint: r.hint, next: r.next?.[surface] };
     return { outcome: 'failed', code: 'UNKNOWN', hint: 'read the screen, then try another way', next: REREAD[surface] };
   }

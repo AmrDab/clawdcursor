@@ -33,6 +33,7 @@
  */
 
 import type { WindowInfo } from './types';
+import { windowTextIncludes } from '../tools/window-text';
 
 /**
  * How often the diff-and-poll loop re-checks `listWindows()`.
@@ -202,8 +203,7 @@ export function buildAppPredicate(name: string): AppPredicate {
     if (proc.length >= 3 && (target.includes(proc) || stem.includes(proc))) {
       return true;
     }
-    const title = w.title.toLowerCase();
-    return title.includes(target) || title.includes(stem);
+    return windowTextIncludes(w.title, target) || windowTextIncludes(w.title, stem);
   };
 }
 

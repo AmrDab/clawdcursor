@@ -55,6 +55,7 @@ import argparse
 import json
 import sys
 import time
+import unicodedata
 from typing import Any, Optional
 
 try:
@@ -129,6 +130,13 @@ INT_MIN = -2147483648   # AT-SPI extents of children scrolled out of a viewport
 NAMELESS_NOISE_ROLES = {'list item', 'table row'}
 
 
+def title_key(s: Optional[str]) -> str:
+    """A window title as compared: format characters (zero-width space, joiners, BOM) removed, whitespace collapsed,
+    lower case."""
+    kept = ''.join(c for c in (s or '') if unicodedata.category(c) != 'Cf')
+    return ' '.join(kept.split()).lower()
+
+
 def safe(fn, default=None):
     """Call fn(), return default if it raises (stale ref, perm denied, etc.)."""
     try:
@@ -173,6 +181,41 @@ def toplevels_active_first(app: Any) -> list:
     kids = [k for k in (safe(lambda i=i: app.get_child_at_index(i)) for i in range(count)) if k is not None]
     return ([k for k in kids if has_state(k, Atspi.StateType.ACTIVE)]
             + [k for k in kids if not has_state(k, Atspi.StateType.ACTIVE)])
+
+
+# Toplevels that belong to the window in use rather than being another window: GTK3 and Qt put an open menu, a combo's list
+# or a tooltip in a toplevel of its own that is never ACTIVE. GTK3 wraps a context menu or a combo list in a toplevel of role
+# "window" holding the menu; a real application window is a "frame" or "dialog".
+POPUP_TOPLEVEL_ROLES = {'menu', 'popup menu', 'tool tip', 'tooltip', 'combo box', 'list', 'window'}
+APP_WINDOW_ROLES = {'frame', 'dialog', 'alert', 'file chooser', 'document frame'}
+
+
+def scope_toplevels(app: Any) -> list:
+    """The windows a find / invoke / tree read covers: only the ACTIVE one when the app has one (the window the agent works
+    in, so the names of its other windows never reach the caller), plus the app's open popups (menus, a combo's list,
+    tooltips: showing toplevels of their own that are never ACTIVE); every window when none is active (the app is not
+    focused)."""
+    tops = toplevels_active_first(app)
+    active = [t for t in tops if has_state(t, Atspi.StateType.ACTIVE)]
+    if not active:
+        return tops
+    popups = [t for t in tops if t not in active
+              and (safe(lambda t=t: t.get_role_name(), '') or '').lower() in POPUP_TOPLEVEL_ROLES
+              and has_state(t, Atspi.StateType.SHOWING)]
+    return active + popups
+
+
+def other_windows_count(app: Any, searched: list) -> int:
+    """How many other showing, normal application windows (frame / dialog; not hidden popups or tooltips) the app has besides
+    those searched. Returned as a number in the reply's `otherWindows` field: the reply carries structured fields (reason,
+    otherWindows), never a sentence with page text in it, because the caller classifies by `reason` and a window title or an
+    element name is page controlled text."""
+    if not searched:
+        return 0
+    return len([t for t in toplevels_active_first(app)
+                if t not in searched
+                and (safe(lambda t=t: t.get_role_name(), '') or '').lower() in APP_WINDOW_ROLES
+                and has_state(t, Atspi.StateType.SHOWING)])
 
 
 def node_to_dict(acc: Any) -> Optional[dict]:
@@ -372,7 +415,7 @@ def active_application(process_id: Optional[int] = None,
             apps = [a for a in apps if safe(lambda a=a: a.get_process_id()) not in exclude_pids]
         for app in apps:
             for top in toplevels_active_first(app):
-                if (safe(lambda top=top: top.get_name(), '') or '') == window_title:
+                if title_key(safe(lambda top=top: top.get_name(), '')) == title_key(window_title):
                     return app
 
     for app in apps:
@@ -565,8 +608,8 @@ def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
         root = node_to_dict(app)
         if root is not None:
             out.append(root)
-        # The active window (a dialog over its main window) is walked first.
-        for top in toplevels_active_first(app):
+        # The active window (a dialog over its main window) and its popups: the same windows a find / invoke searches.
+        for top in scope_toplevels(app):
             walk(top, out, 1, cut)
             if len(out) > MAX_TREE_NODES:
                 break
@@ -619,7 +662,7 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
         # The application node itself, then its windows, the active one first.
         if wanted(app):
             hits.append(app)
-        for top in toplevels_active_first(app):
+        for top in scope_toplevels(app):
             visit(top, 1)
     described: list = []
     for h in hits:
@@ -679,8 +722,8 @@ def role_matches(alts: list, role_name: str) -> bool:
 def find_target(app: Any, name: Optional[str], role: Optional[str]):
     """(accessible, showing) for the best match under `app`: name exact
     (case-insensitive, padding ignored) before substring, role substring;
-    ON-SCREEN matches before hidden ones, the ACTIVE window's before the
-    rest. A hidden 0x0 duplicate (a hidden toolbar's "Save" vs the Save
+    ON-SCREEN matches before hidden ones. Only the ACTIVE window (and its popups) is searched
+    when the app has one (see scope_toplevels). A hidden 0x0 duplicate (a hidden toolbar's "Save" vs the Save
     dialog's button) used to win just by coming first in the tree.
     (None, False) when nothing matches."""
     name_l = name.lower().strip() if name else None
@@ -711,8 +754,8 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
                 return True
         return False
 
-    # Active window first, so document order already ranks it ahead.
-    for top in toplevels_active_first(app):
+    # The active window and its popups (see scope_toplevels).
+    for top in scope_toplevels(app):
         if visit(top, 1):
             return exact[-1], True
     # No exact on-screen match was seen. If the walk ran out of budget or time, one may exist beyond the cut, so a weaker
@@ -767,6 +810,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         used = do_named_action(acc, 'click')
         if used is None:
             out["error"] = "element exposes no Action interface"
+            out["reason"], out["cascade"] = "unsupported", True
         else:
             out["success"], out["method"] = True, used
 
@@ -828,6 +872,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         before = checked_state(acc, role)
         if before is None:
             out["error"] = "not a checkbox, radio, switch or toggle button"
+            out["reason"] = "unsupported"
         else:
             used = do_named_action(acc, 'toggle')
             if used is None:
@@ -854,6 +899,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
             used = do_named_action(acc, 'select')
             if used is None:
                 out["error"] = "no Selection interface on parent and no Action"
+                out["reason"] = "unsupported"
             else:
                 out["success"], out["method"] = True, used
 
@@ -865,6 +911,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         if not has_state(acc, Atspi.StateType.EXPANDABLE) and action not in named:
             # Not an expander: the click fallback in do_named_action pressed it (a "select" on a Save button saved).
             out["error"] = "element cannot expand or collapse"
+            out["reason"] = "unsupported"
         elif has_state(acc, Atspi.StateType.EXPANDED) == want:
             out["success"], out["method"] = True, "already"
         else:
@@ -892,19 +939,20 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
     if target is None:
         if SEARCH_WEAK[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                    "error": f"search cut ({SEARCH_CUT[0]}) before an exact match: only weaker matches for {name or role} were seen; "
+                    "error": f"search cut ({SEARCH_CUT[0]}) before an exact match: only weaker matches were seen; "
                              "use the element's exact name (a partial name cannot be searched completely in a window this large)"}
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                    "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched: {name or role} "
+                    "error": f"search cut ({SEARCH_CUT[0]}): element not found in the part of the window searched "
                              "(this is not 'no such element')"}
-        return {"success": False, "action": action, "error": f"element not found: {name or role}"}
+        return {"success": False, "action": action, "reason": "not_found", "error": "element not found",
+                "otherWindows": other_windows_count(app, scope_toplevels(app))}
     if not showing and action != 'get-value':
         # Acting on a hidden element (closed menu, hidden toolbar, 0x0) and
         # calling it a success is how a Save dialog went unsaved. No bounds:
         # a coordinate fallback onto a hidden element is just as wrong.
-        return {"success": False, "action": action, "notVisible": True,
-                "error": f"element '{name or role}' exists but is not visible on screen "
+        return {"success": False, "action": action, "notVisible": True, "reason": "hidden",
+                "error": "the element exists but is not visible on screen "
                          "(hidden or 0x0, e.g. in a closed menu) — nothing was done"}
     return perform_action(target, action, value)
 
@@ -972,9 +1020,9 @@ def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: O
     if not matches:
         if SEARCH_CUT[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
-                    "error": f"search cut ({SEARCH_CUT[0]}): no element named {name} in the part of the active window searched "
+                    "error": f"search cut ({SEARCH_CUT[0]}): no such element in the part of the active window searched "
                              "(this is not 'no such element')"}
-        return {"success": False, "action": action, "error": f"element not found in the active window: {name}"}
+        return {"success": False, "action": action, "reason": "not_found", "error": "element not found in the active window"}
     # Cut by the budget or the clock with only weaker (substring) matches seen: an exact one may lie beyond, so none is
     # scrolled to. With exact matches the walk proceeds (this walk has no early exit, so a big window is always cut; the
     # caller's bounds pick among same-named matches). A depth cut is structural and does not refuse.
