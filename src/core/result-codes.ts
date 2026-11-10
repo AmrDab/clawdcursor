@@ -141,8 +141,10 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // The checks' own wording, at their own positions: a body that happens to contain "VERIFIED" on some line is not one.
   // Only where the checks write them, so nothing inside a result (typed text, a page, a window title) can pose as one:
   // `expect`'s verdict is appended at the very end; `verify` starts its reply; a typing read-back sits in the leading
-  // "Typed N chars (…)" before any quoted text.
-  if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)) {
+  // "Typed N chars (…)" before any quoted text; a toggle / select writes `Toggled|Selected (read back ✓)` before the
+  // quoted element name, which is screen text.
+  if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
+    || /^(?:Toggled|Selected) \(read back ✓\) "/.test(text)) {
     return { outcome: 'confirmed' };
   }
   // No hint: not every tool takes `expect`, and the server instructions already say how to confirm.

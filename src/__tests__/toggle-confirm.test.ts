@@ -15,7 +15,7 @@ async function toggle(data: Record<string, unknown>) {
 
 describe('a11y_toggle reports the state it observed', () => {
   it('a changed state is reported as the result', async () => {
-    expect(await toggle({ toggleState: 'Off', toggleChanged: true })).toEqual({ text: 'Toggled "Accept terms" → Off.' });
+    expect(await toggle({ toggleState: 'Off', toggleChanged: true })).toEqual({ text: 'Toggled (read back ✓) "Accept terms" → Off.' });
   });
 
   it('a state that never changed is "not confirmed", never "→ On"', async () => {

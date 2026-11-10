@@ -15,6 +15,7 @@
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { selectOption } from '../platform/select-option';
+import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
 
 function needPlatform(tool: string): ToolResult {
@@ -131,6 +132,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           return { text: 'set_field_value failed: name the field (its accessibility name). To type into the focused field, use type_text.', isError: true };
         }
         const pid = await resolveProcessId(ctx, processId);
+        controlType = await preferControl(ctx.platform, 'set-value', { name: safeNameStr, controlType, processId: pid });
         const res = await ctx.platform.invokeElement({
           name: safeNameStr,
           controlType,
@@ -230,17 +232,19 @@ export function getA11yDepthTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('a11y_toggle');
         const pid = await resolveProcessId(ctx, processId);
+        controlType = await preferControl(ctx.platform, 'toggle', { name: String(name), controlType, processId: pid });
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'toggle',
         });
-        if (!res.success) return { text: `a11y_toggle failed for "${name}".`, isError: true };
+        if (!res.success) return { text: `a11y_toggle failed for "${name}"${failReason(res)}.`, isError: true };
         const state = res.data?.toggleState ?? 'unknown';
         // The bridges read the state back until it changes; if it never did, the new state was not seen and the old one
         // must not be reported as the result.
         if (res.data?.toggleChanged === false) {
           return { text: `Toggled "${name}" but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.` };
         }
-        return { text: `Toggled "${name}" → ${state}.` };
+        // The marker comes before the (screen-derived) name and only when the new state was read back: see classifyResult.
+        return { text: res.data?.toggleChanged === true ? `Toggled (read back ✓) "${name}" → ${state}.` : `Toggled "${name}" → ${state}.` };
       },
     },
 
@@ -274,10 +278,9 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'select',
         });
-        return {
-          text: res.success ? `Selected "${name}".` : `a11y_select failed for "${name}".`,
-          isError: !res.success,
-        };
+        if (res.success) return { text: `Selected "${name}".` };
+        const notItem = await notSelectableReason(ctx.platform, { name: String(name), controlType, processId: pid });
+        return { text: `a11y_select failed for "${name}"${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
       },
     },
 
