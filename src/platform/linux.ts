@@ -668,6 +668,8 @@ export class LinuxAdapter implements PlatformAdapter {
       const args = ['--cmd', 'find'];
       // `--name=…`: a name starting with '-' ("--Select--") would otherwise be read by argparse as an option.
       if (query.name) args.push(`--name=${query.name}`);
+      // A role-only find searches in the bridge too (its search budget and its partial report), not an unfiltered walk.
+      if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
       // Without a pid the bridge guesses the app (focused-descendant
       // heuristic, else the first app on the bus) and searched the wrong
       // one. Scope to the foreground window like Windows / macOS do.
@@ -675,12 +677,12 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { elements?: any[]; partial?: boolean };
+      const data = JSON.parse(stdout) as { elements?: any[]; partial?: boolean; reason?: string };
       let raw = Array.isArray(data.elements) ? data.elements : [];
       // The bridge ran out of its search budget without a match: a large window, not "nothing there".
       if (data.partial === true && raw.length === 0) {
         this.lastFindError = 'partial';
-        this.lastFindNote = 'Not found in the first part of this window (the accessibility search stopped at its element budget)';
+        this.lastFindNote = `Not found in the part of this window the accessibility search covered (it stopped at its ${cutReason(data.reason)})`;
       }
       // Role filter runs here, on the NORMALIZED role, so "Button" matches a
       // "push button" and "Edit" matches a "text" entry. Raw AT-SPI role
@@ -754,12 +756,12 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'focused', ...scope], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { element?: any; partial?: boolean };
+      const data = JSON.parse(stdout) as { element?: any; partial?: boolean; reason?: string };
       if (!data.element) {
         // The bridge ran out of its search budget before finding the focus: not "nothing is focused".
         if (data.partial === true) {
           this.lastFindError = 'partial';
-          this.lastFindNote = 'No focused element in the first part of this window (the accessibility search stopped at its element budget)';
+          this.lastFindNote = `No focused element in the part of this window the accessibility search covered (it stopped at its ${cutReason(data.reason)})`;
         }
         return null;
       }
@@ -1702,6 +1704,11 @@ function normalizeAtspiRole(rawRole: string): string {
  * caller passes ("Button", "ControlType.Edit") → a raw AT-SPI substring.
  * Unknown names pass through lowercased.
  */
+/** Why the bridge cut a search, for the note: 'depth limit' | 'element budget' | 'time limit'. */
+function cutReason(reason: unknown): string {
+  return reason === 'depth limit' || reason === 'time limit' || reason === 'element budget' ? reason : 'element budget';
+}
+
 function atspiRoleQuery(controlType: string): string {
   const want = controlType.replace(/^ControlType\./, '').toLowerCase();
   // EVERY raw role that maps here, as "a|b|c" alternatives: Edit is "text"

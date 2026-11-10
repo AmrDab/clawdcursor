@@ -360,6 +360,56 @@ focus_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
 focus_acc.children[0].children[-1].states.add(StateType.FOCUSED)
 wide_acc = focus_acc
 OUT['wide_focused'] = bridge.cmd_focused(5151)
+
+# find builds an element dict (about ten AT-SPI calls) only for hits, not for every node it walks.
+wide_acc = wide_app(1500)
+real_node_to_dict, dict_calls = bridge.node_to_dict, [0]
+def counting_node_to_dict(acc):
+    dict_calls[0] += 1
+    return real_node_to_dict(acc)
+bridge.node_to_dict = counting_node_to_dict
+OUT['find_names'] = [e['name'] for e in bridge.cmd_find('Needle', None, 5151)['elements']]
+OUT['find_dict_calls'] = dict_calls[0]
+# A role-only find searches too, and reports a cut one.
+wide_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+OUT['role_find'] = bridge.cmd_find(None, 'no such role', 5151)
+bridge.node_to_dict = real_node_to_dict
+
+# Deadline: a slow tree ends the search as cut ('time limit') instead of running into the caller's timeout.
+clock = [0.0]
+class SlowAcc(Acc):
+    def get_name(self):
+        clock[0] += 1.0
+        return self.name
+    def get_state_set(self):
+        clock[0] += 1.0
+        return super().get_state_set()
+slow_page = Acc('page', 'document web', children=[SlowAcc('row %d' % i, 'section') for i in range(60)] + [SlowAcc('Needle', 'push button')])
+slow_acc = Acc('app', 'application', pid=5151, children=[slow_page])
+real_now = bridge._now
+bridge._now = lambda: clock[0]
+wide_acc = slow_acc
+def timed(fn):
+    clock[0] = 0.0
+    r = fn()
+    return r
+bridge.begin_search()
+OUT['slow_target'] = [bridge.find_target(slow_acc, 'Needle', None)[0] is None, bridge.SEARCH_CUT[0], clock[0]]
+clock[0] = 0.0
+OUT['slow_find'] = bridge.cmd_find('Needle', None, 5151)
+clock[0] = 0.0
+OUT['slow_invoke'] = bridge.cmd_invoke('Needle', None, 5151, 'click', None)
+clock[0] = 0.0
+OUT['slow_scroll'] = bridge.cmd_scroll_into_view('Needle', None, 5151)
+clock[0] = 0.0
+slow_page.children[-1].states.add(StateType.FOCUSED)
+OUT['slow_focused'] = bridge.cmd_focused(5151)
+bridge._now = real_now
+
+# Depth limit is named as such.
+deep_acc = Acc('app', 'application', pid=5151, children=[chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button'))])
+bridge.begin_search()
+OUT['deep_target'] = [bridge.find_target(deep_acc, 'Too deep', None)[0] is None, bridge.SEARCH_CUT[0]]
 bridge.active_application = real_active_application
 
 # Focus: scoped to the app, active window first — never another app's widget.

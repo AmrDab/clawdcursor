@@ -479,11 +479,13 @@ export function evaluate(ctx: EvaluationContext): Decision {
     : baseTier;
   const correlationId = getCorrelationId();
 
-  const emit = (decision: Decision) => {
+  // The log carries the RULE that decided (a stable id), never the reason text: that can quote the target's name.
+  const emit = (decision: Decision, rule?: string) => {
     // When a compound tool was unpacked, log BOTH names so the audit
     // trail shows the canonical action (for tier forensics) and the
     // surface tool the LLM actually called (for debugging).
-    const logMeta: Record<string, unknown> = { tool: ctx.tool, ...decision, correlationId };
+    const { reason: _reason, ...loggable } = decision as Decision & { reason?: string };
+    const logMeta: Record<string, unknown> = { tool: ctx.tool, ...loggable, ...(rule ? { rule } : {}), correlationId };
     if (canonicalTool !== ctx.tool) logMeta.canonicalTool = canonicalTool;
     logger.info('safety.decision', logMeta);
     return decision;
@@ -515,10 +517,10 @@ export function evaluate(ctx: EvaluationContext): Decision {
     // (close window/tab, show desktop, launchers) are confirm-able instead of
     // dead-ended (v1.6.0 — the old list hard-blocked win+d/ctrl+w).
     if (match?.tier === 'block') {
-      return emit({ decision: 'block', tier: 'destructive', reason: keyBlockReason(match.combo, 'block') });
+      return emit({ decision: 'block', tier: 'destructive', reason: keyBlockReason(match.combo, 'block') }, `key_combo:${match.combo}`);
     }
     if (match?.tier === 'confirm') {
-      return emit({ decision: 'confirm', tier: 'destructive', reason: keyBlockReason(match.combo, 'confirm') });
+      return emit({ decision: 'confirm', tier: 'destructive', reason: keyBlockReason(match.combo, 'confirm') }, `key_combo:${match.combo}`);
     }
   }
 
@@ -529,7 +531,7 @@ export function evaluate(ctx: EvaluationContext): Decision {
       decision: 'confirm',
       tier: 'system',
       reason: 'cdp_evaluate runs arbitrary JS in the active page — requires user approval',
-    });
+    }, 'cdp_evaluate');
   }
 
   // 2b. open_uri tier is SCHEME-dependent. Benign compose/navigate schemes
@@ -548,7 +550,7 @@ export function evaluate(ctx: EvaluationContext): Decision {
       reason: scheme
         ? `open_uri to "${scheme}:" — handler may execute or be destructive (e.g. file: can run a program); needs confirmation`
         : 'open_uri with no/invalid scheme — needs confirmation',
-    });
+    }, 'open_uri_scheme');
   }
 
   // 3. Read tier: always allow.
@@ -558,14 +560,14 @@ export function evaluate(ctx: EvaluationContext): Decision {
 
   // 4. System tier: always confirm (catch-all).
   if (tier === 'system') {
-    return emit({ decision: 'confirm', tier, reason: `${ctx.tool} is a system-tier action` });
+    return emit({ decision: 'confirm', tier, reason: `${ctx.tool} is a system-tier action` }, 'system_tier');
   }
 
   // 4b. Destructive tier: confirm. Matches the tool-registry tag for
   //     explicitly-destructive verbs (close_window, etc.) so the gate
   //     fires even when there's no label match.
   if (tier === 'destructive') {
-    return emit({ decision: 'confirm', tier, reason: `${ctx.tool} is a destructive-tier action` });
+    return emit({ decision: 'confirm', tier, reason: `${ctx.tool} is a destructive-tier action` }, 'destructive_tier');
   }
 
   // 5. Input tier with a Confirm-pattern target label.
@@ -589,7 +591,6 @@ export function evaluate(ctx: EvaluationContext): Decision {
         if (ctx.userTaskText && pattern.test(ctx.userTaskText)) {
           logger.info('safety.intent_match.bypass', {
             tool: ctx.tool,
-            targetLabel: ctx.targetLabel,
             pattern: pattern.source,
             correlationId,
           });
@@ -599,7 +600,7 @@ export function evaluate(ctx: EvaluationContext): Decision {
           decision: 'confirm',
           tier: 'destructive',
           reason: `target "${ctx.targetLabel}" matches destructive pattern ${pattern.source}`,
-        });
+        }, `label_pattern:${pattern.source}`);
       }
     }
   }
@@ -629,10 +630,10 @@ export function evaluate(ctx: EvaluationContext): Decision {
           decision: 'confirm',
           tier: 'destructive',
           reason: `Sensitive app (${ctx.activeApp}) + ${ctx.tool} with no target label — cannot verify the action isn't destructive (Send/Delete/Transfer). Ask the user.`,
-        });
+        }, 'sensitive_app_no_label');
       }
       // Has a label and it didn't match a destructive pattern in step 5 — let it through.
-      logger.debug('safety.sensitive_app.allowed_with_label', { app: ctx.activeApp, tool: ctx.tool, label: ctx.targetLabel, correlationId });
+      logger.debug('safety.sensitive_app.allowed_with_label', { app: ctx.activeApp, tool: ctx.tool, correlationId });
     }
   }
 

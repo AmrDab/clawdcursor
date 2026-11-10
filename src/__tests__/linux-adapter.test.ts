@@ -392,6 +392,20 @@ describe('L7 — findElements scopes to the foreground window pid by default', (
     expect(adapter.lastFindError).toBeNull();
   });
 
+  it('names what cut the search, and a role-only find searches in the bridge', async () => {
+    h.exec = defaultExec(() => ({ elements: [], partial: true, reason: 'time limit' }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.findElements({ controlType: 'Button' });
+    const args = bridgeCalls()[bridgeCalls().length - 1];
+    expect(args.find(a => a.startsWith('--role='))).toMatch(/push button/);
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/time limit/);
+    h.exec = defaultExec(() => ({ elements: [], partial: true, reason: 'depth limit' }));
+    await adapter.findElements({ name: 'x' });
+    expect(adapter.lastFindNote).toMatch(/depth limit/);
+  });
+
   it('a focus search the bridge cut is reported as partial, not as nothing focused', async () => {
     h.exec = defaultExec(() => ({ element: null, partial: true }));
     const adapter = new LinuxAdapter();

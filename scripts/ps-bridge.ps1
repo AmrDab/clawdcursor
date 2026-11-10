@@ -1104,22 +1104,25 @@ function Cmd-InvokeElement {
             #    field (which brings its window forward) and types.
             #    The check is on the WINDOW, not the process: two windows of one process
             #    (Explorer, Notepad, Edge) share a pid, so the front window of the target's
-            #    process is not necessarily the target's. The target's top-level window (its
-            #    ancestor just under the desktop root) must be the foreground window; one that
+            #    process is not necessarily the target's. The target's top-level window (GA_ROOT of its
+            #    nearest handled ancestor) must be the foreground window; one that
             #    cannot be resolved (no handle, as with some UWP hosts) is refused the same way.
             try {
                 Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
                 $target.SetFocus()
                 Start-Sleep -Milliseconds 60
+                # Nearest ancestor (the target included) with a window handle. Not the walk to the desktop: an owned
+                # window (Save As, a message box) is a UIA child of its OWNER, so that walk ends at the owner while
+                # the foreground window is the dialog itself. GA_ROOT of both sides compares real top-level windows.
                 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
-                $desktop = [System.Windows.Automation.AutomationElement]::RootElement
-                $top = $target
-                for ($hop = 0; $hop -lt 80; $hop++) {
-                    $up = $walker.GetParent($top)
-                    if ($null -eq $up -or [System.Windows.Automation.Automation]::Compare($up, $desktop)) { break }
-                    $top = $up
+                $hwnd = [int64]0
+                $up = $target
+                for ($hop = 0; $hop -lt 80 -and $null -ne $up; $hop++) {
+                    $hwnd = [int64]$up.Current.NativeWindowHandle
+                    if ($hwnd -ne 0) { break }
+                    $up = $walker.GetParent($up)
                 }
-                $topHwnd = [int64]$top.Current.NativeWindowHandle
+                $topHwnd = if ($hwnd -ne 0) { [int64][Win32UIA]::GetAncestor([IntPtr]$hwnd, 2) } else { [int64]0 }
                 $fgRoot = [int64][Win32UIA]::GetAncestor([Win32UIA]::GetForegroundWindow(), 2)
                 if ($topHwnd -eq 0 -or $fgRoot -ne $topHwnd) {
                     return @{ success=$false; error="no settable value, and its window is not in front to type into" }

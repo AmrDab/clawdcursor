@@ -470,8 +470,8 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
   // safety block/confirm paths (allow was suppressed above)
   if (event === 'safety.decision') {
     const decision = String(meta?.decision ?? '');
-    const reason = String(meta?.reason ?? '');
-    writePrettyLine(`${tagStr} ${colorize(`⛔ ${decision}`, C.red)} — ${reason}`);
+    const rule = String(meta?.rule ?? '');
+    writePrettyLine(`${tagStr} ${colorize(`⛔ ${decision}`, C.red)} — ${rule}`);
     return;
   }
 

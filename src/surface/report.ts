@@ -292,8 +292,8 @@ export function reportMarkdown(r: ErrorReport): string {
     L.push(`- blind reads that came back empty / timed out: ${t.blindEmpty}; screenshots right after one: ${t.visionAfterBlindMiss}`);
     L.push(`- actions: ${t.actName} by name, ${t.actCoords} by coordinates, ${t.actOther} other; errors: ${t.errors}; refused by a guard: ${t.refused}`);
     L.push('', '```', s.sequence, '```');
-    if (s.errors.length) L.push('', '**Errors (redacted):**', ...s.errors.map(e => `- ${e}`));
-    if (s.refusals.length) L.push('', '**Refused by a guard (redacted):**', ...s.refusals.map(e => `- ${e}`));
+    if (s.errors.length) L.push('', '**Error result codes:**', ...s.errors.map(e => `- ${e}`));
+    if (s.refusals.length) L.push('', '**Guard refusal result codes:**', ...s.refusals.map(e => `- ${e}`));
   }
   if (r.task) L.push('', `**Agent task:** ${r.task.description} (${r.task.status}, ${r.task.totalSteps} steps)`);
   if (r.errorContext && !r.session) L.push('', `**Error:** ${r.errorContext}`);

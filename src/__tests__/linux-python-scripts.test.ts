@@ -118,10 +118,31 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
 
   it('a search stops after MAX_SEARCH_NODES nodes visited (a deep page must not cost thousands of calls), and says it was cut', () => {
     expect(out.wide_capped).toBe(true);
-    expect(out.wide_capped_cut).toBe(true);
-    expect(out.wide_invoke).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/not found in the first \d+ elements/) });
+    expect(out.wide_capped_cut).toBe('element budget');
+    expect(out.wide_invoke).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/^search cut \(element budget\)/), reason: 'element budget' });
     expect(out.wide_find).toMatchObject({ elements: [], partial: true });
     expect(out.wide_focused).toMatchObject({ element: null, partial: true });
+  });
+
+  // Review of #331: find built a dict (about ten AT-SPI calls) for every node it walked, and nothing stopped a slow tree.
+  it('find builds element dicts only for hits; a role-only find searches and reports a cut', () => {
+    expect(out.find_names).toEqual(['Needle']);
+    expect(out.find_dict_calls).toBe(1);
+    expect(out.role_find).toMatchObject({ elements: [], partial: true, reason: 'element budget' });
+  });
+
+  it('every search ends as "time limit" when the tree is slow, instead of running into the caller timeout', () => {
+    const [missed, cut] = out.slow_target;
+    expect(missed).toBe(true);
+    expect(cut).toBe('time limit');
+    expect(out.slow_find).toMatchObject({ elements: [], partial: true, reason: 'time limit' });
+    expect(out.slow_invoke).toMatchObject({ success: false, partial: true, reason: 'time limit', error: expect.stringMatching(/^search cut \(time limit\)/) });
+    expect(out.slow_scroll).toMatchObject({ success: false, partial: true, reason: 'time limit' });
+    expect(out.slow_focused).toMatchObject({ element: null, partial: true, reason: 'time limit' });
+  });
+
+  it('a search the depth cap cut names the depth limit', () => {
+    expect(out.deep_target).toEqual([true, 'depth limit']);
   });
 
   it('scroll-into-view says the search was cut instead of "not found"', () => {

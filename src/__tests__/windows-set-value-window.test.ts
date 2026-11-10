@@ -35,9 +35,11 @@ describe('ps-bridge set-value keyboard fallback', () => {
     expect(fallback).not.toMatch(/GetWindowThreadProcessId/);
     expect(fallback).not.toMatch(/Current\.ProcessId/);
     expect(fallback).toMatch(/ControlViewWalker/);
-    expect(fallback).toMatch(/Automation\]::Compare\(\$up, \$desktop\)/);   // walks up to the child of the desktop root
-    expect(fallback).toMatch(/\$top\.Current\.NativeWindowHandle/);
-    expect(fallback).toMatch(/GetAncestor\(\[Win32UIA\]::GetForegroundWindow\(\), 2\)/);
+    // An owned window (Save As) is a UIA child of its owner: no walk to the desktop root, which would end at the owner.
+    expect(fallback).not.toMatch(/Automation\]::Compare|RootElement/);
+    expect(fallback).toMatch(/\$hwnd = \[int64\]\$up\.Current\.NativeWindowHandle\s*\n\s*if \(\$hwnd -ne 0\) \{ break \}/);  // nearest handled ancestor
+    expect(fallback).toMatch(/GetAncestor\(\[IntPtr\]\$hwnd, 2\)/);                                          // GA_ROOT of the target's side
+    expect(fallback).toMatch(/GetAncestor\(\[Win32UIA\]::GetForegroundWindow\(\), 2\)/);                      // and of the foreground's
   });
 
   it('refuses (the caller\'s click-and-type then runs) when the top-level window cannot be resolved or is not in front', () => {

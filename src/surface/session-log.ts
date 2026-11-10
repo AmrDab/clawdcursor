@@ -95,6 +95,11 @@ export function safeStack(stack: unknown): string {
   return stripHome(String(stack ?? '').split('\n').filter(l => /^\s*at /.test(l)).join('\n'));
 }
 
+/** What was thrown, safely: an Error's class name (TypeError, ...), else the typeof of a thrown non-Error. */
+export function errorClass(e: unknown): string {
+  return e instanceof Error ? String(e.name).slice(0, 40) : typeof e;
+}
+
 /** Servers that have a session file to close; the daemon ends them all when it exits. */
 const live = new Set<SessionLog>();
 export function endAllSessions(reason: string): void {
@@ -125,6 +130,10 @@ export class SessionLog {
       fs.mkdirSync(dir, { recursive: true });
       const old = fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.endsWith('.jsonl')).sort();
       for (const f of old.slice(0, Math.max(0, old.length - (KEEP - 1)))) fs.rmSync(path.join(dir, f), { force: true });
+      // A report lock whose session file is gone (pruned, or the reporter died) has nothing left to guard.
+      for (const f of fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.endsWith('.jsonl.lock'))) {
+        if (!fs.existsSync(path.join(dir, f.slice(0, -'.lock'.length)))) fs.rmSync(path.join(dir, f), { force: true });
+      }
     } catch { /* logging must never break a tool call */ }
   }
 
@@ -239,6 +248,14 @@ export function readSession(file: string): { header: Record<string, unknown> | n
  * file has calls but no `end` line, and their process is gone. Logged once each (an `end` line is added), at the next start.
  * Files from before the header carried a pid are skipped: their ending was never recorded.
  */
+/** Any `end` line means it ended: a call that finished in /stop's grace window appends after the end line. */
+function hasEnd(lines: string[]): boolean {
+  return lines.some(l => { try { return JSON.parse(l).type === 'end'; } catch { return false; } });
+}
+
+/** A lock older than this was left by a reporter that died holding it. */
+const STALE_LOCK_MS = 60_000;
+
 export function reportUncleanExits(): void {
   for (const file of listSessions()) {
     try {
@@ -246,14 +263,15 @@ export function reportUncleanExits(): void {
       const header = JSON.parse(lines[0] ?? '{}');
       const pid = header.type === 'session' ? Number(header.pid) : NaN;
       if (!Number.isInteger(pid) || pid === process.pid || isProcessAlive(pid)) continue;
-      if (JSON.parse(lines[lines.length - 1]).type === 'end') continue;
+      if (hasEnd(lines)) continue;
       // Two servers starting together would both see no end line and both report: whoever creates the lock reports.
+      try { if (Date.now() - fs.statSync(`${file}.lock`).mtimeMs > STALE_LOCK_MS) fs.rmSync(`${file}.lock`, { force: true }); } catch { /* no lock */ }
       let lock: number;
       try { lock = fs.openSync(`${file}.lock`, 'wx'); } catch { continue; }
       try {
         const now = fs.readFileSync(file, 'utf8').split('\n').filter(l => l.trim());
+        if (hasEnd(now)) continue;  // the other server finished between our read and the lock
         const last = JSON.parse(now[now.length - 1]);
-        if (last.type === 'end') continue;  // the other server finished between our read and the lock
         // Only the header: it was killed during its first call.
         const lastCall = last.type === 'session' ? undefined : { tool: last.tool, ...(last.action ? { action: last.action } : {}), at: last.t };
         const reason = 'killed or crashed: no clean exit was recorded';

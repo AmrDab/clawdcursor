@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { SessionLog, classifyCall, outcomeOf, readSession, listSessions, endAllSessions, safeStack } from '../surface/session-log';
+import { SessionLog, classifyCall, outcomeOf, readSession, listSessions, endAllSessions, safeStack, errorClass } from '../surface/session-log';
 import { buildSessionReport, issueUrl, reportMarkdown } from '../surface/report';
 
 beforeEach(() => {
@@ -205,6 +205,20 @@ describe('what the logs may carry', () => {
     expect(fs.readFileSync(log.file!, 'utf8')).toMatch(/"code":"NOT_FOUND"/);
   });
 
+  it('safety.decision logs the rule, never the target text', async () => {
+    const { evaluate } = await import('../core/safety');
+    const err = vi.spyOn(process.stderr, 'write');
+    const d = evaluate({ tool: 'mouse_click', args: {}, targetLabel: 'Delete CANARY-invoice for Jane Roe' });
+    const stderr = err.mock.calls.map(c => String(c[0])).join('');
+    err.mockRestore();
+    expect(d.decision).toBe('confirm');
+    expect((d as { reason: string }).reason).toContain('CANARY');   // the caller still tells the user why
+    const day = dayLogText();
+    expect(day).toMatch(/"msg":"safety.decision".*"rule":"label_pattern:/);
+    expect(day).not.toContain('CANARY');
+    expect(stderr).not.toContain('CANARY');
+  });
+
   it('a crash stack keeps its frames and drops the message and the home path', () => {
     const home = os.homedir();
     const out = safeStack(`Error: Window not found: title='CANARY'\n    at f (${home}${path.sep}proj${path.sep}a.js:1:2)\n    at g (C:\\Users\\other\\b.js:3:4)`);
@@ -215,11 +229,27 @@ describe('what the logs may carry', () => {
   });
 });
 
+describe('errorClass', () => {
+  it('names the class of an Error and the typeof of anything else, never the message', () => {
+    class WindowError extends Error { constructor(m: string) { super(m); this.name = 'WindowError'; } }
+    expect(errorClass(new WindowError("title='CANARY'"))).toBe('WindowError');
+    expect(errorClass(new TypeError('CANARY'))).toBe('TypeError');
+    expect(errorClass("CANARY string")).toBe('string');
+    expect(errorClass({ message: 'CANARY' })).toBe('object');
+    expect(errorClass(undefined)).toBe('undefined');
+  });
+  it('crash logs it too', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
+    expect(src.slice(src.indexOf("process.on('uncaughtException'"), src.indexOf("process.on('unhandledRejection'"))).toMatch(/errorClass\(/);
+  });
+});
+
 describe('unhandledRejection', () => {
   it('logs the code and stack frames, never the message', () => {
     const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
     const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf('In server mode'));
     expect(h).toMatch(/safeStack\(/);
+    expect(h).toMatch(/errorClass\(/);
     expect(h).not.toMatch(/\.message/);
     expect(h).not.toMatch(/String\(reason\)/);
     expect(h).not.toMatch(/, reason\)/);
@@ -277,5 +307,28 @@ describe('the daemon ends its session logs', () => {
     reportUncleanExits();
     expect(fs.readFileSync(file, 'utf8').match(/"type":"end"/g)).toHaveLength(1);
     expect(fs.existsSync(`${file}.lock`)).toBe(false);
+  });
+  // /stop ends the sessions, then waits up to 2.5 s for a running call: its line lands after the end line.
+  it('a file with any end line is ended, even when a call finished after it', async () => {
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const file = deadFile();
+    fs.appendFileSync(file, JSON.stringify({ type: 'end', reason: 'stop' }) + '\n' + JSON.stringify({ t: 'z', tool: 'computer', ok: true }) + '\n');
+    reportUncleanExits();
+    expect(fs.readFileSync(file, 'utf8').match(/"type":"end"/g)).toHaveLength(1);
+  });
+
+  it('a lock left by a dead reporter goes stale; an orphan lock is pruned', async () => {
+    const { reportUncleanExits } = await import('../surface/session-log');
+    const file = deadFile();
+    fs.writeFileSync(`${file}.lock`, '');
+    const old = new Date(Date.now() - 120_000);
+    fs.utimesSync(`${file}.lock`, old, old);
+    reportUncleanExits();
+    expect(fs.readFileSync(file, 'utf8')).toMatch(/"type":"end"/);
+    expect(fs.existsSync(`${file}.lock`)).toBe(false);
+    const orphan = path.join(process.env.CLAWDCURSOR_SESSION_DIR!, 'session-2020-01-01T00-00-00-000Z-1.jsonl.lock');
+    fs.writeFileSync(orphan, '');
+    new SessionLog({ version: 't', surface: 'compact' });
+    expect(fs.existsSync(orphan)).toBe(false);
   });
 });

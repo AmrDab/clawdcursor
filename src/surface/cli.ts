@@ -26,11 +26,12 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   // Stack frames only, home path stripped: an error's name and message can carry window titles and field contents,
   // and the MCP host keeps stderr.
   let frames = '';
-  try { frames = require('./session-log').safeStack(err?.stack); } catch { /* none */ }
-  console.error(`Uncaught exception${err?.code ? ` (${err.code})` : ''}:\n${frames}`);
+  let cls = 'unknown';
+  try { const sl = require('./session-log'); frames = sl.safeStack(err?.stack); cls = sl.errorClass(err); } catch { /* none */ }
+  console.error(`Uncaught exception (${cls}${err?.code ? `, ${err.code}` : ''}):\n${frames}`);
   try {
     const { logger } = require('../core/observability/logger');
-    logger.error('crash', { ...(err?.code ? { code: err.code } : {}), stack: frames });
+    logger.error('crash', { name: cls, ...(err?.code ? { code: err.code } : {}), stack: frames });
   } catch { /* stderr above has it */ }
   process.exit(1);
 });
@@ -46,10 +47,12 @@ process.on('unhandledRejection', (reason: any) => {
     // Lazy-require to avoid pulling the pipeline module at cold CLI startup.
     const { logger } = require('../core/observability/logger');
     // Code and stack frames only, home path stripped (same rule as `crash`): the message can carry user content.
-    const code = (reason as NodeJS.ErrnoException | undefined)?.code;
-    const frames = require('./session-log').safeStack(reason instanceof Error ? reason.stack : undefined);
-    logger.error('unhandledRejection', { ...(code ? { code } : {}), stack: frames });
-    console.error(`unhandledRejection${code ? ` (${code})` : ''}:\n${frames}`);
+    const code = reason instanceof Error ? (reason as NodeJS.ErrnoException).code : undefined;
+    const sl = require('./session-log');
+    const frames = sl.safeStack(reason instanceof Error ? reason.stack : undefined);
+    const cls = sl.errorClass(reason);
+    logger.error('unhandledRejection', { name: cls, ...(code ? { code } : {}), stack: frames });
+    console.error(`unhandledRejection (${cls}${code ? `, ${code}` : ''}):\n${frames}`);
   } catch {
     // Logger itself failed — say that much, still without the message.
     console.error('unhandledRejection (logger unavailable)');
@@ -568,7 +571,11 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     // A server per SDK-client session and per concurrent one-shot post —
     // one shared server refused every request while another held it.
     await startMcpHttp(mcpServer, app, '/mcp',
-      async () => (await createMcpServer({ compact: compactSurface, ctx: toolCtx })).server);
+      async () => {
+        const h = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
+        h.server.onSessionEnd = reason => h.sessionLog.end(reason);
+        return h.server;
+      });
   } catch (err) {
     console.warn('MCP HTTP transport not loaded:', (err as Error).message);
   }
