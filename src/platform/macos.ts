@@ -42,6 +42,7 @@ import {
   defaultMacAx, MacAxError,
   type AppState, type FrontmostInfo, type MacAx, type SkippedApp,
 } from './mac-ax';
+import { windowTextIncludes } from '../tools/window-text';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
@@ -388,7 +389,7 @@ export class MacOSAdapter implements PlatformAdapter {
       // With a title as well, the window that has BOTH: the first window of that name may belong to another process of the app.
       const titleNeedle = query.title?.toLowerCase();
       const sameName = windows.filter(w => w.processName.toLowerCase() === target);
-      const hit = (titleNeedle ? sameName.find(w => w.title.toLowerCase().includes(titleNeedle)) : undefined)
+      const hit = (titleNeedle ? sameName.find(w => windowTextIncludes(w.title, titleNeedle)) : undefined)
         ?? sameName[0]
         ?? windows.find(w => w.processName.toLowerCase().includes(target));
       if (hit) {
@@ -404,7 +405,7 @@ export class MacOSAdapter implements PlatformAdapter {
     } else if (processId === undefined && query.title) {
       const needle = query.title.toLowerCase();
       const windows = await this.listWindows().catch(orElse([] as WindowInfo[]));
-      const matches = windows.filter(w => w.title.toLowerCase().includes(needle));
+      const matches = windows.filter(w => windowTextIncludes(w.title, needle));
       const hit = matches.find(w => !w.isMinimized) ?? matches[0];
       if (!hit) {
         this.focusFailure = lookupError ? message(lookupError) : `No window has a title containing "${query.title}".`;
@@ -554,7 +555,7 @@ export class MacOSAdapter implements PlatformAdapter {
     if (!query?.title || query.processName || query.processId !== undefined) return query;
     const want = query.title.toLowerCase();
     const hit = (await this.listWindows().catch(() => [] as WindowInfo[]))
-      .find(w => (w.title ?? '').toLowerCase().includes(want));
+      .find(w => windowTextIncludes(w.title, want));
     return hit ? { processId: hit.processId, title: hit.title } : query;
   }
 
@@ -1035,7 +1036,7 @@ export class MacOSAdapter implements PlatformAdapter {
         const existing = windowsBefore.find(w =>
           w.processName.toLowerCase() === target ||
           w.processName.toLowerCase().includes(target) ||
-          w.title.toLowerCase().includes(target),
+          windowTextIncludes(w.title, target),
         );
         if (existing) {
           await this.focusWindow({ processId: existing.processId }).catch(() => {});

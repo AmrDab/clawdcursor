@@ -397,7 +397,7 @@ export function getA11yTools(): ToolDefinition[] {
           );
           // AND-match with title if provided
           if (title) {
-            matches = matches.filter((w: any) => w.title.toLowerCase().includes((title as string).toLowerCase()));
+            matches = matches.filter((w: any) => windowTextIncludes(w.title, title as string));
           }
           // Sort: prefer windows on a display, then non-minimized
           matches.sort((a: any, b: any) => {
@@ -420,7 +420,7 @@ export function getA11yTools(): ToolDefinition[] {
           if (title) {
             const t = (title as string).toLowerCase();
             const candidates = (windows ?? []).filter((w: any) =>
-              w.processId === targetPid && w.title.toLowerCase().includes(t)
+              w.processId === targetPid && windowTextIncludes(w.title, t)
             );
             // Prefer on-screen, non-minimized windows when multiple match.
             candidates.sort((a: any, b: any) => {
@@ -487,7 +487,7 @@ export function getA11yTools(): ToolDefinition[] {
         const active = await ctx.a11y.getActiveWindow();
         const verified = active?.processId === targetPid ||
           (processName && active?.processName.toLowerCase().includes(processName.toLowerCase())) ||
-          (title && active?.title.toLowerCase().includes(title.toLowerCase()));
+          (title && windowTextIncludes(active?.title, title));
 
         if (!verified && targetBounds && targetBounds.x >= 0 && targetBounds.y >= 0 && targetBounds.width > 0) {
           const centerX = a11yToMouse(targetBounds.x + Math.round(targetBounds.width / 2), ctx);
@@ -498,7 +498,7 @@ export function getA11yTools(): ToolDefinition[] {
           const a2 = await ctx.a11y.getActiveWindow();
           const v2 = a2?.processId === targetPid ||
             (processName && a2?.processName.toLowerCase().includes(processName.toLowerCase())) ||
-            (title && a2?.title.toLowerCase().includes(title.toLowerCase()));
+            (title && windowTextIncludes(a2?.title, title));
           return {
             text: v2 ? `Focused (retry): "${a2?.title}" [${a2?.processName}] pid:${a2?.processId}`
                      : `Focus FAILED. Foreground: "${a2?.title}" [${a2?.processName}]`,
@@ -632,18 +632,28 @@ export function getA11yTools(): ToolDefinition[] {
         'select-all while focus is in an editable field, an editor document or a list — it returns the ' +
         'accessibility text then. After a select-all copy the content stays selected (the result says so); ' +
         'focus the right window first.',
-      parameters: {},
+      // `ocr`'s parameter, declared here too: the `system` schema lists it, so models pass it with every read.
+      parameters: {
+        scope: {
+          type: 'string',
+          description: '"window" (default, and all this reads): the focused window\'s document. "screen" is accepted and reads the same; for the text of the whole screen use ocr.',
+          required: false,
+          enum: ['screen', 'window'],
+        },
+      },
       category: 'clipboard',
       compactGroup: 'system',
       safetyTier: 1,
-      handler: async (_params, ctx) => {
+      handler: async ({ scope }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
         const r = await copyAllText(ctx.platform);
         if (!r.ok) return { text: r.text, isError: true };
         ctx.a11y.invalidateCache();
+        const scopeNote = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
+        const note = [r.note, scopeNote].filter(Boolean).join('\n');
         // Page text is third-party data, not instructions.
-        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${r.note ? `\n${r.note}` : ''}` };
+        return { text: `${r.text.length} chars from ${r.window}:\n<untrusted-screen-content>\n${r.text}\n</untrusted-screen-content>${note ? `\n${note}` : ''}` };
       },
     },
 
@@ -689,7 +699,7 @@ export function getA11yTools(): ToolDefinition[] {
         let target = (windows ?? []).find((w: any) => {
           if (processId && w.processId === processId) return true;
           if (processName && w.processName.toLowerCase().includes(processName.toLowerCase())) return true;
-          if (title && w.title.toLowerCase().includes(title.toLowerCase())) return true;
+          if (title && windowTextIncludes(w.title, title)) return true;
           return false;
         });
 

@@ -4,6 +4,18 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **`find` and `invoke` stay in the window the agent works in.** With several windows of one process (Edge, Explorer,
+  Office), Windows searched every window for `find` (so names from the user's other windows reached the agent) and took
+  the first window for `invoke`. Both now use the foreground window when it belongs to the process; macOS searches only
+  the key window and Linux only the active one.
+- **`invoke` expands and collapses** an expandable element (a `<details>` summary, a disclosure button) and says which
+  way it went; a miss reports the click's reason, not "TogglePattern not supported" from the last fallback.
+- **A found-but-unsupported miss is `UNSUPPORTED_ACTION`**, not `NOT_FOUND`.
+- **Window titles match through invisible characters** (the zero-width space in Edge's title) in focus, `expect` and
+  scoping, on every OS.
+- **`system copy_all_text` accepts `scope`**, which the `system` schema lists for `ocr`.
+
 ## [1.5.27] - 2026-11-09
 
 ### Fixed

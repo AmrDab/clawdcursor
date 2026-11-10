@@ -16,7 +16,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
-  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -97,6 +97,12 @@ const RULES: Rule[] = [
   // MCP's navigate attaches by itself; the built-in agent's needs browser_connect first.
   { code: 'NOT_CONNECTED', outcome: 'failed', test: /not connected|no browser (?:is )?connected|ECONNREFUSED/i,
     hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
+  // The element WAS found; this verb does not apply to it ("TogglePattern not supported", "element cannot expand or collapse").
+  // Before NOT_FOUND: an invoke miss is worded "missed — <reason>", and the reason decides which of the two it is.
+  { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
+    test: /Pattern not supported|no (?:invoke|click)\/\w+(?:\/\w+)* pattern|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|exposes (?:no|neither) (?:Action|EditableText|Value)|no Selection interface/i,
+    hint: 'found it, but it cannot be done that way (toggled / selected / set / expanded); try invoke / expand / toggle / select, or read its state',
+    next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
     test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing/i,

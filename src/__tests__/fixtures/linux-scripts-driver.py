@@ -249,18 +249,20 @@ other_app = Acc('mousepad', 'application', pid=5555, children=[
 HIDDEN = (StateType.ENABLED, StateType.SENSITIVE)
 toolbar_save = Acc('Save', 'push button', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
 menu_save = Acc('Save      ', 'menu item', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
-only_hidden = Acc('Print', 'menu item', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
+only_hidden = Acc('Preview', 'menu item', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
+# Hidden too, but in the INACTIVE main window: find / invoke do not look there at all.
+elsewhere_hidden = Acc('Print', 'menu item', states=HIDDEN, screen=(0, 0, 0, 0), actions=['click'], pid=7777)
 main_view = Acc('', 'text', pid=7777, text='hello world', screen=(5, 50, 400, 300),
                 states=(StateType.FOCUSED, StateType.VISIBLE, StateType.SHOWING, StateType.ENABLED))
 nameless_row = Acc('', 'list item', pid=7777, screen=(5, 400, 100, 20))
 main_win = Acc('notes.txt - Editor', 'frame', screen=(0, 0, 640, 480), pid=7777,
-               children=[menu_save, only_hidden, toolbar_save, main_view, nameless_row])
+               children=[menu_save, elsewhere_hidden, toolbar_save, main_view, nameless_row])
 dialog_save = Acc('Save', 'push button', screen=(500, 600, 80, 30), actions=['click'], pid=7777)
 file_name = Acc('Name', 'text', pid=7777, text='notes.txt', editable=True, screen=(300, 200, 200, 25),
                 states=(StateType.FOCUSED, StateType.VISIBLE, StateType.SHOWING, StateType.ENABLED))
 dialog = Acc('Save As', 'file chooser', screen=(200, 100, 600, 560), pid=7777,
              states=(StateType.ACTIVE, StateType.ENABLED, StateType.VISIBLE, StateType.SHOWING),
-             children=[file_name, dialog_save])
+             children=[file_name, dialog_save, only_hidden])
 editor_app = Acc('editor', 'application', children=[main_win, dialog], pid=7777, screen=(0, 0, 0, 0))
 desktop = Acc('main', 'desktop frame', children=[other_app, calc_app, editor_app], pid=0)
 
@@ -314,7 +316,9 @@ OUT['label_value'] = bridge.node_to_dict(Acc('Seven', 'label', text='Seven'))['v
 OUT['save'] = bridge.cmd_invoke('Save', None, 7777, 'click', None)
 OUT['save_done'] = {'dialog': dialog_save.action.done, 'toolbar': toolbar_save.action.done,
                     'menu': menu_save.action.done}
-OUT['hidden_only'] = bridge.cmd_invoke('Print', None, 7777, 'click', None)
+OUT['hidden_only'] = bridge.cmd_invoke('Preview', None, 7777, 'click', None)
+OUT['other_window'] = bridge.cmd_invoke('Print', None, 7777, 'click', None)
+OUT['other_window_done'] = elsewhere_hidden.action.done
 OUT['hidden_only_done'] = only_hidden.action.done
 
 # Tree order: on-screen elements first (active dialog first), hidden last,

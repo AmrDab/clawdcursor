@@ -262,13 +262,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             // A ref to a ListItem / combo-item / checkbox may not support
             // InvokePattern, so we try the three activation verbs in order and
             // stop at the first success — identical logic to the by-name path above.
-            const refLadder: InvokeAction[] = ['click', 'select', 'toggle'];
-            let refRes = await ctx.platform.invokeElement({ name: plan.name, action: refLadder[0] });
-            let refUsed: InvokeAction = refLadder[0];
-            for (let i = 1; i < refLadder.length && !refRes.success; i++) {
-              refUsed = refLadder[i];
-              refRes = await ctx.platform.invokeElement({ name: plan.name, action: refUsed });
-            }
+            const { res: refRes, used: refUsed } = await runActivationLadder(
+              (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
             if (!refRes.success) {
               const fallback = await clickBoundsFallback(ctx, plan.name, refRes.bounds);
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
@@ -315,12 +310,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // Pure adapter-string retries → works on every OS with zero per-OS code,
         // and only the failing path pays the extra round-trips.
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
-        let res = await ctx.platform.invokeElement({ name, controlType, processId, action: ladder[0], value });
-        let used: InvokeAction = ladder[0];
-        for (let i = 1; i < ladder.length && !res.success; i++) {
-          used = ladder[i];
-          res = await ctx.platform.invokeElement({ name, controlType, processId, action: used, value });
-        }
+        const { res, used } = await runActivationLadder(
+          (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value }), ladder);
         // Found but no pattern took: click the surfaced bounds centre (same
         // fallback the el_NN path and smart_click already have). Live
         // regression 2026-10: `find` saw the Button, invoke reported "missed".
@@ -341,7 +332,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
                 ? `Invoked "${name}" (${used}) → value: "${(res.data as any).value}"`
-                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}.`
+                : `Invoked "${name}" via a11y${used !== 'click' ? ` (${used})` : ''}${typeof (res.data as { expandState?: unknown } | undefined)?.expandState === 'string' ? ` — now ${(res.data as { expandState: string }).expandState.toLowerCase()}` : ''}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
             : `a11y invoke "${name}" missed — ${typeof res.data?.error === 'string' ? res.data.error : 'element not found or not actionable'}.`) + lateNote,
           targetLabel: name,
@@ -2199,6 +2190,29 @@ async function boundsToClick(
   const vis = await ensureVisible(ctx.platform, { name: plan.element.text, role: plan.element.role, bounds: { x, y, width, height } }, win, ctx.uiMaps);
   return vis.ok ? { ok: true, bounds: [vis.bounds.x, vis.bounds.y, vis.bounds.width, vis.bounds.height] } : vis;
 }
+
+/**
+ * Try the activation verbs in order until one takes. A miss reports the FIRST verb's reason (the generic "click" the caller
+ * asked for), not the last rung's: the last rung is a toggle, and an expandable Button that nothing took was reported as
+ * "TogglePattern not supported" (live 2026-11-10) although the element was found.
+ */
+export async function runActivationLadder(
+  call: (action: InvokeAction) => Promise<{ success: boolean; bounds?: { x: number; y: number; width: number; height: number }; data?: Record<string, unknown> }>,
+  ladder: InvokeAction[],
+): Promise<{ res: Awaited<ReturnType<typeof call>>; used: InvokeAction }> {
+  const first = await call(ladder[0]);
+  let res = first;
+  let used = ladder[0];
+  for (let i = 1; i < ladder.length && !res.success; i++) {
+    used = ladder[i];
+    res = await call(used);
+  }
+  if (!res.success && first.data?.error !== undefined) {
+    res = { ...res, data: { ...res.data, error: first.data.error } };
+  }
+  return { res, used };
+}
+
 
 /**
  * Coordinate fallback for the activate intent when the element was FOUND

@@ -21,6 +21,7 @@ import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
 import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
+import { windowTextIncludes } from '../tools/window-text';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
 let dir: string | null = process.env.VITEST ? null : DATA_DIR;
@@ -115,7 +116,7 @@ const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
 const matches = (q: WindowQuery, f: Foreground) =>
   (q.processId !== undefined && q.processId === f.processId)
   || (!!q.processName && lower(f.processName).includes(lower(q.processName)))
-  || (!!q.title && !!f.title && f.title.toLowerCase().includes(q.title.toLowerCase()));
+  || (!!q.title && !!f.title && windowTextIncludes(f.title, q.title));
 
 function stopCheck(): void {
   if (isStopped()) throw new Error(STOPPED_TEXT);

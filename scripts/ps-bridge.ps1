@@ -326,6 +326,40 @@ function Get-OwnedWindowElements {
     return ,$found
 }
 
+# The top-level windows of a process that a find / invoke searches. A browser, Explorer or Office process has several
+# windows, and an element search over all of them returned the names in the user's OTHER windows (live 2026-11-10: a
+# "Confirm was clicked" from an old Edge window the agent never saw; also a privacy leak), while an invoke took whichever
+# window UIA listed first. When the FOREGROUND window, at its GA_ROOT, belongs to the pid, that is the window the agent
+# works in: only it is returned (a Save as dialog in front is its own root, so it is searched). Otherwise every
+# top-level window of the pid, as before.
+function Get-ProcessScopeWindows {
+    param([int]$wpid)
+    try {
+        $fgH = [Win32UIA]::GetForegroundWindow()
+        if ($fgH -ne [IntPtr]::Zero) {
+            $rootH = [Win32UIA]::GetAncestor($fgH, 2)  # GA_ROOT
+            if ($rootH -eq [IntPtr]::Zero) { $rootH = $fgH }
+            $fgPid = 0
+            [void][Win32UIA]::GetWindowThreadProcessId($rootH, [ref]$fgPid)
+            if ($fgPid -eq $wpid) {
+                return ,@([System.Windows.Automation.AutomationElement]::FromHandle($rootH))
+            }
+        }
+    } catch { }
+    $pc = New-Object System.Windows.Automation.PropertyCondition(
+        [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
+    )
+    return ,@([System.Windows.Automation.AutomationElement]::RootElement.FindAll([System.Windows.Automation.TreeScope]::Children, $pc))
+}
+
+# A window title as compared: format characters (zero-width space, joiners, BOM, soft hyphen: Edge puts a U+200B inside
+# "Microsoft Edge") removed, whitespace collapsed, lower case. Both sides of a title match go through this.
+function ConvertTo-TitleKey {
+    param([string]$s)
+    if (-not $s) { return '' }
+    return ([regex]::Replace([regex]::Replace($s, '\p{Cf}', ''), '\s+', ' ')).Trim().ToLower()
+}
+
 # ── Command: get-screen-context ───────────────────────────────────────────────
 function Cmd-GetScreenContext {
     param($cmd)
@@ -688,11 +722,11 @@ function Cmd-FocusWindow {
     # When BOTH pid and title are supplied, AND-match. Disambiguates tabbed
     # apps like Win11 Notepad where multiple windows share one pid.
     if ($wpid -gt 0 -and $title -ne "") {
-        $tl = $title.ToLower()
+        $tl = ConvertTo-TitleKey $title
         foreach ($w in $allWins) {
             try {
                 if ($w.Current.ProcessId -ne $wpid) { continue }
-                if ($w.Current.Name -and $w.Current.Name.ToLower().Contains($tl)) { $target = $w; break }
+                if ($tl -and (ConvertTo-TitleKey $w.Current.Name).Contains($tl)) { $target = $w; break }
             } catch {}
         }
         # Fall back to pid-only if no title match (caller may have passed a stale title)
@@ -706,9 +740,9 @@ function Cmd-FocusWindow {
             try { if ($w.Current.ProcessId -eq $wpid) { $target = $w; break } } catch {}
         }
     } elseif ($title -ne "") {
-        $tl = $title.ToLower()
+        $tl = ConvertTo-TitleKey $title
         foreach ($w in $allWins) {
-            try { if ($w.Current.Name -and $w.Current.Name.ToLower().Contains($tl)) { $target = $w; break } } catch {}
+            try { if ($tl -and (ConvertTo-TitleKey $w.Current.Name).Contains($tl)) { $target = $w; break } } catch {}
         }
     }
 
@@ -839,12 +873,8 @@ function Cmd-FindElement {
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $searchRoots = @($root)
     if ($wpid -gt 0) {
-        $pc = New-Object System.Windows.Automation.PropertyCondition(
-            [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
-        )
-        # Every top-level window of the process, not just the first: a browser
-        # with several windows otherwise searched only whichever came first.
-        $searchRoots = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, $pc))
+        # The window the agent works in (the foreground one of the pid), else every window of the pid.
+        $searchRoots = @(Get-ProcessScopeWindows $wpid)
         if ($searchRoots.Count -eq 0) { return ,(New-Object System.Object[] 0) }
     }
 
@@ -956,15 +986,13 @@ function Cmd-InvokeElement {
     $action      = $cmd.action
     $value       = if ($cmd.value)       { $cmd.value }          else { "" }
 
-    $root = [System.Windows.Automation.AutomationElement]::RootElement
-    $pc = New-Object System.Windows.Automation.PropertyCondition(
-        [System.Windows.Automation.AutomationElement]::ProcessIdProperty, $wpid
-    )
-    $window = $root.FindFirst([System.Windows.Automation.TreeScope]::Children, $pc)
-    if ($null -eq $window) { return @{ success=$false; error="No window for pid $wpid" } }
+    $scopeWindows = @(Get-ProcessScopeWindows $wpid)
+    if ($scopeWindows.Count -eq 0) { return @{ success=$false; error="No window for pid $wpid" } }
 
-    # Find element: prefer automationId (exact), then fuzzy name walk
+    # Find element: prefer automationId (exact), then fuzzy name walk. The window the agent works in first (see
+    # Get-ProcessScopeWindows); the other windows of the pid only when none is in front.
     $element = $null
+    foreach ($window in $scopeWindows) {
     if ($automationId -ne "") {
         $aidCond = New-Object System.Windows.Automation.PropertyCondition(
             [System.Windows.Automation.AutomationElement]::AutomationIdProperty, $automationId
@@ -1017,6 +1045,8 @@ function Cmd-InvokeElement {
             if ($null -ne $element) { break }
         }
     }
+    if ($null -ne $element) { break }
+    }
 
     if ($null -eq $element) {
         return @{ success=$false; error="Element not found: name='$name' id='$automationId' ct='$controlType'" }
@@ -1054,11 +1084,22 @@ function Cmd-InvokeElement {
                         $p.Select()
                         return @{ success=$true; action="click"; method="SelectionItemPattern" }
                     } catch {
+                        # An expandable element (a <details> summary, a tree node, a disclosure button) has only
+                        # ExpandCollapsePattern: flip it and say which way it went.
+                        try {
+                            $p = $element.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern)
+                            $was = $p.Current.ExpandCollapseState.ToString()
+                            if ($was -eq 'Expanded') { $p.Collapse(); $now = 'Collapsed' }
+                            elseif ($was -eq 'LeafNode') { throw 'leaf node' }
+                            else { $p.Expand(); $now = 'Expanded' }
+                            return @{ success=$true; action="click"; method="ExpandCollapsePattern"; data=@{ expandState=$now; was=$was } }
+                        } catch {
                         $rect = $element.Current.BoundingRectangle
-                        $why = if ($invokeErr) { "Invoke failed: $invokeErr" } else { "No invoke/toggle/select pattern" }
+                        $why = if ($invokeErr) { "Invoke failed: $invokeErr" } else { "No invoke/toggle/select/expand pattern" }
                         return @{ success=$false; action="click"; error=$why;
                             clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)};
                             bounds=@{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
+                        }
                     }
                 }
             }

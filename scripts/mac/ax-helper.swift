@@ -574,12 +574,20 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
     }
 }
 
-/// Every window of the app, the key window first. `hung`: the app did not answer at all (not "it has no windows").
+/// The windows a find / invoke searches: ONLY the key window when the app has one (the window the agent works in; the names in
+/// its other windows must not reach the caller), every window when it has none. `hung`: the app did not answer at all (not
+/// "it has no windows").
+/// A window title as compared: format characters (zero-width space, joiners, BOM) removed, whitespace collapsed, lower case.
+func titleKey(_ s: String) -> String {
+    let kept = String(String.UnicodeScalarView(s.unicodeScalars.filter { $0.properties.generalCategory != .format }))
+    return kept.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ").lowercased()
+}
+
 func windowsToSearch(_ app: NSRunningApplication) -> (windows: [AXUIElement], hung: Bool) {
     let el = appElement(app.processIdentifier)
     var out: [AXUIElement] = []
     let key = keyWindow(el)
-    if let k = key.window { out.append(k) }
+    if let k = key.window { return ([k], key.hung) }
     if let all = copyAttr(el, "AXWindows").value as? [AXUIElement] {
         for w in all where !out.contains(where: { CFEqual($0, w) }) { out.append(w) }
     }
@@ -1095,7 +1103,7 @@ func cmdFocus() -> Never {
     if err == .cannotComplete && Date().timeIntervalSince(t0) >= Double(axTimeout) * 0.8 { fail("timeout", "\(name) is not responding") }
     let windows = (value as? [AXUIElement]) ?? []
     let wanted = opts["title"] ?? ""
-    let needle = wanted.lowercased()
+    let needle = titleKey(wanted)
 
     var target: AXUIElement? = nil
     var best = Int.min
@@ -1105,7 +1113,7 @@ func cmdFocus() -> Never {
         if size.width * size.height <= 0 { continue }                      // not a window that can be raised
         let title = str(a["AXTitle"]) ?? ""
         if !needle.isEmpty {
-            if title.lowercased().contains(needle) { target = w; break }
+            if titleKey(title).contains(needle) { target = w; break }
             continue
         }
         // No title: the window to work in — a standard window beats a popover, an on-screen one beats a minimized one.

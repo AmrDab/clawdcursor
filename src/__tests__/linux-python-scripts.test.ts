@@ -244,6 +244,12 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.hidden_only_done).toEqual([]);
   });
 
+  it('invoke / find look only in the ACTIVE window: an element of the inactive one is not found, not touched', () => {
+    expect(out.other_window.success).toBe(false);
+    expect(String(out.other_window.error)).toMatch(/not found/i);
+    expect(out.other_window_done).toEqual([]);
+  });
+
   it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {
     expect(out.text_view.value).toBe('hello world');
     expect(out.get_value).toMatchObject({ success: true, value: '42' });
@@ -269,8 +275,8 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     const names = out.tree.map((t: [string, string]) => `${t[1]}:${t[0]}`);
     expect(names).toEqual([
       'file chooser:Save As', 'text:Name', 'push button:Save', 'frame:notes.txt - Editor', 'text:',
-      // hidden: the 0x0 application node, the closed menu, the hidden toolbar
-      'application:editor', 'menu item:Save      ', 'menu item:Print', 'push button:Save',
+      // hidden: the 0x0 application node, the dialog's hidden item, the closed menu, the hidden toolbar
+      'application:editor', 'menu item:Preview', 'menu item:Save      ', 'menu item:Print', 'push button:Save',
     ]);
   });
 

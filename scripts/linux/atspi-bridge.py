@@ -55,6 +55,7 @@ import argparse
 import json
 import sys
 import time
+import unicodedata
 from typing import Any, Optional
 
 try:
@@ -129,6 +130,13 @@ INT_MIN = -2147483648   # AT-SPI extents of children scrolled out of a viewport
 NAMELESS_NOISE_ROLES = {'list item', 'table row'}
 
 
+def title_key(s: Optional[str]) -> str:
+    """A window title as compared: format characters (zero-width space, joiners, BOM) removed, whitespace collapsed,
+    lower case."""
+    kept = ''.join(c for c in (s or '') if unicodedata.category(c) != 'Cf')
+    return ' '.join(kept.split()).lower()
+
+
 def safe(fn, default=None):
     """Call fn(), return default if it raises (stale ref, perm denied, etc.)."""
     try:
@@ -173,6 +181,14 @@ def toplevels_active_first(app: Any) -> list:
     kids = [k for k in (safe(lambda i=i: app.get_child_at_index(i)) for i in range(count)) if k is not None]
     return ([k for k in kids if has_state(k, Atspi.StateType.ACTIVE)]
             + [k for k in kids if not has_state(k, Atspi.StateType.ACTIVE)])
+
+
+def scope_toplevels(app: Any) -> list:
+    """The windows a find / invoke searches: only the ACTIVE one when the app has one (the window the agent works in, so
+    the names of its other windows never reach the caller); every window when none is active (the app is not focused)."""
+    tops = toplevels_active_first(app)
+    active = [t for t in tops if has_state(t, Atspi.StateType.ACTIVE)]
+    return active or tops
 
 
 def node_to_dict(acc: Any) -> Optional[dict]:
@@ -372,7 +388,7 @@ def active_application(process_id: Optional[int] = None,
             apps = [a for a in apps if safe(lambda a=a: a.get_process_id()) not in exclude_pids]
         for app in apps:
             for top in toplevels_active_first(app):
-                if (safe(lambda top=top: top.get_name(), '') or '') == window_title:
+                if title_key(safe(lambda top=top: top.get_name(), '')) == title_key(window_title):
                     return app
 
     for app in apps:
@@ -619,7 +635,7 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
         # The application node itself, then its windows, the active one first.
         if wanted(app):
             hits.append(app)
-        for top in toplevels_active_first(app):
+        for top in scope_toplevels(app):
             visit(top, 1)
     described: list = []
     for h in hits:
@@ -711,8 +727,8 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
                 return True
         return False
 
-    # Active window first, so document order already ranks it ahead.
-    for top in toplevels_active_first(app):
+    # The active window only (see scope_toplevels).
+    for top in scope_toplevels(app):
         if visit(top, 1):
             return exact[-1], True
     # No exact on-screen match was seen. If the walk ran out of budget or time, one may exist beyond the cut, so a weaker

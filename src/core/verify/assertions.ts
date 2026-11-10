@@ -32,6 +32,7 @@ import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
 import { isOwnUiPid } from '../../platform/pointer-guard';
+import { windowTextIncludes, normalizeWindowText } from '../../tools/window-text';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -151,6 +152,8 @@ export function validateExpect(expect: unknown): string | null {
 
 const norm = (s: string) => s.toLowerCase();
 const containsCI = (haystack: string, needle: string) => norm(haystack).includes(norm(needle));
+// Window titles carry invisible characters (Edge puts a zero-width space inside "Microsoft Edge"): compare them normalized.
+const titleContains = (haystack: string, needle: string) => windowTextIncludes(haystack, needle);
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Expand a leading `~` so model-supplied paths like `~/Documents/x.txt` work. */
@@ -166,7 +169,7 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
   switch (a.type) {
     case 'window_title_contains': {
       const wins = await adapter.listWindows();
-      const hit = wins.find(w => containsCI(w.title ?? '', a.value));
+      const hit = wins.find(w => titleContains(w.title ?? '', a.value));
       if (hit) return { ok: true, detail: `matched "${truncate(hit.title, 60)}"` };
       // Only the window being acted on, not every app's title: other windows' titles can carry private text (a document
       // name, a token fragment) and are not the caller's business here.
@@ -331,7 +334,7 @@ export async function captureTaskBaseline(
   let processNames: string[] = [];
   try {
     const wins = await adapter.listWindows();
-    windowTitles = wins.map(w => (w.title ?? '').toLowerCase());
+    windowTitles = wins.map(w => normalizeWindowText(w.title));
     processNames = wins.map(w => (w.processName ?? '').toLowerCase());
   } catch { /* empty */ }
   let clipboard = '';
@@ -352,7 +355,7 @@ export function wasTrueAtBaseline(a: Assertion, b: TaskBaseline): boolean | null
   switch (a.type) {
     case 'ocr_contains':             return has(b.ocrText, a.value);
     case 'clipboard_contains':       return has(b.clipboard, a.value);
-    case 'window_title_contains':    return b.windowTitles.some(t => has(t, a.value));
+    case 'window_title_contains':    return b.windowTitles.some(t => has(t, normalizeWindowText(a.value)));
     case 'app_running':              return b.processNames.some(p => has(p, a.name));
     case 'file_changed_since_start': return false; // by construction: nothing is changed-since-start at start
     default:                         return null;  // element_*, file_exists, file_contains — trust

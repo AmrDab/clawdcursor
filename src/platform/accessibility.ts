@@ -20,6 +20,7 @@ import { defaultMacAx } from './mac-ax';
 import { utf8ClipboardEnv } from './mac-keyboard';
 import type { PlatformAdapter, UiElement } from './types';
 import { isOwnUiPid, guardInputMethods } from './pointer-guard';
+import { windowTextIncludes } from '../tools/window-text';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -510,7 +511,7 @@ export class AccessibilityBridge {
     const windows = await this.getWindows();
     return (
       windows.find(w => w.processName.toLowerCase() === lower) ??
-      windows.find(w => w.title.toLowerCase().includes(lower)) ??
+      windows.find(w => windowTextIncludes(w.title, lower)) ??
       windows.find(w => w.processName.toLowerCase().includes(lower)) ??
       null
     );

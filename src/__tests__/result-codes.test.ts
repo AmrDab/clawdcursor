@@ -129,6 +129,23 @@ describe('review fixes', () => {
     }
   });
 
+  it('an element that was found but does not take the verb is UNSUPPORTED_ACTION, not NOT_FOUND', () => {
+    for (const t of ['a11y invoke "More options" missed — TogglePattern not supported.',
+      'a11y invoke "X" missed — SelectionItemPattern not supported.',
+      'a11y invoke "Y" missed — No invoke/toggle/select/expand pattern.',
+      'a11y_toggle failed for "Z": ExpandCollapsePattern not supported.',
+      'a11y invoke "W" missed — element cannot expand or collapse.']) {
+      const c = classifyResult(t, true, true);
+      expect(c?.code, t).toBe('UNSUPPORTED_ACTION');
+      expect(c?.hint).toMatch(/found it/);
+      expect(c?.next).toMatch(/state/);
+    }
+    // a real miss stays a miss, even when its reason is worded close by
+    for (const t of ["a11y invoke \"X\" missed — Element not found: name='X' id='' ct=''.", 'a11y invoke "X" missed — No window for pid 12.']) {
+      expect(classifyResult(t, true, true)?.code).toBe('NOT_FOUND');
+    }
+  });
+
   it('the repeat guard is REPEATED, not "fix the arguments"', () => {
     expect(classifyResult('NOT EXECUTED (repeat guard). Do not repeat this exact call.', true, true, 'agent')?.code).toBe('REPEATED');
     expect(classifyResult('NOT EXECUTED: arguments were not valid JSON', true, true, 'agent')?.code).toBe('INVALID_ARGS');

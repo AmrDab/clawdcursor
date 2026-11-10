@@ -13,9 +13,11 @@
 // Zero-width / formatting characters that carry no visible meaning but defeat
 // equality: ZWSP/ZWNJ/ZWJ + LTR/RTL marks (U+200B-U+200F), embedding/override
 // controls (U+202A-U+202E), word joiner (U+2060), BOM/ZWNBSP (U+FEFF).
+// \p{Cf} is the whole Unicode "format" category, so those and any other invisible format character (soft hyphen,
+// bidi isolates, tag characters) are covered, not a hand-kept list.
 // (NBSP U+00A0, narrow-NBSP U+202F and the rest of the Zs category are matched
 //  by \s in JS regexes, so the whitespace fold below already handles them.)
-const ZERO_WIDTH = new RegExp('[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]', 'g');
+const ZERO_WIDTH = /\p{Cf}/gu;
 
 /** Normalize a title/window string for robust case-insensitive substring matching. */
 export function normalizeWindowText(s: string | undefined | null): string {
