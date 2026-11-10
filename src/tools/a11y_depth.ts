@@ -140,6 +140,10 @@ export function getA11yDepthTools(): ToolDefinition[] {
         });
         if (res.success) {
           const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
+          // Typed into the right window, but the field could not be read back (the Windows keyboard fallback).
+          if (res.data?.unverified === true) {
+            return { text: `Typed "${preview}" into "${safeNameStr}" by keyboard, but the field could not be read back: NOT verified. Read it to check.` };
+          }
           return { text: `Set "${safeNameStr}" = "${preview}".` };
         }
 

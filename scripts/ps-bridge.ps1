@@ -1102,20 +1102,35 @@ function Cmd-InvokeElement {
             #    it (Cmd-FocusWindow), so with another app in front the Ctrl+A and the text
             #    landed there, reported as success. Not refused: the caller then clicks the
             #    field (which brings its window forward) and types.
+            #    The check is on the WINDOW, not the process: two windows of one process
+            #    (Explorer, Notepad, Edge) share a pid, so the front window of the target's
+            #    process is not necessarily the target's. The target's top-level window (its
+            #    ancestor just under the desktop root) must be the foreground window; one that
+            #    cannot be resolved (no handle, as with some UWP hosts) is refused the same way.
             try {
                 Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
                 $target.SetFocus()
                 Start-Sleep -Milliseconds 60
-                $fgPid = [uint32]0
-                [void][Win32UIA]::GetWindowThreadProcessId([Win32UIA]::GetForegroundWindow(), [ref]$fgPid)
-                if ($fgPid -ne [uint32]$target.Current.ProcessId) {
+                $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+                $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+                $top = $target
+                for ($hop = 0; $hop -lt 80; $hop++) {
+                    $up = $walker.GetParent($top)
+                    if ($null -eq $up -or [System.Windows.Automation.Automation]::Compare($up, $desktop)) { break }
+                    $top = $up
+                }
+                $topHwnd = [int64]$top.Current.NativeWindowHandle
+                $fgRoot = [int64][Win32UIA]::GetAncestor([Win32UIA]::GetForegroundWindow(), 2)
+                if ($topHwnd -eq 0 -or $fgRoot -ne $topHwnd) {
                     return @{ success=$false; error="no settable value, and its window is not in front to type into" }
                 }
                 $esc = [regex]::Replace($value, '([+^%~(){}\[\]])', '{$1}')
                 [System.Windows.Forms.SendKeys]::SendWait("^a"); Start-Sleep -Milliseconds 30
                 [System.Windows.Forms.SendKeys]::SendWait($esc); Start-Sleep -Milliseconds 60
                 $after = & $readVal $target
-                if ($after -eq $value -or $null -eq $after) { return @{ success=$true; action="set-value"; value=$value; method="keyboard" } }
+                if ($after -eq $value) { return @{ success=$true; action="set-value"; value=$value; method="keyboard" } }
+                # Typed into the right window but the field cannot be read back: not a confirmed set.
+                if ($null -eq $after) { return @{ success=$true; unverified=$true; action="set-value"; value=$value; method="keyboard" } }
                 return @{ success=$false; error="set-value did not stick (got '$after')" }
             } catch {
                 return @{ success=$false; error="set-value failed (ValuePattern + keyboard): $($_.Exception.Message)" }

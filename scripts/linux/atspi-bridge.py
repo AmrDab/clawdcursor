@@ -74,7 +74,12 @@ except Exception as exc:
 
 # Chromium/Electron pages sit 15-30 levels deep; the node cap bounds the cost.
 MAX_TREE_DEPTH = 40
-MAX_TREE_NODES = 800   # stop after this many elements to bound cost
+MAX_TREE_NODES = 800   # stop after this many elements to bound cost (the OUTPUT of a tree read)
+# A SEARCH (find, invoke, focus) has its own, larger visit budget: a file manager with 1,000 files holds its 1,000th row
+# far past the output cap, and a miss there must not look like "no such element".
+MAX_SEARCH_NODES = 5000
+# Set when a search ran out of budget; the command that ran it reads it and says the search was cut.
+SEARCH_CUT = [False]
 INTERACTIVE_ROLES = {
     # Roles whose state/value the agent is most likely to care about.
     # Used to prefer these over structural containers when truncating.
@@ -273,13 +278,13 @@ def element_bounds(acc: Any):
     return (0, 0, 0, 0), 'screen'
 
 
-def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> None:
-    """Depth-first flatten with caps on depth + total node count. `cut[0]` is set when the depth cap drops a subtree."""
+def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None, limit: int = MAX_TREE_NODES) -> None:
+    """Depth-first flatten with caps on depth + total node count (`limit`). `cut[0]` is set when the depth cap drops a subtree."""
     if acc is None: return
     if depth > MAX_TREE_DEPTH:
         if cut is not None: cut[0] = True
         return
-    if len(out) > MAX_TREE_NODES: return
+    if len(out) > limit: return
 
     node = node_to_dict(acc)
     if node is not None:
@@ -294,8 +299,8 @@ def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> Non
             child = acc.get_child_at_index(i)
         except Exception:
             continue
-        walk(child, out, depth + 1, cut)
-        if len(out) > MAX_TREE_NODES: return
+        walk(child, out, depth + 1, cut, limit)
+        if len(out) > limit: return
 
 
 def active_application(process_id: Optional[int] = None,
@@ -403,7 +408,10 @@ def focused_element(process_id: Optional[int] = None,
 
 def _find_focused(acc: Any, depth: int, seen: list) -> Optional[Any]:
     """`seen[0]` counts nodes visited in this window, so a deep page cannot turn one focus read into thousands of calls."""
-    if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES: return None
+    if acc is None or depth > MAX_TREE_DEPTH: return None
+    if seen[0] > MAX_SEARCH_NODES:
+        SEARCH_CUT[0] = True
+        return None
     seen[0] += 1
     try:
         ss = acc.get_state_set()
@@ -518,7 +526,7 @@ def on_screen(el: dict) -> bool:
 
 
 def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
-                 exclude_pids: Optional[set] = None) -> dict:
+                 exclude_pids: Optional[set] = None, limit: int = MAX_TREE_NODES) -> dict:
     app = active_application(process_id, window_title, exclude_pids)
     out: list = []
     cut = [False]
@@ -528,10 +536,10 @@ def cmd_get_tree(process_id: Optional[int], window_title: Optional[str] = None,
             out.append(root)
         # The active window (a dialog over its main window) is walked first.
         for top in toplevels_active_first(app):
-            walk(top, out, 1, cut)
-            if len(out) > MAX_TREE_NODES:
+            walk(top, out, 1, cut, limit)
+            if len(out) > limit:
                 break
-    truncated = len(out) > MAX_TREE_NODES or cut[0]
+    truncated = len(out) > limit or cut[0]
     # Useful elements first: on-screen ones in document order, then the hidden
     # rest (closed menus and hidden toolbars report 0x0 and used to fill the
     # top of the list). Nameless, valueless rows carry nothing to act on —
@@ -547,8 +555,11 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
              window_title: Optional[str] = None, exclude_pids: Optional[set] = None) -> dict:
     # Implement find as a post-filter over the tree walk — simpler than
     # deep-diving the collection interface and more predictable.
-    tree = cmd_get_tree(process_id, window_title, exclude_pids).get("elements", [])
-    if name is None and role is None:
+    # A filtered find walks with the search budget; the whole tree is only ever shown up to the output cap.
+    filtered = name is not None or role is not None
+    res = cmd_get_tree(process_id, window_title, exclude_pids, MAX_SEARCH_NODES if filtered else MAX_TREE_NODES)
+    tree = res.get("elements", [])
+    if not filtered:
         return {"elements": tree}
 
     name_l = name.lower() if name else None
@@ -564,13 +575,15 @@ def cmd_find(name: Optional[str], role: Optional[str], process_id: Optional[int]
         return True
 
     hits = [e for e in tree if matches(e)]
-    return {"elements": hits}
+    # No match in a walk that was cut is not "nothing there".
+    return {"elements": hits, **({"partial": True} if not hits and res.get("truncated") else {})}
 
 
 def cmd_focused(process_id: Optional[int] = None, window_title: Optional[str] = None,
                 exclude_pids: Optional[set] = None) -> dict:
+    SEARCH_CUT[0] = False
     el = focused_element(process_id, window_title, exclude_pids)
-    return {"element": el}
+    return {"element": el, **({"partial": True} if el is None and SEARCH_CUT[0] else {})}
 
 
 # ── Invoke (action dispatch) ─────────────────────────────────────
@@ -616,7 +629,10 @@ def find_target(app: Any, name: Optional[str], role: Optional[str]):
 
     def visit(acc: Any, depth: int) -> bool:
         """True once the best possible hit (exact + showing) is found."""
-        if acc is None or depth > MAX_TREE_DEPTH or seen[0] > MAX_TREE_NODES:
+        if acc is None or depth > MAX_TREE_DEPTH:
+            return False
+        if seen[0] > MAX_SEARCH_NODES:
+            SEARCH_CUT[0] = True
             return False
         seen[0] += 1
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
@@ -806,8 +822,13 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
     app = active_application(process_id, window_title, exclude_pids)
     if app is None:
         return {"success": False, "action": action, "error": "application not found"}
+    SEARCH_CUT[0] = False
     target, showing = find_target(app, name, role)
     if target is None:
+        if SEARCH_CUT[0]:
+            return {"success": False, "action": action, "partial": True,
+                    "error": f"element not found in the first {MAX_SEARCH_NODES} elements searched: {name or role} "
+                             "(the window is larger; this is not 'no such element')"}
         return {"success": False, "action": action, "error": f"element not found: {name or role}"}
     if not showing and action != 'get-value':
         # Acting on a hidden element (closed menu, hidden toolbar, 0x0) and

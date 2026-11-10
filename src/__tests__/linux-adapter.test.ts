@@ -378,6 +378,19 @@ describe('L7 — findElements scopes to the foreground window pid by default', (
     expect(hits).toHaveLength(1);
     expect(hits[0].controlType).toBe('Button');
   });
+
+  // Review of 1.5.27: a search that ran out of budget in a wide window said "not found".
+  it('a search the bridge cut is reported as partial, not as nothing found', async () => {
+    h.exec = defaultExec(() => ({ elements: [], partial: true }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect(await adapter.findElements({ name: 'Needle' })).toEqual([]);
+    expect(adapter.lastFindError).toBe('partial');
+    expect(adapter.lastFindNote).toMatch(/element budget/);
+    h.exec = defaultExec(() => ({ elements: [] }));
+    await adapter.findElements({ name: 'Needle' });
+    expect(adapter.lastFindError).toBeNull();
+  });
 });
 
 // ─── L8 ───────────────────────────────────────────────────────────────────────

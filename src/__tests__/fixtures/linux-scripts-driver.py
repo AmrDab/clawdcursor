@@ -334,9 +334,27 @@ OUT['deep_cut'] = deep_cut[0]
 too_deep_out, too_deep_cut = [], [False]
 bridge.walk(chain(bridge.MAX_TREE_DEPTH + 5, Acc('Too deep', 'push button')), too_deep_out, 1, too_deep_cut)
 OUT['too_deep_cut'] = too_deep_cut[0]
-# find_target counts nodes visited, not matches: a name that matches nothing stops after MAX_TREE_NODES nodes.
-wide = Acc('page', 'document web', children=[Acc('row %d' % i, 'section') for i in range(bridge.MAX_TREE_NODES * 2)] + [Acc('Needle', 'push button')])
-OUT['wide_capped'] = bridge.find_target(Acc('app', 'application', children=[wide]), 'Needle', None)[0] is None
+# A search has its own visit budget (MAX_SEARCH_NODES), larger than the tree's output cap: a file manager with
+# 1,000 files still finds its 1,000th row. find_target counts nodes visited, not matches, so a name that matches
+# nothing stops there, and says the search was cut.
+def wide_app(n):
+    page = Acc('page', 'document web', children=[Acc('row %d' % i, 'section') for i in range(n)] + [Acc('Needle', 'push button')])
+    return Acc('app', 'application', pid=5151, children=[page])
+OUT['search_over_tree_cap'] = bridge.MAX_SEARCH_NODES > bridge.MAX_TREE_NODES
+bridge.SEARCH_CUT[0] = False
+OUT['wide_found'] = bridge.find_target(wide_app(bridge.MAX_TREE_NODES * 2), 'Needle', None)[0] is not None
+OUT['wide_found_cut'] = bridge.SEARCH_CUT[0]
+bridge.SEARCH_CUT[0] = False
+OUT['wide_capped'] = bridge.find_target(wide_app(bridge.MAX_SEARCH_NODES * 2), 'Needle', None)[0] is None
+OUT['wide_capped_cut'] = bridge.SEARCH_CUT[0]
+real_active_application = bridge.active_application
+wide_acc = wide_app(bridge.MAX_SEARCH_NODES * 2)
+bridge.active_application = lambda *a, **k: wide_acc
+OUT['wide_invoke'] = bridge.cmd_invoke('Needle', None, 5151, 'click', None)
+OUT['wide_find'] = bridge.cmd_find('Needle', None, 5151)
+wide_acc = wide_app(bridge.MAX_TREE_NODES * 2)
+OUT['wide_find_small'] = [e['name'] for e in bridge.cmd_find('Needle', None, 5151)['elements']]
+bridge.active_application = real_active_application
 
 # Focus: scoped to the app, active window first — never another app's widget.
 OUT['focused_editor'] = bridge.cmd_focused(7777)['element']

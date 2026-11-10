@@ -108,8 +108,19 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.too_deep_cut).toBe(true);
   });
 
-  it('find stops after MAX_TREE_NODES nodes visited, matching or not (a deep page must not cost thousands of calls)', () => {
+  // Review of 1.5.27: searches shared the tree's 800-node output cap, so a file manager with 1,000 files missed, silently.
+  it('a search has its own, larger visit budget than the tree output cap', () => {
+    expect(out.search_over_tree_cap).toBe(true);
+    expect(out.wide_found).toBe(true);
+    expect(out.wide_found_cut).toBe(false);
+    expect(out.wide_find_small).toEqual(['Needle']);
+  });
+
+  it('a search stops after MAX_SEARCH_NODES nodes visited (a deep page must not cost thousands of calls), and says it was cut', () => {
     expect(out.wide_capped).toBe(true);
+    expect(out.wide_capped_cut).toBe(true);
+    expect(out.wide_invoke).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/not found in the first \d+ elements/) });
+    expect(out.wide_find).toMatchObject({ elements: [], partial: true });
   });
 
   it('invoke toggle reports the new state', () => {

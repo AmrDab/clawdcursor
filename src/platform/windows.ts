@@ -864,11 +864,13 @@ export class WindowsAdapter implements PlatformAdapter {
         // element_value_contains actually see the value (review 2026-06-11).
         // The miss's reason and a late failure of an earlier invoke ride in data too: the tools read res.data.error /
         // res.data.lateInvokeError to tell the agent WHY, instead of "not found or not actionable".
-        data: (result?.data || result?.value !== undefined || result?.error || result?.lateInvokeError) ? {
+        data: (result?.data || result?.value !== undefined || result?.error || result?.lateInvokeError || result?.unverified === true) ? {
           ...(result?.data ?? {}),
           ...(result?.value !== undefined && !result?.data ? { value: result.value } : {}),
           ...(typeof result?.error === 'string' ? { error: result.error } : {}),
           ...(typeof result?.lateInvokeError === 'string' ? { lateInvokeError: result.lateInvokeError } : {}),
+          // A keyboard set-value that typed into the right window but could not read the field back.
+          ...(result?.unverified === true ? { unverified: true } : {}),
         } : undefined,
       };
     } catch {

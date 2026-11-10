@@ -80,8 +80,9 @@ export function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // EPERM: the process exists but is another user's or elevated.
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
   }
 }
 

@@ -14,9 +14,11 @@ const bridge = readFileSync(join(__dirname, '..', '..', 'scripts', 'ps-bridge.ps
 const setValue = bridge.slice(bridge.indexOf('"set-value" {'), bridge.indexOf('"get-value" {'));
 
 describe('ps-bridge set-value — keyboard fallback', () => {
-  it('checks that the target owns the foreground window before any keystroke', () => {
-    const check = setValue.search(/GetWindowThreadProcessId\(\[Win32UIA\]::GetForegroundWindow\(\), \[ref\]\$fgPid\)/);
-    const compare = setValue.indexOf('$fgPid -ne [uint32]$target.Current.ProcessId');
+  // Review of 1.5.27: the check compared PROCESSES, so a second window of the same process (Explorer, Notepad, Edge)
+  // in front passed it. It compares the target's top-level WINDOW with the foreground window.
+  it('checks that the top-level window of the target is is the foreground window before any keystroke', () => {
+    const check = setValue.search(/GetAncestor\(\[Win32UIA\]::GetForegroundWindow\(\), 2\)/);
+    const compare = setValue.indexOf('$topHwnd -eq 0 -or $fgRoot -ne $topHwnd');
     const firstKey = setValue.indexOf('SendWait(');
     expect(check).toBeGreaterThan(-1);
     expect(compare).toBeGreaterThan(check);
@@ -24,7 +26,7 @@ describe('ps-bridge set-value — keyboard fallback', () => {
   });
 
   it('a window not in front is a plain failure (not refused), so set_value falls back to click-then-type', () => {
-    const refusal = setValue.slice(setValue.indexOf('$fgPid -ne'), setValue.indexOf('SendWait('));
+    const refusal = setValue.slice(setValue.indexOf('$topHwnd -eq 0'), setValue.indexOf('SendWait('));
     expect(refusal).toMatch(/success=\$false/);
     expect(refusal).not.toMatch(/refused/);
   });

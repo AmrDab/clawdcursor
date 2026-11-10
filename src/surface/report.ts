@@ -263,8 +263,9 @@ export function buildSessionReport(sessionPath?: string, userNote?: string): Err
     tally,
     sequence: seq.slice(-60).map(x => (x.n > 1 ? `${x.cls}×${x.n}` : x.cls)).join(' '),
     recentCalls: calls.slice(-40).map(c => ({ tool: c.tool, ...(c.action ? { action: c.action } : {}), cls: c.cls, ok: c.ok, ms: c.ms })),
-    errors: [...new Set(calls.filter(c => !c.ok && c.err && c.outcome !== 'refused').map(c => redactSensitive(String(c.err))))].slice(0, 8),
-    refusals: [...new Set(calls.filter(c => c.outcome === 'refused' && c.err).map(c => redactSensitive(String(c.err))))].slice(0, 8),
+    // Result codes, never error text (older session files carry a redacted `err`; it is not sent).
+    errors: [...new Set(calls.filter(c => !c.ok && c.code && c.outcome !== 'refused').map(c => String(c.code)))].slice(0, 8),
+    refusals: [...new Set(calls.filter(c => c.outcome === 'refused' && c.code).map(c => String(c.code)))].slice(0, 8),
   };
   if (!report.errorContext && report.session.errors.length) report.errorContext = report.session.errors[report.session.errors.length - 1];
   return report;

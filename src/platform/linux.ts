@@ -79,6 +79,7 @@ export class LinuxAdapter implements PlatformAdapter {
   private binaryCache = new Map<string, boolean>();
   /** Why the last find came back short, and whether the last tree read was cut (parity with Windows / macOS). */
   lastFindError: PlatformAdapter['lastFindError'] = null;
+  lastFindNote: string | null = null;
   lastTreeTruncated = false;
   private lastCursor: { x: number; y: number } | null = null;
   /**
@@ -661,6 +662,7 @@ export class LinuxAdapter implements PlatformAdapter {
 
   async findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]> {
     this.lastFindError = null;
+    this.lastFindNote = null;
     if (!this.atspiAvailable) return [];
     try {
       const args = ['--cmd', 'find'];
@@ -673,8 +675,13 @@ export class LinuxAdapter implements PlatformAdapter {
       const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
         timeout: A11Y_TIMEOUT_MS,
       });
-      const data = JSON.parse(stdout) as { elements?: any[] };
+      const data = JSON.parse(stdout) as { elements?: any[]; partial?: boolean };
       let raw = Array.isArray(data.elements) ? data.elements : [];
+      // The bridge ran out of its search budget without a match: a large window, not "nothing there".
+      if (data.partial === true && raw.length === 0) {
+        this.lastFindError = 'partial';
+        this.lastFindNote = 'Not found in the first part of this window (the accessibility search stopped at its element budget)';
+      }
       // Role filter runs here, on the NORMALIZED role, so "Button" matches a
       // "push button" and "Edit" matches a "text" entry. Raw AT-SPI role
       // substrings still match for callers that pass them.

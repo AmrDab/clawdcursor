@@ -23,10 +23,14 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
     console.debug('[clawdcursor] uncaughtException swallowed (known-benign): setTypeOfService EINVAL on macOS/Node v25+');
     return;
   }
-  console.error(`Uncaught exception: ${err?.stack ?? err}`);
+  // Stack frames only, home path stripped: an error's name and message can carry window titles and field contents,
+  // and the MCP host keeps stderr.
+  let frames = '';
+  try { frames = require('./session-log').safeStack(err?.stack); } catch { /* none */ }
+  console.error(`Uncaught exception${err?.code ? ` (${err.code})` : ''}:\n${frames}`);
   try {
     const { logger } = require('../core/observability/logger');
-    logger.error('crash', { msg: err?.message ?? String(err), stack: err?.stack });
+    logger.error('crash', { ...(err?.code ? { code: err.code } : {}), stack: frames });
   } catch { /* stderr above has it */ }
   process.exit(1);
 });
@@ -104,6 +108,7 @@ import { e } from './format';
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
+import { endAllSessions } from './session-log';
 
 const program = new Command();
 
@@ -434,6 +439,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
       agent?.abort();
     },
     onStop: async () => {
+      endAllSessions('stopped with clawdcursor stop (POST /stop)');  // synchronous: in the log before the exit
       try {
         // Lazy require — only attempt when agent existed (scheduler bound).
         if (agent) {
@@ -669,11 +675,13 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
 
   process.on('SIGINT', () => {
     console.log(`\n${e('👋', '--')} Shutting down...`);
+    endAllSessions('SIGINT (Ctrl+C)');
     releasePidFile('start');
     agent?.disconnect();
     process.exit(0);
   });
   process.on('SIGTERM', () => {
+    endAllSessions('SIGTERM (a kill or the system stopped the daemon)');
     releasePidFile('start');
     agent?.disconnect();
     process.exit(0);
