@@ -47,7 +47,11 @@ describe('expand / collapse never use AXShowMenu', () => {
   });
 
   it('the result carries data.expandState ("Expanded" / "Collapsed"), the key #334 reads', () => {
-    expect(expandBody()).toMatch(/"data": \["expandState": want \? "Expanded" : "Collapsed"\]/);
+    expect(expandBody()).toMatch(/\["expandState": want \? "Expanded" : "Collapsed"\]/);
+  });
+
+  it('an element that was already in the wanted state says so (expandChanged: false), so the tool reports "still expanded"', () => {
+    expect(expandBody()).toMatch(/if method == "unchanged" \{ data\["expandChanged"\] = false \}/);
   });
 });
 

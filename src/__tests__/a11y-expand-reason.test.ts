@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { getA11yDepthTools } from '../tools/a11y_depth';
 import type { ToolContext } from '../tools/types';
+import { untrusted } from '../core/miss-text';
 
 const platform = (res: { success: boolean; data?: Record<string, unknown> }) => ({
   invokeElement: vi.fn(async () => res),
@@ -24,7 +25,8 @@ describe.each([
     const t = buildUnifiedTools().find(x => x.name === tool)!;
     const r = await t.execute({ name: 'More options' }, { platform: platform({ success: false, data: { error: `${WHY}.` } }) } as any);
     expect(r.success).toBe(false);
-    expect(r.text).toBe(`Could not ${verb} "More options": ${WHY}.`);           // one full stop, not two
+    // The bridge's own sentence (no structured reason) is shown inside an untrusted block (#336), without its full stop.
+    expect(r.text).toBe(`Could not ${verb} "More options": ${untrusted(WHY)}.`);
   });
 
   it('agent loop / compact route: no reason given, the text is what it always was', async () => {
@@ -45,7 +47,7 @@ describe.each([
     const t = getA11yDepthTools().find(x => x.name === tool)!;
     const r = await t.handler({ name: 'More options' }, { ensureInitialized: async () => {}, platform: platform({ success: false, data: { error: WHY } }) } as unknown as ToolContext);
     expect(r.isError).toBe(true);
-    expect(r.text).toBe(`${tool} failed for "More options": ${WHY}.`);
+    expect(r.text).toBe(`${tool} failed for "More options": ${untrusted(WHY)}.`);
   });
 
   it('MCP tool: without a reason, the text is what it always was', async () => {

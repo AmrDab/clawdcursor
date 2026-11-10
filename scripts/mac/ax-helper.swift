@@ -946,7 +946,9 @@ func expandOrCollapse(_ action: String, _ h: Hit, pid: pid_t, appName: String) -
     let el = h.element
     let want = action == "expand"
     func done(_ method: String) -> [String: Any] {
-        ["ok": true, "success": true, "action": action, "method": method, "data": ["expandState": want ? "Expanded" : "Collapsed"]]
+        var data: [String: Any] = ["expandState": want ? "Expanded" : "Collapsed"]
+        if method == "unchanged" { data["expandChanged"] = false }   // the caller says "still expanded", not "(read back ✓) now expanded"
+        return ["ok": true, "success": true, "action": action, "method": method, "data": data]
     }
     /// A miss. `acted`: something was pressed or sent, so the caller should clean up with a collapse.
     func missed(_ message: String, acted: Bool = false) -> [String: Any] {
