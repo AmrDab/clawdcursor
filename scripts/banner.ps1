@@ -443,10 +443,11 @@ function Update-Layout {
     $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.PreferredWidth + 6
     $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.PreferredWidth + 10
     $stop.Location = New-Object System.Drawing.Point($x, 7);          $x += $stop.Width + 7
-    if ($form.Width -ne $x) { $form.Width = $x; Set-PillShape $form 19 }
+    $form.Width = $x
+    # Every time, not only on a new width: the work may have moved to another monitor.
+    Set-PillShape $form 19
 }
 Update-Layout
-Set-PillShape $form 19
 
 $form.add_ActivityChanged([Action[string]]{ param($t) $activity.Text = $t; Update-Layout })
 

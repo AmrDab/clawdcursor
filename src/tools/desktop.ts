@@ -41,10 +41,14 @@ const LABEL_TAIL = ' If the target has a visible label, click it with smart_clic
  * What to tell the agent after a zoomed view: clicks never take coordinates from the zoomed image — they stay in the space of the
  * full screenshot (or of the screen, for a screen-space region) — so the way back is arithmetic the reply spells out.
  */
-function zoomNote(r: { x: number; y: number; width: number; height: number; space?: string }, outW: number, outH: number): string {
+function zoomNote(r: { x: number; y: number; width: number; height: number; space?: string; display?: number }, outW: number, outH: number): string {
   const conv = `x = ${r.x} + zx·${r.width}/${outW}, y = ${r.y} + zy·${r.height}/${outH}`;
-  return r.space === 'screen'
-    ? ` Clicks stay in full-screen coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} — click it with space:"screen".`
+  if (r.space === 'screen') {
+    return ` Clicks stay in full-screen coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} — click it with space:"screen".`;
+  }
+  // An explicit display does not change which monitor image-space clicks land on: that is the latest screenshot's.
+  return typeof r.display === 'number'
+    ? ` Clicks stay in full-screenshot coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} in the image space of display #${r.display}'s screenshot. Clicks land on the monitor of the latest screenshot: take a screenshot with display:${r.display} first if it showed another one.`
     : ` Clicks stay in full-screenshot coordinates, not zoomed-image ones: a point (zx,zy) seen in this image is ${conv} in the screenshot's image space.`;
 }
 
@@ -178,7 +182,7 @@ export function getDesktopTools(): ToolDefinition[] {
           const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
           if (shot) {
             return {
-              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space }, shot.width, shot.height)}`,
+              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space, display }, shot.width, shot.height)}`,
               image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
             };
           }
@@ -186,7 +190,7 @@ export function getDesktopTools(): ToolDefinition[] {
         const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
         const base64 = frame.buffer.toString('base64');
         return {
-          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
+          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space, display }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
           image: { data: base64, mimeType: 'image/jpeg' },
         };
       },

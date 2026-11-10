@@ -89,6 +89,15 @@ describe('zoom with display', () => {
     expect(captureRegionForLLM).toHaveBeenCalledWith(2796 + 150, -1080 + 75, 300, 180);
   }));
 
+  it('the reply names the display the coordinates belong to, and that clicks follow the latest screenshot', () => onWindows(async () => {
+    const { ctx } = withDisplays();
+    const r = await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 1 }, ctx);
+    expect(r.text).toContain("display #1's screenshot");
+    expect(r.text).toMatch(/screenshot with display:1 first/);
+    const plain = await region.handler({ x: 100, y: 50, width: 200, height: 120 }, ctx);
+    expect(plain.text).not.toMatch(/display #/);
+  }));
+
   it('the primary display maps by the plain screenshot scale', () => onWindows(async () => {
     const { ctx, captureRegionForLLM } = withDisplays();
     await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 0 }, ctx);

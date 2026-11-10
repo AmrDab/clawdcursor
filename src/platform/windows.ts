@@ -212,11 +212,13 @@ export class WindowsAdapter implements PlatformAdapter {
     return this.screenSize;
   }
 
-  async listDisplays(): Promise<Display[]> {
-    // Per-monitor truth first: the bridge enumerates monitors under
-    // per-monitor-v2 awareness, so bounds are PHYSICAL virtual-desktop pixels
-    // (the space clicks use) and each monitor reports its OWN scaling — any
-    // layout, negative origins included. Primary is index 0.
+  /**
+   * The monitors as the bridge enumerates them, under per-monitor-v2
+   * awareness: bounds are PHYSICAL virtual-desktop pixels (the space clicks
+   * and UIA rects use) and each monitor reports its OWN scaling — any layout,
+   * negative origins included. Primary is index 0. Empty when the bridge fails.
+   */
+  private async bridgeDisplays(): Promise<Display[]> {
     try {
       const r = await psRunner.run({ cmd: 'list-displays' }) as {
         success?: boolean;
@@ -234,7 +236,13 @@ export class WindowsAdapter implements PlatformAdapter {
             dpiRatio: d.scale || 1,
           }));
       }
-    } catch { /* fall back to the Forms enumeration below */ }
+    } catch { /* the caller decides what a missing list means */ }
+    return [];
+  }
+
+  async listDisplays(): Promise<Display[]> {
+    const fromBridge = await this.bridgeDisplays();
+    if (fromBridge.length) return fromBridge;
     // System.Windows.Forms.Screen.AllScreens enumerates every connected
     // display with bounds + primary flag. We call it via the PS UIA path
     // we already have warmed up.
@@ -723,8 +731,9 @@ export class WindowsAdapter implements PlatformAdapter {
       const flat: UiElement[] = [];
       for (const n of nodes) this.flattenTree(n, flat);
       // A rect on no monitor (a minimized window's -32000, a gap between monitors) is not a position: flag the
-      // element offscreen instead, as the Linux adapter does. Both sides are physical virtual-desktop pixels.
-      const displays = await this.listDisplays().catch(() => [] as Display[]);
+      // element offscreen instead, as the Linux adapter does. Both sides are physical virtual-desktop pixels —
+      // so only the bridge's list will do: listDisplays' fallback is DPI-unaware (a 3840-wide primary reads 1707).
+      const displays = await this.bridgeDisplays();
       if (displays.length) {
         for (const el of flat) {
           if (onAnyDisplay(displays, el.bounds)) continue;

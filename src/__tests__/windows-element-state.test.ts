@@ -21,7 +21,12 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 let reply: unknown = null;
 vi.mock('../platform/ps-runner', () => ({
-  psRunner: { run: () => Promise.resolve(reply), start: vi.fn(), stop: vi.fn() },
+  psRunner: {
+    run: (c: { cmd?: string }) => Promise.resolve(c?.cmd === 'list-displays'
+      ? { success: true, displays: [{ name: 'DISPLAY1', primary: true, x: 0, y: 0, width: 1920, height: 1080, scale: 1 }] }
+      : reply),
+    start: vi.fn(), stop: vi.fn(),
+  },
 }));
 
 import { WindowsAdapter } from '../platform/windows';

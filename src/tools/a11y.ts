@@ -497,7 +497,7 @@ export function getA11yTools(): ToolDefinition[] {
           (processName && active?.processName.toLowerCase().includes(processName.toLowerCase())) ||
           (title && windowTextIncludes(active?.title, title));
 
-        if (!verified && targetBounds && targetBounds.x >= 0 && targetBounds.y >= 0 && targetBounds.width > 0) {
+        if (!verified && targetBounds && onScreen(targetBounds) && targetBounds.width > 0) {
           const centerX = a11yToMouse(targetBounds.x + Math.round(targetBounds.width / 2), ctx);
           const centerY = a11yToMouse(targetBounds.y + Math.round(targetBounds.height / 2), ctx);
           await ctx.desktop.mouseClick(centerX, centerY);

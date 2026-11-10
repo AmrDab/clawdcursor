@@ -87,9 +87,15 @@ describe('WindowsAdapter.getUiTree on a second monitor above the primary', () =>
     }
   });
 
-  it('keeps every position when the monitors cannot be listed', async () => {
-    vi.spyOn(adapter, 'listDisplays').mockResolvedValue([]);
+  it('keeps every position when the bridge cannot list the monitors — never judged against the fallback list', async () => {
+    replies['list-displays'] = { success: false };
+    // What listDisplays falls back to: a DPI-unaware enumeration, where the 3840x2400 primary reads 1707x1067.
+    const fallback = vi.spyOn(adapter, 'listDisplays').mockResolvedValue([{ ...displays[0], bounds: { x: 0, y: 0, width: 1707, height: 1067 } }]);
+    const farRight = { x: 2000, y: 100, width: 120, height: 32 };
+    (replies['get-screen-context'] as { uiTree: object[] }).uiTree.push(el('Far', farRight));
     const tree = await adapter.getUiTree();
+    expect(fallback).not.toHaveBeenCalled();
+    expect(tree.find(e => e.name === 'Far')).toMatchObject({ bounds: farRight });
     expect(tree.find(e => e.name === 'Beside')).toMatchObject({ bounds: beside });
   });
 
@@ -121,5 +127,13 @@ describe('the Windows overlays on a second monitor', () => {
     expect(body).toContain('GetForegroundWindow()');
     expect(body).toContain('Screen]::FromHandle($fg).WorkingArea');
     expect(body).toContain('Screen]::PrimaryScreen.WorkingArea');
+  });
+
+  it('the pill is placed again on every activity change, not only when its width changes', () => {
+    const banner = script('banner.ps1');
+    const start = banner.indexOf('function Update-Layout {');
+    const body = banner.slice(start, banner.indexOf('\n}', start));
+    expect(body).toMatch(/\n {4}Set-PillShape \$form 19/);
+    expect(body).not.toMatch(/if \(.*Set-PillShape/);
   });
 });
