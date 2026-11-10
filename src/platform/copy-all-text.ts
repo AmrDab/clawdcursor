@@ -44,35 +44,24 @@ export function isTerminalWindow(win: Pick<WindowInfo, 'processName' | 'classNam
  *  `pressedKeys`: select-all + copy were sent to the app, so this was input, not only a read. */
 export interface CopyAllTextResult { ok: boolean; text: string; window?: string; source?: 'document' | 'clipboard' | 'accessibility'; note?: string; pressedKeys?: boolean }
 
-/** Browsers: a focused "document" there is the page, not an editor. */
-const BROWSERS = /^(msedge|chrome|chromium|firefox|brave|opera|vivaldi|arc|safari|google chrome|microsoft edge|zen|librewolf|waterfox)(\.exe)?$/i;
+/** Browsers: select-all there means the page's text. Linux names included (firefox-esr, chromium-browser, google-chrome-stable). */
+const BROWSERS = /^(msedge|chrome|chromium(-browser)?|firefox(-esr|-bin)?|brave|opera|vivaldi|arc|safari|google chrome|google-chrome(-stable)?|microsoft edge|zen|librewolf|waterfox)(\.exe)?$/i;
 /** Roles whose content select-all would select — the next keystroke then replaces it. */
 const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|password|combo|spin/i;
 /** Roles where select-all selects every item — a following Delete acts on all of them. */
 const ITEM_ROLE = /list|tree|table|grid|dataitem|cell|row/i;
 
 /**
- * Why Ctrl+A must not be pressed with this element focused, or null when it is safe (#249). Ctrl+A acts on whatever has focus:
- * in an editor it selects the whole document and the agent's next keystroke replaces it; in a mail list or a file view it selects
+ * Why Ctrl+A must not be pressed in a browser with this element focused, or null when it is safe (#249). Ctrl+A acts on
+ * whatever has focus: in a field it selects the content and the agent's next keystroke replaces it; in a list it selects
  * every item. Unknown focus is not a hazard: page text is what this tool is for.
  */
-export function selectAllHazard(
-  focused: Pick<UiElement, 'controlType' | 'name'> | null | undefined,
-  processName: string,
-  className = '',
-): string | null {
-  const role = String(focused?.controlType ?? '').replace(/^ControlType\./, '');
-  // An Electron app (a Chromium window that is not a browser) without renderer accessibility reports its focus as a bare
-  // Pane, whether that is a list or the message box / the editor holding the user's draft. It cannot be told apart, so it is
-  // not selected (live: the Claude desktop app's prompt read as "Pane").
-  if (/^Chrome_WidgetWin/.test(className) && !BROWSERS.test(processName.trim()) && (!role || /^(pane|window|group|custom)$/i.test(role))) {
-    return `${processName} is an Electron app that does not say what has focus (it reports "${role || 'nothing'}") — it may be a text box holding a draft`;
-  }
+export function selectAllHazard(focused: Pick<UiElement, 'controlType' | 'name'> | null | undefined): string | null {
   if (!focused) return null;
+  const role = String(focused.controlType ?? '').replace(/^ControlType\./, '');
   const name = String(focused.name ?? '').trim();
   const what = name ? `${role} "${name.length > 40 ? name.slice(0, 39) + '…' : name}"` : role;
   if (EDITABLE_ROLE.test(role)) return `focus is in an editable field (${what}) — select-all would select its content, and the next keystroke would replace it`;
-  if (/document/i.test(role) && !BROWSERS.test(processName.trim())) return `focus is in a document (${what}) — in an editor, select-all would select all of it, and the next keystroke would replace it`;
   if (ITEM_ROLE.test(role)) return `focus is on ${what} — select-all there selects every item, and a following Delete would act on all of them`;
   return null;
 }
@@ -132,7 +121,7 @@ export async function copyAllText(platform: CopyPlatform): Promise<CopyAllTextRe
   let hazard: string | null = null;
   if (BROWSERS.test(processName)) {
     const focused = platform.getFocusedElement ? await platform.getFocusedElement().catch(() => null) : null;
-    hazard = selectAllHazard(focused, processName, String(win?.className ?? ''));
+    hazard = selectAllHazard(focused);
     if (!hazard) return copyWithKeys(platform, label);
   }
 

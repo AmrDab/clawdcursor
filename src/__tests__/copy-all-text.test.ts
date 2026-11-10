@@ -207,11 +207,13 @@ describe('copyAllText', () => {
     p.getActiveWindow = vi.fn(async () => ({ processName: 'claude', title: 'Claude', processId: 9, className: 'Chrome_WidgetWin_1' } as any));
     await copyAllText(p as any);
     expect(p.keys).toEqual([]);
-    // a browser with the same window class is a page, not an Electron app
-    expect(selectAllHazard({ controlType: 'Document', name: 'page' }, 'msedge', 'Chrome_WidgetWin_1')).toBeNull();
-    expect(selectAllHazard({ controlType: 'Pane', name: '' }, 'chrome', 'Chrome_WidgetWin_1')).toBeNull();
-    // an Electron app that DOES expose its focus is judged by the role, as everywhere else
-    expect(selectAllHazard({ controlType: 'Edit', name: 'Message' }, 'slack', 'Chrome_WidgetWin_1')).toMatch(/editable/);
+  });
+
+  it.each(['firefox-esr', 'firefox-bin', 'chromium-browser', 'google-chrome', 'google-chrome-stable'])('%s (a Linux browser process name) is a browser: its page is copied', async (proc) => {
+    const p = withFocus(proc, { controlType: 'document web', name: 'page' });
+    const r = await copyAllText(p as any);
+    expect(p.keys).toEqual(['mod+a', 'mod+c']);
+    expect(r).toMatchObject({ ok: true, source: 'clipboard' });
   });
 
   it('reads the document through accessibility first: no keystrokes, nothing selected, clipboard untouched', async () => {
@@ -260,13 +262,13 @@ describe('copyAllText', () => {
     }
   });
 
-  it('selectAllHazard: page-like roles are safe', () => {
-    for (const role of ['Pane', 'Window', 'Group', 'Hyperlink', 'Button', 'Text', 'Custom']) {
-      expect(selectAllHazard({ controlType: role, name: 'x' }, 'someapp')).toBeNull();
+  it('selectAllHazard: page-like roles and unknown focus are safe; a field or a list item is not', () => {
+    for (const role of ['Pane', 'Window', 'Group', 'Hyperlink', 'Button', 'Text', 'Custom', 'Document']) {
+      expect(selectAllHazard({ controlType: role, name: 'x' })).toBeNull();
     }
-    expect(selectAllHazard({ controlType: 'Document', name: 'page' }, 'chrome.exe')).toBeNull();
-    expect(selectAllHazard({ controlType: 'Document', name: 'page' }, 'Google Chrome')).toBeNull();
-    expect(selectAllHazard(null, 'notepad')).toBeNull();
+    expect(selectAllHazard(null)).toBeNull();
+    expect(selectAllHazard({ controlType: 'ControlType.Edit', name: 'Search' })).toMatch(/editable field/);
+    expect(selectAllHazard({ controlType: 'ListItem', name: 'Result 1' })).toMatch(/every item/);
   });
 
   it('gives up on the clipboard within ~2 s even when each read is slow', async () => {
