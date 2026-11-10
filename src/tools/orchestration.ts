@@ -10,6 +10,7 @@ import { resolveAlias } from '../core/router/aliases';
 import { pauseGate } from '../core/pause-gate';
 import { foreignOverlayState } from '../core/overlay-state';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
+import { psOpts } from '../platform/ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -267,7 +268,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
             } else {
               // `exe` is a caller-supplied app name: it arrives as $env:, never as script source (platform/ps-input.ts).
               await execFileAsync('powershell.exe', ['-NoProfile', '-Command', 'Start-Process -FilePath $env:CLAWD_PS_FILE'],
-                { timeout: 10000, env: { ...process.env, CLAWD_PS_FILE: exe } });
+                psOpts({ timeout: 10000, env: { ...process.env, CLAWD_PS_FILE: exe } }));
             }
           } else if (process.platform === 'darwin') {
             await execFileAsync('open', ['-a', alias?.macOSAppName ?? rawName], { timeout: 10000 });

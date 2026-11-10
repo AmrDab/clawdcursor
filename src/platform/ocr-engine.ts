@@ -25,6 +25,7 @@ import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
 import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
 import type { Display } from './types';
+import { psOpts } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -342,11 +343,11 @@ export class OcrEngine {
       '-ExecutionPolicy', 'Bypass',
       '-File', OCR_SCRIPT,
       imagePath,
-    ], {
+    ], psOpts({
       timeout: OCR_TIMEOUT,
       maxBuffer: MAX_BUFFER,
       windowsHide: true,
-    });
+    }));
 
     const trimmed = stdout.trim();
     if (!trimmed) {

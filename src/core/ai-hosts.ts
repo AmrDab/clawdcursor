@@ -12,7 +12,7 @@
  * list alone applies.
  */
 import { execFile } from 'child_process';
-import { tmpdir } from 'os';
+import { psOpts } from '../platform/ps-spawn';
 import { logger } from './observability/logger';
 
 export const AI_HOST_PROCESSES: readonly string[] = [
@@ -104,7 +104,7 @@ function readTable(): Promise<ProcRow[]> {
       'Get-CimInstance Win32_Process | ForEach-Object { $c = if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }; "$($_.ProcessId) $($_.ParentProcessId) $c $($_.Name)" }']]
     : ['ps', ['-A', '-o', 'pid=,ppid=,comm=']];
   return new Promise((resolve, reject) => {
-    execFile(cmd as string, args as string[], { timeout: 8000, windowsHide: true, cwd: tmpdir(), maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+    execFile(cmd as string, args as string[], psOpts({ timeout: 8000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }), (err, stdout) => {
       if (err) return reject(new Error(String((err as NodeJS.ErrnoException).code ?? 'process table unreadable')));
       const rows: ProcRow[] = [];
       for (const line of String(stdout).split(/\r?\n/)) {
@@ -137,7 +137,8 @@ export function walkAncestors(table: ProcRow[], self: number): Set<number> {
   return out;
 }
 
-async function computeAncestors(read: () => Promise<ProcRow[]>): Promise<Set<number>> {
+/** The ancestors, or null when the table could not be read (then only the direct parent is known). */
+async function computeAncestors(read: () => Promise<ProcRow[]>): Promise<Set<number> | null> {
   try {
     const table = await read();
     if (!table.length) throw new Error('empty process table');
@@ -145,7 +146,7 @@ async function computeAncestors(read: () => Promise<ProcRow[]>): Promise<Set<num
   } catch (err) {
     // Once, and only the reason: no paths, no command lines.
     if (!failedLogged) { failedLogged = true; logger.warn('host.ancestry_failed', { reason: String((err as { message?: string })?.message ?? err).slice(0, 80) }); }
-    return new Set();
+    return null;
   }
 }
 
@@ -158,8 +159,10 @@ async function computeAncestors(read: () => Promise<ProcRow[]>): Promise<Set<num
 export async function aiHostKind(w: { processName?: string | null; processId?: number }): Promise<'list' | 'ancestor' | null> {
   if (isAiHostProcess(w.processName)) return 'list';
   if (!ancestryOn || !w.processId) return null;
-  // The direct parent is known without any process-table read: pending, failed or timed out, it still counts.
-  if (w.processId === process.ppid) return 'ancestor';
+  // The direct parent is known without any process-table read, so until the table says otherwise (pending, failed or timed out)
+  // it counts, unless its name is a shell the desktop itself owns (explorer, launchd, systemd). Once the table was read, it decides:
+  // it also knows the parent's creation time (a reused pid) and name.
+  if (w.processId === process.ppid && !ancestry) return NOT_A_HOST.has(normalize(w.processName ?? '')) ? null : 'ancestor';
   if (!ancestry && ancestryPending) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     await Promise.race([ancestryPending, new Promise<void>(r => { timer = setTimeout(r, ancestryWaitMs); })]);

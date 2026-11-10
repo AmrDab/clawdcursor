@@ -37,7 +37,7 @@
 
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import * as path from 'path';
-import * as os from 'os';
+import { psOpts } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
@@ -212,7 +212,7 @@ class ControlBanner {
     return spawn('powershell.exe', psArgs(script, pillArgs(mode)),
       // windowsHide: suppress the console/csc.exe compile flash so the pill spawn
       // can't briefly steal foreground from the app the agent is driving.
-      { stdio, windowsHide: true, env: overlayEnv(mode), cwd: os.tmpdir() });
+      psOpts({ stdio, windowsHide: true, env: overlayEnv(mode) }));
   };
   private glowSpawner: Spawner = (mode) => {
     const stdio: ['ignore', 'ignore', 'ignore'] = ['ignore', 'ignore', 'ignore']; // click-through visual only — no stdout contract
@@ -225,7 +225,7 @@ class ControlBanner {
     }
     const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
     return spawn('powershell.exe', psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
-      { stdio, windowsHide: true, cwd: os.tmpdir() });
+      psOpts({ stdio, windowsHide: true }));
   };
 
   /**

@@ -52,6 +52,7 @@ import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields } from '../core/miss-text';
+import { psOpts } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -180,7 +181,7 @@ export class WindowsAdapter implements PlatformAdapter {
           '$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds; ' +
           '"$($s.Width),$($s.Height)"',
         ],
-        { timeout: PS_TIMEOUT_MS },
+        psOpts({ timeout: PS_TIMEOUT_MS }),
       );
       const [w, h] = stdout.trim().split(',').map(s => parseInt(s, 10));
       if (w > 0 && h > 0) {
@@ -252,7 +253,7 @@ export class WindowsAdapter implements PlatformAdapter {
           '  } ' +
           '} | ConvertTo-Json -Compress',
         ],
-        { timeout: PS_TIMEOUT_MS },
+        psOpts({ timeout: PS_TIMEOUT_MS }),
       );
       const raw = JSON.parse(stdout.trim() || '[]');
       const arr: any[] = Array.isArray(raw) ? raw : [raw];
@@ -547,7 +548,7 @@ export class WindowsAdapter implements PlatformAdapter {
           "' -PassThru | Out-Null;" +
           `$h = ${target};` +
           'if ($h -ne [System.IntPtr]::Zero) { [Win32.NativeMethods]::PostMessage($h, 0x0010, [System.IntPtr]::Zero, [System.IntPtr]::Zero) | Out-Null; "ok" } else { "no-window" }';
-        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: PS_TIMEOUT_MS });
+        const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
         return stdout.trim() === 'ok';
       }
 
@@ -603,7 +604,7 @@ export class WindowsAdapter implements PlatformAdapter {
           '    $ok = $true } }' +
           '  if ($ok) { "ok" } else { "no-window" } }';
         const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps],
-          { timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } });
+          psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } }));
         return stdout.trim() === 'ok';
       }
 
@@ -673,7 +674,7 @@ export class WindowsAdapter implements PlatformAdapter {
         'if ($nh -lt 0) { $nh = $r.Height - $r.Y }' +
         '[Win32.NativeMethods]::SetWindowPos($h, [System.IntPtr]::Zero, $nx, $ny, $nw, $nh, 0x0004) | Out-Null;' +
         '"ok"';
-      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], { timeout: PS_TIMEOUT_MS });
+      const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-Command', ps], psOpts({ timeout: PS_TIMEOUT_MS }));
       return stdout.trim() === 'ok';
     } catch {
       return false;
@@ -1215,7 +1216,7 @@ export class WindowsAdapter implements PlatformAdapter {
         'powershell.exe',
         ['-NoProfile', '-Command',
           '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))'],
-        { timeout: CLIPBOARD_TIMEOUT_MS },
+        psOpts({ timeout: CLIPBOARD_TIMEOUT_MS }),
       );
       return Buffer.from((stdout ?? '').trim(), 'base64').toString('utf8');
     } catch {
@@ -1342,9 +1343,9 @@ export class WindowsAdapter implements PlatformAdapter {
     }
 
     try {
-      const child = spawn('powershell.exe', ['-NoProfile', '-Command', cmdParts.join(' ')], {
+      const child = spawn('powershell.exe', ['-NoProfile', '-Command', cmdParts.join(' ')], psOpts({
         stdio: 'ignore', detached: true, windowsHide: true, env,
-      });
+      }));
       child.unref();
     } catch {
       // Fall through to the lookup — the app may already be running.

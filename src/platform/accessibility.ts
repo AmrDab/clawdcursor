@@ -21,6 +21,7 @@ import { utf8ClipboardEnv } from './mac-keyboard';
 import type { PlatformAdapter, UiElement } from './types';
 import { isOwnUiPid, guardInputMethods } from './pointer-guard';
 import { windowTextIncludes } from '../tools/window-text';
+import { psOpts } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -597,7 +598,7 @@ export class AccessibilityBridge {
         const { stdout } = await execFileAsync('powershell.exe', [
           '-NoProfile', '-Command',
           '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))',
-        ], { timeout: 2000 });
+        ], psOpts({ timeout: 2000 }));
         return Buffer.from((stdout ?? '').trim(), 'base64').toString('utf8').trim();
       }
       if (IS_MAC) {

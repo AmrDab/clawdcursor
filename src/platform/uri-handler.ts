@@ -25,6 +25,7 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { psOpts } from './ps-spawn';
 
 const execFileAsync = promisify(execFile);
 
@@ -183,7 +184,7 @@ export async function shellDispatchUriAndVerify(
     const child = spawn(
       'powershell.exe',
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI'],
-      { detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } },
+      psOpts({ detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
     );
     child.unref();
     child.on('error', () => { /* poll reports no-window */ });
@@ -220,7 +221,7 @@ async function snapshotProcessWindows(processNameLower: string): Promise<Set<str
         '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command',
         `Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -ne '' -and $_.ProcessName.ToLower() -eq $env:CLAWD_PS_NAME } | ForEach-Object { "$($_.MainWindowHandle)|$($_.MainWindowTitle)" }`,
       ],
-      { timeout: 3000, env: { ...process.env, CLAWD_PS_NAME: processNameLower } },
+      psOpts({ timeout: 3000, env: { ...process.env, CLAWD_PS_NAME: processNameLower } }),
     );
     return new Set(
       stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean),

@@ -326,3 +326,35 @@ describe('a failed or slow ancestry read is not "no ancestors"', () => {
     await expect(fakeLayer().typeText('x')).rejects.toThrow(/the app this agent runs in/);
   });
 });
+
+describe('the direct parent follows the shell exclusions and the creation-time check', () => {
+  const realPpid = Object.getOwnPropertyDescriptor(process, 'ppid');
+  afterEach(() => { __setHostAncestryForTests(null); if (realPpid) Object.defineProperty(process, 'ppid', realPpid); });
+  const row = (pid: number, ppid: number, created: number, name: string) => ({ pid, ppid, created, name });
+
+  it('before the table is read: a terminal parent counts, a desktop shell parent (explorer, launchd, systemd) does not', async () => {
+    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    __setHostAncestryForTests(new Promise<number[]>(() => {}), 60_000);
+    for (const shell of ['explorer', 'launchd', 'systemd', 'Finder']) {
+      fg = { processId: 777, processName: shell };
+      const d = fakeLayer();
+      await d.typeText('x');
+      expect(d.sent, shell).toEqual(['type x']);
+    }
+    fg = { processId: 777, processName: 'WindowsTerminal' };
+    await expect(fakeLayer().typeText('x')).rejects.toThrow(/the app this agent runs in/);
+  });
+
+  it('once the table is read: an explorer parent is not a host, a real one is, a reused pid (parent newer than child) is not', async () => {
+    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    const run = async (parent: ReturnType<typeof row>) => {
+      await __startHostAncestryReadForTests(async () => [row(process.pid, 777, 500, 'node'), parent]);
+      fg = { processId: 777, processName: parent.name };
+      const d = fakeLayer();
+      return d.typeText('x').then(() => 'sent', () => 'refused');
+    };
+    expect(await run(row(777, 1, 100, 'explorer.exe'))).toBe('sent');
+    expect(await run(row(777, 1, 100, 'WindowsTerminal.exe'))).toBe('refused');
+    expect(await run(row(777, 1, 900, 'WindowsTerminal.exe'))).toBe('sent');
+  });
+});
