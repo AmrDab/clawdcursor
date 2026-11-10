@@ -147,7 +147,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     init(mode: String) { self.mode = mode }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if mode == "pill" { pill() } else { outline() }
+        if mode == "pill" { pill() } else { windowOutline() }
         giveFocusBack()
         // Activation can also land a moment after launch.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { giveFocusBack() }
@@ -596,7 +596,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
     }
 
-    func outline() {
+    func windowOutline() {
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
         win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content

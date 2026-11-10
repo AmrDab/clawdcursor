@@ -276,7 +276,7 @@ describe('no full-screen glow', () => {
   it('no outline drawer sizes a window to a screen', () => {
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift.slice(swift.indexOf('func outline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
+    expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
     const py = read('scripts', 'linux', 'overlay.py');
     const start = py.indexOf('def run_outline(');
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
