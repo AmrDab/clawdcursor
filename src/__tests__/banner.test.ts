@@ -291,5 +291,8 @@ describe('no full-screen glow', () => {
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
     expect(ps).toContain('BeginInvoke((Action)Follow)');
+    // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
+    expect(ps).toContain('p[0].EndsWith("TARGET")');
+    expect(ps).toContain('p[0].EndsWith("HIDE")');
   });
 });

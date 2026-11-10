@@ -94,8 +94,9 @@ public class WindowOutline : Form {
                     string[] p = line.Trim().Split(' ');
                     long n = 0;
                     if (p.Length > 1) long.TryParse(p[1], out n);
-                    if (p[0] == "TARGET") target = new IntPtr(n);
-                    else if (p[0] == "HIDE") Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
+                    // EndsWith: a parent that puts a byte-order mark in front of its first line must not lose it.
+                    if (p[0].EndsWith("TARGET")) target = new IntPtr(n);
+                    else if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
                     else continue;
                     // At once, not on the next poll: the parent waits only 90 ms after HIDE before it captures.
                     try { BeginInvoke((Action)Follow); } catch { }
@@ -111,9 +112,11 @@ public class WindowOutline : Form {
         poll.Start();
     }
 
-    // Is this window somewhere above `t` in the z-order? (Walks up from `t`: few windows are above the one in front.)
+    // Is this window somewhere above `t` in the z-order? (Walks up from `t`: few windows are above the one in front;
+    // the cap is for a z-order that changes under the walk.)
     bool Above(IntPtr t) {
-        for (IntPtr h = GetWindow(t, 3); h != IntPtr.Zero; h = GetWindow(h, 3)) if (h == Handle) return true; // GW_HWNDPREV
+        IntPtr h = GetWindow(t, 3); // GW_HWNDPREV
+        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) if (h == Handle) return true;
         return false;
     }
 
@@ -152,18 +155,23 @@ public class WindowOutline : Form {
 
 # Compiling the class costs a second or more on every start (csc.exe), so the border came up late. The compiled
 # assembly is kept in ~/.clawdcursor/bin (where the macOS helpers are cached) under a name made from the source, and
-# loaded from there the next time; if that fails for any reason the class is compiled in memory as before.
+# loaded from there the next time. A cached file that does not load is built again and replaced; if that fails too,
+# for any reason, the class is compiled in memory as before.
 try {
     $sha = [System.Security.Cryptography.SHA256]::Create().ComputeHash([System.Text.Encoding]::UTF8.GetBytes($source))
     $dir = Join-Path $env:USERPROFILE '.clawdcursor\bin'
     $dll = Join-Path $dir ('window-outline-' + (-join ($sha[0..7] | ForEach-Object { $_.ToString('x2') })) + '.dll')
-    if (-not (Test-Path $dll)) {
+    $build = {
         [void](New-Item -ItemType Directory -Force $dir)
         Get-ChildItem $dir -Filter 'window-outline-*.dll' | Remove-Item -Force -ErrorAction SilentlyContinue  # other versions
         Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition $source -OutputType Library -OutputAssembly "$dll.$PID.tmp"
         Move-Item -Force "$dll.$PID.tmp" $dll
     }
-    Add-Type -Path $dll
+    # What a build that was killed half-way left behind (not one that is running now).
+    Get-ChildItem $dir -Filter 'window-outline-*.tmp' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-5) } | Remove-Item -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path $dll)) { & $build }
+    try { Add-Type -Path $dll } catch { & $build; Add-Type -Path $dll }
 } catch {
     Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition $source
 }
