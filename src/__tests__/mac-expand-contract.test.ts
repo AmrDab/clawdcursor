@@ -86,7 +86,10 @@ describe('the helper presses no key on its own say-so', () => {
     expect(body.indexOf('guard keyAllowed("Return")')).toBeLessThan(body.indexOf('postKeyToFrontmost(36'));
     expect(body.indexOf('guard keyAllowed("Escape")')).toBeLessThan(body.indexOf('postKeyToFrontmost(53'));
     expect(body).toMatch(/hasKeyboardFocus\(el, pid: pid\)/);
-    expect(body).toMatch(/focusIsWithin\(m\.element, pid: pid\) \|\| hasKeyboardFocus\(el, pid: pid\)/);
+    // Escape for a list: the focus must be on the control or inside the list, checked before the key is posted
+    const esc = body.slice(body.indexOf('func closeWithEscape('), body.indexOf('if want {'));
+    expect(esc).toMatch(/hasKeyboardFocus\(el, pid: pid\) \|\| focusIsWithin\(list\.element, pid: pid\)/);
+    expect(esc.indexOf('focusIsWithin')).toBeLessThan(esc.indexOf('postKeyToFrontmost(53'));
     // the focus a failed keyboard expand moved is put back
     expect(body).toMatch(/restoreFocus\(\)/);
   });
@@ -102,14 +105,16 @@ describe('a list is "this control\'s" only when it is tied to the control', () =
   it('ownMenu: a menu hung under the control, or one right next to it - never "any menu in the window"', () => {
     const fn = swift.slice(swift.indexOf('func ownMenu('), swift.indexOf('/// expand / collapse. Every success'));
     expect(fn).toMatch(/\$0\.child/);
-    expect(fn).toMatch(/insetBy\(dx: -16, dy: -16\)/);
-    expect(fn).toMatch(/zone\.intersects\(\$0\.frame\)/);
+    expect(fn).toMatch(/insetBy\(dx: -28, dy: -28\)/);
+    expect(fn).toMatch(/kinds\.contains\(\$0\.kind\) && zone\.intersects\(\$0\.frame\)/);
+    // a plain AXList stands in for the control's menu only where the caller asks for it (default: menus only)
+    expect(fn).toMatch(/kinds: Set<ListKind> = \[\.menu\]/);
   });
 
   it('expand counts only a menu that appeared with the press, or the control saying it is open', () => {
     const body = expandBody();
     expect(body).toMatch(/!before\.contains \{ \$0\.frame == n\.frame \}/);
-    expect(body).toMatch(/ownMenu\(of: el, in: fresh\)/);
+    expect(body).toMatch(/ownMenu\(of: el, in: fresh, kinds: \[\.menu, \.list\]\)/);
     expect(body).toMatch(/openState\(el\) == true/);
   });
 
@@ -117,10 +122,13 @@ describe('a list is "this control\'s" only when it is tied to the control', () =
     const body = expandBody();
     expect(body).toMatch(/let mine = ownMenu\(of: el, in: before\)/);
     expect(body).toMatch(/if mine != nil \|\| openState\(el\) == true \{ return done\("unchanged"\) \}/);
-    // Escape sits inside `if let m = mine`: it is never sent for a menu that is not the control's
-    const mineBlock = body.indexOf('if let m = mine {');
-    expect(mineBlock).toBeGreaterThan(-1);
-    expect(body.indexOf('needsKey("Escape")')).toBeGreaterThan(mineBlock);
+    // "unchanged" is decided on menus only: a plain list standing next to the control is not proof that it is open
+    expect(body).toMatch(/let mine = ownMenu\(of: el, in: before\)\s/);
+    // Escape is only ever sent through closeWithEscape(list), and that is called only with the control's own menu or list
+    const calls = body.match(/closeWithEscape\(/g) ?? [];
+    expect(calls).toHaveLength(3);                                               // the definition + two callers
+    expect(body).toMatch(/if let m = mine \{[\s\S]*return closeWithEscape\(m,/);
+    expect(body).toMatch(/if let l = ownMenu\(of: el, in: before, kinds: \[\.list\]\) \{\s*return closeWithEscape\(l,/);
   });
 
   it('a press that opened nothing the helper could see says so, and tells the caller it acted (so select cleans up)', () => {
