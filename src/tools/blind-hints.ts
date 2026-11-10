@@ -64,10 +64,10 @@ function insideDocuments(tree: ReadonlyArray<UiElement>): UiElement[] {
 }
 
 /** Enough to act on: 5 named elements, or a small set that is mostly named with a control to act on (a dialog, a login form). */
-function hasStructure(els: ReadonlyArray<UiElement>): boolean {
+function hasStructure(els: ReadonlyArray<UiElement>, smallMin = 1): boolean {
   const names = els.filter(named);
   if (names.length >= STRUCTURED_MIN) return true;
-  return names.length > 0 && names.length * 2 >= els.length && names.some(el => ACTIONABLE.test(el.controlType ?? ''));
+  return names.length >= smallMin && names.length * 2 >= els.length && names.some(el => ACTIONABLE.test(el.controlType ?? ''));
 }
 
 /**
@@ -78,7 +78,9 @@ function hasStructure(els: ReadonlyArray<UiElement>): boolean {
  * could already read by name.
  */
 export function isSparseTree(tree: ReadonlyArray<UiElement>, isBrowser: boolean): boolean {
-  return !hasStructure(isBrowser ? insideDocuments(tree) : tree);
+  // In a web area the small-set exception needs 3 named elements: a canvas or Flutter page with one "Enable accessibility"
+  // button is not a readable page.
+  return !(isBrowser ? hasStructure(insideDocuments(tree), 3) : hasStructure(tree));
 }
 
 /** How alike two element names are, for "did you mean": shared words, containment, then a common prefix. 0 = unrelated. */

@@ -15,6 +15,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'child_process';
 import * as readline from 'readline';
 import * as path from 'path';
+import * as os from 'os';
 import { getPackageRoot } from '../paths';
 import { timeStep } from '../core/observability/steps';
 
@@ -61,12 +62,14 @@ export class PSRunner {
       this.dead  = false;
       this.ready = false;
 
+      // Windows PowerShell writes Microsoft/Windows/PowerShell/ModuleAnalysisCache under LOCALAPPDATA, and under the working
+      // directory when the environment has none (a harness that strips it): run from the temp dir so a stray never lands in a repo.
       const proc = spawn('powershell.exe', [
         '-NoProfile',
         '-NonInteractive',
         '-ExecutionPolicy', 'Bypass',
         '-File', BRIDGE_SCRIPT,
-      ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      ], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, cwd: os.tmpdir() });
       this.proc = proc;
 
       this.rl = readline.createInterface({ input: proc.stdout! });

@@ -181,6 +181,13 @@ describe('5. the "little or no structure" hint needs a sparse tree', () => {
     expect(isSparseTree([doc], true)).toBe(true);
   });
 
+  it('a web area with one control (Flutter "Enable accessibility", a canvas with a button) still gets the hint; a native dialog with two does not need three', () => {
+    const doc = el('page', 'Document', 0, 100, 1000, 800);
+    expect(isSparseTree([doc, el('Enable accessibility', 'Button', 100, 300, 200, 20)], true)).toBe(true);
+    expect(isSparseTree([doc, el('A', 'Button', 100, 300, 20, 20), el('B', 'Button', 130, 300, 20, 20)], true)).toBe(true);
+    expect(isSparseTree([el('OK', 'Button'), el('Cancel', 'Button')], false)).toBe(false);
+  });
+
   it('many unnamed elements are still sparse: there is nothing to act on by name', () => {
     expect(isSparseTree(Array.from({ length: 40 }, () => el('', 'Pane')), false)).toBe(true);
   });

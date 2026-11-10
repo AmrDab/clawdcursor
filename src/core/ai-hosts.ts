@@ -12,6 +12,8 @@
  * list alone applies.
  */
 import { execFile } from 'child_process';
+import { tmpdir } from 'os';
+import { logger } from './observability/logger';
 
 export const AI_HOST_PROCESSES: readonly string[] = [
   'claude', 'claude-desktop', 'chatgpt', 'codex', 'cursor', 'code', 'code-insiders', 'code - insiders', 'windsurf', 'zed', 'zeditor', 'zed-editor',
@@ -51,21 +53,48 @@ const NOT_A_HOST = new Set(['explorer', 'launchd', 'systemd', 'init', 'services'
 
 interface ProcRow { pid: number; ppid: number; name: string; /** creation time (Windows file time); 0 when the OS table has none */ created: number }
 
-/** The ancestors once read; null until then. An input that arrives before it is read goes by the list alone, never waits. */
+/** The ancestors once read; null until then. */
 let ancestry: Set<number> | null = null;
+/** The read in flight, if any. An input to a window that is not on the list waits for it (bounded), never decides without it. */
+let ancestryPending: Promise<void> | null = null;
 let ancestryOn = false;
+let failedLogged = false;
+/** How long an input waits for a pending read before it falls back to the list alone. */
+let ancestryWaitMs = 2000;
 
-/** The stdio entry: this server has a host process to find. Starts the read now, in the background. Never called for the HTTP daemon. */
+/** The stdio entry: this server has a host process to find. Starts the read now, in the background, so the usual case never waits. Never called for the HTTP daemon. */
 export function enableHostAncestry(): void {
   if (ancestryOn) return;
   ancestryOn = true;
-  void computeAncestors().then(set => { if (ancestryOn && !ancestry) ancestry = set; }, () => {});
+  startRead(readTable);
 }
 
-/** For tests: the ancestor pids to use (null = off, and forget what was read). */
-export function __setHostAncestryForTests(pids: Iterable<number> | null, ready = true): void {
+/** Start the read; whatever happens, the direct parent still counts (aiHostKind), so a failed read is "no more ancestors", never "none". */
+function startRead(read: () => Promise<ProcRow[]>): void {
+  ancestryPending = computeAncestors(read).then(set => { ancestry = set; }, () => {}).finally(() => { ancestryPending = null; });
+}
+
+/** For tests: run the real read path with a table reader of the test's own. */
+export function __startHostAncestryReadForTests(read: () => Promise<ProcRow[]>, waitMs = 2000): Promise<void> {
+  ancestryOn = true; ancestryWaitMs = waitMs; ancestry = null;
+  startRead(read);
+  return ancestryPending!;
+}
+
+/**
+ * For tests: the ancestor pids to use (null = off, and forget what was read). A promise stands for a read still in flight: it
+ * resolves to the pids, or never.
+ */
+export function __setHostAncestryForTests(pids: Iterable<number> | Promise<Iterable<number>> | null, waitMs = 2000): void {
   ancestryOn = pids !== null;
-  ancestry = pids && ready ? new Set(pids) : null;   // not ready: the read has started and not finished
+  ancestryWaitMs = waitMs;
+  ancestry = null;
+  ancestryPending = null;
+  if (pids === null) return;
+  if (pids instanceof Promise) {
+    const p: Promise<void> = pids.then(set => { ancestry = new Set(set); }, () => {}).finally(() => { if (ancestryPending === p) ancestryPending = null; });
+    ancestryPending = p;
+  } else ancestry = new Set(pids);
 }
 
 function readTable(): Promise<ProcRow[]> {
@@ -74,9 +103,9 @@ function readTable(): Promise<ProcRow[]> {
     ? ['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
       'Get-CimInstance Win32_Process | ForEach-Object { $c = if ($_.CreationDate) { $_.CreationDate.ToFileTimeUtc() } else { 0 }; "$($_.ProcessId) $($_.ParentProcessId) $c $($_.Name)" }']]
     : ['ps', ['-A', '-o', 'pid=,ppid=,comm=']];
-  return new Promise(resolve => {
-    execFile(cmd as string, args as string[], { timeout: 8000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
-      if (err) return resolve([]);
+  return new Promise((resolve, reject) => {
+    execFile(cmd as string, args as string[], { timeout: 8000, windowsHide: true, cwd: tmpdir(), maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => {
+      if (err) return reject(new Error(String((err as NodeJS.ErrnoException).code ?? 'process table unreadable')));
       const rows: ProcRow[] = [];
       for (const line of String(stdout).split(/\r?\n/)) {
         const m = win ? /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(.*?)\s*$/.exec(line) : /^\s*(\d+)\s+(\d+)\s+()(.*?)\s*$/.exec(line);
@@ -108,13 +137,33 @@ export function walkAncestors(table: ProcRow[], self: number): Set<number> {
   return out;
 }
 
-async function computeAncestors(): Promise<Set<number>> {
-  try { return walkAncestors(await readTable(), process.pid); } catch { return new Set(); }
+async function computeAncestors(read: () => Promise<ProcRow[]>): Promise<Set<number>> {
+  try {
+    const table = await read();
+    if (!table.length) throw new Error('empty process table');
+    return walkAncestors(table, process.pid);
+  } catch (err) {
+    // Once, and only the reason: no paths, no command lines.
+    if (!failedLogged) { failedLogged = true; logger.warn('host.ancestry_failed', { reason: String((err as { message?: string })?.message ?? err).slice(0, 80) }); }
+    return new Set();
+  }
 }
 
-/** Why a window counts as an AI host: its process is on the list, or this server was started from it. null = it does not. */
-export function aiHostKind(w: { processName?: string | null; processId?: number }): 'list' | 'ancestor' | null {
+/**
+ * Why a window counts as an AI host: its process is on the list, or this server was started from it. null = it does not.
+ * While the ancestry read is still running, a window that is not on the list WAITS for it, bounded (~2 s): deciding without it
+ * would let an input into the agent's own terminal through in the first seconds. Only a read that failed or does not finish in
+ * time falls back to the list alone, and that is deliberately fail-open: a slow process table must not block input forever.
+ */
+export async function aiHostKind(w: { processName?: string | null; processId?: number }): Promise<'list' | 'ancestor' | null> {
   if (isAiHostProcess(w.processName)) return 'list';
-  if (ancestryOn && ancestry && w.processId && ancestry.has(w.processId)) return 'ancestor';
-  return null;
+  if (!ancestryOn || !w.processId) return null;
+  // The direct parent is known without any process-table read: pending, failed or timed out, it still counts.
+  if (w.processId === process.ppid) return 'ancestor';
+  if (!ancestry && ancestryPending) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([ancestryPending, new Promise<void>(r => { timer = setTimeout(r, ancestryWaitMs); })]);
+    clearTimeout(timer);
+  }
+  return ancestry?.has(w.processId) ? 'ancestor' : null;
 }

@@ -181,7 +181,7 @@ export function isGuardRefusal(err: unknown): boolean {
  */
 async function refuseAiHost(now: Foreground, explicit: boolean): Promise<void> {
   if (explicit || now.guessed) return;
-  const kind = aiHostKind(now);
+  const kind = await aiHostKind(now);
   if (kind) throw new Error(AI_HOST_REFUSAL(now.processName, kind));
 }
 

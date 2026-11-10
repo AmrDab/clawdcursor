@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import { __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests } from '../core/ai-hosts';
+import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests } from '../core/ai-hosts';
 import { classifyResult } from '../core/result-codes';
 
 type Win = { processId: number; processName: string; title?: string };
@@ -262,14 +262,67 @@ describe('review round 3', () => {
     __setHostAncestryForTests(null);
   });
 
-  it('an input that arrives before the ancestry read has finished goes by the list alone and does not wait', async () => {
-    __setHostAncestryForTests([500], false);
+  it('an input during a pending read to an ancestor window waits for it and is refused once it resolves', async () => {
+    let resolve!: (v: number[]) => void;
+    __setHostAncestryForTests(new Promise<number[]>(r => { resolve = r; }));
     fg = { processId: 500, processName: 'gnome-terminal-server' };
     const d = fakeLayer();
-    await d.typeText('x');   // not yet known: not blocked, not delayed
+    const sent = d.typeText('x');
+    const outcome = sent.then(() => 'sent', e => String(e.message));
+    await new Promise(r => setTimeout(r, 50));
+    resolve([500]);
+    expect(await outcome).toMatch(/the app this agent runs in \(gnome-terminal-server\) — nothing was sent/);
+    expect(d.sent).toEqual([]);
+    __setHostAncestryForTests(null);
+  });
+
+  it('a read that never resolves: input proceeds after the timeout, by the list alone', async () => {
+    __setHostAncestryForTests(new Promise<number[]>(() => {}), 150);
+    fg = { processId: 500, processName: 'gnome-terminal-server' };
+    const d = fakeLayer();
+    const started = Date.now();
+    await d.typeText('x');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(140);
     expect(d.sent).toEqual(['type x']);
-    fg = CLAUDE;
+    fg = CLAUDE;                                   // the list still applies while the read is out
     await expect(d.typeText('y')).rejects.toThrow(/Claude, an AI assistant|foreground changed/);
     __setHostAncestryForTests(null);
+  });
+
+  it('a read that already resolved costs no wait', async () => {
+    __setHostAncestryForTests([500], 60_000);      // a wait here would hang the test
+    fg = { processId: 600, processName: 'notepad' };
+    const d = fakeLayer();
+    await d.typeText('x');
+    expect(d.sent).toEqual(['type x']);
+    __setHostAncestryForTests(null);
+  });
+});
+
+describe('a failed or slow ancestry read is not "no ancestors"', () => {
+  const realPpid = Object.getOwnPropertyDescriptor(process, 'ppid');
+  afterEach(() => { __setHostAncestryForTests(null); if (realPpid) Object.defineProperty(process, 'ppid', realPpid); });
+
+  it('failed read: logged once with the reason only; the direct parent\'s window is still refused, other windows proceed', async () => {
+    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    const warn = vi.spyOn((await import('../core/observability/logger')).logger, 'warn').mockImplementation(() => {});
+    await __startHostAncestryReadForTests(async () => { throw new Error('ENOENT'); });
+    await __startHostAncestryReadForTests(async () => []);   // a second failure is not logged again
+    expect(warn.mock.calls.filter(c => c[0] === 'host.ancestry_failed')).toHaveLength(1);
+    expect(JSON.stringify(warn.mock.calls[0][1])).toBe('{"reason":"ENOENT"}');
+    warn.mockRestore();
+    fg = { processId: 777, processName: 'WindowsTerminal' };
+    const d = fakeLayer();
+    await expect(d.typeText('x')).rejects.toThrow(/the app this agent runs in \(WindowsTerminal\)/);
+    fg = { processId: 888, processName: 'notepad' };
+    await d.typeText('y');
+    expect(d.sent).toEqual(['type y']);
+  });
+
+  it('while the read is pending the direct parent is refused at once, without waiting', async () => {
+    Object.defineProperty(process, 'ppid', { value: 777, configurable: true });
+    __setHostAncestryForTests(new Promise<number[]>(() => {}), 60_000);
+    fg = { processId: 777, processName: 'WindowsTerminal' };
+    await expect(fakeLayer().typeText('x')).rejects.toThrow(/the app this agent runs in/);
   });
 });
