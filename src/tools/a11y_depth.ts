@@ -17,6 +17,8 @@ import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import { selectOption } from '../platform/select-option';
 import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
+import { quoteScreenText } from '../core/result-codes';
+import { missText, untrusted } from '../core/miss-text';
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -71,7 +73,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid, action: 'expand',
         });
         return {
-          text: res.success ? `Expanded "${name}".` : `a11y_expand failed for "${name}".`,
+          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `a11y_expand failed for ${quoteScreenText(name)}.`,
           isError: !res.success,
         };
       },
@@ -98,7 +100,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid, action: 'collapse',
         });
         return {
-          text: res.success ? `Collapsed "${name}".` : `a11y_collapse failed for "${name}".`,
+          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `a11y_collapse failed for ${quoteScreenText(name)}.`,
           isError: !res.success,
         };
       },
@@ -144,16 +146,16 @@ export function getA11yDepthTools(): ToolDefinition[] {
           const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
           // Typed into the right window, but the field could not be read back (the Windows keyboard fallback).
           if (res.data?.unverified === true) {
-            return { text: `Typed "${preview}" into "${safeNameStr}" by keyboard, but the field could not be read back: NOT verified. Read it to check.` };
+            return { text: `Typed "${preview}" into ${quoteScreenText(safeNameStr)} by keyboard, but the field could not be read back: NOT verified. Read it to check.` };
           }
-          return { text: `Set "${safeNameStr}" = "${preview}".` };
+          return { text: `Set ${quoteScreenText(safeNameStr)} = "${preview}".` };
         }
 
         // A refusal is final. "Nothing settable here" falls through to the keyboard below; "I will not pick a field for you"
         // (a role that several fields share, a secure field) must not: that fallback clicks the widest match and types into it.
         if (res.data?.refused === true) {
           return {
-            text: `set_field_value refused for "${safeNameStr}": ${typeof res.data.error === 'string' ? res.data.error : 'the platform declined to act on it'}`,
+            text: `set_field_value refused for ${quoteScreenText(safeNameStr)}: ${typeof res.data.error === 'string' ? untrusted(res.data.error) : 'the platform declined to act on it'}`,
             isError: true,
           };
         }
@@ -192,7 +194,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           }
           const located = !!bounds && bounds.width > 0;
           if (!focusRes.success && !located) {
-            return { text: `set_field_value failed for "${safeNameStr}": ${typeof res.data?.error === 'string' ? res.data.error : 'no settable value'}, and the field could not be focused to type into it.`, isError: true };
+            return { text: `set_field_value failed for ${quoteScreenText(safeNameStr)}: ${res.data?.error !== undefined ? missText(res.data) : 'no settable value'}, and the field could not be focused to type into it.`, isError: true };
           }
           if (located) {
             const cx = Math.round(bounds!.x + bounds!.width / 2);
@@ -207,7 +209,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           await ctx.platform.keyPress('mod+a');
           await ctx.platform.typeText(safeValue);
           const preview = safeValue.length > 40 ? safeValue.slice(0, 40) + '…' : safeValue;
-          return { text: `Set "${safeNameStr}" = "${preview}" (via keyboard fallback).` };
+          return { text: `Set ${quoteScreenText(safeNameStr)} = "${preview}" (via keyboard fallback).` };
         }
       },
     },
@@ -236,15 +238,15 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'toggle',
         });
-        if (!res.success) return { text: `a11y_toggle failed for "${name}"${failReason(res)}.`, isError: true };
+        if (!res.success) return { text: `a11y_toggle failed for ${quoteScreenText(name)}${failReason(res)}.`, isError: true };
         const state = res.data?.toggleState ?? 'unknown';
         // The bridges read the state back until it changes; if it never did, the new state was not seen and the old one
         // must not be reported as the result.
         if (res.data?.toggleChanged === false) {
-          return { text: `Toggled "${name}" but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.` };
+          return { text: `Toggled ${quoteScreenText(name)} but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.` };
         }
         // The marker comes before the (screen-derived) name and only when the new state was read back: see classifyResult.
-        return { text: res.data?.toggleChanged === true ? `Toggled (read back ✓) "${name}" → ${state}.` : `Toggled "${name}" → ${state}.` };
+        return { text: res.data?.toggleChanged === true ? `Toggled (read back ✓) ${quoteScreenText(name)} → ${state}.` : `Toggled ${quoteScreenText(name)} → ${state}.` };
       },
     },
 
@@ -278,9 +280,9 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'select',
         });
-        if (res.success) return { text: `Selected "${name}".` };
+        if (res.success) return { text: `Selected ${quoteScreenText(name)}.` };
         const notItem = await notSelectableReason(ctx.platform, { name: String(name), controlType, processId: pid });
-        return { text: `a11y_select failed for "${name}"${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
+        return { text: `a11y_select failed for ${quoteScreenText(name)}${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
       },
     },
 
@@ -309,7 +311,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid,
         });
         if (hits.length === 0) {
-          return { text: `a11y_get_element: no element named "${name}" found.`, isError: true };
+          return { text: `a11y_get_element: no element named ${quoteScreenText(name)} found.`, isError: true };
         }
         return { text: JSON.stringify(hits[0], null, 2) };
       },
@@ -337,7 +339,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid, action: 'get-value',
         });
         if (!res.success) {
-          return { text: `a11y_get_value: "${name}" exposes no ValuePattern or AXValue.`, isError: true };
+          return { text: `a11y_get_value: ${quoteScreenText(name)} exposes no ValuePattern or AXValue.`, isError: true };
         }
         const value = res.data?.value ?? '';
         return { text: JSON.stringify({ name, value }) };
@@ -366,7 +368,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(name), controlType, processId: pid,
         });
         if (hits.length === 0) {
-          return { text: `get_element_state: no element named "${name}".`, isError: true };
+          return { text: `get_element_state: no element named ${quoteScreenText(name)}.`, isError: true };
         }
         const el = hits[0];
         const state = {
@@ -424,7 +426,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
           name: String(parentName), controlType, processId: pid,
         });
         if (parents.length === 0) {
-          return { text: `a11y_list_children: parent "${parentName}" not found.`, isError: true };
+          return { text: `a11y_list_children: parent ${quoteScreenText(parentName)} not found.`, isError: true };
         }
         // findElements can return loose/substring matches ordered by tree
         // position, so [0] is often NOT the element the caller named (live
@@ -467,7 +469,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
               };
             }
           }
-          return { text: `a11y_list_children: parent "${parentName}" has zero bounds (scrolled out of view) and no children in the accessibility tree.`, isError: true };
+          return { text: `a11y_list_children: parent ${quoteScreenText(parentName)} has zero bounds (scrolled out of view) and no children in the accessibility tree.`, isError: true };
         }
 
         // For the tree walk, prefer the parent element's own processId so

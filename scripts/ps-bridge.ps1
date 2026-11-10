@@ -328,13 +328,6 @@ function Get-OwnedWindowElements {
     return ,$found
 }
 
-# The window a find / invoke searches in a process. A browser, Explorer or Office process has several top-level windows,
-# and a search over all of them returned the names in the user's OTHER windows (live 2026-11-10: a "Confirm was clicked"
-# from an old Edge window the agent never saw; a privacy leak too), while an invoke took whichever window UIA listed first.
-# The window the agent works in is the FOREGROUND window when it belongs to the pid (at its GA_ROOT: a Save as dialog in
-# front is its own root), else the pid's TOPMOST window in z-order. Only that one: no other window of the pid is searched.
-# Returns the window as ONE pipeline item (nothing when the pid has no window), so the caller's @(...) is a flat array.
-# The three seams below are what a test replaces.
 # Shell windows of explorer.exe (desktop, taskbars): never "the window the agent works in", and not app windows to count.
 $script:ShellWindowClasses = @('Progman', 'WorkerW', 'Shell_TrayWnd', 'Shell_SecondaryTrayWnd')
 
@@ -384,6 +377,13 @@ function Get-OtherWindowCount {
     return $n
 }
 
+# The window a find / invoke searches in a process. A browser, Explorer or Office process has several top-level windows,
+# and a search over all of them returned the names in the user's OTHER windows (live 2026-11-10: a "Confirm was clicked"
+# from an old Edge window the agent never saw; a privacy leak too), while an invoke took whichever window UIA listed first.
+# The window the agent works in is the FOREGROUND window when it belongs to the pid (at its GA_ROOT: a Save as dialog in
+# front is its own root), else the pid's TOPMOST window in z-order. Only that one: no other window of the pid is searched.
+# Returns the window as ONE pipeline item (nothing when the pid has no window), so the caller's @(...) is a flat array.
+# The three seams below are what a test replaces.
 function Get-ScopeWindowHandle {
     param([int]$wpid)
     $fgH = [Win32UIA]::GetForegroundWindow()

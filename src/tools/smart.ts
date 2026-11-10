@@ -22,6 +22,7 @@ import { wrapUntrustedScreenContent } from '../core/agent-loop/prompt';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
+import { untrusted } from '../core/miss-text';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -1072,7 +1073,7 @@ export function getSmartTools(): ToolDefinition[] {
           }
 
           return {
-            text: `invoke_element failed: ${result.error || 'element not found or action not supported'}`,
+            text: `invoke_element failed: ${result.error ? untrusted(result.error) : 'element not found or action not supported'}`,
             isError: true,
           };
         } catch (err: any) {

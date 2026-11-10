@@ -444,7 +444,7 @@ export function getA11yTools(): ToolDefinition[] {
 
         const result = await ctx.a11y.focusWindow(title, targetPid);
         ctx.a11y.invalidateCache();
-        if (!result.success) return { text: `Failed to focus: ${result.error}`, isError: true };
+        if (!result.success) return { text: `Failed to focus: ${result.error ? untrusted(result.error) : 'no matching window'}`, isError: true };
 
         // An owned window (Save as, a message box) is foreground once the bridge
         // says so; the centre clicks below would press one of its controls.

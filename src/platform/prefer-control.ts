@@ -9,6 +9,7 @@
  */
 import type { PlatformAdapter } from './types';
 import { missText, untrusted } from '../core/miss-text';
+import { quoteScreenText } from '../core/result-codes';
 
 export type ByNameAction = 'focus' | 'set-value' | 'toggle' | 'select';
 
@@ -86,5 +87,5 @@ export async function notSelectableReason(
 ): Promise<string | undefined> {
   const { named } = await findControls(platform, 'select', q);
   if (!named.length || named.some(h => isSelectableItem(h.controlType))) return undefined;
-  return `"${q.name}" is not a list item or tab to select (it is a ${[...new Set(named.map(h => h.controlType))].join(', ')}); to pick an option inside a dropdown, pass value`;
+  return `${quoteScreenText(q.name)} is not a list item or tab to select (it is a ${[...new Set(named.map(h => h.controlType))].join(', ')}); to pick an option inside a dropdown, pass value`;
 }

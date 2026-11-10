@@ -16,7 +16,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'SAFETY_BLOCKED' | 'NEEDS_CONFIRMATION' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
-  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -120,6 +120,11 @@ const RULES: Rule[] = [
     test: /Pattern not supported|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|element does not support (?:expand|collapse|toggle|select|AXScrollToVisible)|exposes (?:no|neither) (?:EditableText|Value)|no Selection interface/i,
     hint: 'found it, but it cannot be done that way (toggled / selected / set / expanded); try invoke / expand / toggle / select, or read its state',
     next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
+  // Found, but not on screen / the action itself failed: not "the name may differ".
+  { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /the element exists but is not visible on screen/i,
+    hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
+  { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
+    hint: 'found, but the action failed', next: REREAD },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
     test: /(?:element|window|field|button|option|item|tab|target) (?:was )?not found|not found: name=|missed —|no elements? (?:found|named)|no_clickable_target|no (?:editable )?field named|no option named|no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing/i,

@@ -36,3 +36,5 @@ __pycache__/
 # Claude Desktop extension build output (scripts/build-mcpb.mjs)
 build/
 verify-macos-report.json
+
+/Microsoft/
