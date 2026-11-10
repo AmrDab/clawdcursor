@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """ClawdCursor on-screen overlay for Linux (GTK 3).
 
-Same contract as scripts/banner.ps1 + scripts/edge-glow.ps1 on Windows, driven
+Same contract as scripts/banner.ps1 + scripts/window-outline.ps1 on Windows, driven
 by src/core/banner.ts:
 
   overlay.py pill    the top-center pill. Running: a pulsing amber dot,
@@ -26,9 +26,13 @@ by src/core/banner.ts:
                      keyboard, so the box is still a window opened by that click.)
                      stdin: "HIDE <ms>" steps aside for an agent's click;
                      "ACTIVITY <text>" replaces the activity text.
-  overlay.py glow [--color #RRGGBB] [--duration SEC]
-                     a pulsing glow on every edge of every monitor; clicks pass
-                     straight through it.
+  overlay.py outline [--color #RRGGBB]
+                     a thin border around the window the agent works in, and
+                     nothing else: no fill, nothing on the rest of the screen;
+                     clicks pass straight through it. stdin: "TARGET <xid> <pid>"
+                     names the window (a bare "TARGET": none); the border is drawn
+                     while that is the active window, and follows it. "HIDE <ms>"
+                     steps aside for a screen capture.
   overlay.py --probe prints "ok" when GTK can open the display (banner.ts uses
                      this to decide whether the overlay is available).
 
@@ -499,65 +503,84 @@ def run_pill():
         layout()
 
 
-def run_glow(color, thickness, period_ms, min_alpha, peak_alpha, duration):
+def run_outline(color, thickness):
+    gi.require_version('GdkX11', '3.0')
+    from gi.repository import GdkX11  # noqa: F401  (gives the active window its get_xid)
     r, g, b = hex_rgb(color)
-    display = Gdk.Display.get_default()
-    windows = []
-    for i in range(display.get_n_monitors()):
-        geo = display.get_monitor(i).get_geometry()
-        for edge in ('top', 'bottom', 'left', 'right'):
-            win, composited = popup(1, 1)
-            t = min(thickness, geo.width // 2, geo.height // 2) if composited else 6
-            if edge == 'top':
-                x, y, w, h = geo.x, geo.y, geo.width, t
-            elif edge == 'bottom':
-                x, y, w, h = geo.x, geo.y + geo.height - t, geo.width, t
-            elif edge == 'left':
-                x, y, w, h = geo.x, geo.y, t, geo.height
-            else:
-                x, y, w, h = geo.x + geo.width - t, geo.y, t, geo.height
+    screen = Gdk.Screen.get_default()
+    win, _composited = popup(1, 1)
+    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b''}
 
-            def draw(_w, cr, edge=edge, w=w, h=h, composited=composited):
-                cr.set_operator(cairo.OPERATOR_SOURCE)
-                if not composited:
-                    cr.set_source_rgb(r, g, b)
-                    cr.paint()
-                    return False
-                coords = {'top': (0, 0, 0, h), 'bottom': (0, h, 0, 0),
-                          'left': (0, 0, w, 0), 'right': (w, 0, 0, 0)}[edge]
-                grad = cairo.LinearGradient(*coords)
-                grad.add_color_stop_rgba(0, r, g, b, peak_alpha / 255)
-                grad.add_color_stop_rgba(1, r, g, b, 0)
-                cr.set_source(grad)
-                cr.paint()
-                return False
+    def draw(_w, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgb(r, g, b)
+        cr.paint()
+        return False
 
-            win.connect('draw', draw)
-            win.set_default_size(w, h)
-            win.move(x, y)
-            win.show_all()
-            win.resize(w, h)
-            # Click-through: an empty input shape sends every click to the
-            # window underneath.
-            win.input_shape_combine_region(cairo.Region())
-            windows.append((win, composited))
+    win.connect('draw', draw)
 
-    start = time.monotonic()
+    def frame():
+        """The target's frame, decorations included, while it is the active window."""
+        if not state['xid'] or time.monotonic() < state['hidden_until']:
+            return None
+        active = screen.get_active_window()
+        if active is None or active.get_xid() != state['xid']:
+            return None
+        e = active.get_frame_extents()
+        return (e.x, e.y, e.width, e.height) if e.width > 0 and e.height > 0 else None
 
-    def pulse():
-        elapsed = (time.monotonic() - start) * 1000
-        if duration > 0 and elapsed >= duration * 1000:
-            Gtk.main_quit()
-            return False
-        phase = (elapsed % period_ms) / period_ms
-        wave = (1 - math.cos(phase * 2 * math.pi)) / 2
-        opacity = (min_alpha + wave * (255 - min_alpha)) / 255
-        for win, composited in windows:
-            if composited:
-                win.set_opacity(opacity)
+    def follow():
+        rect = frame()
+        if rect == state['rect']:
+            return True
+        state['rect'] = rect
+        if rect is None:
+            win.hide()
+            return True
+        x, y, w, h = rect
+        t = min(thickness, w // 2, h // 2)
+        # The window is cut to a hollow frame: the middle is not part of it, so nothing lies over the content.
+        ring = cairo.Region(cairo.RectangleInt(0, 0, w, h))
+        ring.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
+        win.move(x, y)
+        win.resize(w, h)
+        win.show_all()
+        win.shape_combine_region(ring)
+        # Click-through: an empty input shape sends every click to the window underneath.
+        win.input_shape_combine_region(cairo.Region())
         return True
 
-    GLib.timeout_add(30, pulse)
+    def on_line(line):
+        parts = line.split()
+        if not parts:
+            return
+        try:
+            if parts[0] == 'TARGET':
+                state['xid'] = int(parts[1]) if len(parts) > 1 else 0
+            elif parts[0] == 'HIDE' and len(parts) > 1:
+                state['hidden_until'] = time.monotonic() + max(50, min(int(parts[1]), 10000)) / 1000
+        except ValueError:
+            return
+        follow()
+
+    def on_stdin(fd, condition):
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            return False
+        if not chunk:
+            return False  # EOF: the parent closed the pipe
+        state['buf'] += chunk
+        while b'\n' in state['buf']:
+            raw, state['buf'] = state['buf'].split(b'\n', 1)
+            on_line(raw.decode('utf-8', 'replace').strip())
+        return True
+
+    try:
+        GLib.io_add_watch(sys.stdin.fileno(), GLib.PRIORITY_DEFAULT, GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_stdin)
+    except Exception:
+        pass  # no stdin: nothing to listen to
+    GLib.timeout_add(100, follow)
 
 
 def main(argv):
@@ -565,18 +588,15 @@ def main(argv):
         ok = Gtk.init_check(sys.argv)[0] if hasattr(Gtk, 'init_check') else True
         print('ok' if ok and Gdk.Display.get_default() is not None else 'no-display')
         return 0 if ok else 1
-    if not argv or argv[0] not in ('pill', 'glow'):
-        sys.stderr.write('usage: overlay.py pill | glow [--color #RRGGBB] [--duration SEC] | --probe\n')
+    if not argv or argv[0] not in ('pill', 'outline'):
+        sys.stderr.write('usage: overlay.py pill | outline [--color #RRGGBB] | --probe\n')
         return 2
     if Gdk.Display.get_default() is None:
         return 1
     if argv[0] == 'pill':
         run_pill()
     else:
-        def opt(name, default):
-            return argv[argv.index(name) + 1] if name in argv else default
-        run_glow(opt('--color', '#f59e0b'), int(opt('--thickness', 80)), int(opt('--period', 1600)),
-                 int(opt('--min-alpha', 60)), int(opt('--peak-alpha', 200)), float(opt('--duration', 0)))
+        run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#f59e0b', 3)
     Gtk.main()
     return 0
 

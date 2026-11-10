@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import {
   stopControl, isStopped, resumeControl, sleepUnlessStopped, STOPPED_TEXT,
-  __setControlDirForTests, __setForegroundReaderForTests,
+  __setControlDirForTests, __setForegroundReaderForTests, workingWindow,
 } from '../core/control';
 import { guardInputMethods, unguarded } from '../platform/pointer-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
@@ -78,6 +78,19 @@ describe('the window in front (#294)', () => {
     await expect(d.keyPress('ctrl+l')).rejects.toThrow(/foreground changed: you were working in msedge \(pid 100\), but claude \(pid 200\)/);
     await expect(d.typeText('https://example.com\n')).rejects.toThrow(/foreground changed/);
     expect(d.sent).toEqual(['key ctrl+t']);
+  });
+
+  it('the working window (the outline goes around it) is the one the last input went to; none before the first', async () => {
+    const d = fakeDesktop();
+    expect(workingWindow()).toBeUndefined();
+    fg = { ...EDGE, handle: 0x5a0 } as Win;
+    await d.keyPress('ctrl+t');
+    expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
+    d.clickOpens = NOTEPAD;
+    await d.mouseClick(1, 1);
+    await new Promise(r => setTimeout(r, 40));
+    await d.keyPress('a');
+    expect(workingWindow()).toEqual({ processId: 300, handle: undefined });
   });
 
   it('a paste (typeText → keyPress) is one input, checked once', async () => {

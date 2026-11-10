@@ -110,16 +110,9 @@ describe('WindowsAdapter.getUiTree on a second monitor above the primary', () =>
 
 const script = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', name), 'utf8');
 
-// The same run: the glow showed on the primary only, and the pill sat on the primary while the work was on the other
-// monitor. The scripts draw real windows, so these read the source.
+// The same run: the pill sat on the primary while the work was on the other monitor. The script draws a real window,
+// so this reads the source.
 describe('the Windows overlays on a second monitor', () => {
-  it('the glow goes per-monitor-v2 (physical pixels, as the bridge) before it reads the monitors', () => {
-    const glow = script('edge-glow.ps1');
-    const aware = glow.indexOf('[GlowOverlay]::SetThreadDpiAwarenessContext([IntPtr](-4))');
-    expect(aware).toBeGreaterThan(-1);
-    expect(aware).toBeLessThan(glow.indexOf('[System.Windows.Forms.Screen]::AllScreens'));
-  });
-
   it('the pill sits on the monitor of the foreground window, the primary when there is none', () => {
     const banner = script('banner.ps1');
     const start = banner.indexOf('function Set-PillShape(');

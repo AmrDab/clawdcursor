@@ -162,9 +162,9 @@ function movesFocus(method: string, args: unknown[]): boolean {
 }
 
 /**
- * Runs before every screen capture (screenshot, OCR). The pill and glow are for the person at the screen, never part of
+ * Runs before every screen capture (screenshot, OCR). The pill and outline are for the person at the screen, never part of
  * what the agent sees: where the OS can exclude a window from capture (Windows, macOS) the overlay does so itself, and
- * the banner registers no hook; elsewhere (Linux) the hook hides the pill for the moment of the capture.
+ * the banner registers no hook; elsewhere (Linux) the hook hides them for the moment of the capture.
  */
 let captureHook: (() => Promise<void>) | null = null;
 
@@ -179,7 +179,7 @@ export async function beforeCapture(): Promise<void> {
 }
 
 /**
- * clawdcursor's own overlay processes (the pill, the glow) are the user's: never a window or app that a lookup by name, title
+ * clawdcursor's own overlay processes (the pill, the outline) are the user's: never a window or app that a lookup by name, title
  * or pid resolves to. Window lookups match process names by substring, and on Windows and Linux the overlay runs under a
  * shared interpreter (powershell, python3), so `focus {processName:"powershell"}` could land on the pill. The banner
  * registers its live pids; the platform layer filters them out of its window and app lists.

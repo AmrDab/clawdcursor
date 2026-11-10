@@ -1,5 +1,5 @@
 /**
- * clawdcursor's own on-screen controls (the pill, its pause prompt, the edge glow) are the USER's: the agent never reads,
+ * clawdcursor's own on-screen controls (the pill, its pause prompt, the window outline) are the USER's: the agent never reads,
  * presses or types into them. Found live on macOS (2026-10-24): `accessibility read_tree {processId:<overlay pid>}` returned
  * the pill's tree, the pause prompt's Resume button was findable and invokable by name — faking the user's answer — and
  * nothing stopped an agent from acting while a pause waited.

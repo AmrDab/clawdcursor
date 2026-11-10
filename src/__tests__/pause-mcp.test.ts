@@ -38,7 +38,7 @@ beforeEach(() => {
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
-  controlBanner.__setGlowSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
+  controlBanner.__setOutlineSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
 });
 
 afterEach(() => {

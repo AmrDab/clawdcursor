@@ -82,7 +82,7 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 // ── The window the agent is working in ──
 
-interface Foreground { processId: number; processName: string; appName?: string; title?: string; guessed?: boolean }
+interface Foreground { processId: number; processName: string; appName?: string; title?: string; handle?: number | string; guessed?: boolean }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
@@ -108,7 +108,7 @@ function resetBinding(): void { lease = undefined; acted = undefined; pending = 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, guessed: w.guessed } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, handle: w.handle, guessed: w.guessed } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
@@ -216,6 +216,11 @@ export function actedIn(): { processName: string; appName?: string } | undefined
 /** The app the agent's last input went to (the pill names it), or undefined before the first one. */
 export function workingIn(): { processName: string; appName?: string } | undefined {
   return lease;
+}
+
+/** The window the agent's last input went to (the outline goes around it), or undefined before the first one. */
+export function workingWindow(): { processId: number; handle?: number | string } | undefined {
+  return lease && { processId: lease.processId, handle: lease.handle };
 }
 
 /** After the input: no read. A focus-moving one opens the window in which a new window in front is the agent's own doing. */

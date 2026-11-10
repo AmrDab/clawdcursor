@@ -32,7 +32,7 @@ beforeEach(() => {
   controlBanner.__resetForTests();
   controlBanner.__setPlatformEnabledForTests(true);
   controlBanner.__setSpawnerForTests(mode => { const c = new FakeChild(); pills.push({ child: c, mode }); return c as unknown as ChildProcess; });
-  controlBanner.__setGlowSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
+  controlBanner.__setOutlineSpawnerForTests(() => new FakeChild() as unknown as ChildProcess);
 });
 afterEach(() => controlBanner.__resetForTests());
 

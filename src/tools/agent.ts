@@ -28,7 +28,7 @@ export function getAgentTools(): ToolDefinition[] {
         'A step your rules forbid is handed over as wide as your rules draw it; do the rest they allow. When a secret must go into a field or a terminal prompt, put the cursor there and ask only for the paste ("Paste your app-specific password into the Terminal, press Enter, then click Resume"), naming where it goes: never into the prompt\'s own reply box, whose text reaches you; afterwards pass the saved key\'s file path or keychain profile name, never the secret. ' +
         'For a sign-in, a code or a CAPTCHA, pass `done_when` (what shows once their step is done, e.g. [{"type":"element_exists","name":"Sign out"}]) so the prompt clears and you continue the moment they finish, with no Resume click; it must be false now. ' +
         'Never use done_when for a confirmation or a choice: a page can make it true by itself, so only the user\'s click counts there. ' +
-        'Shows an on-screen prompt: blue glow, your message, Resume / End task. ' +
+        'Shows an on-screen prompt: your message, Resume / End task. ' +
         'While you are driving the desktop, the user is watching the screen, not your chat: ask them on this prompt (use `choices` when there are options), not in your own chat. ' +
         'A question goes in `message`, with `choices` (2-6 short options, one button each) and/or `input` (a text box): a pick comes back as {status:"replied", choice:"<exact option text>"}, typed text as {status:"replied", reply}. Only the user on screen can pick or type. ' +
         'That answer is never approval of a safety confirmation (Send / Delete / Pay): the safety layer does not read it. Never ask for a password or secret on it. ' +

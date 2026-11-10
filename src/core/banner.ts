@@ -3,12 +3,14 @@
  *   - the pill: topmost, never-focused; an amber dot, what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
- *   - the glow: a click-through amber glow that pulses on every edge of every
- *     display. Pure ambient signal; spawned/killed in lockstep with the pill so
- *     the two are always in sync. Opt out via CLAWD_NO_GLOW=1.
+ *   - the outline: a thin, click-through amber border around the window the
+ *     agent is working in (control.ts workingWindow), and nothing else: no fill,
+ *     nothing on the rest of the screen, nothing at all while no window is known
+ *     or that window is not in front. Spawned/killed in lockstep with the pill;
+ *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
  *
  * One contract, three drawers (same modes, same stdout lines):
- *   - Windows: scripts/banner.ps1 + scripts/edge-glow.ps1 (WinForms)
+ *   - Windows: scripts/banner.ps1 + scripts/window-outline.ps1 (WinForms)
  *   - macOS:   scripts/mac/overlay.swift, compiled once into ~/.clawdcursor/bin
  *   - Linux:   scripts/linux/overlay.py (GTK 3; X11, or Wayland via XWayland)
  * Where the drawer can't run (no swiftc, no python3-gi, no display) the overlay
@@ -19,7 +21,7 @@
  * runs the `clawdcursor stop` flow). Two lifecycles feed it:
  *
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
- * roadblock, both overlays are respawned in their paused form — a BLUE glow and
+ * roadblock, both overlays are respawned in their paused form — a BLUE outline and
  * a pill that says what to do, with Resume / End task. The pill prints
  * BANNER_RESUME / BANNER_END; showRunning() swaps back to the amber form. The card can add choice buttons
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
@@ -44,13 +46,13 @@ import { macOverlayBinary } from '../platform/mac-ocr-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { isStopped, workingIn } from './control';
+import { isStopped, workingIn, workingWindow } from './control';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
-const PAUSED_GLOW = '#3b82f6'; // blue — "your turn"
+const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
 
 /**
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says
@@ -100,6 +102,15 @@ export function activityLabel(method: string, processName?: string, appName?: st
   return app ? `${a[0]} in ${app}` : a[0];
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
+/** The window the outline goes around: Windows and Linux find it by handle, macOS by its process. */
+type WorkingWindow = { processId: number; handle?: number | string };
+
+/** One line to an overlay's stdin; false when it has none or is gone. */
+function send(child: ChildProcess | null, line: string): boolean {
+  const stdin = child?.stdin;
+  if (!stdin || stdin.destroyed || !stdin.writable) return false;
+  try { stdin.write(`${line}\n`); return true; } catch { return false; }
+}
 
 const ANSWER_LINES: Record<string, PauseAnswer> = { BANNER_RESUME: 'resume', BANNER_END: 'end' };
 
@@ -194,15 +205,11 @@ function overlayReady(): boolean {
 
 class ControlBanner {
   private child: ChildProcess | null = null;        // the pill (carries BANNER_STOP)
-  private glowChild: ChildProcess | null = null;    // the screen-edge glow overlay
+  private outlineChild: ChildProcess | null = null; // the border around the agent's window
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private pinned = false;
   private enabled = OVERLAY_OS.has(process.platform) && process.env.CLAWD_NO_BANNER !== '1';
   private ready: () => boolean = overlayReady;
-  // The edge glow rides the same lifecycle as the pill but is independently
-  // opt-out-able (some users find ambient pulsing distracting) without losing
-  // the pill's double-click-to-stop affordance.
-  private glowEnabled = process.env.CLAWD_NO_GLOW !== '1';
   private onStopRequested: (() => void) | undefined;
   private paused: PauseInfo | null = null;
   private onAnswer: ((a: PauseAnswer, reply?: string, choice?: number) => void) | undefined;
@@ -222,31 +229,41 @@ class ControlBanner {
       // can't briefly steal foreground from the app the agent is driving.
       psOpts({ stdio, windowsHide: true, env: overlayEnv(mode) }));
   };
-  private glowSpawner: Spawner = (mode) => {
-    const stdio: ['ignore', 'ignore', 'ignore'] = ['ignore', 'ignore', 'ignore']; // click-through visual only — no stdout contract
-    const color = mode.paused ? ['--color', PAUSED_GLOW] : [];
+  private outlineSpawner: Spawner = (mode) => {
+    const stdio: ['pipe', 'ignore', 'ignore'] = ['pipe', 'ignore', 'ignore']; // stdin names the window; no stdout contract
+    const color = mode.paused ? ['--color', PAUSED_OUTLINE] : [];
     if (process.platform === 'darwin') {
-      return spawn(macOverlayBinary.cached(macScript())!, ['glow', ...color], { stdio });
+      return spawn(macOverlayBinary.cached(macScript())!, ['outline', ...color], { stdio });
     }
     if (process.platform === 'linux') {
-      return spawn('python3', [linuxScript(), 'glow', ...color], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
+      return spawn('python3', [linuxScript(), 'outline', ...color], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
     }
-    const script = path.join(getPackageRoot(), 'scripts', 'edge-glow.ps1');
-    return spawn(powershellExe(), psArgs(script, mode.paused ? ['-Color', PAUSED_GLOW] : []),
+    const script = path.join(getPackageRoot(), 'scripts', 'window-outline.ps1');
+    return spawn(powershellExe(), psArgs(script, mode.paused ? ['-Color', PAUSED_OUTLINE] : []),
       psOpts({ stdio, windowsHide: true }));
   };
 
   /**
    * Hide the pill for a moment so an agent's click under it reaches the app instead (it comes back by itself after `ms`).
    * The pill is a real window at the top centre — where browsers keep their tab strip and address bar. Called before every
-   * synthetic mouse press, drag or scroll (pointer-guard.ts). The glow is click-through and stays.
+   * synthetic mouse press, drag or scroll (pointer-guard.ts). The outline is click-through and stays — except
+   * `forCapture`, where the OS cannot keep a window out of a capture (Linux): then it steps aside too.
    */
-  async dodge(ms = DODGE_MS): Promise<void> {
-    const c = this.child;
-    const stdin = c?.stdin;
-    if (!stdin || stdin.destroyed || !stdin.writable) return;
-    try { stdin.write(`HIDE ${ms}\n`); } catch { return; }
-    await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+  async dodge(ms = DODGE_MS, forCapture = false): Promise<void> {
+    const pill = send(this.child, `HIDE ${ms}`);
+    const outline = forCapture && send(this.outlineChild, `HIDE ${ms}`);
+    if (pill || outline) await new Promise(r => setTimeout(r, DODGE_SETTLE_MS));
+  }
+
+  private working: WorkingWindow | undefined;
+  private target = ''; // the last line the live outline was sent
+
+  /** The window the agent works in now: the outline moves to it, or draws nothing when there is none. */
+  setWorkingWindow(w: WorkingWindow | undefined): void {
+    this.working = w;
+    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}` : 'TARGET';
+    if (line === this.target) return;
+    if (send(this.outlineChild, line)) this.target = line;
   }
 
   private activity = '';
@@ -256,9 +273,7 @@ class ControlBanner {
     const line = label.replace(/[\r\n]+/g, ' ').trim().slice(0, 60);
     if (!line || line === this.activity) return;
     this.activity = line;
-    const stdin = this.child?.stdin;
-    if (this.paused || !stdin || stdin.destroyed || !stdin.writable) return;
-    try { stdin.write(`ACTIVITY ${line}\n`); } catch { /* the pill is gone */ }
+    if (!this.paused) send(this.child, `ACTIVITY ${line}`);
   }
 
   /** Wire the double-click → stop callback (the `clawdcursor stop` flow). */
@@ -277,9 +292,9 @@ class ControlBanner {
     return this.child !== null;
   }
 
-  /** Pids of the live overlay processes (pill, glow) — the user's controls, never a target (own-ui-guard.ts). */
+  /** Pids of the live overlay processes (pill, outline) — the user's controls, never a target (own-ui-guard.ts). */
   overlayPids(): number[] {
-    return [this.child?.pid, this.glowChild?.pid].filter((p): p is number => typeof p === 'number');
+    return [this.child?.pid, this.outlineChild?.pid].filter((p): p is number => typeof p === 'number');
   }
 
   /** The overlay's current mode; a pending pause is 'paused' with its message. */
@@ -294,7 +309,7 @@ class ControlBanner {
   }
 
   /**
-   * Switch to the paused form (blue glow + instruction + Resume / End task) and
+   * Switch to the paused form (blue outline + instruction + Resume / End task) and
    * keep it up until showRunning(), regardless of pin or idle timers.
    */
   showPaused(info: PauseInfo, onAnswer: (a: PauseAnswer, reply?: string, choice?: number) => void, onRefocus?: (pid?: number) => void): void {
@@ -384,7 +399,7 @@ class ControlBanner {
     }
     this.installExitHook();
     this.spawnPill();
-    this.spawnGlow();
+    this.spawnOutline();
   }
 
   /** The "control in progress" pill — also the BANNER_STOP / kill-switch source. */
@@ -426,44 +441,47 @@ class ControlBanner {
       });
     }
     child.on('error', () => { if (this.child === child) { this.child = null; this.publish(); } });
-    // If the pill dies, take the glow down with it so the two never desync
-    // into a half-on state (glow without the stop affordance).
-    child.on('exit', () => { if (this.child === child) { this.child = null; this.killGlow(); } });
+    // If the pill dies, take the outline down with it so the two never desync
+    // into a half-on state (outline without the stop affordance).
+    child.on('exit', () => { if (this.child === child) { this.child = null; this.killOutline(); } });
   }
 
-  /** The ambient screen-edge glow — pure visual, click-through, no stdout. */
-  private spawnGlow(): void {
-    if (!this.glowEnabled || this.glowChild) return;
+  /** The border around the agent's window — pure visual, click-through, no stdout. It starts with no window. */
+  private spawnOutline(): void {
+    if (this.outlineChild) return;
     let child: ChildProcess;
     try {
-      child = this.glowSpawner({ paused: this.paused ?? undefined });
+      child = this.outlineSpawner({ paused: this.paused ?? undefined });
     } catch {
       return; // cosmetic — never let it break control
     }
-    this.glowChild = child;
+    this.outlineChild = child;
+    this.target = '';
     this.publish();
-    child.on('error', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
-    child.on('exit', () => { if (this.glowChild === child) { this.glowChild = null; this.publish(); } });
+    child.stdin?.on?.('error', () => { /* the outline is gone */ });
+    child.on('error', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
+    child.on('exit', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
+    if (this.working) this.setWorkingWindow(this.working);
   }
 
   // Neither overlay may outlive its owner — an orphaned "control in progress"
-  // pill or glow after the daemon stopped would be a lie on screen. kill() is a
+  // pill or outline after the daemon stopped would be a lie on screen. kill() is a
   // sync syscall, safe inside an 'exit' handler.
   private installExitHook(): void {
     if (this.exitHookInstalled) return;
     this.exitHookInstalled = true;
     process.on('exit', () => {
       try { this.child?.kill(); } catch { /* gone */ }
-      try { this.glowChild?.kill(); } catch { /* gone */ }
+      try { this.outlineChild?.kill(); } catch { /* gone */ }
       publishOverlayState({ pids: [], paused: false });
     });
   }
 
-  private killGlow(): void {
-    const g = this.glowChild;
-    this.glowChild = null;
-    if (g) {
-      try { g.kill(); } catch { /* already gone */ }
+  private killOutline(): void {
+    const o = this.outlineChild;
+    this.outlineChild = null;
+    if (o) {
+      try { o.kill(); } catch { /* already gone */ }
     }
     this.publish();
   }
@@ -479,12 +497,13 @@ class ControlBanner {
     if (c) {
       try { c.kill(); } catch { /* already gone */ }
     }
-    this.killGlow();
+    this.killOutline();
   }
 
   private forceHide(): void {
     this.clearIdleTimer();
     this.activity = ''; // the next session's pill must not open with this one's last action
+    this.working = undefined; // ...nor its outline on this one's window
     this.paused = null;
     this.onAnswer = undefined;
     this.onRefocus = undefined;
@@ -500,13 +519,11 @@ class ControlBanner {
 
   // ── test hooks ──
   __setSpawnerForTests(s: Spawner): void { this.spawner = s; }
-  __setGlowSpawnerForTests(s: Spawner): void { this.glowSpawner = s; }
+  __setOutlineSpawnerForTests(s: Spawner): void { this.outlineSpawner = s; }
   __setPlatformEnabledForTests(v: boolean): void { this.enabled = v; this.ready = () => v; }
-  __setGlowEnabledForTests(v: boolean): void { this.glowEnabled = v; }
   __resetForTests(): void {
     this.forceHide();
     this.pinned = false;
-    this.glowEnabled = true;
     this.onStopRequested = undefined;
     this.holds = 0;
     this.idleWhileHeld = false;
@@ -523,7 +540,8 @@ setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pid
 setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   if (label) controlBanner.setActivity(label);
+  controlBanner.setWorkingWindow(workingWindow());
 });
 // Captures: the Windows and macOS overlays exclude themselves from capture (WDA_EXCLUDEFROMCAPTURE, sharingType none +
-// the helper's filter); the Linux one cannot, so it steps aside for the capture as it does for a click.
-if (process.platform === 'linux') setBeforeCapture(() => controlBanner.dodge());
+// the helper's filter); the Linux one cannot, so the pill and the outline step aside for the capture.
+if (process.platform === 'linux') setBeforeCapture(() => controlBanner.dodge(DODGE_MS, true));
