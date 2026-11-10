@@ -363,3 +363,15 @@ describe('the daemon ends its session logs', () => {
     expect(fs.existsSync(leftNew)).toBe(true);
   });
 });
+
+describe('session files', () => {
+  it('two sessions made in the same millisecond get their own files', () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2027-01-15T10:00:00.000Z'));
+    try {
+      const a = new SessionLog({ version: 't', surface: 'compact' });
+      const b = new SessionLog({ version: 't', surface: 'compact' });
+      expect(a.file).not.toBe(b.file);
+    } finally { vi.useRealTimers(); }
+  });
+});

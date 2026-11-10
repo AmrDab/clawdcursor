@@ -79,6 +79,7 @@ export interface SessionTally {
 }
 
 const KEEP = 50;
+let sessionSeq = 0;
 
 export function sessionDir(): string {
   return process.env.CLAWDCURSOR_SESSION_DIR || path.join(DATA_DIR, 'sessions');
@@ -125,7 +126,8 @@ export class SessionLog {
     if (!persist || process.env.CLAWDCURSOR_SESSION_LOG === '0') { this.file = null; return; }
     const dir = sessionDir();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    this.file = path.join(dir, `session-${stamp}-${process.pid}.jsonl`);
+    // The counter: a daemon makes one per HTTP session, and two in the same millisecond shared a file.
+    this.file = path.join(dir, `session-${stamp}-${process.pid}-${++sessionSeq}.jsonl`);
     live.add(this);
     try {
       fs.mkdirSync(dir, { recursive: true });
