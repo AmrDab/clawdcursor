@@ -44,6 +44,7 @@ import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
+import { preferControl, notSelectableReason } from '../../platform/prefer-control';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -400,7 +401,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (!name.trim() && !controlType) {
           return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
         }
-        const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'set-value', value });
+        const res = await ctx.platform.invokeElement({
+          name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId, action: 'set-value', value,
+        });
         await sleep(150);
         if (res.success) return { success: true, text: `Set "${name}" = ${value.length} chars`, targetLabel: name };
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
@@ -500,15 +503,18 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       changesScreen: true,
       async execute(args, ctx) {
         const name = String(args.name ?? '');
-        const res = await ctx.platform.invokeElement({
-          name,
-          controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
-          processId: await resolveAgentPid(args, ctx),
-          action: 'toggle',
+        const processId = await resolveAgentPid(args, ctx);
+        const controlType = await preferControl(ctx.platform, 'toggle', {
+          name, controlType: typeof args.controlType === 'string' ? args.controlType : undefined, processId,
         });
-        if (!res.success) return { success: false, text: `Could not toggle "${name}".`, targetLabel: name };
+        const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'toggle' });
+        if (!res.success) return { success: false, text: `Could not toggle "${name}"${failReason(res)}.`, targetLabel: name };
         const state = (res.data as any)?.toggleState ?? 'unknown';
-        return { success: true, text: `Toggled "${name}" → ${state}.`, targetLabel: name };
+        const changed = (res.data as any)?.toggleChanged;
+        if (changed === false) {
+          return { success: true, text: `Toggled "${name}" but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.`, targetLabel: name };
+        }
+        return { success: true, text: changed === true ? `Toggled (read back ✓) "${name}" → ${state}.` : `Toggled "${name}" → ${state}.`, targetLabel: name };
       },
     },
 
@@ -537,15 +543,13 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           });
           return { success: r.success, text: r.text, targetLabel: name };
         }
-        const res = await ctx.platform.invokeElement({
-          name,
-          controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
-          processId: await resolveAgentPid(args, ctx),
-          action: 'select',
-        });
+        const processId = await resolveAgentPid(args, ctx);
+        const controlType = typeof args.controlType === 'string' ? args.controlType : undefined;
+        const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'select' });
+        const notItem = res.success ? undefined : await notSelectableReason(ctx.platform, { name, controlType, processId });
         return {
           success: res.success,
-          text: res.success ? `Selected "${name}".` : `Could not select "${name}".`,
+          text: res.success ? `Selected "${name}".` : `Could not select "${name}"${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`,
           targetLabel: name,
         };
       },
@@ -1249,15 +1253,14 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       changesScreen: true,
       async execute(args, ctx) {
         const name = String(args.name ?? '');
-        const result = await ctx.platform.invokeElement({
-          name,
-          controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
-          processId: typeof args.processId === 'number' ? args.processId : undefined,
-          action: 'focus',
+        const processId = typeof args.processId === 'number' ? args.processId : undefined;
+        const controlType = await preferControl(ctx.platform, 'focus', {
+          name, controlType: typeof args.controlType === 'string' ? args.controlType : undefined, processId,
         });
+        const result = await ctx.platform.invokeElement({ name, controlType, processId, action: 'focus' });
         return {
           success: result.success,
-          text: result.success ? `Focused "${name}" via a11y.` : `Could not focus "${name}".`,
+          text: result.success ? `Focused "${name}" via a11y.` : `Could not focus "${name}"${failReason(result)}.`,
           targetLabel: name,
         };
       },
@@ -2164,6 +2167,12 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
  * Used by every agent-internal tool that calls `findElements` or
  * `invokeElement` with an optional `processId` arg.
  */
+/** `: <reason>` from an adapter's failed result (`error` or `data.error`), or '' when it gave none. */
+function failReason(res: { error?: unknown; data?: Record<string, unknown> }): string {
+  const e = res.error ?? res.data?.error;
+  return typeof e === 'string' && e.trim() ? `: ${e.trim().replace(/[.\s]+$/, '')}` : '';
+}
+
 async function resolveAgentPid(
   args: Record<string, unknown>,
   ctx: AgentToolContext,

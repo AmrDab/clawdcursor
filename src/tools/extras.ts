@@ -24,6 +24,7 @@ import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
 import { promises as fsp } from 'node:fs';
 import { windowTextIncludes } from './window-text';
+import { preferControl } from '../platform/prefer-control';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -500,11 +501,12 @@ export function getExtraTools(): ToolDefinition[] {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('focus_element');
         if (ctx.platform.platform === 'linux') return notSupported('focus_element');
+        controlType = await preferControl(ctx.platform, 'focus', { name: String(name), controlType, processId });
         const result = await ctx.platform.invokeElement({
           name: String(name), controlType, processId, action: 'focus',
         });
         return {
-          text: result.success ? `Focused "${name}" via accessibility.` : `Focus failed for "${name}".`,
+          text: result.success ? `Focused "${name}" via accessibility.` : `Focus failed for "${name}"${result.data?.error ? `: ${result.data.error}` : ''}.`,
           isError: !result.success,
         };
       },

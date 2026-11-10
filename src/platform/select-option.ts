@@ -12,6 +12,7 @@
  *   5. read the control back and report whether it now shows `value`.
  */
 import type { PlatformAdapter } from './types';
+import { findControls } from './prefer-control';
 
 export interface SelectOptionResult {
   success: boolean;
@@ -22,11 +23,6 @@ export interface SelectOptionResult {
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-/** Roles that can hold options, in each OS's spelling: UIA ComboBox / List / Tab, AX PopUpButton / ComboBox / List / TabGroup,
- * AT-SPI (mapped to the UIA names). A label (Text), an option (ListItem) or a button is not one. */
-const HOLDS_OPTIONS = /^(ax)?(combobox|popupbutton|menubutton|dropdown|select|list|listbox|tab|tabgroup|tablist|pagetablist|radiogroup)$/;
-const holdsOptions = (role?: string) => HOLDS_OPTIONS.test(norm(role).replace(/[^a-z]/g, ''));
-
 export async function selectOption(
   platform: Pick<PlatformAdapter, 'invokeElement' | 'findElements'>,
   q: { name: string; value: string; controlType?: string; processId?: number },
@@ -36,15 +32,13 @@ export async function selectOption(
   // Without a role the bridge takes the first element with that name, and a form's label ("Favorite color") is found before
   // its combo box. Aim at the one that can hold options; if only labels or the like have the name, say so.
   if (!controlType) {
-    const named = (await platform.findElements({ name, processId }).catch(() => []))
-      .filter(h => norm(h.name) === norm(name) && h.controlType);
+    const { controlType: held, named } = await findControls(platform, 'select', { name, processId });
     if (named.length) {
-      const holder = named.find(h => holdsOptions(h.controlType));
-      if (!holder) {
+      if (!held) {
         const roles = [...new Set(named.map(h => h.controlType))].join(', ');
         return { success: false, verified: false, text: `No dropdown or list named "${name}"; only ${roles} matched (a label or another element, not something with options). Nothing was changed.` };
       }
-      controlType = holder.controlType;
+      controlType = held;
     }
   }
   const readValue = async (): Promise<string | null> => {
@@ -57,7 +51,7 @@ export async function selectOption(
 
   const before = await readValue();
   if (before !== null && norm(before) === norm(value)) {
-    return { success: true, verified: true, text: `"${name}" already shows "${value}".` };
+    return { success: true, verified: true, text: `Selected (read back ✓) "${value}" in "${name}" (it already showed that).` };
   }
 
   const expanded = await platform.invokeElement({ name, controlType, processId, action: 'expand' }).catch(() => null);
@@ -94,7 +88,7 @@ export async function selectOption(
     return {
       success: ok,
       verified: true,
-      text: ok ? `Selected "${value}" in "${name}" (verified).` : `Tried to select "${value}" in "${name}", but it now shows "${after}".`,
+      text: ok ? `Selected (read back ✓) "${value}" in "${name}".` : `Tried to select "${value}" in "${name}", but it now shows "${after}".`,
     };
   }
   return {

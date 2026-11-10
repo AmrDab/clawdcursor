@@ -33,7 +33,7 @@ describe('selectOption', () => {
     const p = fakePlatform({ options: ['Free', 'Pro', 'Team'] });
     const r = await selectOption(p as any, { name: 'Plan', value: 'Pro' });
     expect(r).toMatchObject({ success: true, verified: true });
-    expect(r.text).toMatch(/Selected "Pro" in "Plan" \(verified\)/);
+    expect(r.text).toMatch(/^Selected \(read back ✓\) "Pro" in "Plan"\./);
     expect(p.calls.map(c => c.action)).toEqual(['get-value', 'expand', 'select', 'get-value']);
   });
 
