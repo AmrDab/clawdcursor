@@ -349,9 +349,17 @@ describe('the daemon ends its session logs', () => {
     reportUncleanExits();
     expect(fs.readFileSync(file, 'utf8')).toMatch(/"type":"end"/);
     expect(fs.existsSync(`${file}.lock`)).toBe(false);
+    // a takeover that died after its rename leaves a stale-<pid> file; old ones go, fresh ones stay
+    const dir = process.env.CLAWDCURSOR_SESSION_DIR!;
+    const leftOld = path.join(dir, 'session-2020-01-01T00-00-00-000Z-1.jsonl.lock.stale-99');
+    const leftNew = path.join(dir, 'session-2020-01-01T00-00-00-000Z-2.jsonl.lock.stale-99');
+    fs.writeFileSync(leftOld, ''); fs.writeFileSync(leftNew, '');
+    fs.utimesSync(leftOld, old, old);
     const orphan = path.join(process.env.CLAWDCURSOR_SESSION_DIR!, 'session-2020-01-01T00-00-00-000Z-1.jsonl.lock');
     fs.writeFileSync(orphan, '');
     new SessionLog({ version: 't', surface: 'compact' });
     expect(fs.existsSync(orphan)).toBe(false);
+    expect(fs.existsSync(leftOld)).toBe(false);
+    expect(fs.existsSync(leftNew)).toBe(true);
   });
 });

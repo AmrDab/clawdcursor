@@ -161,6 +161,11 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.weak_uncut).toBe(true);
   });
 
+  it('scroll-into-view after a budget cut refuses to scroll to the matches it saw; an uncut search is not refused', () => {
+    expect(out.scroll_after_cut).toMatchObject({ success: false, partial: true, error: expect.stringMatching(/before all matches were seen; narrow it with processId or controlType/) });
+    expect(out.scroll_uncut.error ?? '').not.toMatch(/search cut/);
+  });
+
   it('a search the depth cap cut names the depth limit', () => {
     expect(out.deep_target).toEqual([true, 'depth limit']);
   });

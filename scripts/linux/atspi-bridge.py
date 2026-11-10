@@ -975,6 +975,11 @@ def cmd_scroll_into_view(name: Optional[str], role: Optional[str], process_id: O
                     "error": f"search cut ({SEARCH_CUT[0]}): no element named {name} in the part of the active window searched "
                              "(this is not 'no such element')"}
         return {"success": False, "action": action, "error": f"element not found in the active window: {name}"}
+    # Cut by the budget or the clock: the matches seen are not all of them (an exact one, or the one the caller means, may lie
+    # beyond), so none is scrolled to. A depth cut is structural and does not refuse.
+    if SEARCH_CUT[0] in ('element budget', 'time limit'):
+        return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
+                "error": f"search cut ({SEARCH_CUT[0]}) before all matches were seen; narrow it with processId or controlType"}
     # A label and the field it labels share a name: the field is what a scroll is for. Labels only when nothing else matches.
     actionable = [m for m in matches
                   if (safe(lambda m=m: m.get_role_name(), '') or '').lower() not in LABEL_ROLE_NAMES]

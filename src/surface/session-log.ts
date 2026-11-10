@@ -131,6 +131,10 @@ export class SessionLog {
       fs.mkdirSync(dir, { recursive: true });
       const old = fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.endsWith('.jsonl')).sort();
       for (const f of old.slice(0, Math.max(0, old.length - (KEEP - 1)))) fs.rmSync(path.join(dir, f), { force: true });
+      // A stale-lock takeover that died between its rename and its delete leaves a `.lock.stale-<pid>` file.
+      for (const f of fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.includes('.jsonl.lock.stale-'))) {
+        try { if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 60_000) fs.rmSync(path.join(dir, f), { force: true }); } catch { /* gone */ }
+      }
       // A report lock whose session file is gone (pruned, or the reporter died) has nothing left to guard.
       for (const f of fs.readdirSync(dir).filter(f => f.startsWith('session-') && f.endsWith('.jsonl.lock'))) {
         if (!fs.existsSync(path.join(dir, f.slice(0, -'.lock'.length)))) fs.rmSync(path.join(dir, f), { force: true });
