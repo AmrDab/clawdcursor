@@ -359,7 +359,6 @@ export function getA11yTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 
@@ -654,7 +653,6 @@ export function getA11yTools(): ToolDefinition[] {
       category: 'clipboard',
       compactGroup: 'system',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ scope }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
@@ -677,6 +675,7 @@ export function getA11yTools(): ToolDefinition[] {
       category: 'clipboard',
       compactGroup: 'system',
       safetyTier: 1,
+      destructive: true,
       handler: async ({ text }, ctx) => {
         await ctx.ensureInitialized();
         if (ctx.platform) {
@@ -697,9 +696,7 @@ export function getA11yTools(): ToolDefinition[] {
         title: { type: 'string', description: 'Window title substring to match', required: false },
       },
       category: 'window',
-      // Minimizing is trivially reversible (restore_window exists): not destructive.
       safetyTier: 1,
-      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 

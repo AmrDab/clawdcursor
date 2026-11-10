@@ -217,6 +217,7 @@ export function getElectronBridgeTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'system',
       safetyTier: 1,
+      destructive: true,
       handler: async ({ appName, port }, ctx: ToolContext): Promise<ToolResult> => {
         await ctx.ensureInitialized();
         if (!ctx.platform) {

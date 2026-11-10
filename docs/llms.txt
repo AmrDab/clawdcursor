@@ -114,7 +114,7 @@ action the user didn't ask for (send, delete, pay, close unsaved work), ask with
 enforces itself: the user's Stop, the pause, no stray input into an AI assistant's
 window, and a hard key list — the combos that lock the machine or end the session are
 never sent (Windows Win+L, Ctrl+Alt+Del; macOS Ctrl+Cmd+Q, Cmd+Shift+Q, Power; Linux
-Super+L, Ctrl+Alt+L, Ctrl+Alt+Del, Ctrl+Alt+Backspace, Ctrl+Alt+F1-F12); every other
+Super+L, Ctrl+Alt+Del, Ctrl+Alt+Backspace, Ctrl+Alt+F1-F12); every other
 shortcut is allowed. HTTP requires a bearer token. Local-only by default. An on-screen pill shows whenever an agent is
 driving and what it is doing ("Typing in Edge") — its Stop button (or a double-click) stops it. A stop holds
 across restarts: every call returns "stopped by the user" until the user's Resume on a

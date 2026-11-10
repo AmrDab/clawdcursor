@@ -1,8 +1,10 @@
 /**
  * The hard key list: the few OS-level key combinations clawdcursor never sends, whoever asks.
  *
- * They lock the machine, end the session or are reserved by the OS — after one of them the agent has no desktop left to
- * work on, and the user comes back to a locked or logged-out machine. Everything else is allowed: which shortcut to press
+ * The list is narrow on purpose: combos that lock or end the user's session, or cut the agent off from the desktop.
+ * After one of them the agent has no desktop left to work on, and the user comes back to a locked or logged-out machine.
+ * A combo that an app also uses as an ordinary shortcut does not belong here (Linux Ctrl+Alt+L is "Reformat code" in
+ * JetBrains IDEs; Super+L already covers the lock). Everything else is allowed: which shortcut to press
  * is the agent's decision (and its MCP host's permission prompt), not clawdcursor's.
  *
  * Only the list of the OS clawdcursor is running on applies. The one call site is `guardInputMethods`
@@ -27,7 +29,6 @@ const HARD_KEYS: Record<'win32' | 'darwin' | 'linux', ReadonlyArray<{ keys: stri
   ],
   linux: [
     { keys: ['super', 'l'], why: 'locks the screen' },
-    { keys: ['ctrl', 'alt', 'l'], why: 'locks the screen' },
     { keys: ['ctrl', 'alt', 'delete'], why: 'logs out or reboots' },
     { keys: ['ctrl', 'alt', 'backspace'], why: 'kills the display server' },
     ...Array.from({ length: 12 }, (_, i) => ({ keys: ['ctrl', 'alt', `f${i + 1}`], why: 'switches away from the desktop session to a console' })),

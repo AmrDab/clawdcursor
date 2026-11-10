@@ -296,7 +296,6 @@ export function getDesktopTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
         const p = toMouse(ctx, x, y, space);
@@ -336,7 +335,6 @@ export function getDesktopTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ x, y, direction, amount }, ctx) => {
         await ctx.ensureInitialized();
         const p = toMouse(ctx, x, y);

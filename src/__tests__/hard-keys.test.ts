@@ -18,6 +18,7 @@ import { normalizeKey } from '../platform/keys';
 import { getDesktopTools } from '../tools/desktop';
 import { getExtraTools } from '../tools/extras';
 import { getShortcutTools } from '../tools/shortcuts';
+import { SHORTCUTS, resolveShortcutKey } from '../shortcuts';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import type { ToolContext } from '../tools/types';
 
@@ -35,7 +36,7 @@ describe('the list, per OS — only the OS clawdcursor runs on applies', () => {
   });
 
   it('Linux: lock, log out / reboot, kill the display server, console switch, SysRq, power', () => {
-    for (const c of ['super+l', 'ctrl+alt+l', 'ctrl+alt+delete', 'ctrl+alt+backspace', 'ctrl+alt+f1', 'ctrl+alt+f7', 'ctrl+alt+f12', 'alt+sysrq+b', 'XF86PowerOff']) {
+    for (const c of ['super+l', 'ctrl+alt+delete', 'ctrl+alt+backspace', 'ctrl+alt+f1', 'ctrl+alt+f7', 'ctrl+alt+f12', 'alt+sysrq+b', 'XF86PowerOff']) {
       expect(refused(c, 'linux'), c).toBe(true);
     }
   });
@@ -43,6 +44,7 @@ describe('the list, per OS — only the OS clawdcursor runs on applies', () => {
   it('another OS\'s combos are not refused', () => {
     expect(refused('ctrl+cmd+q', 'win32')).toBe(false);   // Ctrl+Q on Windows
     expect(refused('ctrl+alt+l', 'win32')).toBe(false);
+    expect(refused('ctrl+alt+l', 'linux')).toBe(false);   // an app shortcut (JetBrains "Reformat code"); Super+L is the lock
     expect(refused('win+l', 'darwin')).toBe(false);       // Cmd+L: the address bar
     expect(refused('ctrl+alt+delete', 'darwin')).toBe(false);
     expect(refused('cmd+shift+q', 'linux')).toBe(false);
@@ -241,10 +243,13 @@ describe('one call site: the input layer, below every tool', () => {
       expect(kb.sent).toEqual([]);
     });
 
-    it('a named shortcut that resolves to it ("lock screen")', async () => {
+    it('no named shortcut resolves to it, on any OS: the "lock screen" entry is gone', async () => {
+      for (const os of ['win32', 'darwin', 'linux'] as const) {
+        for (const s of SHORTCUTS) expect(hardKeyRefusal(resolveShortcutKey(s, os), [], os), `${s.id} on ${os}`).toBeNull();
+      }
       const kb = keyboard();
-      const run = getShortcutTools().find(t => t.name === 'shortcuts_execute')!;
-      await expect(run.handler({ intent: 'lock screen' }, ctxWith(kb))).rejects.toThrow(/dangerous key combo/);
+      const r = await getShortcutTools().find(t => t.name === 'shortcuts_execute')!.handler({ intent: 'lock screen' }, ctxWith(kb));
+      expect(r.isError).toBe(true);
       expect(kb.sent).toEqual([]);
     });
   });

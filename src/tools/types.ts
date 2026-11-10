@@ -130,8 +130,9 @@ export interface ToolDefinition {
    */
   safetyTier?: 0 | 1;
   /**
-   * `false` on an input tool that cannot destroy anything by itself (moving the pointer, scrolling, arranging a window).
-   * Every other input tool is announced with destructiveHint: what a click, a key or a close does is up to the app.
+   * `true` on a tool that is destructive by itself: it closes a window, overwrites the clipboard, opens a file or URI
+   * (which can run a program), runs page script, restarts an app or sends a report. Announced as MCP destructiveHint.
+   * Ordinary input (click, type, key, scroll) is not marked: what it does depends on where the agent points it.
    */
   destructive?: boolean;
   /**

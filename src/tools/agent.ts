@@ -204,7 +204,6 @@ export function getAgentTools(): ToolDefinition[] {
       parameters: {},
       category: 'orchestration',
       safetyTier: 1,
-      destructive: false,
       handler: async () => {
         const p = pauseGate.current();
         if (!p) return { text: 'resume_task: nothing is paused.', isError: true };

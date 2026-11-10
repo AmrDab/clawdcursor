@@ -112,7 +112,6 @@ export const SHORTCUTS: ShortcutDefinition[] = [
   shortcut('space', 'quick', 'Toggle focused control', 'press space', ['space', 'press space', 'spacebar'], { default: 'Space' }),
   shortcut('delete', 'quick', 'Delete selection', 'press delete', ['delete', 'press delete'], { default: 'Delete' }),
   shortcut('system-search', 'quick', 'Open system search', 'system search', ['system search', 'open search', 'search apps'], { default: 'Super+s', darwin: `${CMD}+Space` }),
-  shortcut('lock-screen', 'quick', 'Lock current session', 'lock screen', ['lock screen'], { default: 'Super+l', darwin: 'Control+Super+q' }),
 
   // ─── macOS System Shortcuts (from Apple support.apple.com/en-us/102650) ────
   shortcut('screenshot-full', 'quick', 'Take full screenshot', 'screenshot',

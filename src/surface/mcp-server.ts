@@ -447,13 +447,13 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
  * an upgrade is caught by CI rather than silently re-breaking Gemini.
  */
 /**
- * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool can destroy something (a click
- * lands on whatever is under it, a key does whatever the app binds it to) unless it declares `destructive: false`.
- * MCP hosts decide from these hints what to ask the user before a call: clawdcursor itself does not judge the action.
+ * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool carries destructiveHint only when
+ * it declares `destructive: true` (closing a window, overwriting the clipboard, opening a file or URI, page script).
+ * The values are the ones 1.5.27 published: hosts build their own approval UI on them, so they change only on purpose.
  */
 export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier' | 'destructive'>): NonNullable<ToolDefinition['annotations']> {
   if (tool.annotations) return tool.annotations;
-  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive !== false };
+  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive === true };
 }
 
 function stripRootSchemaDialect(server: McpServerLike): void {

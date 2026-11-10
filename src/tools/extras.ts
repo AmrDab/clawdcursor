@@ -14,8 +14,8 @@
  * just like the existing `mouse_click`. Window / keyboard tools do not
  * carry coords.
  *
- * Every tool here is an input tool (safetyTier 1) unless it only reads; the ones that cannot destroy anything
- * by themselves say `destructive: false` (see ToolDefinition.destructive).
+ * Every tool here is an input tool (safetyTier 1) unless it only reads; the ones that are destructive by
+ * themselves (`close_window`, `open_file`, `open_uri`) say `destructive: true` (see ToolDefinition.destructive).
  */
 
 import type { ToolDefinition } from './types';
@@ -85,7 +85,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ dx, dy }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_move_relative');
@@ -192,7 +191,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ button }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_up');
@@ -217,7 +215,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'mouse',
       compactGroup: 'computer',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ x, y, direction, amount, space }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('mouse_scroll_horizontal');
@@ -311,7 +308,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'keyboard',
       compactGroup: 'computer',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ key }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('key_up');
@@ -335,7 +331,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('maximize_window');
@@ -362,7 +357,6 @@ export function getExtraTools(): ToolDefinition[] {
       // Tier 1 (input): minimizing is reversible (restore_window). Was tier 2
       // (confirm) by accident — see minimize_window in a11y.ts.
       safetyTier: 1,
-      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('minimize_window_to_taskbar');
@@ -387,7 +381,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('restore_window');
@@ -416,6 +409,7 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
+      destructive: true,
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('close_window');
@@ -446,7 +440,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ x, y, width, height, space, processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('resize_window');
@@ -505,7 +498,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'perception',
       compactGroup: 'accessibility',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('focus_element');
@@ -569,6 +561,7 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'window',
       safetyTier: 1,
+      destructive: true,
       handler: async ({ path: filePath }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_file');
@@ -631,7 +624,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'window',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ url }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_url');
@@ -701,6 +693,7 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'window',
       safetyTier: 1,
+      destructive: true,
       handler: async ({ uri }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_uri');
@@ -868,7 +861,6 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'window',
       compactGroup: 'window',
       safetyTier: 1,
-      destructive: false,
       handler: async ({ index, direction }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('switch_tab_os');
@@ -957,6 +949,7 @@ export function getExtraTools(): ToolDefinition[] {
       category: 'orchestration',
       compactGroup: 'system',
       safetyTier: 1,
+      destructive: true,
       handler: async ({ userNote, logIndex }) => {
         try {
           const { apiSubmitReport } = await import('../surface/report');
