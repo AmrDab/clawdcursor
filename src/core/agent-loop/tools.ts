@@ -22,7 +22,7 @@ import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
-import { resolveAlias, appNameRefusal } from '../router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
@@ -1050,10 +1050,10 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // Running but no window yet: a slow app still loading. Not a failure —
         // a failure invites a second launch.
         if (res.pid) {
-          return { success: true, text: `Started ${quoteScreenText(name)} (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+          return { success: true, text: startedNoWindowText(quoteScreenText(name), res, 'agent') };
         }
         // No process and no window is not a launch: say so instead of "Launched".
-        return { success: false, text: `Could not confirm ${quoteScreenText(name)} opened — no window appeared. Check list_windows before acting on it.` };
+        return { success: false, text: notConfirmedText(quoteScreenText(name), name, 'agent') };
       },
     },
 

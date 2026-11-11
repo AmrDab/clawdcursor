@@ -117,12 +117,15 @@ export async function waitForLaunchedWindow(
   while (Date.now() < deadline) {
     await sleep(interval);
 
-    let current: readonly WindowInfo[];
+    // The read is bounded by what is left of the budget: an app that is starting can block the accessibility read
+    // for many seconds (live: an 8 s wait took 39 s), and a wait that does not end is worse than "not yet".
+    let current: readonly WindowInfo[] | null;
     try {
-      current = await listWindows();
+      current = await Promise.race([listWindows(), sleep(Math.max(0, deadline - Date.now())).then(() => null)]);
     } catch {
       continue;
     }
+    if (current === null) break;
 
     // Pass 1: prefer brand-new windows. PID match wins (most reliable),
     // then predicate match.

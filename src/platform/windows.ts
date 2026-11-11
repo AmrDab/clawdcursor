@@ -1300,13 +1300,17 @@ export class WindowsAdapter implements PlatformAdapter {
       /** `name` only starts something else (PlatformAdapter.launchApp). */
       viaLauncher?: boolean;
     },
-  ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
+  ): Promise<LaunchResult> {
     // Reject control chars / backticks / $() that can escape PowerShell quoting
     // regardless of how we serialize.
     // eslint-disable-next-line no-control-regex -- intentional: reject control chars that could escape PowerShell quoting
     if (/[\r\n\t\x00-\x1f]/.test(name) || /[`$]/.test(name)) {
       throw new Error('launchApp: illegal characters in app name');
     }
+
+    // A known app's process counts as "started by this launch" only if it began after this point (small slack for
+    // clock granularity): browsers and Office keep background processes that prove nothing.
+    const launchedAt = Date.now() - 2_000;
 
     // Snapshot existing windows ONCE before any spawn so the diff-and-poll
     // helper can ignore them. Reused by the idempotency check below — saves
@@ -1328,7 +1332,7 @@ export class WindowsAdapter implements PlatformAdapter {
     let app = this.appWindows(appIdentity(name, {
       processNames: opts?.processNames, displayName: opts?.searchTerm, uwpAppId: opts?.uwpAppId, viaLauncher: opts?.viaLauncher,
     }));
-    const focusExisting = async (): Promise<{ pid?: number; title?: string; handle?: number | string } | null> => {
+    const focusExisting = async (): Promise<LaunchResult | null> => {
       if (opts?.alwaysNewInstance || opts?.url) return null;
       const existing = await app.findIn(windowsBefore);
       if (!existing) return null;
@@ -1387,8 +1391,9 @@ export class WindowsAdapter implements PlatformAdapter {
       // Shorter primary budget so we have headroom for the Start-Menu
       // fallback if shell:AppsFolder didn't surface a window — matches
       // the router's strategy ladder.
-      const uwpResult = await this.findLaunchedWindow(app, windowsBefore, 4_000);
-      if (uwpResult.title) return this.foregroundLaunched(uwpResult);
+      const uwpResult = await this.findLaunchedWindow(app, windowsBefore, 4_000, launchedAt);
+      // Its process is up and the window is not (a slow starter): started. Searching the Start menu would launch it twice.
+      if (uwpResult.title || uwpResult.pid) return this.foregroundLaunched(uwpResult);
       if (opts?.noStartMenuFallback) return uwpResult; // {} — caller verifies
       return this.foregroundLaunched(await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore, app));
     }
@@ -1432,8 +1437,8 @@ export class WindowsAdapter implements PlatformAdapter {
     // any binary not on PATH but Start-Menu-indexed will recover here.
     // Started through a launcher, and what it starts is unknown (a document's program): there is no window to claim.
     if (opts?.viaLauncher && app.identity.processNames.size === 0) return {};
-    const direct = await this.findLaunchedWindow(app, windowsBefore, 4_000);
-    if (direct.title) return this.foregroundLaunched(direct);
+    const direct = await this.findLaunchedWindow(app, windowsBefore, 4_000, launchedAt);
+    if (direct.title || direct.pid) return this.foregroundLaunched(direct);
     if (opts?.noStartMenuFallback || opts?.viaLauncher) return direct; // {} — caller verifies (open_file)
 
     // Route 3: Start Menu search fallback — universal for any app indexed by
@@ -1452,10 +1457,9 @@ export class WindowsAdapter implements PlatformAdapter {
    * window. The idempotency path already focuses; this gives fresh launches the
    * same contract. Best-effort — never throws, the launch already succeeded.
    */
-  private async foregroundLaunched(
-    result: { pid?: number; title?: string; handle?: number | string },
-  ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
-    if (result?.pid) {
+  private async foregroundLaunched(result: LaunchResult): Promise<LaunchResult> {
+    // Only a window can be brought forward: a process that has shown none yet is left to start.
+    if (result?.pid && result.title) {
       await this.focusWindow({ processId: result.pid, title: result.title }).catch(() => {});
     }
     return result;
@@ -1475,7 +1479,7 @@ export class WindowsAdapter implements PlatformAdapter {
     searchTermHint: string | undefined,
     windowsBefore: readonly WindowInfo[],
     app: AppWindows,
-  ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
+  ): Promise<LaunchResult> {
     // Pick the term Windows Search will actually rank correctly. The alias's
     // `searchTerm` (when provided) is the human-friendly name an end user
     // would type — "Edge", "VS Code", "File Explorer". For names without an
@@ -1502,7 +1506,7 @@ export class WindowsAdapter implements PlatformAdapter {
     }
 
     // Whatever the search opened, only a window of THIS app is reported: the top hit can be another app or a document.
-    return this.findLaunchedWindow(app, windowsBefore, 4_000);
+    return this.findLaunchedWindow(app, windowsBefore, 4_000, Date.now() - 2_000);
   }
 
   /**
@@ -1517,12 +1521,18 @@ export class WindowsAdapter implements PlatformAdapter {
    * Start-Process spawn returns the eventual app's PID (we spawn explorer /
    * powershell, not the target binary), so we don't pass `spawnPid`: the
    * window is the app's by identity (`appWindows`), or none is reported.
+   *
+   * No window within the budget is not yet "not launched": a slow starter (a CAD suite, an IDE) has its process up
+   * long before its window. Then the process is the answer — `{ pid, processName }`, no title. `startedSince`
+   * (ms) limits that to a process begun by this launch; omitted, any process of the app counts (a name-only launch,
+   * whose program was resolved exactly and may still be starting from an earlier call).
    */
   private async findLaunchedWindow(
     app: AppWindows,
     windowsBefore: readonly WindowInfo[],
     timeoutMs?: number,
-  ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
+    startedSince?: number,
+  ): Promise<LaunchResult> {
     const win = await waitForLaunchedWindow(
       windowsBefore,
       async () => {
@@ -1533,9 +1543,21 @@ export class WindowsAdapter implements PlatformAdapter {
       app.owns,
       timeoutMs ? { timeoutMs } : undefined,
     );
-    return win
-      ? { pid: win.processId, title: win.title, handle: win.handle }
-      : {};
+    if (win) return { pid: win.processId, title: win.title, handle: win.handle };
+    return (await this.runningProcess(app.identity, startedSince)) ?? {};
+  }
+
+  /** The newest running process of the app (by its process names), optionally only one started since `since` (ms). */
+  private async runningProcess(identity: AppIdentity, since?: number): Promise<{ pid: number; processName: string } | null> {
+    const names = [...identity.processNames];
+    if (names.length === 0) return null;
+    const reply = await psRunner.run({ cmd: 'find-processes', names }).catch(() => null) as
+      { processes?: Array<{ pid?: unknown; name?: unknown; started?: unknown }> } | null;
+    const procs = (Array.isArray(reply?.processes) ? reply.processes : [])
+      .map(p => ({ pid: Number(p.pid), processName: String(p.name ?? ''), started: Number(p.started) || 0 }))
+      .filter(p => Number.isInteger(p.pid) && p.pid > 0 && !isOwnUiPid(p.pid) && (since === undefined || p.started >= since))
+      .sort((a, b) => b.started - a.started);
+    return procs[0] ? { pid: procs[0].pid, processName: procs[0].processName } : null;
   }
 
   /**
@@ -1663,6 +1685,8 @@ export class WindowsAdapter implements PlatformAdapter {
     return new Promise(r => setTimeout(r, ms));
   }
 }
+
+type LaunchResult = { pid?: number; title?: string; handle?: number | string; processName?: string };
 
 /** One app's windows: see `WindowsAdapter.appWindows`. */
 interface AppWindows {

@@ -767,6 +767,25 @@ function Cmd-GetProcessPaths {
     return @{ paths = $paths }
 }
 
+# -- Command: find-processes ---------------------------------------------------
+# The running processes with one of these names (exact; wildcards are escaped): pid, name, start time (Unix ms, 0 when
+# it may not be read). launchApp asks when a launched app has shown no window yet: a slow starter is "started, window
+# not up yet", not a failed launch.
+function Cmd-FindProcesses {
+    param($cmd)
+    $out = @()
+    foreach ($n in @($cmd.names)) {
+        $name = [System.Management.Automation.WildcardPattern]::Escape("$n")
+        if (-not $name) { continue }
+        foreach ($p in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
+            $started = 0
+            try { $started = ([DateTimeOffset]$p.StartTime).ToUnixTimeMilliseconds() } catch {}
+            $out += @{ pid = $p.Id; name = $p.ProcessName; started = $started }
+        }
+    }
+    return @{ processes = @($out) }
+}
+
 # The app's own display name: its exe's file description, else product name ("Designcenter NX" for ugraf.exe).
 # Read once per process; '' when the exe has none or the process may not be opened.
 $script:AppNames = @{}
@@ -1668,6 +1687,7 @@ while ($true) {
             "get-screen-context"    { Cmd-GetScreenContext $cmd }
             "get-foreground-window" { Cmd-GetForegroundWindow }
             "get-process-paths"     { Cmd-GetProcessPaths $cmd }
+            "find-processes"        { Cmd-FindProcesses $cmd }
             "focus-window"          { Cmd-FocusWindow $cmd }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }

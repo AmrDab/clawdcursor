@@ -482,7 +482,11 @@ export interface PlatformAdapter {
      * window is reported at all. Implies `noStartMenuFallback`.
      */
     viaLauncher?: boolean;
-  }): Promise<{ pid?: number; title?: string; handle?: number | string }>;
+    /**
+     * `pid` without `title`: the app's process is running but it has shown no window yet (a slow starter) — started,
+     * not failed. `processName` is that process when the adapter knows it, so the caller can point to a later focus.
+     */
+  }): Promise<{ pid?: number; title?: string; handle?: number | string; processName?: string }>;
 }
 
 /**

@@ -7,7 +7,7 @@ import { quoteScreenText } from '../core/result-codes';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
-import { resolveAlias, appNameRefusal } from '../core/router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../core/router/aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
 import * as os from 'os';
@@ -79,10 +79,10 @@ export function getOrchestrationTools(): ToolDefinition[] {
             // Running but no window yet: a slow app still loading (Outlook, IDEs).
             // Not an error — an error invites a second launch.
             if (res?.pid) {
-              return { text: `Started "${rawName}" (pid=${res.pid}) but no window yet — it may still be loading. Do not launch it again; wait a few seconds and check list_windows.` };
+              return { text: startedNoWindowText(`"${rawName}"`, res) };
             }
             // No process and no window is not a launch: say so instead of "Launched".
-            return { text: `Could not confirm "${rawName}" opened — no window appeared. Check list_windows before acting on it.`, isError: true };
+            return { text: notConfirmedText(`"${rawName}"`, rawName), isError: true };
           } catch (err: any) {
             return { text: `Failed to launch "${rawName}": ${err?.message ?? err}`, isError: true };
           }

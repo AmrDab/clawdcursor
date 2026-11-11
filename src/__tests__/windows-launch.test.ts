@@ -28,7 +28,8 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 const h = vi.hoisted(() => ({
   paths: {} as Record<string, string>,
   bridge: [] as Array<Record<string, unknown>>,
-  installed: null as null | { path?: string; appId?: string; name?: string },
+  installed: null as null | { path?: string; appId?: string; name?: string; target?: string },
+  procs: [] as Array<{ pid: number; name: string; started: number }>,
 }));
 vi.mock('../platform/ps-runner', () => ({
   psRunner: {
@@ -36,6 +37,10 @@ vi.mock('../platform/ps-runner', () => ({
       h.bridge.push(c);
       if (c.cmd === 'get-process-paths') {
         return Promise.resolve({ paths: Object.fromEntries((c.pids as number[]).map(p => [String(p), h.paths[String(p)] ?? ''])) });
+      }
+      if (c.cmd === 'find-processes') {
+        const names = (c.names as string[]).map(n => n.toLowerCase());
+        return Promise.resolve({ processes: h.procs.filter(p => names.includes(p.name.toLowerCase())) });
       }
       return Promise.resolve(null);
     },
@@ -86,7 +91,7 @@ async function settle<T>(p: Promise<T>): Promise<T> {
 }
 
 beforeEach(() => {
-  spawns.length = 0; h.bridge.length = 0; h.paths = {}; h.installed = null;
+  spawns.length = 0; h.bridge.length = 0; h.paths = {}; h.installed = null; h.procs = [];
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-sysroot-'));
   const exe = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   fs.mkdirSync(path.dirname(exe), { recursive: true }); fs.writeFileSync(exe, '');
@@ -245,5 +250,58 @@ describe('open_file on Windows — any valid path opens; a refused one says why'
     desktop(DESKTOP);
     await expect(adapter.launchApp('explorer.exe', { ...OPEN, url: p })).rejects.toThrow(/double quote or a control character/);
     expect(spawns).toHaveLength(0);
+  });
+});
+
+describe('open_app on Windows — a slow starter whose process is up but whose window is not', () => {
+  // Live: open_app "Designcenter" (NX, ugraf.exe) took 39 s and answered "Could not confirm … no window appeared"
+  // while the app was starting.
+  const NX = { appId: 'Siemens.NX.Designcenter', name: 'Designcenter', target: 'C:\\Program Files\\Siemens\\NX2506\\NXBIN\\ugraf.exe' };
+
+  it('reports the running process (pid + process name), not a failure, within the launch budget', async () => {
+    h.installed = NX;
+    h.procs = [{ pid: 5150, name: 'ugraf', started: 1 }];
+    desktop(DESKTOP);
+    const t0 = Date.now();
+    const res = await settle(adapter.launchApp('Designcenter', { nameOnly: true }));
+    expect(res).toEqual({ pid: 5150, processName: 'ugraf' });
+    expect(Date.now() - t0).toBeLessThanOrEqual(9_000);
+    expect(focus).not.toHaveBeenCalled();          // there is no window to bring forward yet
+  });
+
+  it('neither a window nor a process: still the empty result', async () => {
+    h.installed = NX;
+    desktop(DESKTOP);
+    expect(await settle(adapter.launchApp('Designcenter', { nameOnly: true }))).toEqual({});
+  });
+
+  it('a known app whose process started with this launch: reported, and the Start menu is not typed into (that would launch it twice)', async () => {
+    desktop(DESKTOP);
+    h.procs = [{ pid: 6000, name: 'OUTLOOK', started: Date.now() + 500 }];
+    const res = await settle(adapter.launchApp('Excel', { searchTerm: 'Excel', processNames: ['EXCEL', 'OUTLOOK'] }));
+    expect(res).toEqual({ pid: 6000, processName: 'OUTLOOK' });
+    expect(adapter.typeText).not.toHaveBeenCalled();
+  });
+
+  it('a known app: a process that was already there before the launch proves nothing (msedge keeps background processes)', async () => {
+    desktop(DESKTOP);
+    h.procs = [{ pid: 6001, name: 'msedge', started: Date.now() - 3_600_000 }];
+    const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
+    expect(adapter.typeText).toHaveBeenCalledWith('Edge');
+    expect(res).toEqual({});
+  });
+
+  it('a window list that hangs (the starting app blocks the accessibility read) cannot stretch the wait past its budget', async () => {
+    h.installed = NX;
+    h.procs = [{ pid: 5150, name: 'ugraf', started: 1 }];
+    let first = true;
+    vi.spyOn(adapter, 'listWindows').mockImplementation(() => {
+      if (first) { first = false; return Promise.resolve(DESKTOP); }
+      return new Promise<WindowInfo[]>(resolve => setTimeout(() => resolve(DESKTOP), 20_000));
+    });
+    const t0 = Date.now();
+    const res = await settle(adapter.launchApp('Designcenter', { nameOnly: true }));
+    expect(res).toEqual({ pid: 5150, processName: 'ugraf' });
+    expect(Date.now() - t0).toBeLessThanOrEqual(9_000);
   });
 });

@@ -27,7 +27,7 @@ import { promises as fsp } from 'node:fs';
 import { windowTextIncludes } from './window-text';
 import { preferControl, failReason } from '../platform/prefer-control';
 import { quoteScreenText } from '../core/result-codes';
-import { resolveAlias } from '../core/router/aliases';
+import { resolveAlias, startedNoWindowText } from '../core/router/aliases';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -597,9 +597,9 @@ export function getExtraTools(): ToolDefinition[] {
             });
             if (res?.title) return { text: `Opened: ${p} (window: ${quoteScreenText(res.title)})` };
             return {
-              text: exe
-                ? `Opened: ${p} — handed to Windows, but no window of ${leaf} was found: it may still be loading, or it did not start. Check list_windows before acting on it.`
-                : `Opened: ${p}`,
+              text: !exe ? `Opened: ${p}`
+                : res?.pid ? `Opened: ${p} — ${startedNoWindowText(leaf, res)}`
+                : `Opened: ${p} — handed to Windows, but neither a window nor a process of ${leaf} was found: it may not have started. Wait, then window {"action":"focus","processName":${JSON.stringify(exe)}} before acting on it.`,
             };
           }
           // Windows: open the path in Explorer. For a DIRECTORY, VERIFY the

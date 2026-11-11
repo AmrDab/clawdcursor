@@ -66,8 +66,15 @@ describe('open_file — a file is opened by its own program: no Explorer window 
 
   it('a program whose window was not found: says so, and names no window', async () => {
     const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({})));
-    expect(r.text).toMatch(/no window of calc\.exe was found/);
+    expect(r.text).toMatch(/neither a window nor a process of calc\.exe was found/);
     expect(r.text).not.toMatch(/\(window:/);
+  });
+
+  it('a program whose process is up but whose window is not yet: started, with its pid, and how to reach it', async () => {
+    const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({ pid: 400, processName: 'CalculatorApp' })));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toMatch(/pid=400\) but its window isn't up yet/);
+    expect(r.text).toContain('window {"action":"focus","processName":"CalculatorApp"}');
   });
 
   it('a program whose own window surfaced is reported', async () => {

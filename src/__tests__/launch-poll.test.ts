@@ -355,6 +355,15 @@ describe('waitForLaunchedWindow', () => {
     expect(result).toBeNull();
   });
 
+  it('a window read that never returns cannot hold the wait past its budget', async () => {
+    const p = waitForLaunchedWindow([], () => new Promise<WindowInfo[]>(() => {}), buildAppPredicate('never'), { intervalMs: 100, timeoutMs: 1_000 });
+    let settled = false;
+    void p.then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(1_200);
+    expect(settled).toBe(true);
+    await expect(p).resolves.toBeNull();
+  });
+
   it('clamps interval to a 50ms minimum', async () => {
     const before: WindowInfo[] = [];
     const list = vi.fn(async () => []);
