@@ -1,13 +1,17 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
- *   - the pill: topmost, never-focused; an amber dot, what the agent is doing
+ *   - the pill: topmost, never-focused; an amber orb, what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
  *   - the outline: a thin, click-through amber border around the window the
  *     agent is working in (control.ts workingWindow), and nothing else: no fill,
- *     nothing on the rest of the screen, nothing at all while no window is known
- *     or that window is not in front. Spawned/killed in lockstep with the pill;
- *     `TARGET <handle> <pid>` on its stdin names the window, a bare `TARGET` none.
+ *     nothing on the rest of the screen, nothing at all while that window is not
+ *     in front. Faint, with one soft highlight travelling slowly around it (#392;
+ *     the paused form only breathes; steady where the OS reduces motion). When
+ *     the agent acts with no window (the desktop) it goes around the monitor the
+ *     pointer is on. Spawned/killed in lockstep with the pill; `TARGET <handle>
+ *     <pid>` on its stdin names the window, `TARGET MONITOR` the monitor, a bare
+ *     `TARGET` nothing.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
  *
@@ -233,7 +237,7 @@ class ControlBanner {
   };
   private outlineSpawner: Spawner = (mode) => {
     const stdio: ['pipe', 'pipe', 'ignore'] = ['pipe', 'pipe', 'ignore']; // stdin names the window; stdout: OUTLINE_CAPTURABLE
-    const color = mode.paused ? ['--color', PAUSED_OUTLINE] : [];
+    const color = mode.paused ? ['--color', PAUSED_OUTLINE, '--paused'] : [];
     if (process.platform === 'darwin') {
       return spawn(macOverlayBinary.cached(macScript())!, ['outline', ...color], { stdio });
     }
@@ -241,7 +245,7 @@ class ControlBanner {
       return spawn('python3', [linuxScript(), 'outline', ...color], { stdio, env: { ...process.env, GDK_BACKEND: 'x11' } });
     }
     const script = path.join(getPackageRoot(), 'scripts', 'window-outline.ps1');
-    return spawn(powershellExe(), psArgs(script, mode.paused ? ['-Color', PAUSED_OUTLINE] : []),
+    return spawn(powershellExe(), psArgs(script, mode.paused ? ['-Color', PAUSED_OUTLINE, '-Paused'] : []),
       psOpts({ stdio, windowsHide: true }));
   };
 
@@ -269,10 +273,10 @@ class ControlBanner {
   private working: WorkingWindow | undefined;
   private target = ''; // the last line the live outline was sent
 
-  /** The window the agent works in now: the outline moves to it, or draws nothing when there is none. */
+  /** The window the agent works in now: the outline moves to it, or to the monitor the pointer is on when there is none. */
   setWorkingWindow(w: WorkingWindow | undefined): void {
     this.working = w;
-    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}` : 'TARGET';
+    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}` : 'TARGET MONITOR';
     if (line === this.target) return;
     if (send(this.outlineChild, line)) this.target = line;
   }

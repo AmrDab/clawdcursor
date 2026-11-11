@@ -4,6 +4,19 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **The outline is a calm "beam", and the pill has an orb** (#392). The border around the agent's window is now faint,
+  with one soft highlight travelling slowly around it and a subtle glow; amber while the agent works, blue and gently
+  breathing while it waits for you. The running pill shows a small amber orb in place of the blinking dot.
+  - When the agent acts with no window (a click on the desktop), the border goes around the monitor the pointer is on.
+    Nothing is drawn when the agent is idle, as before.
+  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the border is the
+    steady one and the orb does not move.
+  - Still click-through, never focused, and out of the agent's screenshots.
+  - Windows and macOS. On Linux the border stays steady for now (it also goes around the monitor for desktop acts).
+  - Inspired by the "Border beam" and "Thinking orbs" components of [libraries.dev](https://libraries.dev) by Jakub
+    Antalik (MIT). Reimplemented natively (layered windows on Windows, Core Animation on macOS); no code is copied.
+
 ### Fixed
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now
   returns no value or text in `read_tree`, `find`, the focused element and page text. A screenshot or OCR can still show

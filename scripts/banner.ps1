@@ -1,7 +1,7 @@
 # banner.ps1 — "ClawdCursor — desktop control in progress" indicator.
 #
 # A small, always-on-top, borderless pill at the top-center of the monitor the
-# agent is working on: a pulsing amber dot, what the agent is doing ("Typing in Edge"), the
+# agent is working on: a small amber orb, what the agent is doing ("Typing in Edge"), the
 # time since it appeared, and a Stop button. Shown by the daemon while an
 # agent is actively driving the desktop, so a human at the machine ALWAYS
 # knows automation is live (transparency requirement — same spirit as the
@@ -119,6 +119,63 @@ public class NoActivateBannerForm : Form {
         }
     }
 }
+
+// The running pill's orb (#392), in place of the blinking dot: three soft amber blobs drifting slowly inside a small
+// circle. The idea is the "thinking orbs" of libraries.dev by Jakub Antalik (MIT), drawn here with GDI+; nothing of it
+// is copied. The blobs are drawn once; a frame (about 20 a second, of this 16 px control only) puts them at their new
+// places. Where Windows is set to show no animations (SPI_GETCLIENTAREAANIMATION off) they stay where they are.
+public class Orb : Control {
+    [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
+    static readonly System.Drawing.Color[] tones = {
+        System.Drawing.Color.FromArgb(251, 191, 36), System.Drawing.Color.FromArgb(253, 224, 130), System.Drawing.Color.FromArgb(234, 88, 12) };
+    readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
+    readonly System.Drawing.Bitmap[] blobs = new System.Drawing.Bitmap[tones.Length];
+    readonly System.Drawing.Drawing2D.GraphicsPath outside = new System.Drawing.Drawing2D.GraphicsPath();
+    readonly System.Drawing.SolidBrush deep = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(180, 98, 8));
+    System.Windows.Forms.Timer tick;
+    public Orb() {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        Size = new System.Drawing.Size(16, 16);
+        // Each blob: a disc of its tone, fading to nothing at its edge.
+        for (int i = 0; i < blobs.Length; i++) {
+            int d = 13 - 2 * i;
+            blobs[i] = new System.Drawing.Bitmap(d + 2, d + 2);
+            using (var g = System.Drawing.Graphics.FromImage(blobs[i]))
+            using (var shape = new System.Drawing.Drawing2D.GraphicsPath()) {
+                shape.AddEllipse(1, 1, d, d);
+                using (var fade = new System.Drawing.Drawing2D.PathGradientBrush(shape)) {
+                    fade.CenterColor = System.Drawing.Color.FromArgb(235, tones[i]);
+                    fade.SurroundColors = new[] { System.Drawing.Color.FromArgb(0, tones[i]) };
+                    g.FillPath(fade, shape);
+                }
+            }
+        }
+        outside.AddRectangle(new System.Drawing.RectangleF(-1, -1, 18, 18));
+        outside.AddEllipse(1, 1, 14, 14);
+        bool animate;
+        if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;
+        clock.Start();
+        tick = new System.Windows.Forms.Timer();
+        tick.Interval = 50;
+        tick.Tick += (s, e) => Invalidate();
+        tick.Start();
+    }
+    protected override void OnPaint(PaintEventArgs e) {
+        System.Drawing.Graphics g = e.Graphics;
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+        g.Clear(BackColor);
+        g.FillEllipse(deep, 1, 1, 14, 14);
+        double t = clock.Elapsed.TotalSeconds;
+        for (int i = 0; i < blobs.Length; i++) {
+            // Each blob goes round its own small loop, at its own pace (5 to 8 seconds a turn).
+            double a = t * 2 * Math.PI / (5 + 1.5 * i) + i * 2.1;
+            float half = blobs[i].Width / 2f;
+            g.DrawImage(blobs[i], 8 + (float)(3.2 * Math.Cos(a)) - half, 8 + (float)(3.2 * Math.Sin(a * 1.3 + i)) - half);
+        }
+        // What is outside the circle goes back to the pill's colour (a clip would leave a jagged edge).
+        using (var back = new System.Drawing.SolidBrush(BackColor)) g.FillPath(back, outside);
+    }
+}
 '@
 
 $form = New-Object NoActivateBannerForm
@@ -129,7 +186,6 @@ $form.StartPosition   = 'Manual'
 $form.BackColor       = [System.Drawing.Color]::FromArgb(22, 24, 29)
 $form.Size            = New-Object System.Drawing.Size(430, 40)
 
-$amber  = [System.Drawing.Color]::FromArgb(245, 158, 11)
 $blue   = [System.Drawing.Color]::FromArgb(59, 130, 246)
 $muted  = [System.Drawing.Color]::FromArgb(140, 146, 158)
 $script:edge = [System.Drawing.Color]::FromArgb(58, 62, 72)   # the 1px outline; blue on the paused card
@@ -417,7 +473,8 @@ function New-PillLabel([string]$text, [string]$font, [float]$size, $color) {
     $l.AutoSize = $true
     return $l
 }
-$dot      = New-PillLabel ([string][char]0x25CF) 'Segoe UI' 10 $amber
+$dot      = New-Object Orb   # the amber orb: its blobs drift while the agent works
+$dot.BackColor = $form.BackColor
 $brand    = New-PillLabel 'ClawdCursor' 'Segoe UI Semibold' 9 $muted
 $activity = New-PillLabel 'Working' 'Segoe UI Semibold' 9.5 ([System.Drawing.Color]::White)
 if ($env:CLAWD_BANNER_ACTIVITY) { $activity.Text = [string]$env:CLAWD_BANNER_ACTIVITY }
@@ -439,7 +496,7 @@ $form.Controls.AddRange(@($dot, $brand, $activity, $elapsed, $stop))
 # Lay the row out left to right and size the pill to it (the activity text changes), centred again each time.
 function Update-Layout {
     $x = 12
-    $dot.Location = New-Object System.Drawing.Point($x, 9);           $x += $dot.PreferredWidth + 2
+    $dot.Location = New-Object System.Drawing.Point($x, 11);          $x += $dot.Width + 5
     $brand.Location = New-Object System.Drawing.Point($x, 11);        $x += $brand.PreferredWidth + 4
     $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.PreferredWidth + 6
     $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.PreferredWidth + 10
@@ -452,15 +509,11 @@ Update-Layout
 
 $form.add_ActivityChanged([Action[string]]{ param($t) $activity.Text = $t; Update-Layout })
 
-# The amber dot pulses; the clock counts from when the pill appeared.
+# The clock counts from when the pill appeared (the orb moves by itself).
 $clock = [System.Diagnostics.Stopwatch]::StartNew()
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 700
-$bright = $true
 $timer.Add_Tick({
-    $script:bright = -not $script:bright
-    if ($script:bright) { $dot.ForeColor = $amber }
-    else                { $dot.ForeColor = [System.Drawing.Color]::FromArgb(120, 78, 8) }
     $s = [int]$clock.Elapsed.TotalSeconds
     $t = '{0}:{1:00}' -f [int][Math]::Floor($s / 60), ($s % 60)
     if ($elapsed.Text -ne $t) { $elapsed.Text = $t; Update-Layout }

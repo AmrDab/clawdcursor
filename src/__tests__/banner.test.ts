@@ -7,7 +7,7 @@
  *   - BANNER_STOP on the child's stdout fires onStopRequested
  *   - disabled state spawns nothing
  *   - the window outline rides the same lifecycle as the pill and dies with it;
- *     it is told which window the agent works in, and draws nothing without one
+ *     it is told which window the agent works in; when the agent acts with none, the monitor (#392)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
@@ -193,11 +193,17 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 
-  it('is told when there is no window any more, so it hides', () => {
+  it('is told when the agent acts with no window any more: it goes around the monitor instead (#392)', () => {
     controlBanner.pin();
     controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
     controlBanner.setWorkingWindow(undefined);
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET MONITOR']);
+  });
+
+  it('the paused outline is the blue one, told it is paused: no travelling highlight', () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'core', 'banner.ts'), 'utf8');
+    expect(src).toContain("['-Color', PAUSED_OUTLINE, '-Paused']");
+    expect(src).toContain("['--color', PAUSED_OUTLINE, '--paused']");
   });
 
   it('a window known only by its process (macOS) is sent with handle 0', () => {
@@ -273,13 +279,32 @@ describe('no full-screen glow', () => {
     }
   });
 
-  it('no outline drawer sizes a window to a screen', () => {
-    expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
+  it('an outline goes around a screen only when the agent works with no window: the one the pointer is on (#392)', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
+    expect(ps).toContain('monitor = p.Length > 1 && p[1] == "MONITOR"');
+    expect(ps).toContain('bool desk = on && (monitor || (t != IntPtr.Zero && GetForegroundWindow() == t && IsDesktop(t)));');
+    expect(ps).toContain('MonitorFromPoint(at, 2)');
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
+    expect(swift).toContain('parts[1] == "MONITOR"');
+    expect(swift).toContain('if targetMonitor { return pointerScreen() }');
     const py = read('scripts', 'linux', 'overlay.py');
     const start = py.indexOf('def run_outline(');
-    expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
+    const outline = py.slice(start, py.indexOf('\ndef ', start + 1));
+    expect(outline).not.toMatch(/get_n_monitors|get_primary_monitor/);
+    expect(outline).toMatch(/if state\['monitor'\]:[\s\S]*?get_monitor_at_point\(px, py\)/);
+  });
+
+  it('the beam is steady where the OS is set to reduce motion, and the paused form does not travel (#392)', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;');
+    expect(ps).toContain('if (still || paused) {');
+    expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion');
+    expect(swift).toContain('if paused || still {');
+    expect(swift).toContain('if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { continue }');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {

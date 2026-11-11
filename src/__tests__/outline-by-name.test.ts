@@ -74,18 +74,18 @@ describe('the outline follows by-name acts', () => {
       await d.invokeElement({ name: 'Field', action, processId: action === 'toggle' ? fg.processId : undefined });
       expect(workingWindow()).toEqual({ processId: fg.processId, handle: fg.handle });
     }
-    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300', 'TARGET 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET MONITOR', 'TARGET 1970 300', 'TARGET 1440 100', 'TARGET 1970 300', 'TARGET 1440 100']);
   });
 
   it('a by-name act on a process that is not in front leaves the outline where it was', async () => {
     const d = fakeDesktop();
     await d.invokeElement({ name: 'OK', processId: NOTEPAD.processId });
     expect(workingWindow()).toBeUndefined();
-    expect(outlines[0].written).toEqual(['TARGET']);  // no window: the outline draws nothing
+    expect(outlines[0].written).toEqual(['TARGET MONITOR']);  // no window: the outline goes around the monitor (#392)
     await d.invokeElement({ name: 'Save' });
     await d.invokeElement({ name: 'OK', processId: NOTEPAD.processId });
     expect(workingWindow()).toEqual({ processId: 100, handle: 0x5a0 });
-    expect(outlines[0].written).toEqual(['TARGET', 'TARGET 1440 100']);
+    expect(outlines[0].written).toEqual(['TARGET MONITOR', 'TARGET 1440 100']);
   });
 
   it('a refused by-name act (an AI assistant nobody focused) does not move it', async () => {

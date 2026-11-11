@@ -4,7 +4,7 @@
 // scripts/linux/overlay.py, driven by src/core/banner.ts. Compiled once with
 // `swiftc -O` into ~/.clawdcursor/bin (like the OCR helper).
 //
-//   overlay pill   the top-center pill. Running: pulsing amber dot, "ClawdCursor",
+//   overlay pill   the top-center pill. Running: a small amber orb, "ClawdCursor",
 //                  what the agent is doing (env CLAWD_BANNER_ACTIVITY, then
 //                  "ACTIVITY <text>" lines on stdin), the time since it appeared
 //                  and a Stop button; Stop or a double-click prints BANNER_STOP.
@@ -22,12 +22,18 @@
 //                  text field on the card from the start (a click into it takes
 //                  the keyboard; Esc gives it back), replacing "Something else".
 //                  In a multiline field Return adds a line, Cmd+Return sends.
-//   overlay outline [--color #RRGGBB]
+//   overlay outline [--color #RRGGBB] [--paused]
 //                  a thin border around the window the agent works in, and nothing
 //                  else: no fill, nothing on the rest of the screen; clicks pass
 //                  straight through it. stdin: "TARGET <handle> <pid>" names the
 //                  process (a bare "TARGET": none). The border is drawn around the
 //                  process's frontmost window while that app is in front, and follows it.
+//                  "TARGET MONITOR": the agent works with no window (the desktop):
+//                  the border goes around the screen the pointer is on, as it does
+//                  when the target app is in front with no window of its own.
+//                  The border is faint, and one soft highlight travels slowly around
+//                  it (#392); --paused: no travel, a slow breathe. With Reduce
+//                  Motion on it is the plain steady border.
 //
 // When stdin closes (the parent is gone) the process exits.
 //
@@ -62,8 +68,6 @@ func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
     return NSColor(srgbRed: r / 255, green: g / 255, blue: b / 255, alpha: 1)
 }
 
-let amber = rgb(245, 158, 11)
-let amberDim = rgb(120, 78, 8)
 let blue = rgb(59, 130, 246)
 let blueDim = rgb(25, 55, 110)
 let background = rgb(22, 24, 29)
@@ -201,8 +205,44 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return b
     }
 
-    // The running pill: [dot] ClawdCursor  <activity>  m:ss  [Stop]
-    var runDot: NSTextField?
+    /// The running pill's orb (#392), in place of the blinking dot: three soft amber blobs drifting slowly inside a
+    /// 14 pt circle. The idea is the "thinking orbs" of libraries.dev by Jakub Antalik (MIT); nothing of it is copied:
+    /// these are radial gradient layers moved by Core Animation. With Reduce Motion on they stay where they are.
+    func makeOrb() -> NSView {
+        let orb = NSView(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
+        orb.wantsLayer = true
+        orb.layer?.cornerRadius = 7
+        orb.layer?.masksToBounds = true
+        orb.layer?.backgroundColor = rgb(180, 98, 8).cgColor
+        let tones = [rgb(251, 191, 36), rgb(253, 224, 130), rgb(234, 88, 12)]
+        for (i, tone) in tones.enumerated() {
+            let size = CGFloat(13 - 2 * i)
+            let blob = CAGradientLayer()
+            blob.type = .radial
+            blob.colors = [tone.withAlphaComponent(0.92).cgColor, tone.withAlphaComponent(0).cgColor]
+            blob.startPoint = CGPoint(x: 0.5, y: 0.5)
+            blob.endPoint = CGPoint(x: 1, y: 1)
+            blob.bounds = CGRect(x: 0, y: 0, width: size, height: size)
+            let angle = CGFloat(i) * 2.1
+            let from = CGPoint(x: 7 + 3.2 * cos(angle), y: 7 + 3.2 * sin(angle))
+            blob.position = from
+            orb.layer?.addSublayer(blob)
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { continue }
+            // Each blob goes to the other side of the orb and back, at its own pace (5 to 8 seconds a round).
+            let drift = CABasicAnimation(keyPath: "position")
+            drift.fromValue = NSValue(point: from)
+            drift.toValue = NSValue(point: CGPoint(x: 14 - from.x, y: 14 - from.y))
+            drift.duration = 2.5 + 0.75 * Double(i)
+            drift.autoreverses = true
+            drift.repeatCount = .infinity
+            drift.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            blob.add(drift, forKey: "drift")
+        }
+        return orb
+    }
+
+    // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Stop]
+    var runDot: NSView?
     var runActivity: NSTextField?
     var runClock: NSTextField?
     var runBrand: NSTextField?
@@ -222,7 +262,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return w
         }
         var x: CGFloat = 14
-        x += place(dot, x, 40) + 4
+        dot.frame = NSRect(x: x, y: (rowH - 14) / 2, width: 14, height: 14)
+        x += 14 + 6
         x += place(brand, x, 200) + 6
         x += place(act, x, 360) + 8
         x += place(clock, x, 100) + 12
@@ -297,7 +338,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line == "TARGET" || line.hasPrefix("TARGET ") {
                     let parts = line.split(separator: " ")
                     let pid = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
-                    DispatchQueue.main.async { self?.targetPid = pid }
+                    let monitor = parts.count > 1 && parts[1] == "MONITOR"
+                    DispatchQueue.main.async { self?.targetPid = pid; self?.targetMonitor = monitor }
                 }
             }
         }
@@ -382,7 +424,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         content.layer?.borderWidth = 1
         content.layer?.borderColor = (paused ? blue : outline).cgColor
 
-        let dot = label("\u{25CF}", size: paused ? 9 : 12, color: paused ? blue : amber)
+        let dot = label("\u{25CF}", size: 9, color: blue)   // the paused card's dot; the running pill has the orb
         var height: CGFloat = 38
 
         if paused {
@@ -523,9 +565,10 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             clock.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .regular)
             let stop = makeButton("Stop", "BANNER_STOP", frame: NSRect(x: 0, y: 7, width: 52, height: 24),
                                   color: rgb(64, 30, 33), textColor: rgb(252, 165, 165), fontSize: 11, radius: 6)
-            let rowViews: [NSView] = [dot, brand, activity, clock, stop]
+            let orb = makeOrb()
+            let rowViews: [NSView] = [orb, brand, activity, clock, stop]
             rowViews.forEach { content.addSubview($0) }
-            runDot = dot
+            runDot = orb
             runBrand = brand
             runActivity = activity
             runClock = clock
@@ -572,31 +615,53 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var bright = true
         timer = Timer.scheduledTimer(withTimeInterval: paused ? 0.9 : 0.7, repeats: true) { [weak self] _ in
             bright.toggle()
-            dot.textColor = bright ? (paused ? blue : amber) : (paused ? blueDim : amberDim)
-            if !paused { self?.updateClock() }
+            if paused { dot.textColor = bright ? blue : blueDim } else { self?.updateClock() }
         }
     }
 
     /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
     var targetPid = 0
+    /// "TARGET MONITOR": the agent works with no window, so the screen the pointer is on gets the outline.
+    var targetMonitor = false
 
-    /// The frame, in AppKit coordinates, of the target process's frontmost ordinary window while that app is in front.
-    /// The windows are listed only then (the list is front to back).
-    func targetFrame() -> NSRect? {
+    /// The screen the pointer is on (where the agent's last click went), in AppKit coordinates: the part of it below
+    /// the menu bar and beside the Dock, which are above the outline and would hide a side of it.
+    func pointerScreen() -> (frame: NSRect, screen: Bool)? {
+        let at = NSEvent.mouseLocation
+        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(at) }) ?? NSScreen.main else { return nil }
+        return (frame: screen.visibleFrame, screen: true)
+    }
+
+    /// What the outline goes around, in AppKit coordinates, and whether that is a whole screen: the target process's
+    /// frontmost ordinary window while that app is in front (the windows are listed only then; the list is front to
+    /// back), or the pointer's screen when the agent works with no window (TARGET MONITOR, or an app in front that has
+    /// no window of its own: Finder's desktop).
+    func targetFrame() -> (frame: NSRect, screen: Bool)? {
+        if targetMonitor { return pointerScreen() }
         guard targetPid != 0,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
-              let front = list.first(where: {
+              let primary = NSScreen.screens.first else { return nil }
+        guard let front = list.first(where: {
                   ($0[kCGWindowOwnerPID as String] as? Int) == targetPid && ($0[kCGWindowLayer as String] as? Int) == 0
               }),
               let bounds = front[kCGWindowBounds as String] as? NSDictionary,
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-              let primary = NSScreen.screens.first else { return nil }
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return pointerScreen() }
         // Quartz measures down from the top of the primary display, AppKit up from its bottom.
-        return NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
+        return (frame: NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height), screen: false)
     }
 
+    /// The border beam (#392). The idea is the "border beam" of libraries.dev by Jakub Antalik (MIT): a conic gradient
+    /// turning behind a mask that leaves only the border, with a soft glow. Nothing of it is copied; here it is Core
+    /// Animation, composited by the window server: a CAGradientLayer of type .conic (faint all round, one bright
+    /// highlight) turned by a CABasicAnimation, masked by stroked CAShapeLayers - a solid 3 pt border, and two wider,
+    /// fainter strokes around it for the glow.
     func windowOutline() {
+        let paused = CommandLine.arguments.contains("--paused")
+        let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let color = hexColor(option("--color", "#f59e0b"))
+        let glow: CGFloat = 6   // points the window reaches outside the frame, for the glow
+
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
         win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content
@@ -607,18 +672,88 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         win.sharingType = .none  // the outline is not captured either
         let view = NSView()
         view.wantsLayer = true
-        view.layer?.borderColor = hexColor(option("--color", "#f59e0b")).cgColor
-        view.layer?.borderWidth = 3   // points: AppKit scales it for each display
-        // Rounded like the window's own corners, or a wedge of what is behind shows at each one. The system does not
-        // give a window's radius: about 16 pt for a standard window on macOS 26 (which reports itself as 16 to a
-        // binary built with an older SDK), about 10 pt before.
-        view.layer?.cornerRadius = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
         win.contentView = view
+
+        // What turns: a square big enough to cover the frame at any angle, faint (35%) except for one soft highlight
+        // (the same either way round). Paused, or with Reduce Motion on, it is the full colour all round and does not turn.
+        let beam = CAGradientLayer()
+        beam.type = .conic
+        beam.startPoint = CGPoint(x: 0.5, y: 0.5)
+        beam.endPoint = CGPoint(x: 0.5, y: 0)
+        let faint = color.withAlphaComponent(0.35).cgColor
+        if paused || still {
+            beam.colors = [color.cgColor, color.cgColor]
+        } else {
+            beam.colors = [faint, faint, color.cgColor, faint]
+            beam.locations = [0, 0.7, 0.85, 1]
+        }
+        // The mask: the border itself, and (not with Reduce Motion: the plain border) the glow around it.
+        let mask = CALayer()
+        let strokes: [(width: CGFloat, alpha: CGFloat)] = still ? [(3, 1)] : [(2 * glow + 3, 0.10), (glow + 3, 0.20), (3, 1)]
+        let rings: [CAShapeLayer] = strokes.map { stroke in
+            let ring = CAShapeLayer()
+            ring.fillColor = nil
+            ring.strokeColor = NSColor.black.withAlphaComponent(stroke.alpha).cgColor
+            ring.lineWidth = stroke.width
+            mask.addSublayer(ring)
+            return ring
+        }
+        let holder = CALayer()
+        holder.addSublayer(beam)
+        holder.mask = mask
+        view.layer?.addSublayer(holder)
+        if paused && !still {
+            // The paused form breathes: 100% to 60% and back, 2 seconds a round.
+            let breathe = CABasicAnimation(keyPath: "opacity")
+            breathe.fromValue = 1
+            breathe.toValue = 0.6
+            breathe.duration = 1
+            breathe.autoreverses = true
+            breathe.repeatCount = .infinity
+            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            holder.add(breathe, forKey: "breathe")
+        } else if !still {
+            // One turn in 3.5 seconds, clockwise on screen.
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0
+            turn.toValue = -2 * Double.pi
+            turn.duration = 3.5
+            turn.repeatCount = .infinity
+            beam.add(turn, forKey: "turn")
+        }
+
+        // The layers for a window of this size. The border is the 3 pt just inside the frame; a whole screen has square
+        // corners. A window's are rounded like its own, or a wedge of what is behind shows at each one. The system does
+        // not give a window's radius: about 16 pt for a standard window on macOS 26 (which reports itself as 16 to a
+        // binary built with an older SDK), about 10 pt before.
+        let windowRadius: CGFloat = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
+        func layout(_ size: NSSize, screen: Bool) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            let bounds = CGRect(origin: .zero, size: size)
+            holder.frame = bounds
+            mask.frame = bounds
+            let side = hypot(size.width, size.height)
+            beam.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+            beam.position = CGPoint(x: bounds.midX, y: bounds.midY)
+            let edge = bounds.insetBy(dx: glow + 1.5, dy: glow + 1.5)   // the middle of the 3 pt border
+            let radius = screen ? 0 : max(0, windowRadius - 1.5)
+            let path = CGPath(roundedRect: edge, cornerWidth: min(radius, edge.width / 2), cornerHeight: min(radius, edge.height / 2), transform: nil)
+            rings.forEach { $0.frame = bounds; $0.path = path }
+            CATransaction.commit()
+        }
+
         windows.append(win)
         listenForCommands()
+        var laidOut: (NSSize, Bool)? = nil
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let frame = self?.targetFrame() else { win.orderOut(nil); return }
+            guard let target = self?.targetFrame(), target.frame.width > 2 * glow, target.frame.height > 2 * glow else { win.orderOut(nil); return }
+            let frame = target.frame.insetBy(dx: -glow, dy: -glow)
             if win.frame != frame { win.setFrame(frame, display: true) }
+            if laidOut == nil || laidOut!.0 != frame.size || laidOut!.1 != target.screen {
+                layout(frame.size, screen: target.screen)
+                laidOut = (frame.size, target.screen)
+            }
             if !win.isVisible { win.orderFrontRegardless() }
         }
     }
@@ -626,7 +761,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
 let mode = CommandLine.arguments.dropFirst().first ?? ""
 guard mode == "pill" || mode == "outline" else {
-    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB]\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: overlay pill | outline [--color #RRGGBB] [--paused]\n".data(using: .utf8)!)
     exit(2)
 }
 let app = NSApplication.shared
