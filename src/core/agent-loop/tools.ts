@@ -262,7 +262,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
             }
             await sleep(150);
-            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
+            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).`
+              // The reason, as the name path gives it: an ambiguous name comes with the list of what it could mean.
+              : `a11y invoke of ${plan.element.id} missed — ${missText(refRes.data)}.`, targetLabel: plan.name };
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };

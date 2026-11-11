@@ -27,6 +27,9 @@ vi.mock('../platform/ps-runner', () => ({
 
 import { WindowsAdapter } from '../platform/windows';
 import { getA11yTools } from '../tools/a11y';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 // Physical pixels, as the bridge reports: a 3840x2400 primary at 225% and a 1920x1080 monitor at 100% above it.
 const monitors = [
@@ -99,5 +102,53 @@ describe('accessibility find: an offscreen element is listed without a position 
       '[Hyperlink] "Modeling tutorials" (offscreen)',
     ]);
     expect(r.text).not.toMatch(/31000|4200|@0,0/);
+  });
+});
+
+// The bridge cut find at 20 matches in TREE order, before anything put the visible ones first: a hidden web view with
+// more than 20 matches came first in the tree and the one element on screen was never returned.
+describe.runIf(process.platform === 'win32')('ps-bridge find-element (run for real, fake window): the cut comes after "on screen first"', () => {
+  const bridge = readFileSync(join(__dirname, '../../scripts/ps-bridge.ps1'), 'utf8');
+  const fnBody = (name: string) => {
+    const start = bridge.indexOf(`function ${name}`);
+    expect(start, name).toBeGreaterThan(-1);
+    return bridge.slice(start, bridge.indexOf('\nfunction ', start + 10));
+  };
+  const run = (body: string) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${['Test-NameMatch', 'Test-RectOnMonitor', 'Cmd-FindElement'].map(fnBody).join('\n')}\n${body}`],
+  { encoding: 'utf8' }).trim().split(/\r?\n/);
+  const FAKES = `
+function Get-ProcessScopeWindows { param($wpid) return $script:window }
+function Get-MonitorRects { return ,@(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 }) }
+function Add-StateFields { }
+$script:read = 0
+function El($name, $x, $y) {
+  $cur = [pscustomobject]@{ AutomationId = ''; ClassName = ''; ProcessId = 3648; IsEnabled = $true
+    BoundingRectangle = (New-Object System.Windows.Rect ([double]$x), ([double]$y), 200.0, 20.0); ControlType = [pscustomobject]@{ ProgrammaticName = 'ControlType.Text' } }
+  $cur | Add-Member -MemberType ScriptProperty -Name Name -Value { $script:read++; return $this.N }.GetNewClosure()
+  $cur | Add-Member -MemberType NoteProperty -Name N -Value $name
+  return [pscustomobject]@{ Current = $cur } }
+function Window($els) {
+  $w = [pscustomobject]@{ Els = $els }
+  $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
+  return $w }
+$hidden = @(0..24 | ForEach-Object { El "Model help $_" 2850 (4000 + $_ * 1000) })
+`;
+
+  it('25 hidden matches before the visible one: the visible one is returned, first, and the list is still 20', () => {
+    const out = run(`${FAKES}
+$script:window = Window ($hidden + @((El 'model1.prt' 3100 -960)))
+$r = Cmd-FindElement ([pscustomobject]@{ processId = 3648; name = 'Model' })
+"count=$($r.Count) first=$($r[0].name) at $($r[0].bounds.x),$($r[0].bounds.y) second=$($r[1].name) last=$($r[19].name)"`);
+    expect(out).toEqual(['count=20 first=model1.prt at 3100,-960 second=Model help 0 last=Model help 18']);
+  });
+
+  it('20 matches on screen end the search: the rest of the window is not read', () => {
+    const out = run(`${FAKES}
+$visible = @(0..29 | ForEach-Object { El "Model row $_" 3100 (-1000 + $_ * 20) })
+$script:window = Window ($visible + $hidden)
+$r = Cmd-FindElement ([pscustomobject]@{ processId = 3648; name = 'Model' })
+"count=$($r.Count) first=$($r[0].name) last=$($r[19].name) stoppedEarly=$($script:read -lt 60)"`);
+    expect(out).toEqual(['count=20 first=Model row 0 last=Model row 19 stoppedEarly=True']);
   });
 });

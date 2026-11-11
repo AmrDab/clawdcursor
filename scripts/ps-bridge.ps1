@@ -993,7 +993,11 @@ function Cmd-FindElement {
         elseif ($conditions.Count -eq 1) { $conditions[0] }
         else { New-Object System.Windows.Automation.AndCondition([System.Windows.Automation.Condition[]]$conditions) }
 
+    # On screen first, THEN the cut: cut in tree order, a hidden web view with more than $maxResults matches left no
+    # room for the one element on screen. The search ends at $maxResults matches on a monitor; the others fill what is left.
     $results = @()
+    $offMonitor = @()
+    $monitors = Get-MonitorRects
     $nameLower = $name.ToLower()
 
     foreach ($searchRoot in $searchRoots) {
@@ -1012,15 +1016,18 @@ function Cmd-FindElement {
             $rect = $c.BoundingRectangle
             $bounds = if ([double]::IsInfinity($rect.X)) { @{x=0;y=0;width=0;height=0} }
                 else { @{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
+            $onMonitor = $bounds.width -gt 0 -and $bounds.height -gt 0 -and (Test-RectOnMonitor $bounds $monitors)
+            if (-not $onMonitor -and $offMonitor.Count -ge $maxResults) { continue }
             $r = [ordered]@{
                 name=$c.Name; automationId=$c.AutomationId; controlType=$c.ControlType.ProgrammaticName
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
             }
             Add-StateFields $r $el $c.ControlType.ProgrammaticName
-            $results += $r
+            if ($onMonitor) { $results += $r } else { $offMonitor += $r }
         } catch {}
     }
     }
+    $results = @($results + $offMonitor | Select-Object -First $maxResults)
     return ,$results
 }
 
@@ -1102,14 +1109,16 @@ function Test-RectOnMonitor($rect, $monitors) {
 #   1. The ones a user can see: UIA does not call them offscreen and their rect is on a monitor. The best name match
 #      among them wins (pass 1 exact, 2 the name contains the request, 3 a real part of it). A caption that takes no
 #      action gives way to a control that does, and a label inside its own control is that control. Several left:
-#      ambiguous - the caller lists them and nothing is pressed.
+#      only the ones inside the dialog that has the focus ($inFocusedDialog) count - a toolbar and a dialog in
+#      the same window both have "Close". Still several: ambiguous - the caller lists them and nothing is pressed.
 #   2. None visible: the best match that UIA calls offscreen but that has a place on a monitor, or no rect at all (a row
 #      scrolled out of its list, an item of a closed menu).
 #   3. Only matches whose rect is on NO monitor: hidden, never pressed.
-# $hits, in tree order: @{ index; pass; rect = @{ x; y; width; height } or $null; offscreen }. $isActionable: { param($hit) }.
+# $hits, in tree order: @{ index; pass; rect = @{ x; y; width; height } or $null; offscreen }. $isActionable and
+# $inFocusedDialog: { param($hit) }.
 # -> @{ index } | @{ ambiguous = indices } | @{ hidden = $true } | $null (no hits)
 function Select-InvokeTarget {
-    param($hits, $monitors, [scriptblock]$isActionable)
+    param($hits, $monitors, [scriptblock]$isActionable, [scriptblock]$inFocusedDialog)
     $hits = @($hits)
     if ($hits.Count -eq 0) { return $null }
     $placed = { param($h) $null -ne $h.rect -and $h.rect.width -gt 0 -and $h.rect.height -gt 0 }
@@ -1130,8 +1139,44 @@ function Select-InvokeTarget {
         $h = $_
         @($same | Where-Object { $_.index -ne $h.index -and (& $inside $h.rect $_.rect) -and (-not (& $inside $_.rect $h.rect) -or $_.index -lt $h.index) }).Count -eq 0
     })
+    if ($outer.Count -gt 1 -and $inFocusedDialog) {
+        $inDialog = @($outer | Where-Object { & $inFocusedDialog $_ })
+        if ($inDialog.Count -ge 1) { $outer = $inDialog }
+    }
     if ($outer.Count -eq 1) { return @{ index = $outer[0].index } }
     return @{ ambiguous = @($outer | ForEach-Object { $_.index }) }
+}
+
+# The nearest Window / dialog above the element that has the keyboard focus: the dialog the user is in. $null without one.
+function Get-FocusedDialog {
+    try {
+        $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+        $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+        for ($i = 0; $i -lt 60 -and $null -ne $el; $i++) {
+            $c = $el.Current
+            if ($c.ControlType -eq [System.Windows.Automation.ControlType]::Window -or $c.LocalizedControlType -eq 'dialog') { return $el }
+            $el = $walker.GetParent($el)
+        }
+    } catch { }
+    return $null
+}
+function Test-ElementUnder($el, $ancestor) {
+    try {
+        $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+        for ($i = 0; $i -lt 60 -and $null -ne $el; $i++) {
+            if ([System.Windows.Automation.Automation]::Compare($el, $ancestor)) { return $true }
+            $el = $walker.GetParent($el)
+        }
+    } catch { }
+    return $false
+}
+
+# A minimized window keeps every element at -32000: on no monitor, yet a pattern invoke needs no place on screen.
+function Test-WindowMinimized($window) {
+    try {
+        $wp = $window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+        return ($wp.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Minimized)
+    } catch { return $false }
 }
 
 # Does the element take the action at all? A press: one of invoke / toggle / select / expand. A focus: keyboard focus.
@@ -1230,7 +1275,19 @@ function Cmd-InvokeElement {
                 } catch { }
                 [void]$hits.Add(@{ index = $k; pass = $passOf[$k]; rect = $r; offscreen = $off })
             }
-            $pick = if ($hits.Count -gt 0) { Select-InvokeTarget $hits (Get-MonitorRects) { param($h) Test-Activatable $candidates[$h.index] $action } } else { $null }
+            $pick = $null
+            if ($hits.Count -gt 0 -and (Test-WindowMinimized $window)) {
+                # The window itself is minimized: nothing in it is "on screen", and nothing is hidden behind something
+                # else either. The best name match, first in the tree, by pattern - never by a click (see the miss below).
+                $pick = @{ index = @($hits | Sort-Object { $_.pass }, { $_.index })[0].index }
+            } elseif ($hits.Count -gt 0) {
+                $dialogBox = @{}
+                $pick = Select-InvokeTarget $hits (Get-MonitorRects) { param($h) Test-Activatable $candidates[$h.index] $action } {
+                    param($h)
+                    if (-not $dialogBox.ContainsKey('el')) { $dialogBox.el = Get-FocusedDialog }
+                    $null -ne $dialogBox.el -and (Test-ElementUnder $candidates[$h.index] $dialogBox.el)
+                }
+            }
             if ($null -ne $pick) {
                 if ($pick.hidden) { $hiddenOnly = $true }
                 elseif ($pick.ambiguous) {
@@ -1318,10 +1375,15 @@ function Cmd-InvokeElement {
                         $why = if ($invokeErr) { "Invoke failed" } else { "No invoke/toggle/select/expand pattern" }
                         $disabled = $false; try { $disabled = -not $element.Current.IsEnabled } catch { }
                         $why2 = if ($disabled) { 'disabled' } elseif ($invokeErr) { 'invoke_threw' } else { 'unsupported' }
-                        return @{ success=$false; action="click"; error=$why; reason=$why2;
-                            detail=$(if ($invokeErr) { [string]$invokeErr } else { $null }); cascade=($why2 -eq 'unsupported');
-                            clickPoint=@{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)};
-                            bounds=@{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height} }
+                        $miss = @{ success=$false; action="click"; error=$why; reason=$why2;
+                            detail=$(if ($invokeErr) { [string]$invokeErr } else { $null }); cascade=($why2 -eq 'unsupported') }
+                        # A place to click instead - only a place on a monitor (a minimized window's is at -32000).
+                        $at = @{x=[int]$rect.X;y=[int]$rect.Y;width=[int]$rect.Width;height=[int]$rect.Height}
+                        if ($at.width -gt 0 -and $at.height -gt 0 -and (Test-RectOnMonitor $at (Get-MonitorRects))) {
+                            $miss.clickPoint = @{x=[int]($rect.X+$rect.Width/2);y=[int]($rect.Y+$rect.Height/2)}
+                            $miss.bounds = $at
+                        }
+                        return $miss
                         }
                     }
                 }

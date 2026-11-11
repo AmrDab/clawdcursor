@@ -10,8 +10,9 @@
  * runs with a fake bridge reply.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
@@ -50,7 +51,13 @@ const fnBody = (name: string) => {
 };
 function runPs(functions: string[], body: string): string[] {
   const script = `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${functions.map(fnBody).join('\n')}\n${body}`;
-  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  // From a file: Cmd-InvokeElement alone is longer than a Windows command line may be. With a BOM, so PowerShell 5.1 reads UTF-8.
+  const dir = mkdtempSync(join(tmpdir(), 'cc-bridge-test-'));
+  const file = join(dir, 'run.ps1');
+  writeFileSync(file, String.fromCharCode(0xfeff) + script, 'utf8');
+  try {
+    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 
 // The owner's monitors in physical pixels, and where things were: the ribbon button on the monitor above the primary,
@@ -124,7 +131,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Test-Activatable', 'Cmd-InvokeElement'];
+  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Test-Activatable', 'Cmd-InvokeElement'];
   const invoke = `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'New'; action = 'click' })`;
 
   it('invoke "New": the ribbon button on the second monitor is pressed, not the hidden web view\'s link before it', () => {
