@@ -68,6 +68,13 @@ export async function buildNative(outDir: string, platform: string = process.pla
     : { missing: 'python3 with gi and GTK 3 is not installed' };
 }
 
+/**
+ * The file the native fixture writes its live state to. The FIXTURE is its only writer: it creates it when it starts
+ * and replaces it on every change. The runner reads it, and writes its own copy of the final state for the results
+ * under another name (RESULT_FILES in run.ts): two writers on one name was the EEXIST of the first live run.
+ */
+export const nativeStatePath = (workDir: string) => path.join(workDir, 'native-fixture.live.json');
+
 export function nativeArgs(o: { state: string; mode: 'dialog' | 'editor'; pos?: [number, number] }): string[] {
   return ['--state', o.state, '--mode', o.mode, ...(o.pos ? ['--pos', o.pos.join(',')] : [])];
 }
@@ -86,7 +93,7 @@ export function readStateFile(file: string): FixtureState | null {
 
 async function openNative(mode: 'dialog' | 'editor', ctx: FixtureContext): Promise<LiveFixture | { skip: string }> {
   if ('missing' in ctx.native) return { skip: ctx.native.missing };
-  const state = path.join(ctx.workDir, 'fixture-state.json');
+  const state = nativeStatePath(ctx.workDir);
   const child = start(ctx.native.cmd, [...ctx.native.args, ...nativeArgs({ state, mode })], { stdio: 'ignore' });
   await waitFor(() => fs.existsSync(state), 20_000, 'the native fixture to start');
   return {

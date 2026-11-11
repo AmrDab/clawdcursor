@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { claudeCommand, claudeMcpConfig, parseClaudeLine } from '../lib/adapters/claude-code';
+import { claudeCommand, claudeMcpConfig, claudePreflightCommand, parseClaudeLine, parseClaudePreflight } from '../lib/adapters/claude-code';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { clearAgentBins, locateAgent, setAgentBin, sigOf } from '../lib/adapters/common';
+import { PREFLIGHT_PROMPT, clearAgentBins, locateAgent, preflightFailure, setAgentBin, sigOf, type Adapter } from '../lib/adapters/common';
 import { parseArgs } from '../run';
-import { ADAPTERS, parseModels } from '../lib/adapters';
-import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, parseCodexLine } from '../lib/adapters/codex';
+import { ADAPTERS, parseModels, preflightAll } from '../lib/adapters';
+import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, codexPreflightCommand, codexServerFailure, parseCodexLine } from '../lib/adapters/codex';
+import { ollama } from '../lib/adapters/ollama';
+import { probeMcp } from '../lib/isolated';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
 import { MAX_TURNS, RESULT_CHARS, argsOf, chatRequest, resultText, runLoop, toOllamaTools, type OllamaMessage } from '../lib/adapters/ollama';
 
 describe('call signatures', () => {
@@ -288,5 +292,154 @@ describe('finding the native binary of an agent host', () => {
 
   it('the adapters report the reason, not just "not installed"', () => {
     for (const a of ADAPTERS.filter(x => x.id !== 'ollama')) expect(typeof a.why).toBe('function');
+  });
+});
+
+describe('the preflight: can each agent run at all, before anything opens on the desktop', () => {
+  it('claude-code: a trivial prompt, no MCP server, no tool, none of the owner\'s settings', () => {
+    const c = claudePreflightCommand({ exe: '/bin/claude', model: 'sonnet' });
+    expect(c.stdin).toBe(PREFLIGHT_PROMPT);
+    expect(c.args).toContain('--strict-mcp-config');
+    expect(c.args).not.toContain('--mcp-config');
+    expect(c.args).not.toContain('--allowedTools');
+    expect(c.args[c.args.indexOf('--tools') + 1]).toBe('');
+    expect(c.args[c.args.indexOf('--setting-sources') + 1]).toBe('project');
+    expect(c.args[c.args.indexOf('--output-format') + 1]).toBe('json');
+  });
+
+  it('claude-code: reads the one result line', () => {
+    expect(parseClaudePreflight('{"type":"result","subtype":"success","is_error":false,"result":"OK"}\n')).toEqual({ ok: true, said: 'OK' });
+    expect(parseClaudePreflight('{"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}\n'))
+      .toEqual({ ok: false, said: 'Failed to authenticate: OAuth session expired and could not be refreshed' });
+    expect(parseClaudePreflight('some crash output')).toEqual({ ok: false, said: 'some crash output' });
+  });
+
+  it('codex: a trivial prompt, no MCP server, no plugins, no shell', () => {
+    const c = codexPreflightCommand({ exe: 'codex', model: CODEX_DEFAULT, workDir: '/w', lastMessagePath: '/w/last.txt' });
+    expect(c.stdin).toBe(PREFLIGHT_PROMPT);
+    expect(c.args.join(' ')).not.toContain('mcp_servers');
+    expect(c.args).toContain('--ignore-user-config');
+    expect(c.args.filter((_, i) => c.args[i - 1] === '--disable')).toEqual(['plugins', 'shell_tool']);
+    expect(c.env).toBeUndefined();
+  });
+
+  it('an expired login is told apart from a host that did not start, with what to do', () => {
+    expect(preflightFailure('claude-code', 'claude', 1, 'Failed to authenticate: OAuth session expired and could not be refreshed'))
+      .toBe('claude-code is not signed in: run `claude` and log in. (Failed to authenticate: OAuth session expired and could not be refreshed)');
+    expect(preflightFailure('codex', 'codex login', 1, 'ERROR: 401 Unauthorized')).toMatch(/^codex is not signed in: run `codex login` and log in\./);
+    expect(preflightFailure('codex', 'codex login', 2, 'error: unexpected argument')).toBe('codex did not answer a trivial prompt (exit code 2): error: unexpected argument');
+    expect(preflightFailure('claude-code', 'claude', null, '')).toMatch(/no output$/);
+  });
+
+  const fake = (id: string, answer: string | null | Error): Adapter => ({ ...ADAPTERS[0], id,
+    preflight: async () => { if (answer instanceof Error) throw answer; return answer; } });
+
+  it('every model is checked; the ones that cannot run are listed, each with its reason', async () => {
+    const runs = [
+      { adapter: fake('claude-code', 'claude-code is not signed in: run `claude` and log in.'), model: 'sonnet', label: 'claude-code:sonnet' },
+      { adapter: fake('codex', null), model: 'default', label: 'codex:default' },
+      { adapter: fake('ollama', new Error('connect ECONNREFUSED')), model: 'qwen2.5:7b', label: 'ollama:qwen2.5:7b' },
+    ];
+    const dirs: string[] = [];
+    const failures = await preflightAll(runs, label => { dirs.push(label); return os.tmpdir(); }, new AbortController().signal);
+    expect(failures).toEqual(['claude-code:sonnet: claude-code is not signed in: run `claude` and log in.', 'ollama:qwen2.5:7b: ollama failed to start: connect ECONNREFUSED']);
+    expect(dirs).toEqual(['claude-code:sonnet', 'codex:default', 'ollama:qwen2.5:7b']);
+  });
+
+  it('all agents answer: nothing to report', async () => {
+    expect(await preflightAll([{ adapter: fake('codex', null), model: 'default', label: 'codex:default' }], () => os.tmpdir(), new AbortController().signal)).toEqual([]);
+  });
+
+  it('every adapter has one', () => {
+    for (const a of ADAPTERS) expect(typeof a.preflight, a.id).toBe('function');
+  });
+});
+
+describe('an adapter that cannot reach clawdcursor says so: it is the server\'s failure', () => {
+  const init = (servers: unknown) => JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', tools: [], mcp_servers: servers });
+
+  it('claude-code: the init line lists the MCP server as anything but connected', () => {
+    expect(parseClaudeLine(init([{ name: 'clawdcursor', status: 'connected' }]))).toEqual({ sigs: [] });
+    expect(parseClaudeLine(init([{ name: 'clawdcursor', status: 'failed' }]))).toEqual({ sigs: [], serverUnreachable: 'Claude Code reports the clawdcursor MCP server as "failed"' });
+    expect(parseClaudeLine(init([{ name: 'clawdcursor', status: 'needs-auth' }])).serverUnreachable).toMatch(/"needs-auth"/);
+    expect(parseClaudeLine(init([{ name: 'clawdcursor' }])).serverUnreachable).toMatch(/"unknown"/);
+    expect(parseClaudeLine(init([])).serverUnreachable).toBe('Claude Code started without the clawdcursor MCP server');
+    expect(parseClaudeLine(init([{ name: 'other', status: 'connected' }])).serverUnreachable).toMatch(/without the clawdcursor MCP server/);
+    // An init line with no server list (another version) says nothing either way.
+    expect(parseClaudeLine(JSON.stringify({ type: 'system', subtype: 'init' }))).toEqual({ sigs: [] });
+  });
+
+  it('codex: an MCP failure that names the server, on stdout or stderr', () => {
+    expect(codexServerFailure('ERROR: MCP client for `clawdcursor` failed to start: connection refused', 'stderr')).toMatch(/^Codex could not reach the clawdcursor MCP server: ERROR: MCP client/);
+    expect(codexServerFailure('{"type":"error","message":"mcp server clawdcursor timed out during initialize"}', 'stdout')).not.toBeNull();
+    expect(codexServerFailure('{"type":"mcp_startup_failed","server":"clawdcursor","error":"mcp: connection refused"}', 'stdout')).not.toBeNull();
+    expect(codexServerFailure('mcp: clawdcursor ready (6 tools)', 'stderr')).toBeNull();
+    expect(codexServerFailure('ERROR: 401 Unauthorized', 'stderr')).toBeNull();                       // the agent's own login
+    expect(codexServerFailure('MCP client for `other` failed to start', 'stderr')).toBeNull();
+    expect(codexServerFailure('{"type":"error","message":"stream disconnected"}', 'stdout')).toBeNull();
+  });
+
+  it('codex: a tool call that FAILED is not an unreachable server, however its result reads', () => {
+    // An ordinary tool failure: the event names the server and its result says failed / error / refused / not connected.
+    const call = (text: string, type = 'item.completed') => JSON.stringify({ type, item: { id: 'item_4', type: 'mcp_tool_call', server: 'clawdcursor',
+      tool: 'accessibility', arguments: { action: 'invoke', name: 'Aply' }, status: 'failed',
+      result: { content: [{ type: 'text', text }], is_error: true }, error: { message: text } } });
+    for (const text of ['accessibility invoke "Aply" missed — element not found\n[failed · NOT_FOUND · mcp error]', 'FENCED: refused by clawdcursor mcp',
+      'mcp tool clawdcursor.browser: CDP not connected, connection refused', 'timed out after 15000 ms (clawdcursor mcp)']) {
+      expect(codexServerFailure(call(text), 'stdout'), text).toBeNull();
+      expect(codexServerFailure(call(text, 'item.started'), 'stdout'), text).toBeNull();
+    }
+    // ... and stdout that is not an event at all is never read as one.
+    expect(codexServerFailure('mcp clawdcursor failed', 'stdout')).toBeNull();
+    // The same words in an error event, or on stderr, still count.
+    expect(codexServerFailure(JSON.stringify({ type: 'error', message: 'mcp clawdcursor failed to connect' }), 'stdout')).not.toBeNull();
+    expect(codexServerFailure('mcp clawdcursor failed to connect', 'stderr')).not.toBeNull();
+  });
+
+  it('ollama: a failed MCP connection is reported, not thrown (a throw would read as an agent error)', async () => {
+    const closed = http.createServer();
+    await new Promise<void>(r => closed.listen(0, '127.0.0.1', r));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise(r => closed.close(r));
+    const result = await ollama.run({ prompt: 'x', model: 'qwen2.5:7b', mcpUrl: `http://127.0.0.1:${port}/mcp`, token: 't', workDir: os.tmpdir(), logFile: '',
+      onSig: () => {}, signal: new AbortController().signal });
+    expect(result.serverUnreachable).toMatch(/^the MCP connection failed: /);
+    expect(result.finalText).toBe('');
+  });
+
+  describe('the runner\'s own check, for any adapter', () => {
+    const serve = async (handler: http.RequestListener) => {
+      const server = http.createServer(handler);
+      await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+      return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`, close: () => new Promise(r => { server.closeAllConnections(); server.close(r); }) };
+    };
+
+    it('nothing listening: the handshake failed', async () => {
+      const s = await serve(() => {});
+      await s.close();
+      expect(await probeMcp(s.url, 't', 3000)).toMatch(/^the MCP handshake failed: /);
+    });
+
+    it('a server that answers 500 to initialize: the handshake failed', async () => {
+      const s = await serve((_req, res) => { res.writeHead(500); res.end('boom'); });
+      try { expect(await probeMcp(s.url, 't', 3000)).toMatch(/^the MCP handshake failed: /); } finally { await s.close(); }
+    });
+
+    it('a server that initializes but lists no tools: tools/list is missing the six', async () => {
+      const s = await serve((req, res) => {
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => {
+          const msg = JSON.parse(body || '{}') as { id?: number; method?: string };
+          if (msg.id === undefined) { res.writeHead(202); res.end(); return; }
+          const result = msg.method === 'initialize'
+            ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'broken', version: '0' } }
+            : { tools: [{ name: 'accessibility', inputSchema: { type: 'object' } }] };
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+        });
+      });
+      try { expect(await probeMcp(s.url, 't', 3000)).toBe('tools/list is missing system, window, browser, computer, batch'); } finally { await s.close(); }
+    });
   });
 });

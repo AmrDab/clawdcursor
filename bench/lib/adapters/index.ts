@@ -22,6 +22,22 @@ export function parseModels(spec: string, adapters: Adapter[] = ADAPTERS): Model
   return runs;
 }
 
+/**
+ * Before any task: start each agent once with a trivial prompt and no tools. Returns one line per agent that cannot
+ * run (not signed in, did not start); empty when all answered. Without this an expired login shows up as every task
+ * "not done" with zero calls.
+ */
+export async function preflightAll(runs: ModelRun[], workDirFor: (label: string) => string, signal: AbortSignal, timeoutMs = 180_000): Promise<string[]> {
+  const failures: string[] = [];
+  for (const m of runs) {
+    const timeout = AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+    const why = await m.adapter.preflight(m.model, workDirFor(m.label), timeout)
+      .catch((e: Error) => `${m.adapter.id} failed to start: ${e.message}`);
+    if (why) failures.push(`${m.label}: ${why}`);
+  }
+  return failures;
+}
+
 /** Every installed adapter with its default models. */
 export async function detectModels(adapters: Adapter[] = ADAPTERS): Promise<{ runs: ModelRun[]; found: Array<{ id: string; detail: string | null; why: string | null }> }> {
   const found = await Promise.all(adapters.map(async a => {

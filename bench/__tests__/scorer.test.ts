@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { aggregate, buildReport, compare, countFalseOk, expectsEffect, gateOf, renderMarkdown, score, toBaseline, DONE_MARK, type RunRecord, type Score } from '../lib/scorer';
+import { aggregate, agentErrorOf, buildReport, compare, countFalseOk, expectsEffect, gateOf, renderMarkdown, score, toBaseline, DONE_MARK, type RunRecord, type Score } from '../lib/scorer';
 import { countLoops, loopKeys } from '../lib/rules';
 import type { AgentRun, FixtureState, LogCall, TaskSpec } from '../lib/types';
 
@@ -209,9 +209,9 @@ describe('report, baseline, comparison', () => {
   it('passes only when every gated row passes, and never on an empty run', () => {
     const good = score(cleanRun());
     const bad = score({ ...cleanRun(), fixture: { state: {}, events: [] } });
-    expect(buildReport(meta, [good]).gate).toEqual({ pass: true, failed: 0, gated: 1 });
-    expect(buildReport(meta, [good, bad]).gate).toEqual({ pass: false, failed: 1, gated: 2 });
-    expect(buildReport(meta, []).gate.pass).toBe(false);
+    expect(buildReport(meta, [good]).gate).toEqual({ pass: true, status: 'PASS', failed: 0, gated: 1, agentErrors: 0 });
+    expect(buildReport(meta, [good, bad]).gate).toEqual({ pass: false, status: 'FAIL', failed: 1, gated: 2, agentErrors: 0 });
+    expect(buildReport(meta, []).gate).toMatchObject({ pass: false, status: 'INCOMPLETE' });
   });
 
   it('compares with the baseline row of the same task and model', () => {
@@ -319,5 +319,139 @@ describe('repeats', () => {
   it('shows done as n/m in the table', () => {
     const meta = { date: 'd', os: 'windows' as const, clawdcursor: '2', models: ['claude-code:sonnet'], skipped: [] };
     expect(renderMarkdown(buildReport(meta, [aggregate([run({}), run({}), run({ success: false, successes: 0 })])]))).toContain('| 2/3 |');
+  });
+});
+
+describe('an agent that never ran is not clawdcursor failing', () => {
+  const meta = { date: 'd', os: 'windows' as const, clawdcursor: '2', models: ['claude-code:sonnet'], skipped: [] };
+  /** What the first live run recorded for every task: the CLI's login had expired. */
+  const expired = (): RunRecord => ({ ...cleanRun(), calls: [], fixture: { state: { done: false }, events: [{ t: T0, type: 'load', target: 'page' }], loads: 1 },
+    agent: { finalText: 'Failed to authenticate: OAuth session expired and could not be refreshed', exitCode: 1, sigs: [], seconds: 2 } });
+
+  it('a nonzero exit with no tool call is an agent error, with the agent\'s message', () => {
+    expect(agentErrorOf(expired())).toBe('Failed to authenticate: OAuth session expired and could not be refreshed');
+    const s = score(expired());
+    expect(s).toMatchObject({ agentError: 'Failed to authenticate: OAuth session expired and could not be refreshed', success: null, calls: 0 });
+    expect(s.gate).toEqual({ pass: true, failures: [] });   // not gated: it measured nothing
+  });
+
+  it('so is an adapter that threw, and an exit with nothing said', () => {
+    expect(agentErrorOf({ calls: [], agent: { finalText: 'adapter error: spawn claude ENOENT', exitCode: null, sigs: [], seconds: 0 } })).toBe('spawn claude ENOENT');
+    expect(agentErrorOf({ calls: [], agent: { finalText: '', exitCode: 3, sigs: [], seconds: 0 } })).toBe('the agent exited with code 3 before its first tool call');
+  });
+
+  it('it is NOT an agent error when the agent made a call, was stopped by the watchdog, or just gave up', () => {
+    const made = expired(); made.calls = [call(0, 'accessibility', 'read_tree', 'blind')];
+    expect(agentErrorOf(made)).toBeNull();
+    expect(score(made)).toMatchObject({ success: false });
+    const asked = expired(); asked.agent.sigs = [{ tool: 'accessibility', sig: 'a' }];
+    expect(agentErrorOf(asked)).toBeNull();
+    const stopped = expired(); stopped.agent.killed = { rule: 'time-cap', detail: '' };
+    expect(agentErrorOf(stopped)).toBeNull();
+    const gaveUp = expired(); gaveUp.agent = { finalText: 'I cannot do this.\nBENCH_RESULT: FAILED', exitCode: 0, sigs: [], seconds: 3 };
+    expect(agentErrorOf(gaveUp)).toBeNull();
+    expect(score(gaveUp).gate.failures).toContain('task not done (fixture state)');   // a model that does nothing fails the task
+  });
+
+  it('the run is INCOMPLETE, not FAIL: such rows are left out of the gate', () => {
+    const all = buildReport(meta, [score(expired()), score(expired())]);
+    expect(all.gate).toEqual({ pass: false, status: 'INCOMPLETE', failed: 0, gated: 0, agentErrors: 2 });
+    const some = buildReport(meta, [score(cleanRun()), score(expired())]);
+    expect(some.gate).toEqual({ pass: false, status: 'INCOMPLETE', failed: 0, gated: 1, agentErrors: 1 });
+  });
+
+  it('a real failure beside it is still FAIL', () => {
+    const bad = score({ ...cleanRun(), fixture: { state: {}, events: [] } });
+    expect(buildReport(meta, [bad, score(expired())]).gate).toMatchObject({ status: 'FAIL', failed: 1, gated: 1, agentErrors: 1 });
+  });
+
+  it('the table says "agent error" with the message, and the report says what to do', () => {
+    const md = renderMarkdown(buildReport(meta, [score(expired())]));
+    expect(md).toContain('Gate: **INCOMPLETE** (0/0 rows pass; 1 row(s) not measured: the agent host failed)');
+    expect(md).toContain('| agent error |');
+    expect(md).toContain('- (agent error: Failed to authenticate: OAuth session expired and could not be refreshed)');
+    expect(md).toContain('Fix the agent and run again.');
+    expect(md).not.toContain('FAIL:');
+  });
+
+  it('with repeats, one run in which the agent never started leaves the row unmeasured', () => {
+    const s = aggregate([score(cleanRun()), score(expired()), score(cleanRun())]);
+    expect(s.agentError).toMatch(/OAuth session expired/);
+    expect(s.gate.pass).toBe(true);
+    expect(buildReport(meta, [s]).gate.status).toBe('INCOMPLETE');
+  });
+
+  it('an agent-error row is never written to a baseline', () => {
+    const report = buildReport(meta, [score(cleanRun()), { ...score(expired()), task: 'other-task' }]);
+    expect(toBaseline(report).scores.map(x => x.task)).toEqual(['web-sample']);
+  });
+});
+
+describe('"could not reach clawdcursor" is a clawdcursor failure, never an agent error', () => {
+  const meta = { date: 'd', os: 'windows' as const, clawdcursor: '2', models: ['claude-code:sonnet'], skipped: [] };
+  /** The daemon's MCP handshake broke: the agent host exits with an error and makes no call, exactly like an expired login. */
+  const unreachable = (): RunRecord => ({ ...cleanRun(), calls: [], fixture: { state: { done: false }, events: [], loads: 1 },
+    agent: { finalText: '', exitCode: 1, sigs: [], seconds: 1, serverUnreachable: 'the MCP handshake failed: fetch failed' } });
+
+  it('the row fails, with that reason, and is not an agent error', () => {
+    expect(agentErrorOf(unreachable())).toBeNull();
+    const s = score(unreachable());
+    expect(s.agentError).toBeUndefined();
+    expect(s).toMatchObject({ success: false, serverError: 'the MCP handshake failed: fetch failed' });
+    expect(s.gate).toEqual({ pass: false, failures: ['could not reach clawdcursor: the MCP handshake failed: fetch failed'] });
+  });
+
+  it('whatever the agent said or however it exited', () => {
+    for (const agent of [{ finalText: 'adapter error: connect ECONNREFUSED', exitCode: null }, { finalText: 'Failed to authenticate', exitCode: 1 },
+      { finalText: 'BENCH_RESULT: FAILED', exitCode: 0 }]) {
+      const r = unreachable();
+      r.agent = { ...r.agent, ...agent };
+      const s = score(r);
+      expect(s.agentError, agent.finalText).toBeUndefined();
+      expect(s.gate.failures[0], agent.finalText).toMatch(/^could not reach clawdcursor/);
+    }
+  });
+
+  it('the run is FAIL, not INCOMPLETE, and the table says why', () => {
+    const report = buildReport(meta, [score(unreachable())]);
+    expect(report.gate).toEqual({ pass: false, status: 'FAIL', failed: 1, gated: 1, agentErrors: 0 });
+    const md = renderMarkdown(report);
+    expect(md).toContain('Gate: **FAIL**');
+    expect(md).toContain('FAIL: could not reach clawdcursor: the MCP handshake failed: fetch failed');
+    expect(md).not.toContain('agent error');
+  });
+
+  it('with repeats, one unreachable run fails the row; it does not turn into an agent error beside one', () => {
+    const expired: RunRecord = { ...cleanRun(), calls: [], agent: { finalText: 'Failed to authenticate', exitCode: 1, sigs: [], seconds: 1 } };
+    const s = aggregate([score(cleanRun()), score(unreachable()), score(expired)]);
+    expect(s.serverError).toBe('the MCP handshake failed: fetch failed');
+    expect(s.agentError).toBeUndefined();
+    expect(s.gate.pass).toBe(false);
+  });
+
+  it('a completed task stays a success when a host claims the server was unreachable: a tool call succeeded, so it was reached', () => {
+    // Codex finished the task; one of its tool calls had failed along the way with "error" in its result, and the
+    // adapter (wrongly) took that for an unreachable server.
+    const r = cleanRun();
+    r.calls.push(call(4, 'accessibility', 'invoke', 'act-name', { ok: false, outcome: 'error', code: 'NOT_FOUND' }));
+    r.fixture!.events.push(ev(4));
+    r.agent = { ...r.agent, serverUnreachable: 'Codex could not reach the clawdcursor MCP server: {"type":"item.completed","item":{"type":"mcp_tool_call","server":"clawdcursor","result":"error"}}' };
+    const s = score(r);
+    expect(s.serverError).toBeUndefined();
+    expect(s).toMatchObject({ success: true, errors: 1 });
+    expect(s.gate.failures.join(' ')).not.toMatch(/could not reach clawdcursor/);
+    expect(buildReport(meta, [s]).gate.status).not.toBe('INCOMPLETE');
+  });
+
+  it('it is honoured when calls were made but none succeeded (every call failed at the transport)', () => {
+    const r = unreachable();
+    r.calls = [call(0, 'accessibility', 'read_tree', 'blind', { ok: false, outcome: 'error' })];
+    expect(score(r).gate.failures[0]).toMatch(/^could not reach clawdcursor/);
+  });
+
+  it('a manual-verify task fails too: nothing could be done through an unreachable server', () => {
+    const r = unreachable();
+    r.task = { ...task, manualVerify: true, success: undefined };
+    expect(score(r).gate.pass).toBe(false);
   });
 });

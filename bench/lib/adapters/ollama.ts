@@ -6,7 +6,7 @@
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { sigOf, type Adapter, type AgentJob, type AgentResult } from './common';
+import { PREFLIGHT_PROMPT, sigOf, type Adapter, type AgentJob, type AgentResult } from './common';
 import type { CallSig } from '../types';
 
 export const OLLAMA_URL = 'http://127.0.0.1:11434';
@@ -99,11 +99,29 @@ export const ollama: Adapter = {
       return `local server at ${OLLAMA_URL}, tool-calling models: ${models.join(', ')}`;
     } catch { return null; }
   },
+  async preflight(model, _workDir, signal) {
+    try {
+      const { url, body } = chatRequest(model, [{ role: 'user', content: PREFLIGHT_PROMPT }], []);
+      const res = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal });
+      if (res.ok) return null;
+      return `ollama did not answer a trivial prompt with ${model} (${res.status}): ${(await res.text()).slice(0, 200)}. Is the model pulled? (\`ollama pull ${model}\`)`;
+    } catch (e) {
+      return `ollama is not reachable at ${OLLAMA_URL}: ${(e as Error).message}. Start it with \`ollama serve\`.`;
+    }
+  },
   async run(job: AgentJob): Promise<AgentResult> {
     const client = new Client({ name: 'clawdcursor-bench-ollama', version: '1' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(job.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${job.token}` } } }));
+    // Reaching clawdcursor (connect, initialize, tools/list) is the server's part: when it fails, the row is a
+    // clawdcursor failure. Everything after it that throws (the model, the loop) is the agent's.
+    let mcpTools: McpTool[];
     try {
-      const mcpTools = (await client.listTools()).tools as McpTool[];
+      await client.connect(new StreamableHTTPClientTransport(new URL(job.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${job.token}` } } }));
+      mcpTools = (await client.listTools()).tools as McpTool[];
+    } catch (e) {
+      await client.close().catch(() => { /* never opened */ });
+      return { finalText: '', exitCode: 1, serverUnreachable: `the MCP connection failed: ${(e as Error).message}` };
+    }
+    try {
       const tools = toOllamaTools(mcpTools);
       const finalText = await runLoop(job.prompt, mcpTools.map(t => t.name), {
         signal: job.signal, onSig: job.onSig,

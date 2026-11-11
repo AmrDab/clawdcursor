@@ -89,6 +89,11 @@ export interface AgentRun {
   exitCode: number | null;
   /** Set when the watchdog stopped the agent. */
   killed?: { rule: string; detail: string };
+  /**
+   * The agent could not reach clawdcursor: the MCP connection, its initialize or its tools/list failed. That is a
+   * failure of the server under test, never an "agent error", whatever the agent then did or said.
+   */
+  serverUnreachable?: string;
   sigs: CallSig[];
   seconds: number;
 }

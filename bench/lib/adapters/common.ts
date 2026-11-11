@@ -60,7 +60,11 @@ export interface AgentJob {
   signal: AbortSignal;
 }
 
-export interface AgentResult { finalText: string; exitCode: number | null }
+export interface AgentResult {
+  finalText: string; exitCode: number | null;
+  /** The host could not connect to the isolated clawdcursor (connect, initialize or tools/list failed): why. */
+  serverUnreachable?: string;
+}
 
 export interface Adapter {
   id: string;
@@ -73,6 +77,33 @@ export interface Adapter {
   /** Why detect() found nothing usable, when there is more to say than "not installed" (only a .cmd shim, a bad --*-bin). */
   why?(): string | null;
   run(job: AgentJob): Promise<AgentResult>;
+  /**
+   * Start the agent host once with a trivial prompt and no tools. Null when it answered; else why it cannot run
+   * (not signed in, did not start). `workDir` is an empty directory outside the owner's home.
+   */
+  preflight(model: string, workDir: string, signal: AbortSignal): Promise<string | null>;
+}
+
+export const PREFLIGHT_PROMPT = 'Reply with the single word OK.';
+
+/**
+ * What a failed preflight means, for the person running the benchmark. `said` is whatever the host printed.
+ * `login` is the command that signs it in.
+ */
+export function preflightFailure(id: string, login: string, exitCode: number | null, said: string): string {
+  const text = said.replace(/\s+/g, ' ').trim().slice(0, 300);
+  if (/authenticat|oauth|log ?in|sign ?in|unauthori[sz]ed|\b401\b|api key|credential/i.test(text)) {
+    return `${id} is not signed in: run \`${login}\` and log in. (${text})`;
+  }
+  return `${id} did not answer a trivial prompt (exit code ${exitCode}): ${text || 'no output'}`;
+}
+
+/** Run a host's preflight command and collect what it printed (stdout and stderr). */
+export async function runPreflight(c: CliCommand, workDir: string, signal: AbortSignal): Promise<{ exitCode: number | null; out: string; err: string }> {
+  let out = '', err = '';
+  const exitCode = await runCli(c, { cwd: workDir, signal, onLine: l => { out += `${l}\n`; }, onErr: t => { err += t; } })
+    .catch((e: Error) => { err += e.message; return 1; });
+  return { exitCode, out, err };
 }
 
 export interface CliCommand { cmd: string; args: string[]; env?: Record<string, string>; stdin?: string }
@@ -96,7 +127,7 @@ export function sigOf(tool: string, args: unknown): CallSig {
 }
 
 /** Run a CLI agent: stdout goes to `onLine` line by line, the prompt (if any) to stdin. Stops the process tree on abort. */
-export function runCli(c: CliCommand, o: { cwd: string; signal: AbortSignal; onLine(line: string): void; logFile?: string }): Promise<number | null> {
+export function runCli(c: CliCommand, o: { cwd: string; signal: AbortSignal; onLine(line: string): void; onErr?(text: string): void; logFile?: string }): Promise<number | null> {
   return new Promise((resolve, reject) => {
     // The executable itself with its arguments as an array: no shell, so nothing in a path or the environment is parsed
     // as a command. (A .cmd shim cannot be run this way: `which` only returns real executables.)
@@ -111,7 +142,7 @@ export function runCli(c: CliCommand, o: { cwd: string; signal: AbortSignal; onL
       rest = lines.pop() ?? '';
       for (const l of lines) if (l.trim()) o.onLine(l);
     });
-    child.stderr!.on('data', (d: Buffer) => { log?.write(d); });
+    child.stderr!.on('data', (d: Buffer) => { log?.write(d); o.onErr?.(d.toString('utf8')); });
     child.once('error', err => { o.signal.removeEventListener('abort', onAbort); log?.end(); reject(err); });
     child.once('close', code => {
       o.signal.removeEventListener('abort', onAbort);

@@ -6,7 +6,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { locateAgent, runCli, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
+import { PREFLIGHT_PROMPT, locateAgent, preflightFailure, runCli, runPreflight, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
 
@@ -46,6 +46,18 @@ export function codexCommand(o: { exe: string; model: string; mcpUrl: string; to
   };
 }
 
+/** The preflight: exec with no MCP server, no plugins, no shell and none of the owner's config; the prompt on stdin. */
+export function codexPreflightCommand(o: { exe: string; model: string; workDir: string; lastMessagePath: string }): CliCommand {
+  return {
+    cmd: o.exe,
+    args: ['exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only',
+      '--disable', 'plugins', '--disable', 'shell_tool', '-c', 'project_doc_max_bytes=0',
+      ...(o.model && o.model !== CODEX_DEFAULT ? ['--model', o.model] : []),
+      '--cd', o.workDir, '--output-last-message', o.lastMessagePath, '-'],
+    stdin: PREFLIGHT_PROMPT,
+  };
+}
+
 /**
  * One line of `codex exec --json`. A tool call is an item of type mcp_tool_call: it is reported when it starts and
  * again when it completes, so `id` lets the caller count it once.
@@ -62,6 +74,37 @@ export function parseCodexLine(line: string): { sig?: CallSig; id?: string; fina
   }
   if (item.type === 'agent_message' && ev.type === 'item.completed' && typeof item.text === 'string') return { finalText: item.text };
   return {};
+}
+
+/** Text that says the clawdcursor MCP server could not be started or reached. Only ever applied to startup / error output. */
+function unreachableIn(text: string): string | null {
+  const line = text.split('\n').find(l => /mcp/i.test(l) && l.includes(SERVER_NAME) && /fail|error|timed? ?out|unable|could not|refused|not connect/i.test(l));
+  return line ? `Codex could not reach the clawdcursor MCP server: ${line.replace(/\s+/g, ' ').trim().slice(0, 240)}` : null;
+}
+
+/**
+ * Did Codex fail to START or CONNECT to the clawdcursor MCP server?
+ *
+ * `stream` says where the text came from. On stderr every line is Codex's own diagnostics. On stdout (--json) only an
+ * error event or an MCP startup event counts. A tool call's own event never does: it names the server and carries the
+ * tool's result, and a tool that failed ("element not found", "refused") is an ordinary failure of a server that was
+ * reached, not an unreachable one.
+ */
+export function codexServerFailure(text: string, stream: 'stdout' | 'stderr'): string | null {
+  if (stream === 'stderr') return unreachableIn(text);
+  for (const line of text.split('\n')) {
+    let ev: { type?: unknown; item?: { type?: unknown } };
+    try { ev = JSON.parse(line); } catch { continue; }           // not an event: stdout carries events only
+    if (!ev || typeof ev !== 'object') continue;
+    const type = String(ev.type ?? '');
+    const itemType = String(ev.item?.type ?? '');
+    if (itemType === 'mcp_tool_call') continue;
+    if (type === 'error' || itemType === 'error' || /mcp.*(startup|start|connect|init)/i.test(type)) {
+      const found = unreachableIn(line);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 /** The newest binary the Codex desktop app installed, when codex is not on PATH. */
@@ -92,22 +135,34 @@ export const codex: Adapter = {
     const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
     return 'why' in found ? found.why : null;
   },
+  async preflight(model, workDir, signal) {
+    const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
+    if ('why' in found) return `codex: ${found.why}`;
+    const lastMessagePath = path.join(workDir, 'preflight-last-message.txt');
+    const { exitCode, out, err } = await runPreflight(codexPreflightCommand({ exe: found.exe, model, workDir, lastMessagePath }), workDir, signal);
+    let answered = '';
+    try { answered = fs.readFileSync(lastMessagePath, 'utf8').trim(); } catch { /* it wrote no answer */ }
+    return exitCode === 0 && answered ? null : preflightFailure('codex', 'codex login', exitCode, `${err} ${out}`);
+  },
   async run(job: AgentJob) {
     const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
     if ('why' in found) throw new Error(`codex: ${found.why}`);
     const exe = found.exe;
     const lastMessagePath = path.join(job.workDir, 'last-message.txt');
     let finalText = '';
+    let serverUnreachable: string | undefined;
     const seen = new Set<string>();
     const exitCode = await runCli(codexCommand({ exe, model: job.model, mcpUrl: job.mcpUrl, token: job.token, workDir: job.workDir, lastMessagePath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,
+      onErr: text => { serverUnreachable ??= codexServerFailure(text, 'stderr') ?? undefined; },
       onLine: line => {
+        serverUnreachable ??= codexServerFailure(line, 'stdout') ?? undefined;
         const p = parseCodexLine(line);
         if (p.sig && !(p.id && seen.has(p.id))) { if (p.id) seen.add(p.id); job.onSig(p.sig); }
         if (p.finalText !== undefined) finalText = p.finalText;
       },
     });
     try { finalText = fs.readFileSync(lastMessagePath, 'utf8') || finalText; } catch { /* no last message: the stream's is used */ }
-    return { finalText, exitCode };
+    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}) };
   },
 };

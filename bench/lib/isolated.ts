@@ -3,6 +3,8 @@
  * config, logs, pidfile, browser profile), its own port and its own session-log directory. The owner's install, daemon
  * and data are never read or written.
  */
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChildProcess } from 'child_process';
@@ -66,6 +68,24 @@ export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionD
 
 /** The daemon listens on the loopback interface only, and nothing here talks to any other host. */
 const LOOPBACK = '127.0.0.1';
+
+/**
+ * Can clawdcursor be reached the way an agent host reaches it? An MCP connection, its initialize and tools/list, with
+ * the six tools in the answer. Null when it can; else what failed. No tool is called.
+ */
+export async function probeMcp(mcpUrl: string, token: string, timeoutMs = 20_000): Promise<string | null> {
+  const client = new Client({ name: 'clawdcursor-bench-probe', version: '1' });
+  try {
+    await client.connect(new StreamableHTTPClientTransport(new URL(mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }), { timeout: timeoutMs });
+    const tools = (await client.listTools(undefined, { timeout: timeoutMs })).tools.map(t => t.name);
+    const missing = ['accessibility', 'system', 'window', 'browser', 'computer', 'batch'].filter(t => !tools.includes(t));
+    return missing.length ? `tools/list is missing ${missing.join(', ')}` : null;
+  } catch (e) {
+    return `the MCP handshake failed: ${(e as Error).message}`;
+  } finally {
+    await client.close().catch(() => { /* not connected */ });
+  }
+}
 
 export interface IsolatedServer {
   port: number; pid: number; token: string; mcpUrl: string; sessionDir: string;
