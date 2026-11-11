@@ -15,7 +15,7 @@ import { untrusted } from '../core/miss-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint, shownValue } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
 
@@ -190,12 +190,22 @@ function elementLabel(el: UiElement): string {
   return '';
 }
 
-function formatElement(el: UiElement): string {
+/** `value`: the element's value as its line shows it (blind-hints.ts shownValue), where the caller lists values. */
+function elementLine(el: UiElement, value: string): string {
   return `[${el.controlType}] "${elementLabel(el)}"` +
     (el.automationId ? ` id:${el.automationId}` : '') +
     ` @${el.bounds.x},${el.bounds.y} ${el.bounds.width}x${el.bounds.height}` +
+    value +
     (el.disabled || el.enabled === false ? ' DISABLED' : '') +
     (el.focused ? ' FOCUSED' : '');
+}
+const formatElement = (el: UiElement): string => elementLine(el, '');
+
+/** find's lines: each element with its value, as read_tree shows it; `cut` is the hint to add when a value was cut. */
+function foundLines(els: UiElement[]): { lines: string; cut: string } {
+  let cut = false;
+  const lines = els.map(el => elementLine(el, shownValue(el.value, () => { cut = true; }))).join('\n');
+  return { lines, cut: cut ? `\n${CUT_VALUE_NEXT_STEP}` : '' };
 }
 
 async function getActivePid(ctx: ToolContext, processId?: number): Promise<number | undefined> {
@@ -550,7 +560,8 @@ export function getA11yTools(): ToolDefinition[] {
           const more = uiaHits.length > 20 ? `\n... and ${uiaHits.length - 20} more` : '';
           // A search the platform cut returned only part of the list.
           const cut = ctx.platform?.lastFindError === 'partial' ? `\n(${ctx.platform.lastFindNote ?? 'The search was cut; the list is incomplete.'})` : '';
-          return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(uiaHits.slice(0, 20).map(formatElement).join('\n'))}${more}${cut}` };
+          const found = foundLines(uiaHits.slice(0, 20));
+          return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(found.lines)}${more}${cut}${found.cut}` };
         }
         // A timeout is not "nothing there" — say so, or the agent concludes
         // a11y is useless and switches to screenshots for the rest of the session.
@@ -578,7 +589,8 @@ export function getA11yTools(): ToolDefinition[] {
         const cdpHits = await queryCdpDom(ctx, { name, limit: 20, processId });
         if (cdpHits && cdpHits.length) {
           const lines = ['(no UIA matches — falling back to CDP DOM; coords are viewport-relative)'];
-          return { text: `${lines[0]}\n${wrapUntrustedScreenContent(cdpHits.map(formatElement).join('\n'))}` };
+          const found = foundLines(cdpHits);
+          return { text: `${lines[0]}\n${wrapUntrustedScreenContent(found.lines)}${found.cut}` };
         }
         // A bridge that failed is not "nothing found" — said only after the browser DOM fallback also found nothing.
         if (ctx.platform?.lastFindError === 'error') {

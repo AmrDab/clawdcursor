@@ -16,6 +16,22 @@ export const SPARSE_NEXT_STEP =
   'ACT: invoke_element / set_field_value by name → smart_click {"target":"<label>"} → desktop_screenshot, then mouse_click with x,y from that image. ' +
   'Electron/Chromium app? Restarting it with --force-renderer-accessibility exposes the whole page (required on Linux).';
 
+/** How many characters of an element's value its line shows. */
+const VALUE_SHOWN = 40;
+
+/**
+ * An element's value on its line, for read_tree and find alike: quoted, with line breaks and quotes escaped so the element
+ * stays on one line, and marked when cut — an agent that took the first 40 characters of a document for all of it rewrote
+ * the document without its tail (perception eval 2026-11-05). `onCut` runs when the value was cut.
+ */
+export function shownValue(v: string | undefined, onCut?: () => void): string {
+  if (!v) return '';
+  const head = JSON.stringify(v.slice(0, VALUE_SHOWN));
+  if (v.length <= VALUE_SHOWN) return ` value=${head}`;
+  onCut?.();
+  return ` value=${head}… (+${v.length - VALUE_SHOWN} chars not shown)`;
+}
+
 /** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface).
  *  A role-only get_value works on Linux but not on Windows, so an unnamed editor goes to copy_all_text. */
 export const CUT_VALUE_NEXT_STEP =
