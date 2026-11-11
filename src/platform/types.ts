@@ -492,8 +492,9 @@ export interface PlatformAdapter {
     /**
      * `pid` without `title`: the app's process is running but it has shown no window yet (a slow starter) — started,
      * not failed. `processName` is that process when the adapter knows it, so the caller can point to a later focus.
+     * `alreadyRunning`: that process was there before this launch, which was handed to it — running, not started.
      */
-  }): Promise<{ pid?: number; title?: string; handle?: number | string; processName?: string }>;
+  }): Promise<{ pid?: number; title?: string; handle?: number | string; processName?: string; alreadyRunning?: boolean }>;
 }
 
 /**

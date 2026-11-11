@@ -122,3 +122,14 @@ describe('open_app — started, window not up yet (a slow starter: Designcenter 
     expect(r.text).not.toMatch(/list_windows/);
   });
 });
+
+describe('open_app — the launch was handed to a process that was already running', () => {
+  it('says "running", not "Started", and still points to focus by process', async () => {
+    const r = await mcpOpenApp.handler({ name: 'edge' }, mcpCtx(async () => ({ pid: 6001, processName: 'msedge', alreadyRunning: true })));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).not.toMatch(/Started/);
+    expect(r.text).toMatch(/handed off to the running msedge(\.exe)?, pid=6001/);
+    expect(r.text).toContain('window {"action":"focus","processName":"msedge"}');
+    expect(r.text).toMatch(/Do not launch it again/);
+  });
+});

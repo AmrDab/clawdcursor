@@ -158,11 +158,15 @@ export function appNameRefusal(name: string): string | null {
  * suite, an IDE, Outlook). Started, not failed: a failure invites a second launch. It names what to do next in a
  * form every agent can follow — focus by process once the window is up — not "check list_windows".
  */
-export function startedNoWindowText(quotedName: string, res: { pid?: number; processName?: string }, surface: 'mcp' | 'agent' = 'mcp'): string {
+export function startedNoWindowText(quotedName: string, res: { pid?: number; processName?: string; alreadyRunning?: boolean }, surface: 'mcp' | 'agent' = 'mcp'): string {
   const proc = res.processName?.trim();
   const by = proc ? `"processName":${JSON.stringify(proc)}` : `"processId":${res.pid}`;
   const focus = surface === 'mcp' ? `window {"action":"focus",${by}}` : `focus_window {${by}}`;
   const exe = proc ? `${proc}${process.platform === 'win32' ? '.exe' : ''}, ` : '';
+  // A process that was there before the launch was not started by it: the launch was handed to it.
+  if (res.alreadyRunning) {
+    return `${quotedName} was handed off to the running ${exe}pid=${res.pid}, which has no window up yet — some apps take a minute. Do not launch it again; wait, then ${focus}.`;
+  }
   return `Started ${quotedName} (${exe}pid=${res.pid}) but its window isn't up yet — some apps take a minute. Do not launch it again; wait, then ${focus}.`;
 }
 

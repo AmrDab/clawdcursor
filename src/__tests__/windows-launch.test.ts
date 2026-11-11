@@ -338,7 +338,7 @@ describe('open_app on Windows — a slow starter whose process is up but whose w
     desktop(DESKTOP);
     h.procs = [{ pid: 6001, name: 'msedge', started: old() }];
     const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
-    expect(res).toEqual({ pid: 6001, processName: 'msedge' });
+    expect(res).toEqual({ pid: 6001, processName: 'msedge', alreadyRunning: true });
     expect(adapter.typeText).not.toHaveBeenCalled();
   });
 
@@ -430,5 +430,23 @@ describe('open_app on Windows — a UWP app in its frame window is known by the 
     const res = await settle(adapter.launchApp('Calculator', { ...CALC_ALIAS, noStartMenuFallback: true }));
     expect(spawns).toHaveLength(1);
     expect(res).toEqual({});
+  });
+});
+
+describe('open_file on Windows — Explorer starting says nothing about the file it was given', () => {
+  // Re-review of #350: open_file "D:\gone\python.exe" (missing) with an older python.exe running answered
+  // "Started python.exe (pid=old) … do not launch it again". The Start-Process that succeeded was explorer.exe's.
+  const MISSING = { url: 'D:\\gone\\python.exe', noStartMenuFallback: true, viaLauncher: true, processNames: ['python'] };
+
+  it('a missing program with an OLDER process of that name running: nothing is claimed', async () => {
+    desktop(DESKTOP);
+    h.procs = [{ pid: 7000, name: 'python', started: Date.now() - 3_600_000 }];
+    expect(await settle(adapter.launchApp('explorer.exe', MISSING))).toEqual({});
+  });
+
+  it('a program whose process began with this launch is still reported', async () => {
+    desktop(DESKTOP);
+    h.procs = [{ pid: 7001, name: 'python', started: Date.now() + 500 }];
+    expect(await settle(adapter.launchApp('explorer.exe', MISSING))).toEqual({ pid: 7001, processName: 'python' });
   });
 });

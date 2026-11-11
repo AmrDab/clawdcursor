@@ -1437,7 +1437,9 @@ export class WindowsAdapter implements PlatformAdapter {
     // any binary not on PATH but Start-Menu-indexed will recover here.
     // Started through a launcher, and what it starts is unknown (a document's program): there is no window to claim.
     if (opts?.viaLauncher && app.identity.processNames.size === 0) return {};
-    const direct = await this.findLaunchedWindow(app, windowsBefore, 4_000, { since: launchedAt, started });
+    // Through a launcher (open_file), the Start-Process that succeeded is explorer.exe's: it says nothing about the
+    // file. Only a process begun by this launch counts there — never an older one of the same name.
+    const direct = await this.findLaunchedWindow(app, windowsBefore, 4_000, { since: launchedAt, started: opts?.viaLauncher ? undefined : started });
     if (direct.title || direct.pid) return this.foregroundLaunched(direct);
     if (opts?.noStartMenuFallback || opts?.viaLauncher) return direct; // {} — caller verifies (open_file)
 
@@ -1554,8 +1556,10 @@ export class WindowsAdapter implements PlatformAdapter {
     const procs = (await findWindowsProcesses([...app.identity.processNames]))
       .filter(p => !isOwnUiPid(p.pid))
       .sort((x, y) => y.started - x.started);
-    const proc = procs.find(p => launch?.since === undefined || p.started >= launch.since) ?? (started === true ? procs[0] : undefined);
-    return proc ? { pid: proc.pid, processName: proc.processName } : {};
+    const begun = procs.find(p => launch?.since === undefined || p.started >= launch.since);
+    if (begun) return { pid: begun.pid, processName: begun.processName };
+    // Start-Process succeeded and only an older process exists: the app handed the launch to it. Running, not started.
+    return started === true && procs[0] ? { pid: procs[0].pid, processName: procs[0].processName, alreadyRunning: true } : {};
   }
 
   /**
@@ -1750,7 +1754,7 @@ function startProcessArgument(value: string): string {
   return `"${p.replace(/\\+$/, '')}"`;
 }
 
-type LaunchResult = { pid?: number; title?: string; handle?: number | string; processName?: string };
+type LaunchResult = { pid?: number; title?: string; handle?: number | string; processName?: string; alreadyRunning?: boolean };
 
 /** One app's windows: see `WindowsAdapter.appWindows`. */
 interface AppWindows {
