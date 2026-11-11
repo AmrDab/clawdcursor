@@ -1,6 +1,7 @@
 /** Process helpers. The benchmark only ever stops processes it started itself. */
 import { execFile, execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
 import * as net from 'net';
+import * as os from 'os';
 import * as path from 'path';
 
 const isWin = process.platform === 'win32';
@@ -39,7 +40,7 @@ export async function pidsByCommandLine(marker: string, image: string): Promise<
       execFile(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
         'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq $env:BENCH_IMAGE -and $_.CommandLine -and $_.CommandLine.Contains($env:BENCH_MARKER) } '
         + '| ForEach-Object { $_.ProcessId }'],
-      { env: { ...process.env, BENCH_MARKER: marker, BENCH_IMAGE: image }, timeout: 30_000, windowsHide: true }, done);
+      { env: { ...process.env, BENCH_MARKER: marker, BENCH_IMAGE: image }, timeout: 30_000, windowsHide: true, cwd: os.tmpdir() }, done);
     } else execFile('pgrep', ['-f', '--', marker], { timeout: 30_000 }, done);
   });
   return out.split(/\s+/).map(Number).filter(n => Number.isInteger(n) && n > 0 && n !== process.pid);
@@ -79,6 +80,7 @@ export async function waitFor<T>(probe: () => Promise<T | undefined | null | fal
 /** Run a program and return its stdout; null when it is missing or fails. */
 export function tryRun(cmd: string, args: string[], timeoutMs = 20_000): Promise<string | null> {
   return new Promise(resolve => {
-    execFile(cmd, args, { timeout: timeoutMs, windowsHide: true }, (err, stdout) => resolve(err ? null : String(stdout)));
+    // From the temp directory: Windows PowerShell can leave a Microsoft/ module cache in its working directory.
+    execFile(cmd, args, { timeout: timeoutMs, windowsHide: true, cwd: os.tmpdir() }, (err, stdout) => resolve(err ? null : String(stdout)));
   });
 }

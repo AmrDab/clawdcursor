@@ -123,7 +123,7 @@ describe.runIf(process.platform === 'win32')('the Windows native fixture', () =>
 
   beforeAll(() => {
     execFileSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-      path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', dir], { timeout: 90_000 });
+      path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', dir], { timeout: 90_000, cwd: dir });
   }, 120_000);
   afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
