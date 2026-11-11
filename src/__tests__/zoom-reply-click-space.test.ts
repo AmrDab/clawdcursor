@@ -23,6 +23,7 @@ const region = getDesktopTools().find(t => t.name === 'desktop_screenshot_region
 const ctx = () => ({
   ensureInitialized: async () => {},
   getScreenshotScaleFactor: () => 3.5,
+  getMouseScaleFactor: () => 3.5,
   desktop: { captureRegionForLLM: vi.fn(async () => ({ buffer: Buffer.from('x'), llmWidth: 700, llmHeight: 420 })) },
 }) as never;
 
