@@ -12,6 +12,7 @@ import {
   waitForLaunchedWindow,
   buildAppPredicate,
 } from '../platform/launch-poll';
+import { appIdentity, ownsWindow, pathInPackageFamily } from '../platform/app-identity';
 import type { WindowInfo } from '../platform/types';
 
 function w(opts: Partial<WindowInfo> & { processId: number; title?: string; processName?: string }): WindowInfo {
@@ -25,20 +26,50 @@ function w(opts: Partial<WindowInfo> & { processId: number; title?: string; proc
   };
 }
 
-describe('buildAppPredicate', () => {
+describe('buildAppPredicate — a window is the app\'s by identity, never by title text', () => {
   it('matches by exact processName', () => {
     const p = buildAppPredicate('Notepad');
     expect(p(w({ processId: 1, processName: 'notepad' }))).toBe(true);
   });
 
-  it('matches by processName substring', () => {
-    const p = buildAppPredicate('Outlook');
-    expect(p(w({ processId: 1, processName: 'olk', title: 'Mail - Outlook' }))).toBe(true);
+  it('matches one of the app\'s known process names (Outlook → olk)', () => {
+    const p = buildAppPredicate('Outlook', { processNames: ['OUTLOOK', 'olk'] });
+    expect(p(w({ processId: 1, processName: 'olk', title: 'Application Engineering - Outlook' }))).toBe(true);
+    expect(p(w({ processId: 2, processName: 'OUTLOOK' }))).toBe(true);
   });
 
-  it('matches by title substring when processName misses', () => {
-    const p = buildAppPredicate('Calculator');
+  it('a process name that only CONTAINS the name is not the app, in either direction', () => {
+    expect(buildAppPredicate('Outlook')(w({ processId: 1, processName: 'OutlookHelper' }))).toBe(false);
+    expect(buildAppPredicate('note')(w({ processId: 1, processName: 'notepad' }))).toBe(false);
+    expect(buildAppPredicate('notepad')(w({ processId: 1, processName: 'note' }))).toBe(false);
+    expect(buildAppPredicate('Mail')(w({ processId: 1, processName: 'Mailspring' }))).toBe(false);
+  });
+
+  it('a title that contains the name proves nothing ("Mail" is not a browser tab titled "Gmail")', () => {
+    expect(buildAppPredicate('Mail')(w({ processId: 1, processName: 'chrome', title: 'Gmail – Inbox - Google Chrome' }))).toBe(false);
+    expect(buildAppPredicate('Calculator')(w({ processId: 1, processName: 'msedge', title: 'Calculator - Microsoft Edge' }))).toBe(false);
+    expect(buildAppPredicate('Calculator')(w({ processId: 1, processName: 'chrome', title: 'Calculator' }))).toBe(false);
+  });
+
+  it('the packaged-app id never matches a title ("…!App" is not "Application …")', () => {
+    const p = buildAppPredicate('Calculator', { uwpAppId: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App', displayName: 'Calculator' });
+    expect(p(w({ processId: 1, processName: 'olk', title: 'Application Engineering weekly sync - Outlook' }))).toBe(false);
+    expect(p(w({ processId: 2, processName: 'ApplicationFrameHost', title: 'App' }))).toBe(false);
+  });
+
+  it('a window of the UWP frame host is the app\'s when its title IS the display name, or "<doc> - <display name>"', () => {
+    const p = buildAppPredicate('calc', { displayName: 'Calculator' });
     expect(p(w({ processId: 1, processName: 'ApplicationFrameHost', title: 'Calculator' }))).toBe(true);
+    expect(p(w({ processId: 2, processName: 'ApplicationFrameHost', title: 'Standard - Calculator' }))).toBe(true);
+    expect(p(w({ processId: 3, processName: 'ApplicationFrameHost', title: 'Calculator tips - Feedback Hub' }))).toBe(false);
+    expect(p(w({ processId: 4, processName: 'ApplicationFrameHost', title: 'Settings' }))).toBe(false);
+  });
+
+  it('the frame host is never an app\'s process name, even when an alias row lists it', () => {
+    const p = buildAppPredicate('notepad.exe', { processNames: ['Notepad', 'ApplicationFrameHost'], displayName: 'Notepad' });
+    expect(p(w({ processId: 1, processName: 'ApplicationFrameHost', title: 'Settings' }))).toBe(false);
+    expect(p(w({ processId: 2, processName: 'ApplicationFrameHost', title: 'Untitled - Notepad' }))).toBe(true);
+    expect(p(w({ processId: 3, processName: 'Notepad', title: 'anything' }))).toBe(true);
   });
 
   it('rejects unrelated windows', () => {
@@ -49,6 +80,7 @@ describe('buildAppPredicate', () => {
   it('returns false predicate when name is empty / whitespace', () => {
     const p = buildAppPredicate('   ');
     expect(p(w({ processId: 1, processName: 'anything', title: 'anything' }))).toBe(false);
+    expect(p(w({ processId: 2, processName: '', title: '' }))).toBe(false);
   });
 
   it('is case-insensitive', () => {
@@ -59,11 +91,7 @@ describe('buildAppPredicate', () => {
   it('strips .exe so launchName "msedge.exe" matches processName "msedge"', () => {
     const p = buildAppPredicate('msedge.exe');
     expect(p(w({ processId: 1, processName: 'msedge' }))).toBe(true);
-    // Also accepts a title-bar match (Edge titles tabs as "… - Microsoft Edge")
     expect(p(w({ processId: 2, processName: 'ApplicationFrameHost', title: 'Bing - Microsoft Edge' }))).toBe(false);
-    // (title "Bing - Microsoft Edge" doesn't contain literal "msedge"; that's
-    //  fine — the alias predicate is for executable-name match. Title-only
-    //  matches go through the alias's searchTerm, handled elsewhere.)
   });
 
   it('strips .app so launchName "Calculator.app" matches processName "Calculator"', () => {
@@ -71,11 +99,33 @@ describe('buildAppPredicate', () => {
     expect(p(w({ processId: 1, processName: 'Calculator' }))).toBe(true);
   });
 
-  it('uses 3-char minimum on processName for reverse-contains to avoid false positives', () => {
-    // Tiny processName like "ai" or "ps" should NOT sweep up unrelated launches.
-    const p = buildAppPredicate('msedge.exe');
-    expect(p(w({ processId: 1, processName: 'ai', title: 'something' }))).toBe(false);
-    expect(p(w({ processId: 2, processName: 'ps', title: 'something' }))).toBe(false);
+  it('viaLauncher: the launcher\'s own windows are not the result, only the named processes\'', () => {
+    const p = buildAppPredicate('explorer.exe', { viaLauncher: true, processNames: ['calc', 'CalculatorApp'] });
+    expect(p(w({ processId: 1, processName: 'explorer', title: 'Screenshots - File Explorer' }))).toBe(false);
+    expect(p(w({ processId: 2, processName: 'CalculatorApp', title: 'Calculator' }))).toBe(true);
+  });
+});
+
+describe('ownsWindow — a packaged app by its package family', () => {
+  const id = appIdentity('Calculator', { uwpAppId: 'Microsoft.WindowsCalculator_8wekyb3d8bbwe!App' });
+  const win = w({ processId: 1, processName: 'SomeHost', title: 'x' });
+
+  it('a process running from the package folder is the app', () => {
+    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2502.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe')).toBe(true);
+  });
+
+  it('another package, a look-alike name or publisher, or no path at all is not', () => {
+    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.OutlookForWindows_1.2025.1.0_x64__8wekyb3d8bbwe\\olk.exe')).toBe(false);
+    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculatorPlus_1.0.0.0_x64__8wekyb3d8bbwe\\x.exe')).toBe(false);
+    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_1.0.0.0_x64__zzzzzzzzzzzzz\\x.exe')).toBe(false);
+    expect(ownsWindow(id, win, 'C:\\Users\\x\\Microsoft.WindowsCalculator notes\\notepad.exe')).toBe(false);
+    expect(ownsWindow(id, win, '')).toBe(false);
+    expect(ownsWindow(id, win)).toBe(false);
+  });
+
+  it('pathInPackageFamily accepts the family folder itself (system apps) and ignores case', () => {
+    expect(pathInPackageFamily('C:\\Windows\\SystemApps\\Microsoft.Windows.Search_cw5n1h2txyewy\\SearchHost.exe', 'microsoft.windows.search_cw5n1h2txyewy')).toBe(true);
+    expect(pathInPackageFamily('C:\\Windows\\explorer.exe', 'nounderscore')).toBe(false);
   });
 });
 
@@ -156,7 +206,7 @@ describe('waitForLaunchedWindow', () => {
     const p = waitForLaunchedWindow(
       before,
       list,
-      buildAppPredicate('Calculator'),
+      buildAppPredicate('Calculator', { processNames: ['CalculatorApp'] }),
       { intervalMs: 100, timeoutMs: 5_000 },
     );
 

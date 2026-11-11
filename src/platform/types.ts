@@ -470,6 +470,18 @@ export interface PlatformAdapter {
      * instead of the requested folder — a false "Opened" with a side effect.
      */
     noStartMenuFallback?: boolean;
+    /**
+     * The app's known process names (the alias row's `processNames`: Calculator → CalculatorApp, Outlook → olk).
+     * A window is reported as the app's — already running, or just launched — only by identity (app-identity.ts):
+     * its process is `name` or one of these. Never because its title contains the name.
+     */
+    processNames?: readonly string[];
+    /**
+     * `name` only starts something else (open_file: explorer.exe opens the file with its own program). The
+     * launcher's windows are then never the result: only a window of `processNames` is, and with none given no
+     * window is reported at all. Implies `noStartMenuFallback`.
+     */
+    viaLauncher?: boolean;
   }): Promise<{ pid?: number; title?: string; handle?: number | string }>;
 }
 

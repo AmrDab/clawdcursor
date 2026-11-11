@@ -1124,6 +1124,29 @@ describe('appState (B2 — is the launched app running, and does it have a windo
     expect((await ax.appState('TextEdit'))!.processId).toBe(2);
   });
 
+  describe('exact (a launch: the helper finds every app whose name CONTAINS the name)', () => {
+    const gmail = APP({ name: 'Gmail', names: ['gmail', 'gmail', 'app_mode_loader'], processId: 1 });
+
+    it('an app whose name only contains the name is not it ("Mail" is not a Gmail web app)', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, apps: [gmail] }) });
+      expect((await ax.appState('Mail'))!.processId).toBe(1);            // a by-name focus still finds it
+      await expect(ax.appState('Mail', { exact: true })).resolves.toBeNull();
+    });
+
+    it('any of the app\'s names counts: the bundle is "Visual Studio Code", the process "Code"', async () => {
+      const code = APP({ name: 'Code', names: ['code', 'visual studio code', 'electron'], processId: 2 });
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, apps: [gmail, code] }) });
+      expect((await ax.appState('Visual Studio Code.app', { exact: true }))!.processId).toBe(2);
+    });
+
+    it('a helper that does not report names yet is judged on the display name alone', async () => {
+      const { ax } = harness({ reply: JSON.stringify({ ok: true, apps: [APP({ name: 'Notes Helper', processId: 1 }), APP({ name: 'Notes', processId: 2 })] }) });
+      expect((await ax.appState('notes', { exact: true }))!.processId).toBe(2);
+      const { ax: other } = harness({ reply: JSON.stringify({ ok: true, apps: [APP({ name: 'Notes Helper', processId: 1 })] }) });
+      await expect(other.appState('notes', { exact: true })).resolves.toBeNull();
+    });
+  });
+
   it('strips ".app" and a path prefix from the name it searches for', async () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, apps: [] }) });
     await ax.appState('/System/Applications/Calculator.app');

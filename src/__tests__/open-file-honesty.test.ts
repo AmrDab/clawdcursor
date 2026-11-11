@@ -52,3 +52,33 @@ describe('open_file — directory open is verified, not assumed (Windows)', () =
     expect(spy).toHaveBeenCalledWith('explorer.exe', expect.objectContaining({ url: dir, noStartMenuFallback: true }));
   });
 });
+
+describe('open_file — a file is opened by its own program: no Explorer window is ever reported as it (Windows)', () => {
+  // Live: `Opened: C:/Windows/System32/calc.exe (window: "Screenshots - File Explorer")`, and Calculator never started.
+  it('a program: launchApp is told Explorer is only the launcher, and which processes are the program', async () => {
+    const spy = vi.fn(async () => ({}));
+    await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(spy));
+    expect(spy).toHaveBeenCalledWith('explorer.exe', expect.objectContaining({
+      url: 'C:/Windows/System32/calc.exe', viaLauncher: true, noStartMenuFallback: true,
+      processNames: expect.arrayContaining(['calc', 'CalculatorApp']),
+    }));
+  });
+
+  it('a program whose window was not found: says so, and names no window', async () => {
+    const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({})));
+    expect(r.text).toMatch(/no window of calc\.exe was found/);
+    expect(r.text).not.toMatch(/\(window:/);
+  });
+
+  it('a program whose own window surfaced is reported', async () => {
+    const r = await openFile.handler({ path: 'C:/Windows/System32/calc.exe' }, ctx(async () => ({ title: 'Calculator', pid: 400 })));
+    expect(r.text).toMatch(/Opened: .*calc\.exe \(window: .*Calculator/);
+  });
+
+  it('a document: the program is unknown, so launchApp is given no process to look for', async () => {
+    const spy = vi.fn(async () => ({}));
+    const r = await openFile.handler({ path: join(dir, 'report.pdf') }, ctx(spy));
+    expect(spy).toHaveBeenCalledWith('explorer.exe', expect.objectContaining({ viaLauncher: true, processNames: [] }));
+    expect(r.text).not.toMatch(/window/);
+  });
+});

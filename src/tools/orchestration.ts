@@ -70,6 +70,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
               nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
               alwaysNewInstance: alias?.alwaysNewInstance,
               uwpAppId: alias?.uwpAppId,
+              processNames: alias?.processNames,   // whose windows are this app's (identity, not title text)
               searchTerm: alias?.searchTerm
                 ?? (process.platform === 'darwin' ? alias?.macOSAppName : undefined),
             });

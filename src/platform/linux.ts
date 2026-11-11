@@ -48,7 +48,7 @@ import type {
   WaitForElementQuery,
   WindowState,
 } from './types';
-import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
+import { waitForLaunchedWindow, buildAppPredicate, type AppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
@@ -1347,6 +1347,8 @@ export class LinuxAdapter implements PlatformAdapter {
       searchTerm?: string;
       /** Nothing to change here: a name is only ever an executable on PATH or a .desktop entry (xdg-open is for URLs and paths). */
       nameOnly?: boolean;
+      /** The app's known process names (PlatformAdapter.launchApp). */
+      processNames?: readonly string[];
     },
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
     // uwpAppId is Windows-only — ignore on Linux. searchTerm currently has no
@@ -1371,13 +1373,16 @@ export class LinuxAdapter implements PlatformAdapter {
     // Linux doesn't have macOS's "open -a" activation semantics, so a
     // second spawn of the same binary would normally create a second
     // instance. Focus the existing one and return its pid instead.
+    // Which windows are this app's: by identity (launch-poll.ts) — the process is the name asked for, one of the
+    // app's known process names, or the program its desktop entry runs ("calculator" → gnome-calculator). Never a
+    // window whose title or process name merely contains the name: "mail" is not a browser window titled "Gmail".
+    const entry = opts?.url ? null : resolveDesktopEntry(name);
+    const entryExec = path.posix.basename(entry?.argv[0] ?? '');
+    const isApp = buildAppPredicate(name, {
+      processNames: [...(opts?.processNames ?? []), ...(entryExec && !LAUNCH_WRAPPERS.has(entryExec) ? [entryExec] : [])],
+    });
     if (!opts?.alwaysNewInstance && !opts?.url) {
-      const target = name.trim().toLowerCase();
-      const existing = windowsBefore.find(w =>
-        w.processName.toLowerCase() === target ||
-        w.processName.toLowerCase().includes(target) ||
-        windowTextIncludes(w.title, target),
-      );
+      const existing = windowsBefore.find(isApp);
       if (existing) {
         await this.focusWindow({ processId: existing.processId }).catch(() => {});
         return { pid: existing.processId, title: existing.title, handle: existing.handle };
@@ -1388,17 +1393,14 @@ export class LinuxAdapter implements PlatformAdapter {
     const directArgs: string[] = [];
     if (opts?.url) directArgs.push(opts.url);
     const direct = await this.spawnDetached(name, directArgs, opts?.cwd);
-    if (direct.ok) return this.verifySpawned(name, windowsBefore, direct.pid);
+    if (direct.ok) return this.verifySpawned(name, isApp, windowsBefore, direct.pid);
 
     // 2) A desktop name: "calculator" → org.gnome.Calculator.desktop's Exec
     // (gnome-calculator). xdg-open cannot launch an app by name, so this used
     // to spawn xdg-open, wait out the 8 s poll and still report "Launched".
-    if (!opts?.url) {
-      const entry = resolveDesktopEntry(name);
-      if (entry) {
-        const viaEntry = await this.spawnDetached(entry.argv[0], entry.argv.slice(1), opts?.cwd);
-        if (viaEntry.ok) return this.verifySpawned(name, windowsBefore, viaEntry.pid);
-      }
+    if (entry) {
+      const viaEntry = await this.spawnDetached(entry.argv[0], entry.argv.slice(1), opts?.cwd);
+      if (viaEntry.ok) return this.verifySpawned(name, isApp, windowsBefore, viaEntry.pid);
     }
 
     // 3) Fallback to xdg-open — only for what it can open: URLs and paths.
@@ -1409,7 +1411,7 @@ export class LinuxAdapter implements PlatformAdapter {
         // xdg-open's PID isn't the eventual app's PID — drop the spawn pid
         // and rely on the predicate. A URL may land in an existing browser
         // window, so no window here is not proof of failure.
-        const match = await this.findSpawnedWindow(name, windowsBefore);
+        const match = await this.findSpawnedWindow(isApp, windowsBefore);
         return match ?? {};
       }
     }
@@ -1424,10 +1426,11 @@ export class LinuxAdapter implements PlatformAdapter {
    */
   private async verifySpawned(
     name: string,
+    isApp: AppPredicate,
     windowsBefore: readonly WindowInfo[],
     pid?: number,
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
-    const match = await this.findSpawnedWindow(name, windowsBefore, pid);
+    const match = await this.findSpawnedWindow(isApp, windowsBefore, pid);
     if (match) return match;
     if (pid && isProcessAlive(pid)) return { pid };
     throw new Error(`launchApp: "${name}" exited and no window appeared`);
@@ -1445,14 +1448,14 @@ export class LinuxAdapter implements PlatformAdapter {
    * reliable when the binary spawns its own window.
    */
   private async findSpawnedWindow(
-    name: string,
+    isApp: AppPredicate,
     windowsBefore: readonly WindowInfo[],
     pid?: number,
   ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     const win = await waitForLaunchedWindow(
       windowsBefore,
       () => this.listWindows(),
-      buildAppPredicate(name),
+      isApp,
       { spawnPid: pid },
     );
     return win
@@ -1616,6 +1619,9 @@ function desktopEntryDirs(): string[] {
     '/var/lib/snapd/desktop',
   ].map(d => path.posix.join(d, 'applications'));
 }
+
+/** Programs a desktop entry's Exec starts the app THROUGH: their name says nothing about whose window it is. */
+const LAUNCH_WRAPPERS = new Set(['env', 'sh', 'bash', 'flatpak', 'snap', 'python', 'python3', 'java', 'gtk-launch', 'xdg-open']);
 
 /**
  * An app name → the argv of the .desktop entry it names: `Name=` equal to it

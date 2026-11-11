@@ -27,6 +27,7 @@ import { promises as fsp } from 'node:fs';
 import { windowTextIncludes } from './window-text';
 import { preferControl, failReason } from '../platform/prefer-control';
 import { quoteScreenText } from '../core/result-codes';
+import { resolveAlias } from '../core/router/aliases';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -583,6 +584,24 @@ export function getExtraTools(): ToolDefinition[] {
             await ctx.platform.launchApp('xdg-open', { url: p });
             return { text: `Opened: ${p}` };
           }
+          if (!isDir) {
+            // A file is opened by its own program, not by Explorer, so no Explorer window is ever the result (live:
+            // `Opened: …/calc.exe (window: "Screenshots - File Explorer")`). For a program the window reported must be
+            // the program's own — calc.exe → the alias row's CalculatorApp; for a document the program is unknown.
+            const exe = /\.(exe|com)$/i.test(leaf) ? leaf.replace(/\.(exe|com)$/i, '') : '';
+            const alias = exe ? resolveAlias(exe) : null;
+            const res = await ctx.platform.launchApp('explorer.exe', {
+              url: p, noStartMenuFallback: true, viaLauncher: true,
+              processNames: exe ? [exe, ...(alias?.processNames ?? [])] : [],
+              searchTerm: alias?.searchTerm,
+            });
+            if (res?.title) return { text: `Opened: ${p} (window: ${quoteScreenText(res.title)})` };
+            return {
+              text: exe
+                ? `Opened: ${p} — handed to Windows, but no window of ${leaf} was found: it may still be loading, or it did not start. Check list_windows before acting on it.`
+                : `Opened: ${p}`,
+            };
+          }
           // Windows: open the path in Explorer. For a DIRECTORY, VERIFY the
           // right folder window actually surfaced — launchApp must not fall
           // back to a Start-Menu search (which types "explorer" and opens
@@ -590,17 +609,14 @@ export function getExtraTools(): ToolDefinition[] {
           // Previously open_file returned "Opened" unconditionally even when
           // it landed on Home (live bug 2026-06-12).
           const res = await ctx.platform.launchApp('explorer.exe', { url: p, noStartMenuFallback: true });
-          if (isDir) {
-            const title = res?.title ?? '';
-            if (!leaf || !windowTextIncludes(title, leaf)) {
-              return {
-                text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
-                isError: true,
-              };
-            }
-            return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
+          const title = res?.title ?? '';
+          if (!leaf || !windowTextIncludes(title, leaf)) {
+            return {
+              text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
+              isError: true,
+            };
           }
-          return { text: `Opened: ${p}${res?.title ? ` (window: ${quoteScreenText(res.title)})` : ''}` };
+          return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
         } catch (err) {
           return {
             text: `open_file failed: ${err instanceof Error ? err.message : String(err)}`,

@@ -398,6 +398,8 @@ function parseLsappinfo(text: string): FrontmostInfo {
 /** A running application as NSWorkspace sees it, with the windows the AX API can read. */
 export interface AppState {
   name: string;
+  /** Every name the app goes by, lower-case (localized, bundle, CFBundleName, executable). Absent from lsappinfo. */
+  names?: string[];
   bundleId?: string;
   processId: number;
   finishedLaunching: boolean;
@@ -421,6 +423,7 @@ function appSearchName(name: string): string {
 
 const toAppState = (raw: any): AppState => ({
   name: raw.name ?? '',
+  ...(Array.isArray(raw.names) ? { names: raw.names.map(String) } : {}),
   bundleId: raw.bundleId ?? undefined,
   processId: raw.processId ?? 0,
   finishedLaunching: raw.finishedLaunching !== false,
@@ -537,8 +540,11 @@ export interface MacAx {
    * straight from NSWorkspace, so a launch can be confirmed without diffing the
    * (slow, fallible) window list. Null = not running. A timeout throws: the
    * state is unknown, which is not the same as "not running".
+   *
+   * The helper finds apps whose name CONTAINS `name` ("Mail" finds Mail, Airmail and a Gmail web app). `exact` keeps
+   * only an app one of whose names EQUALS it: what a launch needs, so that it never focuses and reports another app.
    */
-  appState(name: string): Promise<AppState | null>;
+  appState(name: string, opts?: { exact?: boolean }): Promise<AppState | null>;
   /**
    * The control with keyboard focus in a process (the frontmost app's when omitted), or null
    * when nothing has focus. Control types use the names get-focused-element.jxa used ("Edit").
@@ -787,7 +793,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       return { title: String(reply.title ?? ''), processId: Number(reply.processId ?? pid), processName: String(reply.processName ?? '') };
     },
 
-    async appState(name: string): Promise<AppState | null> {
+    async appState(name: string, opts?: { exact?: boolean }): Promise<AppState | null> {
       const what = 'app state lookup';
       const want = appSearchName(name);
       if (!want) return null;       // an empty name would match every app and return the newest
@@ -797,7 +803,12 @@ export function createMacAx(deps: MacAxDeps): MacAx {
         what,
         { waitForBuild: false },
       );
-      if (reply) return bestApp((reply.apps ?? []).map(toAppState).filter((a: AppState) => !isOwnUiPid(a.processId)), want);
+      if (reply) {
+        const is = want.toLowerCase();
+        const apps = (reply.apps ?? []).map(toAppState).filter((a: AppState) => !isOwnUiPid(a.processId))
+          .filter((a: AppState) => !opts?.exact || (a.names ?? [a.name.toLowerCase()]).includes(is));
+        return bestApp(apps, want);
+      }
       try {
         const { stdout: found } = await deps.exec('lsappinfo', ['find', `name=${want}`], { timeoutMs: LSAPPINFO_TIMEOUT_MS });
         const asn = found.trim().split('\n')[0]?.trim();

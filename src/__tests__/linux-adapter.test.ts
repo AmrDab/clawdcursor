@@ -829,3 +829,69 @@ describe('R3 — the bridge says why a read came back short', () => {
     expect(args).not.toContain('--name');
   });
 });
+
+describe('open_app — a running window is the app only by identity, never by a title or a process name that contains the name', () => {
+  const FOCUS = (c: { cmd: string; args: string[] }) => c.cmd === 'wmctrl' && c.args[0] === '-i' && c.args[1] === '-a';
+  const OTHERS =
+    '0x03c00003  0 4242   100 200 800 600  box Gmail – Inbox — Mozilla Firefox\n' +
+    '0x03c00004  0 5555   50 60 640 480  box Calculator notes - Mousepad\n';
+
+  function setup(wmctrl?: string) {
+    process.env.XDG_DATA_HOME = '/home/t/.local/share';
+    process.env.XDG_DATA_DIRS = '/usr/share';
+    h.files['/usr/share/applications/org.gnome.Calculator.desktop'] =
+      '[Desktop Entry]\nName=Calculator\nExec=gnome-calculator %U\nType=Application\n';
+    h.proc['/proc/5555/comm'] = 'mousepad\n';
+    const base = defaultExec();
+    if (wmctrl) h.exec = (cmd, args) => (cmd === 'wmctrl' && args[0] === '-l' ? { stdout: wmctrl } : base(cmd, args));
+    const spawns: string[] = [];
+    h.spawn = (cmd: string) => {
+      spawns.push(cmd);
+      const proc = Object.assign(new EventEmitter(), { pid: undefined as number | undefined, unref: () => {} });
+      setImmediate(() => proc.emit('error', Object.assign(new Error('ENOENT'), { code: 'ENOENT' })));
+      return proc;
+    };
+    return spawns;
+  }
+
+  it('"mail" is not the browser window titled "Gmail": nothing is focused, and the failed launch is reported', async () => {
+    h.proc['/proc/4242/cmdline'] = '/usr/lib/firefox/firefox\0';
+    const spawns = setup(OTHERS);
+    await expect(new LinuxAdapter().launchApp('mail')).rejects.toThrow(/mail/);
+    expect(spawns).toEqual(['mail']);
+    expect(h.calls.some(FOCUS)).toBe(false);
+  });
+
+  it('"calculator" is not the editor window titled "Calculator notes"', async () => {
+    h.proc['/proc/4242/cmdline'] = '/usr/lib/firefox/firefox\0';
+    const spawns = setup(OTHERS);
+    await expect(new LinuxAdapter().launchApp('calculator')).rejects.toThrow(/calculator/);
+    expect(spawns).toEqual(['calculator', 'gnome-calculator']);
+    expect(h.calls.some(FOCUS)).toBe(false);
+  });
+
+  it('a process whose name only contains the name is not the app ("calc" is not gnome-calculator)', async () => {
+    h.proc['/proc/4242/cmdline'] = '/usr/bin/gnome-calculator\0';
+    const spawns = setup();
+    await expect(new LinuxAdapter().launchApp('calc')).rejects.toThrow(/calc/);
+    expect(spawns).toEqual(['calc']);
+    expect(h.calls.some(FOCUS)).toBe(false);
+  });
+
+  it('already running as the program its desktop entry starts: that window is focused, nothing is launched', async () => {
+    h.proc['/proc/4242/cmdline'] = '/usr/bin/gnome-calculator\0';
+    const spawns = setup();
+    const res = await new LinuxAdapter().launchApp('calculator');
+    expect(spawns).toEqual([]);
+    expect(res).toMatchObject({ pid: 4242, title: 'gnome-calculator' });
+    expect(h.calls.filter(FOCUS).map(c => c.args[2])).toEqual(['0x3c00003']);
+  });
+
+  it('already running under one of the app\'s known process names', async () => {
+    h.proc['/proc/4242/cmdline'] = '/opt/microsoft/msedge/msedge\0';
+    const spawns = setup();
+    const res = await new LinuxAdapter().launchApp('edge', { processNames: ['msedge'] });
+    expect(spawns).toEqual([]);
+    expect(res).toMatchObject({ pid: 4242 });
+  });
+});

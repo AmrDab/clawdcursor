@@ -751,6 +751,22 @@ function Cmd-ActivateAtPoint {
     }
 }
 
+# -- Command: get-process-paths ------------------------------------------------
+# The exe path of each pid ('' when the process is gone or may not be opened). launchApp reads a packaged app's
+# identity from it: a window is the app's when its process runs from the app's package folder (app-identity.ts).
+function Cmd-GetProcessPaths {
+    param($cmd)
+    $paths = @{}
+    foreach ($p in @($cmd.pids)) {
+        $id = 0
+        if (-not [int]::TryParse("$p", [ref]$id)) { continue }
+        $path = ''
+        try { $path = "$([System.Diagnostics.Process]::GetProcessById($id).MainModule.FileName)" } catch {}
+        $paths["$id"] = $path
+    }
+    return @{ paths = $paths }
+}
+
 # The app's own display name: its exe's file description, else product name ("Designcenter NX" for ugraf.exe).
 # Read once per process; '' when the exe has none or the process may not be opened.
 $script:AppNames = @{}
@@ -1651,6 +1667,7 @@ while ($true) {
         $result = switch ($cmd.cmd) {
             "get-screen-context"    { Cmd-GetScreenContext $cmd }
             "get-foreground-window" { Cmd-GetForegroundWindow }
+            "get-process-paths"     { Cmd-GetProcessPaths $cmd }
             "focus-window"          { Cmd-FocusWindow $cmd }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }

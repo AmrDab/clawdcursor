@@ -1034,6 +1034,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
             alwaysNewInstance: alias?.alwaysNewInstance,
             uwpAppId: alias?.uwpAppId,
+            processNames: alias?.processNames,   // whose windows are this app's (identity, not title text)
             // Pick the searchTerm that gives the OS native launcher (Start
             // Menu / Spotlight) the best chance of resolving to the right
             // app — alias.searchTerm wins when present, mac falls back to

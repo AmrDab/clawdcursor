@@ -1025,6 +1025,8 @@ export class MacOSAdapter implements PlatformAdapter {
       uwpAppId?: string;
       searchTerm?: string;
       nameOnly?: boolean;
+      /** The app's known process names (PlatformAdapter.launchApp). */
+      processNames?: readonly string[];
     },
   ): Promise<{ pid?: number; title?: string; handle?: number | string }> {
     // uwpAppId is Windows-only — ignore on macOS.
@@ -1043,7 +1045,8 @@ export class MacOSAdapter implements PlatformAdapter {
     // and the Spotlight fallback then typed the name into Spotlight for an app
     // that was already up (live blind test, 2026-10-15). `undefined` means the
     // lookup itself failed — only then is the window-list diff the fallback.
-    const before: AppState | null | undefined = await this.ax.appState(name).catch(() => undefined);
+    // By identity: an app one of whose names EQUALS `name`, never one whose name merely contains it ("Mail" is not Airmail).
+    const before: AppState | null | undefined = await this.ax.appState(name, { exact: true }).catch(() => undefined);
 
     let windowsBefore: readonly WindowInfo[] = [];
     if (before === undefined) windowsBefore = await this.listWindows().catch(() => [] as WindowInfo[]);
@@ -1065,12 +1068,9 @@ export class MacOSAdapter implements PlatformAdapter {
         return this.launchResult(before, beforeWindows[0]);
       }
       if (before === undefined) {
-        const target = name.toLowerCase();
-        const existing = windowsBefore.find(w =>
-          w.processName.toLowerCase() === target ||
-          w.processName.toLowerCase().includes(target) ||
-          windowTextIncludes(w.title, target),
-        );
+        // The window list is all there is: a window is the app's when its process IS the app (launch-poll.ts), not
+        // when its title contains the name — "Mail" is not a browser window titled "Gmail".
+        const existing = windowsBefore.find(buildAppPredicate(name, { processNames: opts?.processNames }));
         if (existing) {
           await this.focusWindow({ processId: existing.processId }).catch(() => {});
           return { pid: existing.processId, title: existing.title, handle: existing.handle };
@@ -1134,17 +1134,17 @@ export class MacOSAdapter implements PlatformAdapter {
     name: string,
     before: AppState | null | undefined,
     windowsBefore: readonly WindowInfo[],
-    opts: { alwaysNewInstance?: boolean } | undefined,
+    opts: { alwaysNewInstance?: boolean; processNames?: readonly string[] } | undefined,
   ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     if (before === undefined) {
       // Process state is unreadable: the window-list diff is all there is.
-      const win = await waitForLaunchedWindow(windowsBefore, () => this.listWindows(), buildAppPredicate(name), { timeoutMs: LAUNCH_CONFIRM_MS });
+      const win = await waitForLaunchedWindow(windowsBefore, () => this.listWindows(), buildAppPredicate(name, { processNames: opts?.processNames }), { timeoutMs: LAUNCH_CONFIRM_MS });
       return win ? { pid: win.processId, title: win.title, handle: win.handle } : null;
     }
     const deadline = Date.now() + LAUNCH_CONFIRM_MS;
     let running: AppState | null = null;
     for (;;) {
-      const st = await this.ax.appState(name).catch(() => null);
+      const st = await this.ax.appState(name, { exact: true }).catch(() => null);
       // With -n only a process other than the one we started from counts.
       if (st && (!opts?.alwaysNewInstance || st.processId !== before?.processId)) {
         running = st;
@@ -1172,7 +1172,7 @@ export class MacOSAdapter implements PlatformAdapter {
     searchTermHint: string | undefined,
     before: AppState | null | undefined,
     windowsBefore: readonly WindowInfo[],
-    opts: { alwaysNewInstance?: boolean } | undefined,
+    opts: { alwaysNewInstance?: boolean; processNames?: readonly string[] } | undefined,
   ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     // Prefer the alias's curated `searchTerm` (or `macOSAppName`); fall back
     // to the stripped bundle name. Keeps the launcher app-agnostic — adding

@@ -26,14 +26,14 @@
  *   - **OS-agnostic.** Operates on the abstract `WindowInfo` shape; no
  *     win32 / AppKit / X11 specifics.
  *   - **App-agnostic.** No allowlist of known apps. The predicate is supplied
- *     by the caller (typically a name/title substring match).
+ *     by the caller (an identity match — see `buildAppPredicate`).
  *   - **Model-agnostic.** No prompt or LLM coupling — pure async function.
  *   - **MCP-safe.** No tool signature change. Callers' return contracts are
  *     unchanged; only the latency-to-truth improves.
  */
 
 import type { WindowInfo } from './types';
-import { windowTextIncludes } from '../tools/window-text';
+import { appIdentity, ownsWindow, type AppIdentityHints } from './app-identity';
 
 /**
  * How often the diff-and-poll loop re-checks `listWindows()`.
@@ -65,8 +65,7 @@ export interface LaunchPollOpts {
 
 /**
  * Predicate used to decide whether a `WindowInfo` belongs to the app we just
- * launched. Implementations typically do a case-insensitive match against
- * `processName` and `title`.
+ * launched. See `buildAppPredicate`.
  */
 export type AppPredicate = (w: WindowInfo) => boolean;
 
@@ -170,41 +169,14 @@ export async function waitForLaunchedWindow(
 }
 
 /**
- * Build the standard "matches the launched app" predicate. Mirrors the
- * heuristic each adapter previously used inline, with one extra rule:
- *
- *   1. exact `processName` match (case-insensitive)
- *   2. `processName` substring match
- *   3. reverse — target contains `processName` (handles `msedge.exe` ↔
- *      processName `msedge`, `firefox.exe` ↔ `firefox`, `Calculator.app` ↔
- *      `Calculator`). The reverse leg is gated by a 3-character minimum
- *      on `processName` so unrelated 1–2-char proc names ("ps", "ai")
- *      don't sweep everything in.
- *   4. `title` substring match
- *
- * App-agnostic — caller passes whatever name the user / agent / alias
- * resolver provided. OS-agnostic — operates only on the abstract
- * `WindowInfo` shape.
+ * The "this window belongs to the launched app" predicate: by identity only (app-identity.ts) — the window's process
+ * name equals the launch name (extension dropped) or one of the app's known process names; on Windows also its
+ * package family, or the exact display-name title of a window the UWP frame host owns. Never a substring of the
+ * process name or of the title: a title is whatever a document, a web page or a mail subject says.
  */
-export function buildAppPredicate(name: string): AppPredicate {
-  const target = name.trim().toLowerCase();
-  if (!target) return () => false;
-  // Strip a trailing `.exe` / `.com` / `.app` so a launchName like
-  // "msedge.exe" still matches a `processName` of "msedge". This is the
-  // single OS-agnostic, app-agnostic translation needed: launchers want
-  // file-system names, window enumerators give back stripped process names.
-  const stem = target.replace(/\.(exe|com|app)$/, '');
-  return (w: WindowInfo): boolean => {
-    const proc = w.processName.toLowerCase();
-    if (proc === target) return true;
-    if (proc === stem) return true;
-    if (proc.includes(target)) return true;
-    if (proc.includes(stem)) return true;
-    if (proc.length >= 3 && (target.includes(proc) || stem.includes(proc))) {
-      return true;
-    }
-    return windowTextIncludes(w.title, target) || windowTextIncludes(w.title, stem);
-  };
+export function buildAppPredicate(name: string, hints?: AppIdentityHints): AppPredicate {
+  const identity = appIdentity(name, hints);
+  return (w: WindowInfo): boolean => ownsWindow(identity, w);
 }
 
 function sleep(ms: number): Promise<void> {

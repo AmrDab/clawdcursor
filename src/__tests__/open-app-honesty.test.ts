@@ -74,3 +74,18 @@ describe('agent-loop open_app', () => {
     expect(r.success).toBe(true);
   });
 });
+
+describe('open_app tells the adapter which processes are the app (a window is the app\'s by identity, not by title)', () => {
+  it.each([
+    ['Calculator', ['CalculatorApp', 'Calculator', 'calc']],
+    ['Outlook', ['OUTLOOK', 'olk']],
+    ['edge', ['msedge']],
+  ])('%s → %j, on both surfaces', async (name, processNames) => {
+    const mcp = mcpCtx(async () => ({ pid: 7, title: 'x' }));
+    await mcpOpenApp.handler({ name }, mcp);
+    expect((mcp.platform as any).launchApp).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ processNames }));
+    const agent = agentCtx(async () => ({ pid: 7, title: 'x' }));
+    await agentOpenApp.execute({ name }, agent);
+    expect(agent.platform.launchApp).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ processNames }));
+  });
+});

@@ -164,7 +164,7 @@ describe('a name outside the alias table only ever starts an installed app', () 
     const w = src('windows.ts');
     const nameOnly = w.slice(w.indexOf('// Name-only launch'), w.indexOf('// Route 1:'));
     expect(nameOnly).toMatch(/resolveInstalledWindowsApp\(name\)/);
-    expect(nameOnly).toMatch(/if \(!app\) return \{\};/);
+    expect(nameOnly).toMatch(/if \(!found\) return \{\};/);
     expect(nameOnly).not.toMatch(/launchViaStartMenuSearch|CLAWD_PS_FILE: name\b/);
     // Everything after it is for trusted names only.
     expect(w.slice(w.indexOf('// Route 1:'), w.indexOf('private async foregroundLaunched')).match(/launchViaStartMenuSearch/g)?.length).toBeGreaterThan(0);
