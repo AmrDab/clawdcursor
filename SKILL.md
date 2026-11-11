@@ -63,10 +63,10 @@ metadata:
 > - MCP stdio (editor host): add `"args": ["mcp", "--compact"]` to your config.
 > - MCP over HTTP (daemon mode): start the daemon with `--compact` (or set
 >   `CLAWD_MCP_COMPACT=1`) so `/mcp` serves the 6 compound tools (incl. `batch`). The surface is
->   fixed at startup — a daemon serves EITHER the compact tools OR the 100+
+>   fixed at startup — a daemon serves EITHER the compact tools OR the 89
 >   granular ones, not both. Default (no flag) is granular.
 >
-> Granular mode's 100+ tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
+> Granular mode's 89 tools are kept for back-compat. Compact's tools are much smaller and reduce mis-tool-selection. Use granular only if your runtime MUST have every primitive as its own top-level schema.
 
 **You drive the tools yourself. clawdcursor never runs a model.**
 
@@ -88,7 +88,7 @@ batch({steps})              Collapse N tool calls into one round-trip (see "Exec
 
 Pick a compound FIRST based on what kind of operation it is, then set the
 `action` enum, then supply the args. The catalog is ~7,000 tokens - about a third
-of the granular surface's ~20,000 - so small models (Haiku, Kimi, Ollama) stay focused.
+of the granular surface's ~19,000 - so small models (Haiku, Kimi, Ollama) stay focused.
 
 ### Cost tier - always use the cheapest tier that works
 
@@ -168,8 +168,8 @@ clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a 
 
 | Mode | Command | Transport | Brain | Tools available |
 |------|---------|-----------|-------|-----------------|
-| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 100+ granular (default) or compact surface (`--compact`) |
-| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 100+ granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
+| `mcp` | `clawdcursor mcp [--compact]` | stdio | **You** (editor host) | 89 granular (default) or compact surface (`--compact`) |
+| `agent` | `clawdcursor agent [--compact]` | HTTP `/mcp` | **You** (HTTP client) | 89 granular (default) **or** compact surface — pass `--compact` (or `CLAWD_MCP_COMPACT=1`). One surface per daemon, chosen at startup — NOT both at once |
 
 ---
 
@@ -189,7 +189,7 @@ clawdcursor exposes one protocol (**MCP**) over two transports. It never runs a 
 }
 ```
 
-**Granular - 100+ individual tools (power-user, back-compat, larger prompt budget):**
+**Granular - 89 individual tools (power-user, back-compat, larger prompt budget):**
 ```json
 {
   "mcpServers": {
@@ -479,6 +479,6 @@ Hit a clawdcursor bug (a tool throws/crashes or behaves contrary to this doc —
 
 ## Full documentation
 
-- **Tool catalog (100+ granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
+- **Tool catalog (89 granular or compact):** `tools/list` JSON-RPC over stdio MCP or HTTP `/mcp`
 - **Architecture detail:** README.md in the repo
 - **Changelog:** CHANGELOG.md

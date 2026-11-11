@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * 🐾 Clawd Cursor — AI Desktop Agent
+ * 🐾 Clawd Cursor — desktop control for AI agents
  *
  * Your AI controls your desktop natively.
  */
@@ -220,7 +220,7 @@ async function forceKillPort(port: number): Promise<boolean> {
 
 program
   .name('clawdcursor')
-  .description('🐾 AI Desktop Agent — native screen control')
+  .description('🐾 Desktop control for AI agents: an MCP tool layer your agent drives')
   .version(VERSION);
 
 // ── Agent mode (v0.9 PR7.4) ────────────────────────────────────────────

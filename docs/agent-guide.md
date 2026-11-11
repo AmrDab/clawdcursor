@@ -4,7 +4,8 @@
 > [`SKILL.md`](../SKILL.md) at the repo root. Load that — it has the full
 > compact-tool workflow, compound → granular action reference, what clawdcursor
 > enforces and what it leaves to you, per-OS capability matrix, and error recovery.
-> The same guide is served at <https://clawdcursor.com/llms.txt>.
+> A shorter summary (install, the tool surface, the safety rules) is served at
+> <https://clawdcursor.com/llms.txt>.
 
 ## One-line summary
 

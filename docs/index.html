@@ -83,8 +83,9 @@
     ── WHAT PROTECTS THE USER ──────────────────────────────────────────────────
     clawdcursor does not decide what the agent may do: there is no policy gate.
     Always enforced: the user's Stop (pill, `clawdcursor stop`; holds across
-    restarts), the pause card (nothing runs while it is up; only the user can
-    answer it), no stray input into an AI assistant's window, a short per-OS
+    restarts), the pause card (nothing runs while it is up; a choice or reply
+    comes only from the user; on the granular surface an agent's resume_task
+    can also end a pause, reported as unverified), no stray input into an AI assistant's window, a short per-OS
     list of session-ending keys that are never sent, token-authenticated
     loopback-only HTTP, screen text wrapped as untrusted data, one-time consent.
     Per-action approval is the MCP host's job (tools carry readOnlyHint /
@@ -571,65 +572,52 @@
 
   </section>
 
-  <!-- vs computer use -->
-  <section class="sect" id="vs-computer-use">
-    <div class="sect-label">Efficiency</div>
-    <h2>Leaner than computer use.</h2>
-    <p class="sub">Screenshot-based computer use sends the model a picture of the screen every time it looks. clawdcursor sends text the model can act on by name.</p>
-
-    <div class="stats">
-      <div class="stat"><div class="stat-val">38</div><div class="stat-lbl">Tokens to find a button by name</div></div>
-      <div class="stat"><div class="stat-val">~1,000+</div><div class="stat-lbl">Tokens for one screenshot</div></div>
-      <div class="stat"><div class="stat-val">12&ndash;47&times;</div><div class="stat-lbl">Fewer tokens on a measured task</div></div>
-    </div>
+  <!-- Approach: text first -->
+  <section class="sect" id="approach">
+    <div class="sect-label">Approach</div>
+    <h2>Text first, screenshots last.</h2>
+    <p class="sub">clawdcursor gives the model text it can act on by name, and keeps images for targets that nothing else describes.</p>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
         <thead>
           <tr style="background:rgba(255,255,255,0.03);">
             <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);"></th>
-            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);">Screenshot-based computer use</th>
-            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--border);">clawdcursor</th>
+            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--border);">What clawdcursor does</th>
           </tr>
         </thead>
         <tbody>
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">What the model reads per look</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A screenshot: ~1,000&ndash;1,800 tokens</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text: 38 tokens to find a button, 50 to read a field</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading the screen</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text first: the accessibility tree (<code>read_tree</code>), then the window's own text (<code>copy_all_text</code>), then OCR. No image reaches the model on these reads.</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">How it clicks</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">x, y coordinates guessed from the picture</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">By name: <code>invoke "Equals"</code>. Coordinates are the fallback</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Screenshots</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Last. <code>computer screenshot</code> returns an image; it is for a target with no name and no visible text.</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Did the click work?</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">Take another screenshot</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);"><code>expect</code> checks it in the same call and reports a DEVIATION</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Clicking and typing</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">By name: <code>invoke "Equals"</code>, or <code>set_value</code> on a named field. <code>smart_click</code> finds a visible label by OCR. A coordinate click is the fallback.</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Checking an action</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);"><code>expect</code> re-reads the screen in the same call and reports a DEVIATION if the state is not there. Without it, the result says <code>unverified</code>.</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Known steps in a row</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A model turn + a screenshot per step</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call, every step still guarded (Stop, pause)</td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading text</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">Read off the pixels</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">The app's own text: tree values, <code>copy_all_text</code>, OCR</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call. Each step is refused by Stop and the pause exactly as a direct call would be.</td>
             </tr>
             <tr>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Which model</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">One that can read screenshots and point at pixels</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Any model with tool calling</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Any model with tool calling. The text reads need no image input.</td>
             </tr>
         </tbody>
       </table>
     </div>
 
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
-      Measured on Windows 11 (October 2026): 127 &times; 49 in Calculator took clawdcursor 3 tool calls and ~176 tokens of screen input, with 0 screenshots. A screenshot loop needs 2 to 8 screenshots for the same task (2,072&ndash;8,288 tokens at 1024&times;768). Screenshot cost from
-      <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool" target="_blank" rel="noopener" style="color:var(--accent2);">Anthropic's computer use docs</a>; clawdcursor tokens estimated as characters &divide; 3.5.
+      Measured figures will come from the 2.1 benchmark, which runs one standard test across app types, operating systems and models
+      (<a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a>).
     </p>
   </section>
 
@@ -685,7 +673,7 @@
       <div class="feat-card">
         <div class="feat-icon">🟦</div>
         <h4>The pause card</h4>
-        <p>While the agent waits for you, no other tool call runs. Only you can answer the card; the agent cannot click it or the pill.</p>
+        <p>While the agent waits for you, no other tool call runs. A choice or a reply on the card comes only from you; the agent cannot click it or the pill. On the granular surface an agent can also end a pause with <code>resume_task</code>, reported as unverified.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">💬</div>
@@ -988,7 +976,7 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
     'oneliner|unix': 'curl -fsSL https://clawdcursor.com/install.sh | bash',
     'npm|win':  'npm i -g clawdcursor',
     'npm|unix': 'npm i -g clawdcursor',
-    'source|win':  'git clone https://github.com/AmrDab/clawdcursor.git && cd clawdcursor && npm i && npm run build && npm link',
+    'source|win':  'git clone https://github.com/AmrDab/clawdcursor.git; cd clawdcursor; npm i; if ($?) { npm run build }; if ($?) { npm link }',
     'source|unix': 'git clone https://github.com/AmrDab/clawdcursor.git && cd clawdcursor && npm i && npm run build && npm link',
   };
   const INSTALL_COMMENTS = {

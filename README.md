@@ -188,6 +188,14 @@ curl -s -X POST http://127.0.0.1:3847/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+```powershell
+# Windows PowerShell 5.1
+$token = (Get-Content "$env:USERPROFILE\.clawdcursor\token" -Raw).Trim()
+$headers = @{ Authorization = "Bearer $token"; Accept = "application/json, text/event-stream" }
+$body = '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3847/mcp -Headers $headers -ContentType "application/json" -Body $body
+```
+
 ### Updating
 
 | Installed as | Update with |
@@ -213,7 +221,7 @@ flowchart TB
     see -- "1" --> tree["accessibility read_tree<br/>element names + positions"]
     see -- "2" --> text["system copy_all_text<br/>exact text of a page or document"]
     see -- "3" --> ocr["system ocr<br/>when the tree is empty"]
-    see -- "last" --> shot["computer screenshot<br/>the only read that sends an image"]
+    see -- "last" --> shot["computer screenshot<br/>sends an image to the model"]
 
     tree --> act
     text --> act
@@ -228,7 +236,7 @@ flowchart TB
     result --> agent
 ```
 
-- **See.** `accessibility read_tree` lists a window's elements by name. `system copy_all_text` gives the exact text of a page or document. `system ocr` reads the screen when the tree is empty. `computer screenshot` is the last resort and the only read that puts an image in the model's context.
+- **See.** `accessibility read_tree` lists a window's elements by name. `system copy_all_text` gives the exact text of a page or document. `system ocr` reads the screen when the tree is empty. `computer screenshot` is the last resort: it and its variants (`screenshot_region`, `zoom`) are the reads that put an image in the model's context.
 - **Act.** `accessibility invoke` clicks an element by name and `set_value` fills a field. If the name is not in the tree, `smart_click` finds the visible label by OCR. A coordinate click is for a target with no name and no visible text. `compile_ui`, `find_button` and `find_field` return an `{element_id, snapshot_id}` pair that stays valid when the layout shifts.
 - **Check.** Every action result ends with one status line: `confirmed`, `unverified`, `refused` or `failed`, with a code and a suggested next call. Pass `expect` on an action that matters and the call re-reads the screen afterwards and reports a `DEVIATION` if the expected state is not there. Without `expect`, an action whose effect nothing checked says `unverified`.
 - **Keys.** The server instructions name the OS and its shortcut modifier. `mod` means `cmd` on macOS and `ctrl` on Windows and Linux.
@@ -263,7 +271,7 @@ computer({ action: "key", combo: "mod+s" })          // Cmd+S on macOS, Ctrl+S e
 window({ action: "open_app", name: "Outlook" })
 ```
 
-The full guide for agents is [SKILL.md](SKILL.md), also served at [clawdcursor.com/llms.txt](https://clawdcursor.com/llms.txt). Every parameter is in [schema.snapshot.json](schema.snapshot.json).
+The full guide for agents is [SKILL.md](SKILL.md); it ships in the npm package and the Claude Code plugin. [clawdcursor.com/llms.txt](https://clawdcursor.com/llms.txt) is a shorter summary of it: install, the tool surface and the safety rules. Every parameter is in [schema.snapshot.json](schema.snapshot.json).
 
 ---
 
@@ -274,7 +282,7 @@ Clawd Cursor runs with **your own OS permissions**. Anything you can do with a m
 What is enforced, whatever the agent sends:
 
 - **Stop.** Press Stop on the pill (or double-click it), or run `clawdcursor stop`. Every Clawd Cursor process stops, including a call or batch already running, and stays stopped across restarts until you resume.
-- **The pause card.** While a `pause_for_user` prompt is up, no other tool call runs, and only you can answer it. The agent cannot click its own card or the pill.
+- **The pause card.** While a `pause_for_user` prompt is up, no other tool call runs. A choice or a typed reply on the card comes only from you: the agent cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
 - **No stray input into an AI assistant's window.** Input is refused when the window in front is an AI assistant the agent did not focus or open on purpose, or is no longer the window the agent was working in.
 - **A short list of keys that are never sent**, because they lock the machine or end the session. Windows: `Win+L`, `Ctrl+Alt+Del`. macOS: `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, anything with Power or Eject. Linux: `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`, SysRq, Power. Every other shortcut is allowed.
 - **Token-authenticated local HTTP.** `clawdcursor agent` binds `127.0.0.1` only and requires the bearer token. `clawdcursor mcp` (stdio) opens no port.
@@ -309,7 +317,7 @@ Privacy:
 
 - **Windows:** no setup.
 - **macOS:** Accessibility is required; Screen Recording is needed only for screenshots and OCR. `clawdcursor grant` opens the dialogs. See [docs/MACOS-SETUP.md](docs/MACOS-SETUP.md). Retina scaling is handled for you: do not pre-scale coordinates.
-- **Linux X11:** `apt install tesseract-ocr python3-gi gir1.2-atspi-2.0`.
+- **Linux X11:** `sudo apt install tesseract-ocr python3-gi gir1.2-atspi-2.0`.
 - **Linux Wayland:** the same, plus `ydotool` with `ydotoold` (preferred) or `wtype` (keyboard only).
 
 ---
