@@ -406,6 +406,28 @@ describe('launchApp (B2 — confirm the launch from the process, not the window 
     expect(ax.appState).not.toHaveBeenCalled();
   });
 
+  describe('`open <target>` (open_file / open_url / open_uri) is the OS opener, not an app', () => {
+    const TARGET = "/Users/x/Sam's $HOME `notes`; rm -rf.txt";
+    const opener = () => execCalls.filter(c => c.cmd === '/usr/bin/open');
+
+    it('runs /usr/bin/open with the target as ONE argv element: no shell, no `-a open`, no Spotlight', async () => {
+      const ax = fakeAx();
+      const res = await settle(new MacOSAdapter({ ax }).launchApp('open', { url: TARGET }));
+      expect(opener().map(c => c.args)).toEqual([[TARGET]]);
+      expect(execCalls.some(c => /(^|\/)(sh|bash|zsh)$/.test(c.cmd))).toBe(false);
+      expect(opens()).toHaveLength(0);                 // nothing like `open -a open …`
+      expect(osascripts()).toHaveLength(0);            // no Spotlight typing, no focus
+      expect(ax.appState).not.toHaveBeenCalled();
+      expect(res).toEqual({});                         // no window is claimed
+    });
+
+    it('a target `open` refuses is an error with its words, and still never reaches Spotlight', async () => {
+      execFail = (cmd) => (cmd === '/usr/bin/open' ? new Error('The file /nope does not exist.') : null);
+      await expect(settle(new MacOSAdapter({ ax: fakeAx() }).launchApp('open', { url: '/nope' }))).rejects.toThrow(/does not exist/);
+      expect(osascripts()).toHaveLength(0);
+    });
+  });
+
   describe('a running app is the one asked for only by identity', () => {
     const noState = () => vi.fn(async () => { throw new MacAxError('timeout', 'app state lookup timed out'); });
     const focused = (pid: number) => osascripts().some(c => c.args.join(' ').includes('focus-window.jxa') && c.args.includes(String(pid)));

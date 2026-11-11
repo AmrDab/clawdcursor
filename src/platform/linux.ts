@@ -1360,6 +1360,8 @@ export class LinuxAdapter implements PlatformAdapter {
     if (/[\r\n\t\x00-\x1f]/.test(name)) {
       throw new Error('launchApp: illegal characters in app name');
     }
+    // `xdg-open` with a target (open_file / open_url / open_uri) is the desktop's opener, not an app to find.
+    if (name === 'xdg-open' && opts?.url) return this.xdgOpen(opts.url, opts.cwd);
     // Snapshot windows BEFORE any spawn so the post-launch diff-and-poll
     // helper can ignore them. Reused for the idempotency check.
     let windowsBefore: readonly WindowInfo[] = [];
@@ -1462,6 +1464,35 @@ export class LinuxAdapter implements PlatformAdapter {
       // A window with no _NET_WM_PID reports pid 0: the process we spawned is it.
       ? { pid: win.processId || pid, title: win.title, handle: win.handle }
       : null;
+  }
+
+  /**
+   * `xdg-open <target>`: the target is one argv element (no shell). xdg-open hands the target to its handler and
+   * exits, so it used to be judged as an app that "exited and no window appeared" — a failure reported for a file
+   * that had opened. Its exit status is the answer: 0 = handed over; anything else is thrown with what it means.
+   * Still running after a few seconds (a desktop where it runs the handler itself) counts as handed over.
+   * No window is claimed: which app answers is not known here.
+   */
+  private xdgOpen(target: string, cwd?: string): Promise<{ pid?: number; title?: string; handle?: number | string }> {
+    const why: Record<number, string> = {
+      1: 'bad arguments', 2: 'the file does not exist', 3: 'a required tool was not found', 4: 'no application could open it',
+    };
+    return new Promise((resolve, reject) => {
+      let proc: ReturnType<typeof spawn>;
+      try {
+        proc = spawn('xdg-open', [target], { detached: true, stdio: 'ignore', cwd });
+      } catch (err) {
+        reject(new Error(`launchApp: xdg-open could not be started (${err instanceof Error ? err.message : String(err)})`));
+        return;
+      }
+      const timer = setTimeout(() => { try { proc.unref(); } catch { /* */ } resolve({}); }, 3_000);
+      proc.on('error', (err: Error) => { clearTimeout(timer); reject(new Error(`launchApp: xdg-open could not be started (${err.message})`)); });
+      proc.on('exit', (code: number | null) => {
+        clearTimeout(timer);
+        if (code === 0) resolve({});
+        else reject(new Error(`launchApp: xdg-open could not open "${target}" (${why[code ?? -1] ?? 'it was stopped'}, exit ${code})`));
+      });
+    });
   }
 
   private spawnDetached(cmd: string, args: string[], cwd?: string): Promise<{ ok: boolean; pid?: number }> {

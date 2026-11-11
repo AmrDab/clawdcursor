@@ -578,11 +578,11 @@ export function getExtraTools(): ToolDefinition[] {
         try {
           if (ctx.platform.platform === 'darwin') {
             await ctx.platform.launchApp('open', { url: p });
-            return { text: `Opened: ${p}` };
+            return { text: `Opened: ${p} — handed to its default app; no window was checked, so confirm with list_windows before acting on it.` };
           }
           if (ctx.platform.platform === 'linux') {
             await ctx.platform.launchApp('xdg-open', { url: p });
-            return { text: `Opened: ${p}` };
+            return { text: `Opened: ${p} — handed to its default app; no window was checked, so confirm with list_windows before acting on it.` };
           }
           if (!isDir) {
             // A file is opened by its own program, not by Explorer, so no Explorer window is ever the result (live:

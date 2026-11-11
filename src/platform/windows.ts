@@ -1396,8 +1396,14 @@ export class WindowsAdapter implements PlatformAdapter {
     // Route 2: classic Start-Process via PowerShell; the values arrive as $env:, never as script source (ps-input.ts).
     const env: NodeJS.ProcessEnv = { ...process.env, CLAWD_PS_FILE: name };
     const cmdParts: string[] = ['Start-Process', '-FilePath', '$env:CLAWD_PS_FILE'];
-    // eslint-disable-next-line no-control-regex -- intentional: reject control chars that could escape PowerShell quoting
-    if (opts?.url && !/[\r\n\t\x00-\x1f"'`$]/.test(opts.url)) {
+    if (opts?.url) {
+      // The target reaches PowerShell as $env: data, never as script text, so `'`, `$` and a backtick are ordinary
+      // characters of a path ("Sam's notes.txt", "C:\$Recycle.Bin"). Only what could split the argument is refused —
+      // and refused out loud: the target used to be dropped silently, and the bare launcher opened instead.
+      // eslint-disable-next-line no-control-regex -- intentional: control characters never belong in a path or a URL
+      if (/[\x00-\x1f"]/.test(opts.url)) {
+        throw new Error('launchApp: the path or URL to open contains a double quote or a control character, which cannot be passed to a Windows program');
+      }
       // A drive or UNC path goes out with backslashes: explorer.exe reads "/" as the start of a switch, so
       // `explorer C:/Windows/System32/calc.exe` opens the Documents folder and never starts the program.
       env.CLAWD_PS_ARGS = /^(?:[A-Za-z]:[\\/]|[\\/]{2})/.test(opts.url) ? opts.url.replace(/\//g, '\\') : opts.url;

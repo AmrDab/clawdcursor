@@ -82,3 +82,28 @@ describe('open_file — a file is opened by its own program: no Explorer window 
     expect(r.text).not.toMatch(/window/);
   });
 });
+
+describe('open_file — a refused path says why; macOS and Linux go through the OS opener', () => {
+  const tool = (platform: string, launchApp: any): ToolContext =>
+    ({ ensureInitialized: async () => {}, platform: { platform, launchApp: vi.fn(launchApp) } } as unknown as ToolContext);
+
+  it('Windows: the adapter\'s refusal reaches the agent', async () => {
+    const r = await openFile.handler({ path: 'C:\\x\\a"b.txt' }, ctx(async () => { throw new Error('launchApp: the path or URL to open contains a double quote or a control character'); }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/double quote or a control character/);
+  });
+
+  it.each([['darwin', 'open'], ['linux', 'xdg-open']])('%s: hands the path to `%s`, and claims no window', async (platform, opener) => {
+    const spy = vi.fn(async () => ({}));
+    const r = await openFile.handler({ path: "/home/x/Sam's $notes.txt" }, tool(platform, spy));
+    expect(spy).toHaveBeenCalledWith(opener, { url: "/home/x/Sam's $notes.txt" });
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toMatch(/^Opened: .*no window was checked/);
+  });
+
+  it.each([['darwin'], ['linux']])('%s: the opener\'s failure is the result', async (platform) => {
+    const r = await openFile.handler({ path: '/nope' }, tool(platform, async () => { throw new Error('The file /nope does not exist.'); }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/does not exist/);
+  });
+});

@@ -1038,6 +1038,15 @@ export class MacOSAdapter implements PlatformAdapter {
       throw new Error('launchApp: illegal characters in app name');
     }
 
+    // `open` with a target (open_file / open_url / open_uri) is the OS opener itself, not an app to find. It used to
+    // run as `open -a open <target>` — "no application named open" — and then fall through to Spotlight, which typed
+    // "open" and pressed Return. The target is one argv element (no shell); a refusal by `open` (no such file, no
+    // app for it) is thrown with its own words. No window is claimed: which app answers is not known here.
+    if (name === 'open' && opts?.url) {
+      await execFileAsync('/usr/bin/open', [opts.url], { timeout: 5_000, cwd: opts.cwd });
+      return {};
+    }
+
     // Ask NSWorkspace first: is the app already running, and does it have a
     // window? The old flow learned the pid only from a diff of the window list
     // (9 s on a busy Mac, and an 8 s timeout read as "no windows"), so launches

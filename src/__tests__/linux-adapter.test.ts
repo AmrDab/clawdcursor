@@ -895,3 +895,39 @@ describe('open_app — a running window is the app only by identity, never by a 
     expect(res).toMatchObject({ pid: 4242 });
   });
 });
+
+describe('`xdg-open <target>` (open_file / open_url / open_uri) is the desktop\'s opener, not an app', () => {
+  const TARGET = "/home/x/Sam's $HOME `notes`; rm -rf.txt";
+
+  function opener(exit: number | 'ENOENT') {
+    const spawns: Array<{ cmd: string; args: string[]; opts: { shell?: unknown } }> = [];
+    h.spawn = (cmd: string, args: string[], opts: unknown) => {
+      spawns.push({ cmd, args, opts: opts as { shell?: unknown } });
+      const proc = Object.assign(new EventEmitter(), { pid: 900, unref: () => {} });
+      setImmediate(() => (exit === 'ENOENT' ? proc.emit('error', new Error('spawn xdg-open ENOENT')) : proc.emit('exit', exit)));
+      return proc;
+    };
+    return spawns;
+  }
+
+  it('the target is ONE argv element of xdg-open: no shell; handed over = success, and no window is claimed or waited for', async () => {
+    const spawns = opener(0);
+    const res = await new LinuxAdapter().launchApp('xdg-open', { url: TARGET });
+    expect(spawns.map(s => [s.cmd, s.args])).toEqual([['xdg-open', [TARGET]]]);
+    expect(spawns[0].opts.shell).toBeFalsy();
+    expect(res).toEqual({});
+    expect(h.calls.some(c => c.cmd === 'wmctrl')).toBe(false);
+  });
+
+  it('xdg-open\'s failure is reported with what it means', async () => {
+    opener(2);
+    await expect(new LinuxAdapter().launchApp('xdg-open', { url: '/nope' })).rejects.toThrow(/could not open "\/nope" \(the file does not exist, exit 2\)/);
+    opener(4);
+    await expect(new LinuxAdapter().launchApp('xdg-open', { url: '/x.zzz' })).rejects.toThrow(/no application could open it/);
+  });
+
+  it('xdg-open missing is said, not passed off as an opened file', async () => {
+    opener('ENOENT');
+    await expect(new LinuxAdapter().launchApp('xdg-open', { url: TARGET })).rejects.toThrow(/xdg-open could not be started/);
+  });
+});

@@ -220,3 +220,30 @@ describe('open_file on Windows — the window reported is the opened program\'s,
     expect(focus).not.toHaveBeenCalled();
   });
 });
+
+describe('open_file on Windows — any valid path opens; a refused one says why', () => {
+  const OPEN = { noStartMenuFallback: true, viaLauncher: true };
+  const script = () => spawns[0].args.join(' ');
+
+  it.each([
+    ["C:\\Users\\x\\Sam's notes.txt"],
+    ['C:\\$Recycle.Bin\\S-1-5\\$I1.txt'],
+    ['C:\\Users\\x\\a `b` & (c); echo.txt'],
+  ])('%s reaches the launcher as data ($env:), never as script text', async (p) => {
+    desktop(DESKTOP);
+    await adapter.launchApp('explorer.exe', { ...OPEN, url: p });
+    expect(spawns).toHaveLength(1);
+    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe(p);
+    expect(script()).toContain('-ArgumentList $env:CLAWD_PS_ARGS');
+    expect(script()).not.toContain('notes');
+    expect(script()).not.toContain('Recycle');
+    expect(script()).not.toContain('echo');
+    expect((spawns[0].opts as { shell?: unknown }).shell).toBeFalsy();
+  });
+
+  it.each([['C:\\x\\a"b.txt'], ['C:\\x\\a\nb.txt']])('%j is refused with the reason, and nothing is started (it used to open the bare launcher)', async (p) => {
+    desktop(DESKTOP);
+    await expect(adapter.launchApp('explorer.exe', { ...OPEN, url: p })).rejects.toThrow(/double quote or a control character/);
+    expect(spawns).toHaveLength(0);
+  });
+});
