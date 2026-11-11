@@ -1,0 +1,103 @@
+/**
+ * Codex CLI as the agent host:
+ *   codex exec --json --ignore-user-config ... -c mcp_servers.clawdcursor.url="<isolated>/mcp" ... -
+ * with the prompt on stdin. The owner's config.toml (and so their MCP servers) is not loaded, plugins and the shell
+ * tool are off: the isolated clawdcursor is the only way to act. The bearer token travels in an environment variable.
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+import { runCli, sigOf, which, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
+import { tryRun } from '../proc';
+import type { CallSig } from '../types';
+
+export const TOKEN_ENV = 'BENCH_CLAWDCURSOR_TOKEN';
+/** Model name that means "whatever Codex is configured to use": no -m flag. */
+export const CODEX_DEFAULT = 'default';
+
+/** Codex parses each -c value as TOML: a string must be quoted. */
+const toml = (s: string) => JSON.stringify(s);
+
+export function codexCommand(o: { exe: string; model: string; mcpUrl: string; token: string; workDir: string; lastMessagePath: string; prompt: string }): CliCommand {
+  const server = `mcp_servers.${SERVER_NAME}`;
+  return {
+    cmd: o.exe,
+    args: [
+      'exec',
+      '--json',                           // one JSON event per line: tool calls with their arguments
+      '--ignore-user-config',             // not the owner's config.toml: none of their MCP servers
+      '--ignore-rules',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--sandbox', 'read-only',
+      '--disable', 'plugins',             // plugins bring their own MCP servers (a computer-use one among them)
+      '--disable', 'shell_tool',          // the desktop is reached through clawdcursor only
+      '-c', `${server}.url=${toml(o.mcpUrl)}`,
+      '-c', `${server}.bearer_token_env_var=${toml(TOKEN_ENV)}`,
+      '-c', `${server}.default_tools_approval_mode=${toml('approve')}`,   // nobody is there to approve each call
+      '-c', `approval_policy=${toml('never')}`,
+      ...(o.model && o.model !== CODEX_DEFAULT ? ['--model', o.model] : []),
+      '--cd', o.workDir,
+      '--output-last-message', o.lastMessagePath,
+      '-',                                // the prompt comes on stdin
+    ],
+    env: { [TOKEN_ENV]: o.token },
+    stdin: o.prompt,
+  };
+}
+
+/**
+ * One line of `codex exec --json`. A tool call is an item of type mcp_tool_call: it is reported when it starts and
+ * again when it completes, so `id` lets the caller count it once.
+ */
+export function parseCodexLine(line: string): { sig?: CallSig; id?: string; finalText?: string } {
+  let ev: { type?: string; item?: { id?: string; type?: string; server?: string; tool?: string; arguments?: unknown; text?: string } };
+  try { ev = JSON.parse(line); } catch { return {}; }
+  const item = ev?.item;
+  if (!item || typeof item !== 'object') return {};
+  if (item.type === 'mcp_tool_call' && typeof item.tool === 'string') {
+    let args = item.arguments;
+    if (typeof args === 'string') { try { args = JSON.parse(args); } catch { /* keep the text */ } }
+    return { sig: sigOf(item.tool, args), id: item.id };
+  }
+  if (item.type === 'agent_message' && ev.type === 'item.completed' && typeof item.text === 'string') return { finalText: item.text };
+  return {};
+}
+
+/** codex on PATH, else the newest binary the Codex desktop app installed. */
+export function findCodex(env: NodeJS.ProcessEnv = process.env): string | null {
+  const onPath = which('codex', env);
+  if (onPath) return onPath;
+  const bin = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
+  if (!bin || !fs.existsSync(bin)) return null;
+  const found = fs.readdirSync(bin).map(d => path.join(bin, d, 'codex.exe')).filter(p => fs.existsSync(p))
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+  return found[0] ?? null;
+}
+
+export const codex: Adapter = {
+  id: 'codex',
+  defaultModels: [CODEX_DEFAULT],
+  async detect() {
+    const exe = findCodex();
+    if (!exe) return null;
+    const v = /\.(cmd|bat)$/i.test(exe) ? 'installed' : (await tryRun(exe, ['--version']))?.trim();
+    return v ? `${v} (${exe})` : null;
+  },
+  async run(job: AgentJob) {
+    const exe = findCodex();
+    if (!exe) throw new Error('codex is not installed');
+    const lastMessagePath = path.join(job.workDir, 'last-message.txt');
+    let finalText = '';
+    const seen = new Set<string>();
+    const exitCode = await runCli(codexCommand({ exe, model: job.model, mcpUrl: job.mcpUrl, token: job.token, workDir: job.workDir, lastMessagePath, prompt: job.prompt }), {
+      cwd: job.workDir, signal: job.signal, logFile: path.join(job.workDir, 'agent.log'),
+      onLine: line => {
+        const p = parseCodexLine(line);
+        if (p.sig && !(p.id && seen.has(p.id))) { if (p.id) seen.add(p.id); job.onSig(p.sig); }
+        if (p.finalText !== undefined) finalText = p.finalText;
+      },
+    });
+    try { finalText = fs.readFileSync(lastMessagePath, 'utf8') || finalText; } catch { /* no last message: the stream's is used */ }
+    return { finalText, exitCode };
+  },
+};

@@ -1,8 +1,10 @@
 /** The agent hosts the benchmark can run a task through. Only the installed ones are used. */
 import { claudeCode } from './claude-code';
+import { codex } from './codex';
+import { ollama } from './ollama';
 import type { Adapter } from './common';
 
-export const ADAPTERS: Adapter[] = [claudeCode];
+export const ADAPTERS: Adapter[] = [claudeCode, codex, ollama];
 
 export interface ModelRun { adapter: Adapter; model: string; label: string }
 
