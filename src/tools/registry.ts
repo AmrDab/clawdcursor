@@ -262,11 +262,11 @@ function projectedMouseTools(): ToolDefinition[] {
 //   the System B version.
 //   → controlType added to the System B tool (tools.ts) for backward-compat.
 //
-// ocr_read_screen: KEPT ON SYSTEM A. System A returns structured JSON
-//   (elements[] + bounds + fullText + dpiRatio + coordinateSystem) which
-//   external agents rely on to locate-and-click OCR'd text. System B's
-//   read_text returns lean plain text built for the in-context LLM — a
-//   downgrade for the MCP surface — so it is not projected. No format change.
+// ocr_read_screen: KEPT ON SYSTEM A. For scope:"screen" it returns structured JSON
+//   (elements[] + bounds + fullText + coordinateSystem); for scope:"window" it
+//   answers in rows, `@x,y "text"` (the centre of the text, screen coordinates),
+//   after a line that says which window was read. System B's read_text reads
+//   the whole screen only and gives a line's top-left corner, so it is not projected.
 //
 // TOOLS LEFT ON SYSTEM A (no System B buildUnifiedTools() equivalent, or
 // compact-surface invariant test requires no compactGroup):
@@ -299,10 +299,9 @@ const A11Y_SYSB_NAMES = new Set([
   'compile_ui',
   'find_action_button',
   'find_input_field',
-  // NOTE: `read_text` (System B) is intentionally NOT projected. Its lean
-  // `@x,y "text"` output is built for the in-context LLM. The MCP surface keeps
-  // System A's `ocr_read_screen`, whose structured JSON (elements[] + bounds +
-  // coordinateSystem) is what external agents need to locate-and-click OCR text.
+  // NOTE: `read_text` (System B) is intentionally NOT projected. The MCP surface keeps
+  // System A's `ocr_read_screen`: JSON (elements[] + bounds + coordinateSystem) for
+  // scope:"screen", `@x,y "text"` rows with the centre of each text for scope:"window".
 ]);
 
 /** MCP names that the projected a11y tools will carry (after mcpName rename). */

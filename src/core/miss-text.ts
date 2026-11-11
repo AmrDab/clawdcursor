@@ -11,8 +11,27 @@
 
 import { wrapUntrustedScreenContent } from './untrusted-screen-content';
 
-export type MissReason = 'not_found' | 'unsupported' | 'invoke_threw' | 'disabled' | 'timeout' | 'no_window' | 'hidden' | 'failed';
-const REASONS: ReadonlySet<string> = new Set<MissReason>(['not_found', 'unsupported', 'invoke_threw', 'disabled', 'timeout', 'no_window', 'hidden', 'failed']);
+export type MissReason = 'not_found' | 'unsupported' | 'invoke_threw' | 'disabled' | 'timeout' | 'no_window' | 'hidden' | 'ambiguous' | 'failed';
+const REASONS: ReadonlySet<string> = new Set<MissReason>(['not_found', 'unsupported', 'invoke_threw', 'disabled', 'timeout', 'no_window', 'hidden', 'ambiguous', 'failed']);
+
+/** One of the elements an ambiguous name could mean: screen text and a screen rect, shown only inside an untrusted block. */
+export interface MissCandidate { name: string; controlType: string; bounds?: { x: number; y: number; width: number; height: number } }
+const MAX_CANDIDATES = 8;
+
+function candidatesOf(raw: unknown): MissCandidate[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_CANDIDATES).map(c => {
+    const o = (c ?? {}) as Record<string, unknown>;
+    const b = (o.bounds ?? {}) as Record<string, unknown>;
+    const rect = [b.x, b.y, b.width, b.height];
+    return {
+      name: String(o.name ?? '').replace(/\s+/g, ' ').slice(0, 80),
+      controlType: String(o.controlType ?? '').replace(/^ControlType\./, '').slice(0, 40),
+      ...(rect.every(v => typeof v === 'number' && Number.isFinite(v))
+        ? { bounds: { x: b.x as number, y: b.y as number, width: b.width as number, height: b.height as number } } : {}),
+    };
+  });
+}
 
 /** The one wrapper (untrusted-screen-content.ts): the content cannot close the block. */
 export const untrusted = wrapUntrustedScreenContent;
@@ -27,13 +46,14 @@ export function structuredMissFields(r: unknown): Record<string, unknown> {
   out.reason = reason;
   if (typeof o.detail === 'string' && o.detail) out.detail = o.detail.slice(0, 500);
   if (o.cascade === true) out.cascade = true;
+  if (reason === 'ambiguous') out.candidates = candidatesOf(o.candidates);
   if (typeof o.otherWindows === 'number' && Number.isFinite(o.otherWindows) && o.otherWindows > 0) {
     out.otherWindows = Math.min(Math.floor(o.otherWindows), 999);
   }
   return out;
 }
 
-interface MissData { reason?: unknown; detail?: unknown; cascade?: unknown; otherWindows?: unknown; error?: unknown }
+interface MissData { reason?: unknown; detail?: unknown; cascade?: unknown; otherWindows?: unknown; error?: unknown; candidates?: unknown }
 
 /**
  * The reason, as text. With a known reason: our own sentence for it, the app's detail inside an untrusted block, the window
@@ -54,6 +74,14 @@ export function missText(d: MissData | undefined, fallback = 'element not found 
     case 'disabled': own = 'the element is disabled'; break;
     case 'timeout': own = 'the search timed out before it read the whole window'; break;
     case 'hidden': own = 'the element exists but is not visible on screen, nothing was done'; break;
+    case 'ambiguous': {
+      const list = candidatesOf(d.candidates);
+      const rows = list.map(c => `[${c.controlType || 'Element'}] ${JSON.stringify(c.name)}` +
+        (c.bounds ? ` @${c.bounds.x},${c.bounds.y} ${c.bounds.width}x${c.bounds.height}` : ''));
+      return `${list.length || 'several'} elements on screen match that name, nothing was done; ` +
+        'name one by its controlType, or click its position (@x,y is its top-left corner, in screen coordinates):' +
+        (rows.length ? `\n${untrusted(rows.join('\n'))}` : '');
+    }
     default: own = 'the action failed';
   }
   const n = typeof d.otherWindows === 'number' ? d.otherWindows : 0;

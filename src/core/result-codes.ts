@@ -18,7 +18,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED'
-  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
+  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
 export type Surface = 'mcp' | 'agent';
@@ -151,6 +151,10 @@ const RULES: Rule[] = [
   // Found, but not on screen / the action itself failed: not "the name may differ".
   { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /the element exists but is not visible on screen/i,
     hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
+  // Found more than once: which one is the caller's to say. The list is in the result.
+  { code: 'AMBIGUOUS', outcome: 'failed', test: /elements on screen match that name, nothing was done/i,
+    hint: 'several elements have that name; pass controlType to name one, or click the position of the one you mean',
+    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)' } },
   { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
     hint: 'found, but the action failed', next: REREAD },
   // A window that is not there: list the windows, then focus one.

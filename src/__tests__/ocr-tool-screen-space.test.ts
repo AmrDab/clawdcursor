@@ -38,7 +38,8 @@ async function read(platform: string, dpiRatio: number, params: Record<string, u
     platform: { getActiveWindow: async () => active },
   } as any;
   const r = await tool.handler(params, ctx);
-  return JSON.parse(r.text);
+  // A window read answers in text rows (ocr-window-scope-display2.test.ts); every other answer is JSON.
+  return r.text.startsWith('OCR of the focused window') ? { text: r.text } : JSON.parse(r.text);
 }
 
 describe('ocr_read_screen returns screen coordinates on every OS', () => {
@@ -71,11 +72,11 @@ describe('ocr_read_screen scope', () => {
 
   it('scope:"window" reads only the focused window rectangle (coordinates stay screen-space)', async () => {
     const out = await read('win32', 1, { scope: 'window' });
-    expect(out.scope).toBe('window');
-    expect(out.window).toBe('Notepad');
+    expect(out.text).toContain('focused window at (100,50) 400x300');
+    expect(out.text).toContain('window: Notepad');
     expect(reads.regions).toEqual([[100, 50, 400, 300]]);
     expect(reads.screen).toBe(0);
-    expect(out.elements[0]).toMatchObject({ x: 110, y: 70 });   // region origin already added back by the engine
+    expect(out.text).toContain('@170,90 "Save"');   // the centre of (110,70) 120x40: region origin already added back by the engine
   });
 
   it('scope:"window" falls back to the whole screen when there is no usable window', async () => {

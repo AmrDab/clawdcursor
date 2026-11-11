@@ -263,7 +263,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
               if (fallback) return { ...fallback, text: `${fallback.text} (via ${plan.element.id})` };
             }
             await sleep(150);
-            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).` : `a11y invoke of ${plan.element.id} missed.`, targetLabel: plan.name };
+            return { success: refRes.success, text: refRes.success ? `Invoked ${quoteScreenText(plan.name)} via a11y${refUsed !== 'click' ? ` (${refUsed})` : ''} (via ${plan.element.id}).`
+              // The reason, as the name path gives it: an ambiguous name comes with the list of what it could mean.
+              : `a11y invoke of ${plan.element.id} missed — ${missText(refRes.data)}.`, targetLabel: plan.name };
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `invoke_element ref rejected: ${seen.error}`, isError: true };
@@ -2229,14 +2231,16 @@ export async function runActivationLadder(
   const first = await call(ladder[0]);
   let res = first;
   let used = ladder[0];
-  for (let i = 1; i < ladder.length && !res.success; i++) {
+  // Hidden or ambiguous is about WHICH element, not which verb: another verb finds the same thing.
+  const settled = first.data?.reason === 'hidden' || first.data?.reason === 'ambiguous';
+  for (let i = 1; i < ladder.length && !res.success && !settled; i++) {
     used = ladder[i];
     res = await call(used);
   }
   // The click rung is the one that read the element: its reason AND its bounds (for the coordinate fallback) stand.
   if (!res.success) {
     const keep: Record<string, unknown> = {};
-    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
+    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows', 'candidates']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
     res = { ...res, bounds: first.bounds ?? res.bounds, ...(Object.keys(keep).length ? { data: { ...res.data, ...keep } } : {}) };
   }
   return { res, used };
