@@ -117,20 +117,14 @@ if (-not $consentGiven) {
     Write-Host "  [OK] Consent already accepted from a previous install." -ForegroundColor Green
 }
 Write-Host ""
-Write-Host "  Then pick a path:" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "    Autonomous agent" -NoNewline -ForegroundColor White
-Write-Host " (clawdcursor brings the AI brain):" -ForegroundColor Gray
-Write-Host "      1. clawdcursor doctor   " -NoNewline -ForegroundColor Yellow
-Write-Host "Configure AI provider + models" -ForegroundColor Gray
-Write-Host "      2. clawdcursor agent    " -NoNewline -ForegroundColor Yellow
-Write-Host "Start the daemon (HTTP + MCP on :3847)" -ForegroundColor Gray
-Write-Host ""
-Write-Host "    MCP-only" -NoNewline -ForegroundColor White
-Write-Host " (your editor brings the AI brain):" -ForegroundColor Gray
+Write-Host "  Then connect your agent (it brings the AI; clawdcursor is its tools):" -ForegroundColor Cyan
 Write-Host "      - Claude Code: install the plugin (bundles the MCP server + skill," -ForegroundColor Gray
 Write-Host "        no hand-edited config) -- see the README's plugin section." -ForegroundColor Gray
-Write-Host "      - Cursor / Windsurf / Zed: register " -NoNewline -ForegroundColor Gray
+Write-Host "      - Claude Desktop: install the .mcpb extension from the GitHub release." -ForegroundColor Gray
+Write-Host "      - Codex / Cursor / Windsurf / Zed: register " -NoNewline -ForegroundColor Gray
 Write-Host "clawdcursor mcp --compact" -ForegroundColor Yellow
-Write-Host "      No daemon, no API key in clawdcursor -- your editor handles both." -ForegroundColor Gray
+Write-Host "      - A client that speaks MCP over HTTP: " -NoNewline -ForegroundColor Gray
+Write-Host "clawdcursor agent" -NoNewline -ForegroundColor Yellow
+Write-Host " (MCP on :3847, token auth)" -ForegroundColor Gray
+Write-Host "      No API key in clawdcursor: your agent's host handles the model." -ForegroundColor Gray
 Write-Host ""
