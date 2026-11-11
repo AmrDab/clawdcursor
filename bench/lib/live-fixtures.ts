@@ -49,7 +49,7 @@ export interface NativeBuild { cmd: string; args: string[]; apps: string[] }
 
 /** Build (or locate) the native fixture of this OS. */
 export async function buildNative(outDir: string, platform: string = process.platform): Promise<NativeBuild | { missing: string }> {
-  fs.mkdirSync(outDir, { recursive: true });
+  fs.mkdirSync(outDir, { recursive: true, mode: 0o700 });
   if (platform === 'win32') {
     const out = await tryRun(POWERSHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(NATIVE_DIR, 'windows', 'build.ps1'), '-OutDir', outDir], 120_000);
@@ -186,7 +186,7 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
     };
   }
   const doc = path.join(ctx.workDir, 'bench-document.txt');
-  fs.writeFileSync(doc, '');
+  fs.writeFileSync(doc, '', { flag: 'wx', mode: 0o600 });   // a new file in this run's own directory
   await tryRun('open', ['-a', 'TextEdit', doc]);
   const text = () => osa('tell application "TextEdit" to get text of document 1');
   await waitFor(async () => (await text()) !== null, 30_000, 'TextEdit to open');

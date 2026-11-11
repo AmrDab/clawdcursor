@@ -57,7 +57,7 @@ export function browserArgs(o: { kind: BrowserExe['kind']; profileDir: string; u
 export interface FixtureBrowser { cdpPort: number; close(): Promise<void> }
 
 export async function openBrowser(b: BrowserExe, o: { profileDir: string; url: string; pos?: [number, number]; extraArgs?: string[] }): Promise<FixtureBrowser> {
-  fs.mkdirSync(o.profileDir, { recursive: true });
+  fs.mkdirSync(o.profileDir, { recursive: true, mode: 0o700 });
   start(b.exe, browserArgs({ kind: b.kind, ...o }), { stdio: 'ignore' });
   const image = path.basename(b.exe);
   // Stop whatever runs on this profile, by its own debug port when there is one, and remove the profile.

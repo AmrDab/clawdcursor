@@ -1,8 +1,9 @@
 /** What every agent adapter shares: the job, the result, running a CLI and reading its output line by line. */
 import { createHash } from 'crypto';
 import * as fs from 'fs';
-import * as path from 'path';
-import { killTree, start } from '../proc';
+import { killTree, start, which } from '../proc';
+
+export { which };
 import type { CallSig } from '../types';
 
 export interface AgentJob {
@@ -57,29 +58,13 @@ export function sigOf(tool: string, args: unknown): CallSig {
   return { tool: name, sig: createHash('sha1').update(`${name}\n${stable(args ?? {})}`).digest('hex').slice(0, 16) };
 }
 
-/** A program on PATH, with the Windows extensions. */
-export function which(name: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
-  const exts = platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  for (const dir of (env.PATH ?? env.Path ?? '').split(path.delimiter).filter(Boolean)) {
-    for (const ext of exts) {
-      const p = path.join(dir, name + ext);
-      try { if (fs.statSync(p).isFile()) return p; } catch { /* not here */ }
-    }
-  }
-  return null;
-}
-
 /** Run a CLI agent: stdout goes to `onLine` line by line, the prompt (if any) to stdin. Stops the process tree on abort. */
 export function runCli(c: CliCommand, o: { cwd: string; signal: AbortSignal; onLine(line: string): void; logFile?: string }): Promise<number | null> {
   return new Promise((resolve, reject) => {
-    // A .cmd shim needs the shell on Windows; its arguments here are flags and paths, never the prompt.
-    const viaShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(c.cmd);
-    const quote = (a: string) => a === '' || /[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a;
-    const child = viaShell
-      ? start(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `"${[c.cmd, ...c.args].map(quote).join(' ')}"`],
-        { cwd: o.cwd, env: { ...process.env, ...c.env }, stdio: ['pipe', 'pipe', 'pipe'], windowsVerbatimArguments: true })
-      : start(c.cmd, c.args, { cwd: o.cwd, env: { ...process.env, ...c.env }, stdio: ['pipe', 'pipe', 'pipe'] });
-    const log = o.logFile ? fs.createWriteStream(o.logFile, { flags: 'a' }) : null;
+    // The executable itself with its arguments as an array: no shell, so nothing in a path or the environment is parsed
+    // as a command. (A .cmd shim cannot be run this way: `which` only returns real executables.)
+    const child = start(c.cmd, c.args, { cwd: o.cwd, env: { ...process.env, ...c.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const log = o.logFile ? fs.createWriteStream(o.logFile, { flags: 'wx', mode: 0o600 }) : null;
     const onAbort = () => killTree(child.pid);
     o.signal.addEventListener('abort', onAbort, { once: true });
     let rest = '';

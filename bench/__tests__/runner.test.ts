@@ -4,7 +4,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { execFileSync } from 'child_process';
-import { agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, selectTasks } from '../run';
+import { agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, readBaseline, selectTasks } from '../run';
+import { which } from '../lib/proc';
+import { globalPackageRoots, resolveCli } from '../lib/isolated';
 import { Cleanup } from '../lib/cleanup';
 import { browserAppNames, browserArgs, findBrowser } from '../lib/browser';
 import { isolatedEnv, serverCommand } from '../lib/isolated';
@@ -200,7 +202,29 @@ describe('the results directory', () => {
     expect(() => prepareOutDir(base)).toThrow(/is not empty/);
     const file = path.join(base, 'a-file');
     fs.writeFileSync(file, 'x');
-    expect(() => prepareOutDir(file)).toThrow(/is not empty/);
+    expect(() => prepareOutDir(file)).toThrow(/is not a directory/);
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('with no --out it is a new private directory with a name nobody can guess', () => {
+    const a = prepareOutDir();
+    const b = prepareOutDir();
+    try {
+      expect(a).not.toBe(b);
+      expect(path.dirname(a)).toBe(fs.realpathSync(os.tmpdir()) === os.tmpdir() ? os.tmpdir() : path.dirname(a));
+      expect(path.basename(a)).toMatch(/^clawdcursor-bench-.{6}$/);
+      expect(fs.readdirSync(a)).toEqual([]);
+      if (process.platform !== 'win32') expect(fs.statSync(a).mode & 0o077).toBe(0);
+    } finally { fs.rmSync(a, { recursive: true, force: true }); fs.rmSync(b, { recursive: true, force: true }); }
+  });
+
+  it('the baseline is read in one step: none yet is null, a broken one is an error', () => {
+    const base = tmp();
+    expect(readBaseline(path.join(base, 'windows.json'))).toBeNull();
+    fs.writeFileSync(path.join(base, 'windows.json'), JSON.stringify({ meta: {}, scores: [] }));
+    expect(readBaseline(path.join(base, 'windows.json'))).toEqual({ meta: {}, scores: [] });
+    fs.writeFileSync(path.join(base, 'broken.json'), '{');
+    expect(() => readBaseline(path.join(base, 'broken.json'))).toThrow();
     fs.rmSync(base, { recursive: true, force: true });
   });
 });
@@ -305,5 +329,43 @@ describe('cleanup on Ctrl+C or a crash', () => {
     expect(target.listenerCount('SIGINT')).toBe(1);
     uninstall();
     expect(target.listenerCount('SIGINT')).toBe(0);
+  });
+});
+
+describe('no shell anywhere', () => {
+  const lib = (f: string) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+  const sources = ['run.ts', 'lib/proc.ts', 'lib/isolated.ts', 'lib/browser.ts', 'lib/live-fixtures.ts', 'lib/ownership.ts', 'lib/selfcheck.ts',
+    'lib/adapters/common.ts', 'lib/adapters/claude-code.ts', 'lib/adapters/codex.ts', 'lib/adapters/ollama.ts'];
+
+  it('nothing is run through cmd.exe, a shell option or exec()', () => {
+    for (const f of sources) {
+      const src = lib(f);
+      expect(src, f).not.toMatch(/ComSpec|cmd\.exe|shell: true|['"]\/c['"]|\bexecSync\(|[^.\w]exec\(/);
+    }
+  });
+
+  it('a program is found on PATH as a real executable only: a .cmd shim is not one', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-which-test-'));
+    try {
+      fs.writeFileSync(path.join(dir, 'shim.cmd'), '@echo off');
+      fs.writeFileSync(path.join(dir, 'tool.exe'), '');
+      fs.writeFileSync(path.join(dir, 'tool'), '');
+      expect(which('shim', { PATH: dir }, 'win32')).toBeNull();
+      expect(which('tool', { PATH: dir }, 'win32')).toBe(path.join(dir, 'tool.exe'));
+      // A POSIX PATH is split on colons, which a Windows drive letter has: checked where paths have none.
+      if (process.platform !== 'win32') expect(which('tool', { PATH: `/nowhere:${dir}` }, 'linux')).toBe(path.join(dir, 'tool'));
+      expect(which('missing', { PATH: dir }, 'linux')).toBeNull();
+      expect(which('tool', {}, 'linux')).toBeNull();
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('the global install is found by looking, not by asking npm', async () => {
+    const win = globalPackageRoots({ APPDATA: 'C:\\Users\\x\\AppData\\Roaming', PATH: '' }, 'win32', 'C:\\Program Files\\nodejs\\node.exe');
+    expect(win.some(r => /AppData[\\/]Roaming[\\/]npm[\\/]node_modules[\\/]clawdcursor$/.test(r))).toBe(true);
+    const nix = globalPackageRoots({ PATH: '' }, 'linux', '/usr/local/bin/node');
+    expect(nix.map(r => r.replace(/\\/g, '/').replace(/^[A-Za-z]:/, ''))).toContain('/usr/local/lib/node_modules/clawdcursor');
+    // A build directory: its package.json and its built CLI are read, nothing is run.
+    const repo = path.join(__dirname, '..', '..');
+    await expect(resolveCli(path.join(repo, 'no-such-dir'))).rejects.toThrow(/npm run build/);
   });
 });

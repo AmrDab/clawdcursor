@@ -77,13 +77,26 @@ export function notApplicable(t: TaskSpec, m: Pick<ModelRun, 'label'> & { adapte
  * The results directory must be new or empty: session logs and state files left by an earlier run would be read back
  * as this run's.
  */
-export function prepareOutDir(dir: string): string {
+export function prepareOutDir(dir?: string): string {
+  // No --out: a new private directory (0700, a name nobody can guess) under the temp directory.
+  if (dir === undefined) return fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-bench-'));
   const out = path.resolve(dir);
-  if (fs.existsSync(out) && (!fs.statSync(out).isDirectory() || fs.readdirSync(out).length)) {
+  try { fs.mkdirSync(out, { recursive: true, mode: 0o700 }); }   // a no-op when it is there
+  catch { throw new Error(`${out} is not a directory that can be used for results. Give --out a new directory.`); }
+  // Read once: what is in it now is what the refusal is about.
+  if (fs.readdirSync(out).length) {
     throw new Error(`${out} is not empty: results of an earlier run could be read back as this one's. Give --out a new directory.`);
   }
-  fs.mkdirSync(out, { recursive: true });
   return out;
+}
+
+/** A new file in a directory of this run: never over an existing one, readable by the current user only. */
+const writeNew = (file: string, text: string) => fs.writeFileSync(file, text, { flag: 'wx', mode: 0o600 });
+
+/** The baseline to compare with, or null when there is none yet: one read, no "does it exist" first. */
+export function readBaseline(file: string): Baseline | null {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')) as Baseline; }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null; throw e; }
 }
 
 /**
@@ -91,8 +104,10 @@ export function prepareOutDir(dir: string): string {
  * project settings load. The temp directory is inside the home directory on Windows; the Public folder is not.
  */
 export function agentRoot(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): string {
-  const base = platform === 'win32' && env.PUBLIC && fs.existsSync(env.PUBLIC) ? env.PUBLIC : os.tmpdir();
-  const dir = fs.mkdtempSync(path.join(base, 'clawdcursor-bench-agent-'));   // 0700 on macOS and Linux
+  // mkdtemp makes a new directory with a name nobody can guess (0700 on macOS and Linux). No Public folder: the temp directory.
+  let dir: string;
+  try { dir = fs.mkdtempSync(path.join(platform === 'win32' && env.PUBLIC ? env.PUBLIC : os.tmpdir(), 'clawdcursor-bench-agent-')); }
+  catch { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-bench-agent-')); }
   // It holds the MCP config with the daemon's bearer token, and the Public folder is readable by every account: on
   // Windows the directory is cut off from inherited permissions and given to the current user alone.
   if (platform === 'win32') {
@@ -115,14 +130,14 @@ interface Env {
 /** One task with one model: fixture, fenced isolated server, agent under the watchdog, then the score. */
 async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: number): Promise<Score | { skip: string }> {
   const workDir = path.join(env.outDir, m.label.replace(/[^A-Za-z0-9._-]/g, '_'), repeat ? `${task.id}.${repeat + 1}` : task.id);
-  fs.mkdirSync(workDir, { recursive: true });
+  fs.mkdirSync(workDir, { recursive: true, mode: 0o700 });
   const ctx: FixtureContext = { server: env.server, browser: findBrowser(), native: env.native, workDir, runId: `r${n}-${task.id}`.slice(0, 64) };
   const fixture = await openFixture(task, ctx);
   if ('skip' in fixture) return fixture;
   const fixtureClosed = env.cleanup.add(() => fixture.close());
   const sessionDir = path.join(workDir, 'sessions');
   const agentDir = path.join(env.agentRoot, `run-${n}`);
-  fs.mkdirSync(agentDir, { recursive: true });
+  fs.mkdirSync(agentDir, { recursive: true, mode: 0o700 });
   let daemon: Awaited<ReturnType<typeof startIsolated>> | undefined;
   let daemonClosed = () => { /* not started */ };
   try {
@@ -170,8 +185,8 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const state = await fixture.state();
     const calls = readSessionCalls(sessionDir);
     const agent: AgentRun = { ...result, sigs, seconds, ...(killed ? { killed } : {}) };
-    fs.writeFileSync(path.join(workDir, 'fixture-state.json'), JSON.stringify(state, null, 2));
-    fs.writeFileSync(path.join(workDir, 'agent.json'), JSON.stringify(agent, null, 2));
+    writeNew(path.join(workDir, 'fixture-state.json'), JSON.stringify(state, null, 2));
+    writeNew(path.join(workDir, 'agent.json'), JSON.stringify(agent, null, 2));
     return score({ task, model: m.label, calls, fixture: state, agent });
   } finally {
     await daemon?.stop().catch(() => { /* already down */ });
@@ -213,8 +228,7 @@ async function live(o: Options): Promise<void> {
   // The daemon tries the default browser debug port when it starts: a browser there is the owner's own session.
   if (await portOpen(USER_CDP_PORT)) throw new Error(`a browser is listening on debug port ${USER_CDP_PORT}: clawdcursor would attach to it. Close it first.`);
   const { cli, version, source } = await resolveCli(o.build);
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const outDir = prepareOutDir(o.out ?? path.join(os.tmpdir(), 'clawdcursor-bench', stamp));
+  const outDir = prepareOutDir(o.out);
   // Everything a run starts is registered here: Ctrl+C, a kill or a crash closes it all before the process exits.
   const cleanup = new Cleanup();
   const uninstall = cleanup.install();
@@ -265,10 +279,10 @@ async function live(o: Options): Promise<void> {
     uninstall();
     const report = buildReport({ date: new Date().toISOString(), os: osName, clawdcursor: version, models: models.map(m => m.label), skipped }, scores);
     const baselineFile = path.resolve(o.baseline ?? path.join(__dirname, 'baseline', `${osName}.json`));
-    const base: Baseline | null = fs.existsSync(baselineFile) ? JSON.parse(fs.readFileSync(baselineFile, 'utf8')) : null;
+    const base = readBaseline(baselineFile);
     const md = renderMarkdown(report, base ? compare(report, base) : undefined);
-    fs.writeFileSync(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2));
-    fs.writeFileSync(path.join(outDir, 'report.md'), md);
+    writeNew(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2));
+    writeNew(path.join(outDir, 'report.md'), md);
     console.log(`\n${md}\n${base ? '' : `No baseline at ${baselineFile}: pass --update-baseline to write one.\n`}Report: ${path.join(outDir, 'report.md')}`);
     if (o.updateBaseline && scores.length) {
       fs.mkdirSync(path.dirname(baselineFile), { recursive: true });

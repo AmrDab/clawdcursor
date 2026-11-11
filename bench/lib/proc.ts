@@ -1,5 +1,6 @@
 /** Process helpers. The benchmark only ever stops processes it started itself. */
 import { execFile, execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'child_process';
+import * as fs from 'fs';
 import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
@@ -12,9 +13,22 @@ export function system32(...rel: string[]): string {
 }
 export const POWERSHELL = system32('WindowsPowerShell', 'v1.0', 'powershell.exe');
 
-/** Start a child in its own process group, so the whole tree can be stopped. */
+/**
+ * A program on PATH. On Windows only a real executable (.exe): a .cmd or .bat shim would have to be run through the
+ * shell, and nothing in the benchmark is.
+ */
+export function which(name: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
+  const file = platform === 'win32' ? `${name}.exe` : name;
+  for (const dir of (env.PATH ?? env.Path ?? '').split(platform === 'win32' ? ';' : ':').filter(Boolean)) {
+    const p = path.join(dir, file);
+    try { if (fs.statSync(p).isFile()) return p; } catch { /* not here */ }
+  }
+  return null;
+}
+
+/** Start a child in its own process group, so the whole tree can be stopped. Always by argument array, never through a shell. */
 export function start(cmd: string, args: string[], opts: SpawnOptions = {}): ChildProcess {
-  return spawn(cmd, args, { windowsHide: true, detached: !isWin, ...opts });
+  return spawn(cmd, args, { windowsHide: true, detached: !isWin, ...opts, shell: false });
 }
 
 /** Stop a process we started, and its children. */
@@ -77,10 +91,10 @@ export async function waitFor<T>(probe: () => Promise<T | undefined | null | fal
   }
 }
 
-/** Run a program and return its stdout; null when it is missing or fails. */
+/** Run a program (by argument array, never through a shell) and return its stdout; null when it is missing or fails. */
 export function tryRun(cmd: string, args: string[], timeoutMs = 20_000): Promise<string | null> {
   return new Promise(resolve => {
     // From the temp directory: Windows PowerShell can leave a Microsoft/ module cache in its working directory.
-    execFile(cmd, args, { timeout: timeoutMs, windowsHide: true, cwd: os.tmpdir() }, (err, stdout) => resolve(err ? null : String(stdout)));
+    execFile(cmd, args, { timeout: timeoutMs, windowsHide: true, cwd: os.tmpdir(), shell: false }, (err, stdout) => resolve(err ? null : String(stdout)));
   });
 }

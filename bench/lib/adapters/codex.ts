@@ -69,10 +69,15 @@ export function findCodex(env: NodeJS.ProcessEnv = process.env): string | null {
   const onPath = which('codex', env);
   if (onPath) return onPath;
   const bin = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
-  if (!bin || !fs.existsSync(bin)) return null;
-  const found = fs.readdirSync(bin).map(d => path.join(bin, d, 'codex.exe')).filter(p => fs.existsSync(p))
-    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
-  return found[0] ?? null;
+  if (!bin) return null;
+  // One stat per candidate: the newest codex.exe that is there.
+  let dirs: string[] = [];
+  try { dirs = fs.readdirSync(bin); } catch { return null; }
+  const found = dirs.flatMap(d => {
+    const exe = path.join(bin, d, 'codex.exe');
+    try { return [{ exe, at: fs.statSync(exe).mtimeMs }]; } catch { return []; }
+  }).sort((a, b) => b.at - a.at);
+  return found[0]?.exe ?? null;
 }
 
 export const codex: Adapter = {
@@ -82,7 +87,7 @@ export const codex: Adapter = {
   async detect() {
     const exe = findCodex();
     if (!exe) return null;
-    const v = /\.(cmd|bat)$/i.test(exe) ? 'installed' : (await tryRun(exe, ['--version']))?.trim();
+    const v = (await tryRun(exe, ['--version']))?.trim();
     return v ? `${v} (${exe})` : null;
   },
   async run(job: AgentJob) {

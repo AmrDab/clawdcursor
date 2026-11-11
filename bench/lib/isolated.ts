@@ -6,25 +6,42 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChildProcess } from 'child_process';
-import { freePort, killTree, start, tryRun, waitFor } from './proc';
+import { freePort, killTree, start, waitFor, which } from './proc';
+
+/**
+ * Where a global `npm install -g clawdcursor` puts the package, without asking npm (no shell, no child process): next to
+ * the `clawdcursor` launcher on PATH, in npm's global folder on Windows, or under the lib folder of this Node.
+ */
+export function globalPackageRoots(env: NodeJS.ProcessEnv = process.env, platform: string = process.platform, execPath: string = process.execPath): string[] {
+  const roots: string[] = [];
+  const launcher = which('clawdcursor', env, platform);
+  if (launcher) {
+    roots.push(path.join(path.dirname(launcher), 'node_modules', 'clawdcursor'));              // Windows: <prefix>\clawdcursor.cmd
+    roots.push(path.join(path.dirname(launcher), '..', 'lib', 'node_modules', 'clawdcursor')); // macOS / Linux: <prefix>/bin/clawdcursor
+  }
+  if (platform === 'win32' && env.APPDATA) roots.push(path.join(env.APPDATA, 'npm', 'node_modules', 'clawdcursor'));
+  roots.push(path.join(path.dirname(execPath), '..', 'lib', 'node_modules', 'clawdcursor'));
+  roots.push(path.join(path.dirname(execPath), 'node_modules', 'clawdcursor'));
+  return [...new Set(roots.map(r => path.resolve(r)))];
+}
+
+/** The text of a file, or null when it is not there: one read, no "does it exist" first. */
+function readIfThere(file: string): string | null {
+  try { return fs.readFileSync(file, 'utf8'); }
+  catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT' || (e as NodeJS.ErrnoException).code === 'ENOTDIR') return null; throw e; }
+}
 
 /** dist/surface/cli.js of a repo build (`--build <dir>`), or of the global install. */
 export async function resolveCli(buildDir?: string): Promise<{ cli: string; version: string; source: string }> {
-  let root: string;
-  if (buildDir) root = path.resolve(buildDir);
-  else {
-    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const globalRoot = (await tryRun(process.platform === 'win32' ? (process.env.ComSpec ?? 'cmd.exe') : npm,
-      process.platform === 'win32' ? ['/d', '/s', '/c', `${npm} root -g`] : ['root', '-g']))?.trim();
-    if (!globalRoot) throw new Error('npm root -g failed: pass --build <dir> to use a repo build');
-    root = path.join(globalRoot, 'clawdcursor');
+  const roots = buildDir ? [path.resolve(buildDir)] : globalPackageRoots();
+  for (const root of roots) {
+    const pkg = readIfThere(path.join(root, 'package.json'));
+    const cli = path.join(root, 'dist', 'surface', 'cli.js');
+    if (pkg === null || readIfThere(cli) === null) continue;
+    return { cli, version: JSON.parse(pkg).version as string, source: buildDir ? `build ${root}` : `global install ${root}` };
   }
-  const cli = path.join(root, 'dist', 'surface', 'cli.js');
-  if (!fs.existsSync(cli)) {
-    throw new Error(buildDir ? `${cli} is missing: run "npm run build" in ${root}` : `no global clawdcursor at ${root}: install it or pass --build <dir>`);
-  }
-  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version as string;
-  return { cli, version, source: buildDir ? `build ${root}` : 'global install' };
+  throw new Error(buildDir ? `${path.join(roots[0], 'dist', 'surface', 'cli.js')} is missing: run "npm run build" in ${roots[0]}`
+    : 'no global clawdcursor found: install it or pass --build <dir>');
 }
 
 /** The daemon's command line: the compact surface (the six tools agents use) on its own port, consent accepted in the temp home. */
@@ -47,6 +64,9 @@ export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionD
     ...(o.fencePids ? { CLAWD_FENCE_PIDS: o.fencePids.join(',') || 'none' } : {}) };
 }
 
+/** The daemon listens on the loopback interface only, and nothing here talks to any other host. */
+const LOOPBACK = '127.0.0.1';
+
 export interface IsolatedServer {
   port: number; pid: number; token: string; mcpUrl: string; sessionDir: string;
   stop(): Promise<void>;
@@ -55,32 +75,34 @@ export interface IsolatedServer {
 }
 
 export async function startIsolated(o: { cli: string; home: string; sessionDir: string; cdpPort: number; logFile: string; fencePids?: number[] }): Promise<IsolatedServer> {
-  fs.mkdirSync(o.home, { recursive: true });
-  fs.mkdirSync(o.sessionDir, { recursive: true });
+  fs.mkdirSync(o.home, { recursive: true, mode: 0o700 });
+  fs.mkdirSync(o.sessionDir, { recursive: true, mode: 0o700 });
   const port = await freePort();
   const { cmd, args } = serverCommand(o.cli, port);
-  const log = fs.openSync(o.logFile, 'a');
+  const log = fs.openSync(o.logFile, 'wx', 0o600);   // a new file in this run's own directory
   const child: ChildProcess = start(cmd, args, { env: isolatedEnv(process.env, o), cwd: o.home, stdio: ['ignore', log, log] });
   let exited: number | null | undefined;
   child.once('exit', code => { exited = code; });
-  const base = `http://127.0.0.1:${port}`;
+  const base = `http://${LOOPBACK}:${port}`;
   const tokenFile = path.join(o.home, '.clawdcursor', 'token');
   try {
     await waitFor(async () => {
       if (exited !== undefined) throw new Error(`the daemon exited with code ${exited}: see ${o.logFile}`);
-      return (await fetch(`${base}/health`)).ok && fs.existsSync(tokenFile);
+      return (await fetch(`${base}/health`)).ok && readIfThere(tokenFile) !== null;
     }, 45_000, `the isolated clawdcursor on port ${port} (log: ${o.logFile})`);
   } catch (e) {
     killTree(child.pid);
     fs.closeSync(log);
     throw e;
   }
-  const token = fs.readFileSync(tokenFile, 'utf8').trim();
+  const token = (readIfThere(tokenFile) ?? '').trim();
   return {
     port, pid: child.pid ?? 0, token, mcpUrl: `${base}/mcp`, sessionDir: o.sessionDir,
     stop: async () => {
-      // Ask it to stop (it closes its session logs), then make sure.
-      try { await fetch(`${base}/stop`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000) }); } catch { /* gone */ }
+      // A signal, not a request: macOS and Linux let the daemon close its session logs on SIGTERM; Windows has no such
+      // signal, and nothing is lost there (every call is in the session log the moment it returns).
+      if (process.platform !== 'win32' && child.pid) { try { process.kill(child.pid, 'SIGTERM'); } catch { /* gone */ } }
+      else killTree(child.pid);
       try { await waitFor(() => exited !== undefined, 5000, 'the daemon to exit'); } catch { killTree(child.pid); }
       try { fs.closeSync(log); } catch { /* closed by kill() */ }
     },

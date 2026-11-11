@@ -147,13 +147,17 @@ export function tailSessionDir(dir: string, onCall: (c: LogCall) => void, everyM
     for (const f of files) {
       const file = path.join(dir, f);
       const from = offsets.get(f) ?? 0;
-      let size = 0;
-      try { size = fs.statSync(file).size; } catch { continue; }
-      if (size <= from) continue;
-      const buf = Buffer.alloc(size - from);
-      const fd = fs.openSync(file, 'r');
-      try { fs.readSync(fd, buf, 0, buf.length, from); } finally { fs.closeSync(fd); }
-      offsets.set(f, size);
+      // Opened once; its size and its bytes are both read from that handle, so they are the same file.
+      let fd: number;
+      try { fd = fs.openSync(file, 'r'); } catch { continue; }   // pruned by the daemon between the listing and now
+      let buf: Buffer;
+      try {
+        const size = fs.fstatSync(fd).size;
+        if (size <= from) continue;
+        buf = Buffer.alloc(size - from);
+        fs.readSync(fd, buf, 0, buf.length, from);
+        offsets.set(f, size);
+      } finally { fs.closeSync(fd); }
       const lines = ((rest.get(f) ?? '') + buf.toString('utf8')).split('\n');
       rest.set(f, lines.pop() ?? '');   // the last piece has no newline yet
       for (const line of lines) {

@@ -49,14 +49,14 @@ export const claudeCode: Adapter = {
   async detect() {
     const exe = which('claude');
     if (!exe) return null;
-    const v = /\.(cmd|bat)$/i.test(exe) ? 'installed' : (await tryRun(exe, ['--version']))?.trim();
+    const v = (await tryRun(exe, ['--version']))?.trim();
     return v ? `${v} (${exe})` : null;
   },
   async run(job: AgentJob) {
     const exe = which('claude');
     if (!exe) throw new Error('claude is not on PATH');
     const mcpConfigPath = path.join(job.workDir, 'mcp.json');
-    fs.writeFileSync(mcpConfigPath, claudeMcpConfig(job.mcpUrl, job.token), { mode: 0o600 });
+    fs.writeFileSync(mcpConfigPath, claudeMcpConfig(job.mcpUrl, job.token), { flag: 'wx', mode: 0o600 });
     let finalText = '';
     const exitCode = await runCli(claudeCommand({ exe, model: job.model, mcpConfigPath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,

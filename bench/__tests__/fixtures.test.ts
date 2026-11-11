@@ -136,12 +136,41 @@ describe('the reading page', () => {
   });
 });
 
+/**
+ * The tags of an HTML fragment in order, and the text between them (comments and script bodies left out). A small
+ * scanner over the string: nothing is stripped with a regular expression.
+ */
+function scan(html: string): { tags: string[]; text: string } {
+  const tags: string[] = [];
+  let text = '';
+  const low = html.toLowerCase();
+  for (let i = 0; i < html.length;) {
+    if (low.startsWith('<!--', i)) { const end = low.indexOf('-->', i + 4); i = end < 0 ? html.length : end + 3; continue; }
+    if (html[i] !== '<') { text += html[i++]; continue; }
+    const close = html.indexOf('>', i);
+    if (close < 0) { text += html.slice(i); break; }
+    const name = low.slice(i + 1, close).trim().split(/\s/)[0];
+    tags.push(name);
+    i = close + 1;
+    if (name === 'script') { const end = low.indexOf('</script', i); i = end < 0 ? html.length : end; }
+  }
+  return { tags, text };
+}
+
 describe('the web pages', () => {
+  it('the scanner reads tags in any case and skips comments and script bodies', () => {
+    expect(scan('a<!-- <b>no</b> -->b<SCRIPT>if (1 < 2) x = "<i>";</SCRIPT >c<p class="x">d</p>')).toEqual({ tags: ['script', '/script', 'p', '/p'], text: 'abcd' });
+    expect(scan('text <unclosed')).toEqual({ tags: [], text: 'text <unclosed' });
+  });
+
   const read = (name: string) => fs.readFileSync(path.join(__dirname, '..', 'fixtures', 'web', name), 'utf8');
 
   it('the canvas page has no text and no control for the accessibility tree', () => {
-    const body = read('canvas.html').split('<body>')[1].replace(/<script[\s\S]*?<\/script>/g, '').replace(/<!--[\s\S]*?-->/g, '');
-    expect(body.replace(/<canvas[^>]*aria-hidden="true"[^>]*><\/canvas>/, '').replace(/<\/?(body|html)>/g, '').trim()).toBe('');
+    const { tags, text } = scan(read('canvas.html').split('<body>')[1]);
+    // The only elements in the body: the hidden canvas and the two scripts. No text outside them.
+    expect(tags).toEqual(['canvas', '/canvas', 'script', '/script', 'script', '/script', '/body', '/html']);
+    expect(text.trim()).toBe('');
+    expect(read('canvas.html')).toContain('<canvas id="c" width="600" height="600" aria-hidden="true"></canvas>');
   });
 
   it('the trap page puts each trap before the wanted element', () => {
