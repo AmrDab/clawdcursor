@@ -2,6 +2,17 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+- **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now
+  returns no value or text in `read_tree`, `find`, the focused element and page text. A screenshot or OCR can still show
+  whatever is visible on screen.
+
+### Changed
+- README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and
+  the 2.1 roadmap. Five obsolete docs about removed features are deleted, and descriptions no longer say "safe".
+
 ## [2.0.0] - 2026-11-11
 
 First published as 1.6.0 on 2026-11-10. It removes tools, CLI flags and the policy gate, which is a breaking change, so it is
