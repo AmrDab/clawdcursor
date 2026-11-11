@@ -17,7 +17,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
-  | 'STOPPED' | 'FOREGROUND_CHANGED'
+  | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
@@ -66,6 +66,9 @@ function smartClickFor(text: string, template: string): string | undefined {
 
 /** First match wins: refusals before failures, specific before generic. */
 const RULES: Rule[] = [
+  // The test fence (core/fence.ts): the target is outside the processes this run is limited to.
+  { code: 'FENCED', outcome: 'refused', test: /FENCED: /,
+    hint: 'this run may only touch its own fixture windows; work in the window you were given' },
   { code: 'CONSENT_REQUIRED', outcome: 'refused', test: /needs one-time consent/i,
     hint: 'the user runs `clawdcursor consent --accept` once; no restart needed' },
   { code: 'KEYBOARD_OWNED', outcome: 'refused', test: /system dialog owns the keyboard/i,

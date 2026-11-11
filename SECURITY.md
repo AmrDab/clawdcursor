@@ -41,6 +41,20 @@ These hold whatever the agent sends, alone or inside a `batch`. A way around any
 
 Stop, the pause and the AI-host guard protect against an agent that works through the tools. An agent that also has a shell of its own on your machine is not confined by clawdcursor at all.
 
+### The test and automation fence (`CLAWD_FENCE_PIDS`)
+
+For unattended runs on a machine a person also uses (the benchmark in `bench/`, a CI job with a desktop), clawdcursor can be limited to the windows of named processes. Start it with `CLAWD_FENCE_PIDS=<pid>,<pid>` and every tool call is checked **before** it does or reads anything (`src/core/fence.ts`); a call outside the fence is refused with the code `FENCED` and nothing happens:
+
+- input (keys, typing, clicks, drags, scrolls) goes only to a fenced window in front, and a pointer press must land inside that window;
+- acts and reads by name or by process (`accessibility`) take only a fenced process, or the fenced window in front;
+- window actions (focus, close, minimize, maximize, restore, resize) take only fenced windows; a title or process name that also matches another window is refused;
+- the window list, the clipboard (read and write), OCR and region captures of the screen, launches (`open_app`, `open_file`, `open_url`, `open_uri`, `navigate`), shortcuts, reports and `pause_for_user` are refused;
+- a full screenshot needs a fenced window in front, and everything outside that window is blacked out;
+- the browser driver attaches only to the agent's own debug port (`CLAWD_AGENT_CDP_PORT`), never to a browser on the user's port, and launches nothing;
+- a step of a `batch` is checked like a direct call, step by step.
+
+A process counts as fenced when it is one of the named processes or a descendant of one; a Store app's frame counts by the app it hosts. Whatever cannot be decided is refused. With the variable unset nothing changes. The fence is a limit for tests and automation, not a sandbox: like the guarantees above, it confines an agent that works through the tools, not one with a shell of its own. A way for a tool call to act or read outside it is a vulnerability.
+
 ## Scope
 
 **In scope:**

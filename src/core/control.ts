@@ -16,6 +16,7 @@
  *    working in. A change right after the agent's own focus-moving input (a click, Return, a shortcut) or focus call is
  *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
+import { fenceCheck, fenceInput, isFenceRefusal, type PointerPress } from './fence';
 import * as fs from 'fs';
 import { quoteScreenText } from './result-codes';
 import * as path from 'path';
@@ -83,7 +84,9 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 // ── The window the agent is working in ──
 
-interface Foreground { processId: number; processName: string; appName?: string; title?: string; handle?: number | string; guessed?: boolean }
+interface Foreground { processId: number; processName: string; appName?: string; title?: string; handle?: number | string; guessed?: boolean;
+  /** For the fence (fence.ts): the app a Store app's frame hosts, and where the window is. */
+  hostedProcessId?: number; bounds?: { x: number; y: number; width: number; height: number } }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
@@ -114,7 +117,7 @@ function resetBinding(): void { lease = undefined; acted = undefined; working = 
 const platformForeground = async (): Promise<Foreground | null> => {
   const { getPlatform } = await import('../platform');
   const w = await (await getPlatform()).getActiveWindow();
-  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, handle: w.handle, guessed: w.guessed } : null;
+  return w && w.processId ? { processId: w.processId, processName: w.processName || `pid ${w.processId}`, appName: w.appName, title: w.title || undefined, handle: w.handle, guessed: w.guessed, hostedProcessId: w.hostedProcessId, bounds: w.bounds } : null;
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
@@ -137,15 +140,18 @@ function stopCheck(): void {
 }
 
 /** One foreground read per input, before it. */
-async function before(): Promise<void> {
+async function before(press?: PointerPress): Promise<void> {
   stopCheck();
   let now = await readForeground().catch(() => null);
+  // The fence (CLAWD_FENCE_PIDS): with no foreground to check, nothing is sent.
+  if (!now) await fenceInput(null);
   if (!now) return;  // this OS cannot say what is in front: nothing to compare
   // A window the agent just focused may take a moment to come up (macOS activation, a window manager).
   for (const until = Date.now() + FOCUS_ARRIVAL_MS; pending && !matches(pending, now) && Date.now() < until;) {
     await new Promise(r => setTimeout(r, 100));
     now = (await readForeground().catch(() => null)) ?? now;
   }
+  await fenceInput(now, press);
   if (isOwnUiPid(now.processId)) throw new Error(`foreground changed: clawdcursor's own on-screen control is in front, not ${lease ? name(lease) : 'an app'} — nothing was sent. Wait for the user, then focus your window with window {"action":"focus"}.`);
   const ownMove = Date.now() - movedAt < OWN_MOVE_MS;
   let explicit = false;
@@ -181,7 +187,7 @@ const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
  */
 export function isGuardRefusal(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
-  return m.startsWith('stopped by the user') || m.startsWith('foreground changed: ')
+  return m.startsWith('stopped by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
     || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);
 }
 
@@ -207,6 +213,9 @@ const openedBy = (now: Foreground): boolean => sameApp(openedName, now.processNa
 async function byName(processId?: number): Promise<void> {
   stopCheck();
   const now = await readForeground().catch(() => null);
+  // The fence: the process named, else the window in front, must be inside it. Checked before the background-process return below.
+  if (processId !== undefined) await fenceCheck('act by name', { pid: processId });
+  else await fenceInput(now);
   if (!now || (processId !== undefined && processId !== now.processId)) return;
   const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
   await refuseAiHost(now, explicit);

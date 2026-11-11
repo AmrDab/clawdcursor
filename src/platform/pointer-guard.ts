@@ -33,7 +33,7 @@ interface InputGuard {
   /** Throws while the user has stopped clawdcursor. */
   stopCheck(): void;
   /** Before an input: throws while stopped, or when the agent's window is no longer in front. */
-  before(): Promise<void>;
+  before(press?: { points: Array<{ x: number; y: number }>; boundsPerMouse: number }): Promise<void>;
   /** After an input; `movesFocus` when it could bring another window up (a click, Return, a shortcut). */
   done(movesFocus: boolean): void;
   /** The agent brought a window up on purpose: the next input binds to it. */
@@ -118,7 +118,7 @@ export function guardInputMethods<T extends object>(target: T): T {
   for (const m of INPUT_METHODS) {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
-      await g.before();
+      await g.before(pointerPress(m, args, target));
       announce(m);
       const r = await f(...args);
       g.done(movesFocus(m, args));
@@ -168,6 +168,26 @@ export function guardInputMethods<T extends object>(target: T): T {
  * must not make clawdcursor forget the `win` it is still holding. Per server process: a key held through one clawdcursor
  * process is not known to another.
  */
+/**
+ * Where a pointer method is about to press, for the fence (core/fence.ts): the points in mouse coordinates, and the factor
+ * from mouse coordinates to window bounds (Windows reports bounds in physical pixels and moves the mouse in logical ones).
+ */
+export function pointerPress(method: string, args: unknown[], target: object): { points: Array<{ x: number; y: number }>; boundsPerMouse: number } | undefined {
+  const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
+  const points: Array<{ x: number; y: number }> = [];
+  if (method === 'executeMouseAction') {
+    const a = (args[0] ?? {}) as Record<string, unknown>;
+    for (const [kx, ky] of [['x', 'y'], ['endX', 'endY'], ['toX', 'toY']]) if (num(a[kx]) && num(a[ky])) points.push({ x: a[kx] as number, y: a[ky] as number });
+  } else if (method.startsWith('mouse')) {
+    for (let i = 0; i + 1 < Math.min(args.length, method === 'mouseDrag' ? 4 : 2); i += 2) {
+      if (num(args[i]) && num(args[i + 1])) points.push({ x: args[i] as number, y: args[i + 1] as number });
+    }
+  }
+  if (!points.length) return undefined;
+  const ratio = Number((target as { dpiRatio?: number }).dpiRatio);
+  return { points, boundsPerMouse: process.platform === 'win32' && ratio > 0 ? ratio : 1 };
+}
+
 const heldKeys = new Map<string, string>();
 const namedKeys = (combo: unknown): string[] => String(combo ?? '').split('+').map(k => k.trim().toLowerCase()).filter(Boolean);
 
