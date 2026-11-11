@@ -194,7 +194,8 @@ function elementLabel(el: UiElement): string {
 function elementLine(el: UiElement, value: string): string {
   return `[${el.controlType}] "${elementLabel(el)}"` +
     (el.automationId ? ` id:${el.automationId}` : '') +
-    ` @${el.bounds.x},${el.bounds.y} ${el.bounds.width}x${el.bounds.height}` +
+    // On no monitor (or scrolled out of view): no position, so nothing to click. read_tree says the same.
+    (el.offscreen ? ' (offscreen)' : ` @${el.bounds.x},${el.bounds.y} ${el.bounds.width}x${el.bounds.height}`) +
     value +
     (el.disabled || el.enabled === false ? ' DISABLED' : '') +
     (el.focused ? ' FOCUSED' : '');

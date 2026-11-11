@@ -735,20 +735,27 @@ export class WindowsAdapter implements PlatformAdapter {
       const nodes = Array.isArray(tree) ? tree : [tree];
       const flat: UiElement[] = [];
       for (const n of nodes) this.flattenTree(n, flat);
-      // A rect on no monitor (a minimized window's -32000, a gap between monitors) is not a position: flag the
-      // element offscreen instead, as the Linux adapter does. Both sides are physical virtual-desktop pixels —
-      // so only the bridge's list will do: listDisplays' fallback is DPI-unaware (a 3840-wide primary reads 1707).
-      const displays = await this.bridgeDisplays();
-      if (displays.length) {
-        for (const el of flat) {
-          if (onAnyDisplay(displays, el.bounds)) continue;
-          el.bounds = { x: 0, y: 0, width: 0, height: 0 };
-          el.offscreen = true;
-        }
-      }
+      await this.flagOffscreen(flat);
       return flat;
     } catch {
       return [];
+    }
+  }
+
+  /**
+   * A rect on no monitor (a minimized window's -32000, a gap between monitors, a hidden web view laid out at y=31000) is
+   * not a position: flag the element offscreen and take its bounds away, as the Linux adapter does. For EVERY element this
+   * adapter hands out (tree, find, focused): find listed a hidden web view's text with positions while read_tree did not.
+   * Both sides are physical virtual-desktop pixels — so only the bridge's list will do: listDisplays' fallback is
+   * DPI-unaware (a 3840-wide primary reads 1707). No list: nothing is judged.
+   */
+  private async flagOffscreen(elements: UiElement[]): Promise<void> {
+    const displays = await this.bridgeDisplays();
+    if (!displays.length) return;
+    for (const el of elements) {
+      if (onAnyDisplay(displays, el.bounds)) continue;
+      el.bounds = { x: 0, y: 0, width: 0, height: 0 };
+      el.offscreen = true;
     }
   }
 
@@ -791,7 +798,12 @@ export class WindowsAdapter implements PlatformAdapter {
           ...(scope.processId !== undefined ? { processId: scope.processId } : {}),
         }) as any;
         const raw = Array.isArray(result) ? result : [];
-        if (raw.length > 0) return raw.map(this.normalizeElement);
+        if (raw.length > 0) {
+          const found = raw.map(this.normalizeElement);
+          await this.flagOffscreen(found);
+          // The ones on screen first: a caller that takes the first hit, or a list that is cut, gets something it can act on.
+          return [...found.filter(el => !el.offscreen), ...found.filter(el => el.offscreen)];
+        }
       } catch (err) {
         this.lastFindError = /timeout/i.test(String((err as Error)?.message ?? err)) ? 'timeout' : 'error';
         return [];
@@ -804,7 +816,9 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       const result = await psRunner.run({ cmd: 'get-focused-element' }) as any;
       if (!result || result.success === false) return null;
-      return this.normalizeElement(result);
+      const focused = this.normalizeElement(result);
+      await this.flagOffscreen([focused]);
+      return focused;
     } catch {
       return null;
     }
