@@ -37,9 +37,9 @@ interface InputGuard {
   /** After an input; `movesFocus` when it could bring another window up (a click, Return, a shortcut). */
   done(movesFocus: boolean): void;
   /** The agent brought a window up on purpose: the next input binds to it. */
-  focused(q: WindowQuery): void;
+  focused(q: WindowQuery): Promise<void>;
   /** The agent launched an app: the next input binds to its window (by pid or title), or to whatever opens when unknown. */
-  launched(r?: { pid?: number; title?: string }, appName?: string): void;
+  launched(r?: { pid?: number; title?: string }, appName?: string): Promise<void>;
   /** Before an act on an element by name: stopped, or the window it would resolve to is an AI assistant nobody chose. */
   byName(processId?: number): Promise<void>;
 }
@@ -144,7 +144,8 @@ export function guardInputMethods<T extends object>(target: T): T {
     const q: WindowQuery = typeof args[0] === 'object' && args[0] !== null
       ? args[0] as WindowQuery
       : { title: args[0] as string | undefined, processId: args[1] as number | undefined };
-    if (r === true || (typeof r === 'object' && r?.success)) g.focused(q);
+    // Told after `focused` has the window: the outline goes to it now, not at the next act.
+    if (r === true || (typeof r === 'object' && r?.success)) { await g.focused(q); announce('focusWindow'); }
     return r;
   });
   // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
@@ -152,7 +153,8 @@ export function guardInputMethods<T extends object>(target: T): T {
     wrap(m, async (g, f, args, nested) => {
       if (!nested) { g.stopCheck(); announce(m); }
       const r = await f(...args) as { pid?: number; title?: string } | undefined;
-      g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
+      await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
+      announce(m);  // again, now that the launched window is known: the outline goes to it
       return r;
     });
   }
