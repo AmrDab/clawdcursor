@@ -1,278 +1,76 @@
-# macOS Setup Guide
+# macOS setup
 
-> **v0.9.0**: macOS support is fully preserved from the v0.7.14 baseline — Swift host app + JXA + System Events. `clawdcursor grant` still triggers the TCC permission dialogs; `clawdcursor doctor` still verifies the install. The CLI verb to start the daemon is now `clawdcursor agent` (was `start` in v0.8). `start` still works as a deprecation alias for the 0.9.x cycle.
+How to install clawdcursor 2.0 on macOS and grant the two permissions it needs. For other hosts and operating systems see the [README](../README.md#install).
 
-Complete guide to running Clawd Cursor on macOS. The agent uses **JXA (JavaScript for Automation)** and **System Events** for native UI automation (keyboard shortcuts route through System Events for TCC safety), a native **Swift host app** (`ClawdCursorHost`) for screen capture + accessibility tree under proper TCC consent, and **CDP (Chrome DevTools Protocol)** for browser interactions.
+## Requirements
 
----
+| | |
+|---|---|
+| macOS | 12 (Monterey) or later, Intel or Apple Silicon |
+| Node.js | 20 or later (not needed for the Claude Desktop extension) |
+| Xcode Command Line Tools | `xcode-select --install`. Needed to build the native helpers. Without them the install still completes and the slower `osascript` path is used. |
 
-## ⚠️ Accessibility Permissions (CRITICAL — Read First!)
+## 1. Install
 
-Clawd Cursor uses the macOS Accessibility API via JXA/System Events. You **must** grant Accessibility permission to the **terminal app** that runs `node`/`npx`:
+Pick the route for your agent's host:
 
-1. Open **System Settings → Privacy & Security → Accessibility**
-2. Click **+** and add your terminal app:
-   - **Terminal.app**, **iTerm.app**, **Warp**, **Alacritty**, etc.
-3. **Restart your terminal** after granting permission
-4. If scripts still fail from `npx` but work manually, also try adding `/usr/bin/osascript`
+- **Claude Desktop:** open `clawdcursor-darwin.mcpb` from the [latest release](https://github.com/AmrDab/clawdcursor/releases/latest) and turn on "Allow clawdcursor to control this computer".
+- **Claude Code:** `claude plugin marketplace add AmrDab/clawdcursor`, then `claude plugin install clawdcursor@clawdcursor`.
+- **Codex, Cursor and other MCP hosts, or HTTP:**
 
-> **Note:** `sudo` does NOT bypass Accessibility permissions — they are per-app, not per-user.
+  ```bash
+  npm i -g clawdcursor
+  clawdcursor consent --accept
+  ```
 
-### Quick verification
-```bash
-# Should return JSON array of windows:
-osascript -l JavaScript scripts/mac/get-windows.jxa
+  Then register `clawdcursor mcp --compact` in the host, or run `clawdcursor agent` for HTTP. The config shapes are in the [README](../README.md#install).
 
-# If this works manually but fails from npx, it's a permissions issue.
-```
+The npm install builds and ad-hoc-signs the native helpers when the Command Line Tools are present. If they were missing, run `xcode-select --install`; the fast accessibility helper then builds on first use (about 3 seconds).
 
----
+## 2. Grant permissions
 
-## Prerequisites
+clawdcursor needs two entries under **System Settings → Privacy & Security**:
 
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| **macOS**   | 13 (Ventura) | 14+ (Sonoma) |
-| **Node.js** | 18.0    | 20+ |
-| **Xcode CLI** | Any recent version | Latest |
-
-### Install Node.js
+| Permission | Needed for | Without it |
+|---|---|---|
+| **Accessibility** | Reading the UI tree, clicking, typing. Required. | Nothing works. |
+| **Screen & System Audio Recording** | Screenshots and OCR only. | Screenshots and OCR return an error that says how to fix it. Windows, keys and the accessibility tree keep working. |
 
 ```bash
-# Using Homebrew (recommended)
-brew install node
-
-# Or download from https://nodejs.org
+clawdcursor grant
 ```
 
----
+This opens the system dialogs and prints which permissions are granted.
 
-## 1. Accessibility Permissions (Required)
+macOS gives these permissions to an **app**, not to clawdcursor as a command. The app that needs them is the one that starts clawdcursor: your terminal when you run `clawdcursor agent`, or the agent's host (Claude, Cursor, VS Code, …) when it starts `clawdcursor mcp`. If you use clawdcursor from two hosts, each needs its own grant. Restart the app after granting.
 
-Clawd Cursor uses the macOS Accessibility API via `osascript` and System Events. You **must** grant your terminal app Accessibility access.
-
-### Grant Access
-
-1. Open **System Settings** → **Privacy & Security** → **Accessibility**
-2. Click the **+** button (you may need to unlock with your password)
-3. Add your terminal application:
-   - **Terminal.app** (`/Applications/Utilities/Terminal.app`)
-   - **iTerm2** (`/Applications/iTerm.app`) — if you use iTerm
-   - **VS Code** — if running from VS Code's integrated terminal
-   - **Warp** / **Alacritty** / other terminals as applicable
-4. Make sure the toggle is **ON** for your terminal
-
-> ⚠️ **"Not authorized to send Apple events"** — If you see this error, your terminal doesn't have Accessibility permission. Follow the steps above to fix it.
-
-### Verify Accessibility Access
+## 3. Check
 
 ```bash
-# This should list your foreground windows without errors
-osascript -l JavaScript -e '
-  var se = Application("System Events");
-  se.includeStandardAdditions = true;
-  var fp = se.processes.where({frontmost: true})[0];
-  JSON.stringify({name: fp.name(), pid: fp.unixId()});
-'
+clawdcursor doctor     # version, consent, screen capture, accessibility, permissions
+clawdcursor status     # short readiness check
 ```
 
-If it works, you'll see something like: `{"name":"Terminal","pid":12345}`
+`doctor` checks the permissions of the terminal it runs in. An MCP host has its own grant, so a pass in the terminal does not prove the host is allowed. The reliable test is to ask your agent to read a window: `accessibility {"action":"read_tree"}`.
 
----
+## Keys on macOS
 
-## 2. Install & Build
+The server tells the agent it is on macOS and that the shortcut modifier is `cmd`. `mod` in a key combo means `cmd` here (`mod+s` is Cmd+S). An explicit `ctrl+…` is sent as the real Control key. `Ctrl+Cmd+Q`, `Cmd+Shift+Q` and any combination with the Power or Eject key are never sent.
 
-```bash
-git clone https://github.com/AmrDab/clawdcursor.git
-cd clawdcursor && npm install && npm run build
-```
+## Browsers and Electron apps
 
-### Make macOS scripts executable
-
-```bash
-chmod +x scripts/mac/*.sh
-chmod +x scripts/mac/*.jxa
-```
-
----
-
-## 3. Launch with CDP (Browser Automation)
-
-To use the CDPDriver for browser tasks, launch Chrome or Edge with the remote debugging port:
-
-### Google Chrome
-
-```bash
-# Launch Chrome with CDP enabled
-open -a "Google Chrome" --args --remote-debugging-port=9222
-
-# If Chrome is already running, quit it first:
-# osascript -e 'tell application "Google Chrome" to quit'
-# Then relaunch with the flag above
-```
-
-### Microsoft Edge
-
-```bash
-open -a "Microsoft Edge" --args --remote-debugging-port=9222
-```
-
-### Verify CDP is working
-
-```bash
-curl -s http://localhost:9222/json/version | python3 -m json.tool
-```
-
-You should see Chrome/Edge version info. If you get "Connection refused", the browser isn't running with CDP enabled.
-
----
-
-## 4. Start the Agent
-
-```bash
-npm start
-```
-
-Or with specific options:
-
-```bash
-# With debug screenshots
-npm start -- --debug
-
-# Custom port
-npm start -- --port 4000
-```
-
-### Drive it
-
-clawdcursor never runs a model; connect your own agent to `http://127.0.0.1:3847/mcp` (MCP over HTTP, `Authorization: Bearer $(cat ~/.clawdcursor/token)`) and call its tools, or register `clawdcursor mcp` with your editor.
-
----
-
-## How It Works on macOS
-
-### UIDriver (Native App Automation)
-
-The UIDriver uses **JXA (JavaScript for Automation)** scripts via `osascript` to interact with native macOS apps through the Accessibility API:
-
-| Windows (PowerShell/.NET) | macOS (JXA + System Events) |
-|---------------------------|------------------------------|
-| `find-element.ps1` | `scripts/mac/find-element.sh` → `find-element.jxa` |
-| `invoke-element.ps1` | `scripts/mac/interact-element.sh` → `invoke-element.jxa` |
-| `interact-element.ps1` | `scripts/mac/interact-element.sh` |
-| UI Automation ControlTypes | Accessibility Roles (AXButton, AXTextField, etc.) |
-| `InvokePattern.Invoke()` | `element.click()` |
-| `ValuePattern.SetValue()` | `element.value = "text"` or `keystroke` |
-
-### CDPDriver (Browser Automation)
-
-The CDPDriver works identically on both platforms — it connects to Chrome/Edge via WebSocket on `localhost:9222`. No platform-specific code needed.
-
-### OS Detection
-
-UIDriver automatically detects the platform:
-
-```typescript
-const driver = new UIDriver();
-// On macOS: uses scripts/mac/*.sh → JXA
-// On Windows: uses scripts/*.ps1 → PowerShell/.NET
-// Same API — callers don't need to know which OS
-```
-
----
+The `browser` tool drives Chrome, Edge and Electron apps over the Chrome DevTools Protocol. The agent does not need you to start the browser with a flag: `browser {"action":"navigate"}` opens a browser clawdcursor controls, and `system {"action":"relaunch_with_cdp"}` restarts an Electron app with the protocol enabled (it closes the app first, so unsaved work in it can be lost).
 
 ## Troubleshooting
 
-### "Not authorized to send Apple events"
+**Every tool returns a consent prompt.** Run `clawdcursor consent --accept`, or turn on the consent toggle in the Claude Desktop extension settings.
 
-**Cause:** Your terminal doesn't have Accessibility permissions.
+**The tree is empty or actions are refused with a permission error.** The app that started clawdcursor has no Accessibility grant. Enable it under Privacy & Security → Accessibility and restart that app.
 
-**Fix:** System Settings → Privacy & Security → Accessibility → Add your terminal app.
+**Screenshots or OCR fail, everything else works.** Screen Recording is missing for the app that started clawdcursor. Enable it under Privacy & Security → Screen & System Audio Recording and restart that app.
 
-### "No process found with ID X"
+**Reads are slow, or "native helper not found".** The Swift helpers were not built. Run `xcode-select --install`; `clawdcursor doctor` reports the helper's state, and an error that needs a manual build prints the command to run.
 
-**Cause:** The target app has no accessible windows, or the PID is wrong.
+**Keys or focus go nowhere while a password field is active.** macOS secure input is on, and macOS sends keys and focus only to the app holding it. The error from `window focus` names that app. clawdcursor does not type credentials; the agent hands that step to you with a pause.
 
-**Fix:**
-```bash
-# Find the PID of an app
-pgrep -f "Google Chrome"
-
-# List all visible windows
-osascript -l JavaScript scripts/mac/get-windows.jxa
-```
-
-### CDP connection refused
-
-**Cause:** Chrome/Edge wasn't launched with `--remote-debugging-port=9222`.
-
-**Fix:** Quit the browser completely, then relaunch:
-```bash
-osascript -e 'tell application "Google Chrome" to quit'
-sleep 2
-open -a "Google Chrome" --args --remote-debugging-port=9222
-```
-
-### "osascript: not found"
-
-**Cause:** PATH issue in the shell environment.
-
-**Fix:** `osascript` should be at `/usr/bin/osascript`. Make sure `/usr/bin` is in your PATH:
-```bash
-echo $PATH | tr ':' '\n' | grep /usr/bin
-```
-
-### Scripts not executable
-
-```bash
-chmod +x scripts/mac/*.sh scripts/mac/*.jxa
-```
-
-### Python3 not found (used by find-element.sh)
-
-The `find-element.sh` script uses Python 3 for JSON transformation. macOS ships with Python 3:
-```bash
-/usr/bin/python3 --version
-```
-
-If missing, install via: `brew install python3` or `xcode-select --install`
-
----
-
-## Platform Differences
-
-| Feature | Windows | macOS |
-|---------|---------|-------|
-| UI Automation | .NET UIAutomationClient | System Events + JXA |
-| Element IDs | AutomationId (developer-set) | Not available (use name) |
-| ControlTypes | `Button`, `Edit`, `MenuItem` | `AXButton`, `AXTextField`, `AXMenuItem` |
-| Script runner | PowerShell (`powershell.exe`) | Bash + osascript |
-| CDP port | Same (9222) | Same (9222) |
-| Shell command chaining | `;` (PowerShell) | `&&` (Bash) |
-
----
-
-## Quick Reference
-
-```bash
-# Run doctor
-npm run doctor
-
-# Start agent
-npm start
-
-# Launch Chrome with CDP
-open -a "Google Chrome" --args --remote-debugging-port=9222
-
-# Test accessibility
-osascript -l JavaScript scripts/mac/get-foreground-window.jxa
-
-# List all windows
-osascript -l JavaScript scripts/mac/get-windows.jxa
-
-# Find a button
-osascript -l JavaScript scripts/mac/find-element.jxa -name "OK" -role "button"
-
-# Get UI tree of frontmost app
-bash scripts/mac/get-ui-tree.sh
-```
+**An old copy is still running.** `clawdcursor versions` lists every installed copy (global npm, Claude Desktop extension, Claude Code plugin). Update with `npm i -g clawdcursor@latest` and restart the host.
