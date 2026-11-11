@@ -1078,6 +1078,74 @@ function Resolve-EditableTarget {
     return $el
 }
 
+# -- Which element a name stands for when an action presses it ------------------
+# "On screen" is the adapter's rule (onAnyDisplay): the rect overlaps some monitor. Negative origins are real (a monitor
+# left of / above the primary). No monitor list (the enumeration failed) judges nothing.
+function Get-MonitorRects {
+    $list = New-Object System.Collections.ArrayList
+    try { foreach ($m in [ScreenPM]::Monitors()) { [void]$list.Add(@{ x = $m[2]; y = $m[3]; width = $m[4]; height = $m[5] }) } } catch { }
+    return ,$list.ToArray()
+}
+function Test-RectOnMonitor($rect, $monitors) {
+    $monitors = @($monitors)
+    if ($monitors.Count -eq 0) { return $true }
+    foreach ($m in $monitors) {
+        if ($rect.x -lt $m.x + $m.width -and $rect.x + $rect.width -gt $m.x -and
+            $rect.y -lt $m.y + $m.height -and $rect.y + $rect.height -gt $m.y) { return $true }
+    }
+    return $false
+}
+
+# The element an action (not a value read / write) acts on, out of every element whose name matched. It took the first
+# match in tree order, whatever it was: a link of a web view the window does not show came before the ribbon button of
+# the same name, was invoked, and the invoke "succeeded" (live 2026-11-10, Designcenter NX: "New").
+#   1. The ones a user can see: UIA does not call them offscreen and their rect is on a monitor. The best name match
+#      among them wins (pass 1 exact, 2 the name contains the request, 3 a real part of it). A caption that takes no
+#      action gives way to a control that does, and a label inside its own control is that control. Several left:
+#      ambiguous - the caller lists them and nothing is pressed.
+#   2. None visible: the best match that UIA calls offscreen but that has a place on a monitor, or no rect at all (a row
+#      scrolled out of its list, an item of a closed menu).
+#   3. Only matches whose rect is on NO monitor: hidden, never pressed.
+# $hits, in tree order: @{ index; pass; rect = @{ x; y; width; height } or $null; offscreen }. $isActionable: { param($hit) }.
+# -> @{ index } | @{ ambiguous = indices } | @{ hidden = $true } | $null (no hits)
+function Select-InvokeTarget {
+    param($hits, $monitors, [scriptblock]$isActionable)
+    $hits = @($hits)
+    if ($hits.Count -eq 0) { return $null }
+    $placed = { param($h) $null -ne $h.rect -and $h.rect.width -gt 0 -and $h.rect.height -gt 0 }
+    $visible = @($hits | Where-Object { -not $_.offscreen -and (& $placed $_) -and (Test-RectOnMonitor $_.rect $monitors) })
+    if ($visible.Count -eq 0) {
+        $rest = @($hits | Where-Object { -not (& $placed $_) -or (Test-RectOnMonitor $_.rect $monitors) } | Sort-Object { $_.pass }, { $_.index })
+        if ($rest.Count -eq 0) { return @{ hidden = $true } }
+        return @{ index = $rest[0].index }
+    }
+    $best = ($visible | ForEach-Object { $_.pass } | Measure-Object -Minimum).Minimum
+    $same = @($visible | Where-Object { $_.pass -eq $best })
+    if ($same.Count -gt 1) {
+        $acts = @($same | Where-Object { & $isActionable $_ })
+        if ($acts.Count -gt 0) { $same = $acts }
+    }
+    $inside = { param($a, $b) $a.x -ge $b.x -and $a.y -ge $b.y -and $a.x + $a.width -le $b.x + $b.width -and $a.y + $a.height -le $b.y + $b.height }
+    $outer = @($same | Where-Object {
+        $h = $_
+        @($same | Where-Object { $_.index -ne $h.index -and (& $inside $h.rect $_.rect) -and (-not (& $inside $_.rect $h.rect) -or $_.index -lt $h.index) }).Count -eq 0
+    })
+    if ($outer.Count -eq 1) { return @{ index = $outer[0].index } }
+    return @{ ambiguous = @($outer | ForEach-Object { $_.index }) }
+}
+
+# Does the element take the action at all? A press: one of invoke / toggle / select / expand. A focus: keyboard focus.
+# A caption or a text run takes neither, so a label gives way to the field or button that shares its name.
+function Test-Activatable($el, $action) {
+    $ae = [System.Windows.Automation.AutomationElement]
+    if ($action -eq 'focus') { try { return [bool]$el.Current.IsKeyboardFocusable } catch { return $false } }
+    foreach ($p in $ae::IsInvokePatternAvailableProperty, $ae::IsTogglePatternAvailableProperty,
+            $ae::IsSelectionItemPatternAvailableProperty, $ae::IsExpandCollapsePatternAvailableProperty) {
+        try { if ($el.GetCurrentPropertyValue($p)) { return $true } } catch { }
+    }
+    return $false
+}
+
 # ── Command: invoke-element (fuzzy name match) ────────────────────────────────
 function Cmd-InvokeElement {
     param($cmd)
@@ -1094,6 +1162,7 @@ function Cmd-InvokeElement {
     # Find element: prefer automationId (exact), then fuzzy name walk. The window the agent works in first (see
     # Get-ProcessScopeWindows); the other windows of the pid only when none is in front.
     $element = $null
+    $hiddenOnly = $false
     foreach ($window in $scopeWindows) {
     if ($automationId -ne "") {
         $aidCond = New-Object System.Windows.Automation.PropertyCondition(
@@ -1129,27 +1198,61 @@ function Cmd-InvokeElement {
         # and an Edit, and get-value read the label's caption (live 2026-10-14).
         $valueAction = ($action -eq 'get-value' -or $action -eq 'set-value')
         $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox, [System.Windows.Automation.ControlType]::Spinner)
-        foreach ($pass in 1, 2, 3) {
-            $firstHit = $null
-            for ($k = 0; $k -lt $names.Count; $k++) {
-                $elName = $names[$k]
-                if ($elName.Length -eq 0) { continue }
-                if (($pass -eq 1 -and $elName -eq $nameLower) -or
-                    ($pass -eq 2 -and $elName.Contains($nameLower)) -or
-                    ($pass -eq 3 -and (Test-NameMatch $elName $nameLower))) {
-                    if (-not $valueAction) { $element = $candidates[$k]; break }
+        # The pass each element matches in (0: none): the earliest one, so a pass only holds what no earlier pass took.
+        $passOf = New-Object 'System.Collections.Generic.List[int]'
+        foreach ($elName in $names) {
+            $passOf.Add($(if ($elName.Length -eq 0) { 0 } elseif ($elName -eq $nameLower) { 1 }
+                elseif ($elName.Contains($nameLower)) { 2 } elseif (Test-NameMatch $elName $nameLower) { 3 } else { 0 }))
+        }
+        if ($valueAction) {
+            foreach ($pass in 1, 2, 3) {
+                $firstHit = $null
+                for ($k = 0; $k -lt $names.Count; $k++) {
+                    if ($passOf[$k] -ne $pass) { continue }
                     if ($null -eq $firstHit) { $firstHit = $candidates[$k] }
                     $ct = $null; try { $ct = $candidates[$k].Current.ControlType } catch {}
                     if ($EDITABLE -contains $ct) { $element = $candidates[$k]; break }
                 }
+                if ($null -eq $element) { $element = $firstHit }
+                if ($null -ne $element) { break }
             }
-            if ($null -eq $element) { $element = $firstHit }
-            if ($null -ne $element) { break }
+        } else {
+            # An action presses something: the element the user can see, never one on no monitor (Select-InvokeTarget).
+            $hits = New-Object System.Collections.ArrayList
+            for ($k = 0; $k -lt $names.Count; $k++) {
+                if ($passOf[$k] -eq 0) { continue }
+                $r = $null; $off = $false
+                try {
+                    $cur = $candidates[$k].Current
+                    $off = [bool]$cur.IsOffscreen
+                    $br = $cur.BoundingRectangle
+                    if (-not $br.IsEmpty -and -not [double]::IsInfinity($br.X)) { $r = @{ x = $br.X; y = $br.Y; width = $br.Width; height = $br.Height } }
+                } catch { }
+                [void]$hits.Add(@{ index = $k; pass = $passOf[$k]; rect = $r; offscreen = $off })
+            }
+            $pick = if ($hits.Count -gt 0) { Select-InvokeTarget $hits (Get-MonitorRects) { param($h) Test-Activatable $candidates[$h.index] $action } } else { $null }
+            if ($null -ne $pick) {
+                if ($pick.hidden) { $hiddenOnly = $true }
+                elseif ($pick.ambiguous) {
+                    # Structured, like every miss: the names are screen text and go in fields, never in a sentence.
+                    $list = @(foreach ($i in @($pick.ambiguous | Select-Object -First 8)) {
+                        $c = $candidates[$i].Current; $b = $c.BoundingRectangle
+                        @{ name = [string]$c.Name; controlType = [string]$c.ControlType.ProgrammaticName
+                           bounds = @{ x = [int]$b.X; y = [int]$b.Y; width = [int]$b.Width; height = [int]$b.Height } }
+                    })
+                    return @{ success=$false; action=$action; reason="ambiguous"; candidates=$list; error="Several elements match" }
+                }
+                else { $element = $candidates[$pick.index] }
+            }
         }
     }
     if ($null -ne $element) { break }
     }
 
+    if ($null -eq $element -and $hiddenOnly) {
+        # No bounds: a click at a place on no monitor lands nowhere, or on something else.
+        return @{ success=$false; action=$action; reason="hidden"; error="Element is on no monitor" }
+    }
     if ($null -eq $element) {
         return @{ success=$false; reason="not_found"; otherWindows=(Get-ScopeOtherWindows $wpid $scopeWindows); error="Element not found" }
     }

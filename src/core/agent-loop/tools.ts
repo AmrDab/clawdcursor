@@ -2233,14 +2233,16 @@ export async function runActivationLadder(
   const first = await call(ladder[0]);
   let res = first;
   let used = ladder[0];
-  for (let i = 1; i < ladder.length && !res.success; i++) {
+  // Hidden or ambiguous is about WHICH element, not which verb: another verb finds the same thing.
+  const settled = first.data?.reason === 'hidden' || first.data?.reason === 'ambiguous';
+  for (let i = 1; i < ladder.length && !res.success && !settled; i++) {
     used = ladder[i];
     res = await call(used);
   }
   // The click rung is the one that read the element: its reason AND its bounds (for the coordinate fallback) stand.
   if (!res.success) {
     const keep: Record<string, unknown> = {};
-    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
+    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows', 'candidates']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
     res = { ...res, bounds: first.bounds ?? res.bounds, ...(Object.keys(keep).length ? { data: { ...res.data, ...keep } } : {}) };
   }
   return { res, used };

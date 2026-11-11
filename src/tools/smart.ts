@@ -24,7 +24,7 @@ import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
-import { untrusted } from '../core/miss-text';
+import { untrusted, missText, structuredMissFields } from '../core/miss-text';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -552,6 +552,8 @@ export function getSmartTools(): ToolDefinition[] {
           | { method: 'invoke'; pending?: boolean; lateInvokeError?: string }
           | { method: 'bounds'; clickPoint: { x: number; y: number }; bounds?: { x: number; y: number; w: number; h: number }; text?: string };
         let guardRefusal: string | null = null;
+        // Several visible elements have the name (the bridge's reason "ambiguous"): the call's answer is the list.
+        let ambiguous: string | null = null;
         const a11yPromise: Promise<A11yHit | null> = (async (): Promise<A11yHit | null> => {
           if (emptyA11y) return null;
           try {
@@ -579,6 +581,8 @@ export function getSmartTools(): ToolDefinition[] {
               return { method: 'invoke', pending: data?.pending === true, lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined };
             }
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
+            const miss = structuredMissFields(result);
+            if (miss.reason === 'ambiguous') ambiguous = missText(miss);
             return null;
           } catch (err) {
             // The guard refused (stopped, foreground changed, an AI assistant in front): the call is refused, not a miss.
@@ -588,13 +592,13 @@ export function getSmartTools(): ToolDefinition[] {
             // nothing either and doubled the wait (live macOS: 24 s).
             if (/not found/i.test(err instanceof Error ? err.message : String(err)) || remaining() < MIN_BUDGET_MS) return null;
             try {
-              const elements = await ctx.a11y.findElement({
-                name: target,
-                processId: processId || activeWin?.processId,
-              });
+              // The platform's find marks an element on no monitor offscreen: never a place to click.
+              const query = { name: target, processId: processId || activeWin?.processId };
+              const elements: Array<{ name: string; offscreen?: boolean; bounds: { x: number; y: number; width: number; height: number } }> =
+                ctx.platform?.findElements ? await ctx.platform.findElements(query) : await ctx.a11y.findElement(query);
               if (elements?.length) {
-                const el = elements[0];
-                if (el.bounds?.width > 0) {
+                const el = elements.find(e => !e.offscreen) ?? elements[0];
+                if (!el.offscreen && el.bounds?.width > 0) {
                   const cx = el.bounds.x + Math.floor(el.bounds.width / 2);
                   const cy = el.bounds.y + Math.floor(el.bounds.height / 2);
                   return {
@@ -639,6 +643,8 @@ export function getSmartTools(): ToolDefinition[] {
           Promise.allSettled([ocrPromise, a11yPromise]).then(() => clearTimeout(timer));
         });
         if (guardRefusal && !parallelResult.a11y) return { text: guardRefusal as string, isError: true };
+        // Not the OCR match in its place: that would be picking one of them in silence.
+        if (ambiguous) return { text: `smart_click ${quoteScreenText(target)}: ${ambiguous as string}`, isError: true };
         const ocrMatch = parallelResult.ocr;
         const a11yResult = parallelResult.a11y;
         const parallelTimedOut = parallelResult.timedOut;
