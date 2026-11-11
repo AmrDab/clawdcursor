@@ -16,7 +16,7 @@
  *    working in. A change right after the agent's own focus-moving input (a click, Return, a shortcut) or focus call is
  *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
-import { fenceCheck, fenceInput, isFenceRefusal, type PointerPress } from './fence';
+import { fenceCheck, fenceInput, isFenceRefusal } from './fence';
 import * as fs from 'fs';
 import { quoteScreenText } from './result-codes';
 import * as path from 'path';
@@ -140,7 +140,7 @@ function stopCheck(): void {
 }
 
 /** One foreground read per input, before it. */
-async function before(press?: PointerPress): Promise<void> {
+async function before(): Promise<void> {
   stopCheck();
   let now = await readForeground().catch(() => null);
   // The fence (CLAWD_FENCE_PIDS): with no foreground to check, nothing is sent.
@@ -151,7 +151,7 @@ async function before(press?: PointerPress): Promise<void> {
     await new Promise(r => setTimeout(r, 100));
     now = (await readForeground().catch(() => null)) ?? now;
   }
-  await fenceInput(now, press);
+  await fenceInput(now);   // the pointer's own bounds are checked where it moves and presses (pointer-guard.ts)
   if (isOwnUiPid(now.processId)) throw new Error(`foreground changed: clawdcursor's own on-screen control is in front, not ${lease ? name(lease) : 'an app'} — nothing was sent. Wait for the user, then focus your window with window {"action":"focus"}.`);
   const ownMove = Date.now() - movedAt < OWN_MOVE_MS;
   let explicit = false;

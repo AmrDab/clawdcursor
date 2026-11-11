@@ -11,6 +11,7 @@
  * Caching: last result is kept for 300ms. Invalidated on any action execution.
  */
 
+import { fenceWholeScreen } from '../core/fence';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -176,6 +177,7 @@ export class OcrEngine {
    * that the capture or the engine failed (#274: a failure read as "No text detected").
    */
   async recognizeScreen(): Promise<OcrResult> {
+    fenceWholeScreen('OCR of the whole screen');   // the test fence (core/fence.ts): no fenced form of it exists
     if (!this.isAvailable()) return { ...EMPTY_RESULT };
 
     // Return cached if fresh

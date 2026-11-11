@@ -1,6 +1,6 @@
 /**
  * The test and automation fence (core/fence.ts): with CLAWD_FENCE_PIDS set, nothing is done or read outside the fenced
- * processes. With it unset, nothing changes.
+ * processes. It is an allow list: a tool that is not classified is refused. With the variable unset, nothing changes.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import sharp from 'sharp';
@@ -16,42 +16,55 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 
 import {
-  FENCE_ENV, FENCED, fenceActive, fenceCdpOnly, fenceCheck, fenceGate, fenceInput, fenceMask, fenceRoots, fenceTools, inFence,
-  isFenceRefusal, __setFenceDesktopForTests, __setFenceProcessTableForTests, type FenceWindow,
+  FENCE_ENV, FENCE_POLICY, FENCED, fenceActive, fenceCdpOnly, fenceCheck, fenceGate, fenceImage, fenceInput, fenceKind, fenceMask,
+  fencePlatform, fencePointer, fenceRoots, fenceTools, fenceWholeScreen, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
+  primaryRect, wholly, __setFenceDesktopForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
 } from '../core/fence';
 import { classifyResult } from '../core/result-codes';
 import { outcomeOf } from '../surface/session-log';
 import { isGuardRefusal, __setForegroundReaderForTests } from '../core/control';
-import { guardedInput, pointerPress } from '../platform/pointer-guard';
+import { guardInputMethods, guardedInput } from '../platform/pointer-guard';
+import { getTools } from '../tools/registry';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 import type { ToolDefinition, ToolContext } from '../tools/types';
 
-// Processes: 100 is the fixture, 101 its child, 102 a grandchild. 200 is the owner's app, 300 a Store app frame host.
+// Processes: 100 is the fixture, 101 its child, 102 a grandchild. 200 is the owner's app. 300 is ApplicationFrameHost,
+// which hosts the fixture's Store app (400) and the owner's (201).
 const TABLE = new Map([[100, 1], [101, 100], [102, 101], [200, 1], [201, 200], [300, 1], [400, 1]]);
 const fenced = { [FENCE_ENV]: '100, 400' } as NodeJS.ProcessEnv;
 const open = {} as NodeJS.ProcessEnv;
 
-const fixture: FenceWindow = { processId: 101, processName: 'BenchFixture.exe', title: 'Bench Dialog', bounds: { x: 100, y: 100, width: 400, height: 300 } };
-const owners: FenceWindow = { processId: 200, processName: 'OUTLOOK.EXE', title: 'Inbox - Bench Dialog notes', bounds: { x: 600, y: 100, width: 400, height: 300 } };
+const fixture: FenceWindow = { processId: 101, processName: 'BenchFixture.exe', title: 'Bench Dialog', handle: 7001, bounds: { x: 100, y: 100, width: 400, height: 300 } };
+const owners: FenceWindow = { processId: 200, processName: 'OUTLOOK.EXE', title: 'Inbox - Bench Dialog notes', handle: 7002, bounds: { x: 600, y: 100, width: 400, height: 300 } };
+const calc: FenceWindow = { processId: 300, hostedProcessId: 400, processName: 'ApplicationFrameHost.exe', title: 'Calculator', handle: 7003, bounds: { x: 100, y: 500, width: 300, height: 400 } };
+const settings: FenceWindow = { processId: 300, hostedProcessId: 201, processName: 'ApplicationFrameHost.exe', title: 'Settings', handle: 7004, bounds: { x: 500, y: 500, width: 300, height: 400 } };
 let front: FenceWindow | null = fixture;
 let windows: FenceWindow[] = [fixture, owners];
+let cursor: { x: number; y: number } | null = { x: 300, y: 250 };
+let primary: Rect | null = { x: 0, y: 0, width: 3840, height: 2400 };
 
-const tool = (name: string, parameters: Record<string, unknown> = {}): ToolDefinition & { calls: Array<Record<string, unknown>> } => {
+const tool = (name: string, parameters: Record<string, unknown> = {}, result: object = {}): ToolDefinition & { calls: Array<Record<string, unknown>> } => {
   const calls: Array<Record<string, unknown>> = [];
   return { name, description: name, parameters, category: 'test', calls,
-    handler: async (params: Record<string, unknown>) => { calls.push(params); return { text: `${name} ran` }; } } as never;
+    handler: async (params: Record<string, unknown>) => { calls.push(params); return { text: `${name} ran`, ...result }; } } as never;
 };
 const ctx = {} as ToolContext;
 const targeted = { processId: { type: 'number' }, title: { type: 'string' }, processName: { type: 'string' } };
+const run = (t: ToolDefinition, params: Record<string, unknown> = {}) => fenceTools([t], fenced)[0].handler(params, ctx);
+const refused = async (t: ToolDefinition, params: Record<string, unknown> = {}) => {
+  const r = await run(t, params);
+  return !!r.isError && r.text.startsWith(FENCED);
+};
 
 beforeEach(() => {
-  front = fixture;
-  windows = [fixture, owners];
+  front = fixture; windows = [fixture, owners]; cursor = { x: 300, y: 250 }; primary = { x: 0, y: 0, width: 3840, height: 2400 };
   __setFenceProcessTableForTests(async () => TABLE);
-  __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows });
+  __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary });
 });
 afterEach(() => {
   __setFenceProcessTableForTests(null);
   __setFenceDesktopForTests(null);
+  __setForegroundReaderForTests(async () => null);
   delete process.env[FENCE_ENV];
 });
 
@@ -62,29 +75,117 @@ describe('with CLAWD_FENCE_PIDS unset, nothing changes', () => {
     expect(fenceActive({ [FENCE_ENV]: '  ' } as NodeJS.ProcessEnv)).toBe(false);
   });
 
-  it('the tool list is returned as it is: the same array, the same handlers', () => {
-    const tools = [tool('get_windows'), tool('read_clipboard'), tool('open_url')];
+  it('the tool list and the platform adapter are returned as they are', () => {
+    const tools = [tool('get_windows'), tool('read_clipboard'), tool('a_tool_nobody_classified')];
     expect(fenceTools(tools, open)).toBe(tools);
+    const adapter = { listWindows: async () => [owners] };
+    const list = adapter.listWindows;
+    expect(fencePlatform(adapter, open)).toBe(adapter);
+    expect(adapter.listWindows).toBe(list);
   });
 
   it('every check passes without asking the desktop anything', async () => {
-    __setFenceDesktopForTests({ foreground: async () => { throw new Error('asked'); }, windows: async () => { throw new Error('asked'); } });
-    __setFenceProcessTableForTests(async () => { throw new Error('asked'); });
-    const params = { title: 'Inbox' };
+    const asked = async (): Promise<never> => { throw new Error('asked'); };
+    __setFenceDesktopForTests({ foreground: asked, windows: asked, cursor: asked, primary: asked });
+    __setFenceProcessTableForTests(asked);
+    const params = { title: 'Inbox', processId: 'not a number' };
     expect(await fenceGate(tool('close_window', targeted), params, open)).toBe(params);
     await expect(fenceCheck('x', { pid: 200 }, open)).resolves.toBeUndefined();
-    await expect(fenceCheck('x', { foreground: true }, open)).resolves.toBeUndefined();
-    await expect(fenceInput(owners, { points: [{ x: 5000, y: 5000 }], boundsPerMouse: 1 }, open)).resolves.toBeUndefined();
+    await expect(fenceInput(owners, open)).resolves.toBeUndefined();
+    await expect(fencePointer('mouseClick', [5000, 5000], open)).resolves.toBeUndefined();
+    await expect(fencePointer('mouseDown', [], open)).resolves.toBeUndefined();
+    expect(() => fenceWholeScreen('OCR', open)).not.toThrow();
     const image = Buffer.from('not even an image');
     expect(await fenceMask(image, { originX: 0, originY: 0, scale: 1 }, open)).toBe(image);
+    expect(await fenceImage(image, 'image/png', { originX: 0, originY: 0, scale: 1 }, open)).toEqual({ data: image.toString('base64'), mimeType: 'image/png' });
     expect(fenceCdpOnly(9333, open)).toBeUndefined();
   });
 
-  it('the input guard sends input as before', async () => {
+  it('the input guard sends input as before, and typing is not split', async () => {
     __setForegroundReaderForTests(async () => ({ processId: 200, processName: 'OUTLOOK.EXE' }));
     const send = vi.fn(async () => 'sent');
     expect(await guardedInput('typeText', ['hi'], send)).toBe('sent');
-    __setForegroundReaderForTests(async () => null);
+    const typed: string[] = [];
+    const desk = guardInputMethods({ typeText: async (t: string) => { typed.push(t); }, mouseDown: async () => 'down' });
+    await desk.typeText('one\ntwo\tthree');
+    expect(typed).toEqual(['one\ntwo\tthree']);
+    expect(await desk.mouseDown()).toBe('down');
+  });
+
+  it('text that happens to say FENCED is not a fence refusal', () => {
+    const text = `${FENCED}get_windows is outside the test fence`;
+    expect(classifyResult(text, true, true)?.code).not.toBe('FENCED');
+    expect(outcomeOf(true, text)).toBe('error');
+  });
+});
+
+describe('an allow list: every tool is classified, and what is not is refused', () => {
+  const granular = getTools().map(t => t.name);
+  const compact = getTools({ palette: 'compact' }).map(t => t.name);
+  const classified = (name: string) => Object.prototype.hasOwnProperty.call(FENCE_POLICY, name);
+
+  it('every tool in tools/list, on both surfaces, is in the table', () => {
+    expect(granular.length).toBeGreaterThan(80);
+    expect(compact).toEqual(['accessibility', 'system', 'window', 'browser', 'computer', 'batch']);
+    const missing = [...granular, ...compact].filter(n => !classified(n));
+    expect(missing, `classify these in FENCE_POLICY (src/core/fence.ts): ${missing.join(', ')}`).toEqual([]);
+  });
+
+  it('every action of every compound tool runs a classified tool', () => {
+    const unclassified: string[] = [];
+    let actions = 0;
+    for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
+      for (const r of routes) { actions++; if (!classified(r.delegate)) unclassified.push(`${compound} ${r.action} -> ${r.delegate}`); }
+    }
+    expect(actions).toBeGreaterThan(80);
+    expect(unclassified).toEqual([]);
+  });
+
+  it('the table names no tool that does not exist', () => {
+    const known = new Set([...granular, ...compact]);
+    expect(Object.keys(FENCE_POLICY).filter(n => !known.has(n))).toEqual([]);
+  });
+
+  it('a tool that is not in the table is refused, and never runs', async () => {
+    expect(fenceKind('a_tool_added_next_year')).toBe('refuse');
+    expect(fenceKind('constructor')).toBe('refuse');
+    const t = tool('a_tool_added_next_year');
+    expect(await refused(t)).toBe(true);
+    expect(t.calls).toEqual([]);
+  });
+
+  it.each(['get_windows', 'read_clipboard', 'write_clipboard', 'ocr_read_screen', 'smart_read', 'smart_click', 'smart_type',
+    'open_app', 'open_file', 'open_url', 'open_uri', 'navigate_browser', 'switch_tab_os', 'relaunch_with_cdp', 'detect_webview_apps',
+    'shortcuts_execute', 'session_report', 'submit_report', 'logs_recent', 'verify', 'pause_for_user', 'resume_task',
+    'cdp_evaluate'])('%s is refused whatever is in front', async name => {
+    expect(fenceKind(name)).toBe('refuse');
+    const t = tool(name);
+    expect(await refused(t, { scope: 'window', processId: 101, title: 'Bench Dialog' })).toBe(true);
+    expect(t.calls).toEqual([]);
+  });
+
+  it('undo_last acts, so it is checked like an act', async () => {
+    expect(fenceKind('undo_last')).toBe('act');
+    expect(await refused(tool('undo_last'))).toBe(false);
+    front = owners;
+    expect(await refused(tool('undo_last'))).toBe(true);
+  });
+
+  it.each(['read_screen', 'find_element', 'compile_ui', 'find_action_button', 'find_input_field', 'a11y_get_value', 'copy_all_text',
+    'get_active_window', 'invoke_element', 'set_field_value', 'type_text', 'key_press', 'mouse_click', 'mouse_hover', 'mouse_move_relative',
+    'mouse_down', 'mouse_up'])('%s runs only with a fenced window in front', async name => {
+    expect(await refused(tool(name))).toBe(false);
+    front = owners;
+    const t = tool(name);
+    expect(await refused(t)).toBe(true);
+    expect(t.calls).toEqual([]);
+    front = null;
+    expect(await refused(tool(name))).toBe(true);
+  });
+
+  it.each(['wait', 'get_system_time', 'get_screen_size', 'cursor_position', 'cdp_click', 'cdp_read_text'])('%s runs: it touches no window (or only the fenced browser)', async name => {
+    front = owners;
+    expect(await refused(tool(name))).toBe(false);
   });
 });
 
@@ -105,74 +206,61 @@ describe('which processes are inside', () => {
     expect(await inFence(100, fenced)).toBe(true);    // a root needs no table
     expect(await inFence(100, { [FENCE_ENV]: 'abc' } as NodeJS.ProcessEnv)).toBe(false);
   });
-
-  it('reads the table again for a process started since', async () => {
-    let table = new Map([[100, 1]]);
-    __setFenceProcessTableForTests(async () => table);
-    expect(await inFence(100, fenced)).toBe(true);
-    expect(await inFence(555, fenced)).toBe(false);
-    table = new Map([[100, 1], [555, 100]]);
-    await new Promise(r => setTimeout(r, 250));
-    expect(await inFence(555, fenced)).toBe(true);
-  });
 });
 
-describe('the gate on every tool', () => {
-  const refused = async (t: ToolDefinition, params: Record<string, unknown> = {}) => {
-    const r = await fenceTools([t], fenced)[0].handler(params, ctx);
-    return !!r.isError && r.text.startsWith(FENCED);
-  };
+describe('target fields', () => {
+  it('a numeric string is normalised and passed on, so the handler and the fence see the same target', async () => {
+    expect(normaliseTargets('read_screen', { processId: '101', name: 'x' })).toEqual({ processId: 101, name: 'x' });
+    const t = tool('read_screen', targeted);
+    front = owners;
+    expect(await refused(t, { processId: ' 101 ' })).toBe(false);
+    expect(t.calls).toEqual([{ processId: 101 }]);
+  });
 
-  it.each(['get_windows', 'read_clipboard', 'write_clipboard', 'open_app', 'open_file', 'open_url', 'open_uri', 'navigate_browser',
-    'switch_tab_os', 'shortcuts_execute', 'relaunch_with_cdp', 'detect_webview_apps', 'session_report', 'pause_for_user',
-    'desktop_screenshot_region', 'ocr_read_screen', 'ocr_find_text'])('%s is refused, and its handler never runs', async name => {
-    const t = tool(name);
-    expect(await refused(t, { url: 'https://example.com', title: 'Bench Dialog' })).toBe(true);
+  it('a string pid of another process is checked as that process, not skipped', async () => {
+    const t = tool('read_screen', targeted);
+    expect(await refused(t, { processId: '200' })).toBe(true);   // the fixture is in front: the old gate fell through to it
     expect(t.calls).toEqual([]);
   });
 
-  it.each(['wait', 'get_system_time', 'get_screen_size', 'cdp_click', 'cdp_read_text'])('%s runs: it touches no window (or only the fenced browser)', async name => {
-    front = owners;
-    const t = tool(name);
-    expect(await refused(t)).toBe(false);
-    expect(t.calls).toHaveLength(1);
+  it.each([['processId', 'abc'], ['processId', 12.5], ['processId', -4], ['processId', 0], ['processId', '0x1f'], ['processId', true],
+    ['processId', { valueOf: () => 101 }], ['processId', [101]], ['pid', '12; 13'], ['handle', 'main'], ['windowId', NaN], ['hwnd', '']])(
+    '%s = %j is refused', async (field, value) => {
+      for (const name of ['read_screen', 'invoke_element', 'focus_window', 'desktop_screenshot']) {
+        const t = tool(name, targeted);
+        expect(await refused(t, { [field]: value }), name).toBe(true);
+        expect(t.calls).toEqual([]);
+      }
+    });
+
+  it('null and undefined mean "not given"', () => {
+    expect(normaliseTargets('read_screen', { processId: null, pid: undefined, name: 'x' })).toEqual({ name: 'x' });
   });
 
-  it('a call with no target acts on the window in front: it runs only when that window is fenced', async () => {
-    for (const name of ['read_screen', 'find_element', 'invoke_element', 'type_text', 'key_press', 'mouse_click', 'desktop_screenshot',
-      'get_active_window', 'copy_all_text', 'a_tool_added_next_year']) {
-      front = fixture;
-      const ok = tool(name);
-      expect(await refused(ok), name).toBe(false);
-      front = owners;
-      const no = tool(name);
-      expect(await refused(no), name).toBe(true);
-      expect(no.calls, name).toEqual([]);
-    }
-  });
-
-  it('is refused when the window in front cannot be read', async () => {
-    front = null;
-    expect(await refused(tool('read_screen'))).toBe(true);
-    __setFenceDesktopForTests({ foreground: async () => { throw new Error('bridge down'); }, windows: async () => [] });
-    expect(await refused(tool('type_text'))).toBe(true);
-  });
-
-  it('a processId names the target: reads and acts on another process are refused, whatever is in front', async () => {
+  it('a process id names the target: another process is refused, whatever is in front', async () => {
     expect(await refused(tool('read_screen', targeted), { processId: 200 })).toBe(true);
-    expect(await refused(tool('invoke_element', targeted), { processId: 201, name: 'Send' })).toBe(true);
+    expect(await refused(tool('invoke_element', targeted), { pid: 201, name: 'Send' })).toBe(true);
     front = owners;
     expect(await refused(tool('read_screen', targeted), { processId: 102 })).toBe(false);
   });
 
-  it.each(['focus_window', 'close_window', 'minimize_window_to_taskbar', 'maximize_window', 'restore_window', 'resize_window'])(
-    '%s on a window of the owner is refused by title, by process name and by pid', async name => {
-      for (const params of [{ title: 'Inbox' }, { processName: 'outlook' }, { processId: 200 }]) {
-        const t = tool(name, targeted);
-        expect(await refused(t, params), JSON.stringify(params)).toBe(true);
-        expect(t.calls).toEqual([]);
-      }
-    });
+  it('a window handle must be that of a fenced window', async () => {
+    expect(await refused(tool('invoke_element', targeted), { handle: 7001 })).toBe(false);
+    expect(await refused(tool('invoke_element', targeted), { handle: 7002 })).toBe(true);
+    expect(await refused(tool('invoke_element', targeted), { handle: 9999 })).toBe(true);
+  });
+});
+
+describe('window actions', () => {
+  const WINDOW_TOOLS = ['focus_window', 'close_window', 'minimize_window', 'minimize_window_to_taskbar', 'maximize_window', 'restore_window', 'resize_window'];
+
+  it.each(WINDOW_TOOLS)('%s on a window of the owner is refused by title, by process name and by pid', async name => {
+    for (const params of [{ title: 'Inbox' }, { processName: 'outlook' }, { processId: 200 }, { processId: '200' }]) {
+      const t = tool(name, targeted);
+      expect(await refused(t, params), JSON.stringify(params)).toBe(true);
+      expect(t.calls).toEqual([]);
+    }
+  });
 
   it('a title that matches a fenced window AND one of the owner is refused', async () => {
     expect(await refused(tool('close_window', targeted), { title: 'bench dialog' })).toBe(true);
@@ -182,50 +270,349 @@ describe('the gate on every tool', () => {
     expect(await refused(tool('focus_window', targeted), { title: 'Calculator' })).toBe(true);
   });
 
-  it('a name that matches only the fixture is pinned to its process before the tool runs', async () => {
+  it('a name that matches only the fixture is pinned to its process, and keeps its title', async () => {
     const t = tool('focus_window', targeted);
-    expect(await refused(t, { processName: 'benchfixture', title: undefined })).toBe(false);
-    expect(t.calls).toEqual([{ processId: 101 }]);
+    windows = [fixture, { ...owners, title: 'Inbox' }];
+    expect(await refused(t, { title: 'Bench Dialog' })).toBe(false);
+    expect(t.calls).toEqual([{ title: 'Bench Dialog', processId: 101 }]);
   });
 
-  it('a Store app counts by the process its frame hosts', async () => {
-    front = { processId: 300, hostedProcessId: 400, processName: 'ApplicationFrameHost.exe', title: 'Calculator' };
-    expect(await refused(tool('type_text'))).toBe(false);
-    front = { processId: 300, hostedProcessId: 201, processName: 'ApplicationFrameHost.exe', title: 'Mail' };
-    expect(await refused(tool('type_text'))).toBe(true);
+  it('with no target they act on the window in front', async () => {
+    expect(await refused(tool('close_window', targeted))).toBe(false);
+    front = owners;
+    expect(await refused(tool('close_window', targeted))).toBe(true);
   });
 
-  it('the refusal says what was refused and that nothing happened', async () => {
-    const r = await fenceTools([tool('get_windows')], fenced)[0].handler({}, ctx);
-    expect(r.text).toMatch(/^FENCED: get_windows is outside the test fence \(CLAWD_FENCE_PIDS\) — nothing was done and nothing was read\.$/);
-    expect(isFenceRefusal(new Error(r.text))).toBe(true);
-    expect(isGuardRefusal(new Error(r.text))).toBe(true);
+  describe('a Store app (its window belongs to ApplicationFrameHost, which hosts every Store app)', () => {
+    it('in front, it counts by the process its frame hosts', async () => {
+      front = calc;
+      expect(await refused(tool('type_text'))).toBe(false);
+      front = settings;
+      expect(await refused(tool('type_text'))).toBe(true);
+    });
+
+    it('by title: refused while the frame host also owns a window of the owner (a call by process could close Settings)', async () => {
+      windows = [fixture, calc, settings];
+      const t = tool('close_window', targeted);
+      expect(await refused(t, { title: 'Calculator' })).toBe(true);
+      expect(t.calls).toEqual([]);
+    });
+
+    it('by title: allowed when every window of the frame host is fenced, pinned and still named', async () => {
+      windows = [fixture, calc];
+      const t = tool('close_window', targeted);
+      expect(await refused(t, { title: 'Calculator' })).toBe(false);
+      expect(t.calls).toEqual([{ title: 'Calculator', processId: 300 }]);
+    });
+
+    it('by the frame host\'s pid alone: refused', async () => {
+      windows = [fixture, calc, settings];
+      expect(await refused(tool('close_window', targeted), { processId: 300 })).toBe(true);
+      expect(await refused(tool('read_screen', targeted), { processId: 300 })).toBe(true);
+    });
+
+    it('by the exact window handle: allowed, the owner\'s handle refused', async () => {
+      windows = [fixture, calc, settings];
+      expect(await refused(tool('close_window', targeted), { handle: 7003 })).toBe(false);
+      expect(await refused(tool('close_window', targeted), { handle: 7004 })).toBe(true);
+    });
+  });
+});
+
+describe('the pointer', () => {
+  it('finds every point a call names: pairs, an action object, and each point of a path', () => {
+    expect(pointerPoints('mouseClick', [10, 20, 1])).toEqual([{ x: 10, y: 20 }]);
+    expect(pointerPoints('mouseDrag', [10, 20, 30, 40])).toEqual([{ x: 10, y: 20 }, { x: 30, y: 40 }]);
+    expect(pointerPoints('mouseScroll', [10, 20, -3])).toEqual([{ x: 10, y: 20 }]);
+    expect(pointerPoints('executeMouseAction', [{ kind: 'drag', x: 1, y: 2, endX: 3, endY: 4 }])).toEqual([{ x: 1, y: 2 }, { x: 3, y: 4 }]);
+    expect(pointerPoints('mouseDragStepped', [[{ x: 1, y: 2 }, { x: 3, y: 4 }, { x: 5, y: 6 }]])).toHaveLength(3);
+    expect(pointerPoints('mouseDrag', [10, 20, 30, 40, { path: [[11, 21], [900, 900]] }])).toEqual([{ x: 10, y: 20 }, { x: 30, y: 40 }, { x: 11, y: 21 }, { x: 900, y: 900 }]);
+    expect(pointerPoints('mouseDown', [])).toEqual([]);
+    expect(pointerPoints('mouseDown', ['left'])).toEqual([]);
+    expect(pointerPoints('mouseUp', [1])).toEqual([]);            // a lone number is a button
+    expect(pointerPoints('mouseMoveRelative', [50, 60])).toEqual([]);   // offsets, not a point
+  });
+
+  const at = (method: string, args: unknown[]) => fencePointer(method, args, fenced);
+
+  it('a click, a scroll and a move may only go inside the fenced window in front', async () => {
+    for (const m of ['mouseClick', 'mouseDoubleClick', 'mouseRightClick', 'mouseScroll', 'mouseMove']) {
+      await expect(at(m, [300, 250]), m).resolves.toBeUndefined();
+      await expect(at(m, [700, 250]), m).rejects.toThrow(/not inside the fenced window/);   // the owner's window beside it
+    }
+  });
+
+  it('move, then press, then release cannot click another window: the bare press is checked at the LIVE pointer', async () => {
+    await expect(at('mouseMove', [700, 250])).rejects.toThrow(FENCED);        // the move itself is refused
+    cursor = { x: 700, y: 250 };                                             // ... and had the pointer got there anyway
+    await expect(at('mouseDown', [])).rejects.toThrow(/not inside the fenced window/);
+    await expect(at('mouseDown', ['left'])).rejects.toThrow(FENCED);
+    await expect(at('mouseUp', [])).rejects.toThrow(FENCED);
+    cursor = { x: 300, y: 250 };
+    await expect(at('mouseDown', [])).resolves.toBeUndefined();
+    await expect(at('mouseUp', ['left'])).resolves.toBeUndefined();
+  });
+
+  it('a relative move is checked at where it ends', async () => {
+    cursor = { x: 480, y: 250 };
+    await expect(at('mouseMoveRelative', [10, 0])).resolves.toBeUndefined();
+    await expect(at('mouseMoveRelative', [200, 0])).rejects.toThrow(FENCED);
+  });
+
+  it('a press with no readable pointer position is refused', async () => {
+    cursor = null;
+    await expect(at('mouseDown', [])).rejects.toThrow(/cannot be read/);
+    await expect(at('mouseMoveRelative', [1, 1])).rejects.toThrow(FENCED);
+  });
+
+  it('every point of a drag is checked: its start, its end and each point of its path', async () => {
+    await expect(at('mouseDrag', [150, 150, 450, 350])).resolves.toBeUndefined();
+    await expect(at('mouseDrag', [150, 150, 700, 150])).rejects.toThrow(FENCED);
+    await expect(at('mouseDrag', [150, 150, 450, 350, { path: [[200, 200], [700, 250], [300, 300]] }])).rejects.toThrow(FENCED);
+    await expect(at('mouseDragStepped', [[{ x: 150, y: 150 }, { x: 200, y: 200 }, { x: 450, y: 350 }]])).resolves.toBeUndefined();
+    await expect(at('mouseDragStepped', [[{ x: 150, y: 150 }, { x: 90, y: 20 }, { x: 450, y: 350 }]])).rejects.toThrow(FENCED);
+  });
+
+  it('needs a fenced window in front with known bounds', async () => {
+    front = owners;
+    await expect(at('mouseClick', [700, 250])).rejects.toThrow(FENCED);
+    front = { processId: 101 };
+    await expect(at('mouseClick', [300, 250])).rejects.toThrow(/no known bounds/);
+  });
+
+  it('every pointer method of a driver is checked where it is sent, before it runs', async () => {
+    process.env[FENCE_ENV] = '100';
+    __setForegroundReaderForTests(async () => ({ processId: 101, processName: 'BenchFixture', bounds: fixture.bounds }));
+    const sent: string[] = [];
+    class Driver {
+      async mouseClick(x: number, y: number) { sent.push(`click ${x},${y}`); }
+      async mouseMove(x: number, y: number) { sent.push(`move ${x},${y}`); }
+      async mouseMoveRelative(dx: number, dy: number) { sent.push(`rel ${dx},${dy}`); }
+      async mouseDown() { sent.push('down'); }
+      async mouseUp() { sent.push('up'); }
+      async mouseDragStepped(path: Array<{ x: number; y: number }>) { sent.push(`path ${path.length}`); }
+    }
+    const d = guardInputMethods(new Driver());
+    await expect(d.mouseMove(700, 250)).rejects.toThrow(FENCED);
+    await expect(d.mouseClick(700, 250)).rejects.toThrow(FENCED);
+    await expect(d.mouseMoveRelative(400, 0)).rejects.toThrow(FENCED);
+    await expect(d.mouseDragStepped([{ x: 150, y: 150 }, { x: 700, y: 250 }])).rejects.toThrow(FENCED);
+    cursor = { x: 700, y: 250 };
+    await expect(d.mouseDown()).rejects.toThrow(FENCED);
+    await expect(d.mouseUp()).rejects.toThrow(FENCED);
+    expect(sent).toEqual([]);
+    cursor = { x: 300, y: 250 };
+    await d.mouseMove(300, 250); await d.mouseDown(); await d.mouseUp(); await d.mouseClick(110, 110);
+    expect(sent).toEqual(['move 300,250', 'down', 'up', 'click 110,110']);
+  });
+});
+
+describe('screen geometry: fenced windows must be wholly on the primary display', () => {
+  // The owner's desk: DISPLAY1 at 0,0, 3840x2400 at 225%; DISPLAY2 at 2796,-1080 (logical), 1920x1080 at 100%.
+  const displays = [
+    { index: 0, primary: true, bounds: { x: 0, y: 0, width: 1707, height: 1067 }, physicalSize: { width: 3840, height: 2400 }, dpiRatio: 2.25 },
+    { index: 1, primary: false, bounds: { x: 2796, y: -1080, width: 1920, height: 1080 }, physicalSize: { width: 1920, height: 1080 }, dpiRatio: 1 },
+  ];
+  const onPrimary: Rect = { x: 900, y: 600, width: 2250, height: 1575 };           // a 1000x700 logical window at 225%
+  const onSecond: Rect = { x: 2796, y: -1080, width: 1000, height: 900 };
+  const straddling: Rect = { x: 3400, y: 200, width: 1000, height: 900 };          // runs off the right edge onto nothing, or the next monitor
+
+  it('the primary display is its physical rectangle on Windows and Linux, its logical one on macOS', () => {
+    expect(primaryRect(displays, 'win32')).toEqual({ x: 0, y: 0, width: 3840, height: 2400 });
+    expect(primaryRect(displays, 'linux')).toEqual({ x: 0, y: 0, width: 3840, height: 2400 });
+    expect(primaryRect(displays, 'darwin')).toEqual({ x: 0, y: 0, width: 1707, height: 1067 });
+    expect(primaryRect([displays[1]], 'win32')).toBeNull();
+  });
+
+  it('a window on the primary is wholly on it; one on the second monitor or across the edge is not', () => {
+    const p = primaryRect(displays, 'win32')!;
+    expect(wholly(onPrimary, p)).toBe(true);
+    expect(wholly({ x: -8, y: -8, width: 3856, height: 2416 }, p)).toBe(true);    // maximized: its invisible border overhangs
+    expect(wholly(onSecond, p)).toBe(false);
+    expect(wholly(straddling, p)).toBe(false);
+    expect(wholly({ x: 0, y: 0, width: 0, height: 0 }, p)).toBe(false);
+  });
+
+  it('pointer input and captures are refused for a fenced window on the second monitor or across the edge', async () => {
+    primary = primaryRect(displays, 'win32');
+    for (const bounds of [onSecond, straddling]) {
+      front = { ...fixture, bounds };
+      await expect(fencePointer('mouseClick', [bounds.x + 50, bounds.y + 50], fenced)).rejects.toThrow(/not wholly on the primary display/);
+      expect(await refused(tool('desktop_screenshot'))).toBe(true);
+    }
+    primary = null;   // the displays cannot be read: refused
+    front = { ...fixture, bounds: onPrimary };
+    await expect(fencePointer('mouseClick', [1000, 700], fenced)).rejects.toThrow(FENCED);
+  });
+
+  it('on the 225% primary, points and bounds are both physical pixels: inside is inside, the second monitor is outside', async () => {
+    primary = primaryRect(displays, 'win32');
+    front = { ...fixture, bounds: onPrimary };
+    await expect(fencePointer('mouseClick', [2000, 1500], fenced)).resolves.toBeUndefined();
+    await expect(fencePointer('mouseClick', [3149, 2174], fenced)).resolves.toBeUndefined();     // the last pixel of the window
+    await expect(fencePointer('mouseClick', [3200, 1500], fenced)).rejects.toThrow(FENCED);      // right of it, still on the primary
+    await expect(fencePointer('mouseClick', [4000, -500], fenced)).rejects.toThrow(FENCED);      // on DISPLAY2
+    await expect(fencePointer('mouseClick', [889, 667], fenced)).rejects.toThrow(FENCED);        // the same point in LOGICAL units is not inside
+    cursor = { x: 4000, y: -500 };
+    await expect(fencePointer('mouseDown', [], fenced)).rejects.toThrow(FENCED);
+  });
+});
+
+describe('typing', () => {
+  it('text with Enter or Tab goes a piece at a time, and stops when the focus has left the fence', async () => {
+    process.env[FENCE_ENV] = '100';
+    let inFront = { processId: 101, processName: 'BenchFixture' };
+    __setForegroundReaderForTests(async () => inFront);
+    const typed: string[] = [];
+    const desk = guardInputMethods({ typeText: async (t: string) => {
+      typed.push(t);
+      if (t.endsWith('\n')) inFront = { processId: 200, processName: 'OUTLOOK.EXE' };   // Enter closed the dialog: the owner's window is in front
+    } });
+    await expect(desk.typeText('name\tvalue\nto the owner')).rejects.toThrow(FENCED);
+    expect(typed).toEqual(['name\t', 'value\n']);
+  });
+
+  it('sends every piece when the focus stays', async () => {
+    process.env[FENCE_ENV] = '100';
+    __setForegroundReaderForTests(async () => ({ processId: 101, processName: 'BenchFixture' }));
+    const typed: string[] = [];
+    const desk = guardInputMethods({ typeText: async (t: string) => { typed.push(t); } });
+    await desk.typeText('one\r\ntwo\n\nthree');
+    expect(typed).toEqual(['one\r\n', 'two\n', '\n', 'three']);
+    await desk.typeText('plain');
+    expect(typed[typed.length - 1]).toBe('plain');
+  });
+
+  it('keys go only to a fenced window in front', async () => {
+    await expect(fenceInput(fixture, fenced)).resolves.toBeUndefined();
+    await expect(fenceInput(owners, fenced)).rejects.toThrow(/^FENCED: input/);
+    await expect(fenceInput(null, fenced)).rejects.toThrow(FENCED);
+    process.env[FENCE_ENV] = '100';
+    const send = vi.fn(async () => 'sent');
+    __setForegroundReaderForTests(async () => ({ processId: 200, processName: 'OUTLOOK.EXE' }));
+    await expect(guardedInput('keyPress', ['enter'], send)).rejects.toThrow(FENCED);
+    __setForegroundReaderForTests(async () => null);
+    await expect(guardedInput('keyPress', ['enter'], send)).rejects.toThrow(FENCED);
+    expect(send).not.toHaveBeenCalled();
+  });
+});
+
+describe('one capture path', () => {
+  const white = (w = 200, h = 100) => sharp({ create: { width: w, height: h, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+  const pixel = async (b64: string, x: number, y: number) => {
+    const { data, info } = await sharp(Buffer.from(b64, 'base64')).raw().toBuffer({ resolveWithObject: true });
+    return data[(y * info.width + x) * info.channels];
+  };
+  primary = { x: 0, y: 0, width: 3840, height: 2400 };
+
+  it('a full capture shows the fenced window and blacks out the rest, at the same size', async () => {
+    // The screen is 800x400 here, the image a quarter of that; the fixture window is at (100,100) 400x300.
+    const image = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 }, fenced);
+    const meta = await sharp(Buffer.from(image.data, 'base64')).metadata();
+    expect([meta.width, meta.height, image.mimeType]).toEqual([200, 100, 'image/png']);
+    expect(await pixel(image.data, 60, 50)).toBe(255);      // inside the window
+    expect(await pixel(image.data, 10, 10)).toBe(0);        // left of it
+    expect(await pixel(image.data, 160, 50)).toBe(0);       // the owner's window beside it
+  });
+
+  it('a region capture (zoom) is masked the same way, from where the region is on screen', async () => {
+    // The region is x 400..800, y 100..300 on screen: the fixture's right fifth (400..500) and the owner's window (600..800).
+    const image = await fenceImage(await white(200, 100), 'image/png', { originX: 400, originY: 100, screenWidth: 400 }, fenced);
+    expect(await pixel(image.data, 20, 50)).toBe(255);      // screen x 440: the fixture
+    expect(await pixel(image.data, 80, 50)).toBe(0);        // screen x 560: the gap
+    expect(await pixel(image.data, 150, 50)).toBe(0);       // screen x 700: the owner's window
+  });
+
+  it('macOS: bounds in points, the capture in pixels', async () => {
+    const image = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 8, boundsScale: 2 }, fenced);
+    expect(await pixel(image.data, 60, 50)).toBe(255);
+    expect(await pixel(image.data, 10, 10)).toBe(0);
+  });
+
+  it('is refused when no fenced window is in front, when it has no bounds, or when none of it is in the capture', async () => {
+    const frame = { originX: 0, originY: 0, scale: 4 };
+    front = owners;
+    await expect(fenceImage(await white(), 'image/png', frame, fenced)).rejects.toThrow(FENCED);
+    front = { processId: 101 };
+    await expect(fenceImage(await white(), 'image/png', frame, fenced)).rejects.toThrow(/no known bounds/);
+    front = fixture;
+    await expect(fenceImage(await white(), 'image/png', { originX: 3000, originY: 0, scale: 4 }, fenced)).rejects.toThrow(/not in this capture/);
+    await expect(fenceImage(await white(), 'image/png', { originX: 0, originY: 0 }, fenced)).rejects.toThrow(/cannot be mapped/);
+  });
+
+  it.each(['desktop_screenshot', 'screenshot_full', 'desktop_screenshot_region'])('%s: an image that did not come through it never leaves the gate', async name => {
+    const raw = { data: (await white()).toString('base64'), mimeType: 'image/png' };
+    const r = await run(tool(name, {}, { image: raw }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain(FENCED);
+    expect(r.image).toBeUndefined();
+    const through = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 }, fenced);
+    const ok = await run(tool(name, {}, { image: through }));
+    expect(ok.isError).toBeFalsy();
+    expect(ok.image).toBe(through);
+  });
+
+  it('a tool that is not a capture tool cannot return an image at all, masked or not', async () => {
+    const through = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 }, fenced);
+    const r = await run(tool('read_screen', {}, { image: through }));
+    expect(r.isError).toBe(true);
+    expect(r.image).toBeUndefined();
+  });
+
+  it('a capture needs a fenced window in front before anything is captured', async () => {
+    front = owners;
+    for (const name of ['desktop_screenshot', 'screenshot_full', 'desktop_screenshot_region']) {
+      const t = tool(name);
+      expect(await refused(t), name).toBe(true);
+      expect(t.calls).toEqual([]);
+    }
+  });
+});
+
+describe('the platform window list, OCR and the browser driver', () => {
+  it('the adapter lists fenced windows only; its own list stays for the gate', async () => {
+    const adapter = fencePlatform({ listWindows: async () => [fixture, owners, calc, settings] }, fenced);
+    expect((await adapter.listWindows()).map(w => w.title)).toEqual(['Bench Dialog', 'Calculator']);
+  });
+
+  it('OCR of the whole screen is refused', () => {
+    expect(() => fenceWholeScreen('OCR of the whole screen', fenced)).toThrow(FENCED);
+  });
+
+  it('the browser driver may attach only to the agent\'s own port', () => {
+    expect(fenceCdpOnly(9333, fenced)).toBe(9333);
   });
 });
 
 describe('through the real tool list', () => {
-  it('a compound action and every step of a batch reach the gate', async () => {
+  it('compound actions and every step of a batch are judged by the same table', async () => {
     process.env[FENCE_ENV] = '100';
     vi.resetModules();
     const fence = await import('../core/fence');
     fence.__setFenceProcessTableForTests(async () => TABLE);
-    fence.__setFenceDesktopForTests({ foreground: async () => owners, windows: async () => windows });
-    const { getTools } = await import('../tools/registry');
-    const compact = getTools({ palette: 'compact' });
-    const run = (name: string, params: Record<string, unknown>) => compact.find(t => t.name === name)!.handler(params, { ensureInitialized: async () => {} } as ToolContext);
+    fence.__setFenceDesktopForTests({ foreground: async () => owners, windows: async () => windows, cursor: async () => cursor, primary: async () => primary });
+    const registry = await import('../tools/registry');
+    const compact = registry.getTools({ palette: 'compact' });
+    const call = (name: string, params: Record<string, unknown>) => compact.find(t => t.name === name)!.handler(params, { ensureInitialized: async () => {} } as ToolContext);
 
     for (const [name, params] of [
       ['window', { action: 'list' }], ['window', { action: 'close', title: 'Inbox' }], ['window', { action: 'open_url', url: 'https://example.com' }],
       ['system', { action: 'clipboard_read' }], ['system', { action: 'clipboard_write', text: 'x' }], ['system', { action: 'ocr' }],
-      ['computer', { action: 'screenshot' }], ['computer', { action: 'type', text: 'hello' }], ['accessibility', { action: 'read_tree', processId: 200 }],
+      ['system', { action: 'report' }], ['system', { action: 'undo' }],
+      ['computer', { action: 'screenshot' }], ['computer', { action: 'zoom', x: 0, y: 0, width: 10, height: 10 }], ['computer', { action: 'type', text: 'hello' }],
+      ['computer', { action: 'mouse_down' }], ['computer', { action: 'move_relative', dx: 5, dy: 5 }],
+      ['accessibility', { action: 'read_tree', processId: 200 }], ['accessibility', { action: 'read_tree', processId: '200' }],
+      ['accessibility', { action: 'smart_read', scope: 'screen' }], ['accessibility', { action: 'smart_click', target: 'Send' }],
+      ['browser', { action: 'evaluate', javascript: 'fetch("/api/state")' }],
     ] as Array<[string, Record<string, unknown>]>) {
-      const r = await run(name, params);
+      const r = await call(name, params);
       expect(r.isError, `${name} ${params.action}`).toBe(true);
       expect(r.text, `${name} ${params.action}`).toContain(FENCED);
+      expect(r.image, `${name} ${params.action}`).toBeUndefined();
     }
 
     // A batch: the first step is harmless and runs, the second is refused, and the third never runs.
-    const batch = await run('batch', { steps: [
+    const batch = await call('batch', { steps: [
       { name: 'computer', arguments: { action: 'wait', seconds: 0.01 } },
       { name: 'computer', arguments: { action: 'type', text: 'to the owner' } },
       { name: 'window', arguments: { action: 'close', title: 'Inbox' } },
@@ -233,6 +620,9 @@ describe('through the real tool list', () => {
     expect(batch.isError).toBe(true);
     expect(batch.text).toContain(FENCED);
     expect(batch.steps?.map(s => s.status)).toEqual(['ok', 'error']);   // halted at the refused step: the third never ran
+    // The same with granular tool names as steps.
+    const granular = await call('batch', { steps: [{ name: 'get_windows', arguments: {} }] });
+    expect(granular.text).toContain(FENCED);
   });
 
   it('without the variable the same list has the plain handlers', async () => {
@@ -240,98 +630,30 @@ describe('through the real tool list', () => {
     vi.resetModules();
     const fence = await import('../core/fence');
     const spy = vi.spyOn(fence, 'fenceGate');
-    const { getTools } = await import('../tools/registry');
-    const r = await getTools().find(t => t.name === 'wait')!.handler({ seconds: 0.01 }, { ensureInitialized: async () => {} } as ToolContext);
+    const registry = await import('../tools/registry');
+    const r = await registry.getTools().find(t => t.name === 'wait')!.handler({ seconds: 0.01 }, { ensureInitialized: async () => {} } as ToolContext);
     expect(r.isError).toBeFalsy();
     expect(spy).not.toHaveBeenCalled();
   });
 });
 
-describe('input', () => {
-  it('goes only to a fenced window in front', async () => {
-    await expect(fenceInput(fixture, undefined, fenced)).resolves.toBeUndefined();
-    await expect(fenceInput(owners, undefined, fenced)).rejects.toThrow(/^FENCED: input/);
-    await expect(fenceInput(null, undefined, fenced)).rejects.toThrow(FENCED);
+describe('the refusal', () => {
+  it('says what was refused and that nothing happened', async () => {
+    const r = await run(tool('get_windows'));
+    expect(r.text).toMatch(/^FENCED: get_windows is outside the test fence \(CLAWD_FENCE_PIDS\) — nothing was done and nothing was read\.$/);
+    expect(isFenceRefusal(new Error(r.text))).toBe(true);
+    expect(isGuardRefusal(new Error(r.text))).toBe(true);
   });
 
-  it('a pointer press must land inside the fenced window', async () => {
-    const press = (x: number, y: number, boundsPerMouse = 1) => fenceInput(fixture, { points: [{ x, y }], boundsPerMouse }, fenced);
-    await expect(press(300, 250)).resolves.toBeUndefined();
-    await expect(press(100, 100)).resolves.toBeUndefined();          // the corner
-    await expect(press(700, 250)).rejects.toThrow(/not inside the fenced window/);   // the owner's window beside it
-    await expect(press(300, 20)).rejects.toThrow(FENCED);
-    // Windows: bounds are physical pixels, the mouse moves in logical ones (150% scaling here).
-    await expect(press(200, 150, 1.5)).resolves.toBeUndefined();     // (300, 225) physical
-    await expect(press(400, 150, 1.5)).rejects.toThrow(FENCED);      // (600, 225) physical: outside
-  });
-
-  it('every point of a drag is checked, and a window with no bounds takes no pointer', async () => {
-    await expect(fenceInput(fixture, { points: [{ x: 150, y: 150 }, { x: 700, y: 150 }], boundsPerMouse: 1 }, fenced)).rejects.toThrow(FENCED);
-    await expect(fenceInput({ processId: 101 }, { points: [{ x: 150, y: 150 }], boundsPerMouse: 1 }, fenced)).rejects.toThrow(/no known bounds/);
-  });
-
-  it('the pointer methods say where they press', () => {
-    const desktop = { dpiRatio: 1.5 };
-    const k = process.platform === 'win32' ? 1.5 : 1;
-    expect(pointerPress('mouseClick', [10, 20, 1], desktop)).toEqual({ points: [{ x: 10, y: 20 }], boundsPerMouse: k });
-    expect(pointerPress('mouseDrag', [10, 20, 30, 40], desktop)).toEqual({ points: [{ x: 10, y: 20 }, { x: 30, y: 40 }], boundsPerMouse: k });
-    expect(pointerPress('mouseScroll', [10, 20, -3], desktop)?.points).toEqual([{ x: 10, y: 20 }]);
-    expect(pointerPress('executeMouseAction', [{ kind: 'drag', x: 1, y: 2, endX: 3, endY: 4 }], {})).toEqual({ points: [{ x: 1, y: 2 }, { x: 3, y: 4 }], boundsPerMouse: 1 });
-    expect(pointerPress('typeText', ['hello'], desktop)).toBeUndefined();
-    expect(pointerPress('keyPress', ['ctrl+a'], desktop)).toBeUndefined();
-  });
-
-  it('the input guard refuses before anything is sent: wrong window, a click beside the window, no foreground', async () => {
-    process.env[FENCE_ENV] = '100';
-    const send = vi.fn(async () => 'sent');
-    __setForegroundReaderForTests(async () => ({ processId: 200, processName: 'OUTLOOK.EXE' }));
-    await expect(guardedInput('typeText', ['hi'], send)).rejects.toThrow(FENCED);
-    __setForegroundReaderForTests(async () => null);
-    await expect(guardedInput('typeText', ['hi'], send)).rejects.toThrow(FENCED);
-    expect(send).not.toHaveBeenCalled();
-    __setForegroundReaderForTests(async () => ({ processId: 101, processName: 'BenchFixture' }));
-    expect(await guardedInput('typeText', ['hi'], send)).toBe('sent');
-    __setForegroundReaderForTests(async () => null);
-  });
-});
-
-describe('a screenshot under the fence', () => {
-  const white = () => sharp({ create: { width: 200, height: 100, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
-  const pixel = async (buf: Buffer, x: number, y: number) => {
-    const { data, info } = await sharp(buf).raw().toBuffer({ resolveWithObject: true });
-    return data[(y * info.width + x) * info.channels];
-  };
-
-  it('shows the fenced window and blacks out the rest, at the same size', async () => {
-    // The screen is 800x400, the image half that; the fixture window is at (100,100) 400x300 on screen.
-    const out = await fenceMask(await white(), { originX: 0, originY: 0, scale: 4 }, fenced);
-    const meta = await sharp(out).metadata();
-    expect([meta.width, meta.height, meta.format]).toEqual([200, 100, 'png']);
-    expect(await pixel(out, 60, 50)).toBe(255);      // inside the window: (240, 200) on screen
-    expect(await pixel(out, 10, 10)).toBe(0);        // left of it
-    expect(await pixel(out, 160, 50)).toBe(0);       // the owner's window beside it
-  });
-
-  it('is refused when the window in front is not fenced, or has no bounds, or is on another display', async () => {
-    front = owners;
-    await expect(fenceMask(await white(), { originX: 0, originY: 0, scale: 4 }, fenced)).rejects.toThrow(FENCED);
-    front = { processId: 101 };
-    await expect(fenceMask(await white(), { originX: 0, originY: 0, scale: 4 }, fenced)).rejects.toThrow(/no known bounds/);
-    front = fixture;
-    await expect(fenceMask(await white(), { originX: 5000, originY: 0, scale: 4 }, fenced)).rejects.toThrow(/not on this display/);
-  });
-});
-
-describe('the browser driver, results and the log', () => {
-  it('may attach only to the agent\'s own port', () => {
-    expect(fenceCdpOnly(9333, fenced)).toBe(9333);
-  });
-
-  it('a refusal is the code FENCED, a refusal and not a failure', () => {
+  it('is the code FENCED and a refusal, only while the fence is on', () => {
     const text = `${FENCED}get_windows is outside the test fence (CLAWD_FENCE_PIDS) — nothing was done and nothing was read.`;
+    process.env[FENCE_ENV] = '100';
     expect(classifyResult(text, true, true)).toMatchObject({ outcome: 'refused', code: 'FENCED' });
-    expect(classifyResult(`window: ${text}`, true, false)).toMatchObject({ code: 'FENCED' });
     expect(outcomeOf(true, text)).toBe('refused');
-    expect(outcomeOf(false, 'Typed "FENCED: " into the field')).toBe('ok');
+    expect(outcomeOf(false, `Typed "${FENCED}" into the field`)).toBe('ok');
+    expect(outcomeOf(true, `no element named "${FENCED}x"`)).not.toBe('refused');   // not at the start: screen text
+    delete process.env[FENCE_ENV];
+    expect(classifyResult(text, true, true)?.code).not.toBe('FENCED');
+    expect(outcomeOf(true, text)).toBe('error');
   });
 });

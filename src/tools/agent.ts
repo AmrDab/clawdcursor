@@ -3,6 +3,7 @@
  * they can do, resume a paused run, and capture the full screen.
  */
 
+import { fenceImage } from '../core/fence';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
 import { pauseGate, parsePauseCard } from '../core/pause-gate';
@@ -234,10 +235,11 @@ export function getAgentTools(): ToolDefinition[] {
           // format }. Format is configured per-capture (`'jpeg'` by default,
           // sometimes `'png'`); use it to set the correct mimeType instead
           // of the previous hardcoded 'image/png' which lied for the JPEG path.
-          const b64 = Buffer.isBuffer(frame.buffer)
-            ? frame.buffer.toString('base64')
-            : Buffer.from(frame.buffer).toString('base64');
           const mimeType = frame.format === 'png' ? 'image/png' : 'image/jpeg';
+          // The one capture path (core/fence.ts): under the test fence only the fenced window is shown.
+          const ratio = Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio);
+          const image = await fenceImage(Buffer.isBuffer(frame.buffer) ? frame.buffer : Buffer.from(frame.buffer), mimeType,
+            { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale: process.platform === 'darwin' && ratio > 0 ? ratio : 1 });
           return {
             text: JSON.stringify({
               scaleFactor: frame.scaleFactor,
@@ -245,7 +247,7 @@ export function getAgentTools(): ToolDefinition[] {
               llmHeight: frame.llmHeight,
               format: frame.format,
             }),
-            image: { data: b64, mimeType },
+            image,
           };
         } catch (err) {
           return { text: `Screenshot failed: ${(err as Error).message}`, isError: true };
