@@ -162,8 +162,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   clicks the text OCR sees), and several visible elements with the name are listed with role and position instead of
   one being picked (`AMBIGUOUS`: pass `controlType`, or click the position). A label gives way to the control that
   shares its name, and of several visible matches only those inside the dialog that has the focus count (a toolbar
-  and a dialog in one window both have "Close"). A minimized window is still driven by pattern, as before, and a miss
-  never hands out a point on no monitor to click. Value reads and writes are unchanged.
+  and a dialog in one window both have "Close"). A minimized window is still driven by pattern, through the same
+  choice with placement unknown (two controls of one name are ambiguous there too), and a miss never hands out a point
+  on no monitor to click. Value reads and writes are unchanged.
 - **`find` and the focused element mark an element on no monitor offscreen (Windows)**, as `read_tree` does: no
   position, listed after the elements on screen. `find "Model"` listed a hidden web view's text at y up to 31,000.
   The 20-result cut now comes after "on screen first", so hidden matches cannot crowd out the visible one.

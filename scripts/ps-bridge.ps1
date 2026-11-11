@@ -1114,15 +1114,21 @@ function Test-RectOnMonitor($rect, $monitors) {
 #   2. None visible: the best match that UIA calls offscreen but that has a place on a monitor, or no rect at all (a row
 #      scrolled out of its list, an item of a closed menu).
 #   3. Only matches whose rect is on NO monitor: hidden, never pressed.
+# -placementUnknown, for a MINIMIZED window: every element is at -32000 and UIA calls all of them offscreen, so where an
+# element would be, and whether the window would show it, cannot be told. Placement then rules nothing in and nothing
+# out (no "visible", no "hidden", no label-inside-its-control: the rects say nothing) and the rest of the choice
+# stands: best name match, a control over a caption, the focused dialog - and several left is ambiguous, never the
+# first in the tree (that was the hidden web view's link again).
 # $hits, in tree order: @{ index; pass; rect = @{ x; y; width; height } or $null; offscreen }. $isActionable and
 # $inFocusedDialog: { param($hit) }.
 # -> @{ index } | @{ ambiguous = indices } | @{ hidden = $true } | $null (no hits)
 function Select-InvokeTarget {
-    param($hits, $monitors, [scriptblock]$isActionable, [scriptblock]$inFocusedDialog)
+    param($hits, $monitors, [scriptblock]$isActionable, [scriptblock]$inFocusedDialog, [switch]$placementUnknown)
     $hits = @($hits)
     if ($hits.Count -eq 0) { return $null }
     $placed = { param($h) $null -ne $h.rect -and $h.rect.width -gt 0 -and $h.rect.height -gt 0 }
-    $visible = @($hits | Where-Object { -not $_.offscreen -and (& $placed $_) -and (Test-RectOnMonitor $_.rect $monitors) })
+    $visible = @(if ($placementUnknown) { $hits }
+        else { $hits | Where-Object { -not $_.offscreen -and (& $placed $_) -and (Test-RectOnMonitor $_.rect $monitors) } })
     if ($visible.Count -eq 0) {
         $rest = @($hits | Where-Object { -not (& $placed $_) -or (Test-RectOnMonitor $_.rect $monitors) } | Sort-Object { $_.pass }, { $_.index })
         if ($rest.Count -eq 0) { return @{ hidden = $true } }
@@ -1130,15 +1136,15 @@ function Select-InvokeTarget {
     }
     $best = ($visible | ForEach-Object { $_.pass } | Measure-Object -Minimum).Minimum
     $same = @($visible | Where-Object { $_.pass -eq $best })
-    if ($same.Count -gt 1) {
+    if ($same.Count -gt 1 -and $isActionable) {
         $acts = @($same | Where-Object { & $isActionable $_ })
         if ($acts.Count -gt 0) { $same = $acts }
     }
     $inside = { param($a, $b) $a.x -ge $b.x -and $a.y -ge $b.y -and $a.x + $a.width -le $b.x + $b.width -and $a.y + $a.height -le $b.y + $b.height }
-    $outer = @($same | Where-Object {
+    $outer = @(if ($placementUnknown) { $same } else { $same | Where-Object {
         $h = $_
         @($same | Where-Object { $_.index -ne $h.index -and (& $inside $h.rect $_.rect) -and (-not (& $inside $_.rect $h.rect) -or $_.index -lt $h.index) }).Count -eq 0
-    })
+    } })
     if ($outer.Count -gt 1 -and $inFocusedDialog) {
         $inDialog = @($outer | Where-Object { & $inFocusedDialog $_ })
         if ($inDialog.Count -ge 1) { $outer = $inDialog }
@@ -1171,7 +1177,8 @@ function Test-ElementUnder($el, $ancestor) {
     return $false
 }
 
-# A minimized window keeps every element at -32000: on no monitor, yet a pattern invoke needs no place on screen.
+# A minimized window keeps every element at -32000: on no monitor, yet a pattern invoke needs no place on screen. Its
+# elements go through the same choice with their placement unknown (Select-InvokeTarget -placementUnknown).
 function Test-WindowMinimized($window) {
     try {
         $wp = $window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
@@ -1276,17 +1283,15 @@ function Cmd-InvokeElement {
                 [void]$hits.Add(@{ index = $k; pass = $passOf[$k]; rect = $r; offscreen = $off })
             }
             $pick = $null
-            if ($hits.Count -gt 0 -and (Test-WindowMinimized $window)) {
-                # The window itself is minimized: nothing in it is "on screen", and nothing is hidden behind something
-                # else either. The best name match, first in the tree, by pattern - never by a click (see the miss below).
-                $pick = @{ index = @($hits | Sort-Object { $_.pass }, { $_.index })[0].index }
-            } elseif ($hits.Count -gt 0) {
+            if ($hits.Count -gt 0) {
                 $dialogBox = @{}
+                # A minimized window: the same choice, with placement unknown. By pattern only - the miss below never
+                # hands out a point on no monitor.
                 $pick = Select-InvokeTarget $hits (Get-MonitorRects) { param($h) Test-Activatable $candidates[$h.index] $action } {
                     param($h)
                     if (-not $dialogBox.ContainsKey('el')) { $dialogBox.el = Get-FocusedDialog }
                     $null -ne $dialogBox.el -and (Test-ElementUnder $candidates[$h.index] $dialogBox.el)
-                }
+                } -placementUnknown:(Test-WindowMinimized $window)
             }
             if ($null -ne $pick) {
                 if ($pick.hidden) { $hiddenOnly = $true }

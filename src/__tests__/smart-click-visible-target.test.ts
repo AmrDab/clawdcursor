@@ -9,7 +9,7 @@
  * The bridge needs a desktop, so its choice (Select-InvokeTarget) runs here for real with fake elements; the TS layer
  * runs with a fake bridge reply.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -232,6 +232,12 @@ function ctxFor(invokeElement: () => Promise<unknown>) {
 const smartClick = getSmartTools().find(t => t.name === 'smart_click')!;
 
 describe('smart_click', () => {
+  // The Windows case, on every CI runner: on macOS an OCR position is divided by the Retina ratio before the click
+  // (ocrPointToClickPoint), so the same word is clicked at other numbers there. That rule has its own tests.
+  const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  beforeEach(() => Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' }));
+  afterEach(() => Object.defineProperty(process, 'platform', realPlatform));
+
   it('ambiguous: says so and lists them; the OCR match is NOT clicked in its place', async () => {
     const { ctx, mouseClick } = ctxFor(async () => AMBIGUOUS);
     const r = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);

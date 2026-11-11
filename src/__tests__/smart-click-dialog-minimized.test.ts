@@ -124,13 +124,55 @@ ${click('Close')}
 });
 
 describe.runIf(process.platform === 'win32')('ps-bridge (run for real): a minimized window', () => {
-  it('invoke by name in a MINIMIZED window presses the first match by pattern, as 1.5.27 did', () => {
+  // Minimized, every element is at -32000 and UIA calls all of them offscreen: where each one would be, and whether the
+  // window would show it, cannot be told. So placement is UNKNOWN - it rules nothing in and nothing out - and the rest
+  // of the choice stands: best name match, a control over a caption, the focused dialog, and never "the first in the tree".
+  it('Select-InvokeTarget -placementUnknown: one match is the one; a control beats a caption; two controls are ambiguous, same rect or not', () => {
+    const out = runPs(['Test-RectOnMonitor', 'Select-InvokeTarget'], `${SELECT_SETUP}
+function Min($i, $pass = 1) { return @{ index = $i; pass = $pass; rect = (Rc -32000 -32000 160 28); offscreen = $true } }
+$only1 = { param($h) $h.index -eq 1 }
+"1 $(Show (Select-InvokeTarget @((Min 0)) $monitors $all $null -placementUnknown))"
+"2 $(Show (Select-InvokeTarget @((Min 0), (Min 1)) $monitors $only1 $null -placementUnknown))"          # Text "New", then Button "New"
+"3 $(Show (Select-InvokeTarget @((Min 0), (Min 1)) $monitors $all $null -placementUnknown))"            # the hidden link and the ribbon button
+"4 $(Show (Select-InvokeTarget @((Min 0 2), (Min 1 1)) $monitors $all $null -placementUnknown))"        # the exact name still beats a looser match
+"5 $(Show (Select-InvokeTarget @((Min 0), (Min 1)) $monitors $all { param($h) $h.index -eq 1 } -placementUnknown))" # the focused dialog still decides
+"6 $(Show (Select-InvokeTarget @((Min 0), (Min 1)) $monitors $all))"                                     # a SHOWN window: both on no monitor
+"7 $(Show (Select-InvokeTarget @() $monitors $all $null -placementUnknown))"`);
+    expect(out).toEqual(['1 index 0', '2 index 1', '3 ambiguous 0,1', '4 index 1', '5 index 1', '6 hidden', '7 none']);
+  });
+
+  it('minimized, a single match: pressed by pattern', () => {
     const out = runPs(FNS, `${FAKE_WINDOW}
 $script:minimized = $true
-$script:window = Window @((El 'play' 'Play' -32000 -32000 80 30), (El 'play-2' 'Play' -31900 -32000 80 30))
+$script:window = Window @((El 'play' 'Play' -32000 -32000 80 30))
 ${click('Play')}
 "success=$($r.success) method=$($r.method) pressed=$($script:pressed -join ',')"`);
     expect(out).toEqual(['success=True method=InvokePattern pressed=play']);
+  });
+
+  it('minimized, the hidden web view\'s link and the ribbon button (both take a press): AMBIGUOUS with the list, nothing pressed', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:minimized = $true
+$script:window = Window @((El 'web-link' 'New' -32000 -32000 160 28), (El 'ribbon' 'New' -32000 -32000 160 28))
+${click('New')}
+"success=$($r.success) reason=$($r.reason) n=$(@($r.candidates).Count) pressed=$($script:pressed.Count)"`);
+    expect(out).toEqual(['success=False reason=ambiguous n=2 pressed=0']);
+  });
+
+  it('minimized, a Text label and a Button of one name: the button, though the label is first in the tree', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:minimized = $true
+$script:window = Window @((El 'label' 'New' -32000 -32000 160 28 $false), (El 'button' 'New' -32000 -32000 160 28))
+${click('New')}
+"success=$($r.success) pressed=$($script:pressed -join ',')"`);
+    expect(out).toEqual(['success=True pressed=button']);
+  });
+
+  it('the minimized branch goes through the one choice: no "first match" shortcut is left in the bridge', () => {
+    const inv = fnBody('Cmd-InvokeElement');
+    expect(inv).toMatch(/-placementUnknown:\(Test-WindowMinimized \$window\)/);
+    expect(inv.match(/Select-InvokeTarget /g)).toHaveLength(1);
+    expect(inv).not.toMatch(/Sort-Object \{ \$_\.pass \}/);
   });
 
   it('the same elements in a window that is SHOWN are hidden: nothing pressed', () => {
