@@ -5,7 +5,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { runCli, sigOf, which, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
+import { locateAgent, runCli, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
 
@@ -47,14 +47,19 @@ export const claudeCode: Adapter = {
   defaultModels: ['sonnet', 'haiku'],
   seesImages: true,
   async detect() {
-    const exe = which('claude');
-    if (!exe) return null;
-    const v = (await tryRun(exe, ['--version']))?.trim();
-    return v ? `${v} (${exe})` : null;
+    const found = locateAgent('claude', '--claude-bin');
+    if ('why' in found) return null;
+    const v = (await tryRun(found.exe, ['--version']))?.trim();
+    return v ? `${v} (${found.exe})` : null;
+  },
+  why() {
+    const found = locateAgent('claude', '--claude-bin');
+    return 'why' in found ? found.why : null;
   },
   async run(job: AgentJob) {
-    const exe = which('claude');
-    if (!exe) throw new Error('claude is not on PATH');
+    const found = locateAgent('claude', '--claude-bin');
+    if ('why' in found) throw new Error(`claude: ${found.why}`);
+    const exe = found.exe;
     const mcpConfigPath = path.join(job.workDir, 'mcp.json');
     fs.writeFileSync(mcpConfigPath, claudeMcpConfig(job.mcpUrl, job.token), { flag: 'wx', mode: 0o600 });
     let finalText = '';

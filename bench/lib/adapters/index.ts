@@ -23,8 +23,11 @@ export function parseModels(spec: string, adapters: Adapter[] = ADAPTERS): Model
 }
 
 /** Every installed adapter with its default models. */
-export async function detectModels(adapters: Adapter[] = ADAPTERS): Promise<{ runs: ModelRun[]; found: Array<{ id: string; detail: string | null }> }> {
-  const found = await Promise.all(adapters.map(async a => ({ id: a.id, detail: await a.detect().catch(() => null) })));
+export async function detectModels(adapters: Adapter[] = ADAPTERS): Promise<{ runs: ModelRun[]; found: Array<{ id: string; detail: string | null; why: string | null }> }> {
+  const found = await Promise.all(adapters.map(async a => {
+    const detail = await a.detect().catch(() => null);
+    return { id: a.id, detail, why: detail ? null : a.why?.() ?? null };
+  }));
   const runs = adapters.filter((_, i) => found[i].detail).flatMap(a => a.defaultModels.map(model => ({ adapter: a, model, label: `${a.id}:${model}` })));
   return { runs, found };
 }

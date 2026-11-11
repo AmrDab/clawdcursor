@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { ADAPTERS, detectModels, parseModels, type ModelRun } from './lib/adapters';
+import { setAgentBin } from './lib/adapters/common';
 import { findBrowser } from './lib/browser';
 import { Cleanup } from './lib/cleanup';
 import { startFixtureServer, type FixtureServer } from './lib/fixture-server';
@@ -25,7 +26,7 @@ import type { AgentRun, CallSig, TaskSpec } from './lib/types';
 
 export interface Options {
   live: boolean; selfcheck: boolean; includeManual: boolean; updateBaseline: boolean; repeats: number;
-  build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string;
+  build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string; claudeBin?: string; codexBin?: string;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -42,6 +43,8 @@ export function parseArgs(argv: string[]): Options {
     else if (a === '--tasks') o.tasks = value().split(',').map(s => s.trim()).filter(Boolean);
     else if (a === '--out') o.out = value();
     else if (a === '--baseline') o.baseline = value();
+    else if (a === '--claude-bin') o.claudeBin = value();
+    else if (a === '--codex-bin') o.codexBin = value();
     else if (a === '--repeats') {
       o.repeats = Number(value());
       if (!Number.isInteger(o.repeats) || o.repeats < 1 || o.repeats > 9) throw new Error('--repeats needs a number from 1 to 9');
@@ -210,7 +213,7 @@ async function plan(o: Options): Promise<void> {
   console.log('\nAgents:');
   for (const f of found) {
     const a = ADAPTERS.find(x => x.id === f.id);
-    console.log(`  ${f.id.padEnd(12)} ${f.detail ?? 'not installed'}${f.detail && a && !a.seesImages ? '  (no images: screenshot tasks are n/a)' : ''}`);
+    console.log(`  ${f.id.padEnd(12)} ${f.detail ?? f.why ?? 'not installed'}${f.detail && a && !a.seesImages ? '  (no images: screenshot tasks are n/a)' : ''}`);
   }
   const browser = findBrowser();
   console.log(`\nBrowser: ${browser ? browser.exe : 'none found (web tasks are skipped)'}`);
@@ -224,7 +227,7 @@ async function live(o: Options): Promise<void> {
   const { run, skipped } = selectTasks(loadTasks(), o);
   const models = o.models ? parseModels(o.models) : (await detectModels()).runs;
   if (!models.length) throw new Error(`no agent host found (${ADAPTERS.map(a => a.id).join(', ')})`);
-  for (const m of models) if (!await m.adapter.detect()) throw new Error(`${m.adapter.id} is not installed`);
+  for (const m of models) if (!await m.adapter.detect()) throw new Error(`${m.adapter.id}: ${m.adapter.why?.() ?? 'not installed'}`);
   // The daemon tries the default browser debug port when it starts: a browser there is the owner's own session.
   if (await portOpen(USER_CDP_PORT)) throw new Error(`a browser is listening on debug port ${USER_CDP_PORT}: clawdcursor would attach to it. Close it first.`);
   const { cli, version, source } = await resolveCli(o.build);
@@ -295,6 +298,8 @@ async function live(o: Options): Promise<void> {
 
 async function main(): Promise<void> {
   const o = parseArgs(process.argv.slice(2));
+  if (o.claudeBin) setAgentBin('claude', o.claudeBin);
+  if (o.codexBin) setAgentBin('codex', o.codexBin);
   if (o.selfcheck) {
     const { selfcheckWeb, selfcheckNative, selfcheckIsolation } = await import('./lib/selfcheck');
     const results = [await selfcheckNative(), await selfcheckWeb(), await selfcheckIsolation(o.build)];

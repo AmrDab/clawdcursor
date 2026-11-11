@@ -1,9 +1,44 @@
 /** What every agent adapter shares: the job, the result, running a CLI and reading its output line by line. */
 import { createHash } from 'crypto';
 import * as fs from 'fs';
-import { killTree, start, which } from '../proc';
+import * as path from 'path';
+import { findShim, killTree, start, which } from '../proc';
 
 export { which };
+
+/** The binaries named with --claude-bin / --codex-bin, by program name ("claude", "codex"). */
+const binOverrides = new Map<string, string>();
+
+/**
+ * Use this binary for `name` instead of looking on PATH. Only a native executable is accepted: on Windows a path that
+ * ends in .exe (a .cmd or .bat shim would need a shell, and nothing here runs through one); an existing file anywhere.
+ */
+export function setAgentBin(name: string, file: string, platform: string = process.platform): void {
+  const abs = path.resolve(file);
+  if (platform === 'win32' ? !/\.exe$/i.test(abs) : /\.(cmd|bat|ps1|sh)$/i.test(abs)) {
+    throw new Error(`${file} is not a native binary: pass the path of ${name}${platform === 'win32' ? '.exe' : ''} itself, not a launcher script`);
+  }
+  let isFile = false;
+  try { isFile = fs.statSync(abs).isFile(); } catch { /* not there */ }
+  if (!isFile) throw new Error(`${file} is not a file`);
+  binOverrides.set(name, abs);
+}
+export function clearAgentBins(): void { binOverrides.clear(); }
+
+/**
+ * The native binary of an agent host: the one named with its --*-bin flag, else `name` on PATH (a real executable),
+ * else what `fallback` finds. When there is none, `why` says so; an npm .cmd shim on PATH is named, not run.
+ */
+export function locateAgent(name: string, flag: string, o: { fallback?: () => string | null; env?: NodeJS.ProcessEnv; platform?: string } = {}): { exe: string } | { why: string } {
+  const override = binOverrides.get(name);
+  if (override) return { exe: override };
+  const exe = which(name, o.env, o.platform) ?? o.fallback?.() ?? null;
+  if (exe) return { exe };
+  const shim = findShim(name, o.env, o.platform);
+  return { why: shim
+    ? `found only an npm .cmd shim at ${shim}; the benchmark needs the native binary (${name}.exe): install it from the vendor, or pass ${flag}`
+    : 'not installed' };
+}
 import type { CallSig } from '../types';
 
 export interface AgentJob {
@@ -35,6 +70,8 @@ export interface Adapter {
   seesImages: boolean;
   /** A version or detail line when this agent host is installed, else null. */
   detect(): Promise<string | null>;
+  /** Why detect() found nothing usable, when there is more to say than "not installed" (only a .cmd shim, a bad --*-bin). */
+  why?(): string | null;
   run(job: AgentJob): Promise<AgentResult>;
 }
 

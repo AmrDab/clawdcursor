@@ -72,6 +72,7 @@ Options of a live run:
 | `--build <dir>` | the clawdcursor under test: `<dir>/dist/surface/cli.js`. Without it, the global install. |
 | `--models a:b,c:d` | e.g. `claude-code:sonnet,claude-code:haiku,codex:default,ollama:qwen2.5:7b`. Default: every installed agent with its default models. |
 | `--tasks id,id` | only these tasks |
+| `--claude-bin <file>`, `--codex-bin <file>` | the native binary to use (`claude.exe`, `codex.exe`) when it is not on PATH. An npm `.cmd` launcher is not accepted: nothing is run through a shell. |
 | `--include-manual` | also the manual-verify tasks (open Designcenter with a part loaded first) |
 | `--out <dir>` | results directory: new or empty (default: a new folder under the temp directory). A directory that holds anything is refused, so an earlier run's logs cannot be read back. |
 | `--repeats N` | run each task N times per model (1 to 9, default 1) |

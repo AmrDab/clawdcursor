@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { claudeCommand, claudeMcpConfig, parseClaudeLine } from '../lib/adapters/claude-code';
-import { sigOf } from '../lib/adapters/common';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { clearAgentBins, locateAgent, setAgentBin, sigOf } from '../lib/adapters/common';
+import { parseArgs } from '../run';
 import { ADAPTERS, parseModels } from '../lib/adapters';
 import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, parseCodexLine } from '../lib/adapters/codex';
 import { MAX_TURNS, RESULT_CHARS, argsOf, chatRequest, resultText, runLoop, toOllamaTools, type OllamaMessage } from '../lib/adapters/ollama';
@@ -238,5 +242,51 @@ describe('the adapters', () => {
 
   it('say whether their model is shown images: the Ollama loop leaves them out', () => {
     expect(ADAPTERS.map(a => a.seesImages)).toEqual([true, true, false]);
+  });
+});
+
+describe('finding the native binary of an agent host', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-agent-bin-test-'));
+  const shim = path.join(dir, 'claude.cmd');
+  const exe = path.join(dir, 'native', 'claude.exe');
+  fs.writeFileSync(shim, '@echo off');
+  fs.mkdirSync(path.dirname(exe));
+  fs.writeFileSync(exe, '');
+  const win = { env: { PATH: dir }, platform: 'win32' };
+
+  it('only an npm .cmd shim on PATH: says so, names it, and says what to do', () => {
+    clearAgentBins();
+    expect(locateAgent('claude', '--claude-bin', win)).toEqual({ why:
+      `found only an npm .cmd shim at ${shim}; the benchmark needs the native binary (claude.exe): install it from the vendor, or pass --claude-bin` });
+    expect(locateAgent('codex', '--codex-bin', { ...win, fallback: () => null })).toEqual({ why: 'not installed' });
+  });
+
+  it('a real executable on PATH wins over a shim beside it, and a fallback is used when PATH has none', () => {
+    clearAgentBins();
+    expect(locateAgent('claude', '--claude-bin', { env: { PATH: `${dir};${path.dirname(exe)}` }, platform: 'win32' })).toEqual({ exe });
+    expect(locateAgent('codex', '--codex-bin', { ...win, fallback: () => 'C:\\app\\codex.exe' })).toEqual({ exe: 'C:\\app\\codex.exe' });
+  });
+
+  it('--claude-bin / --codex-bin name the binary, and it is used before PATH', () => {
+    expect(parseArgs(['--claude-bin', exe, '--codex-bin', 'x.exe'])).toMatchObject({ claudeBin: exe, codexBin: 'x.exe' });
+    setAgentBin('claude', exe, 'win32');
+    expect(locateAgent('claude', '--claude-bin', win)).toEqual({ exe });
+    clearAgentBins();
+    expect('why' in locateAgent('claude', '--claude-bin', win)).toBe(true);
+  });
+
+  it('only a path to an .exe is accepted on Windows: a shim, a script or a missing file is refused', () => {
+    expect(() => setAgentBin('claude', shim, 'win32')).toThrow(/not a native binary.*claude\.exe/);
+    expect(() => setAgentBin('claude', path.join(dir, 'claude.ps1'), 'win32')).toThrow(/not a native binary/);
+    expect(() => setAgentBin('claude', path.join(dir, 'claude'), 'win32')).toThrow(/not a native binary/);
+    expect(() => setAgentBin('claude', path.join(dir, 'missing.exe'), 'win32')).toThrow(/is not a file/);
+    expect(() => setAgentBin('claude', path.dirname(exe) + '.exe', 'win32')).toThrow(/is not a file/);
+    expect(() => setAgentBin('codex', path.join(dir, 'codex.sh'), 'linux')).toThrow(/not a native binary/);
+    clearAgentBins();
+    expect('why' in locateAgent('claude', '--claude-bin', win)).toBe(true);   // a refused path is not kept
+  });
+
+  it('the adapters report the reason, not just "not installed"', () => {
+    for (const a of ADAPTERS.filter(x => x.id !== 'ollama')) expect(typeof a.why).toBe('function');
   });
 });

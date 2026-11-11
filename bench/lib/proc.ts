@@ -26,6 +26,18 @@ export function which(name: string, env: NodeJS.ProcessEnv = process.env, platfo
   return null;
 }
 
+/** An npm launcher script for `name` on PATH (name.cmd / name.bat), on Windows. It is only reported, never run. */
+export function findShim(name: string, env: NodeJS.ProcessEnv = process.env, platform: string = process.platform): string | null {
+  if (platform !== 'win32') return null;
+  for (const dir of (env.PATH ?? env.Path ?? '').split(';').filter(Boolean)) {
+    for (const ext of ['.cmd', '.bat']) {
+      const p = path.join(dir, name + ext);
+      try { if (fs.statSync(p).isFile()) return p; } catch { /* not here */ }
+    }
+  }
+  return null;
+}
+
 /** Start a child in its own process group, so the whole tree can be stopped. Always by argument array, never through a shell. */
 export function start(cmd: string, args: string[], opts: SpawnOptions = {}): ChildProcess {
   return spawn(cmd, args, { windowsHide: true, detached: !isWin, ...opts, shell: false });

@@ -6,7 +6,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { runCli, sigOf, which, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
+import { locateAgent, runCli, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
 
@@ -64,10 +64,8 @@ export function parseCodexLine(line: string): { sig?: CallSig; id?: string; fina
   return {};
 }
 
-/** codex on PATH, else the newest binary the Codex desktop app installed. */
-export function findCodex(env: NodeJS.ProcessEnv = process.env): string | null {
-  const onPath = which('codex', env);
-  if (onPath) return onPath;
+/** The newest binary the Codex desktop app installed, when codex is not on PATH. */
+export function codexAppBinary(env: NodeJS.ProcessEnv = process.env): string | null {
   const bin = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
   if (!bin) return null;
   // One stat per candidate: the newest codex.exe that is there.
@@ -85,14 +83,19 @@ export const codex: Adapter = {
   defaultModels: [CODEX_DEFAULT],
   seesImages: true,
   async detect() {
-    const exe = findCodex();
-    if (!exe) return null;
-    const v = (await tryRun(exe, ['--version']))?.trim();
-    return v ? `${v} (${exe})` : null;
+    const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
+    if ('why' in found) return null;
+    const v = (await tryRun(found.exe, ['--version']))?.trim();
+    return v ? `${v} (${found.exe})` : null;
+  },
+  why() {
+    const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
+    return 'why' in found ? found.why : null;
   },
   async run(job: AgentJob) {
-    const exe = findCodex();
-    if (!exe) throw new Error('codex is not installed');
+    const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
+    if ('why' in found) throw new Error(`codex: ${found.why}`);
+    const exe = found.exe;
     const lastMessagePath = path.join(job.workDir, 'last-message.txt');
     let finalText = '';
     const seen = new Set<string>();
