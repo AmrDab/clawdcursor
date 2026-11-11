@@ -111,9 +111,17 @@ export const ollama: Adapter = {
   },
   async run(job: AgentJob): Promise<AgentResult> {
     const client = new Client({ name: 'clawdcursor-bench-ollama', version: '1' });
-    await client.connect(new StreamableHTTPClientTransport(new URL(job.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${job.token}` } } }));
+    // Reaching clawdcursor (connect, initialize, tools/list) is the server's part: when it fails, the row is a
+    // clawdcursor failure. Everything after it that throws (the model, the loop) is the agent's.
+    let mcpTools: McpTool[];
     try {
-      const mcpTools = (await client.listTools()).tools as McpTool[];
+      await client.connect(new StreamableHTTPClientTransport(new URL(job.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${job.token}` } } }));
+      mcpTools = (await client.listTools()).tools as McpTool[];
+    } catch (e) {
+      await client.close().catch(() => { /* never opened */ });
+      return { finalText: '', exitCode: 1, serverUnreachable: `the MCP connection failed: ${(e as Error).message}` };
+    }
+    try {
       const tools = toOllamaTools(mcpTools);
       const finalText = await runLoop(job.prompt, mcpTools.map(t => t.name), {
         signal: job.signal, onSig: job.onSig,

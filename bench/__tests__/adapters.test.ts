@@ -6,7 +6,11 @@ import * as path from 'path';
 import { PREFLIGHT_PROMPT, clearAgentBins, locateAgent, preflightFailure, setAgentBin, sigOf, type Adapter } from '../lib/adapters/common';
 import { parseArgs } from '../run';
 import { ADAPTERS, parseModels, preflightAll } from '../lib/adapters';
-import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, codexPreflightCommand, parseCodexLine } from '../lib/adapters/codex';
+import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, codexPreflightCommand, codexServerFailure, parseCodexLine } from '../lib/adapters/codex';
+import { ollama } from '../lib/adapters/ollama';
+import { probeMcp } from '../lib/isolated';
+import * as http from 'http';
+import type { AddressInfo } from 'net';
 import { MAX_TURNS, RESULT_CHARS, argsOf, chatRequest, resultText, runLoop, toOllamaTools, type OllamaMessage } from '../lib/adapters/ollama';
 
 describe('call signatures', () => {
@@ -348,5 +352,75 @@ describe('the preflight: can each agent run at all, before anything opens on the
 
   it('every adapter has one', () => {
     for (const a of ADAPTERS) expect(typeof a.preflight, a.id).toBe('function');
+  });
+});
+
+describe('an adapter that cannot reach clawdcursor says so: it is the server\'s failure', () => {
+  const init = (servers: unknown) => JSON.stringify({ type: 'system', subtype: 'init', session_id: 's', tools: [], mcp_servers: servers });
+
+  it('claude-code: the init line lists the MCP server as anything but connected', () => {
+    expect(parseClaudeLine(init([{ name: 'clawdcursor', status: 'connected' }]))).toEqual({ sigs: [] });
+    expect(parseClaudeLine(init([{ name: 'clawdcursor', status: 'failed' }]))).toEqual({ sigs: [], serverUnreachable: 'Claude Code reports the clawdcursor MCP server as "failed"' });
+    expect(parseClaudeLine(init([{ name: 'clawdcursor', status: 'needs-auth' }])).serverUnreachable).toMatch(/"needs-auth"/);
+    expect(parseClaudeLine(init([{ name: 'clawdcursor' }])).serverUnreachable).toMatch(/"unknown"/);
+    expect(parseClaudeLine(init([])).serverUnreachable).toBe('Claude Code started without the clawdcursor MCP server');
+    expect(parseClaudeLine(init([{ name: 'other', status: 'connected' }])).serverUnreachable).toMatch(/without the clawdcursor MCP server/);
+    // An init line with no server list (another version) says nothing either way.
+    expect(parseClaudeLine(JSON.stringify({ type: 'system', subtype: 'init' }))).toEqual({ sigs: [] });
+  });
+
+  it('codex: an MCP failure that names the server, on stdout or stderr', () => {
+    expect(codexServerFailure('ERROR: MCP client for `clawdcursor` failed to start: connection refused')).toMatch(/^Codex could not reach the clawdcursor MCP server: ERROR: MCP client/);
+    expect(codexServerFailure('{"type":"error","message":"mcp server clawdcursor timed out during initialize"}')).not.toBeNull();
+    expect(codexServerFailure('mcp: clawdcursor ready (6 tools)')).toBeNull();
+    expect(codexServerFailure('ERROR: 401 Unauthorized')).toBeNull();                       // the agent's own login
+    expect(codexServerFailure('MCP client for `other` failed to start')).toBeNull();
+  });
+
+  it('ollama: a failed MCP connection is reported, not thrown (a throw would read as an agent error)', async () => {
+    const closed = http.createServer();
+    await new Promise<void>(r => closed.listen(0, '127.0.0.1', r));
+    const port = (closed.address() as AddressInfo).port;
+    await new Promise(r => closed.close(r));
+    const result = await ollama.run({ prompt: 'x', model: 'qwen2.5:7b', mcpUrl: `http://127.0.0.1:${port}/mcp`, token: 't', workDir: os.tmpdir(), logFile: '',
+      onSig: () => {}, signal: new AbortController().signal });
+    expect(result.serverUnreachable).toMatch(/^the MCP connection failed: /);
+    expect(result.finalText).toBe('');
+  });
+
+  describe('the runner\'s own check, for any adapter', () => {
+    const serve = async (handler: http.RequestListener) => {
+      const server = http.createServer(handler);
+      await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+      return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`, close: () => new Promise(r => { server.closeAllConnections(); server.close(r); }) };
+    };
+
+    it('nothing listening: the handshake failed', async () => {
+      const s = await serve(() => {});
+      await s.close();
+      expect(await probeMcp(s.url, 't', 3000)).toMatch(/^the MCP handshake failed: /);
+    });
+
+    it('a server that answers 500 to initialize: the handshake failed', async () => {
+      const s = await serve((_req, res) => { res.writeHead(500); res.end('boom'); });
+      try { expect(await probeMcp(s.url, 't', 3000)).toMatch(/^the MCP handshake failed: /); } finally { await s.close(); }
+    });
+
+    it('a server that initializes but lists no tools: tools/list is missing the six', async () => {
+      const s = await serve((req, res) => {
+        let body = '';
+        req.on('data', c => { body += c; });
+        req.on('end', () => {
+          const msg = JSON.parse(body || '{}') as { id?: number; method?: string };
+          if (msg.id === undefined) { res.writeHead(202); res.end(); return; }
+          const result = msg.method === 'initialize'
+            ? { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'broken', version: '0' } }
+            : { tools: [{ name: 'accessibility', inputSchema: { type: 'object' } }] };
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+        });
+      });
+      try { expect(await probeMcp(s.url, 't', 3000)).toBe('tools/list is missing system, window, browser, computer, batch'); } finally { await s.close(); }
+    });
   });
 });

@@ -60,7 +60,11 @@ export interface AgentJob {
   signal: AbortSignal;
 }
 
-export interface AgentResult { finalText: string; exitCode: number | null }
+export interface AgentResult {
+  finalText: string; exitCode: number | null;
+  /** The host could not connect to the isolated clawdcursor (connect, initialize or tools/list failed): why. */
+  serverUnreachable?: string;
+}
 
 export interface Adapter {
   id: string;

@@ -386,3 +386,52 @@ describe('an agent that never ran is not clawdcursor failing', () => {
     expect(toBaseline(report).scores.map(x => x.task)).toEqual(['web-sample']);
   });
 });
+
+describe('"could not reach clawdcursor" is a clawdcursor failure, never an agent error', () => {
+  const meta = { date: 'd', os: 'windows' as const, clawdcursor: '2', models: ['claude-code:sonnet'], skipped: [] };
+  /** The daemon's MCP handshake broke: the agent host exits with an error and makes no call, exactly like an expired login. */
+  const unreachable = (): RunRecord => ({ ...cleanRun(), calls: [], fixture: { state: { done: false }, events: [], loads: 1 },
+    agent: { finalText: '', exitCode: 1, sigs: [], seconds: 1, serverUnreachable: 'the MCP handshake failed: fetch failed' } });
+
+  it('the row fails, with that reason, and is not an agent error', () => {
+    expect(agentErrorOf(unreachable())).toBeNull();
+    const s = score(unreachable());
+    expect(s.agentError).toBeUndefined();
+    expect(s).toMatchObject({ success: false, serverError: 'the MCP handshake failed: fetch failed' });
+    expect(s.gate).toEqual({ pass: false, failures: ['could not reach clawdcursor: the MCP handshake failed: fetch failed'] });
+  });
+
+  it('whatever the agent said or however it exited', () => {
+    for (const agent of [{ finalText: 'adapter error: connect ECONNREFUSED', exitCode: null }, { finalText: 'Failed to authenticate', exitCode: 1 },
+      { finalText: 'BENCH_RESULT: FAILED', exitCode: 0 }]) {
+      const r = unreachable();
+      r.agent = { ...r.agent, ...agent };
+      const s = score(r);
+      expect(s.agentError, agent.finalText).toBeUndefined();
+      expect(s.gate.failures[0], agent.finalText).toMatch(/^could not reach clawdcursor/);
+    }
+  });
+
+  it('the run is FAIL, not INCOMPLETE, and the table says why', () => {
+    const report = buildReport(meta, [score(unreachable())]);
+    expect(report.gate).toEqual({ pass: false, status: 'FAIL', failed: 1, gated: 1, agentErrors: 0 });
+    const md = renderMarkdown(report);
+    expect(md).toContain('Gate: **FAIL**');
+    expect(md).toContain('FAIL: could not reach clawdcursor: the MCP handshake failed: fetch failed');
+    expect(md).not.toContain('agent error');
+  });
+
+  it('with repeats, one unreachable run fails the row; it does not turn into an agent error beside one', () => {
+    const expired: RunRecord = { ...cleanRun(), calls: [], agent: { finalText: 'Failed to authenticate', exitCode: 1, sigs: [], seconds: 1 } };
+    const s = aggregate([score(cleanRun()), score(unreachable()), score(expired)]);
+    expect(s.serverError).toBe('the MCP handshake failed: fetch failed');
+    expect(s.agentError).toBeUndefined();
+    expect(s.gate.pass).toBe(false);
+  });
+
+  it('a manual-verify task fails too: nothing could be done through an unreachable server', () => {
+    const r = unreachable();
+    r.task = { ...task, manualVerify: true, success: undefined };
+    expect(score(r).gate.pass).toBe(false);
+  });
+});

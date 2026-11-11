@@ -57,6 +57,11 @@ An **agent error** is a row in which the agent host exited with an error before 
 expired, it did not start). It says nothing about clawdcursor: the row shows the agent's message, is left out of the
 gate, and is never written to a baseline.
 
+Not reaching clawdcursor is the opposite case. The runner checks the isolated daemon's MCP connection, initialize and
+tools/list itself before it starts an agent and again when an agent made no call, and the adapters report what their
+host says (Claude Code's server status, a Codex MCP error, the Ollama loop's own connection). Any of these makes the
+row a clawdcursor **failure** ("could not reach clawdcursor: ..."), never an agent error.
+
 Before any task, and before anything opens on the desktop, a live run **checks each agent** with one trivial prompt and
 no tools. If one cannot run, the run stops there with the reason, for example
 "claude-code is not signed in: run `claude` and log in".

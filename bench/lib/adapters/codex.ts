@@ -76,6 +76,15 @@ export function parseCodexLine(line: string): { sig?: CallSig; id?: string; fina
   return {};
 }
 
+/**
+ * Does this output say Codex could not start or reach the clawdcursor MCP server? Codex prints such a failure as an
+ * error event or on stderr, naming the server.
+ */
+export function codexServerFailure(text: string): string | null {
+  const line = text.split('\n').find(l => /mcp/i.test(l) && l.includes(SERVER_NAME) && /fail|error|timed? ?out|unable|could not|refused|not connect/i.test(l));
+  return line ? `Codex could not reach the clawdcursor MCP server: ${line.replace(/\s+/g, ' ').trim().slice(0, 240)}` : null;
+}
+
 /** The newest binary the Codex desktop app installed, when codex is not on PATH. */
 export function codexAppBinary(env: NodeJS.ProcessEnv = process.env): string | null {
   const bin = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
@@ -119,16 +128,19 @@ export const codex: Adapter = {
     const exe = found.exe;
     const lastMessagePath = path.join(job.workDir, 'last-message.txt');
     let finalText = '';
+    let serverUnreachable: string | undefined;
     const seen = new Set<string>();
     const exitCode = await runCli(codexCommand({ exe, model: job.model, mcpUrl: job.mcpUrl, token: job.token, workDir: job.workDir, lastMessagePath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,
+      onErr: text => { serverUnreachable ??= codexServerFailure(text) ?? undefined; },
       onLine: line => {
+        serverUnreachable ??= codexServerFailure(line) ?? undefined;
         const p = parseCodexLine(line);
         if (p.sig && !(p.id && seen.has(p.id))) { if (p.id) seen.add(p.id); job.onSig(p.sig); }
         if (p.finalText !== undefined) finalText = p.finalText;
       },
     });
     try { finalText = fs.readFileSync(lastMessagePath, 'utf8') || finalText; } catch { /* no last message: the stream's is used */ }
-    return { finalText, exitCode };
+    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}) };
   },
 };

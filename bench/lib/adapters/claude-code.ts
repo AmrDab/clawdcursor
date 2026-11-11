@@ -55,9 +55,18 @@ export function parseClaudePreflight(out: string): { ok: boolean; said: string }
 }
 
 /** One line of --output-format stream-json: the tool calls the model made in it, and the final reply if it is the result line. */
-export function parseClaudeLine(line: string): { sigs: CallSig[]; finalText?: string } {
-  let msg: { type?: string; result?: unknown; message?: { content?: Array<{ type?: string; name?: string; input?: unknown }> } };
+export function parseClaudeLine(line: string): { sigs: CallSig[]; finalText?: string; serverUnreachable?: string } {
+  let msg: { type?: string; subtype?: string; result?: unknown; mcp_servers?: Array<{ name?: string; status?: string }>;
+    message?: { content?: Array<{ type?: string; name?: string; input?: unknown }> } };
   try { msg = JSON.parse(line); } catch { return { sigs: [] }; }
+  // The first line of a session lists the MCP servers and whether each connected. Anything but "connected" for the one
+  // server this run has means the agent has no clawdcursor tools: the server's failure, not the agent's.
+  if (msg?.type === 'system' && msg.subtype === 'init' && Array.isArray(msg.mcp_servers)) {
+    const server = msg.mcp_servers.find(s => s?.name === SERVER_NAME);
+    if (!server) return { sigs: [], serverUnreachable: 'Claude Code started without the clawdcursor MCP server' };
+    if (server.status !== 'connected') return { sigs: [], serverUnreachable: `Claude Code reports the clawdcursor MCP server as "${server.status ?? 'unknown'}"` };
+    return { sigs: [] };
+  }
   if (msg?.type === 'result') return { sigs: [], finalText: typeof msg.result === 'string' ? msg.result : '' };
   if (msg?.type !== 'assistant' || !Array.isArray(msg.message?.content)) return { sigs: [] };
   return { sigs: msg.message.content.filter(b => b?.type === 'tool_use' && typeof b.name === 'string').map(b => sigOf(b.name!, b.input)) };
@@ -91,14 +100,16 @@ export const claudeCode: Adapter = {
     const mcpConfigPath = path.join(job.workDir, 'mcp.json');
     fs.writeFileSync(mcpConfigPath, claudeMcpConfig(job.mcpUrl, job.token), { flag: 'wx', mode: 0o600 });
     let finalText = '';
+    let serverUnreachable: string | undefined;
     const exitCode = await runCli(claudeCommand({ exe, model: job.model, mcpConfigPath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,
       onLine: line => {
         const p = parseClaudeLine(line);
         p.sigs.forEach(job.onSig);
         if (p.finalText !== undefined) finalText = p.finalText;
+        if (p.serverUnreachable) serverUnreachable = p.serverUnreachable;
       },
     });
-    return { finalText, exitCode };
+    return { finalText, exitCode, ...(serverUnreachable ? { serverUnreachable } : {}) };
   },
 };

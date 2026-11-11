@@ -13,7 +13,7 @@ import { setAgentBin } from './lib/adapters/common';
 import { findBrowser } from './lib/browser';
 import { Cleanup } from './lib/cleanup';
 import { startFixtureServer, type FixtureServer } from './lib/fixture-server';
-import { resolveCli, startIsolated } from './lib/isolated';
+import { probeMcp, resolveCli, startIsolated } from './lib/isolated';
 import { appUnavailable, buildNative, openFixture, type FixtureContext, type NativeBuild } from './lib/live-fixtures';
 import { USER_CDP_PORT, cdpIsFixture, ownsFocus, portOpen, readFocus } from './lib/ownership';
 import { execFileSync } from 'child_process';
@@ -181,9 +181,13 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     let judging: Promise<void> = Promise.resolve();
     const stopTail = tailSessionDir(sessionDir, c => { judging = judging.then(async () => stop(await dog.judge(c))).catch(() => undefined); });
     const clock = setInterval(() => stop(dog.onTime((Date.now() - started) / 1000)), 500);
-    let result = { finalText: '', exitCode: null as number | null };
+    let result: { finalText: string; exitCode: number | null; serverUnreachable?: string } = { finalText: '', exitCode: null };
+    // Whatever the agent host is: can clawdcursor be reached at all? If not, the agent is not started, and the row is a
+    // clawdcursor failure (never an "agent error").
+    const unreachable = await probeMcp(daemon.mcpUrl, daemon.token);
     try {
-      result = await m.adapter.run({ prompt: buildPrompt(task, fixture.window), model: m.model, mcpUrl: daemon.mcpUrl, token: daemon.token,
+      if (unreachable) result = { finalText: '', exitCode: null, serverUnreachable: unreachable };
+      else result = await m.adapter.run({ prompt: buildPrompt(task, fixture.window), model: m.model, mcpUrl: daemon.mcpUrl, token: daemon.token,
         workDir: agentDir, logFile: path.join(workDir, 'agent.log'), signal: abort.signal, onSig: s => { sigs.push(s); stop(dog.onSig(s)); } });
     } catch (e) {
       result.finalText = `adapter error: ${(e as Error).message}`;
@@ -194,6 +198,11 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
       agentStopped();
     }
     await judging;   // the last calls are judged before the score is written
+    // An agent that made no call and did not say why: ask the daemon again before calling it the agent's fault.
+    if (!result.serverUnreachable && !killed && !sigs.length && !readSessionCalls(sessionDir).length) {
+      const now = await probeMcp(daemon.mcpUrl, daemon.token);
+      if (now) result.serverUnreachable = now;
+    }
     const seconds = (Date.now() - started) / 1000;
     await sleep(1500);   // a late effect still reaches the fixture's recorder
     const state = await fixture.state();
@@ -291,7 +300,7 @@ async function live(o: Options): Promise<void> {
               break;
             }
             repeats.push(s);
-            console.log(`${s.agentError ? `AGENT ERROR (${s.agentError})` : s.manual ? 'manual' : s.success ? 'done' : 'NOT done'}, ${s.calls} calls, ${s.screenshots} shots, ${s.seconds}s`
+            console.log(`${s.serverError ? `CLAWDCURSOR UNREACHABLE (${s.serverError})` : s.agentError ? `AGENT ERROR (${s.agentError})` : s.manual ? 'manual' : s.success ? 'done' : 'NOT done'}, ${s.calls} calls, ${s.screenshots} shots, ${s.seconds}s`
               + `${s.killed ? `, stopped by the watchdog (${s.killed})` : ''}${s.gate.pass ? '' : `  [gate: ${s.gate.failures.join('; ')}]`}`);
             if (s.killed === 'privacy') throw new Error('PRIVACY: the agent acted outside the fixture windows. The run is stopped.');
           } catch (e) {

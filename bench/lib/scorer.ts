@@ -65,6 +65,8 @@ export interface Score {
    * row says nothing about clawdcursor, so it is not gated and the run is INCOMPLETE.
    */
   agentError?: string;
+  /** The agent could not reach clawdcursor (MCP connect, initialize or tools/list failed): a failure of the server under test. */
+  serverError?: string;
   gate: { pass: boolean; failures: string[] };
 }
 
@@ -113,7 +115,8 @@ export function countFalseOk(calls: LogCall[], fixture: FixtureState | null): nu
  */
 export function agentErrorOf(r: Pick<RunRecord, 'calls' | 'agent'>): string | null {
   const a = r.agent;
-  if (a.killed || r.calls.length || a.sigs.length) return null;
+  // Not reaching clawdcursor is the server's failure, whatever the agent's exit code says.
+  if (a.serverUnreachable || a.killed || r.calls.length || a.sigs.length) return null;
   const threw = a.finalText.startsWith('adapter error:');
   if (!threw && (a.exitCode === 0 || a.exitCode === null)) return null;
   const said = a.finalText.replace(/^adapter error:\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 300);
@@ -152,6 +155,7 @@ export function score(r: RunRecord): Score {
     ...(r.agent.killed ? { killed: r.agent.killed.rule } : {}),
     gate: { pass: true, failures: [] },
   };
+  if (r.agent.serverUnreachable) { s.serverError = r.agent.serverUnreachable; if (!manual) s.success = false; s.successes = 0; }
   const agentError = agentErrorOf(r);
   if (agentError) { s.agentError = agentError; s.success = null; s.successes = 0; s.falseSuccesses = 0; s.falseDone = false; }
   s.gate = gateOf(s);
@@ -162,9 +166,12 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 /** The thresholds one row must meet. A manual-verify row is never gated. */
 export function gateOf(s: Omit<Score, 'gate'>): Score['gate'] {
+  // An unreachable server fails any row, a manual one too: nothing could be done through it.
+  if (s.serverError && s.manual) return { pass: false, failures: [`could not reach clawdcursor: ${s.serverError}`] };
   if (s.manual || s.agentError) return { pass: true, failures: [] };   // not a measurement of clawdcursor
   const failures: string[] = [];
-  if (s.reloaded) failures.push('the fixture page was reloaded');
+  if (s.serverError) failures.push(`could not reach clawdcursor: ${s.serverError}`);
+  else if (s.reloaded) failures.push('the fixture page was reloaded');
   else if (s.success !== true) failures.push(s.runs > 1 ? `task done in ${s.successes} of ${s.runs} runs` : 'task not done (fixture state)');
   const maxShots = s.oracleScreenshots + GATE.screenshotSlack;
   if (s.screenshots > maxShots) failures.push(`screenshots ${s.screenshots} > ${maxShots}`);
@@ -211,7 +218,9 @@ export function aggregate(runs: Score[]): Score {
   };
   if (killed) s.killed = killed; else delete s.killed;
   // One run in which the agent never started leaves the row unmeasured: it is not averaged away.
-  const failedToRun = runs.find(r => r.agentError)?.agentError;
+  const unreachable = runs.find(r => r.serverError)?.serverError;
+  if (unreachable) s.serverError = unreachable; else delete s.serverError;
+  const failedToRun = unreachable ? undefined : runs.find(r => r.agentError)?.agentError;
   if (failedToRun) { s.agentError = failedToRun; s.success = null; } else delete s.agentError;
   s.gate = gateOf(s);
   return s;
