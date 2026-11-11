@@ -299,7 +299,8 @@ Privacy:
 
 - **No model calls and no telemetry.** Screenshots and screen text go only to the MCP client that asked for them. `clawdcursor report` is opt-in and previews what it sends.
 - **No screenshots, if you want.** `clawdcursor agent --no-vision`, or `CLAWD_DISABLE_VISION=1` (which also covers stdio), refuses every call that would return an image; the agent works from the accessibility tree and OCR text.
-- **Logs.** `~/.clawdcursor/logs/` records which tool ran and whether it worked, not typed text or screen content. Password-field values are redacted in tree reads.
+- **Logs.** `~/.clawdcursor/logs/` records which tool ran and whether it worked, not typed text or screen content.
+- **Password fields.** Password field values are never returned by tree, find or value reads (Windows, macOS, Linux). A screenshot or OCR can still show whatever is visible on screen.
 - **Pauses.** A pause times out after 15 minutes (`CLAWD_PAUSE_TIMEOUT_MIN`). `CLAWD_NO_PAUSE=1` turns pausing off for CI and unattended runs.
 
 [SECURITY.md](SECURITY.md) has the threat model, the limits of each guarantee, and how to report a vulnerability privately.
