@@ -94,7 +94,7 @@ const manifest = {
   long_description: [
     'clawdcursor gives Claude hands on your desktop. It reads the screen through the accessibility tree first (fast and exact), falls back to OCR, and uses screenshots only when it must — then clicks, types, manages windows and drives your browser.',
     '',
-    '**Safety:** dangerous key combos (lock, log out, force-quit) are always blocked, and destructive actions such as closing windows or pressing Send/Delete/Pay ask for confirmation first. A banner shows while an agent is in control.',
+    '**Control stays yours:** a pill and an outline around the window being worked in show while an agent is in control, and Stop on the pill halts every action until you resume. Key combos that lock the computer or end your session are never sent, and the agent never types into an AI assistant window by accident. What the agent does is up to the agent and your approval prompts in Claude: clawdcursor carries out what it is asked, with your user rights.',
     '',
     '**macOS:** grant Claude **Accessibility** and **Screen Recording** in System Settings → Privacy & Security the first time macOS asks.',
   ].join('\n'),
@@ -132,7 +132,7 @@ const manifest = {
     allow_desktop_control: {
       type: 'boolean',
       title: 'Allow clawdcursor to control this computer',
-      description: 'Required. Lets Claude use your mouse, keyboard and screen through clawdcursor. Dangerous key combos stay blocked and destructive actions still ask first. Until this is on, every tool returns a consent prompt instead of acting.',
+      description: 'Required. Lets Claude use your mouse, keyboard and screen through clawdcursor, with your user rights. Stop on the on-screen pill halts it at any time, and session-ending key combos are never sent. Until this is on, every tool returns a consent prompt instead of acting.',
       required: true,
       default: false,
     },

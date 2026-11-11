@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [Unreleased]
+## [1.6.0] - 2026-11-10
 
 ### Removed
 - **Breaking: the built-in agent loop is gone.** clawdcursor no longer calls a
@@ -155,6 +155,19 @@ All notable changes to Clawd Cursor will be documented in this file.
   when `SystemRoot` is unset, and the run directory is refused if it is a symlink and tightened to 0700.
 
 ### Fixed
+- **`open_app` and `open_file` name a window only when it belongs to the app.** "Opened Calculator" could name another app's
+  window whose title held "app" (the Store-app id ends in `!App`), and Calculator never started. A running window now counts
+  only by identity: its process name, or its Store package (a framed Store window by the app it hosts). `open_file` on Windows
+  passes drive paths with backslashes (a `/` read as a switch opened Documents) and never counts a File Explorer window.
+  Paths with `'`, `$` or spaces open. macOS `open_file` / `open_url` / `open_uri` run `/usr/bin/open` (no shell, no
+  Spotlight); Linux runs `xdg-open`. An app that is still starting says so: `Started "Designcenter" (ugraf.exe, pid=N) but its
+  window isn't up yet … wait, then window focus`, within a bounded wait, instead of "no window appeared" after 39 s.
+- **The outline follows the agent.** It moves on acts by name (`invoke`, `set_value`, `select`…), on the agent's `window
+  focus` and on `open_app`, not only on mouse and keyboard input; reads don't move it. Its corners are rounded where the
+  window's are (Windows 11, macOS).
+- **`find` shows an element's value** (`[TextField] "Quantity" … value="30"`), as `read_tree` does.
+- **`screenshot_region` and `zoom` with `space:"screen"` capture the area named on a Retina Mac.** They took the points as
+  pixels: half the area, part of another window. One helper converts for both.
 - **An action by name presses the element you can see (Windows).** `invoke` / `smart_click` took the first element in
   tree order whose name matched: in Designcenter NX, "New" was a link of a web view the window does not show (laid out
   at y = 31,000), and the answer was `Clicked "New" via UI Automation` while nothing opened. Now a match that is on a

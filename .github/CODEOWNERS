@@ -9,10 +9,8 @@
 
 # Safety-critical surfaces: changes here can grant or revoke real OS power.
 # Extra eyes required.
-/src/core/safety/                       @AmrDab
-/src/llm/knowledge/guide-linter.ts      @AmrDab
-/src/llm/knowledge/remote-loader.ts     @AmrDab
-/src/llm/knowledge/cache.ts             @AmrDab
+/src/platform/hard-keys.ts              @AmrDab
+/src/core/untrusted-screen-content.ts   @AmrDab
 
 # Platform adapters — cross-OS regressions are easy and silent.
 /src/platform/                          @AmrDab
