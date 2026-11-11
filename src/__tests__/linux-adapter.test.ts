@@ -466,6 +466,16 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
     expect(args[args.indexOf('--action') + 1]).toBe('toggle');
   });
 
+  it('get-value: an empty field is "" with readable true; a password entry is not readable', async () => {
+    let reply: unknown = { success: true, action: 'get-value', value: '', readable: true };
+    h.exec = defaultExec(() => reply);
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    expect((await adapter.invokeElement({ name: 'Your name', action: 'get-value' })).data).toEqual({ value: '', readable: true });
+    reply = { success: true, action: 'get-value', value: '', readable: false, secure: true };
+    expect((await adapter.invokeElement({ name: 'Password', action: 'get-value' })).data).toEqual({ value: '', readable: false, secure: true });
+  });
+
   it('a failed action still returns bounds so callers can coordinate-fallback', async () => {
     h.exec = defaultExec(() => ({ success: false, error: 'no Action interface', bounds: { x: 5, y: 6, width: 7, height: 8 } }));
     const adapter = new LinuxAdapter();

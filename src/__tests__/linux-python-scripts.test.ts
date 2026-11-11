@@ -211,6 +211,22 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.get_value).toMatchObject({ success: true, value: '42' });
   });
 
+  it('get-value says whether the value was read: an empty entry is "" and readable, never its name', () => {
+    expect(out.get_value).toMatchObject({ success: true, value: '42', readable: true });
+    expect(out.get_value_blank).toMatchObject({ success: true, value: '', readable: true });
+    // a password entry's Text is bullets: withheld, not readable, not "empty"
+    expect(out.get_value_secret).toMatchObject({ success: true, value: '', readable: false, secure: true });
+    // an element with no value: a miss, not its name
+    expect(out.get_value_no_value).toMatchObject({ success: false, readable: false });
+    expect(out.get_value_no_value.value).toBeUndefined();
+  });
+
+  it('a spin button (a number box) reads and takes its number through Value', () => {
+    expect(out.get_value_spin).toMatchObject({ success: true, value: '100.0', readable: true });
+    expect(out.set_value_spin).toMatchObject({ success: true, method: 'Value' });
+    expect(out.get_value_spin_after).toMatchObject({ success: true, value: '30.0', readable: true });
+  });
+
   it('invoke select uses the parent Selection interface', () => {
     expect(out.select.success).toBe(true);
     expect(out.select_idx).toEqual([1]);

@@ -370,7 +370,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
             await sleep(150);
             if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
-            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name });
+            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name },
+              () => typeIntoField(ctx, fillValue, plan.name, undefined, undefined));
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
@@ -397,7 +398,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const res = await ctx.platform.invokeElement({ ...field, action: 'set-value', value });
         await sleep(150);
         // `unverified`: the Windows bridge typed it and could not read the field; the focused field is where the keys went.
-        if (res.success) return setResult(ctx.platform, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field);
+        // A direct set the field ignored (it reads something else, or still nothing) is typed instead, once.
+        if (res.success) {
+          return setResult(ctx.platform, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field,
+            () => typeIntoField(ctx, value, name, controlType, processId));
+        }
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
         if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
           const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
@@ -578,7 +583,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (!res.success) return { success: false, text: `a11y get_value ${quoteScreenText(name)} missed — ${missText(res.data)}.` };
         // The whole value: read_tree points here to read what it cut. Only a huge one is cut again, and says so.
         const value = String((res.data as any)?.value ?? '');
-        const shownValue = value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
+        // Not a value: a password field withholds it, and an element with no value answers with its own NAME.
+        const d = res.data as { readable?: unknown; secure?: unknown; method?: unknown } | undefined;
+        if (d?.secure === true) return { success: true, text: `${quoteScreenText(name)} is a password field: its value is withheld (could not read).` };
+        if (d?.readable === false || /^name$/i.test(String(d?.method))) {
+          return { success: true, text: wrapUntrustedScreenContent(value
+            ? `${quoteScreenText(name)} has no value to read (it is not a field that holds one). Its name: "${value.slice(0, 200)}"`
+            : `${quoteScreenText(name)} has no value that could be read.`) };
+        }
+        const shownValue =value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
         return { success: true, text: wrapUntrustedScreenContent(`${quoteScreenText(name)} = "${shownValue}"`) };
       },
     },
@@ -2333,8 +2346,8 @@ function focusBreadcrumb(
   return ` · focus ${quoteScreenText(truncateTitle(b))}→${quoteScreenText(truncateTitle(a))}`;
 }
 
-/** Roles that take typed text, across UIA / AX / AT-SPI names. */
-const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
+/** Roles that take typed text, across UIA / AX / AT-SPI names. A number box is a Spinner (AT-SPI "spin button", AXIncrementor). */
+const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|password|document|spin|incrementor/i;
 
 /**
  * The on-screen centre of the editable element called `name` — the input, not
@@ -2342,7 +2355,7 @@ const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|
  * found: the caller must then NOT type anything.
  */
 async function editableTarget(
-  ctx: AgentToolContext, name: string, controlType: string | undefined, processId: number | undefined,
+  ctx: AgentToolContext, name: string, controlType: string | undefined, processId: number | undefined, noSecure = false,
 ): Promise<{ x: number; y: number } | null> {
   const found = await ctx.platform.findElements({ name, controlType, processId }).catch(() => []);
   const onScreen = found.filter(el => el.bounds && el.bounds.width > 0 && el.bounds.height > 0);
@@ -2350,8 +2363,26 @@ async function editableTarget(
   // AT-SPI label) and an editable text view is "Edit" (AT-SPI "text"/"entry").
   const editable = onScreen.filter(el => EDITABLE_ROLE.test(String(el.controlType ?? '')) && !/^text$/i.test(String(el.controlType ?? '')));
   const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
-  if (!pick?.bounds) return null;
+  if (!pick?.bounds || (noSecure && (pick.secure || /password/i.test(String(pick.controlType ?? ''))))) return null;
   return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
+}
+
+/**
+ * set_field_value's second try, after a direct set the field ignored: click the field, select all, type — the keys
+ * smart_type sends, through the same input guard (ctx.platform). False: nothing was typed — no such field on screen, a
+ * password field (never typed into on a guess), or a clear (select-all + no text clears nothing).
+ */
+async function typeIntoField(
+  ctx: AgentToolContext, value: string, name: string, controlType: string | undefined, processId: number | undefined,
+): Promise<boolean> {
+  if (!value) return false;
+  const target = await editableTarget(ctx, name, controlType, processId, true);
+  if (!target) return false;
+  await ctx.platform.mouseClick(target.x, target.y);
+  await ctx.platform.keyPress('mod+a');
+  await ctx.platform.typeText(value);
+  await sleep(150);
+  return true;
 }
 
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */

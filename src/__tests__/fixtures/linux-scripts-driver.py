@@ -224,6 +224,9 @@ late = Acc('Late', 'check box', actions=['toggle'], lag=0.2)
 stuck = Acc('Stuck', 'check box', actions=['toggle'], lag=0)
 name_field = Acc('Name', 'text', text='old', editable=True)
 display = Acc('Display', 'label', text='42')
+blank_field = Acc('Blank', 'text', text='', editable=True)
+secret_field = Acc('Secret', 'password text', text='****', editable=True)
+quantity = Acc('Quantity', 'spin button', value=100.0)
 canvas = Acc('canvas', 'drawing area', actions=None)
 tab1 = Acc('Tab 1', 'page tab')
 tab2 = Acc('Tab 2', 'page tab')
@@ -236,7 +239,8 @@ node = Acc('Node', 'tree item', states=(StateType.ENABLED, StateType.SENSITIVE, 
 # GTK4 on X11: SCREEN extents are 0,0 with the real size; WINDOW has the position.
 gtk4 = Acc('Gtk4', 'push button', screen=(0, 0, 64, 44), window=(16, 349, 64, 44))
 frame = Acc('Calculator', 'frame', screen=(100, 200, 800, 600),
-            children=[seven, agree, late, stuck, name_field, display, canvas, tabs, empty_state, sensitive_only, rel, node, gtk4])
+            children=[seven, agree, late, stuck, name_field, display, canvas, tabs, empty_state, sensitive_only, rel, node, gtk4,
+                      blank_field, secret_field, quantity])
 calc_app = Acc('gnome-calculator', 'application', children=[frame], pid=4242)
 # Another app whose (inactive) window still holds FOCUSED on a widget.
 other_app = Acc('mousepad', 'application', pid=5555, children=[
@@ -300,6 +304,12 @@ OUT['focus_state'] = StateType.FOCUSED in name_field.states
 OUT['set_value'] = bridge.cmd_invoke('Name', None, 4242, 'set-value', 'Ada')
 OUT['set_value_text'] = name_field.text
 OUT['get_value'] = bridge.cmd_invoke('Display', None, 4242, 'get-value', None)
+OUT['get_value_blank'] = bridge.cmd_invoke('Blank', None, 4242, 'get-value', None)
+OUT['get_value_secret'] = bridge.cmd_invoke('Secret', None, 4242, 'get-value', None)
+OUT['get_value_no_value'] = bridge.cmd_invoke('7', None, 4242, 'get-value', None)
+OUT['get_value_spin'] = bridge.cmd_invoke('Quantity', None, 4242, 'get-value', None)
+OUT['set_value_spin'] = bridge.cmd_invoke('Quantity', None, 4242, 'set-value', '30')
+OUT['get_value_spin_after'] = bridge.cmd_invoke('Quantity', None, 4242, 'get-value', None)
 OUT['select'] = bridge.cmd_invoke('Tab 2', None, 4242, 'select', None)
 OUT['select_idx'] = tabs.selection.selected
 OUT['expand'] = bridge.cmd_invoke('Node', None, 4242, 'expand', None)

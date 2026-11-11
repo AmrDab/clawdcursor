@@ -838,6 +838,13 @@ describe('invoke', () => {
     expect(res.data?.value).toBe('6,223');
   });
 
+  it('get-value: an empty field is "" with readable true; the name of an element with no value is not readable', async () => {
+    const empty = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'get-value', value: '', method: 'AXValue', readable: true }) });
+    expect((await empty.ax.invoke({ processId: 7, name: 'Your name', action: 'get-value' })).data).toEqual({ value: '', method: 'AXValue', readable: true });
+    const label = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'get-value', value: 'Send', method: 'name', readable: false }) });
+    expect((await label.ax.invoke({ processId: 7, name: 'Send', action: 'get-value' })).data).toEqual({ value: 'Send', method: 'name', readable: false });
+  });
+
   it('keeps a nested data payload (toggle)', async () => {
     const { ax } = harness({ reply: JSON.stringify({ ok: true, success: true, action: 'toggle', data: { toggleState: 'On' } }) });
     const res = await ax.invoke({ processId: 7, name: 'Mute', action: 'toggle' });

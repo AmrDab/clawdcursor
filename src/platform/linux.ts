@@ -821,6 +821,9 @@ export class LinuxAdapter implements PlatformAdapter {
         ? result.bounds : undefined;
       const data: Record<string, unknown> = {};
       if (result?.value !== undefined) data.value = result.value;
+      // get-value: `readable` — the value itself was read ("" is an empty field); `secure` — a password entry, value withheld.
+      if (typeof result?.readable === 'boolean') data.readable = result.readable;
+      if (result?.secure === true) data.secure = true;
       if (result?.toggleState !== undefined) data.toggleState = result.toggleState;
       if (result?.toggleChanged !== undefined) data.toggleChanged = result.toggleChanged;
       // e.g. "exists but is not visible on screen" — say why, not just "missed".

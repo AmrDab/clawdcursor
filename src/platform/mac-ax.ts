@@ -584,7 +584,10 @@ function toInvokeResult(r: any): InvokeResult {
     // act (ambiguous role, secure field) — callers must not route around that with a guess.
     data: withMissFields(r, r?.refused === true
       ? { ...(r?.data ?? (r?.value !== undefined ? { value: r.value } : {})), refused: true }
-      : r?.data ?? (r?.value !== undefined ? { value: r.value, method: r.method } : undefined)),
+      // `readable`: the value itself was read ("" is an empty field); false: the element has no value, or did not answer.
+      : r?.data ?? (r?.value !== undefined
+        ? { value: r.value, method: r.method, ...(typeof r.readable === 'boolean' ? { readable: r.readable } : {}) }
+        : undefined)),
     error: typeof r?.error === 'string' ? r.error : undefined,
   };
 }

@@ -844,10 +844,15 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
                     out["error"] = "element exposes neither EditableText nor Value"
 
     elif action == 'get-value':
+        # readable: the value itself was read, so "" is an empty field. A password entry withholds its value (its Text
+        # is bullets): not readable, and not "empty".
         vi = safe(lambda: acc.get_value_iface())
-        if vi:
-            out["success"], out["value"] = True, str(safe(lambda: vi.get_current_value(), ''))
+        if (safe(lambda: acc.get_role_name(), '') or '').lower() == 'password text':
+            out["success"], out["value"], out["readable"], out["secure"] = True, '', False, True
+        elif vi:
+            out["success"], out["value"], out["readable"] = True, str(safe(lambda: vi.get_current_value(), '')), True
         else:
+            out["readable"] = True
             text = read_text(acc)
             if text is not None:
                 out["success"], out["value"] = True, text
@@ -864,6 +869,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
                 if chosen:
                     out["success"], out["value"] = True, (safe(lambda: chosen.get_name(), '') or '')
                 else:
+                    out["readable"] = False
                     out["error"] = "element exposes neither Value nor Text"
 
     elif action == 'toggle':

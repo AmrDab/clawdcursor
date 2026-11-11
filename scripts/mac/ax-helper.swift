@@ -632,8 +632,8 @@ func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
 
 /// Roles each action should land on, best first (set-value must reach the editable field, not the label beside it).
 let actionRoles: [String: [String]] = [
-    "set-value": ["textfield", "textarea", "combobox", "searchfield"],
-    "get-value": ["textfield", "textarea", "combobox", "searchfield", "statictext"],
+    "set-value": ["textfield", "textarea", "combobox", "searchfield", "incrementor"],
+    "get-value": ["textfield", "textarea", "combobox", "searchfield", "incrementor", "statictext"],
     "toggle": ["checkbox", "radiobutton", "switch"],
     "click": ["button", "menuitem", "menubuttonitem", "link", "radiobutton", "checkbox", "popupbutton", "cell", "row", "tab"],
     // What can be opened: the triangle or pop-up, not the label that shares its name.
@@ -1078,15 +1078,27 @@ func perform(_ action: String, _ h: Hit, pid: pid_t, appName: String) -> [String
         guard let v = opts["value"] else { return miss(action, "set-value needs --value") }
         if h.subrole == "AXSecureTextField" { return refuse(action, "refusing to write to a secure text field") }
         if !settable(el, "AXValue") { return miss(action, "the element's value is not settable", element: el) }
-        let r = AXUIElementSetAttributeValue(el, "AXValue" as CFString, v as CFString)
+        // A stepper (AXIncrementor) holds a number, not text.
+        var newValue: CFTypeRef = v as CFString
+        if h.role == "AXIncrementor", let n = Double(v) { newValue = NSNumber(value: n) }
+        let r = AXUIElementSetAttributeValue(el, "AXValue" as CFString, newValue)
         return r == .success ? ["ok": true, "success": true, "action": action, "method": "AXValue", "value": v] : miss(action, "could not set the value (AXError \(r.rawValue))", element: el)
     case "get-value":
         if h.subrole == "AXSecureTextField" { return refuse(action, "the element is a secure text field — its value is withheld") }
         let a = multi(el, ["AXValue", "AXTitle", "AXDescription"])
-        for (key, method) in [("AXValue", "AXValue"), ("AXTitle", "name"), ("AXDescription", "name")] {
-            if let v = str(a[key]), !v.isEmpty { return ["ok": true, "success": true, "action": action, "value": v, "method": method] }
+        // A text field's value is its AXValue, "" when it is empty: never its title or description (an empty web field
+        // "Your name" read back as "Your name", and a set that did nothing could not be told from one that worked).
+        // `readable`: the value itself was read. false: the element has no value (the reply is its NAME), or it did not answer.
+        let holdsText = ["AXTextField", "AXTextArea", "AXComboBox", "AXSearchField", "AXIncrementor"].contains(h.role)
+        if let v = str(a["AXValue"]), holdsText || !v.isEmpty {
+            return ["ok": true, "success": true, "action": action, "value": v, "method": "AXValue", "readable": true]
         }
-        return ["ok": true, "success": true, "action": action, "value": "", "method": "empty"]
+        if !holdsText {
+            for key in ["AXTitle", "AXDescription"] {
+                if let v = str(a[key]), !v.isEmpty { return ["ok": true, "success": true, "action": action, "value": v, "method": "name", "readable": false] }
+            }
+        }
+        return ["ok": true, "success": true, "action": action, "value": "", "method": "empty", "readable": false]
     case "expand", "collapse":
         return expandOrCollapse(action, h, pid: pid, appName: appName)
     case "scroll-to-visible":

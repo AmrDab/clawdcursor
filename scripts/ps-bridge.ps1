@@ -1037,14 +1037,17 @@ function Resolve-EditableTarget {
     $EDIT  = [System.Windows.Automation.ControlType]::Edit
     $DOC   = [System.Windows.Automation.ControlType]::Document
     $COMBO = [System.Windows.Automation.ControlType]::ComboBox
+    # A number box (Edge's <input type="number">) is a Spinner: it takes a value and typed text like an Edit.
+    $SPIN  = [System.Windows.Automation.ControlType]::Spinner
     $editCond  = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $EDIT)
     $editable  = New-Object System.Windows.Automation.OrCondition(
         $editCond,
         (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $DOC)),
-        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $COMBO)))
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $COMBO)),
+        (New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $SPIN)))
     $ct = $el.Current.ControlType
     # 1) Already editable.
-    if ($ct -eq $EDIT -or $ct -eq $DOC) { return $el }
+    if ($ct -eq $EDIT -or $ct -eq $DOC -or $ct -eq $SPIN) { return $el }
     if ($ct -eq $COMBO) { try { $i = $el.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCond); if ($i) { return $i } } catch {}; return $el }
     # 2) Editable descendant (matched a group/pane wrapping the field).
     try { $d = $el.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editable); if ($d) { if ($d.Current.ControlType -eq $COMBO) { try { $i = $d.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $editCond); if ($i) { return $i } } catch {} }; return $d } } catch {}
@@ -1125,7 +1128,7 @@ function Cmd-InvokeElement {
         # its name: the Save as dialog's "File name:" is a Text label, a ComboBox
         # and an Edit, and get-value read the label's caption (live 2026-10-14).
         $valueAction = ($action -eq 'get-value' -or $action -eq 'set-value')
-        $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox)
+        $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox, [System.Windows.Automation.ControlType]::Spinner)
         foreach ($pass in 1, 2, 3) {
             $firstHit = $null
             for ($k = 0; $k -lt $names.Count; $k++) {
@@ -1228,7 +1231,11 @@ function Cmd-InvokeElement {
             # label, and other fields are a ComboBox wrapping an Edit. Resolve to the
             # real editable target, set it via ValuePattern, VERIFY, then fall back to
             # keyboard entry. Verification catches silent no-ops (wrong-name saves).
-            $readVal = { param($el) try { return $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { return $null } }
+            # A Spinner / Slider without ValuePattern keeps its number in RangeValuePattern.
+            $readVal = { param($el)
+                try { return $el.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value } catch { }
+                try { return [string]$el.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value } catch { return $null }
+            }
             $target = Resolve-EditableTarget $element
 
             # The edit inside a Win32 combo box (the common file dialog's File
@@ -1250,6 +1257,18 @@ function Cmd-InvokeElement {
                     if (-not $vp.Current.IsReadOnly) {
                         $vp.SetValue($value)
                         if ((& $readVal $target) -eq $value) { return @{ success=$true; action="set-value"; value=$value; method="ValuePattern" } }
+                    }
+                } catch { }
+            }
+
+            # 1b) No usable ValuePattern, a number asked for: RangeValuePattern (a Spinner, a Slider), verified as a number.
+            $num = 0.0
+            if (-not $comboEdit -and [double]::TryParse($value, [System.Globalization.NumberStyles]::Float, [System.Globalization.CultureInfo]::InvariantCulture, [ref]$num)) {
+                try {
+                    $rv = $target.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+                    if (-not $rv.Current.IsReadOnly) {
+                        $rv.SetValue($num)
+                        if ([double]$rv.Current.Value -eq $num) { return @{ success=$true; action="set-value"; value=$value; method="RangeValuePattern" } }
                     }
                 } catch { }
             }
@@ -1313,6 +1332,10 @@ function Cmd-InvokeElement {
                 $labeled = Resolve-EditableTarget $element -LabeledOnly
                 if ($labeled) { $element = $labeled }
             }
+            # A password box withholds its value: not readable, and not "empty".
+            $isPassword = $false
+            try { $isPassword = [bool]$element.Current.IsPassword } catch { }
+            if ($isPassword) { return @{ success=$true; action="get-value"; value=""; method="Password"; readable=$false; secure=$true } }
             $holdsText = $false   # a field that can hold a value (empty means empty)
             try {
                 $vp = $element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
@@ -1320,6 +1343,13 @@ function Cmd-InvokeElement {
                 $v = $vp.Current.Value
                 if ($null -ne $v -and $v.Length -gt 0) { $val = $v; $method = "ValuePattern" }
             } catch { }
+            if ($null -eq $val) {
+                # A Spinner (a web number box) or Slider: its number is the value, never its name.
+                try {
+                    $rv = $element.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
+                    $val = [string]$rv.Current.Value; $method = "RangeValuePattern"
+                } catch { }
+            }
             if ($null -eq $val) {
                 try {
                     $tp = $element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
@@ -1340,8 +1370,14 @@ function Cmd-InvokeElement {
             # box read back as "First name"). Name is the value only for
             # elements that hold no text at all (a label, a button).
             if ($null -eq $val -and $holdsText) { $val = ""; $method = "ValuePattern" }
-            if ($null -eq $val) { $val = $element.Current.Name; $method = "Name" }
-            return @{ success=$true; action="get-value"; value=$val; method=$method }
+            # A Spinner with no pattern that answered: unreadable, and still not its name.
+            if ($null -eq $val -and $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Spinner) {
+                return @{ success=$true; action="get-value"; value=""; method="None"; readable=$false }
+            }
+            # readable: the value itself was read. False for the Name: the element has no value.
+            $readable = $true
+            if ($null -eq $val) { $val = $element.Current.Name; $method = "Name"; $readable = $false }
+            return @{ success=$true; action="get-value"; value=$val; method=$method; readable=$readable }
         }
         "focus" {
             try { $element.SetFocus(); return @{ success=$true; action="focus" } }
