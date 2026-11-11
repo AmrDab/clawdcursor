@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { claudeCommand, claudeMcpConfig, parseClaudeLine } from '../lib/adapters/claude-code';
+import { claudeCommand, claudeMcpConfig, claudePreflightCommand, parseClaudeLine, parseClaudePreflight } from '../lib/adapters/claude-code';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { clearAgentBins, locateAgent, setAgentBin, sigOf } from '../lib/adapters/common';
+import { PREFLIGHT_PROMPT, clearAgentBins, locateAgent, preflightFailure, setAgentBin, sigOf, type Adapter } from '../lib/adapters/common';
 import { parseArgs } from '../run';
-import { ADAPTERS, parseModels } from '../lib/adapters';
-import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, parseCodexLine } from '../lib/adapters/codex';
+import { ADAPTERS, parseModels, preflightAll } from '../lib/adapters';
+import { CODEX_DEFAULT, TOKEN_ENV, codexCommand, codexPreflightCommand, parseCodexLine } from '../lib/adapters/codex';
 import { MAX_TURNS, RESULT_CHARS, argsOf, chatRequest, resultText, runLoop, toOllamaTools, type OllamaMessage } from '../lib/adapters/ollama';
 
 describe('call signatures', () => {
@@ -288,5 +288,65 @@ describe('finding the native binary of an agent host', () => {
 
   it('the adapters report the reason, not just "not installed"', () => {
     for (const a of ADAPTERS.filter(x => x.id !== 'ollama')) expect(typeof a.why).toBe('function');
+  });
+});
+
+describe('the preflight: can each agent run at all, before anything opens on the desktop', () => {
+  it('claude-code: a trivial prompt, no MCP server, no tool, none of the owner\'s settings', () => {
+    const c = claudePreflightCommand({ exe: '/bin/claude', model: 'sonnet' });
+    expect(c.stdin).toBe(PREFLIGHT_PROMPT);
+    expect(c.args).toContain('--strict-mcp-config');
+    expect(c.args).not.toContain('--mcp-config');
+    expect(c.args).not.toContain('--allowedTools');
+    expect(c.args[c.args.indexOf('--tools') + 1]).toBe('');
+    expect(c.args[c.args.indexOf('--setting-sources') + 1]).toBe('project');
+    expect(c.args[c.args.indexOf('--output-format') + 1]).toBe('json');
+  });
+
+  it('claude-code: reads the one result line', () => {
+    expect(parseClaudePreflight('{"type":"result","subtype":"success","is_error":false,"result":"OK"}\n')).toEqual({ ok: true, said: 'OK' });
+    expect(parseClaudePreflight('{"type":"result","is_error":true,"result":"Failed to authenticate: OAuth session expired and could not be refreshed"}\n'))
+      .toEqual({ ok: false, said: 'Failed to authenticate: OAuth session expired and could not be refreshed' });
+    expect(parseClaudePreflight('some crash output')).toEqual({ ok: false, said: 'some crash output' });
+  });
+
+  it('codex: a trivial prompt, no MCP server, no plugins, no shell', () => {
+    const c = codexPreflightCommand({ exe: 'codex', model: CODEX_DEFAULT, workDir: '/w', lastMessagePath: '/w/last.txt' });
+    expect(c.stdin).toBe(PREFLIGHT_PROMPT);
+    expect(c.args.join(' ')).not.toContain('mcp_servers');
+    expect(c.args).toContain('--ignore-user-config');
+    expect(c.args.filter((_, i) => c.args[i - 1] === '--disable')).toEqual(['plugins', 'shell_tool']);
+    expect(c.env).toBeUndefined();
+  });
+
+  it('an expired login is told apart from a host that did not start, with what to do', () => {
+    expect(preflightFailure('claude-code', 'claude', 1, 'Failed to authenticate: OAuth session expired and could not be refreshed'))
+      .toBe('claude-code is not signed in: run `claude` and log in. (Failed to authenticate: OAuth session expired and could not be refreshed)');
+    expect(preflightFailure('codex', 'codex login', 1, 'ERROR: 401 Unauthorized')).toMatch(/^codex is not signed in: run `codex login` and log in\./);
+    expect(preflightFailure('codex', 'codex login', 2, 'error: unexpected argument')).toBe('codex did not answer a trivial prompt (exit code 2): error: unexpected argument');
+    expect(preflightFailure('claude-code', 'claude', null, '')).toMatch(/no output$/);
+  });
+
+  const fake = (id: string, answer: string | null | Error): Adapter => ({ ...ADAPTERS[0], id,
+    preflight: async () => { if (answer instanceof Error) throw answer; return answer; } });
+
+  it('every model is checked; the ones that cannot run are listed, each with its reason', async () => {
+    const runs = [
+      { adapter: fake('claude-code', 'claude-code is not signed in: run `claude` and log in.'), model: 'sonnet', label: 'claude-code:sonnet' },
+      { adapter: fake('codex', null), model: 'default', label: 'codex:default' },
+      { adapter: fake('ollama', new Error('connect ECONNREFUSED')), model: 'qwen2.5:7b', label: 'ollama:qwen2.5:7b' },
+    ];
+    const dirs: string[] = [];
+    const failures = await preflightAll(runs, label => { dirs.push(label); return os.tmpdir(); }, new AbortController().signal);
+    expect(failures).toEqual(['claude-code:sonnet: claude-code is not signed in: run `claude` and log in.', 'ollama:qwen2.5:7b: ollama failed to start: connect ECONNREFUSED']);
+    expect(dirs).toEqual(['claude-code:sonnet', 'codex:default', 'ollama:qwen2.5:7b']);
+  });
+
+  it('all agents answer: nothing to report', async () => {
+    expect(await preflightAll([{ adapter: fake('codex', null), model: 'default', label: 'codex:default' }], () => os.tmpdir(), new AbortController().signal)).toEqual([]);
+  });
+
+  it('every adapter has one', () => {
+    for (const a of ADAPTERS) expect(typeof a.preflight, a.id).toBe('function');
   });
 });

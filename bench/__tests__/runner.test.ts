@@ -4,13 +4,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { execFileSync } from 'child_process';
-import { agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, readBaseline, selectTasks } from '../run';
+import { RESULT_FILES, agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, readBaseline, selectTasks, writeTaskResults } from '../run';
 import { which } from '../lib/proc';
 import { globalPackageRoots, resolveCli } from '../lib/isolated';
 import { Cleanup } from '../lib/cleanup';
 import { browserAppNames, browserArgs, findBrowser } from '../lib/browser';
 import { isolatedEnv, serverCommand } from '../lib/isolated';
-import { nativeArgs, parseCalcDisplay, parseCalcProbe } from '../lib/live-fixtures';
+import { nativeArgs, nativeStatePath, parseCalcDisplay, parseCalcProbe, readStateFile } from '../lib/live-fixtures';
 import { evaluate } from '../lib/tasks';
 import { buildPrompt, PRIVACY_RULES } from '../lib/prompt';
 import { DONE_MARK, FAILED_MARK } from '../lib/scorer';
@@ -367,5 +367,71 @@ describe('no shell anywhere', () => {
     // A build directory: its package.json and its built CLI are read, nothing is run.
     const repo = path.join(__dirname, '..', '..');
     await expect(resolveCli(path.join(repo, 'no-such-dir'))).rejects.toThrow(/npm run build/);
+  });
+});
+
+describe('a task\'s results directory: one writer per file', () => {
+  const agent = { finalText: 'BENCH_RESULT: DONE', exitCode: 0, sigs: [], seconds: 1 };
+  /** What a native task does to its directory: the fixture starts and writes its live state there, the agent runs, the runner writes the results. */
+  const nativeTask = (workDir: string, fixtureStarts: (stateFile: string) => void) => {
+    const live = nativeStatePath(workDir);
+    fixtureStarts(live);
+    const state = readStateFile(live);
+    writeTaskResults(workDir, state, agent);
+    return { live, state };
+  };
+  const fakeFixture = (stateFile: string) => fs.writeFileSync(stateFile, JSON.stringify({ state: { text: '' }, events: [] }));
+
+  it('the fixture\'s live state file and the runner\'s result file have different names', () => {
+    const live = path.basename(nativeStatePath('/run'));
+    expect(Object.values(RESULT_FILES)).not.toContain(live);
+    expect(live).not.toBe('fixture-state.json');
+  });
+
+  it('a native task\'s setup and results, twice, each in a fresh directory: no EEXIST', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-results-test-'));
+    try {
+      for (const task of ['editor-type-lines', 'native-dialog-fill']) {
+        const workDir = path.join(base, 'claude-code_sonnet', task);
+        fs.mkdirSync(workDir, { recursive: true });
+        const { state } = nativeTask(workDir, fakeFixture);
+        expect(state).toEqual({ state: { text: '' }, events: [] });
+        expect(fs.readdirSync(workDir).sort()).toEqual(['agent.json', 'fixture-state.json', 'native-fixture.live.json']);
+        expect(JSON.parse(fs.readFileSync(path.join(workDir, 'fixture-state.json'), 'utf8'))).toEqual(state);
+      }
+    } finally { fs.rmSync(base, { recursive: true, force: true }); }
+  });
+
+  it.runIf(process.platform === 'win32')('the same with the real WinForms fixture writing its state (its self-test: no window)', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-results-test-'));
+    try {
+      const powershell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      execFileSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', base],
+        { timeout: 90_000, cwd: base });
+      for (const [i, mode] of ['editor', 'dialog', 'editor'].entries()) {
+        const workDir = path.join(base, `run-${i}`);
+        fs.mkdirSync(workDir);
+        const { state } = nativeTask(workDir, stateFile => { execFileSync(path.join(base, 'BenchFixture.exe'), ['--state', stateFile, '--mode', mode, '--selftest'], { timeout: 30_000 }); });
+        expect(state?.events.length).toBeGreaterThan(0);
+        expect(fs.existsSync(path.join(workDir, 'fixture-state.json'))).toBe(true);
+      }
+    } finally { fs.rmSync(base, { recursive: true, force: true }); }
+  }, 120_000);
+
+  it('the runner writes its files once: a second write to the same directory is refused, not an overwrite', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-results-test-'));
+    try {
+      writeTaskResults(workDir, { state: {}, events: [] }, agent);
+      expect(() => writeTaskResults(workDir, { state: { forged: true }, events: [] }, agent)).toThrow(/EEXIST/);
+      expect(JSON.parse(fs.readFileSync(path.join(workDir, 'fixture-state.json'), 'utf8'))).toEqual({ state: {}, events: [] });
+    } finally { fs.rmSync(workDir, { recursive: true, force: true }); }
+  });
+
+  it('the live state of a task with no state (a manual-verify task) is null, and still written', () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-results-test-'));
+    try {
+      writeTaskResults(workDir, null, agent);
+      expect(fs.readFileSync(path.join(workDir, 'fixture-state.json'), 'utf8')).toBe('null');
+    } finally { fs.rmSync(workDir, { recursive: true, force: true }); }
   });
 });

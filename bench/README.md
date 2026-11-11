@@ -43,7 +43,23 @@ Per task and model, for every task that has a predicate:
 | loops | 0 |
 | privacy | the watchdog never had to stop the agent for acting outside the fixture |
 
-Manual-verify tasks (Designcenter) give metrics only. `npm run bench -- --live` exits 0 only when every gated row passes.
+Manual-verify tasks (Designcenter) give metrics only.
+
+A run ends as one of three:
+
+| Status | Exit code | Meaning |
+|---|---|---|
+| PASS | 0 | every gated row passes |
+| FAIL | 1 | a gated row fails |
+| INCOMPLETE | 3 | no gated row fails, but an agent host failed on some rows, or nothing was measured |
+
+An **agent error** is a row in which the agent host exited with an error before its first tool call (its login
+expired, it did not start). It says nothing about clawdcursor: the row shows the agent's message, is left out of the
+gate, and is never written to a baseline.
+
+Before any task, and before anything opens on the desktop, a live run **checks each agent** with one trivial prompt and
+no tools. If one cannot run, the run stops there with the reason, for example
+"claude-code is not signed in: run `claude` and log in".
 
 ## Running it
 

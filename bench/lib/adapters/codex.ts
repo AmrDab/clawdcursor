@@ -6,7 +6,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { locateAgent, runCli, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
+import { PREFLIGHT_PROMPT, locateAgent, preflightFailure, runCli, runPreflight, sigOf, SERVER_NAME, type Adapter, type AgentJob, type CliCommand } from './common';
 import { tryRun } from '../proc';
 import type { CallSig } from '../types';
 
@@ -43,6 +43,18 @@ export function codexCommand(o: { exe: string; model: string; mcpUrl: string; to
     ],
     env: { [TOKEN_ENV]: o.token },
     stdin: o.prompt,
+  };
+}
+
+/** The preflight: exec with no MCP server, no plugins, no shell and none of the owner's config; the prompt on stdin. */
+export function codexPreflightCommand(o: { exe: string; model: string; workDir: string; lastMessagePath: string }): CliCommand {
+  return {
+    cmd: o.exe,
+    args: ['exec', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only',
+      '--disable', 'plugins', '--disable', 'shell_tool', '-c', 'project_doc_max_bytes=0',
+      ...(o.model && o.model !== CODEX_DEFAULT ? ['--model', o.model] : []),
+      '--cd', o.workDir, '--output-last-message', o.lastMessagePath, '-'],
+    stdin: PREFLIGHT_PROMPT,
   };
 }
 
@@ -91,6 +103,15 @@ export const codex: Adapter = {
   why() {
     const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
     return 'why' in found ? found.why : null;
+  },
+  async preflight(model, workDir, signal) {
+    const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });
+    if ('why' in found) return `codex: ${found.why}`;
+    const lastMessagePath = path.join(workDir, 'preflight-last-message.txt');
+    const { exitCode, out, err } = await runPreflight(codexPreflightCommand({ exe: found.exe, model, workDir, lastMessagePath }), workDir, signal);
+    let answered = '';
+    try { answered = fs.readFileSync(lastMessagePath, 'utf8').trim(); } catch { /* it wrote no answer */ }
+    return exitCode === 0 && answered ? null : preflightFailure('codex', 'codex login', exitCode, `${err} ${out}`);
   },
   async run(job: AgentJob) {
     const found = locateAgent('codex', '--codex-bin', { fallback: codexAppBinary });

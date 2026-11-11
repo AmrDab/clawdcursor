@@ -60,6 +60,11 @@ export interface Score {
   seconds: number;
   /** the watchdog rule that stopped the agent */
   killed?: string;
+  /**
+   * The agent host itself failed (not signed in, did not start, crashed before its first tool call): its message. The
+   * row says nothing about clawdcursor, so it is not gated and the run is INCOMPLETE.
+   */
+  agentError?: string;
   gate: { pass: boolean; failures: string[] };
 }
 
@@ -102,6 +107,19 @@ export function countFalseOk(calls: LogCall[], fixture: FixtureState | null): nu
   return n;
 }
 
+/**
+ * Did the agent host fail before it did anything? A nonzero exit (or an adapter that threw) with no tool call at all:
+ * an expired login, a missing binary, a crash at start. The watchdog stopping an agent is not this.
+ */
+export function agentErrorOf(r: Pick<RunRecord, 'calls' | 'agent'>): string | null {
+  const a = r.agent;
+  if (a.killed || r.calls.length || a.sigs.length) return null;
+  const threw = a.finalText.startsWith('adapter error:');
+  if (!threw && (a.exitCode === 0 || a.exitCode === null)) return null;
+  const said = a.finalText.replace(/^adapter error:\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 300);
+  return said || `the agent exited with code ${a.exitCode} before its first tool call`;
+}
+
 export function score(r: RunRecord): Score {
   const { task } = r;
   const us = units(r.calls);
@@ -134,6 +152,8 @@ export function score(r: RunRecord): Score {
     ...(r.agent.killed ? { killed: r.agent.killed.rule } : {}),
     gate: { pass: true, failures: [] },
   };
+  const agentError = agentErrorOf(r);
+  if (agentError) { s.agentError = agentError; s.success = null; s.successes = 0; s.falseSuccesses = 0; s.falseDone = false; }
   s.gate = gateOf(s);
   return s;
 }
@@ -142,7 +162,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
 
 /** The thresholds one row must meet. A manual-verify row is never gated. */
 export function gateOf(s: Omit<Score, 'gate'>): Score['gate'] {
-  if (s.manual) return { pass: true, failures: [] };
+  if (s.manual || s.agentError) return { pass: true, failures: [] };   // not a measurement of clawdcursor
   const failures: string[] = [];
   if (s.reloaded) failures.push('the fixture page was reloaded');
   else if (s.success !== true) failures.push(s.runs > 1 ? `task done in ${s.successes} of ${s.runs} runs` : 'task not done (fixture state)');
@@ -190,6 +210,9 @@ export function aggregate(runs: Score[]): Score {
     gate: { pass: true, failures: [] },
   };
   if (killed) s.killed = killed; else delete s.killed;
+  // One run in which the agent never started leaves the row unmeasured: it is not averaged away.
+  const failedToRun = runs.find(r => r.agentError)?.agentError;
+  if (failedToRun) { s.agentError = failedToRun; s.success = null; } else delete s.agentError;
   s.gate = gateOf(s);
   return s;
 }
@@ -197,14 +220,20 @@ export function aggregate(runs: Score[]): Score {
 export interface Report {
   meta: { date: string; os: BenchOs; clawdcursor: string; models: string[]; skipped: Array<{ task: string; why: string }> };
   scores: Score[];
-  gate: { pass: boolean; failed: number; gated: number };
+  /**
+   * PASS: every gated row passes. FAIL: a gated row fails. INCOMPLETE: no gated row fails, but an agent host failed on
+   * some rows (`agentErrors`) or nothing was measured, so the run says nothing final about clawdcursor.
+   */
+  gate: { pass: boolean; status: 'PASS' | 'FAIL' | 'INCOMPLETE'; failed: number; gated: number; agentErrors: number };
 }
 
 export function buildReport(meta: Report['meta'], scores: Score[]): Report {
-  const gated = scores.filter(s => !s.manual);
+  const agentErrors = scores.filter(s => s.agentError).length;
+  const gated = scores.filter(s => !s.manual && !s.agentError);
   const failed = gated.filter(s => !s.gate.pass).length;
   // No gated row at all is not a pass: nothing was measured.
-  return { meta, scores, gate: { pass: gated.length > 0 && failed === 0, failed, gated: gated.length } };
+  const status = failed > 0 ? 'FAIL' as const : agentErrors > 0 || gated.length === 0 ? 'INCOMPLETE' as const : 'PASS' as const;
+  return { meta, scores, gate: { pass: status === 'PASS', status, failed, gated: gated.length, agentErrors } };
 }
 
 /** The numbers kept from a run to compare the next one with. */
@@ -214,7 +243,8 @@ export interface Baseline {
 }
 
 export function toBaseline(r: Report): Baseline {
-  return { meta: r.meta, scores: r.scores.map(({ task, model, success, calls, screenshots, falseSuccesses, loops, seconds }) =>
+  // A row in which the agent never ran is no baseline for anything.
+  return { meta: r.meta, scores: r.scores.filter(x => !x.agentError).map(({ task, model, success, calls, screenshots, falseSuccesses, loops, seconds }) =>
     ({ task, model, success, calls, screenshots, falseSuccesses, loops, seconds })) };
 }
 
@@ -247,22 +277,27 @@ const signed = (n: number) => n > 0 ? `+${n}` : String(n);
 export function renderMarkdown(r: Report, deltas?: Delta[]): string {
   const out: string[] = [];
   out.push(`# clawdcursor benchmark: ${r.meta.os}, clawdcursor ${r.meta.clawdcursor}`, '');
-  out.push(`${r.meta.date}. Gate: **${r.gate.pass ? 'PASS' : 'FAIL'}** (${r.gate.gated - r.gate.failed}/${r.gate.gated} rows pass).`, '');
+  out.push(`${r.meta.date}. Gate: **${r.gate.status}** (${r.gate.gated - r.gate.failed}/${r.gate.gated} rows pass`
+    + `${r.gate.agentErrors ? `; ${r.gate.agentErrors} row(s) not measured: the agent host failed` : ''}).`, '');
+  if (r.gate.status === 'INCOMPLETE') {
+    out.push(r.gate.agentErrors ? 'INCOMPLETE: an agent host failed before it made a tool call (not signed in, did not start). Those rows say nothing about '
+      + 'clawdcursor and are not gated. Fix the agent and run again.' : 'INCOMPLETE: no gated task was run.', '');
+  }
   out.push(`Gate per row: task done (fixture state), screenshots <= oracle + ${GATE.screenshotSlack}, calls <= ${GATE.callFactor} x oracle, `
     + 'no false success, no loop. Manual-verify rows are not gated. Calls and screenshots count each step of a batch; '
     + '"trips" are top-level calls. With repeats, a row is the median of its runs.', '');
   for (const model of r.meta.models) {
     const rows = r.scores.filter(s => s.model === model);
     if (!rows.length) continue;
-    const gated = rows.filter(s => !s.manual);
+    const gated = rows.filter(s => !s.manual && !s.agentError);
     out.push(`## ${model}`, '');
     out.push(`Done ${gated.filter(s => s.success).length}/${gated.length}, calls ${sum(rows, 'calls')} (oracle ${sum(rows, 'oracleCalls')}), `
       + `screenshots ${sum(rows, 'screenshots')} (oracle ${sum(rows, 'oracleScreenshots')}), false successes ${sum(rows, 'falseSuccesses')}, loops ${sum(rows, 'loops')}.`, '');
     out.push('| Task | Type | Guards | Done | Calls (oracle) | Trips | Shots (oracle) | Shots / oracle | By name | By coords | False ok | Loops | Time | Gate |');
     out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
     for (const s of rows) {
-      const done = s.manual ? 'manual' : s.runs > 1 ? `${s.successes}/${s.runs}` : s.success ? 'yes' : 'NO';
-      const gate = s.manual ? '-' : s.gate.pass ? 'pass' : `FAIL: ${s.gate.failures.join('; ')}`;
+      const done = s.agentError ? 'agent error' : s.manual ? 'manual' : s.runs > 1 ? `${s.successes}/${s.runs}` : s.success ? 'yes' : 'NO';
+      const gate = s.agentError ? `- (agent error: ${s.agentError.replace(/\|/g, '/')})` : s.manual ? '-' : s.gate.pass ? 'pass' : `FAIL: ${s.gate.failures.join('; ')}`;
       out.push(`| ${s.task} | ${s.archetype} | ${s.mechanisms.join(' ')} | ${done} | ${s.calls} (${s.oracleCalls}) | ${s.roundTrips} | ${s.screenshots} (${s.oracleScreenshots}) | `
         + `${s.screenshotRatio ?? '-'} | ${pct(s.byName)} | ${pct(s.byCoords)} | ${s.falseSuccesses} | ${s.loops} | ${s.seconds}s | `
         + `${gate}${s.killed ? ` (stopped: ${s.killed})` : ''} |`);

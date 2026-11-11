@@ -8,7 +8,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { ADAPTERS, detectModels, parseModels, type ModelRun } from './lib/adapters';
+import { ADAPTERS, detectModels, parseModels, preflightAll, type ModelRun } from './lib/adapters';
 import { setAgentBin } from './lib/adapters/common';
 import { findBrowser } from './lib/browser';
 import { Cleanup } from './lib/cleanup';
@@ -95,6 +95,17 @@ export function prepareOutDir(dir?: string): string {
 
 /** A new file in a directory of this run: never over an existing one, readable by the current user only. */
 const writeNew = (file: string, text: string) => fs.writeFileSync(file, text, { flag: 'wx', mode: 0o600 });
+
+/**
+ * The files the RUNNER writes into a task's results directory, once each, at the end of the task. Nothing else writes
+ * these names: the native fixture's own live state file has another one (nativeStatePath).
+ */
+export const RESULT_FILES = { state: 'fixture-state.json', agent: 'agent.json' } as const;
+
+export function writeTaskResults(workDir: string, state: unknown, agent: AgentRun): void {
+  writeNew(path.join(workDir, RESULT_FILES.state), JSON.stringify(state, null, 2));
+  writeNew(path.join(workDir, RESULT_FILES.agent), JSON.stringify(agent, null, 2));
+}
 
 /** The baseline to compare with, or null when there is none yet: one read, no "does it exist" first. */
 export function readBaseline(file: string): Baseline | null {
@@ -188,8 +199,7 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const state = await fixture.state();
     const calls = readSessionCalls(sessionDir);
     const agent: AgentRun = { ...result, sigs, seconds, ...(killed ? { killed } : {}) };
-    writeNew(path.join(workDir, 'fixture-state.json'), JSON.stringify(state, null, 2));
-    writeNew(path.join(workDir, 'agent.json'), JSON.stringify(agent, null, 2));
+    writeTaskResults(workDir, state, agent);
     return score({ task, model: m.label, calls, fixture: state, agent });
   } finally {
     await daemon?.stop().catch(() => { /* already down */ });
@@ -241,6 +251,23 @@ async function live(o: Options): Promise<void> {
     for (const dir of [tempRoot, agents]) { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ } }
   };
   cleanup.add(removeTemp);
+  // Before anything opens on the desktop: can each agent run at all? One trivial prompt each, no tools.
+  process.stdout.write('Checking the agents ... ');
+  const stopPreflight = new AbortController();
+  const preflightStopped = cleanup.add(() => stopPreflight.abort());
+  const cannotRun = await preflightAll(models, label => {
+    const dir = path.join(agents, `preflight-${label.replace(/[^A-Za-z0-9._-]/g, '_')}`);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return dir;
+  }, stopPreflight.signal);
+  preflightStopped();
+  if (cannotRun.length) {
+    console.log('failed');
+    await cleanup.runAll();
+    uninstall();
+    throw new Error(`no task was run, because an agent cannot run:\n  ${cannotRun.join('\n  ')}`);
+  }
+  console.log('ok');
   console.log(`clawdcursor ${version} (${source}); ${run.length} task(s) x ${models.map(m => m.label).join(', ')}${o.repeats > 1 ? ` x ${o.repeats} repeats` : ''}; results in ${outDir}`);
   const server = await startFixtureServer();
   cleanup.add(() => server.close());
@@ -264,7 +291,7 @@ async function live(o: Options): Promise<void> {
               break;
             }
             repeats.push(s);
-            console.log(`${s.manual ? 'manual' : s.success ? 'done' : 'NOT done'}, ${s.calls} calls, ${s.screenshots} shots, ${s.seconds}s`
+            console.log(`${s.agentError ? `AGENT ERROR (${s.agentError})` : s.manual ? 'manual' : s.success ? 'done' : 'NOT done'}, ${s.calls} calls, ${s.screenshots} shots, ${s.seconds}s`
               + `${s.killed ? `, stopped by the watchdog (${s.killed})` : ''}${s.gate.pass ? '' : `  [gate: ${s.gate.failures.join('; ')}]`}`);
             if (s.killed === 'privacy') throw new Error('PRIVACY: the agent acted outside the fixture windows. The run is stopped.');
           } catch (e) {
@@ -287,12 +314,14 @@ async function live(o: Options): Promise<void> {
     writeNew(path.join(outDir, 'report.json'), JSON.stringify(report, null, 2));
     writeNew(path.join(outDir, 'report.md'), md);
     console.log(`\n${md}\n${base ? '' : `No baseline at ${baselineFile}: pass --update-baseline to write one.\n`}Report: ${path.join(outDir, 'report.md')}`);
-    if (o.updateBaseline && scores.length) {
+    if (o.updateBaseline && report.gate.status === 'INCOMPLETE') console.log('No baseline written: the run is INCOMPLETE.');
+    else if (o.updateBaseline && scores.length) {
       fs.mkdirSync(path.dirname(baselineFile), { recursive: true });
       fs.writeFileSync(baselineFile, JSON.stringify(toBaseline(report), null, 2) + '\n');
       console.log(`Baseline written: ${baselineFile}`);
     }
-    process.exitCode = report.gate.pass ? 0 : 1;
+    // 0: the gate passes. 1: it fails. 3: incomplete (an agent host failed, or nothing was measured).
+    process.exitCode = report.gate.status === 'PASS' ? 0 : report.gate.status === 'FAIL' ? 1 : 3;
   }
 }
 
