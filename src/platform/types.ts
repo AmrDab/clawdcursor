@@ -68,6 +68,13 @@ export interface WindowInfo {
   isMinimized: boolean;
   /** Platform-opaque handle for re-targeting. */
   handle?: number | string;
+  /**
+   * Windows: the app a frame window hosts. A UWP app's top-level window belongs to ApplicationFrameHost; the app
+   * itself owns the `Windows.UI.Core.CoreWindow` child. Reported by the launch's Win32 window read, so the app is
+   * known by identity and not by its (localized) title.
+   */
+  hostedProcessId?: number;
+  hostedProcessName?: string;
   /** True when this is the adapter's best guess at the window in front (Linux without xdotool), not what the OS said. */
   guessed?: boolean;
 }

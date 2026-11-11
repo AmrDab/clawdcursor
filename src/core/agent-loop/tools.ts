@@ -23,6 +23,7 @@ import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
 import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../router/aliases';
+import { openFilePath } from '../../tools/open-file';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
@@ -1304,17 +1305,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       },
       changesScreen: true,
       async execute(args, ctx) {
-        const p = String(args.path ?? '');
-        try {
-          if (ctx.platform.platform === 'darwin') await ctx.platform.launchApp('open', { url: p });
-          else if (ctx.platform.platform === 'linux') await ctx.platform.launchApp('xdg-open', { url: p });
-          else await ctx.platform.launchApp('explorer.exe', { url: p });
-          await sleep(500);
-          return { success: true, text: `Opened: ${p}` };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { success: false, text: `open_file failed: ${msg}` };
-        }
+        // One implementation with the MCP tool (tools/open-file.ts): this one used to call launchApp('explorer.exe')
+        // bare, so a file that showed no Explorer window sent it on to type "explorer" into the Start menu.
+        const r = await openFilePath(ctx.platform, String(args.path ?? ''), 'agent');
+        if (!r.isError) await sleep(500);
+        return { success: !r.isError, text: r.text };
       },
     },
 

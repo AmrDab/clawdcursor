@@ -12,8 +12,11 @@
  *      (the alias row: Calculator → CalculatorApp, Outlook → olk / OUTLOOK, Edge → msedge);
  *   2. Windows, packaged app: its process runs from the app's package — the exe path has a folder of the package
  *      family (`…\WindowsApps\Microsoft.WindowsCalculator_<version>_<arch>__8wekyb3d8bbwe\…`);
- *   3. Windows, a window owned by ApplicationFrameHost (the frame of a UWP app, whose own process the window list
- *      does not show): its title EQUALS the app's display name, or ends with " - <display name>".
+ *   3. Windows, a window owned by ApplicationFrameHost (the frame of a UWP app): the HOSTED app — the owner of its
+ *      Windows.UI.Core.CoreWindow child — passes rule 1 or 2. That holds on any Windows language.
+ *      Only when the hosted app is not known (a window list without it; a minimized UWP window, whose core window is
+ *      detached) does the title decide, as a last resort: it EQUALS the app's display name, or ends with
+ *      " - <display name>". Display names are localized, so this misses on a non-English Windows — never a wrong hit.
  */
 import type { WindowInfo } from './types';
 import { normalizeWindowText } from '../tools/window-text';
@@ -70,14 +73,18 @@ export function pathInPackageFamily(exePath: string, family: string): boolean {
     seg === fam || (seg.length > head.length + tail.length && seg.startsWith(head) && seg.endsWith(tail)));
 }
 
-/** Does window `w` belong to the app? `processPath` is its process's exe path when the caller knows it (rule 2). */
-export function ownsWindow(id: AppIdentity, w: WindowInfo, processPath?: string): boolean {
-  const proc = bareName(w.processName);
-  if (proc && id.processNames.has(proc)) return true;
-  if (processPath && id.packageFamily && pathInPackageFamily(processPath, id.packageFamily)) return true;
-  if (proc === FRAME_HOST) {
-    const title = normalizeWindowText(w.title);
-    return id.displayNames.some(d => title === d || title.endsWith(` - ${d}`));
-  }
-  return false;
+/** Does window `w` belong to the app? `pathOf` gives a process's exe path when the caller knows it (rule 2). */
+export function ownsWindow(id: AppIdentity, w: WindowInfo, pathOf?: (pid: number) => string | undefined): boolean {
+  const isApp = (name: string | undefined, pid: number | undefined): boolean => {
+    const proc = bareName(name);
+    if (proc && proc !== FRAME_HOST && id.processNames.has(proc)) return true;
+    const exe = pid && id.packageFamily ? pathOf?.(pid) : undefined;
+    return !!exe && pathInPackageFamily(exe, id.packageFamily!);
+  };
+  if (isApp(w.processName, w.processId)) return true;
+  if (bareName(w.processName) !== FRAME_HOST) return false;
+  // A frame window: the app is whoever it hosts.
+  if (w.hostedProcessId) return isApp(w.hostedProcessName, w.hostedProcessId);
+  const title = normalizeWindowText(w.title);
+  return id.displayNames.some(d => title === d || title.endsWith(` - ${d}`));
 }

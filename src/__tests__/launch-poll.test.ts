@@ -111,16 +111,29 @@ describe('ownsWindow — a packaged app by its package family', () => {
   const win = w({ processId: 1, processName: 'SomeHost', title: 'x' });
 
   it('a process running from the package folder is the app', () => {
-    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2502.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe')).toBe(true);
+    expect(ownsWindow(id, win, () => 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2502.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe')).toBe(true);
   });
 
   it('another package, a look-alike name or publisher, or no path at all is not', () => {
-    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.OutlookForWindows_1.2025.1.0_x64__8wekyb3d8bbwe\\olk.exe')).toBe(false);
-    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculatorPlus_1.0.0.0_x64__8wekyb3d8bbwe\\x.exe')).toBe(false);
-    expect(ownsWindow(id, win, 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_1.0.0.0_x64__zzzzzzzzzzzzz\\x.exe')).toBe(false);
-    expect(ownsWindow(id, win, 'C:\\Users\\x\\Microsoft.WindowsCalculator notes\\notepad.exe')).toBe(false);
-    expect(ownsWindow(id, win, '')).toBe(false);
+    expect(ownsWindow(id, win, () => 'C:\\Program Files\\WindowsApps\\Microsoft.OutlookForWindows_1.2025.1.0_x64__8wekyb3d8bbwe\\olk.exe')).toBe(false);
+    expect(ownsWindow(id, win, () => 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculatorPlus_1.0.0.0_x64__8wekyb3d8bbwe\\x.exe')).toBe(false);
+    expect(ownsWindow(id, win, () => 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_1.0.0.0_x64__zzzzzzzzzzzzz\\x.exe')).toBe(false);
+    expect(ownsWindow(id, win, () => 'C:\\Users\\x\\Microsoft.WindowsCalculator notes\\notepad.exe')).toBe(false);
+    expect(ownsWindow(id, win, () => '')).toBe(false);
     expect(ownsWindow(id, win)).toBe(false);
+  });
+
+  it('a frame window is the app\'s when the app it HOSTS is — by process name or by package, never mind the title', () => {
+    const names = appIdentity('Calculator', { processNames: ['CalculatorApp'], displayName: 'Calculator' });
+    const frame = (title: string, hostedProcessName?: string) =>
+      ({ ...w({ processId: 1, processName: 'ApplicationFrameHost', title }), ...(hostedProcessName ? { hostedProcessId: 2, hostedProcessName } : {}) });
+    expect(ownsWindow(names, frame('Rechner', 'CalculatorApp'))).toBe(true);          // localized title
+    expect(ownsWindow(names, frame('Calculator', 'SystemSettings'))).toBe(false);     // hosted app known: the title does not decide
+    expect(ownsWindow(id, frame('Rechner', 'Whatever'), pid => (pid === 2
+      ? 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2502.2.0_x64__8wekyb3d8bbwe\\CalculatorApp.exe' : undefined))).toBe(true);
+    // hosted app unknown: the title is the last resort
+    expect(ownsWindow(names, frame('Calculator'))).toBe(true);
+    expect(ownsWindow(names, frame('Rechner'))).toBe(false);
   });
 
   it('pathInPackageFamily accepts the family folder itself (system apps) and ignores case', () => {

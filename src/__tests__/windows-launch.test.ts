@@ -30,6 +30,10 @@ const h = vi.hoisted(() => ({
   bridge: [] as Array<Record<string, unknown>>,
   installed: null as null | { path?: string; appId?: string; name?: string; target?: string },
   procs: [] as Array<{ pid: number; name: string; started: number }>,
+  /** What the bridge's Win32 window read answers; null = a bridge without it (the adapter falls back to listWindows). */
+  fast: null as null | (() => Promise<unknown>),
+  /** Exit status of a spawned PowerShell (Start-Process): 0 = started. */
+  spawnExit: 0,
 }));
 vi.mock('../platform/ps-runner', () => ({
   psRunner: {
@@ -38,16 +42,19 @@ vi.mock('../platform/ps-runner', () => ({
       if (c.cmd === 'get-process-paths') {
         return Promise.resolve({ paths: Object.fromEntries((c.pids as number[]).map(p => [String(p), h.paths[String(p)] ?? ''])) });
       }
-      if (c.cmd === 'find-processes') {
-        const names = (c.names as string[]).map(n => n.toLowerCase());
-        return Promise.resolve({ processes: h.procs.filter(p => names.includes(p.name.toLowerCase())) });
-      }
+      if (c.cmd === 'list-windows' && h.fast) return h.fast();
       return Promise.resolve(null);
     },
     start: vi.fn(), stop: vi.fn(),
   },
 }));
 vi.mock('../platform/win-app-resolve', () => ({ resolveInstalledWindowsApp: async () => h.installed }));
+vi.mock('../platform/win-processes', () => ({
+  findWindowsProcesses: async (names: string[]) => {
+    const want = names.map(n => n.toLowerCase());
+    return h.procs.filter(p => want.includes(p.name.toLowerCase())).map(p => ({ pid: p.pid, processName: p.name, started: p.started }));
+  },
+}));
 
 type Call = { cmd: string; args: string[]; opts: { env?: NodeJS.ProcessEnv } };
 const spawns: Call[] = [];
@@ -55,7 +62,7 @@ vi.mock('child_process', () => ({
   execFile: (_c: string, _a: string[], _o: unknown, cb: (e: null, r: { stdout: string; stderr: string }) => void) => cb(null, { stdout: '', stderr: '' }),
   spawn: (cmd: string, args: string[], opts: Call['opts']) => {
     spawns.push({ cmd, args, opts });
-    return { unref: () => {}, on: () => {} };
+    return { unref: () => {}, on: (ev: string, cb: (code: number) => void) => { if (ev === 'exit') void Promise.resolve().then(() => cb(h.spawnExit)); } };
   },
 }));
 
@@ -91,7 +98,7 @@ async function settle<T>(p: Promise<T>): Promise<T> {
 }
 
 beforeEach(() => {
-  spawns.length = 0; h.bridge.length = 0; h.paths = {}; h.installed = null; h.procs = [];
+  spawns.length = 0; h.bridge.length = 0; h.paths = {}; h.installed = null; h.procs = []; h.fast = null; h.spawnExit = 0;
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-sysroot-'));
   const exe = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   fs.mkdirSync(path.dirname(exe), { recursive: true }); fs.writeFileSync(exe, '');
@@ -201,7 +208,7 @@ describe('open_file on Windows — the window reported is the opened program\'s,
   it('explorer.exe gets the path with backslashes (it reads "/" as a switch and opens Documents instead)', async () => {
     desktop(DESKTOP, [...DESKTOP, CALC]);
     await settle(adapter.launchApp('explorer.exe', EXE));
-    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe('C:\\Windows\\System32\\calc.exe');
+    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe('"C:\\Windows\\System32\\calc.exe"');
   });
 
   it('an exe: the program\'s own window is reported', async () => {
@@ -238,7 +245,7 @@ describe('open_file on Windows — any valid path opens; a refused one says why'
     desktop(DESKTOP);
     await adapter.launchApp('explorer.exe', { ...OPEN, url: p });
     expect(spawns).toHaveLength(1);
-    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe(p);
+    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe(`"${p}"`);
     expect(script()).toContain('-ArgumentList $env:CLAWD_PS_ARGS');
     expect(script()).not.toContain('notes');
     expect(script()).not.toContain('Recycle');
@@ -253,14 +260,43 @@ describe('open_file on Windows — any valid path opens; a refused one says why'
   });
 });
 
+
+describe('open_file on Windows — the path is ONE argument, whatever it contains', () => {
+  // `Start-Process -ArgumentList` hands its string to the program as written: unquoted, a path with spaces split.
+  const OPEN = { noStartMenuFallback: true, viaLauncher: true };
+  it.each([
+    ['C:\\Users\\x\\My Documents\\Q3 report (final).pdf', '"C:\\Users\\x\\My Documents\\Q3 report (final).pdf"'],
+    ['C:/Program Files/My App/', '"C:\\Program Files\\My App"'],          // no backslash left to escape the closing quote
+    ['\\\\server\\share\\Team Docs\\a b.txt', '"\\\\server\\share\\Team Docs\\a b.txt"'],
+    ['//server/share/Team Docs/', '"\\\\server\\share\\Team Docs"'],
+    ['C:\\', 'C:\\'],
+    ['C:/', 'C:\\'],
+    ['C:\\plain\\path.txt', '"C:\\plain\\path.txt"'],
+  ])('%s → %s', async (given, sent) => {
+    desktop(DESKTOP);
+    await adapter.launchApp('explorer.exe', { ...OPEN, url: given });
+    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe(sent);
+    expect(spawns[0].args.join(' ')).toContain('-ArgumentList $env:CLAWD_PS_ARGS');
+  });
+
+  it('a URL is left as it is', async () => {
+    desktop(DESKTOP);
+    await settle(adapter.launchApp('msedge.exe', { url: 'https://example.com/a?b=c&d=e', noStartMenuFallback: true }));
+    expect(spawns[0].opts.env?.CLAWD_PS_ARGS).toBe('https://example.com/a?b=c&d=e');
+  });
+});
+
 describe('open_app on Windows — a slow starter whose process is up but whose window is not', () => {
   // Live: open_app "Designcenter" (NX, ugraf.exe) took 39 s and answered "Could not confirm … no window appeared"
   // while the app was starting.
   const NX = { appId: 'Siemens.NX.Designcenter', name: 'Designcenter', target: 'C:\\Program Files\\Siemens\\NX2506\\NXBIN\\ugraf.exe' };
+  const NX_EXE = { path: 'C:\\Program Files\\Siemens\\NX2506\\NXBIN\\ugraf.exe' };
+  const fresh = () => Date.now() + 500;
+  const old = () => Date.now() - 3_600_000;
 
-  it('reports the running process (pid + process name), not a failure, within the launch budget', async () => {
+  it('reports the process this launch started (pid + process name), not a failure, within the launch budget', async () => {
     h.installed = NX;
-    h.procs = [{ pid: 5150, name: 'ugraf', started: 1 }];
+    h.procs = [{ pid: 5150, name: 'ugraf', started: fresh() }];
     desktop(DESKTOP);
     const t0 = Date.now();
     const res = await settle(adapter.launchApp('Designcenter', { nameOnly: true }));
@@ -275,33 +311,124 @@ describe('open_app on Windows — a slow starter whose process is up but whose w
     expect(await settle(adapter.launchApp('Designcenter', { nameOnly: true }))).toEqual({});
   });
 
+  it('name-only: a process that was there BEFORE this launch is not "started" (a tray app whose launch did nothing)', async () => {
+    h.installed = NX;
+    h.procs = [{ pid: 5150, name: 'ugraf', started: old() }];
+    desktop(DESKTOP);
+    expect(await settle(adapter.launchApp('Designcenter', { nameOnly: true }))).toEqual({});
+  });
+
+  it('name-only: a launch Windows refused is a failure with the reason, even with an older process of that name running', async () => {
+    h.installed = NX_EXE;
+    h.spawnExit = 1;
+    h.procs = [{ pid: 5150, name: 'ugraf', started: old() }];
+    desktop(DESKTOP);
+    await expect(settle(adapter.launchApp('Designcenter', { nameOnly: true }))).rejects.toThrow(/Windows could not start "Designcenter"/);
+  });
+
   it('a known app whose process started with this launch: reported, and the Start menu is not typed into (that would launch it twice)', async () => {
     desktop(DESKTOP);
-    h.procs = [{ pid: 6000, name: 'OUTLOOK', started: Date.now() + 500 }];
+    h.procs = [{ pid: 6000, name: 'OUTLOOK', started: fresh() }];
     const res = await settle(adapter.launchApp('Excel', { searchTerm: 'Excel', processNames: ['EXCEL', 'OUTLOOK'] }));
     expect(res).toEqual({ pid: 6000, processName: 'OUTLOOK' });
     expect(adapter.typeText).not.toHaveBeenCalled();
   });
 
-  it('a known app: a process that was already there before the launch proves nothing (msedge keeps background processes)', async () => {
+  it('a known app, Start-Process succeeded, the app handed the launch to its running process: reported, no Start-menu search', async () => {
     desktop(DESKTOP);
-    h.procs = [{ pid: 6001, name: 'msedge', started: Date.now() - 3_600_000 }];
+    h.procs = [{ pid: 6001, name: 'msedge', started: old() }];
+    const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
+    expect(res).toEqual({ pid: 6001, processName: 'msedge' });
+    expect(adapter.typeText).not.toHaveBeenCalled();
+  });
+
+  it('a known app, Start-Process FAILED: background processes of that name prove nothing — the Start-menu search is the recovery', async () => {
+    desktop(DESKTOP);
+    h.spawnExit = 1;
+    h.procs = [{ pid: 6001, name: 'msedge', started: old() }];
     const res = await settle(adapter.launchApp('msedge.exe', { searchTerm: 'Edge', processNames: ['msedge'] }));
     expect(adapter.typeText).toHaveBeenCalledWith('Edge');
     expect(res).toEqual({});
   });
+});
 
-  it('a window list that hangs (the starting app blocks the accessibility read) cannot stretch the wait past its budget', async () => {
-    h.installed = NX;
-    h.procs = [{ pid: 5150, name: 'ugraf', started: 1 }];
+describe('open_app on Windows — the wait ends with its budget, and the process answer survives a stuck window read', () => {
+  const NX = { appId: 'Siemens.NX.Designcenter', name: 'Designcenter', target: 'C:\\Program Files\\Siemens\\NX2506\\NXBIN\\ugraf.exe' };
+
+  /** The bridge as it behaves while an app is starting: one read answers, the next hangs 20 s and then the bridge is torn down. */
+  function wedgedBridge() {
     let first = true;
-    vi.spyOn(adapter, 'listWindows').mockImplementation(() => {
-      if (first) { first = false; return Promise.resolve(DESKTOP); }
-      return new Promise<WindowInfo[]>(resolve => setTimeout(() => resolve(DESKTOP), 20_000));
-    });
+    h.fast = () => {
+      if (first) { first = false; return Promise.resolve({ windows: DESKTOP }); }
+      return new Promise((_, reject) => setTimeout(() => reject(new Error('PSRunner bridge restarted after a command timeout')), 20_000));
+    };
+  }
+
+  it('the launch reads windows through the bridge\'s Win32 read, not the UI Automation one', async () => {
+    h.fast = async () => ({ windows: spawns.length ? [...DESKTOP, CALC] : DESKTOP });
+    const uia = vi.spyOn(adapter, 'listWindows');
+    const res = await settle(adapter.launchApp('Calculator', CALC_ALIAS));
+    expect(res).toMatchObject({ pid: 400, title: 'Calculator' });
+    expect(uia).not.toHaveBeenCalled();
+    expect(h.bridge.some(c => c.cmd === 'get-screen-context')).toBe(false);
+  });
+
+  it('name-only (the NX case): "started, window not up yet" within the budget, although the window read is stuck', async () => {
+    h.installed = NX;
+    h.procs = [{ pid: 5150, name: 'ugraf', started: Date.now() + 500 }];
+    wedgedBridge();
     const t0 = Date.now();
     const res = await settle(adapter.launchApp('Designcenter', { nameOnly: true }));
     expect(res).toEqual({ pid: 5150, processName: 'ugraf' });
     expect(Date.now() - t0).toBeLessThanOrEqual(9_000);
+  });
+
+  it('a known app: the same, and no Start-menu search launches it a second time', async () => {
+    h.procs = [{ pid: 6000, name: 'OUTLOOK', started: Date.now() + 500 }];
+    wedgedBridge();
+    const t0 = Date.now();
+    const res = await settle(adapter.launchApp('Outlook', { searchTerm: 'Outlook', processNames: ['OUTLOOK', 'olk'], alwaysNewInstance: true }));
+    expect(res).toEqual({ pid: 6000, processName: 'OUTLOOK' });
+    expect(adapter.typeText).not.toHaveBeenCalled();
+    expect(Date.now() - t0).toBeLessThanOrEqual(5_000);
+  });
+
+  it('a first window read that never answers does not hold the launch: it starts from an empty snapshot', async () => {
+    h.installed = NX;
+    h.procs = [{ pid: 5150, name: 'ugraf', started: Date.now() + 6_000 }];
+    h.fast = () => new Promise(() => {});
+    const t0 = Date.now();
+    const res = await settle(adapter.launchApp('Designcenter', { nameOnly: true }));
+    expect(res).toEqual({ pid: 5150, processName: 'ugraf' });
+    expect(Date.now() - t0).toBeLessThanOrEqual(5_000 + 9_000);
+  });
+});
+
+describe('open_app on Windows — a UWP app in its frame window is known by the app it hosts, on any Windows language', () => {
+  const frame = (title: string, pid: number, hosted?: { id: number; name: string }): WindowInfo =>
+    ({ ...W(title, 'ApplicationFrameHost', pid), ...(hosted ? { hostedProcessId: hosted.id, hostedProcessName: hosted.name } : {}) });
+  const fast = (before: WindowInfo[]) => { h.fast = async () => ({ windows: before }); };
+
+  it('a German Calculator ("Rechner") that is open is found by its hosted process and focused, not launched twice', async () => {
+    fast([...DESKTOP, frame('Rechner', 500, { id: 501, name: 'CalculatorApp' })]);
+    const res = await settle(adapter.launchApp('Calculator', CALC_ALIAS));
+    expect(spawns).toHaveLength(0);
+    expect(res).toMatchObject({ pid: 500, title: 'Rechner' });
+  });
+
+  it('…or by the hosted process\'s package family, whatever that process is called', async () => {
+    h.paths['501'] = 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsCalculator_11.2502.2.0_x64__8wekyb3d8bbwe\\Renamed.exe';
+    fast([...DESKTOP, frame('Rechner', 500, { id: 501, name: 'Renamed' })]);
+    const res = await settle(adapter.launchApp('Calculator', { uwpAppId: CALC_ALIAS.uwpAppId, searchTerm: 'Calculator' }));
+    expect(spawns).toHaveLength(0);
+    expect(res).toMatchObject({ pid: 500 });
+  });
+
+  it('a frame hosting ANOTHER app is not Calculator, even if its title says "Calculator"', async () => {
+    h.paths['601'] = 'C:\\Program Files\\WindowsApps\\Contoso.Notes_1.0.0.0_x64__abcdefgh12345\\Notes.exe';
+    fast([...DESKTOP, frame('Calculator', 600, { id: 601, name: 'Notes' })]);
+    const res = await settle(adapter.launchApp('Calculator', { ...CALC_ALIAS, noStartMenuFallback: true }));
+    expect(spawns).toHaveLength(1);
+    expect(res).toEqual({});
   });
 });

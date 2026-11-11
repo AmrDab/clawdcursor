@@ -119,13 +119,10 @@ export async function waitForLaunchedWindow(
 
     // The read is bounded by what is left of the budget: an app that is starting can block the accessibility read
     // for many seconds (live: an 8 s wait took 39 s), and a wait that does not end is worse than "not yet".
-    let current: readonly WindowInfo[] | null;
-    try {
-      current = await Promise.race([listWindows(), sleep(Math.max(0, deadline - Date.now())).then(() => null)]);
-    } catch {
-      continue;
-    }
-    if (current === null) break;
+    const read = await within(listWindows(), Math.max(0, deadline - Date.now()));
+    if (read === TIMED_OUT) break;
+    if (read === null) continue;
+    const current = read;
 
     // Pass 1: prefer brand-new windows. PID match wins (most reliable),
     // then predicate match.
@@ -180,6 +177,20 @@ export async function waitForLaunchedWindow(
 export function buildAppPredicate(name: string, hints?: AppIdentityHints): AppPredicate {
   const identity = appIdentity(name, hints);
   return (w: WindowInfo): boolean => ownsWindow(identity, w);
+}
+
+/** `within` ran out of time. */
+export const TIMED_OUT = Symbol('timed out');
+
+/**
+ * `p`, or TIMED_OUT after `ms` — the read itself is abandoned, not cancelled. null when `p` rejects. For reads that
+ * may hang on an app that is starting: a launch wait has a budget, and it must end with it.
+ */
+export function within<T>(p: Promise<T>, ms: number): Promise<T | null | typeof TIMED_OUT> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => resolve(TIMED_OUT), ms);
+    p.then(v => { clearTimeout(timer); resolve(v); }, () => { clearTimeout(timer); resolve(null); });
+  });
 }
 
 function sleep(ms: number): Promise<void> {

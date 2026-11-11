@@ -767,23 +767,65 @@ function Cmd-GetProcessPaths {
     return @{ paths = $paths }
 }
 
-# -- Command: find-processes ---------------------------------------------------
-# The running processes with one of these names (exact; wildcards are escaped): pid, name, start time (Unix ms, 0 when
-# it may not be read). launchApp asks when a launched app has shown no window yet: a slow starter is "started, window
-# not up yet", not a failed launch.
-function Cmd-FindProcesses {
-    param($cmd)
-    $out = @()
-    foreach ($n in @($cmd.names)) {
-        $name = [System.Management.Automation.WildcardPattern]::Escape("$n")
-        if (-not $name) { continue }
-        foreach ($p in @(Get-Process -Name $name -ErrorAction SilentlyContinue)) {
-            $started = 0
-            try { $started = ([DateTimeOffset]$p.StartTime).ToUnixTimeMilliseconds() } catch {}
-            $out += @{ pid = $p.Id; name = $p.ProcessName; started = $started }
-        }
+# -- Command: list-windows -----------------------------------------------------
+# The visible top-level windows, read with Win32 alone: no UI Automation. get-screen-context asks every window's
+# UIA provider, and an app that is starting does not answer - the read blocks until the bridge's call timeout,
+# which is how an 8 s launch wait took 39 s. A launch needs only handle, title, owner and state, and those come
+# from the window manager without asking the app (GetWindowText reads another process's caption from the
+# window structure; it sends no message).
+# A UWP app's window belongs to ApplicationFrameHost; the app itself owns the Windows.UI.Core.CoreWindow child,
+# reported as hostedProcessId / hostedProcessName so the app is known by identity, not by its (localized) title.
+function Cmd-ListWindows {
+    if (-not ([System.Management.Automation.PSTypeName]'LaunchWin').Type) {
+        Add-Type -TypeDefinition @"
+using System; using System.Runtime.InteropServices;
+public static class LaunchWin {
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr h, System.Text.StringBuilder s, int n);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string cls, string title);
+  public static string TitleOf(IntPtr h) { var sb = new System.Text.StringBuilder(512); GetWindowText(h, sb, 512); return sb.ToString(); }
+  public static IntPtr CoreOf(IntPtr h) { return FindWindowEx(h, IntPtr.Zero, "Windows.UI.Core.CoreWindow", null); }
+}
+"@
     }
-    return @{ processes = @($out) }
+    $names = @{}
+    $nameOf = {
+        param([int]$id)
+        if (-not $names.ContainsKey($id)) {
+            $n = 'unknown'
+            try { $n = [System.Diagnostics.Process]::GetProcessById($id).ProcessName } catch {}
+            $names[$id] = $n
+        }
+        $names[$id]
+    }
+    $list = @()
+    for ($h = [ScreenPM]::GetTopWindow([IntPtr]::Zero); $h -ne [IntPtr]::Zero; $h = [ScreenPM]::GetWindow($h, 2)) {
+        if (-not [ScreenPM]::IsWindowVisible($h)) { continue }
+        $cloaked = 0; [void][ScreenPM]::DwmGetWindowAttribute($h, 14, [ref]$cloaked, 4)  # DWMWA_CLOAKED
+        if ($cloaked -ne 0) { continue }
+        $cls = [ScreenPM]::ClassOf($h)
+        if ($script:ShellWindowClasses -contains $cls) { continue }
+        $title = [LaunchWin]::TitleOf($h)
+        if (-not $title -or $title.Trim().Length -eq 0) { continue }
+        $wpid = 0
+        [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$wpid)
+        $r = New-Object 'ScreenPM+RECT'
+        [void][ScreenPM]::GetWindowRect($h, [ref]$r)
+        $w = [ordered]@{
+            handle = [int64]$h; title = $title; processName = (& $nameOf ([int]$wpid)); processId = [int]$wpid; className = $cls
+            bounds = @{ x = $r.L; y = $r.T; width = ($r.R - $r.L); height = ($r.B - $r.T) }
+            isMinimized = [bool][ScreenPM]::IsIconic($h)
+        }
+        if ($cls -eq 'ApplicationFrameWindow') {
+            $core = [LaunchWin]::CoreOf($h)
+            if ($core -ne [IntPtr]::Zero) {
+                $cp = 0
+                [void][Win32UIA]::GetWindowThreadProcessId($core, [ref]$cp)
+                if ($cp -ne 0 -and $cp -ne $wpid) { $w.hostedProcessId = [int]$cp; $w.hostedProcessName = (& $nameOf ([int]$cp)) }
+            }
+        }
+        $list += $w
+    }
+    return @{ windows = @($list) }
 }
 
 # The app's own display name: its exe's file description, else product name ("Designcenter NX" for ugraf.exe).
@@ -1687,7 +1729,7 @@ while ($true) {
             "get-screen-context"    { Cmd-GetScreenContext $cmd }
             "get-foreground-window" { Cmd-GetForegroundWindow }
             "get-process-paths"     { Cmd-GetProcessPaths $cmd }
-            "find-processes"        { Cmd-FindProcesses $cmd }
+            "list-windows"          { Cmd-ListWindows }
             "focus-window"          { Cmd-FocusWindow $cmd }
             "find-element"          { Cmd-FindElement $cmd }
             "invoke-element"        { Cmd-InvokeElement $cmd }

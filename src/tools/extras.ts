@@ -23,11 +23,9 @@ import { MOD } from '../platform/keys';
 import { screenJson } from '../core/untrusted-screen-content';
 import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
-import { promises as fsp } from 'node:fs';
-import { windowTextIncludes } from './window-text';
 import { preferControl, failReason } from '../platform/prefer-control';
 import { quoteScreenText } from '../core/result-codes';
-import { resolveAlias, startedNoWindowText } from '../core/router/aliases';
+import { openFilePath } from './open-file';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -567,62 +565,7 @@ export function getExtraTools(): ToolDefinition[] {
       handler: async ({ path: filePath }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_file');
-        // Route through launchApp with a file-URL or raw path. The Windows
-        // adapter handles shell: paths and Start-Process; macOS uses `open`;
-        // Linux uses xdg-open fallback.
-        const p = String(filePath);
-        // Leaf segment — for a directory this is the Explorer window title.
-        const leaf = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
-        let isDir = false;
-        try { isDir = (await fsp.stat(p)).isDirectory(); } catch { /* unknown/missing — treat as file */ }
-        try {
-          if (ctx.platform.platform === 'darwin') {
-            await ctx.platform.launchApp('open', { url: p });
-            return { text: `Opened: ${p} — handed to its default app; no window was checked, so confirm with list_windows before acting on it.` };
-          }
-          if (ctx.platform.platform === 'linux') {
-            await ctx.platform.launchApp('xdg-open', { url: p });
-            return { text: `Opened: ${p} — handed to its default app; no window was checked, so confirm with list_windows before acting on it.` };
-          }
-          if (!isDir) {
-            // A file is opened by its own program, not by Explorer, so no Explorer window is ever the result (live:
-            // `Opened: …/calc.exe (window: "Screenshots - File Explorer")`). For a program the window reported must be
-            // the program's own — calc.exe → the alias row's CalculatorApp; for a document the program is unknown.
-            const exe = /\.(exe|com)$/i.test(leaf) ? leaf.replace(/\.(exe|com)$/i, '') : '';
-            const alias = exe ? resolveAlias(exe) : null;
-            const res = await ctx.platform.launchApp('explorer.exe', {
-              url: p, noStartMenuFallback: true, viaLauncher: true,
-              processNames: exe ? [exe, ...(alias?.processNames ?? [])] : [],
-              searchTerm: alias?.searchTerm,
-            });
-            if (res?.title) return { text: `Opened: ${p} (window: ${quoteScreenText(res.title)})` };
-            return {
-              text: !exe ? `Opened: ${p}`
-                : res?.pid ? `Opened: ${p} — ${startedNoWindowText(leaf, res)}`
-                : `Opened: ${p} — handed to Windows, but neither a window nor a process of ${leaf} was found: it may not have started. Wait, then window {"action":"focus","processName":${JSON.stringify(exe)}} before acting on it.`,
-            };
-          }
-          // Windows: open the path in Explorer. For a DIRECTORY, VERIFY the
-          // right folder window actually surfaced — launchApp must not fall
-          // back to a Start-Menu search (which types "explorer" and opens
-          // File Explorer at Home), and a pre-existing window is not proof.
-          // Previously open_file returned "Opened" unconditionally even when
-          // it landed on Home (live bug 2026-06-12).
-          const res = await ctx.platform.launchApp('explorer.exe', { url: p, noStartMenuFallback: true });
-          const title = res?.title ?? '';
-          if (!leaf || !windowTextIncludes(title, leaf)) {
-            return {
-              text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
-              isError: true,
-            };
-          }
-          return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
-        } catch (err) {
-          return {
-            text: `open_file failed: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-        }
+        return openFilePath(ctx.platform, String(filePath));
       },
     },
 

@@ -11,6 +11,7 @@ import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getExtraTools } from '../tools/extras';
+import { buildUnifiedTools } from '../core/agent-loop/tools';
 import type { ToolContext } from '../tools/types';
 
 const openFile = getExtraTools().find(t => t.name === 'open_file')!;
@@ -106,11 +107,41 @@ describe('open_file — a refused path says why; macOS and Linux go through the 
     expect(spy).toHaveBeenCalledWith(opener, { url: "/home/x/Sam's $notes.txt" });
     expect(r.isError).toBeFalsy();
     expect(r.text).toMatch(/^Opened: .*no window was checked/);
+    expect(r.text).not.toMatch(/list_windows/);
   });
 
   it.each([['darwin'], ['linux']])('%s: the opener\'s failure is the result', async (platform) => {
     const r = await openFile.handler({ path: '/nope' }, tool(platform, async () => { throw new Error('The file /nope does not exist.'); }));
     expect(r.isError).toBe(true);
     expect(r.text).toMatch(/does not exist/);
+  });
+});
+
+describe('agent-loop open_file is the same implementation (it used to launch explorer bare and could reach the Start-menu search)', () => {
+  const agentOpenFile = buildUnifiedTools().find(t => t.name === 'open_file')!;
+  const agentCtx = (platform: string, launchApp: any) => ({ platform: { platform, launchApp: vi.fn(launchApp) } }) as any;
+
+  it('a file: Explorer is only the launcher, and no Start-menu fallback', async () => {
+    const c = agentCtx('win32', async () => ({}));
+    const r = await agentOpenFile.execute({ path: 'C:/Windows/System32/calc.exe' }, c);
+    expect(c.platform.launchApp).toHaveBeenCalledWith('explorer.exe', expect.objectContaining({
+      viaLauncher: true, noStartMenuFallback: true, processNames: expect.arrayContaining(['calc', 'CalculatorApp']),
+    }));
+    expect(r.success).toBe(true);
+    expect(r.text).toContain('focus_window {"processName":"calc"}');
+  });
+
+  it('a folder: verified by its window, and no Start-menu fallback', async () => {
+    const c = agentCtx('win32', async () => ({ title: 'Home - File Explorer', pid: 5 }));
+    const r = await agentOpenFile.execute({ path: dir }, c);
+    expect(c.platform.launchApp).toHaveBeenCalledWith('explorer.exe', expect.objectContaining({ noStartMenuFallback: true }));
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/could NOT confirm the folder/);
+  });
+
+  it('a refusal is a failure with its reason', async () => {
+    const r = await agentOpenFile.execute({ path: 'C:\\x\\a"b.txt' }, agentCtx('win32', async () => { throw new Error('contains a double quote or a control character'); }));
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/double quote/);
   });
 });
