@@ -1,11 +1,22 @@
 /**
- * `npm run bench -- --selfcheck`: proves the fixtures and the task predicates without an agent and without a window.
+ * `npm run bench -- --selfcheck`: proves the fixtures, the task predicates and the runner's isolation, without an agent
+ * and without a window.
  *
  * Web: each web task's page is driven by a scripted trajectory in a HEADLESS browser, once the right way (the predicate
  * must hold) and once into the trap (it must not). Native: the fixture's own --selftest (off screen, never activated).
- * It is not part of the unit tests: it needs an installed Chromium browser.
+ * Isolation: the isolated daemon and the fixture browser start and stop, and the owner's ~/.clawdcursor is unchanged.
+ * It is not part of the unit tests: it needs an installed Chromium browser and a clawdcursor build.
  */
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { chromium, type Page } from 'playwright';
+import { findBrowser, openBrowser } from './browser';
+import { resolveCli, startIsolated } from './isolated';
+import { buildNative, nativeArgs, readStateFile } from './live-fixtures';
+import { freePort, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
 import { evaluate, loadTasks } from './tasks';
 import type { TaskSpec } from './types';
@@ -114,4 +125,89 @@ async function runScript(task: TaskSpec, script: Script, run: string, server: Aw
   } finally {
     await page.close();
   }
+}
+
+/** The native fixture of this OS: built, then run with --selftest (off screen, never activated, closes itself). */
+export async function selfcheckNative(log: (line: string) => void = console.log): Promise<boolean> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-selfcheck-'));
+  try {
+    const built = await buildNative(dir);
+    if ('missing' in built) { log(`skip native fixture: ${built.missing}`); return true; }
+    let ok = true;
+    for (const mode of ['dialog', 'editor'] as const) {
+      const state = path.join(dir, `${mode}.json`);
+      const ran = await tryRun(built.cmd, [...built.args, ...nativeArgs({ state, mode }), '--selftest'], 60_000);
+      const fx = ran === null ? null : readStateFile(state);
+      const pass = !!fx && (mode === 'editor' ? fx.state.text === 'first line\nsecond line'
+        : fx.state.modalResult === 'ok' && fx.state.shippingEdit === 1 && fx.state.billingEdit === 0
+          && JSON.stringify(fx.state.applied) === JSON.stringify({ name: 'Self Test', email: 'self@test.example', priority: 'High', subscribe: true }));
+      if (!pass) ok = false;
+      log(`${pass ? 'ok  ' : 'FAIL'} native fixture ${mode}: ${fx ? `${fx.events.length} events` : 'no state file'}`);
+    }
+    return ok;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Size and time of every file under a directory: to prove a run did not touch it. */
+function fingerprint(dir: string): string {
+  const out: string[] = [];
+  const walk = (d: string) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else { const s = fs.statSync(p); out.push(`${p}|${s.size}|${s.mtimeMs}`); }
+    }
+  };
+  try { walk(dir); } catch { /* no such directory: nothing to touch */ }
+  return out.sort().join('\n');
+}
+
+/**
+ * The isolation of the runner: the fixture browser (headless here) opens a page and is closed whole; the isolated daemon
+ * starts in a temp home on its own port, refuses a request without its token and lists the six tools. No tool is
+ * called, so nothing on the desktop is read or touched. The owner's ~/.clawdcursor must be byte-for-byte as before.
+ */
+export async function selfcheckIsolation(buildDir: string | undefined, log: (line: string) => void = console.log): Promise<boolean> {
+  const real = path.join(os.homedir(), '.clawdcursor');
+  const before = fingerprint(real);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-selfcheck-'));
+  const check = (ok: boolean, what: string) => { log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); return ok; };
+  let ok = true;
+  const server = await startFixtureServer();
+  try {
+    const { cli, version, source } = await resolveCli(buildDir);
+    const cdpPort = await freePort();
+    const exe = findBrowser();
+    const profileDir = path.join(root, 'browser-profile');
+    const browser = exe ? await openBrowser(exe, { profileDir, cdpPort, url: server.url('trap', 'isolation'), extraArgs: ['--headless=new'] }) : null;
+    if (!browser) log('skip fixture browser: no Chromium browser installed');
+    const daemon = await startIsolated({ cli, home: path.join(root, 'home'), sessionDir: path.join(root, 'sessions'), cdpPort, logFile: path.join(root, 'server.log') });
+    try {
+      if (browser) {
+        await waitFor(() => server.state('isolation').events.some(e => e.type === 'load'), 10_000, 'the page to report').catch(() => undefined);
+        ok = check(server.state('isolation').events.some(e => e.type === 'load'), 'fixture browser: the page reports to the fixture server') && ok;
+      }
+      const bare = await fetch(daemon.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+      ok = check(bare.status === 401, `isolated clawdcursor ${version} (${source}) on port ${daemon.port}: refuses a request without its token`) && ok;
+      const client = new Client({ name: 'bench-selfcheck', version: '0' });
+      await client.connect(new StreamableHTTPClientTransport(new URL(daemon.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${daemon.token}` } } }));
+      const tools = (await client.listTools()).tools.map(t => t.name).sort().join(',');
+      await client.close();
+      ok = check(tools === 'accessibility,batch,browser,computer,system,window', `isolated clawdcursor: the six tools (${tools})`) && ok;
+      ok = check(fs.existsSync(path.join(root, 'home', '.clawdcursor', 'token')), 'isolated clawdcursor: its data is in the temp home') && ok;
+    } finally {
+      await daemon.stop();
+      await browser?.close();
+    }
+    ok = check(!fs.existsSync(profileDir), 'fixture browser: closed, its temp profile removed') && ok;
+    ok = check(fingerprint(real) === before, `the owner's ${real} is untouched`) && ok;
+  } catch (e) {
+    ok = check(false, `isolation: ${(e as Error).message}`);
+  } finally {
+    await server.close();
+    try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ }
+  }
+  return ok;
 }
