@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { EventEmitter } from 'events';
+import { execFileSync } from 'child_process';
 import { agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, selectTasks } from '../run';
 import { Cleanup } from '../lib/cleanup';
 import { browserAppNames, browserArgs, findBrowser } from '../lib/browser';
@@ -115,14 +116,15 @@ describe('the command line', () => {
 
   it('reads every option', () => {
     expect(parseArgs(['--live', '--build', '.', '--models', 'claude-code:sonnet', '--tasks', 'a, b', '--out', 'o', '--baseline', 'b.json',
-      '--window-pos', '-1920,40', '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, includeManual: true,
-      updateBaseline: true, repeats: 3, build: '.', models: 'claude-code:sonnet', tasks: ['a', 'b'], out: 'o', baseline: 'b.json', pos: [-1920, 40] });
+      '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, includeManual: true,
+      updateBaseline: true, repeats: 3, build: '.', models: 'claude-code:sonnet', tasks: ['a', 'b'], out: 'o', baseline: 'b.json' });
   });
 
   it('rejects an unknown option, a missing value and a bad position', () => {
     expect(() => parseArgs(['--fast'])).toThrow('unknown option --fast');
     expect(() => parseArgs(['--build'])).toThrow('--build needs a value');
-    expect(() => parseArgs(['--window-pos', 'left'])).toThrow('x,y');
+    // Fixture windows open on the primary monitor only: there is no option to move them (the fence refuses other monitors).
+    expect(() => parseArgs(['--window-pos', '-1920,40'])).toThrow('unknown option --window-pos');
     expect(() => parseArgs(['--repeats', '0'])).toThrow('1 to 9');
   });
 });
@@ -212,6 +214,18 @@ describe('where the agents run', () => {
       if (process.platform === 'win32' && process.env.PUBLIC) expect(dir.toLowerCase().startsWith(home + path.sep)).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
+  it.runIf(process.platform === 'win32')('is readable by the current user alone: it holds the MCP config with the bearer token', () => {
+    const dir = agentRoot();
+    try {
+      const acl = execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe'), [dir], { encoding: 'utf8' });
+      const entries = acl.split(/\r?\n/).map(l => l.replace(dir, '').trim()).filter(l => /:\(/.test(l));
+      expect(entries).toHaveLength(1);                                   // one entry: no inherited Users / Everyone / INTERACTIVE
+      expect(entries[0]).toMatch(/:\(OI\)\(CI\)\(F\)$/);
+      expect(acl).not.toMatch(/BUILTIN\\Users|Everyone|INTERACTIVE|Authenticated Users/i);
+      fs.writeFileSync(path.join(dir, 'mcp.json'), '{}');                // and the owner can still use it
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('falls back to the temp directory', () => {
     const dir = agentRoot('linux', {});
     expect(dir.startsWith(os.tmpdir())).toBe(true);

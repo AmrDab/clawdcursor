@@ -15,7 +15,8 @@ import { startFixtureServer, type FixtureServer } from './lib/fixture-server';
 import { resolveCli, startIsolated } from './lib/isolated';
 import { appUnavailable, buildNative, openFixture, type FixtureContext, type NativeBuild } from './lib/live-fixtures';
 import { USER_CDP_PORT, cdpIsFixture, ownsFocus, portOpen, readFocus } from './lib/ownership';
-import { freePort, sleep } from './lib/proc';
+import { execFileSync } from 'child_process';
+import { freePort, sleep, system32 } from './lib/proc';
 import { buildPrompt } from './lib/prompt';
 import { aggregate, buildReport, compare, renderMarkdown, score, toBaseline, type Baseline, type Score } from './lib/scorer';
 import { currentOs, loadTasks } from './lib/tasks';
@@ -24,7 +25,7 @@ import type { AgentRun, CallSig, TaskSpec } from './lib/types';
 
 export interface Options {
   live: boolean; selfcheck: boolean; includeManual: boolean; updateBaseline: boolean; repeats: number;
-  build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string; pos?: [number, number];
+  build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string;
 }
 
 export function parseArgs(argv: string[]): Options {
@@ -44,10 +45,6 @@ export function parseArgs(argv: string[]): Options {
     else if (a === '--repeats') {
       o.repeats = Number(value());
       if (!Number.isInteger(o.repeats) || o.repeats < 1 || o.repeats > 9) throw new Error('--repeats needs a number from 1 to 9');
-    } else if (a === '--window-pos') {
-      const [x, y] = value().split(',').map(Number);
-      if (!Number.isInteger(x) || !Number.isInteger(y)) throw new Error('--window-pos needs x,y');
-      o.pos = [x, y];
     } else throw new Error(`unknown option ${a}`);
   }
   return o;
@@ -95,19 +92,31 @@ export function prepareOutDir(dir: string): string {
  */
 export function agentRoot(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): string {
   const base = platform === 'win32' && env.PUBLIC && fs.existsSync(env.PUBLIC) ? env.PUBLIC : os.tmpdir();
-  return fs.mkdtempSync(path.join(base, 'clawdcursor-bench-agent-'));
+  const dir = fs.mkdtempSync(path.join(base, 'clawdcursor-bench-agent-'));   // 0700 on macOS and Linux
+  // It holds the MCP config with the daemon's bearer token, and the Public folder is readable by every account: on
+  // Windows the directory is cut off from inherited permissions and given to the current user alone.
+  if (platform === 'win32') {
+    try {
+      const me = execFileSync(system32('whoami.exe'), { encoding: 'utf8' }).trim();
+      execFileSync(system32('icacls.exe'), [dir, '/inheritance:r', '/grant:r', `${me}:(OI)(CI)F`], { stdio: 'ignore' });
+    } catch (e) {
+      fs.rmSync(dir, { recursive: true, force: true });
+      throw new Error(`could not make the agents' directory private (icacls): ${(e as Error).message}`);
+    }
+  }
+  return dir;
 }
 
 interface Env {
   cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; agentRoot: string;
-  pos?: [number, number]; cleanup: Cleanup;
+  cleanup: Cleanup;
 }
 
 /** One task with one model: fixture, fenced isolated server, agent under the watchdog, then the score. */
 async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: number): Promise<Score | { skip: string }> {
   const workDir = path.join(env.outDir, m.label.replace(/[^A-Za-z0-9._-]/g, '_'), repeat ? `${task.id}.${repeat + 1}` : task.id);
   fs.mkdirSync(workDir, { recursive: true });
-  const ctx: FixtureContext = { server: env.server, browser: findBrowser(), native: env.native, workDir, runId: `r${n}-${task.id}`.slice(0, 64), pos: env.pos };
+  const ctx: FixtureContext = { server: env.server, browser: findBrowser(), native: env.native, workDir, runId: `r${n}-${task.id}`.slice(0, 64) };
   const fixture = await openFixture(task, ctx);
   if ('skip' in fixture) return fixture;
   const fixtureClosed = env.cleanup.add(() => fixture.close());
@@ -221,7 +230,7 @@ async function live(o: Options): Promise<void> {
   const scores: Score[] = [];
   try {
     const native = run.some(t => t.fixture.kind === 'native') ? await buildNative(path.join(tempRoot, 'native')) : { missing: 'not needed' };
-    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, pos: o.pos, cleanup };
+    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, cleanup };
     let n = 0;
     for (const m of models) {
       for (const task of run) {

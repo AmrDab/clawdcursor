@@ -156,16 +156,19 @@ export function gateOf(s: Omit<Score, 'gate'>): Score['gate'] {
   return { pass: failures.length === 0, failures };
 }
 
-const median = (xs: number[]) => { const v = [...xs].sort((a, b) => a - b); return v[Math.floor((v.length - 1) / 2)]; };
+/** The upper median: of two runs the worse one, of three the middle one. */
+const median = (xs: number[]) => { const v = [...xs].sort((a, b) => a - b); return v[Math.floor(v.length / 2)]; };
 
 /**
- * One row for several runs of the same task and model (--repeats): the median of every count, done when most runs were
- * done, so one unlucky sample does not decide the gate. A privacy stop or a reload in any run stays.
+ * One row for several runs of the same task and model (--repeats): the (upper) median of calls, screenshots and time,
+ * done when most runs were done, so one slow sample does not decide the gate. False successes and loops take the WORST
+ * run: one of them in any run fails the row. A privacy stop or a reload in any run stays.
  */
 export function aggregate(runs: Score[]): Score {
   if (runs.length === 1) return runs[0];
   const first = runs[0];
   const med = (key: 'calls' | 'roundTrips' | 'screenshots' | 'actName' | 'actCoords' | 'errors' | 'falseSuccesses' | 'falseOk' | 'loops' | 'seconds') => median(runs.map(r => r[key]));
+  const worst = (key: 'falseSuccesses' | 'falseOk' | 'loops') => Math.max(...runs.map(r => r[key]));
   const successes = runs.filter(r => r.success === true).length;
   const actName = med('actName'), actCoords = med('actCoords');
   const pointed = actName + actCoords;
@@ -179,10 +182,10 @@ export function aggregate(runs: Score[]): Score {
     actName, actCoords,
     byName: pointed ? Math.round(actName / pointed * 100) / 100 : null,
     byCoords: pointed ? Math.round(actCoords / pointed * 100) / 100 : null,
-    errors: med('errors'), falseSuccesses: med('falseSuccesses'), falseOk: med('falseOk'),
-    falseDone: runs.filter(r => r.falseDone).length * 2 > runs.length,
+    errors: med('errors'), falseSuccesses: worst('falseSuccesses'), falseOk: worst('falseOk'),
+    falseDone: runs.some(r => r.falseDone),
     reloaded: runs.some(r => r.reloaded),
-    loops: med('loops'), seconds: med('seconds'),
+    loops: worst('loops'), seconds: med('seconds'),
     runs: runs.length, successes,
     gate: { pass: true, failures: [] },
   };

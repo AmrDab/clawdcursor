@@ -14,8 +14,10 @@ describe('the fixture server', () => {
   beforeAll(async () => { server = await startFixtureServer(); });
   afterAll(async () => { await server.close(); });
 
-  const post = (run: string, body: unknown) => fetch(`http://127.0.0.1:${server.port}/api/state?run=${run}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  /** A post as the page's own recorder makes it: with the run's nonce. */
+  const post = (run: string, body: object, nonce?: string) => fetch(`http://127.0.0.1:${server.port}/api/state?run=${run}`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ nonce: nonce ?? (/^[A-Za-z0-9_-]{1,64}$/.test(run) ? server.nonce(run) : ''), ...body }),
   });
 
   it('listens on 127.0.0.1 only and serves every page with the recorder', async () => {
@@ -23,7 +25,7 @@ describe('the fixture server', () => {
     for (const page of WEB_PAGES) {
       const res = await fetch(server.url(page, 'r1'));
       expect(res.status, page).toBe(200);
-      expect(await res.text(), page).toContain('<script src="/bench.js"></script>');
+      expect(await res.text(), page).toContain('<script src="/bench.js?run=r1"></script>');
     }
     expect((await fetch(`http://127.0.0.1:${server.port}/bench.js`)).status).toBe(200);
   });
@@ -49,7 +51,8 @@ describe('the fixture server', () => {
     expect(fx.events.map(e => e.target)).toEqual(['a', 'b', 'c']);
     expect(fx.events[0]).toMatchObject({ type: 'click', trusted: true });
     expect(fx.events[0].t).toBeGreaterThanOrEqual(before);
-    expect(await (await fetch(`http://127.0.0.1:${server.port}/api/state?run=rec`)).json()).toEqual(fx);
+    // The state cannot be read back over HTTP: only the runner, in process, reads it.
+    expect((await fetch(`http://127.0.0.1:${server.port}/api/state?run=rec`)).status).toBe(405);
   });
 
   it('keeps runs apart, and an unknown run is empty', async () => {
@@ -73,6 +76,32 @@ describe('the fixture server', () => {
     // A late post of the old page does not replace the new page's state.
     await post('reload', { page: 'p1', seq: 9, state: { clicks: { whatsNew: 9 } }, events: [] });
     expect(server.state('reload').state).toEqual({ clicks: { whatsNew: 0, new: 1 } });
+  });
+
+  describe('state is taken only from the run\'s own page script', () => {
+    it('the recorder script of a run carries that run\'s nonce; the page does not', async () => {
+      const js = await (await fetch(`http://127.0.0.1:${server.port}/bench.js?run=n1`)).text();
+      expect(js).toContain(`var nonce = '${server.nonce('n1')}';`);
+      expect(server.nonce('n1')).toMatch(/^[0-9a-f]{32}$/);
+      expect(server.nonce('n2')).not.toBe(server.nonce('n1'));
+      for (const page of WEB_PAGES) expect(await (await fetch(server.url(page, 'n1'))).text(), page).not.toContain(server.nonce('n1'));
+    });
+
+    it('a post without the nonce, or with another run\'s, is refused and changes nothing', async () => {
+      await post('forge', { seq: 1, state: { clicks: { new: 0 } }, events: [{ type: 'load', target: 'page' }] });
+      const forged = { seq: 99, state: { clicks: { new: 1 } }, events: [{ type: 'click', target: 'new' }] };
+      for (const nonce of ['', 'guess', server.nonce('other-run')]) expect((await post('forge', forged, nonce)).status, nonce).toBe(403);
+      const bare = await fetch(`http://127.0.0.1:${server.port}/api/state?run=forge`, { method: 'POST', body: JSON.stringify(forged) });
+      expect(bare.status).toBe(403);
+      expect(server.state('forge')).toMatchObject({ state: { clicks: { new: 0 } }, loads: 1 });
+      expect(server.state('forge').events).toHaveLength(1);
+    });
+
+    it('the script served with no run has no nonce, so nothing it posts is taken', async () => {
+      const js = await (await fetch(`http://127.0.0.1:${server.port}/bench.js`)).text();
+      expect(js).toContain("var nonce = '';");
+      expect((await post('nobody', { seq: 1, state: { a: 1 }, events: [] }, '')).status).toBe(403);
+    });
   });
 
   it('rejects a bad run id and bad JSON', async () => {
@@ -123,7 +152,7 @@ describe('the web pages', () => {
 
   it('the recorder names each page load and records raw mouse, key and wheel input', () => {
     const js = read('bench.js');
-    expect(js).toMatch(/page: page, seq: \+\+seq/);
+    expect(js).toMatch(/nonce: nonce, page: page, seq: \+\+seq/);
     for (const type of ['mousedown', 'mouseup', 'keydown', 'keyup', 'wheel', 'pointermove']) expect(js, type).toContain(`'${type}'`);
   });
 

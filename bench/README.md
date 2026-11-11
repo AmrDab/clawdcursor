@@ -26,8 +26,9 @@ round trips, not calls: its steps are counted.
 A web run in which the page was loaded more than once fails: a reload resets the page's counters. The fixture server
 keeps every event of every load.
 
-With `--repeats N` each task runs N times per model and its row is the median of the runs; it is done when most runs
-were done. A privacy stop or a reload in any run stays.
+With `--repeats N` each task runs N times per model. Its row takes the (upper) median of calls, screenshots and time,
+and is done when most runs were done; false successes and loops take the worst run, so one of them in any run fails
+the row. A privacy stop or a reload in any run stays.
 
 ### The gate
 
@@ -64,9 +65,8 @@ Options of a live run:
 | `--models a:b,c:d` | e.g. `claude-code:sonnet,claude-code:haiku,codex:default,ollama:qwen2.5:7b`. Default: every installed agent with its default models. |
 | `--tasks id,id` | only these tasks |
 | `--include-manual` | also the manual-verify tasks (open Designcenter with a part loaded first) |
-| `--window-pos x,y` | where the fixture window opens: run the suite on the second monitor to guard M4 |
 | `--out <dir>` | results directory: new or empty (default: a new folder under the temp directory). A directory that holds anything is refused, so an earlier run's logs cannot be read back. |
-| `--repeats N` | run each task N times per model and score the median (1 to 9, default 1) |
+| `--repeats N` | run each task N times per model (1 to 9, default 1) |
 | `--update-baseline` | write `bench/baseline/<os>.json` from this run |
 | `--baseline <file>` | compare with another baseline |
 
@@ -85,7 +85,8 @@ Only what is installed is used.
   images, so the tasks whose oracle needs a screenshot (canvas, CAD) are not run for it: they are listed as n/a, not failed.
 
 Every agent runs in a new empty directory outside the owner's home (the Public folder on Windows), so no `CLAUDE.md`,
-`AGENTS.md`, hook or project setting of the owner's loads.
+`AGENTS.md`, hook or project setting of the owner's loads. The directory holds the MCP config with the daemon's token:
+it is readable by the current user alone (an ACL on Windows, mode 0700 elsewhere) and removed after the run.
 
 ### Isolation and privacy
 
@@ -100,7 +101,13 @@ Every agent runs in a new empty directory outside the owner's home (the Public f
 - **The fence** is the first layer, and it acts BEFORE anything happens: the daemon is started with
   `CLAWD_FENCE_PIDS=<the fixture's processes>` and clawdcursor itself refuses (code `FENCED`) every input, act, window
   action, launch, clipboard access, window list, OCR and capture outside those processes and their children, each
-  step of a batch included. A screenshot shows only the fenced window. See SECURITY.md and `src/core/fence.ts`.
+  step of a batch included. It is an allow list: a tool nobody classified is refused. The pointer may only move and
+  press inside the fixture window, a screenshot shows only that window, and `browser evaluate` is refused. See
+  SECURITY.md and `src/core/fence.ts`.
+- **Fixture windows open on the primary monitor only.** The fence refuses a fixture window anywhere else until its
+  geometry is proven across monitors with different scaling, so M4 is guarded on the primary display for now.
+- **The fixture server takes state only from its own page script**: each run has a nonce that is inside the script,
+  not in the page or its accessibility tree, and a post without it is refused. The state cannot be read back over HTTP.
 - **Ctrl+C, a kill or a crash** stops the agent, kills the daemon, closes every fixture and browser and removes the
   temp homes before the runner exits.
 - **The watchdog** is the second layer. It follows the session log, after each call, and stops the agent on:
@@ -133,7 +140,7 @@ Every agent runs in a new empty directory outside the owner's home (the Public f
 | web-timing-late-dialog | web, timing | all | M5 | 4 / 0 | a dialog that opens 3 s after the click |
 | web-timing-gated-field | web, timing | all | M5 M1 | 5 / 0 | a field that throws input away until it has loaded |
 | web-canvas-draw | canvas, no tree | all | M3 M4 | 2 / 1 | one look, then a drag that lands where the image said |
-| web-canvas-targets | canvas, no tree | all | M3 M4 | 6 / 1 | coordinate clicks within 30 px on any monitor and scale |
+| web-canvas-targets | canvas, no tree | all | M3 M4 | 6 / 1 | coordinate clicks within 30 px at the primary display's scale |
 | web-long-read | long text | all | M3 | 3 / 0 | one table row in the middle of a long page, read exactly |
 | native-dialog-fill | native dialog | all | M1 | 6 / 0 | text fields, a list, a checkbox, Apply |
 | native-dialog-modal | native dialog | all | M2 M5 | 3 / 0 | the modal's OK, not the window's OK behind it |

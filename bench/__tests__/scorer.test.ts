@@ -280,10 +280,24 @@ describe('repeats', () => {
     expect(aggregate([s])).toBe(s);
   });
 
-  it('takes the median of every count, so one bad sample does not decide the gate', () => {
-    const s = aggregate([run({ calls: 4, screenshots: 0, seconds: 10 }), run({ calls: 30, screenshots: 9, seconds: 200, loops: 1, falseSuccesses: 2 }), run({ calls: 5, screenshots: 1, seconds: 12 })]);
+  it('takes the median of calls, screenshots and time, so one slow sample does not decide the gate', () => {
+    const s = aggregate([run({ calls: 4, screenshots: 0, seconds: 10 }), run({ calls: 30, screenshots: 9, seconds: 200 }), run({ calls: 5, screenshots: 1, seconds: 12 })]);
     expect(s).toMatchObject({ calls: 5, screenshots: 1, seconds: 12, loops: 0, falseSuccesses: 0, runs: 3, successes: 3, success: true });
     expect(s.gate.pass).toBe(true);
+  });
+
+  it('of two runs the median is the worse one', () => {
+    expect(aggregate([run({ calls: 4 }), run({ calls: 9 })]).calls).toBe(9);
+    expect(aggregate([run({ calls: 9 }), run({ calls: 4 }), run({ calls: 5 }), run({ calls: 6 })]).calls).toBe(6);
+  });
+
+  it('takes the WORST run for false successes and loops: one bad run in three still fails', () => {
+    const lied = aggregate([run({}), run({ falseSuccesses: 2, falseOk: 2 }), run({})]);
+    expect(lied).toMatchObject({ falseSuccesses: 2, falseOk: 2, success: true });
+    expect(lied.gate.failures).toEqual(['false successes 2']);
+    const looped = aggregate([run({}), run({}), run({ loops: 1 })]);
+    expect(looped.gate.failures).toEqual(['loops 1']);
+    expect(aggregate([run({}), run({ falseDone: true }), run({})]).falseDone).toBe(true);
   });
 
   it('is done when most runs were done', () => {

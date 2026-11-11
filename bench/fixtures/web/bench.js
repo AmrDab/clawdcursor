@@ -5,12 +5,14 @@
   var pending = [];
   var timer = null;
   var seq = 0;
+  // Put here by the fixture server when it serves this script for a run. The server takes state only with it.
+  var nonce = '__BENCH_NONCE__';
   // One id per load of the page: the server counts them, so a reload shows.
   var page = Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 
   function flush() {
     timer = null;
-    var body = JSON.stringify({ page: page, seq: ++seq, state: bench.snapshot(), events: pending });
+    var body = JSON.stringify({ nonce: nonce, page: page, seq: ++seq, state: bench.snapshot(), events: pending });
     pending = [];
     fetch('/api/state?run=' + encodeURIComponent(run), {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: body, keepalive: true,

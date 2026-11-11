@@ -4,6 +4,7 @@
  * A page is opened as /<page>.html?run=<id>. Its recorder (bench.js) POSTs every interaction and a snapshot of the page's
  * state to /api/state?run=<id>. The scorer reads that state: success is never judged from what the agent says.
  */
+import { randomBytes } from 'crypto';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
@@ -65,13 +66,20 @@ document.getElementById('submit').addEventListener('click', function () {
 
 interface Run { seq: number; state: Record<string, unknown>; events: Array<FixtureEvent & { seq: number; order: number }>;
   /** Every load of the page is a new page instance with its own id: a reload cannot wash a wrong click away. */
-  pages: string[]; order: number }
+  pages: string[]; order: number;
+  /**
+   * Given to the page's recorder inside its script, and required on every post. It is not in the page's text or its
+   * accessibility tree, so nothing that only reads or drives the page can forge the state the scorer reads.
+   */
+  nonce: string }
 
 export interface FixtureServer {
   port: number;
   url(page: string, run: string, query?: Record<string, string>): string;
   /** What the pages of this run reported so far. */
   state(run: string): FixtureState;
+  /** The run's nonce (for tests of the server: an agent has no way to ask for it). */
+  nonce(run: string): string;
   close(): Promise<void>;
 }
 
@@ -81,7 +89,7 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
   const runs = new Map<string, Run>();
   const runOf = (id: string) => {
     let r = runs.get(id);
-    if (!r) { r = { seq: -1, state: {}, events: [], pages: [], order: 0 }; runs.set(id, r); }
+    if (!r) { r = { seq: -1, state: {}, events: [], pages: [], order: 0, nonce: randomBytes(16).toString('hex') }; runs.set(id, r); }
     return r;
   };
   const server = http.createServer((req, res) => {
@@ -93,14 +101,14 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
     if (url.pathname === '/api/state') {
       const run = url.searchParams.get('run') ?? '';
       if (!/^[A-Za-z0-9_-]{1,64}$/.test(run)) return send(400, 'bad run id');
-      if (req.method === 'GET') return send(200, JSON.stringify(stateOf(run)), 'application/json');
       if (req.method !== 'POST') return send(405, 'method not allowed');
       let body = '';
       req.on('data', c => { body += c; if (body.length > 1_000_000) req.destroy(); });
       req.on('end', () => {
         try {
-          const msg = JSON.parse(body) as { page?: string; seq?: number; state?: Record<string, unknown>; events?: FixtureEvent[] };
+          const msg = JSON.parse(body) as { nonce?: string; page?: string; seq?: number; state?: Record<string, unknown>; events?: FixtureEvent[] };
           const r = runOf(run);
+          if (msg.nonce !== r.nonce) return send(403, 'not from this run\'s page');
           const page = String(msg.page ?? '');
           // A page instance not seen before: the page was loaded (again). Its sequence numbers start over.
           if (!r.pages.includes(page)) { r.pages.push(page); r.seq = -1; }
@@ -116,11 +124,19 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
       return;
     }
     if (req.method !== 'GET') return send(405, 'method not allowed');
-    if (url.pathname === '/longread.html') return send(200, renderLongread(), TYPES['.html']);
+    const run = url.searchParams.get('run') ?? '';
+    const validRun = /^[A-Za-z0-9_-]{1,64}$/.test(run);
+    // A page loads its recorder for its own run: the script comes back with that run's nonce inside it.
+    const forRun = (html: string) => html.replace('<script src="/bench.js"></script>', `<script src="/bench.js?run=${validRun ? run : ''}"></script>`);
+    if (url.pathname === '/longread.html') return send(200, forRun(renderLongread()), TYPES['.html']);
     const name = url.pathname.slice(1);
     const allowed = name === 'bench.js' || WEB_PAGES.some(p => name === `${p}.html`);
     if (!allowed) return send(404, 'not found');
-    fs.readFile(path.join(WEB_DIR, name), 'utf8', (err, text) => err ? send(404, 'not found') : send(200, text, TYPES[path.extname(name)]));
+    fs.readFile(path.join(WEB_DIR, name), 'utf8', (err, text) => {
+      if (err) return send(404, 'not found');
+      if (name === 'bench.js') return send(200, text.replace('__BENCH_NONCE__', validRun ? runOf(run).nonce : ''), TYPES['.js']);
+      send(200, forRun(text), TYPES['.html']);
+    });
   });
   const stateOf = (run: string): FixtureState => {
     const r = runs.get(run);
@@ -134,6 +150,7 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
     port: bound,
     url: (page, run, query = {}) => `http://127.0.0.1:${bound}/${page}.html?${new URLSearchParams({ run, ...query })}`,
     state: stateOf,
+    nonce: run => runOf(run).nonce,
     close: () => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }),
   };
 }

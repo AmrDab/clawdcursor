@@ -41,8 +41,6 @@ export interface FixtureContext {
   /** A fresh directory for this run. */
   workDir: string;
   runId: string;
-  /** Top-left corner for the fixture window (to run the suite on another monitor). */
-  pos?: [number, number];
 }
 
 // ── native fixture ──────────────────────────────────────────────────────────
@@ -89,7 +87,7 @@ export function readStateFile(file: string): FixtureState | null {
 async function openNative(mode: 'dialog' | 'editor', ctx: FixtureContext): Promise<LiveFixture | { skip: string }> {
   if ('missing' in ctx.native) return { skip: ctx.native.missing };
   const state = path.join(ctx.workDir, 'fixture-state.json');
-  const child = start(ctx.native.cmd, [...ctx.native.args, ...nativeArgs({ state, mode, pos: ctx.pos })], { stdio: 'ignore' });
+  const child = start(ctx.native.cmd, [...ctx.native.args, ...nativeArgs({ state, mode })], { stdio: 'ignore' });
   await waitFor(() => fs.existsSync(state), 20_000, 'the native fixture to start');
   return {
     window: mode === 'editor' ? '"Bench Editor" (a desktop app)' : '"Bench Dialog" (a desktop app)',
@@ -209,7 +207,7 @@ export async function openFixture(task: TaskSpec, ctx: FixtureContext): Promise<
   if (f.kind === 'app') return openApp(f.app, ctx);
   if (!ctx.browser) return { skip: 'no Chromium browser (Edge, Chrome or Chromium) is installed' };
   const profileDir = path.join(ctx.workDir, 'browser-profile');
-  const browser = await openBrowser(ctx.browser, { profileDir, url: ctx.server.url(f.page, ctx.runId, f.query), pos: ctx.pos });
+  const browser = await openBrowser(ctx.browser, { profileDir, url: ctx.server.url(f.page, ctx.runId, f.query) });
   const image = path.basename(ctx.browser.exe);
   return {
     window: `the browser window showing the page "${PAGE_TITLES[f.page] ?? f.page}" (a private window, already open)`,
