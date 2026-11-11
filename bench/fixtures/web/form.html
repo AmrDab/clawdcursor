@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bench Form</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  label { display: block; margin: 10px 0; }
+  input, select, button { font: inherit; padding: 4px 8px; }
+  #note { border: 1px solid #888; min-height: 3em; padding: 6px; }
+  details { margin: 10px 0; }
+</style>
+</head>
+<body>
+<h1>Bench Form</h1>
+<form id="order" onsubmit="return false">
+  <label>Full name <input id="name" data-bench="name" type="text" autocomplete="off"></label>
+  <label>Quantity <input id="qty" data-bench="qty" type="number" min="1" max="20" step="1" value="1"></label>
+  <label>Shipping
+    <select id="shipping" data-bench="shipping">
+      <option>Standard</option>
+      <option>Express</option>
+      <option>Overnight</option>
+    </select>
+  </label>
+  <label><input id="gift" data-bench="gift" type="checkbox"> Gift wrap</label>
+  <label><input id="newsletter" data-bench="newsletter" type="checkbox" checked> Newsletter</label>
+  <details id="advanced" data-bench="advanced">
+    <summary>Advanced options</summary>
+    <label><input id="fragile" data-bench="fragile" type="checkbox"> Fragile</label>
+  </details>
+  <p id="note-label">Delivery note</p>
+  <div id="note" data-bench="note" contenteditable="true" role="textbox" aria-multiline="true" aria-labelledby="note-label"></div>
+  <p><button id="confirm" data-bench="confirm" type="button">Confirm</button> <span id="status" role="status"></span></p>
+</form>
+<script src="/bench.js"></script>
+<script>
+  var submitted = null;
+  var confirms = 0;
+  function $(id) { return document.getElementById(id); }
+  function values() {
+    return {
+      name: $('name').value.trim(),
+      qty: $('qty').value === '' ? null : Number($('qty').value),
+      shipping: $('shipping').value,
+      gift: $('gift').checked,
+      newsletter: $('newsletter').checked,
+      advancedOpen: $('advanced').open,
+      fragile: $('fragile').checked,
+      note: $('note').innerText.replace(/\s+/g, ' ').trim(),
+    };
+  }
+  bench.snapshot = function () { return { values: values(), submitted: submitted, confirms: confirms }; };
+  $('confirm').addEventListener('click', function () {
+    confirms++;
+    submitted = values();
+    $('status').textContent = 'Order confirmed.';
+  });
+</script>
+</body>
+</html>

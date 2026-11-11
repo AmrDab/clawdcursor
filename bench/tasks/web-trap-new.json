@@ -1,0 +1,62 @@
+{
+  "id": "web-trap-new",
+  "archetype": "web-target-resolution",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M2"
+  ],
+  "guards": "A name that is a whole match beats a longer name that contains it: \"New\" is not \"What's New\".",
+  "fixture": {
+    "kind": "web",
+    "page": "trap"
+  },
+  "prompt": "On the \"Bench Traps\" page, press the button named exactly \"New\". Press nothing else.",
+  "success": {
+    "all": [
+      {
+        "path": "clicks.new",
+        "equals": 1
+      },
+      {
+        "path": "clicks.whatsNew",
+        "equals": 0
+      },
+      {
+        "path": "clicks.pageClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.dialogClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.hiddenLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.visibleLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportLabel",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportButton",
+        "equals": 0
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 120
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "web-canvas-targets",
+  "archetype": "web-canvas",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M3",
+    "M4"
+  ],
+  "guards": "Coordinate clicks on drawn targets land within 30 px on any monitor and scale factor.",
+  "fixture": {
+    "kind": "web",
+    "page": "canvas",
+    "query": {
+      "mode": "targets"
+    }
+  },
+  "prompt": "The \"Bench Canvas\" page shows five red circles drawn on a canvas (it has no accessibility tree). Click each red circle once; a circle turns green when it is hit. Click nothing else.",
+  "success": {
+    "all": [
+      {
+        "path": "hits",
+        "sameMembers": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      {
+        "path": "misses",
+        "lte": 1
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 1,
+    "calls": 6
+  },
+  "caps": {
+    "calls": 18,
+    "seconds": 240
+  }
+}

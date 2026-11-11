@@ -1,0 +1,38 @@
+{
+  "id": "web-timing-late-dialog",
+  "archetype": "web-timing",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M5"
+  ],
+  "guards": "A dialog that opens seconds after the click: wait for it instead of failing or sleeping a fixed time.",
+  "fixture": {
+    "kind": "web",
+    "page": "timing"
+  },
+  "prompt": "On the \"Bench Timing\" page, press \"Start export\". A dialog named \"Export ready\" opens a few seconds later: press its Download button.",
+  "success": {
+    "all": [
+      {
+        "path": "exportDownloaded",
+        "equals": true
+      },
+      {
+        "path": "editorOpen",
+        "equals": false
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 4
+  },
+  "caps": {
+    "calls": 14,
+    "seconds": 180
+  }
+}

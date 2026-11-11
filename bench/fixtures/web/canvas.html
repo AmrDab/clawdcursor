@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bench Canvas</title>
+<style>
+  html, body { margin: 0; background: #fff; }
+  canvas { display: block; margin: 20px; touch-action: none; }
+</style>
+</head>
+<body>
+<!-- Everything is drawn: there is no text and no control in the accessibility tree. -->
+<canvas id="c" width="600" height="600" aria-hidden="true"></canvas>
+<script src="/bench.js"></script>
+<script>
+  // ?mode=draw : a 3x3 grid; the page works out which cells got ink.
+  // ?mode=targets : five drawn circles; the page counts hits and misses.
+  var mode = new URLSearchParams(location.search).get('mode') === 'targets' ? 'targets' : 'draw';
+  var c = document.getElementById('c');
+  var g = c.getContext('2d');
+  var CELL = 200;
+  var INSET = 20;  // ink counts for a cell only inside its inner area, so a stroke along a border inks nothing
+  var TARGETS = [{ id: 1, x: 90, y: 80 }, { id: 2, x: 500, y: 110 }, { id: 3, x: 300, y: 300 }, { id: 4, x: 110, y: 510 }, { id: 5, x: 520, y: 480 }];
+  var RADIUS = 30;
+  var st = mode === 'draw' ? { mode: mode, inked: [], strokes: 0 } : { mode: mode, hits: [], misses: 0, clicks: 0 };
+  bench.snapshot = function () { return st; };
+
+  function paint() {
+    g.fillStyle = '#fff'; g.fillRect(0, 0, 600, 600);
+    g.strokeStyle = '#222'; g.lineWidth = 2;
+    if (mode === 'draw') {
+      for (var i = 0; i <= 3; i++) {
+        g.beginPath(); g.moveTo(i * CELL, 0); g.lineTo(i * CELL, 600); g.stroke();
+        g.beginPath(); g.moveTo(0, i * CELL); g.lineTo(600, i * CELL); g.stroke();
+      }
+    } else {
+      g.strokeRect(1, 1, 598, 598);
+      TARGETS.forEach(function (t) {
+        g.fillStyle = st.hits.indexOf(t.id) >= 0 ? '#2a2' : '#d22';
+        g.beginPath(); g.arc(t.x, t.y, RADIUS, 0, Math.PI * 2); g.fill();
+      });
+    }
+  }
+  paint();
+
+  function at(e) { var r = c.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; }
+
+  function ink(p) {
+    if (p.x < 0 || p.y < 0 || p.x >= 600 || p.y >= 600) return;
+    var col = Math.floor(p.x / CELL), row = Math.floor(p.y / CELL);
+    var dx = p.x - col * CELL, dy = p.y - row * CELL;
+    if (dx < INSET || dy < INSET || dx > CELL - INSET || dy > CELL - INSET) return;
+    var id = 'r' + (row + 1) + 'c' + (col + 1);
+    if (st.inked.indexOf(id) < 0) { st.inked.push(id); st.inked.sort(); }
+  }
+
+  if (mode === 'draw') {
+    var last = null;
+    var line = function (a, b) {
+      // Every 4 px between two samples: a fast drag reports few points.
+      var n = Math.max(1, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 4));
+      for (var i = 0; i <= n; i++) ink({ x: a.x + (b.x - a.x) * i / n, y: a.y + (b.y - a.y) * i / n });
+      g.strokeStyle = '#06c'; g.lineWidth = 6; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
+    };
+    c.addEventListener('pointerdown', function (e) { last = at(e); c.setPointerCapture(e.pointerId); line(last, last); });
+    c.addEventListener('pointermove', function (e) { if (last) { var p = at(e); line(last, p); last = p; } });
+    c.addEventListener('pointerup', function (e) {
+      if (!last) return;
+      line(last, at(e)); last = null; st.strokes++;
+      bench.record('stroke', 'canvas');
+    });
+  } else {
+    c.addEventListener('click', function (e) {
+      var p = at(e);
+      st.clicks++;
+      var hit = TARGETS.filter(function (t) { return Math.hypot(p.x - t.x, p.y - t.y) <= RADIUS; })[0];
+      if (!hit) st.misses++;
+      else if (st.hits.indexOf(hit.id) < 0) { st.hits.push(hit.id); st.hits.sort(); }
+      paint();
+    });
+  }
+</script>
+</body>
+</html>

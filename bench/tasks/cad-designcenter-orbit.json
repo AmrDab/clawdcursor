@@ -1,0 +1,25 @@
+{
+  "id": "cad-designcenter-orbit",
+  "archetype": "cad-viewport",
+  "os": [
+    "windows"
+  ],
+  "mechanisms": [
+    "M3"
+  ],
+  "manualVerify": true,
+  "guards": "A 3D viewport with no tree (Designcenter): cheap looks and few of them. Success is checked by a person; only the metrics are scored.",
+  "fixture": {
+    "kind": "app",
+    "app": "designcenter"
+  },
+  "prompt": "In the Designcenter window that is open with a part loaded, rotate the model in the 3D viewport by dragging with the middle mouse button about 200 pixels to the right, then fit the view to the window.",
+  "oracle": {
+    "screenshots": 2,
+    "calls": 4
+  },
+  "caps": {
+    "calls": 20,
+    "seconds": 300
+  }
+}

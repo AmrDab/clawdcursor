@@ -1,0 +1,66 @@
+{
+  "id": "web-trap-dialog-close",
+  "archetype": "web-target-resolution",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M2"
+  ],
+  "guards": "The open dialog beats the page behind it: Close means the dialog's Close.",
+  "fixture": {
+    "kind": "web",
+    "page": "trap"
+  },
+  "prompt": "On the \"Bench Traps\" page a small \"Notice\" dialog is open. Close that dialog with its own Close button. Do not press the page's Close button.",
+  "success": {
+    "all": [
+      {
+        "path": "clicks.dialogClose",
+        "equals": 1
+      },
+      {
+        "path": "clicks.whatsNew",
+        "equals": 0
+      },
+      {
+        "path": "clicks.new",
+        "equals": 0
+      },
+      {
+        "path": "clicks.pageClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.hiddenLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.visibleLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportLabel",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportButton",
+        "equals": 0
+      },
+      {
+        "path": "dialogOpen",
+        "equals": false
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 120
+  }
+}

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bench Traps</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  section { border: 1px solid #bbb; padding: 10px 14px; margin: 14px 0; }
+  button { font: inherit; padding: 4px 10px; }
+  .offscreen { position: absolute; left: -9999px; top: 0; }
+  dialog { position: fixed; right: 24px; bottom: 24px; left: auto; top: auto; margin: 0; border: 2px solid #333; padding: 12px; }
+</style>
+</head>
+<body>
+<h1>Bench Traps</h1>
+
+<!-- 1. A longer name that contains the wanted one, first in the page. -->
+<section aria-label="Documents">
+  <button data-bench="whatsNew" type="button">What's New</button>
+  <button data-bench="new" type="button">New</button>
+</section>
+
+<!-- 2. A Close button of the page, and a Close button of the open dialog. -->
+<section aria-label="Page">
+  <button data-bench="pageClose" type="button">Close</button>
+  <span id="pageStatus" role="status"></span>
+</section>
+<dialog id="notice" aria-label="Notice">
+  <p>Maintenance tonight at 22:00.</p>
+  <button data-bench="dialogClose" type="button">Close</button>
+</dialog>
+
+<!-- 3. A link that is off screen and one that is visible, with the same name. The hidden one comes first. -->
+<section aria-label="Reports">
+  <a class="offscreen" data-bench="hiddenLink" href="#hidden">Download report</a>
+  <a data-bench="visibleLink" href="#visible">Download report</a>
+</section>
+
+<!-- 4. A label next to its button, with the same text. The label comes first. -->
+<section aria-label="Export">
+  <span data-bench="exportLabel">Export</span>
+  <button data-bench="exportButton" type="button">Export</button>
+</section>
+
+<script src="/bench.js"></script>
+<script>
+  var clicks = { whatsNew: 0, 'new': 0, pageClose: 0, dialogClose: 0, hiddenLink: 0, visibleLink: 0, exportLabel: 0, exportButton: 0 };
+  var notice = document.getElementById('notice');
+  notice.show();  // not modal: the page's own Close stays clickable
+  bench.snapshot = function () { return { clicks: clicks, dialogOpen: notice.open }; };
+  document.querySelectorAll('[data-bench]').forEach(function (el) {
+    el.addEventListener('click', function (e) {
+      if (el.tagName === 'A') e.preventDefault();
+      clicks[el.dataset.bench]++;
+      if (el.dataset.bench === 'dialogClose') notice.close();
+      if (el.dataset.bench === 'pageClose') document.getElementById('pageStatus').textContent = 'The page was closed.';
+    });
+  });
+</script>
+</body>
+</html>

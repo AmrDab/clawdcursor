@@ -1,0 +1,29 @@
+{
+  "id": "calc-multiply",
+  "archetype": "store-uwp",
+  "os": [
+    "windows",
+    "macos"
+  ],
+  "mechanisms": [
+    "M1"
+  ],
+  "guards": "A Store/UWP app (Calculator): keys reach the app and the result is read back, not assumed.",
+  "fixture": {
+    "kind": "app",
+    "app": "calculator"
+  },
+  "prompt": "In the Calculator window that is open, calculate 47 times 89 and leave the result on the display.",
+  "success": {
+    "path": "display",
+    "equals": "4183"
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 3
+  },
+  "caps": {
+    "calls": 14,
+    "seconds": 180
+  }
+}

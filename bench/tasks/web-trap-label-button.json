@@ -1,0 +1,62 @@
+{
+  "id": "web-trap-label-button",
+  "archetype": "web-target-resolution",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M2"
+  ],
+  "guards": "A control beats the label next to it with the same text.",
+  "fixture": {
+    "kind": "web",
+    "page": "trap"
+  },
+  "prompt": "On the \"Bench Traps\" page, in the Export section, press the Export button once.",
+  "success": {
+    "all": [
+      {
+        "path": "clicks.exportButton",
+        "equals": 1
+      },
+      {
+        "path": "clicks.whatsNew",
+        "equals": 0
+      },
+      {
+        "path": "clicks.new",
+        "equals": 0
+      },
+      {
+        "path": "clicks.pageClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.dialogClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.hiddenLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.visibleLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportLabel",
+        "equals": 0
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 120
+  }
+}

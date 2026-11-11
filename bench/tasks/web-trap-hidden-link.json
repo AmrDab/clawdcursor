@@ -1,0 +1,62 @@
+{
+  "id": "web-trap-hidden-link",
+  "archetype": "web-target-resolution",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M2"
+  ],
+  "guards": "A visible element beats an off-screen one with the same name.",
+  "fixture": {
+    "kind": "web",
+    "page": "trap"
+  },
+  "prompt": "On the \"Bench Traps\" page, click the \"Download report\" link that is visible on the page, once.",
+  "success": {
+    "all": [
+      {
+        "path": "clicks.visibleLink",
+        "equals": 1
+      },
+      {
+        "path": "clicks.whatsNew",
+        "equals": 0
+      },
+      {
+        "path": "clicks.new",
+        "equals": 0
+      },
+      {
+        "path": "clicks.pageClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.dialogClose",
+        "equals": 0
+      },
+      {
+        "path": "clicks.hiddenLink",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportLabel",
+        "equals": 0
+      },
+      {
+        "path": "clicks.exportButton",
+        "equals": 0
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 120
+  }
+}

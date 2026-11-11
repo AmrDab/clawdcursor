@@ -1,0 +1,50 @@
+{
+  "id": "native-dialog-duplicate",
+  "archetype": "native-dialog",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M2"
+  ],
+  "guards": "Two buttons with the same name in different groups: the candidates are told apart by their container.",
+  "fixture": {
+    "kind": "native",
+    "mode": "dialog"
+  },
+  "prompt": "The \"Bench Dialog\" window has two buttons named Edit: one in the Billing group and one in the Shipping group. Press the Edit button of the Shipping group once. Press nothing else.",
+  "success": {
+    "all": [
+      {
+        "path": "shippingEdit",
+        "equals": 1
+      },
+      {
+        "path": "billingEdit",
+        "equals": 0
+      },
+      {
+        "path": "mainOk",
+        "equals": 0
+      },
+      {
+        "path": "mainCancel",
+        "equals": 0
+      },
+      {
+        "path": "applied",
+        "exists": false
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 120
+  }
+}

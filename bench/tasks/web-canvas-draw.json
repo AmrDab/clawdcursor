@@ -1,0 +1,46 @@
+{
+  "id": "web-canvas-draw",
+  "archetype": "web-canvas",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M3",
+    "M4"
+  ],
+  "guards": "A surface with no accessibility tree: one look, then a drag that lands where the image said (also guards screen geometry).",
+  "fixture": {
+    "kind": "web",
+    "page": "canvas",
+    "query": {
+      "mode": "draw"
+    }
+  },
+  "prompt": "The \"Bench Canvas\" page shows a 3 by 3 grid drawn on a canvas (it has no accessibility tree). Draw one straight stroke from the centre of the top-left cell to the centre of the bottom-right cell, through the centre cell. Do not touch any other cell.",
+  "success": {
+    "all": [
+      {
+        "path": "inked",
+        "sameMembers": [
+          "r1c1",
+          "r2c2",
+          "r3c3"
+        ]
+      },
+      {
+        "path": "strokes",
+        "gte": 1
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 1,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 180
+  }
+}

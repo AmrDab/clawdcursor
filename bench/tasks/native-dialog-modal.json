@@ -1,0 +1,55 @@
+{
+  "id": "native-dialog-modal",
+  "archetype": "native-dialog",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M2",
+    "M5"
+  ],
+  "guards": "A modal dialog opens after a click and has the same OK / Cancel as the window behind it: OK means the modal's OK.",
+  "fixture": {
+    "kind": "native",
+    "mode": "dialog"
+  },
+  "prompt": "In the \"Bench Dialog\" window, press \"Delete...\". A \"Confirm delete\" dialog opens: confirm it with its OK button. Do not press the main window's own OK or Cancel.",
+  "success": {
+    "all": [
+      {
+        "path": "modalResult",
+        "equals": "ok"
+      },
+      {
+        "path": "modalOpen",
+        "equals": false
+      },
+      {
+        "path": "shippingEdit",
+        "equals": 0
+      },
+      {
+        "path": "billingEdit",
+        "equals": 0
+      },
+      {
+        "path": "mainOk",
+        "equals": 0
+      },
+      {
+        "path": "mainCancel",
+        "equals": 0
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 3
+  },
+  "caps": {
+    "calls": 12,
+    "seconds": 180
+  }
+}

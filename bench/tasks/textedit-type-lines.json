@@ -1,0 +1,29 @@
+{
+  "id": "textedit-type-lines",
+  "archetype": "document-editor",
+  "os": [
+    "macos"
+  ],
+  "mechanisms": [
+    "M1",
+    "M5"
+  ],
+  "guards": "The same as editor-type-lines, in a real document editor (TextEdit).",
+  "fixture": {
+    "kind": "app",
+    "app": "textedit"
+  },
+  "prompt": "In the TextEdit \"bench-document.txt\" window, type exactly these two lines into the empty document, with nothing else:\nBenchmark line one\nBenchmark line two",
+  "success": {
+    "path": "text",
+    "matches": "^Benchmark line one\\r?\\nBenchmark line two\\s*$"
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 2
+  },
+  "caps": {
+    "calls": 10,
+    "seconds": 180
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "id": "web-timing-gated-field",
+  "archetype": "web-timing",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M5",
+    "M1"
+  ],
+  "guards": "A field that throws input away until it has loaded: text typed early must not be reported as entered.",
+  "fixture": {
+    "kind": "web",
+    "page": "timing"
+  },
+  "prompt": "On the \"Bench Timing\" page, press \"Open editor\". The \"Project code\" field accepts text only once the status next to it says Ready. Enter ORBIT-42 in it, then press Save.",
+  "success": {
+    "all": [
+      {
+        "path": "saved",
+        "equals": "ORBIT-42"
+      },
+      {
+        "path": "exportStarted",
+        "equals": false
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 5
+  },
+  "caps": {
+    "calls": 16,
+    "seconds": 180
+  }
+}
