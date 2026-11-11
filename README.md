@@ -45,7 +45,7 @@
 
 **1.6.0** &mdash; **A tool, driven by your agent.** ([full changelog](CHANGELOG.md))
 - **Breaking:** the built-in agent loop and all model settings are gone. Claude, Codex, Cursor, a local Llama or any MCP client drives the six tools (`accessibility`, `system`, `window`, `browser`, `computer`, `batch`); the `task` tool and the `--provider/--model/--api-key` flags are removed.
-- **Breaking:** the policy gate is gone, so `open_file`, closing a window, clipboard writes and clicking "Send" by name work. What still protects you: Stop, the pause card, no input into AI assistant windows, a short per-OS list of session-ending keys, and your MCP host's own approval prompts. See [SECURITY.md](SECURITY.md).
+- **Breaking:** the policy gate is gone, so `open_file`, closing a window, clipboard writes and clicking "Send" by name work. What still protects you: Stop, the pause card, no stray input into AI assistant windows, a short per-OS list of session-ending keys, and your MCP host's own approval prompts. See [SECURITY.md](SECURITY.md).
 - A thin outline around the window the agent is working in replaces the full-screen glow; the pill sits on that window's monitor.
 - Results you can trust: a value is "set" only when the field shows it; `copy_all_text` never presses keys outside a browser; `open_app` never names another app's window; actions by name never press a hidden element.
 - Keys follow the OS: the agent is told its modifier (`cmd` or `ctrl`) up front, and shortcuts are offered only for this OS.

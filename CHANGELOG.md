@@ -2,7 +2,7 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [1.6.0] - 2026-11-11
+## [1.6.0] - 2026-11-10
 
 ### Removed
 - **Breaking: the built-in agent loop is gone.** clawdcursor no longer calls a
