@@ -136,8 +136,28 @@ export interface FenceWindow {
   bounds?: Rect;
 }
 
-const windowInFence = async (w: FenceWindow, env: NodeJS.ProcessEnv) =>
-  await inFence(w.processId, env) || await inFence(w.hostedProcessId, env);
+const isFrameHost = (w: FenceWindow) => /^applicationframehost(\.exe)?$/i.test(String(w.processName ?? '').trim());
+
+/**
+ * Is this window one of a fenced process? A Store app's window belongs to ApplicationFrameHost, one process for every
+ * Store app on the desktop, so such a window counts by the app it HOSTS (the process of its CoreWindow), never by the
+ * host. The window lists and the foreground read do not carry that: it is looked up by the window's handle.
+ */
+async function windowInFence(w: FenceWindow, env: NodeJS.ProcessEnv): Promise<boolean> {
+  if (await inFence(w.processId, env)) return true;
+  let hosted = w.hostedProcessId;
+  if (hosted === undefined && w.handle !== undefined && isFrameHost(w)) hosted = (await frameHosts()).get(String(w.handle));
+  return inFence(hosted, env);
+}
+
+/** Window handle → the process that frame hosts, read at most once a second (the bridge's Win32 window read). */
+let hostsCache: { at: number; map: Map<string, number> } | null = null;
+async function frameHosts(): Promise<Map<string, number>> {
+  if (hostsCache && Date.now() - hostsCache.at < 1000) return hostsCache.map;
+  const map = await desktop.frameHosts().catch(() => new Map<string, number>());
+  hostsCache = { at: Date.now(), map };
+  return map;
+}
 
 interface Desktop {
   foreground(): Promise<FenceWindow | null>;
@@ -149,6 +169,8 @@ interface Desktop {
   cursor(): Promise<{ x: number; y: number } | null>;
   /** Capture pixels per unit of window bounds: 1 on Windows and Linux, the primary display's scale on macOS (bounds are points there). */
   captureScale(): Promise<number>;
+  /** Windows: for each Store app frame window, by handle, the process it hosts. Empty elsewhere. */
+  frameHosts(): Promise<Map<string, number>>;
 }
 
 /** The adapter's own listWindows, kept when `fencePlatform` replaces it with the fenced-only one. */
@@ -174,10 +196,21 @@ const platformDesktop: Desktop = {
     const ratio = Number(displays.find(d => d.primary)?.dpiRatio);
     return ratio > 0 ? ratio : 1;
   },
+  frameHosts: async () => {
+    const map = new Map<string, number>();
+    if (process.platform !== 'win32') return map;
+    const { psRunner } = await import('../platform/ps-runner');
+    const reply = await psRunner.run({ cmd: 'list-windows' }) as { windows?: Array<{ handle?: unknown; hostedProcessId?: unknown }> } | null;
+    for (const w of reply?.windows ?? []) {
+      if (w.handle !== undefined && Number.isInteger(w.hostedProcessId) && (w.hostedProcessId as number) > 0) map.set(String(w.handle), w.hostedProcessId as number);
+    }
+    return map;
+  },
 };
 let desktop: Desktop = platformDesktop;
 export function __setFenceDesktopForTests(d: Partial<Desktop> | null): void {
-  desktop = d ? { primary: async () => ({ x: 0, y: 0, width: 100_000, height: 100_000 }), cursor: async () => null, foreground: async () => null, windows: async () => [], captureScale: async () => 1, ...d } : platformDesktop;
+  desktop = d ? { primary: async () => ({ x: 0, y: 0, width: 100_000, height: 100_000 }), cursor: async () => null, foreground: async () => null, windows: async () => [], captureScale: async () => 1, frameHosts: async () => new Map<string, number>(), ...d } : platformDesktop;
+  hostsCache = null;
 }
 
 /**
@@ -411,12 +444,19 @@ export async function fenceGate(tool: Pick<ToolDefinition, 'name' | 'parameters'
     for (const w of any) if (!await windowInFence(w, env)) throw new Error(refusal(`${tool.name}: a window outside the fence also matches part of that target, and which one it means`));
     const owner = matched[0].processId;
     if (matched.some(w => w.processId !== owner)) throw new Error(refusal(`${tool.name}: that target matches windows of several processes, and which one it means`));
-    // The tool resolves by process (and title). A process that also owns windows outside the fence (ApplicationFrameHost
-    // hosts every Store app's window) could resolve to one of those: without an exact window identity it is refused.
-    if (handle === undefined) {
-      for (const w of all) if (w.processId === owner && !await windowInFence(w, env)) throw new Error(refusal(`${tool.name}: the process of that window also owns windows outside the fence, and a call by process`));
-    }
-    return { ...params, ...(tool.parameters && 'processId' in tool.parameters ? { processId: owner } : {}) };
+    let shared = false;
+    if (handle === undefined) for (const w of all) if (w.processId === owner && !await windowInFence(w, env)) shared = true;
+    if (!shared) return { ...params, ...(tool.parameters && 'processId' in tool.parameters ? { processId: owner } : {}) };
+    // The process also owns windows outside the fence (ApplicationFrameHost hosts every Store app's window), so a call
+    // by process could resolve to one of those. It goes through only when the TITLE alone identifies the window: the
+    // title given is the whole title of the one fenced window, and no other open window's title contains it. The tool
+    // is then given the title and nothing else to resolve by.
+    const exact = !!title && matched.length === 1 && lower(matched[0].title).trim() === title.trim()
+      && all.filter(w => lower(w.title).includes(title)).length === 1;
+    if (!exact) throw new Error(refusal(`${tool.name}: the process of that window also owns windows outside the fence, and a call that does not name the window by its whole, unique title`));
+    const byTitle: Record<string, unknown> = { ...params };
+    delete byTitle.processId; delete byTitle.pid; delete byTitle.processName;
+    return byTitle;
   }
   if (pid !== undefined) {
     if (!await inFence(pid, env)) throw new Error(refusal(`${tool.name}: process ${pid}`));

@@ -112,13 +112,13 @@ describe('the prompt', () => {
 
 describe('the command line', () => {
   it('plans by default: a live run must be asked for', () => {
-    expect(parseArgs([])).toEqual({ live: false, selfcheck: false, includeManual: false, updateBaseline: false, repeats: 1 });
+    expect(parseArgs([])).toEqual({ live: false, selfcheck: false, selfcheckFixtures: false, includeManual: false, updateBaseline: false, repeats: 1 });
     expect(parseArgs(['--live']).live).toBe(true);
   });
 
   it('reads every option', () => {
     expect(parseArgs(['--live', '--build', '.', '--models', 'claude-code:sonnet', '--tasks', 'a, b', '--out', 'o', '--baseline', 'b.json',
-      '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, includeManual: true,
+      '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, selfcheckFixtures: false, includeManual: true,
       updateBaseline: true, repeats: 3, build: '.', models: 'claude-code:sonnet', tasks: ['a', 'b'], out: 'o', baseline: 'b.json' });
   });
 
@@ -433,5 +433,36 @@ describe('a task\'s results directory: one writer per file', () => {
       writeTaskResults(workDir, null, agent);
       expect(fs.readFileSync(path.join(workDir, 'fixture-state.json'), 'utf8')).toBe('null');
     } finally { fs.rmSync(workDir, { recursive: true, force: true }); }
+  });
+});
+
+describe('a fixture whose window the benchmark needs is started with its window on screen', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'lib', 'live-fixtures.ts'), 'utf8');
+
+  it('the native fixture and Calculator are started visible, never with windowsHide (which hides the first window)', () => {
+    expect(src).toMatch(/startVisible\(native\.cmd/);
+    expect(src).toMatch(/startVisible\(system32\('calc\.exe'\)/);
+    expect(src).not.toMatch(/[^A-Za-z]start\(/);   // no plain start() of a GUI app left in this file
+  });
+
+  it('startVisible turns windowsHide off, whatever the caller passed', async () => {
+    const proc = await import('../lib/proc');
+    const child = proc.startVisible(process.execPath, ['-e', 'process.exit(0)'], { stdio: 'ignore', windowsHide: true });
+    const code = await new Promise(r => child.once('exit', r));
+    expect(code).toBe(0);
+    // The flag itself is not readable from a child: the one place it is set is checked in the source.
+    expect(fs.readFileSync(path.join(__dirname, '..', 'lib', 'proc.ts'), 'utf8')).toMatch(/return start\(cmd, args, \{ \.\.\.opts, windowsHide: false \}\);/);
+  });
+
+  it('the runner waits for the fixture\'s window, not only for its state file', async () => {
+    expect(src).toMatch(/waitFor\(\(\) => hasWindow\(child\.pid\)/);
+    const { hasWindow } = await import('../lib/proc');
+    expect(await hasWindow(1234, 'linux')).toBe(true);
+    expect(await hasWindow(undefined, 'win32')).toBe(false);
+  });
+
+  it('has a flag for the check that opens the real fixtures behind the fence', () => {
+    expect(parseArgs(['--selfcheck-fixtures']).selfcheckFixtures).toBe(true);
+    expect(parseArgs([]).selfcheckFixtures).toBe(false);
   });
 });

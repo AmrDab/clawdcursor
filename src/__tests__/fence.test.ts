@@ -388,11 +388,55 @@ describe('window actions', () => {
       expect(await refused(tool('type_text'))).toBe(true);
     });
 
-    it('by title: refused while the frame host also owns a window of the owner (a call by process could close Settings)', async () => {
+    it('by its whole, unique title while the frame host also owns a window of the owner: allowed, and resolved by title alone', async () => {
       windows = [fixture, calc, settings];
-      const t = tool('close_window', targeted);
-      expect(await refused(t, { title: 'Calculator' })).toBe(true);
-      expect(t.calls).toEqual([]);
+      const t = tool('focus_window', targeted);
+      expect(await refused(t, { title: 'Calculator' })).toBe(false);
+      // No processId is passed on: the frame host's pid would also match the owner's Settings window.
+      expect(t.calls).toEqual([{ title: 'Calculator' }]);
+      const c = tool('close_window', targeted);
+      expect(await refused(c, { title: 'calculator', processName: 'ApplicationFrameHost' })).toBe(true);   // the name matches Settings too
+    });
+
+    it('by part of its title, or a title another window also contains, while the host is shared: refused', async () => {
+      windows = [fixture, calc, settings];
+      expect(await refused(tool('close_window', targeted), { title: 'Calc' })).toBe(true);
+      windows = [fixture, calc, settings, { ...owners, title: 'How to use Calculator - Edge' }];
+      expect(await refused(tool('close_window', targeted), { title: 'Calculator' })).toBe(true);
+      windows = [fixture, calc, { ...settings, title: 'Calculator' }];                                   // another Store app with the same title
+      expect(await refused(tool('close_window', targeted), { title: 'Calculator' })).toBe(true);
+    });
+
+    it('the lists and the foreground read do not say what a frame hosts: it is looked up by the window\'s handle', async () => {
+      // As the platform reports them on Windows: no hostedProcessId on either frame.
+      const bareCalc = { ...calc, hostedProcessId: undefined };
+      const bareSettings = { ...settings, hostedProcessId: undefined };
+      const lookup = { frameHosts: async () => new Map([['7003', 400], ['7004', 201]]) };
+      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary, ...lookup });
+      windows = [fixture, bareCalc, bareSettings];
+      front = bareCalc;
+      for (const name of ['read_screen', 'type_text', 'key_press', 'desktop_screenshot']) expect(await refused(tool(name)), name).toBe(false);
+      expect(await refused(tool('focus_window', targeted), { title: 'Calculator' })).toBe(false);
+      front = bareSettings;
+      for (const name of ['read_screen', 'type_text']) expect(await refused(tool(name)), name).toBe(true);
+      expect(await refused(tool('focus_window', targeted), { title: 'Settings' })).toBe(true);
+      // The fenced window list shows the fixture's Store app, and not the owner's.
+      const adapter = fencePlatform({ listWindows: async () => [fixture, owners, bareCalc, bareSettings] }, fenced);
+      expect((await adapter.listWindows()).map(w => w.title)).toEqual(['Bench Dialog', 'Calculator']);
+    });
+
+    it('a frame whose hosted process cannot be looked up is outside the fence', async () => {
+      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary,
+        frameHosts: async () => { throw new Error('bridge down'); } });
+      front = { ...calc, hostedProcessId: undefined };
+      expect(await refused(tool('read_screen'))).toBe(true);
+    });
+
+    it('only ApplicationFrameHost is looked up: another process cannot borrow a fenced window\'s handle', async () => {
+      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary,
+        frameHosts: async () => new Map([['7002', 400]]) });
+      front = owners;   // OUTLOOK.EXE, handle 7002
+      expect(await refused(tool('read_screen'))).toBe(true);
     });
 
     it('by title: allowed when every window of the frame host is fenced, pinned and still named', async () => {

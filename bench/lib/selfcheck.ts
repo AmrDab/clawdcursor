@@ -15,7 +15,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { chromium, type Page } from 'playwright';
 import { findBrowser, openBrowser } from './browser';
 import { resolveCli, startIsolated } from './isolated';
-import { buildNative, nativeArgs, readStateFile } from './live-fixtures';
+import { buildNative, nativeArgs, openApp, openNativeFixture, readStateFile, type LiveFixture } from './live-fixtures';
 import { cdpIsFixture, ownsFocus, readFocus } from './ownership';
 import { freePort, pidsByCommandLine, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
@@ -234,6 +234,90 @@ export async function selfcheckIsolation(buildDir: string | undefined, log: (lin
     ok = check(false, `isolation: ${(e as Error).message}`);
   } finally {
     await server.close();
+    try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ }
+  }
+  return ok;
+}
+
+/**
+ * `--selfcheck-fixtures`: the benchmark's own fixtures behind the real fence. Unlike --selfcheck this OPENS WINDOWS for a
+ * few seconds (the native fixture twice, and Calculator when it can be used), and focuses its own fixture. No agent runs.
+ *
+ * It is the check the first Codex run needed: the daemon is fenced to the fixture exactly as a live run fences it, and
+ * `window focus` and `read_tree` on the fixture must be ALLOWED, while a second, unfenced window must be REFUSED.
+ */
+export async function selfcheckFixtures(buildDir: string | undefined, log: (line: string) => void = console.log): Promise<boolean> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-selfcheck-'));
+  const check = (ok: boolean, what: string) => { log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); return ok; };
+  let ok = true;
+  type Reply = { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+  const text = (r: Reply) => (r.content ?? []).map(c => c.text ?? '').join('\n');
+  /** A daemon fenced to `fixture`, and a client on it: what `run` sees is what an agent would. */
+  const fenced = async (fixture: LiveFixture, n: number, run: (call: (name: string, args: Record<string, unknown>) => Promise<Reply>) => Promise<void>) => {
+    const { cli } = await resolveCli(buildDir);
+    const daemon = await startIsolated({ cli, home: path.join(root, `home-${n}`), sessionDir: path.join(root, `sessions-${n}`), cdpPort: await freePort(),
+      fencePids: await fixture.roots(), logFile: path.join(root, `server-${n}.log`) });
+    const client = new Client({ name: 'bench-selfcheck-fixtures', version: '0' });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(daemon.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${daemon.token}` } } }));
+      await run((name, args) => client.callTool({ name, arguments: args }) as Promise<Reply>);
+    } finally {
+      await client.close().catch(() => { /* not connected */ });
+      await daemon.stop();
+    }
+  };
+  const allowed = (r: Reply) => !text(r).includes('FENCED: ');
+  try {
+    const native = await buildNative(path.join(root, 'native'));
+    if ('missing' in native) log(`skip native fixture: ${native.missing}`);
+    else {
+      const dirs = ['fixture', 'other'].map(d => { const dir = path.join(root, d); fs.mkdirSync(dir, { mode: 0o700 }); return dir; });
+      // The window the run is fenced to, and a second window that is NOT in the fence (the same app, another process).
+      const other = await openNativeFixture('editor', native, dirs[1]);
+      const fixture = await openNativeFixture('dialog', native, dirs[0]);
+      try {
+        const otherPid = (await other.roots())[0];
+        await fenced(fixture, 1, async call => {
+          const focus = await call('window', { action: 'focus', title: 'Bench Dialog' });
+          ok = check(allowed(focus) && !focus.isError, `native fixture: window focus on it is allowed (${text(focus).split('\n')[0].slice(0, 80)})`) && ok;
+          const tree = await call('accessibility', { action: 'read_tree' });
+          ok = check(allowed(tree) && /Apply/.test(text(tree)) && /Subscribe/.test(text(tree)), 'native fixture: read_tree on it is allowed and shows its controls') && ok;
+          ok = check(!/Bench Editor/.test(text(tree)), 'native fixture: read_tree does not list the window outside the fence') && ok;
+          const byPid = await call('accessibility', { action: 'read_tree', processId: (await fixture.roots())[0] });
+          ok = check(allowed(byPid), 'native fixture: read_tree by its process id is allowed') && ok;
+          const otherFocus = await call('window', { action: 'focus', title: 'Bench Editor' });
+          ok = check(!allowed(otherFocus) && !!otherFocus.isError, 'a window outside the fence: window focus is refused (FENCED)') && ok;
+          const otherTree = await call('accessibility', { action: 'read_tree', processId: otherPid });
+          ok = check(!allowed(otherTree) && !/Document/.test(text(otherTree)), 'a window outside the fence: read_tree is refused (FENCED)') && ok;
+          const again = await call('window', { action: 'focus', title: 'Bench Dialog' });
+          ok = check(allowed(again), 'native fixture: still allowed after the refusals') && ok;
+        });
+      } finally {
+        await fixture.close();
+        await other.close();
+      }
+    }
+
+    // A Store app: its window belongs to ApplicationFrameHost, the fence is given the app's own process.
+    const calc = await openApp('calculator', { workDir: root });
+    if ('skip' in calc) log(`skip Calculator: ${calc.skip}`);
+    else {
+      try {
+        await fenced(calc, 2, async call => {
+          const tree = await call('accessibility', { action: 'read_tree' });
+          ok = check(allowed(tree) && /Calculator/.test(text(tree)), 'Calculator (a Store app): read_tree on it is allowed') && ok;
+          const focus = await call('window', { action: 'focus', title: 'Calculator' });
+          ok = check(allowed(focus), `Calculator: window focus by its title is allowed (${text(focus).split('\n')[0].slice(0, 80)})`) && ok;
+          const host = await call('window', { action: 'focus', processName: 'ApplicationFrameHost' });
+          ok = check(!allowed(host), 'Calculator: its shared host process by name is refused (FENCED)') && ok;
+        });
+      } finally {
+        await calc.close();
+      }
+    }
+  } catch (e) {
+    ok = check(false, `fixtures behind the fence: ${(e as Error).message}`);
+  } finally {
     try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ }
   }
   return ok;

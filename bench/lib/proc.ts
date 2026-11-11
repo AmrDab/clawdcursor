@@ -43,6 +43,23 @@ export function start(cmd: string, args: string[], opts: SpawnOptions = {}): Chi
   return spawn(cmd, args, { windowsHide: true, detached: !isWin, ...opts, shell: false });
 }
 
+/**
+ * Start an app whose WINDOW the benchmark needs on screen. `windowsHide` tells Windows to start the process with its
+ * first window hidden (SW_HIDE): right for a helper, and the reason the native fixture had no window at all in the
+ * first live run, so the fence found nothing of it to allow.
+ */
+export function startVisible(cmd: string, args: string[], opts: SpawnOptions = {}): ChildProcess {
+  return start(cmd, args, { ...opts, windowsHide: false });
+}
+
+/** Windows: does this process have a visible main window yet? Elsewhere there is no cheap way to ask: true. */
+export async function hasWindow(pid: number | undefined, platform: string = process.platform): Promise<boolean> {
+  if (platform !== 'win32') return true;
+  if (!pid) return false;
+  const out = await tryRun(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${Math.trunc(pid)} -ErrorAction SilentlyContinue).MainWindowHandle`]);
+  return Number(out?.trim()) > 0;
+}
+
 /** Stop a process we started, and its children. */
 export function killTree(pid: number | undefined): void {
   if (!pid) return;
