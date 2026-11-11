@@ -2,7 +2,10 @@
 
 All notable changes to Clawd Cursor will be documented in this file.
 
-## [1.6.0] - 2026-11-10
+## [2.0.0] - 2026-11-11
+
+First published as 1.6.0 on 2026-11-10. It removes tools, CLI flags and the policy gate, which is a breaking change, so it is
+renumbered 2.0.0 to follow semver; 1.6.0 is deprecated on npm. The code is the same apart from the "removed in 2.0" wording.
 
 ### Removed
 - **Breaking: the built-in agent loop is gone.** clawdcursor no longer calls a
@@ -28,7 +31,7 @@ All notable changes to Clawd Cursor will be documented in this file.
     `--api-key` flags are gone from `agent` and `start`. The HTTP MCP transport,
     `/stop`, `/resume`, `/health` and token auth are unchanged.
   - The removed flags and `clawdcursor task` now fail as an unknown option or
-    command, followed by "removed in 1.6: clawdcursor no longer runs a model;
+    command, followed by "removed in 2.0: clawdcursor no longer runs a model;
     your agent drives the tools". The same goes for the removed `doctor` flags.
 - **Breaking: all model configuration is gone.** There is no provider, model,
   API key or base URL setting anywhere: the provider clients and key discovery

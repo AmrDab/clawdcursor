@@ -43,9 +43,9 @@
 
 ## What's new
 
-**1.6.0** &mdash; **A tool, driven by your agent.** ([full changelog](CHANGELOG.md))
+**2.0.0** &mdash; **A tool, driven by your agent.** (First published as 1.6.0; renumbered because it is a breaking change.) ([full changelog](CHANGELOG.md))
 - **Breaking:** the built-in agent loop and all model settings are gone. Claude, Codex, Cursor, a local Llama or any MCP client drives the six tools (`accessibility`, `system`, `window`, `browser`, `computer`, `batch`); the `task` tool and the `--provider/--model/--api-key` flags are removed.
-- **Breaking:** the policy gate is gone, so `open_file`, closing a window, clipboard writes and clicking "Send" by name work. What still protects you: Stop, the pause card, no stray input into AI assistant windows, a short per-OS list of session-ending keys, and your MCP host's own approval prompts. See [SECURITY.md](SECURITY.md).
+- **Breaking:** the policy gate is gone, so `open_file`, closing a window, clipboard writes and clicking "Send" by name work. What still protects you: Stop, the pause card, no stray input into AI assistant windows, a short per-OS list of session-ending keys, and your MCP host's own approval prompts. If your host auto-approves tool calls, nothing asks before an irreversible action: see [SECURITY.md](SECURITY.md) (an opt-in confirm mode is coming in 2.1).
 - A thin outline around the window the agent is working in replaces the full-screen glow; the pill sits on that window's monitor.
 - Results you can trust: a value is "set" only when the field shows it; `copy_all_text` never presses keys outside a browser; `open_app` never names another app's window; actions by name never press a hidden element.
 - Keys follow the OS: the agent is told its modifier (`cmd` or `ctrl`) up front, and shortcuts are offered only for this OS.
@@ -453,7 +453,7 @@ Platform code lives behind a single `PlatformAdapter` interface (`src/platform/{
 
 ## Safety & privacy
 
-clawdcursor runs with **your own permissions** and has no policy of its own about what the agent may do: since 1.6 there is no allow / confirm / block gate. That decision belongs to your agent and to your MCP host's permission prompts, which read clawdcursor's tool annotations (`readOnlyHint` on reads, `destructiveHint` on tools that close a window, open a file or URI, overwrite the clipboard or run page script). Agents are told to ask you with `pause_for_user` before an irreversible action you did not ask for. What clawdcursor always enforces itself:
+clawdcursor runs with **your own permissions** and has no policy of its own about what the agent may do: since 2.0 there is no allow / confirm / block gate. That decision belongs to your agent and to your MCP host's permission prompts, which read clawdcursor's tool annotations (`readOnlyHint` on reads, `destructiveHint` on tools that close a window, open a file or URI, overwrite the clipboard or run page script). Agents are told to ask you with `pause_for_user` before an irreversible action you did not ask for. What clawdcursor always enforces itself:
 
 - **Stop.** Double-click the pill, or `clawdcursor stop`: every process stops, a running batch included, and stays stopped across restarts until you resume.
 - **The hard key list.** The few combos that lock the machine or end the session are never sent (Windows `Win+L`, `Ctrl+Alt+Del`; macOS `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, Power; Linux `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`), however they are spelled. Every other shortcut is allowed.

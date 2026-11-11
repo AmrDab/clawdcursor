@@ -1,6 +1,6 @@
 /**
  * The hard key list (platform/hard-keys.ts): the few OS-level combos clawdcursor never sends, and the only key rule left
- * after the policy gate was removed in 1.6. Everything else is allowed.
+ * after the policy gate was removed in 2.0. Everything else is allowed.
  *
  * Two advisories were bypasses of the old keyboard gate, and their inputs are replayed here against the new one:
  *   GHSA-35pc-g74h-p476 — the gate was keyed on the tool's name (the agent loop's `key` tool walked past it), and a

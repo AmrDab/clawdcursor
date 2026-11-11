@@ -113,12 +113,12 @@ import { privateRunDir, system32Exe } from '../platform/ps-spawn';
 
 const program = new Command();
 
-// Flags and commands that went with the built-in agent (1.6): the failure stays, with one line saying why.
-const REMOVED_IN_16 = /unknown option '--(provider|model|text-model|vision-model|base-url|api-key|no-save|reset)'|unknown command 'task'/;
+// Flags and commands that went with the built-in agent (2.0): the failure stays, with one line saying why.
+const REMOVED_IN_2 = /unknown option '--(provider|model|text-model|vision-model|base-url|api-key|no-save|reset)'|unknown command 'task'/;
 program.configureOutput({
   outputError: (str, write) => {
     write(str);
-    if (REMOVED_IN_16.test(str)) write('removed in 1.6: clawdcursor no longer runs a model; your agent drives the tools\n');
+    if (REMOVED_IN_2.test(str)) write('removed in 2.0: clawdcursor no longer runs a model; your agent drives the tools\n');
   },
 });
 
