@@ -152,3 +152,27 @@ export function appNameRefusal(name: string): string | null {
     'To open a file or run a program by its path use open_file — window {"action":"open_file","path":"…"}; ' +
     'for a URI or protocol handler (ms-settings:, mailto:, file:) use open_uri — system {"action":"open_uri","uri":"…"}; for a web address open_url.';
 }
+
+/**
+ * open_app's answer when the app's process is up but it has shown no window within the wait — a slow starter (a CAD
+ * suite, an IDE, Outlook). Started, not failed: a failure invites a second launch. It names what to do next in a
+ * form every agent can follow — focus by process once the window is up — not "check list_windows".
+ */
+export function startedNoWindowText(quotedName: string, res: { pid?: number; processName?: string; alreadyRunning?: boolean }, surface: 'mcp' | 'agent' = 'mcp'): string {
+  const proc = res.processName?.trim();
+  const by = proc ? `"processName":${JSON.stringify(proc)}` : `"processId":${res.pid}`;
+  const focus = surface === 'mcp' ? `window {"action":"focus",${by}}` : `focus_window {${by}}`;
+  const exe = proc ? `${proc}${process.platform === 'win32' ? '.exe' : ''}, ` : '';
+  // A process that was there before the launch was not started by it: the launch was handed to it.
+  if (res.alreadyRunning) {
+    return `${quotedName} was handed off to the running ${exe}pid=${res.pid}, which has no window up yet — some apps take a minute. Do not launch it again; wait, then ${focus}.`;
+  }
+  return `Started ${quotedName} (${exe}pid=${res.pid}) but its window isn't up yet — some apps take a minute. Do not launch it again; wait, then ${focus}.`;
+}
+
+/** open_app's answer when neither a window nor a process of the app was found. */
+export function notConfirmedText(quotedName: string, rawName: string, surface: 'mcp' | 'agent' = 'mcp'): string {
+  const by = `"processName":${JSON.stringify(rawName)}`;
+  const focus = surface === 'mcp' ? `window {"action":"focus",${by}}` : `focus_window {${by}}`;
+  return `Could not confirm ${quotedName} opened — no window appeared and no process of it was found. If it is slow to start, wait, then ${focus}; do not act on it before that succeeds.`;
+}

@@ -405,6 +405,66 @@ describe('launchApp (B2 — confirm the launch from the process, not the window 
     await expect(new MacOSAdapter({ ax }).launchApp('Text\nEdit')).rejects.toThrow(/illegal characters/);
     expect(ax.appState).not.toHaveBeenCalled();
   });
+
+  describe('`open <target>` (open_file / open_url / open_uri) is the OS opener, not an app', () => {
+    const TARGET = "/Users/x/Sam's $HOME `notes`; rm -rf.txt";
+    const opener = () => execCalls.filter(c => c.cmd === '/usr/bin/open');
+
+    it('runs /usr/bin/open with the target as ONE argv element: no shell, no `-a open`, no Spotlight', async () => {
+      const ax = fakeAx();
+      const res = await settle(new MacOSAdapter({ ax }).launchApp('open', { url: TARGET }));
+      expect(opener().map(c => c.args)).toEqual([[TARGET]]);
+      expect(execCalls.some(c => /(^|\/)(sh|bash|zsh)$/.test(c.cmd))).toBe(false);
+      expect(opens()).toHaveLength(0);                 // nothing like `open -a open …`
+      expect(osascripts()).toHaveLength(0);            // no Spotlight typing, no focus
+      expect(ax.appState).not.toHaveBeenCalled();
+      expect(res).toEqual({});                         // no window is claimed
+    });
+
+    it('a target `open` refuses is an error with its words, and still never reaches Spotlight', async () => {
+      execFail = (cmd) => (cmd === '/usr/bin/open' ? new Error('The file /nope does not exist.') : null);
+      await expect(settle(new MacOSAdapter({ ax: fakeAx() }).launchApp('open', { url: '/nope' }))).rejects.toThrow(/does not exist/);
+      expect(osascripts()).toHaveLength(0);
+    });
+  });
+
+  describe('a running app is the one asked for only by identity', () => {
+    const noState = () => vi.fn(async () => { throw new MacAxError('timeout', 'app state lookup timed out'); });
+    const focused = (pid: number) => osascripts().some(c => c.args.join(' ').includes('focus-window.jxa') && c.args.includes(String(pid)));
+
+    it('asks for the app whose name EQUALS the name, before the launch and while confirming it', async () => {
+      const ax = fakeAx({ appState: vi.fn(sequence<AppState | null>(null, APP())) });
+      await settle(new MacOSAdapter({ ax }).launchApp('TextEdit'));
+      expect(ax.appState.mock.calls.length).toBeGreaterThan(1);
+      for (const call of ax.appState.mock.calls) expect(call).toEqual(['TextEdit', { exact: true }]);
+    });
+
+    it('window list only: "Mail" is not the browser window titled "Gmail" — it is launched, and that window is never focused or reported', async () => {
+      const gmail = WIN({ title: 'Gmail – Inbox', processName: 'Google Chrome', processId: 9, handle: 9 });
+      const ax = fakeAx({ appState: noState(), listWindows: vi.fn(async () => [gmail]) });
+      const res = await settle(new MacOSAdapter({ ax }).launchApp('Mail'));
+      expect(opens().map(c => c.args)).toEqual([['-a', 'Mail']]);
+      expect(res).toEqual({});
+      expect(focused(9)).toBe(false);
+    });
+
+    it('window list only: a process whose name merely contains the name is not the app ("Notes" is not "Notes Helper")', async () => {
+      const helper = WIN({ title: 'x', processName: 'Notes Helper', processId: 9, handle: 9 });
+      const ax = fakeAx({ appState: noState(), listWindows: vi.fn(async () => [helper]) });
+      const res = await settle(new MacOSAdapter({ ax }).launchApp('Notes'));
+      expect(opens()).toHaveLength(1);
+      expect(res).toEqual({});
+    });
+
+    it('window list only: the app\'s own window is focused and nothing is launched', async () => {
+      const mail = WIN({ title: 'Inbox', processName: 'Mail', processId: 77, handle: 77 });
+      const ax = fakeAx({ appState: noState(), listWindows: vi.fn(async () => [WIN({ title: 'Gmail – Inbox', processName: 'Google Chrome', processId: 9, handle: 9 }), mail]) });
+      const res = await settle(new MacOSAdapter({ ax }).launchApp('Mail'));
+      expect(opens()).toHaveLength(0);
+      expect(res).toMatchObject({ pid: 77, title: 'Inbox' });
+      expect(focused(77)).toBe(true);
+    });
+  });
 });
 
 describe('keyboard guard (B11)', () => {

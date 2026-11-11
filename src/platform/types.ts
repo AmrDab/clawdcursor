@@ -68,6 +68,13 @@ export interface WindowInfo {
   isMinimized: boolean;
   /** Platform-opaque handle for re-targeting. */
   handle?: number | string;
+  /**
+   * Windows: the app a frame window hosts. A UWP app's top-level window belongs to ApplicationFrameHost; the app
+   * itself owns the `Windows.UI.Core.CoreWindow` child. Reported by the launch's Win32 window read, so the app is
+   * known by identity and not by its (localized) title.
+   */
+  hostedProcessId?: number;
+  hostedProcessName?: string;
   /** True when this is the adapter's best guess at the window in front (Linux without xdotool), not what the OS said. */
   guessed?: boolean;
 }
@@ -470,7 +477,24 @@ export interface PlatformAdapter {
      * instead of the requested folder — a false "Opened" with a side effect.
      */
     noStartMenuFallback?: boolean;
-  }): Promise<{ pid?: number; title?: string; handle?: number | string }>;
+    /**
+     * The app's known process names (the alias row's `processNames`: Calculator → CalculatorApp, Outlook → olk).
+     * A window is reported as the app's — already running, or just launched — only by identity (app-identity.ts):
+     * its process is `name` or one of these. Never because its title contains the name.
+     */
+    processNames?: readonly string[];
+    /**
+     * `name` only starts something else (open_file: explorer.exe opens the file with its own program). The
+     * launcher's windows are then never the result: only a window of `processNames` is, and with none given no
+     * window is reported at all. Implies `noStartMenuFallback`.
+     */
+    viaLauncher?: boolean;
+    /**
+     * `pid` without `title`: the app's process is running but it has shown no window yet (a slow starter) — started,
+     * not failed. `processName` is that process when the adapter knows it, so the caller can point to a later focus.
+     * `alreadyRunning`: that process was there before this launch, which was handed to it — running, not started.
+     */
+  }): Promise<{ pid?: number; title?: string; handle?: number | string; processName?: string; alreadyRunning?: boolean }>;
 }
 
 /**

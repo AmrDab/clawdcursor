@@ -1235,6 +1235,8 @@ func cmdApps() -> Never {
     for app in apps {
         var d: [String: Any] = [
             "name": app.localizedName ?? "unknown",
+            // Every name the app goes by (lower-case): a launch accepts it only when one EQUALS the name asked for.
+            "names": appNames(app),
             "processId": Int(app.processIdentifier),
             "finishedLaunching": app.isFinishedLaunching,
             "active": app.isActive,

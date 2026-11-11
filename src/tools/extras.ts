@@ -23,10 +23,9 @@ import { MOD } from '../platform/keys';
 import { screenJson } from '../core/untrusted-screen-content';
 import { toMouse, toMouseLength } from './types';
 import { SPACE_PARAM } from './desktop';
-import { promises as fsp } from 'node:fs';
-import { windowTextIncludes } from './window-text';
 import { preferControl, failReason } from '../platform/prefer-control';
 import { quoteScreenText } from '../core/result-codes';
+import { openFilePath } from './open-file';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -566,47 +565,7 @@ export function getExtraTools(): ToolDefinition[] {
       handler: async ({ path: filePath }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return needPlatform('open_file');
-        // Route through launchApp with a file-URL or raw path. The Windows
-        // adapter handles shell: paths and Start-Process; macOS uses `open`;
-        // Linux uses xdg-open fallback.
-        const p = String(filePath);
-        // Leaf segment — for a directory this is the Explorer window title.
-        const leaf = p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
-        let isDir = false;
-        try { isDir = (await fsp.stat(p)).isDirectory(); } catch { /* unknown/missing — treat as file */ }
-        try {
-          if (ctx.platform.platform === 'darwin') {
-            await ctx.platform.launchApp('open', { url: p });
-            return { text: `Opened: ${p}` };
-          }
-          if (ctx.platform.platform === 'linux') {
-            await ctx.platform.launchApp('xdg-open', { url: p });
-            return { text: `Opened: ${p}` };
-          }
-          // Windows: open the path in Explorer. For a DIRECTORY, VERIFY the
-          // right folder window actually surfaced — launchApp must not fall
-          // back to a Start-Menu search (which types "explorer" and opens
-          // File Explorer at Home), and a pre-existing window is not proof.
-          // Previously open_file returned "Opened" unconditionally even when
-          // it landed on Home (live bug 2026-06-12).
-          const res = await ctx.platform.launchApp('explorer.exe', { url: p, noStartMenuFallback: true });
-          if (isDir) {
-            const title = res?.title ?? '';
-            if (!leaf || !windowTextIncludes(title, leaf)) {
-              return {
-                text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
-                isError: true,
-              };
-            }
-            return { text: `Opened folder "${leaf}" (window: ${quoteScreenText(title)})` };
-          }
-          return { text: `Opened: ${p}${res?.title ? ` (window: ${quoteScreenText(res.title)})` : ''}` };
-        } catch (err) {
-          return {
-            text: `open_file failed: ${err instanceof Error ? err.message : String(err)}`,
-            isError: true,
-          };
-        }
+        return openFilePath(ctx.platform, String(filePath));
       },
     },
 

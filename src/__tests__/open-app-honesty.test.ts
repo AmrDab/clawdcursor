@@ -74,3 +74,62 @@ describe('agent-loop open_app', () => {
     expect(r.success).toBe(true);
   });
 });
+
+describe('open_app tells the adapter which processes are the app (a window is the app\'s by identity, not by title)', () => {
+  it.each([
+    ['Calculator', ['CalculatorApp', 'Calculator', 'calc']],
+    ['Outlook', ['OUTLOOK', 'olk']],
+    ['edge', ['msedge']],
+  ])('%s → %j, on both surfaces', async (name, processNames) => {
+    const mcp = mcpCtx(async () => ({ pid: 7, title: 'x' }));
+    await mcpOpenApp.handler({ name }, mcp);
+    expect((mcp.platform as any).launchApp).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ processNames }));
+    const agent = agentCtx(async () => ({ pid: 7, title: 'x' }));
+    await agentOpenApp.execute({ name }, agent);
+    expect(agent.platform.launchApp).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ processNames }));
+  });
+});
+
+describe('open_app — started, window not up yet (a slow starter: Designcenter / ugraf.exe took longer than the wait)', () => {
+  const slow = async () => ({ pid: 5150, processName: 'ugraf' });
+
+  it('MCP: says the process is up, is not an error, and points to window focus by process — not to list_windows', async () => {
+    const r = await mcpOpenApp.handler({ name: 'Designcenter' }, mcpCtx(slow));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toMatch(/Started "Designcenter" \(ugraf(\.exe)?, pid=5150\) but its window isn't up yet/);
+    expect(r.text).toContain('window {"action":"focus","processName":"ugraf"}');
+    expect(r.text).toMatch(/Do not launch it again/);
+    expect(r.text).not.toMatch(/list_windows/);
+  });
+
+  it('agent loop: the same, with its own tool name', async () => {
+    const r = await agentOpenApp.execute({ name: 'Designcenter' }, agentCtx(slow));
+    expect(r.success).toBe(true);
+    expect(r.text).toContain('focus_window {"processName":"ugraf"}');
+    expect(r.text).not.toMatch(/list_windows/);
+  });
+
+  it('only a pid is known (macOS / Linux): focus by process id', async () => {
+    const r = await mcpOpenApp.handler({ name: 'outlook' }, mcpCtx(async () => ({ pid: 7 })));
+    expect(r.text).toContain('window {"action":"focus","processId":7}');
+  });
+
+  it('nothing found at all: still an error, and the advice is focus by process, not list_windows', async () => {
+    const r = await mcpOpenApp.handler({ name: 'Designcenter' }, mcpCtx(async () => ({})));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/no window appeared/);
+    expect(r.text).toContain('window {"action":"focus","processName":"Designcenter"}');
+    expect(r.text).not.toMatch(/list_windows/);
+  });
+});
+
+describe('open_app — the launch was handed to a process that was already running', () => {
+  it('says "running", not "Started", and still points to focus by process', async () => {
+    const r = await mcpOpenApp.handler({ name: 'edge' }, mcpCtx(async () => ({ pid: 6001, processName: 'msedge', alreadyRunning: true })));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).not.toMatch(/Started/);
+    expect(r.text).toMatch(/handed off to the running msedge(\.exe)?, pid=6001/);
+    expect(r.text).toContain('window {"action":"focus","processName":"msedge"}');
+    expect(r.text).toMatch(/Do not launch it again/);
+  });
+});
