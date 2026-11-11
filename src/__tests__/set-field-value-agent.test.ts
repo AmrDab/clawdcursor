@@ -19,8 +19,10 @@ function ctxWith(platform: string, setOk: boolean, found: any[]) {
     keyPress: vi.fn(async () => {}),
     typeText: vi.fn(async () => {}),
     getActiveWindow: vi.fn(async () => null),
+    focusWindow: vi.fn(async () => true),
+    listDisplays: vi.fn(async () => [{ bounds: { x: 0, y: 0, width: 1920, height: 1080 }, dpiRatio: 1 }]),
   };
-  return { ctx: { platform: p } as any, p };
+  return { ctx: { platform: p, screen: { physicalWidth: 1920, physicalHeight: 1080 } } as any, p };
 }
 
 describe('agent-loop set_field_value', () => {

@@ -53,6 +53,10 @@ describe('a Spinner (a web number box) is a field with a value', () => {
     expect(spinner).toBeLessThan(name);
   });
 
+  it('ps-bridge: an empty Spinner that has a ValuePattern reads "", not RangeValuePattern\'s 0', () => {
+    expect(getValue).toMatch(/if \(\$null -eq \$val -and -not \$holdsText\) \{\s*\n[^\n]*\n\s*try \{\s*\n\s*\$rv = \$element\.GetCurrentPattern\(\[System\.Windows\.Automation\.RangeValuePattern\]::Pattern\)/);
+  });
+
   it('ps-bridge: set-value sets a number through RangeValuePattern when ValuePattern did not take it, verified', () => {
     const rangeSet = setValue.indexOf('$rv.SetValue($num)');
     expect(rangeSet).toBeGreaterThan(setValue.indexOf('$vp.SetValue($value)'));

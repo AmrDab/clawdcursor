@@ -1343,8 +1343,8 @@ function Cmd-InvokeElement {
                 $v = $vp.Current.Value
                 if ($null -ne $v -and $v.Length -gt 0) { $val = $v; $method = "ValuePattern" }
             } catch { }
-            if ($null -eq $val) {
-                # A Spinner (a web number box) or Slider: its number is the value, never its name.
+            if ($null -eq $val -and -not $holdsText) {
+                # A Spinner (a web number box) or Slider with no ValuePattern: its number is the value, never its name. (With one, an empty box reads "", not the range's 0.)
                 try {
                     $rv = $element.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern)
                     $val = [string]$rv.Current.Value; $method = "RangeValuePattern"

@@ -185,29 +185,34 @@ export function fieldRead(res: { success: boolean; data?: Record<string, unknown
  * field shows. Reads `named` (the field a native set wrote to), or without it the focused field (where the value was
  * typed).
  *
- * `retype`: the direct set wrote to `named`, and that field reads something else (a web field can ignore a value set
- * through accessibility). Called ONCE to type the value into the field instead (true: it did); the field is then read
- * again and the result names that path. Never called for a field that cannot be read (a password field).
+ * `retry`: the direct set wrote to `named` and had NO effect — the field is still empty, or holds exactly what it held
+ * `before` the set (a web field can ignore a value set through accessibility). `type` is then called ONCE to type the
+ * value into the field instead; when it did ('typed') the field is read again and the result names that path. Any other
+ * mismatch (a reformat, other text) stays a failure, and a field that cannot be read (a password field) is never typed into.
  */
+export type Retyped = 'typed' | 'skipped' | 'unfocused';
 export async function setResult(
   platform: Pick<PlatformAdapter, 'getFocusedElement' | 'invokeElement'>, value: string, label: string, how: string,
   named?: { name: string; controlType?: string; processId?: number },
-  retype?: () => Promise<boolean>,
+  retry?: { before?: string; type: () => Promise<Retyped> },
 ): Promise<{ success: boolean; text: string; targetLabel: string }> {
   const read = () => readBackTyped(async () => {
     if (!named) return platform.getFocusedElement();
     return fieldRead(await platform.invokeElement({ ...named, action: 'get-value' }));
   }, value, { whole: true });
   let rb = await read();
-  let typed = false;
-  if (named && retype && rb.result === 'mismatch' && await retype()) {
-    typed = true;
-    rb = await read();
+  let retyped: Retyped = 'skipped';
+  const noEffect = rb.result === 'mismatch' && (!rb.value || (retry?.before !== undefined && flat(retry.before) === rb.value));
+  if (named && retry && noEffect) {
+    retyped = await retry.type();
+    if (retyped === 'typed') rb = await read();
   }
+  const typed = retyped === 'typed';
   const set = `${quoteScreenText(label)} = ${value.length} chars${how}${typed ? ' (set via keys after the direct set had no effect)' : ''}`;
   const cut = (s: string) => quoteScreenText(s.length > 80 ? `${s.slice(0, 79)}…` : s);
   const shows = `the field shows ${cut(rb.value ?? '')}`;
-  const alsoTyped = typed ? ' Typing it into the field (select-all + keys) after the direct set did not change that.' : '';
+  const alsoTyped = typed ? ' Typing it into the field (select-all + keys) after the direct set did not change that.'
+    : retyped === 'unfocused' ? ' To type it instead, the field was clicked, but could not focus the field to type into it; nothing was typed.' : '';
   switch (rb.result) {
     case 'match': return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
     case 'unknown': return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };

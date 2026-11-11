@@ -158,9 +158,9 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **A value read gives the field's value, and `set_value` says when it did nothing.** `get_value` on an empty text
   field answered with its label (macOS: `"Your name" = "Your name"`), so a set the app ignored read as "could not be
   read back: NOT verified". Now an empty field reads `""`, every bridge says whether the value itself was read
-  (`readable`), and only a field that truly cannot be read (a password box, no value) is "NOT verified". A readable
-  field that does not hold the value after a direct set is typed into once (click, select-all, keys) and the result
-  names that path; one that is still empty fails with "the field still shows nothing". A clear that reads back empty
+  (`readable`), and only a field that truly cannot be read (a password box, no value) is "NOT verified". A direct
+  set that had no effect (the field is still empty, or unchanged) is typed once (its window in front, click, the focus
+  confirmed on the field, select-all, keys) and the result names that path; one that is still empty fails with "the field still shows nothing". A clear that reads back empty
   on a readable field is confirmed. An element with no value is reported as having none, with its name given as its name.
 - **A number box is a field.** Edge's `<input type="number">` is a UIA Spinner: `set_value` found "no editable field"
   and `get_value` answered its name. Windows now reads and sets it through ValuePattern or RangeValuePattern, macOS
