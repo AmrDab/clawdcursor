@@ -123,16 +123,21 @@ function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
   return (!numeric && w && v.startsWith(w)) || (bare(w) && bare(v) === bare(w)) ? 'suffix' : 'mismatch';
 }
 
+/** What a read of a field gave. `readable`: the read itself worked, so an empty `value` means the field IS empty. */
+export type FieldRead = { value?: string; secure?: boolean; readable?: boolean };
+
 /**
  * Read the focused field after typing. 'unknown' when it cannot be told — no focused element, a password field (its
  * value is withheld), a field that exposes no text (empty value: many custom controls), or a value at the read cap.
  * Polls briefly: a field can lag the keys. `value` is what the field showed (for the caller to report). Never throws.
  *
- * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue). A clear (empty text)
- * fails on a field that still shows text, and is never confirmed: an empty read is also what an unreadable field gives.
+ * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue). An empty read counts
+ * only when the reader says the field is `readable` (a by-name value read does; see fieldRead): then a clear is
+ * confirmed, and a field that still shows nothing after a set is a mismatch. Without that, an empty read is also what
+ * an unreadable field gives, and stays 'unknown'.
  */
 export async function readBackTyped(
-  focused: () => Promise<{ value?: string; secure?: boolean } | null | undefined>,
+  focused: () => Promise<FieldRead | null | undefined>,
   text: string,
   opts: { maxMs?: number; stepMs?: number; submit?: boolean; whole?: boolean } = {},
 ): Promise<{ result: ReadBack; value?: string; secure?: boolean }> {
@@ -142,12 +147,12 @@ export async function readBackTyped(
   const t0 = Date.now();
   let last: { result: ReadBack; value?: string } = { result: 'unknown' };
   for (;;) {
-    let el: { value?: string; secure?: boolean } | null | undefined = null;
+    let el: FieldRead | null | undefined = null;
     try { el = await focused(); } catch { /* unreadable */ }
     if (el?.secure) return { result: 'unknown', secure: true };
     const raw = typeof el?.value === 'string' ? el.value : '';
     const v = raw.length >= READ_CAP ? '' : flat(raw);
-    if (v) {
+    if (v || (whole && el?.readable === true && raw.length < READ_CAP)) {
       // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
       // do — typing into the middle of a document.
       const result = whole ? holdsValue(v, want)
@@ -161,29 +166,63 @@ export async function readBackTyped(
 }
 
 /**
+ * What a by-name get-value says the field holds. Null: it could not be read — the read failed, or the element has no
+ * value and the bridge answered with its NAME (`method` "name", `readable` false): that is not the field's text.
+ * The bridges say `readable` themselves; a non-empty value was evidently read.
+ */
+export function fieldRead(res: { success: boolean; data?: Record<string, unknown> }): FieldRead | null {
+  const d = res.data;
+  if (!res.success || !d) return null;
+  if (d.secure === true) return { secure: true };
+  if (typeof d.value !== 'string' || /^name$/i.test(String(d.method))) return null;
+  return (typeof d.readable === 'boolean' ? d.readable : d.value !== '') ? { value: d.value, readable: true } : null;
+}
+
+/**
  * How every set_field_value path ends: one read-back (readBackTyped, whole value) decides the result. A field that holds
  * the value is confirmed; one that shows it with more after it or in another format, or cannot be read, is a success
- * said to be NOT verified; any other text is a failure that says what the field shows. Reads `named` (the field a
- * native set wrote to), or without it the focused field (where the value was typed).
+ * said to be NOT verified; any other text — or nothing, in a field that can be read — is a failure that says what the
+ * field shows. Reads `named` (the field a native set wrote to), or without it the focused field (where the value was
+ * typed).
+ *
+ * `retry`: the direct set wrote to `named` and had NO effect — the field is still empty, or holds exactly what it held
+ * `before` the set (a web field can ignore a value set through accessibility). `type` is then called ONCE to type the
+ * value into the field instead; when it did ('typed') the field is read again and the result names that path. Any other
+ * mismatch (a reformat, other text) stays a failure, and a field that cannot be read (a password field) is never typed into.
  */
+export type Retyped = 'typed' | 'skipped' | 'unfocused';
 export async function setResult(
   platform: Pick<PlatformAdapter, 'getFocusedElement' | 'invokeElement'>, value: string, label: string, how: string,
   named?: { name: string; controlType?: string; processId?: number },
+  retry?: { before?: string; type: () => Promise<Retyped> },
 ): Promise<{ success: boolean; text: string; targetLabel: string }> {
-  const rb = await readBackTyped(async () => {
+  const read = () => readBackTyped(async () => {
     if (!named) return platform.getFocusedElement();
-    const res = await platform.invokeElement({ ...named, action: 'get-value' });
-    const d = res.data as { value?: unknown; method?: unknown } | undefined;
-    // A bridge that finds no value answers with the element's NAME (method "Name"): that is not the field's text.
-    return res.success && typeof d?.value === 'string' && !/^name$/i.test(String(d.method)) ? { value: d.value } : null;
+    return fieldRead(await platform.invokeElement({ ...named, action: 'get-value' }));
   }, value, { whole: true });
-  const set = `${quoteScreenText(label)} = ${value.length} chars${how}`;
+  let rb = await read();
+  let retyped: Retyped = 'skipped';
+  const noEffect = rb.result === 'mismatch' && (!rb.value || (retry?.before !== undefined && flat(retry.before) === rb.value));
+  if (named && retry && noEffect) {
+    retyped = await retry.type();
+    if (retyped === 'typed') rb = await read();
+  }
+  const typed = retyped === 'typed';
+  const set = `${quoteScreenText(label)} = ${value.length} chars${how}${typed ? ' (set via keys after the direct set had no effect)' : ''}`;
   const cut = (s: string) => quoteScreenText(s.length > 80 ? `${s.slice(0, 79)}…` : s);
   const shows = `the field shows ${cut(rb.value ?? '')}`;
+  const alsoTyped = typed ? ' Typing it into the field (select-all + keys) after the direct set did not change that.'
+    : retyped === 'unfocused' ? ' To type it instead, the field was clicked, but could not focus the field to type into it; nothing was typed.' : '';
   switch (rb.result) {
     case 'match': return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
     case 'unknown': return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };
     case 'suffix': return { success: true, text: `Set ${set} — ${shows}, which may be the value in another format, or with a suggestion or old text after it: NOT verified.`, targetLabel: label };
-    default: return { success: false, text: `Set ${quoteScreenText(label)} failed: ${shows}, not the value asked for (${cut(value)}) — its old text was not replaced, or the field rewrote it.`, targetLabel: label };
+    default: return {
+      success: false,
+      text: rb.value
+        ? `Set ${quoteScreenText(label)} failed: ${shows}, not the value asked for (${cut(value)}) — its old text was not replaced, or the field rewrote it.${alsoTyped}`
+        : `Set ${quoteScreenText(label)} failed: the field still shows nothing, not the value asked for (${cut(value)}) — the set had no effect.${alsoTyped}`,
+      targetLabel: label,
+    };
   }
 }

@@ -112,6 +112,9 @@ const RULES: Rule[] = [
   // A set / replace whose field holds something else: old text that was not cleared ("10030" for "30"), or a reformat.
   { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field shows .*, not the (?:value|text) asked for/i,
     hint: 'the field holds the text quoted in the result, not what was asked for: this call did not replace its old text, and the same call will not either; select the old text in the field (double-click or triple-click it), then type', next: REREAD },
+  // A set that did nothing: the field can be read, and it is still empty.
+  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field still shows nothing, not the value asked for/i,
+    hint: 'the field can be read and is still empty: the set did not reach it, and the same call will not either; click the field, then type', next: REREAD },
   { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,
     hint: 'the same call kept repeating without progress; change the approach' },
   { code: 'INVALID_ARGS', outcome: 'failed',

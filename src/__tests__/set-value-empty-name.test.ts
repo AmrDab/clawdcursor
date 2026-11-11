@@ -13,6 +13,7 @@ function platform() {
     keyPress: vi.fn(async () => {}),
     typeText: vi.fn(async () => {}),
     getActiveWindow: vi.fn(async () => null),
+    listDisplays: vi.fn(async () => [{ bounds: { x: 0, y: 0, width: 3840, height: 2160 }, dpiRatio: 1 }]),
   };
 }
 

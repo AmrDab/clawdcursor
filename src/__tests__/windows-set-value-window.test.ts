@@ -61,6 +61,18 @@ describe('an unverified keyboard set-value reaches the agent as such', () => {
     expect(res).toMatchObject({ success: true, data: { unverified: true } });
   });
 
+  it('get-value: an empty field is "" with readable true; a Spinner reads its number; a password box is not readable', async () => {
+    const get = (name: string) => new WindowsAdapter().invokeElement({ name, processId: 7, action: 'get-value' });
+    reply = { success: true, action: 'get-value', value: '', method: 'ValuePattern', readable: true };
+    expect((await get('Your name')).data).toMatchObject({ value: '', method: 'ValuePattern', readable: true });
+    reply = { success: true, action: 'get-value', value: '100', method: 'RangeValuePattern', readable: true };
+    expect((await get('Quantity')).data).toMatchObject({ value: '100', method: 'RangeValuePattern', readable: true });
+    reply = { success: true, action: 'get-value', value: '', method: 'Password', readable: false, secure: true };
+    expect((await get('Password')).data).toMatchObject({ value: '', readable: false, secure: true });
+    reply = { success: true, action: 'get-value', value: 'Send', method: 'Name', readable: false };
+    expect((await get('Send')).data).toMatchObject({ value: 'Send', method: 'Name', readable: false });
+  });
+
   it('set_field_value says it was not verified', async () => {
     const tool = buildUnifiedTools().find(t => t.name === 'set_field_value')!;
     const ctx = { platform: { platform: 'win32', findElements: async () => [], getFocusedElement: async () => null,

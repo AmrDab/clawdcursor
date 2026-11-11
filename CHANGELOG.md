@@ -155,6 +155,16 @@ All notable changes to Clawd Cursor will be documented in this file.
   when `SystemRoot` is unset, and the run directory is refused if it is a symlink and tightened to 0700.
 
 ### Fixed
+- **A value read gives the field's value, and `set_value` says when it did nothing.** `get_value` on an empty text
+  field answered with its label (macOS: `"Your name" = "Your name"`), so a set the app ignored read as "could not be
+  read back: NOT verified". Now an empty field reads `""`, every bridge says whether the value itself was read
+  (`readable`), and only a field that truly cannot be read (a password box, no value) is "NOT verified". A direct
+  set that had no effect (the field is still empty, or unchanged) is typed once (its window in front, click, the focus
+  confirmed on the field, select-all, keys) and the result names that path; one that is still empty fails with "the field still shows nothing". A clear that reads back empty
+  on a readable field is confirmed. An element with no value is reported as having none, with its name given as its name.
+- **A number box is a field.** Edge's `<input type="number">` is a UIA Spinner: `set_value` found "no editable field"
+  and `get_value` answered its name. Windows now reads and sets it through ValuePattern or RangeValuePattern, macOS
+  treats a stepper (AXIncrementor) as a value target, and the keyboard fallback types into a Spinner / spin button.
 - **The pill names the app by its own name.** On Windows it is the exe's file description ("Clicking in Designcenter
   NX", not "Clicking in Ugraf"), read once per process; macOS already gave the localized name; elsewhere the process
   name as before.

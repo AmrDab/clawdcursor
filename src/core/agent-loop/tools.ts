@@ -24,7 +24,7 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, se
 import { ensureTargetForeground, sameProcess } from './focus-guard';
 import { resolveAlias, appNameRefusal } from '../router/aliases';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
-import type { InvokeAction } from '../../platform/types';
+import type { InvokeAction, UiElement } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
@@ -39,7 +39,7 @@ import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-cont
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, typesAsKeys } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, fieldRead, typesAsKeys, type Retyped } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
@@ -360,10 +360,12 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           const plan = resolveRef(refIds, ctx.uiMaps, Date.now(), 'fill', aw);
           if (!plan.ok) return { success: false, text: `set_field_value ref rejected: ${plan.error}`, isError: true };
           if (plan.via === 'name') {
+            const before = await valueBefore(ctx, { name: plan.name });
             const res = await ctx.platform.invokeElement({ name: plan.name, action: 'set-value', value: fillValue });
             await sleep(150);
             if (!res.success) return { success: false, text: `Set of ${plan.element.id} failed.`, targetLabel: plan.name };
-            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name });
+            return setResult(ctx.platform, fillValue, plan.name, ` (via ${plan.element.id})`, { name: plan.name },
+              { before, type: () => typeIntoField(ctx, fillValue, plan.name, undefined, undefined) });
           }
           const seen = await boundsToClick(ctx, plan, aw);
           if (!seen.ok) return { success: false, text: `set_field_value ref rejected: ${seen.error}`, isError: true };
@@ -387,10 +389,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           return { success: false, text: 'Set failed: name the field (its accessibility name), or pass element_id + snapshot_id from compile_ui. To type into the focused field, use type.', isError: true };
         }
         const field = { name, controlType: await preferControl(ctx.platform, 'set-value', { name, controlType, processId }), processId };
+        const before = await valueBefore(ctx, field);
         const res = await ctx.platform.invokeElement({ ...field, action: 'set-value', value });
         await sleep(150);
         // `unverified`: the Windows bridge typed it and could not read the field; the focused field is where the keys went.
-        if (res.success) return setResult(ctx.platform, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field);
+        // A direct set that had no effect (the field is still empty, or holds what it held before) is typed instead, once.
+        if (res.success) {
+          return setResult(ctx.platform, value, name, '', (res.data as { unverified?: unknown } | undefined)?.unverified === true ? undefined : field,
+            { before, type: () => typeIntoField(ctx, value, name, controlType, processId) });
+        }
         // A refusal is final: "nothing settable here" falls through to typing below, "I will not pick a field for you" must not.
         if ((res.data as { refused?: unknown } | undefined)?.refused === true) {
           const why = typeof res.data?.error === 'string' ? res.data.error : 'the platform declined to act on it';
@@ -403,6 +410,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (!target) {
           return { success: false, text: `Set ${quoteScreenText(name)} failed: no settable value and no editable field named ${quoteScreenText(name)} to type into.`, targetLabel: name };
         }
+        // A coordinate click hits whatever is on top: raise the field's window first (as clickBoundsFallback does).
+        if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
         await ctx.platform.mouseClick(target.x, target.y);
         await ctx.platform.keyPress('mod+a');
         await ctx.platform.typeText(value);
@@ -571,7 +580,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         if (!res.success) return { success: false, text: `a11y get_value ${quoteScreenText(name)} missed — ${missText(res.data)}.` };
         // The whole value: read_tree points here to read what it cut. Only a huge one is cut again, and says so.
         const value = String((res.data as any)?.value ?? '');
-        const shownValue = value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
+        // Not a value: a password field withholds it, and an element with no value answers with its own NAME.
+        const d = res.data as { readable?: unknown; secure?: unknown; method?: unknown } | undefined;
+        if (d?.secure === true) return { success: true, text: `${quoteScreenText(name)} is a password field: its value is withheld (could not read).` };
+        if (d?.readable === false || /^name$/i.test(String(d?.method))) {
+          return { success: true, text: wrapUntrustedScreenContent(value
+            ? `${quoteScreenText(name)} has no value to read (it is not a field that holds one). Its name: ${quoteScreenText(value.slice(0, 200))}`
+            : `${quoteScreenText(name)} has no value that could be read.`) };
+        }
+        const shownValue =value.length > GET_VALUE_MAX ? `${value.slice(0, GET_VALUE_MAX)}… (+${value.length - GET_VALUE_MAX} chars not shown)` : value;
         return { success: true, text: wrapUntrustedScreenContent(`${quoteScreenText(name)} = "${shownValue}"`) };
       },
     },
@@ -2231,6 +2248,28 @@ export async function runActivationLadder(
 
 
 /**
+ * The centre of an element's bounds, when a click there is safe: the bounds are sane (finite, non-degenerate, not
+ * INT_MIN) and the centre lies on the virtual screen. Null otherwise: never click an offscreen coordinate. Shared by
+ * every fallback that clicks an element's bounds (clickBoundsFallback, editableTarget).
+ */
+async function clickablePoint(
+  ctx: AgentToolContext, b: { x: number; y: number; width: number; height: number } | undefined,
+): Promise<{ x: number; y: number } | null> {
+  if (!b) return null;
+  const vals = [b.x, b.y, b.width, b.height];
+  if (!vals.every(Number.isFinite) || b.width <= 0 || b.height <= 0 || b.x === RECT_INT_MIN || b.y === RECT_INT_MIN) return null;
+  const cx = Math.round(b.x + b.width / 2);
+  const cy = Math.round(b.y + b.height / 2);
+  // Virtual screen = union of displays (logical, and scaled to physical since
+  // a11y rects are physical on Windows); fall back to the primary display.
+  const displays = await ctx.platform.listDisplays().catch(() => []);
+  const rects = displays.length
+    ? displays.flatMap(d => [1, d.dpiRatio || 1].map(r => ({ x: d.bounds.x * r, y: d.bounds.y * r, w: d.bounds.width * r, h: d.bounds.height * r })))
+    : [{ x: 0, y: 0, w: ctx.screen.physicalWidth, h: ctx.screen.physicalHeight }];
+  return rects.some(r => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h) ? { x: cx, y: cy } : null;
+}
+
+/**
  * Coordinate fallback for the activate intent when the element was FOUND
  * but exposes no invoke/toggle/select pattern: click the centre of the
  * bounds the adapter surfaced — but ONLY when they are sane (finite,
@@ -2243,19 +2282,9 @@ async function clickBoundsFallback(
   b: { x: number; y: number; width: number; height: number } | undefined,
   processId?: number,
 ): Promise<{ success: true; text: string; targetLabel: string } | null> {
-  if (!b) return null;
-  const vals = [b.x, b.y, b.width, b.height];
-  if (!vals.every(Number.isFinite) || b.width <= 0 || b.height <= 0 || b.x === RECT_INT_MIN || b.y === RECT_INT_MIN) return null;
-  const cx = Math.round(b.x + b.width / 2);
-  const cy = Math.round(b.y + b.height / 2);
-  // Virtual screen = union of displays (logical, and scaled to physical since
-  // a11y rects are physical on Windows); fall back to the primary display.
-  const displays = await ctx.platform.listDisplays().catch(() => []);
-  const rects = displays.length
-    ? displays.flatMap(d => [1, d.dpiRatio || 1].map(r => ({ x: d.bounds.x * r, y: d.bounds.y * r, w: d.bounds.width * r, h: d.bounds.height * r })))
-    : [{ x: 0, y: 0, w: ctx.screen.physicalWidth, h: ctx.screen.physicalHeight }];
-  const onScreen = rects.some(r => cx >= r.x && cx < r.x + r.w && cy >= r.y && cy < r.y + r.h);
-  if (!onScreen) return null;
+  const at = await clickablePoint(ctx, b);
+  if (!at) return null;
+  const { x: cx, y: cy } = at;
   // A coordinate click hits whatever is on top. When the element was looked
   // up in a named process (not the foreground window), raise that window
   // first so the click can't land on a window covering it.
@@ -2326,25 +2355,79 @@ function focusBreadcrumb(
   return ` · focus ${quoteScreenText(truncateTitle(b))}→${quoteScreenText(truncateTitle(a))}`;
 }
 
-/** Roles that take typed text, across UIA / AX / AT-SPI names. */
-const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
+/** Roles that take typed text, across UIA / AX / AT-SPI names. A number box is a Spinner (AT-SPI "spin button", AXIncrementor). */
+const EDITABLE_ROLE = /edit|entry|textfield|textarea|text field|text area|combo|password|document|spin|incrementor/i;
 
 /**
  * The on-screen centre of the editable element called `name` — the input, not
  * a label that shares its name ("City" label + "City" field). Null when none is
- * found: the caller must then NOT type anything.
+ * found: the caller must then NOT type anything. Never an element scrolled out of view, and never a point that is on no
+ * display (clickablePoint): a click there lands on something else.
  */
 async function editableTarget(
-  ctx: AgentToolContext, name: string, controlType: string | undefined, processId: number | undefined,
-): Promise<{ x: number; y: number } | null> {
+  ctx: AgentToolContext, name: string, controlType: string | undefined, processId: number | undefined, noSecure = false,
+): Promise<{ x: number; y: number; el: UiElement } | null> {
   const found = await ctx.platform.findElements({ name, controlType, processId }).catch(() => []);
-  const onScreen = found.filter(el => el.bounds && el.bounds.width > 0 && el.bounds.height > 0);
+  const onScreen = found.filter(el => el.bounds && el.bounds.width > 0 && el.bounds.height > 0 && !el.offscreen);
   // Types are normalized per platform: a label is "Text" everywhere (UIA Text,
   // AT-SPI label) and an editable text view is "Edit" (AT-SPI "text"/"entry").
   const editable = onScreen.filter(el => EDITABLE_ROLE.test(String(el.controlType ?? '')) && !/^text$/i.test(String(el.controlType ?? '')));
   const pick = editable.sort((a, b) => (b.bounds!.width * b.bounds!.height) - (a.bounds!.width * a.bounds!.height))[0];
-  if (!pick?.bounds) return null;
-  return { x: Math.round(pick.bounds.x + pick.bounds.width / 2), y: Math.round(pick.bounds.y + pick.bounds.height / 2) };
+  if (!pick?.bounds || (noSecure && (pick.secure || /password/i.test(String(pick.controlType ?? ''))))) return null;
+  const at = await clickablePoint(ctx, pick.bounds);
+  return at ? { ...at, el: pick } : null;
+}
+
+/** What the field holds before a direct set (undefined: it cannot be read): a set that leaves exactly this had no effect. */
+async function valueBefore(ctx: AgentToolContext, field: { name: string; controlType?: string; processId?: number }): Promise<string | undefined> {
+  const res = await ctx.platform.invokeElement({ ...field, action: 'get-value' }).catch(() => null);
+  return res ? fieldRead(res)?.value : undefined;
+}
+
+/** Is the focused element `field` itself: something that takes text, in the same place (or of the same name, overlapping it)? */
+function focusIsField(focused: UiElement | null, field: UiElement): boolean {
+  const role = String(focused?.controlType ?? '');
+  if (!focused?.bounds || focused.secure || !EDITABLE_ROLE.test(role) || /^text$|password/i.test(role)) return false;
+  const a = focused.bounds, b = field.bounds;
+  const near = (p: number, q: number) => Math.abs(p - q) <= 8;
+  if (near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height)) return true;
+  const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  return overlap && !!focused.name?.trim() && focused.name.trim().toLowerCase() === field.name.trim().toLowerCase();
+}
+
+/**
+ * set_field_value's second try, after a direct set the field ignored: click the field, select all, type — the keys
+ * smart_type sends, through the same input guard (ctx.platform).
+ *
+ * A direct set works on a window that is behind another; a click does not — it hits whatever is on top, and select-all +
+ * typing would then replace THAT control's contents (a whole document, in an editor). So: the field's window is brought
+ * to the front first, and after the click the keyboard focus must be on the field itself before any key is sent.
+ * 'skipped': nothing was done — no such field in view, a password field (never typed into on a guess), a clear
+ * (select-all + no text clears nothing), or its window would not come to the front. 'unfocused': the field was clicked
+ * but the focus is not on it; nothing was typed.
+ */
+async function typeIntoField(
+  ctx: AgentToolContext, value: string, name: string, controlType: string | undefined, processId: number | undefined,
+): Promise<Retyped> {
+  if (!value) return 'skipped';
+  const target = await editableTarget(ctx, name, controlType, processId, true);
+  if (!target) return 'skipped';
+  const pid = processId ?? target.el.processId;
+  if (pid !== undefined) {
+    const inFront = async () => (await ctx.platform.getActiveWindow().catch(() => null))?.processId === pid;
+    if (!await inFront()) {
+      await ctx.platform.focusWindow({ processId: pid }).catch(() => false);
+      await sleep(150);
+      if (!await inFront()) return 'skipped';
+    }
+  }
+  await ctx.platform.mouseClick(target.x, target.y);
+  await sleep(100);
+  if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el)) return 'unfocused';
+  await ctx.platform.keyPress('mod+a');
+  await ctx.platform.typeText(value);
+  await sleep(150);
+  return 'typed';
 }
 
 /** macOS: " ⚠ …" when a modal dialog of another app had the keyboard during the keystrokes just sent, else "". */

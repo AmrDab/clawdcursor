@@ -234,6 +234,8 @@ export function getA11yDepthTools(): ToolDefinition[] {
           return { text: `a11y_get_value: ${quoteScreenText(name)} exposes no ValuePattern or AXValue.`, isError: true };
         }
         const value = res.data?.value ?? '';
+        // readable false: not a value — a password field, or an element with no value, answered with its own name.
+        if (res.data?.readable === false) return { text: screenJson({ name, readable: false, ...(value ? { elementName: value } : {}) }) };
         return { text: screenJson({ name, value }) };
       },
     },
