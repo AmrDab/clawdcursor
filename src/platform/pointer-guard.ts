@@ -179,9 +179,10 @@ export function guardInputMethods<T extends object>(target: T): T {
 /**
  * The test fence (core/fence.ts): every pointer method of this object (a move, a press, a release, a click, a drag, a
  * scroll) is checked before it runs: the pointer may only be inside the fenced window in front. Outermost, so a move
- * followed by a bare press cannot reach another window. With no fence the check returns at once.
+ * followed by a bare press cannot reach another window. With no fence nothing is wrapped.
  */
 function fencePointerMethods(target: object): void {
+  if (!fenceActive()) return;   // no fence: the methods stay exactly as they are
   const names = new Set<string>();
   for (let o: object | null = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
     for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k) || k === 'executeMouseAction') names.add(k);

@@ -23,6 +23,7 @@
  * and release inside it. The platform's window list holds fenced windows only. Fenced windows must be wholly on the
  * primary display. Whatever cannot be decided (no foreground, no process table, no bounds, no pointer position) is refused.
  */
+import { AsyncLocalStorage } from 'async_hooks';
 import { execFile } from 'child_process';
 import * as os from 'os';
 import type { ToolDefinition, ToolResult } from '../tools/types';
@@ -73,11 +74,28 @@ async function readProcessTable(): Promise<ProcessTable> {
 
 let tableReader: () => Promise<ProcessTable> = readProcessTable;
 let cached: { at: number; table: ProcessTable } | null = null;
-const TABLE_TTL_MS = 2000;
+/** The read in flight: checks that arrive while the table is being read wait for that read, they do not start their own. */
+let reading: Promise<ProcessTable> | null = null;
+/** How long a table is used as it is. */
+const TABLE_TTL_MS = 3000;
+/** A pid that is not in the table may have started since: the table is read again, but only when it is older than this. */
+const MISS_REFRESH_MS = 1000;
+
+/**
+ * The process table, at most `maxAgeMs` old. The age counts from when the read FINISHED: a read takes over a second
+ * on Windows, and stamping it at its start made every table look stale the moment it arrived.
+ */
+function processTable(maxAgeMs: number): Promise<ProcessTable> {
+  if (cached && Date.now() - cached.at <= maxAgeMs) return Promise.resolve(cached.table);
+  return reading ??= tableReader()
+    .then(table => { cached = { at: Date.now(), table }; return table; })
+    .finally(() => { reading = null; });
+}
 
 export function __setFenceProcessTableForTests(reader: (() => Promise<Map<number, number>>) | null): void {
   tableReader = reader ?? readProcessTable;
   cached = null;
+  reading = null;
 }
 
 function within(pid: number, roots: number[], table: ProcessTable): boolean {
@@ -95,11 +113,10 @@ export async function inFence(pid: number | undefined, env: NodeJS.ProcessEnv = 
   if (!roots || !pid || !Number.isInteger(pid) || pid <= 0) return false;
   if (roots.includes(pid)) return true;
   try {
-    if (!cached || Date.now() - cached.at > TABLE_TTL_MS) cached = { at: Date.now(), table: await tableReader() };
-    if (within(pid, roots, cached.table)) return true;
-    // A process started since the table was read (a dialog's helper, a browser's new renderer): read once more.
-    if (Date.now() - cached.at > 200) cached = { at: Date.now(), table: await tableReader() };
-    return within(pid, roots, cached.table);
+    if (within(pid, roots, await processTable(TABLE_TTL_MS))) return true;
+    // A process started since the table was read (a dialog's helper, a browser's new renderer): read once more, unless
+    // the table is that fresh. The windows of other apps are all "not in the fence": they must not each cost a read.
+    return within(pid, roots, await processTable(MISS_REFRESH_MS));
   } catch {
     return false;
   }
@@ -318,13 +335,16 @@ export const FENCE_POLICY: Readonly<Record<string, FenceKind>> = {
   mouse_hover: 'act', mouse_move_relative: 'act', mouse_scroll: 'act', mouse_scroll_horizontal: 'act', mouse_drag: 'act',
   mouse_drag_stepped: 'act', mouse_down: 'act', mouse_up: 'act',
 
-  focus_window: 'window', close_window: 'window', maximize_window: 'window', minimize_window: 'window',
+  focus_window: 'window', close_window: 'window', maximize_window: 'window',
   minimize_window_to_taskbar: 'window', restore_window: 'window', resize_window: 'window',
 
   desktop_screenshot: 'capture', screenshot_full: 'capture', desktop_screenshot_region: 'capture',
 
   // No single target, or outside by nature: the window list, the clipboard, launches and URL openers, shortcuts, reports and logs (they leave the machine or hold other sessions), the user's pause.
   get_windows: 'refuse', read_clipboard: 'refuse', write_clipboard: 'refuse',
+  // The old minimize: it finds its window itself, by pid OR name OR title, focuses it and presses a key. The compact
+  // surface uses minimize_window_to_taskbar.
+  minimize_window: 'refuse',
   open_app: 'refuse', open_file: 'refuse', open_url: 'refuse', open_uri: 'refuse', navigate_browser: 'refuse', switch_tab_os: 'refuse',
   relaunch_with_cdp: 'refuse', detect_webview_apps: 'refuse', shortcuts_execute: 'refuse',
   session_report: 'refuse', submit_report: 'refuse', logs_recent: 'refuse', verify: 'refuse',
@@ -384,6 +404,11 @@ export async function fenceGate(tool: Pick<ToolDefinition, 'name' | 'parameters'
       && (!title || lower(w.title).includes(title)) && (!processName || lower(w.processName).includes(processName)));
     if (!matched.length) throw new Error(refusal(`${tool.name}: no open window matches that target, and whatever it would resolve to`));
     for (const w of matched) if (!await windowInFence(w, env)) throw new Error(refusal(`${tool.name}: a window matching that target`));
+    // A tool may match its fields with OR where this gate matched them with AND: a window outside the fence that matches
+    // ANY one of them (the same title in another app, say) could be the one it picks.
+    const any = all.filter(w => (handle !== undefined && Number(w.handle) === handle) || (pid !== undefined && w.processId === pid)
+      || (!!title && lower(w.title).includes(title)) || (!!processName && lower(w.processName).includes(processName)));
+    for (const w of any) if (!await windowInFence(w, env)) throw new Error(refusal(`${tool.name}: a window outside the fence also matches part of that target, and which one it means`));
     const owner = matched[0].processId;
     if (matched.some(w => w.processId !== owner)) throw new Error(refusal(`${tool.name}: that target matches windows of several processes, and which one it means`));
     // The tool resolves by process (and title). A process that also owns windows outside the fence (ApplicationFrameHost
@@ -402,6 +427,21 @@ export async function fenceGate(tool: Pick<ToolDefinition, 'name' | 'parameters'
 }
 
 // ── images ──────────────────────────────────────────────────────────────────
+
+/** What a tool call saw in front when it began: every capture inside the call is checked against it. */
+const capturing = new AsyncLocalStorage<{ before: Promise<FenceWindow | null> }>();
+
+/**
+ * Run a tool call (or anything that captures the screen) with the window in front read FIRST. The gate does this for
+ * every fenced tool; a capture made outside such a scope is refused. Runs `fn` as it is with no fence.
+ */
+export function fenceCapturing<R>(fn: () => Promise<R>, env: NodeJS.ProcessEnv = process.env): Promise<R> {
+  if (!fenceActive(env)) return fn();
+  return capturing.run({ before: desktop.foreground().catch(() => null) }, fn);
+}
+
+const sameWindow = (a: FenceWindow, b: FenceWindow) => a.processId === b.processId && String(a.handle ?? '') === String(b.handle ?? '')
+  && !!a.bounds && !!b.bounds && a.bounds.x === b.bounds.x && a.bounds.y === b.bounds.y && a.bounds.width === b.bounds.width && a.bounds.height === b.bounds.height;
 
 /** Images that went through `fenceImage` under the fence: any other image a tool returns is dropped. */
 const masked = new WeakSet<object>();
@@ -430,7 +470,12 @@ export async function fenceImage(image: Buffer, mimeType: string, frame: Capture
 /** The mask itself. Throws the refusal when no fenced window is in front, or none of it is in the image. A no-op with no fence. */
 export async function fenceMask(image: Buffer, frame: CaptureFrame, env: NodeJS.ProcessEnv = process.env): Promise<Buffer> {
   if (!fenceActive(env)) return image;
+  // The window is read AFTER the capture here and was read BEFORE it when the call began (fenceCapturing). If it moved,
+  // resized or lost the front in between, the mask would be cut for a rectangle the capture does not show: refused.
+  const before = await capturing.getStore()?.before;
   const front = await fencedFront('screen capture', env);
+  if (!before) throw new Error(refusal('screen capture: where the fenced window was before the capture is not known, so the capture'));
+  if (!sameWindow(before, front)) throw new Error(refusal('screen capture: the window in front moved or changed while it was captured (take it again), and the capture'));
   const sharp = (await import('sharp')).default;
   const meta = await sharp(image).metadata();
   const W = meta.width ?? 0, H = meta.height ?? 0;
@@ -464,7 +509,8 @@ export function fenceTools(tools: ToolDefinition[], env: NodeJS.ProcessEnv = pro
       let gated: Record<string, unknown>;
       try { gated = await fenceGate(tool, params ?? {}, env); }
       catch (e) { return { text: e instanceof Error ? e.message : String(e), isError: true }; }
-      const result = await tool.handler(gated, ctx);
+      // The window in front is read before the handler runs: a capture inside it is masked only if nothing moved since.
+      const result = await fenceCapturing(() => tool.handler(gated, ctx), env);
       if (result.image && !(fenceKind(tool.name) === 'capture' && masked.has(result.image))) {
         return { text: refusal(`${tool.name}: an image that did not go through the fenced capture`), isError: true };
       }
@@ -480,15 +526,22 @@ export function fenceTools(tools: ToolDefinition[], env: NodeJS.ProcessEnv = pro
  */
 export function fencePlatform<T extends { listWindows(): Promise<FenceWindow[]> }>(adapter: T, env: NodeJS.ProcessEnv = process.env): T {
   if (!fenceActive(env)) return adapter;
-  const rawList = adapter.listWindows.bind(adapter);
-  (adapter as unknown as Record<symbol, unknown>)[RAW_WINDOWS] = rawList;
-  adapter.listWindows = (async () => {
-    const all = await rawList();
+  (adapter as unknown as Record<symbol, unknown>)[RAW_WINDOWS] = adapter.listWindows.bind(adapter);
+  return fenceWindowList(adapter, 'listWindows', env);
+}
+
+/** The same for any object with a method that lists windows (the accessibility bridge's `getWindows`). Untouched with no fence. */
+export function fenceWindowList<T extends object>(target: T, method: string, env: NodeJS.ProcessEnv = process.env): T {
+  const t = target as unknown as Record<string, unknown>;
+  const original = t[method];
+  if (!fenceActive(env) || typeof original !== 'function') return target;
+  t[method] = async (...args: unknown[]) => {
+    const all = await (original as (...a: unknown[]) => Promise<FenceWindow[] | null | undefined>).apply(target, args);
     const inside: FenceWindow[] = [];
-    for (const w of all) if (await windowInFence(w, env)) inside.push(w);
+    for (const w of all ?? []) if (await windowInFence(w, env)) inside.push(w);
     return inside;
-  }) as T['listWindows'];
-  return adapter;
+  };
+  return target;
 }
 
 /**

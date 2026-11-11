@@ -54,6 +54,14 @@ npm run build
 npm run bench -- --live --build .     # runs the tasks
 ```
 
+Before a live run:
+
+- turn on Do Not Disturb / Focus Assist, because toasts and always-on-top windows inside the fixture rect would be
+  captured;
+- close a browser that listens on debug port 9223 (the run refuses to start otherwise);
+- close Calculator if it is open (its task is skipped otherwise), and keep other Store apps closed;
+- have the primary monitor free: fixture windows open there.
+
 **A live run takes over the mouse and keyboard until it ends.** Do not use the computer meanwhile, and close a browser
 that listens on debug port 9223 first (the run refuses to start otherwise).
 

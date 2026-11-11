@@ -16,8 +16,8 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 
 import {
-  FENCE_ENV, FENCE_POLICY, FENCED, fenceActive, fenceCdpOnly, fenceCheck, fenceGate, fenceImage, fenceInput, fenceKind, fenceMask,
-  fenceOcrCapture, fenceOcrText, fencePlatform, fencePointer, fenceRoots, fenceTools, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
+  FENCE_ENV, FENCE_POLICY, FENCED, fenceActive, fenceCapturing, fenceCdpOnly, fenceCheck, fenceGate, fenceImage, fenceInput, fenceKind, fenceMask,
+  fenceOcrCapture, fenceOcrText, fencePlatform, fencePointer, fenceRoots, fenceTools, fenceWindowList, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
   primaryRect, wholly, __setFenceDesktopForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
 } from '../core/fence';
 import { classifyResult } from '../core/result-codes';
@@ -51,6 +51,9 @@ const tool = (name: string, parameters: Record<string, unknown> = {}, result: ob
 const ctx = {} as ToolContext;
 const targeted = { processId: { type: 'number' }, title: { type: 'string' }, processName: { type: 'string' } };
 const run = (t: ToolDefinition, params: Record<string, unknown> = {}) => fenceTools([t], fenced)[0].handler(params, ctx);
+/** A capture as a tool call makes it: the window in front is read first (the gate does this), then the capture is masked. */
+const image = (buf: Buffer, mime: string, frame: Parameters<typeof fenceImage>[2]) => fenceCapturing(() => fenceImage(buf, mime, frame, fenced), fenced);
+const ocrCapture = (png: Buffer, at: { x: number; y: number }) => fenceCapturing(() => fenceOcrCapture(png, at, fenced), fenced);
 const refused = async (t: ToolDefinition, params: Record<string, unknown> = {}) => {
   const r = await run(t, params);
   return !!r.isError && r.text.startsWith(FENCED);
@@ -113,6 +116,23 @@ describe('with CLAWD_FENCE_PIDS unset, nothing changes', () => {
     await desk.typeText('one\ntwo\tthree');
     expect(typed).toEqual(['one\ntwo\tthree']);
     expect(await desk.mouseDown()).toBe('down');
+  });
+
+  it('the pointer methods of a driver are the originals, and so is a window list', () => {
+    class Driver { async mouseMove() {} async mouseMoveRelative() {} async mouseUp() {} async mouseDragStepped() {} async getWindows() { return []; } }
+    const d = guardInputMethods(new Driver());
+    // Methods the input guard itself does not wrap: with no fence nothing else may wrap them either.
+    for (const m of ['mouseMoveRelative', 'mouseUp', 'mouseDragStepped'] as const) {
+      expect(Object.prototype.hasOwnProperty.call(d, m), m).toBe(false);
+      expect(d[m]).toBe(Driver.prototype[m]);
+    }
+    expect(fenceWindowList(d, 'getWindows', open).getWindows).toBe(Driver.prototype.getWindows);
+  });
+
+  it('a capture needs no call scope, and none is made', async () => {
+    let ran = false;
+    expect(await fenceCapturing(async () => { ran = true; return 7; }, open)).toBe(7);
+    expect(ran).toBe(true);
   });
 
   it('text that happens to say FENCED is not a fence refusal', () => {
@@ -216,6 +236,50 @@ describe('which processes are inside', () => {
   });
 });
 
+describe('the process table is read once, not once per check', () => {
+  const slowReader = () => {
+    let reads = 0;
+    __setFenceProcessTableForTests(async () => { reads++; await new Promise(r => setTimeout(r, 120)); return TABLE; });
+    return () => reads;
+  };
+
+  it('checks that arrive together share one read', async () => {
+    const reads = slowReader();
+    const answers = await Promise.all([101, 102, 200, 201, 300, 9999, 101, 200].map(pid => inFence(pid, fenced)));
+    expect(answers).toEqual([true, true, false, false, false, false, true, false]);
+    expect(reads()).toBe(1);
+  });
+
+  it('a table is fresh from when its read FINISHED: the checks that follow a slow read use it', async () => {
+    const reads = slowReader();
+    expect(await inFence(101, fenced)).toBe(true);
+    // Twenty windows of other apps, one after the other (a window list being filtered): none of them costs a read.
+    for (let i = 0; i < 20; i++) expect(await inFence(200 + (i % 2), fenced)).toBe(false);
+    expect(reads()).toBe(1);
+  });
+
+  it('a pid that is not in an older table is looked for once more: a process may have started since', async () => {
+    let table = new Map([[100, 1]]);
+    let reads = 0;
+    __setFenceProcessTableForTests(async () => { reads++; return table; });
+    expect(await inFence(555, fenced)).toBe(false);
+    table = new Map([[100, 1], [555, 100]]);
+    expect(await inFence(555, fenced)).toBe(false);          // the table is a moment old: not read again yet
+    expect(reads).toBe(1);
+    await new Promise(r => setTimeout(r, 1100));
+    expect(await inFence(555, fenced)).toBe(true);
+    expect(reads).toBe(2);
+  });
+
+  it('a failed read fails closed and is not kept', async () => {
+    let fail = true;
+    __setFenceProcessTableForTests(async () => { if (fail) throw new Error('no ps'); return TABLE; });
+    expect(await inFence(101, fenced)).toBe(false);
+    fail = false;
+    expect(await inFence(101, fenced)).toBe(true);
+  });
+});
+
 describe('target fields', () => {
   it('a numeric string is normalised and passed on, so the handler and the fence see the same target', async () => {
     expect(normaliseTargets('read_screen', { processId: '101', name: 'x' })).toEqual({ processId: 101, name: 'x' });
@@ -260,7 +324,7 @@ describe('target fields', () => {
 });
 
 describe('window actions', () => {
-  const WINDOW_TOOLS = ['focus_window', 'close_window', 'minimize_window', 'minimize_window_to_taskbar', 'maximize_window', 'restore_window', 'resize_window'];
+  const WINDOW_TOOLS = ['focus_window', 'close_window', 'minimize_window_to_taskbar', 'maximize_window', 'restore_window', 'resize_window'];
 
   it.each(WINDOW_TOOLS)('%s on a window of the owner is refused by title, by process name and by pid', async name => {
     for (const params of [{ title: 'Inbox' }, { processName: 'outlook' }, { processId: 200 }, { processId: '200' }]) {
@@ -268,6 +332,31 @@ describe('window actions', () => {
       expect(await refused(t, params), JSON.stringify(params)).toBe(true);
       expect(t.calls).toEqual([]);
     }
+  });
+
+  it('the old minimize_window is refused: it picks its own window by pid OR name OR title, from its own list', async () => {
+    expect(fenceKind('minimize_window')).toBe('refuse');
+    for (const params of [{ processId: 101 }, { title: 'Bench Dialog', processId: 101 }, {}]) {
+      const t = tool('minimize_window', targeted);
+      expect(await refused(t, params)).toBe(true);
+      expect(t.calls).toEqual([]);
+    }
+  });
+
+  it.each(WINDOW_TOOLS)('%s: a fenced pid with a title that ALSO matches a window of the owner is refused (a tool that matches with OR could pick it)', async name => {
+    // pid 101 AND "bench dialog" is the fixture alone, but the owner's "Inbox - Bench Dialog notes" matches the title too.
+    const t = tool(name, targeted);
+    expect(await refused(t, { processId: 101, title: 'bench dialog' })).toBe(true);
+    expect(await refused(t, { processId: 101, processName: 'outlook' })).toBe(true);
+    expect(t.calls).toEqual([]);
+    // With a title only the fixture has, the same call runs.
+    windows = [fixture, { ...owners, title: 'Inbox' }];
+    expect(await refused(tool(name, targeted), { processId: 101, title: 'bench dialog' })).toBe(false);
+  });
+
+  it('the accessibility bridge lists fenced windows only, like the platform adapter', async () => {
+    const bridge = fenceWindowList({ getWindows: async (_refresh?: boolean) => [fixture, owners, calc, settings] }, 'getWindows', fenced);
+    expect((await bridge.getWindows(true)).map(w => w.title)).toEqual(['Bench Dialog', 'Calculator']);
   });
 
   it('a title that matches a fenced window AND one of the owner is refused', async () => {
@@ -515,26 +604,26 @@ describe('one capture path', () => {
 
   it('a full capture shows the fenced window and blacks out the rest, at the same size', async () => {
     // The screen is 800x400 here, the image a quarter of that; the fixture window is at (100,100) 400x300.
-    const image = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 }, fenced);
-    const meta = await sharp(Buffer.from(image.data, 'base64')).metadata();
-    expect([meta.width, meta.height, image.mimeType]).toEqual([200, 100, 'image/png']);
-    expect(await pixel(image.data, 60, 50)).toBe(255);      // inside the window
-    expect(await pixel(image.data, 10, 10)).toBe(0);        // left of it
-    expect(await pixel(image.data, 160, 50)).toBe(0);       // the owner's window beside it
+    const shot = await image(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 });
+    const meta = await sharp(Buffer.from(shot.data, 'base64')).metadata();
+    expect([meta.width, meta.height, shot.mimeType]).toEqual([200, 100, 'image/png']);
+    expect(await pixel(shot.data, 60, 50)).toBe(255);      // inside the window
+    expect(await pixel(shot.data, 10, 10)).toBe(0);        // left of it
+    expect(await pixel(shot.data, 160, 50)).toBe(0);       // the owner's window beside it
   });
 
   it('a region capture (zoom) is masked the same way, from where the region is on screen', async () => {
     // The region is x 400..800, y 100..300 on screen: the fixture's right fifth (400..500) and the owner's window (600..800).
-    const image = await fenceImage(await white(200, 100), 'image/png', { originX: 400, originY: 100, screenWidth: 400 }, fenced);
-    expect(await pixel(image.data, 20, 50)).toBe(255);      // screen x 440: the fixture
-    expect(await pixel(image.data, 80, 50)).toBe(0);        // screen x 560: the gap
-    expect(await pixel(image.data, 150, 50)).toBe(0);       // screen x 700: the owner's window
+    const shot = await image(await white(200, 100), 'image/png', { originX: 400, originY: 100, screenWidth: 400 });
+    expect(await pixel(shot.data, 20, 50)).toBe(255);      // screen x 440: the fixture
+    expect(await pixel(shot.data, 80, 50)).toBe(0);        // screen x 560: the gap
+    expect(await pixel(shot.data, 150, 50)).toBe(0);       // screen x 700: the owner's window
   });
 
   it('macOS: bounds in points, the capture in pixels', async () => {
-    const image = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 8, boundsScale: 2 }, fenced);
-    expect(await pixel(image.data, 60, 50)).toBe(255);
-    expect(await pixel(image.data, 10, 10)).toBe(0);
+    const shot = await image(await white(), 'image/png', { originX: 0, originY: 0, scale: 8, boundsScale: 2 });
+    expect(await pixel(shot.data, 60, 50)).toBe(255);
+    expect(await pixel(shot.data, 10, 10)).toBe(0);
   });
 
   it('is refused when no fenced window is in front, when it has no bounds, or when none of it is in the capture', async () => {
@@ -544,8 +633,52 @@ describe('one capture path', () => {
     front = { processId: 101 };
     await expect(fenceImage(await white(), 'image/png', frame, fenced)).rejects.toThrow(/no known bounds/);
     front = fixture;
-    await expect(fenceImage(await white(), 'image/png', { originX: 3000, originY: 0, scale: 4 }, fenced)).rejects.toThrow(/not in this capture/);
-    await expect(fenceImage(await white(), 'image/png', { originX: 0, originY: 0 }, fenced)).rejects.toThrow(/cannot be mapped/);
+    await expect(image(await white(), 'image/png', { originX: 3000, originY: 0, scale: 4 })).rejects.toThrow(/not in this capture/);
+    await expect(image(await white(), 'image/png', { originX: 0, originY: 0 })).rejects.toThrow(/cannot be mapped/);
+  });
+
+  describe('the window is read before AND after the capture', () => {
+    const frame = { originX: 0, originY: 0, scale: 4 };
+    /** A capture during which `change` happens: after the call began, before the mask is cut. */
+    const during = async (change: () => void) => fenceCapturing(async () => {
+      await new Promise(r => setTimeout(r, 5));   // the capture itself
+      change();
+      return fenceImage(await white(), 'image/png', frame, fenced);
+    }, fenced);
+
+    it('a window that moved during the capture: refused, not masked for the wrong rectangle', async () => {
+      await expect(during(() => { front = { ...fixture, bounds: { x: 600, y: 100, width: 400, height: 300 } }; })).rejects.toThrow(/moved or changed while it was captured/);
+    });
+    it('a window that was resized, or another fenced window that came to the front: refused', async () => {
+      await expect(during(() => { front = { ...fixture, bounds: { ...fixture.bounds!, width: 900 } }; })).rejects.toThrow(FENCED);
+      await expect(during(() => { front = { ...fixture, handle: 7999 }; })).rejects.toThrow(FENCED);
+      await expect(during(() => { front = { ...fixture, processId: 102 }; })).rejects.toThrow(FENCED);
+    });
+    it('the owner\'s window came to the front during the capture: refused', async () => {
+      await expect(during(() => { front = owners; })).rejects.toThrow(FENCED);
+    });
+    it('nothing changed: masked', async () => {
+      const shot = await during(() => {});
+      expect(await pixel(shot.data, 60, 50)).toBe(255);
+      expect(await pixel(shot.data, 160, 50)).toBe(0);
+    });
+    it('a capture with no "before" (made outside a tool call) is refused', async () => {
+      await expect(fenceImage(await white(), 'image/png', frame, fenced)).rejects.toThrow(/before the capture is not known/);
+      await expect(fenceOcrCapture(await white(), { x: 0, y: 0 }, fenced)).rejects.toThrow(FENCED);
+    });
+    it('the gate gives every tool call that scope: a capture tool behind it is masked, and refused when the window moves under it', async () => {
+      const shooter = (move: boolean) => ({ ...tool('desktop_screenshot'), handler: async () => {
+        if (move) front = { ...fixture, bounds: { x: 300, y: 100, width: 400, height: 300 } };
+        return { text: 'shot', image: await fenceImage(await white(), 'image/png', frame, fenced) };
+      } }) as ToolDefinition;
+      const ok = await run(shooter(false));
+      expect(ok.isError).toBeFalsy();
+      expect(await pixel(ok.image!.data, 160, 50)).toBe(0);
+      const moved = await fenceTools([shooter(true)], fenced)[0].handler({}, ctx).catch((e: Error) => ({ text: e.message, isError: true, image: undefined }));
+      expect(moved.isError).toBe(true);
+      expect(moved.text).toContain(FENCED);
+      expect(moved.image).toBeUndefined();
+    });
   });
 
   it.each(['desktop_screenshot', 'screenshot_full', 'desktop_screenshot_region'])('%s: an image that did not come through it never leaves the gate', async name => {
@@ -554,14 +687,14 @@ describe('one capture path', () => {
     expect(r.isError).toBe(true);
     expect(r.text).toContain(FENCED);
     expect(r.image).toBeUndefined();
-    const through = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 }, fenced);
+    const through = await image(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 });
     const ok = await run(tool(name, {}, { image: through }));
     expect(ok.isError).toBeFalsy();
     expect(ok.image).toBe(through);
   });
 
   it('a tool that is not a capture tool cannot return an image at all, masked or not', async () => {
-    const through = await fenceImage(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 }, fenced);
+    const through = await image(await white(), 'image/png', { originX: 0, originY: 0, scale: 4 });
     const r = await run(tool('read_screen', {}, { image: through }));
     expect(r.isError).toBe(true);
     expect(r.image).toBeUndefined();
@@ -597,7 +730,7 @@ describe('OCR is scoped to the fenced window', () => {
   };
 
   it('the pixels outside the fenced window are gone before the engine sees them', async () => {
-    const masked = await fenceOcrCapture(await screenPng(), { x: 0, y: 0 }, fenced);
+    const masked = await ocrCapture(await screenPng(), { x: 0, y: 0 });
     expect(await lit(masked, 300, 250)).toBe(true);
     expect(await lit(masked, 700, 250)).toBe(false);
     expect(await lit(masked, 50, 50)).toBe(false);
@@ -608,7 +741,7 @@ describe('OCR is scoped to the fenced window', () => {
   it('a region capture is masked from where the region is on screen', async () => {
     // The agent asks for the region x 400..1000: the fixture's right fifth and all of the owner's window.
     const region = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
-    const masked = await fenceOcrCapture(region, { x: 400, y: 0 }, fenced);
+    const masked = await ocrCapture(region, { x: 400, y: 0 });
     expect(await lit(masked, 50, 250)).toBe(true);      // screen x 450: the fixture
     expect(await lit(masked, 300, 250)).toBe(false);    // screen x 700: the owner's window
     expect((await fakeOcr(masked, { x: 400, y: 0 })).fullText).toBe('');
@@ -625,14 +758,14 @@ describe('OCR is scoped to the fenced window', () => {
 
   it('is refused with no fenced window in front: there is nothing it may read', async () => {
     front = owners;
-    await expect(fenceOcrCapture(await screenPng(), { x: 0, y: 0 }, fenced)).rejects.toThrow(FENCED);
+    await expect(ocrCapture(await screenPng(), { x: 0, y: 0 })).rejects.toThrow(FENCED);
     await expect(fenceOcrText({ elements: [], fullText: '' }, fenced)).rejects.toThrow(FENCED);
   });
 
   it('macOS: bounds in points, the capture in pixels', async () => {
     __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary, captureScale: async () => 2 });
     const big = await sharp({ create: { width: 2000, height: 800, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
-    const masked = await fenceOcrCapture(big, { x: 0, y: 0 }, fenced);
+    const masked = await ocrCapture(big, { x: 0, y: 0 });
     expect(await lit(masked, 600, 500)).toBe(true);     // the point (300, 250) of the fixture window
     expect(await lit(masked, 1400, 500)).toBe(false);   // the point (700, 250) of the owner's
   });
@@ -650,7 +783,7 @@ describe('OCR is scoped to the fenced window', () => {
     let regionAt = { x: 0, y: 0 };
     engine.grab = async () => ({ data: Buffer.alloc(1000 * 400 * 4, 255), width: 1000, height: 400, channels: 4 });
     engine.runOcr = async file => fakeOcr(fs.readFileSync(file), regionAt);
-    const whole = await engine.recognizeScreen();
+    const whole = await fenceCapturing(() => engine.recognizeScreen());
     expect(whole.fullText).toBe('Apply');
     expect(JSON.stringify(whole)).not.toMatch(/hunter2|Inbox/);
     // fakeOcr reports screen positions; the engine adds the region's offset to what the OS OCR returns, so undo it here.
@@ -660,11 +793,11 @@ describe('OCR is scoped to the fenced window', () => {
       for (const e of r.elements) { e.x -= regionAt.x; e.y -= regionAt.y; }
       return r;
     };
-    expect((await engine.recognizeRegion(400, 0, 600, 400)).fullText).toBe('');
+    expect((await fenceCapturing(() => engine.recognizeRegion(400, 0, 600, 400))).fullText).toBe('');
     // With the owner's window in front there is nothing to read.
     front = owners;
     (engine as unknown as { invalidateCache(): void }).invalidateCache();
-    await expect(engine.recognizeScreen()).rejects.toThrow(FENCED);
+    await expect(fenceCapturing(() => engine.recognizeScreen())).rejects.toThrow(FENCED);
   });
 });
 

@@ -9,6 +9,7 @@
  *     MaxDepth raised to 4 so nested elements are visible to the LLM.
  */
 
+import { fenceWindowList } from '../core/fence';
 import { execFile } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
@@ -151,6 +152,7 @@ export class AccessibilityBridge {
 
   constructor() {
     guardInputMethods(this);  // invoke / focus by element: refused once the user stops clawdcursor (pointer-guard.ts)
+    fenceWindowList(this, 'getWindows');   // the test fence (core/fence.ts): fenced windows only. Untouched with no fence.
   }
 
   /**
