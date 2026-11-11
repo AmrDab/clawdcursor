@@ -21,6 +21,7 @@ import { getAgentTools } from './agent';
 import type { ToolDefinition, ToolContext, ToolResult, CompactGroup } from './types';
 import { toOpenAiFunctions, toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
+import { fenceTools } from '../core/fence';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
 
@@ -545,14 +546,16 @@ function granularTools(): ToolDefinition[] {
       !BROWSER_MCP_NAMES.has(t.name),
     );
 
-    _granularCache = [
+    // The fence (CLAWD_FENCE_PIDS, core/fence.ts): with it set, every handler is gated here, once. The MCP surface, the
+    // compound tools and the steps of a batch all run these handlers. Unset, the list is returned as it is.
+    _granularCache = fenceTools([
       ...systemATools,
       ...projectedWindowTools(),
       ...projectedKeyboardTools(),
       ...projectedMouseTools(),
       ...projectedA11yTools(),
       ...projectedBrowserTools(),
-    ];
+    ]);
   }
   return _granularCache;
 }

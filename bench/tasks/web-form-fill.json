@@ -1,0 +1,62 @@
+{
+  "id": "web-form-fill",
+  "archetype": "web-form",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M1"
+  ],
+  "guards": "Every kind of form control takes its value, and each reply says what really changed (no false \"ok\" on a spinner, select, <details> or contenteditable).",
+  "fixture": {
+    "kind": "web",
+    "page": "form"
+  },
+  "prompt": "On the \"Bench Form\" page, fill the order form: Full name \"Ada Lovelace\"; Quantity 7; Shipping \"Express\"; tick \"Gift wrap\"; untick \"Newsletter\"; open \"Advanced options\" and tick \"Fragile\"; write \"Leave at the side door\" in the Delivery note. Then press Confirm.",
+  "success": {
+    "all": [
+      {
+        "path": "confirms",
+        "equals": 1
+      },
+      {
+        "path": "submitted.name",
+        "equals": "Ada Lovelace"
+      },
+      {
+        "path": "submitted.qty",
+        "equals": 7
+      },
+      {
+        "path": "submitted.shipping",
+        "equals": "Express"
+      },
+      {
+        "path": "submitted.gift",
+        "equals": true
+      },
+      {
+        "path": "submitted.newsletter",
+        "equals": false
+      },
+      {
+        "path": "submitted.fragile",
+        "equals": true
+      },
+      {
+        "path": "submitted.note",
+        "equals": "Leave at the side door"
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 10
+  },
+  "caps": {
+    "calls": 30,
+    "seconds": 300
+  }
+}

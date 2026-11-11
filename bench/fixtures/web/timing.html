@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bench Timing</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  section { border: 1px solid #bbb; padding: 10px 14px; margin: 14px 0; }
+  input, button { font: inherit; padding: 4px 8px; }
+</style>
+</head>
+<body>
+<h1>Bench Timing</h1>
+
+<!-- A dialog that opens a few seconds after the button is pressed. -->
+<section aria-label="Export">
+  <button id="start" data-bench="start" type="button">Start export</button>
+  <span id="exportStatus" role="status"></span>
+</section>
+<dialog id="ready" aria-label="Export ready">
+  <p>The export is ready.</p>
+  <button id="download" data-bench="download" type="button">Download</button>
+</dialog>
+
+<!-- A field that is on screen at once but throws input away until it has loaded. -->
+<section aria-label="Editor">
+  <button id="open" data-bench="open" type="button">Open editor</button>
+  <div id="editor" hidden>
+    <label>Project code <input id="code" data-bench="code" type="text" autocomplete="off"></label>
+    <button id="save" data-bench="save" type="button">Save</button>
+    <span id="editorStatus" role="status"></span>
+  </div>
+</section>
+
+<script src="/bench.js"></script>
+<script>
+  // ?delay=<ms> sets both waits (2000-4000); the default is 3000.
+  var asked = Number(new URLSearchParams(location.search).get('delay'));
+  var delay = asked >= 2000 && asked <= 4000 ? asked : 3000;
+  var st = { exportStarted: false, dialogShown: false, exportDownloaded: false,
+             editorOpen: false, editorReady: false, rejectedInputs: 0, earlySaves: 0, saved: null };
+  function $(id) { return document.getElementById(id); }
+  bench.snapshot = function () { return st; };
+
+  $('start').addEventListener('click', function () {
+    if (st.exportStarted) return;
+    st.exportStarted = true;
+    $('exportStatus').textContent = 'Preparing the export...';
+    setTimeout(function () {
+      st.dialogShown = true;
+      $('exportStatus').textContent = '';
+      $('ready').showModal();
+      bench.record('state', 'dialogShown');
+    }, delay);
+  });
+  $('download').addEventListener('click', function () {
+    st.exportDownloaded = true;
+    $('ready').close();
+    $('exportStatus').textContent = 'Downloaded.';
+  });
+
+  $('open').addEventListener('click', function () {
+    if (st.editorOpen) return;
+    st.editorOpen = true;
+    $('editor').hidden = false;
+    $('editorStatus').textContent = 'Loading...';
+    setTimeout(function () {
+      st.editorReady = true;
+      $('editorStatus').textContent = 'Ready';
+      bench.record('state', 'editorReady');
+    }, delay);
+  });
+  $('code').addEventListener('input', function () {
+    if (!st.editorReady && $('code').value !== '') { st.rejectedInputs++; $('code').value = ''; }
+  });
+  $('save').addEventListener('click', function () {
+    if (!st.editorReady) { st.earlySaves++; return; }
+    st.saved = $('code').value.trim();
+    $('editorStatus').textContent = 'Saved';
+  });
+</script>
+</body>
+</html>

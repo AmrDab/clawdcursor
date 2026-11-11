@@ -6,6 +6,7 @@
  * The server auto-scales to Windows LOGICAL coordinates via mouseScaleFactor.
  */
 
+import { fenceImage } from '../core/fence';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage, screenToPhysical } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
@@ -15,6 +16,15 @@ import { MOD } from '../platform/keys';
 import { waitForPaste, writeClipboardVerified } from './paste-guard';
 import { lastCaptureUnchecked } from '../platform/native-helper';
 import { unguarded } from '../platform/pointer-guard';
+
+/**
+ * Window bounds are physical pixels on Windows and Linux, the same as a capture; macOS reports them in points, and a
+ * Retina capture has `dpiRatio` pixels per point. The fence's mask needs both in one unit.
+ */
+function fenceBoundsScale(ctx: ToolContext): number {
+  const ratio = Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio);
+  return process.platform === 'darwin' && ratio > 0 ? ratio : 1;
+}
 
 
 /** The capture went ahead unchecked (#276): a missing grant would look like this image, so the agent is told. */
@@ -127,16 +137,17 @@ export function getDesktopTools(): ToolDefinition[] {
           setLastFrame({ originX: o.x, originY: o.y, scale: shot.scaleFactor, display: target!.index });
           return {
             text: `Screenshot: ${shot.width}x${shot.height}px of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}${LABEL_TAIL}`,
-            image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+            // Under the test fence only the fenced window is shown: the rest is blacked out (core/fence.ts).
+            image: await fenceImage(shot.buffer, 'image/png', { originX: o.x, originY: o.y, scale: shot.scaleFactor, boundsScale: fenceBoundsScale(ctx) }),
           };
         }
         const frame = await ctx.desktop.captureForLLM();
         setLastFrame(null);
-        const base64 = frame.buffer.toString('base64');
+        const image = await fenceImage(frame.buffer, 'image/jpeg', { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale: fenceBoundsScale(ctx) });
         const note = target && (process.platform === 'win32' || explicit !== undefined) ? displayNote(displays, target) : '';
         return {
           text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}${uncheckedNote()}${LABEL_TAIL}`,
-          image: { data: base64, mimeType: 'image/jpeg' },
+          image,
         };
       },
     },
@@ -182,15 +193,16 @@ export function getDesktopTools(): ToolDefinition[] {
           if (shot) {
             return {
               text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space, display }, shot.width, shot.height)}`,
-              image: { data: shot.buffer.toString('base64'), mimeType: 'image/png' },
+              // The captured rectangle is (p0, w x h) on screen: the same capture path as a full screenshot (core/fence.ts).
+              image: await fenceImage(shot.buffer, 'image/png', { originX: p0.x, originY: p0.y, screenWidth: w, boundsScale: fenceBoundsScale(ctx) }),
             };
           }
         }
         const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
-        const base64 = frame.buffer.toString('base64');
+        const image = await fenceImage(frame.buffer, 'image/jpeg', { originX: p0.x, originY: p0.y, screenWidth: w, boundsScale: fenceBoundsScale(ctx) });
         return {
           text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space, display }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
-          image: { data: base64, mimeType: 'image/jpeg' },
+          image,
         };
       },
     },

@@ -11,13 +11,14 @@
  * the head of a result is read for the error vocabulary: a long body (page text) can contain the same words as content.
  */
 
+import { fenceActive } from './fence';
 import { defuseScreenDelimiters } from './untrusted-screen-content';
 
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
-  | 'STOPPED' | 'FOREGROUND_CHANGED'
+  | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
@@ -33,6 +34,8 @@ export interface ResultClass {
 
 interface Rule {
   code: ResultCode;
+  /** The rule applies only while this holds (the fence's code means nothing with no fence). */
+  when?: () => boolean;
   outcome: 'refused' | 'failed';
   test: RegExp;
   /** Look at the whole text, not just its head (DEVIATION is appended after the tool's own text). */
@@ -66,6 +69,9 @@ function smartClickFor(text: string, template: string): string | undefined {
 
 /** First match wins: refusals before failures, specific before generic. */
 const RULES: Rule[] = [
+  // The test fence (core/fence.ts): the target is outside the processes this run is limited to.
+  { code: 'FENCED', outcome: 'refused', test: /FENCED: /, when: fenceActive,
+    hint: 'this run may only touch its own fixture windows; work in the window you were given' },
   { code: 'CONSENT_REQUIRED', outcome: 'refused', test: /needs one-time consent/i,
     hint: 'the user runs `clawdcursor consent --accept` once; no restart needed' },
   { code: 'KEYBOARD_OWNED', outcome: 'refused', test: /system dialog owns the keyboard/i,
@@ -250,7 +256,7 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   if (isError) {
     const own = ownWords(text);
     const head = own.slice(0, HEAD);
-    const r = RULES.find(rule => rule.test.test(rule.whole ? own : head));
+    const r = RULES.find(rule => (!rule.when || rule.when()) && rule.test.test(rule.whole ? own : head));
     if (r) {
       const n = r.next?.[surface];
       return { outcome: r.outcome, code: r.code, hint: r.hintFor?.[surface] ?? r.hint, next: typeof n === 'function' ? n(text) : n };

@@ -1,0 +1,62 @@
+{
+  "id": "native-dialog-fill",
+  "archetype": "native-dialog",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M1"
+  ],
+  "guards": "Native text fields, a list and a checkbox take their values by name, and Apply reports what was applied.",
+  "fixture": {
+    "kind": "native",
+    "mode": "dialog"
+  },
+  "prompt": "In the \"Bench Dialog\" window: set Name to \"Grace Hopper\", Email to \"grace@example.com\", choose \"High\" in the Priority list, tick Subscribe, then press Apply.",
+  "success": {
+    "all": [
+      {
+        "path": "applied.name",
+        "equals": "Grace Hopper"
+      },
+      {
+        "path": "applied.email",
+        "equals": "grace@example.com"
+      },
+      {
+        "path": "applied.priority",
+        "equals": "High"
+      },
+      {
+        "path": "applied.subscribe",
+        "equals": true
+      },
+      {
+        "path": "shippingEdit",
+        "equals": 0
+      },
+      {
+        "path": "billingEdit",
+        "equals": 0
+      },
+      {
+        "path": "mainOk",
+        "equals": 0
+      },
+      {
+        "path": "mainCancel",
+        "equals": 0
+      }
+    ]
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 6
+  },
+  "caps": {
+    "calls": 20,
+    "seconds": 240
+  }
+}

@@ -9,6 +9,8 @@
  * - Coordinate scaling handled transparently
  */
 
+import { setFenceCursorReader } from '../core/fence';
+import { unguarded } from './pointer-guard';
 import { beforePointerPress, beforeCapture, guardInputMethods } from './pointer-guard';
 import os from 'os';
 import { EventEmitter } from 'events';
@@ -106,6 +108,7 @@ export class NativeDesktop extends EventEmitter {
     super();
     this.config = config;
     guardInputMethods(this);  // the MCP tools type and click through this class (pointer-guard.ts)
+    setFenceCursorReader(() => unguarded(() => this.getCursorPosition()));   // the test fence checks bare presses at the live pointer
   }
 
   /**

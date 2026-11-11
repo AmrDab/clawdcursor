@@ -4,6 +4,7 @@
  * Use this everywhere instead of `if (process.platform === 'darwin')`.
  */
 
+import { fencePlatform } from '../core/fence';
 import type { PlatformAdapter } from './types';
 import { guardInputMethods } from './pointer-guard';
 
@@ -26,7 +27,8 @@ export async function getPlatform(): Promise<PlatformAdapter> {
   }
 
   await adapter.init();
-  cached = guardInputMethods(adapter);
+  // The test fence (core/fence.ts): the window list holds fenced windows only. Unset, the adapter is untouched.
+  cached = fencePlatform(guardInputMethods(adapter));
   return adapter;
 }
 

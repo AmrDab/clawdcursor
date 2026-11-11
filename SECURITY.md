@@ -42,6 +42,33 @@ These hold whatever the agent sends, alone or inside a `batch`. A way around any
 
 Stop, the pause and the AI-host guard protect against an agent that works through the tools. An agent that also has a shell of its own on your machine is not confined by clawdcursor at all.
 
+### The test and automation fence (`CLAWD_FENCE_PIDS`)
+
+For unattended runs on a machine a person also uses (the benchmark in `bench/`, a CI job with a desktop), clawdcursor can be limited to the windows of named processes. Start it with `CLAWD_FENCE_PIDS=<pid>,<pid>` and every tool call is checked **before** it does or reads anything (`src/core/fence.ts`); a call outside the fence is refused with the code `FENCED` and nothing happens.
+
+The fence is an **allow list**. Every tool is classified in one table (`FENCE_POLICY`), and a tool that is not in it is refused, so a tool added later is outside the fence until someone classifies it. A test lists every registered tool and every action of the compound tools against the table. A step of a `batch` runs the same handler as a direct call, so it is judged by the same table, step by step.
+
+| Class | Tools | Rule |
+|---|---|---|
+| free | wait, the clock, the screen size, the display list, the pointer position | touch no window |
+| read | `read_tree`, `find`, `compile_ui`, `get_value`, `copy_all_text`, `ocr`, `smart_read`, the active window, ... | one window, which must be fenced: the window handle or process named, else the window in front. OCR captures are masked to that window before the OCR engine sees them, and text positioned outside it is dropped |
+| act | `invoke`, `set_value`, `smart_click`, `smart_type`, typing, keys, every mouse action, `undo` | the same, and checked again where the input is sent (a click `smart_click` makes after its OCR fallback is a pointer press like any other) |
+| window | focus, close, minimize, maximize, restore, resize | only a window identified as fenced; a name that also matches another window, or a process that also owns windows outside the fence (the Store apps' shared frame host), is refused |
+| capture | `screenshot`, `screenshot_region` / `zoom`, `screenshot_full` | every image is built by one helper that blacks out everything but the fenced window in front; an image that did not come through it never leaves |
+| cdp | the `browser` actions | the driver attaches only to the agent's own debug port (`CLAWD_AGENT_CDP_PORT`), never to a browser on the user's port, and launches nothing |
+| refuse | the window list, the clipboard, `open_app` / `open_file` / `open_url` / `open_uri` / `navigate`, `evaluate`, shortcuts, reports and logs, `pause_for_user` | no single target, or outside by nature |
+
+Below the tools, where input is sent:
+
+- keys and text go only to a fenced window in front; text with Enter or Tab is sent a piece at a time, and the foreground is checked again before each piece;
+- the pointer may only move, press and release inside the fenced window in front: every point a call names (each point of a drag path too), the end of a relative move, and, for a press or release that names no point, the live pointer position;
+- the platform's window list holds fenced windows only, so a tool that prints "the open windows" shows no others;
+- a target field (`processId`, `pid`, `handle`, `windowId`) must be a positive integer; a numeric string is normalised and passed on, anything else is refused.
+
+A process counts as fenced when it is one of the named processes or a descendant of one; a Store app's frame counts by the app it hosts. Fenced windows must be wholly on the primary display (pointer checks and the mask compare coordinates with window bounds, and that is not proven across monitors with different scaling). Whatever cannot be decided (no foreground, no process table, no bounds, no pointer position) is refused.
+
+With the variable unset nothing changes. The fence is a limit for tests and automation, not a sandbox: like the guarantees above, it confines an agent that works through the tools, not one with a shell of its own. A way for a tool call to act or read outside it is a vulnerability.
+
 ## Scope
 
 **In scope:**

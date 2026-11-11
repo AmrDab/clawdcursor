@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts'],
+    include: ['src/__tests__/**/*.test.ts', 'tests/**/*.test.ts', 'bench/__tests__/**/*.test.ts'],
     setupFiles: ['tests/vitest.setup.ts'],
     testTimeout: 15000,
     fakeTimers: {

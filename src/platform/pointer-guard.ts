@@ -8,6 +8,7 @@
  */
 import { AsyncLocalStorage } from 'async_hooks';
 import { hardKeyRefusal, keysOf } from './hard-keys';
+import { fenceActive, fencePointer } from '../core/fence';
 
 let hook: (() => Promise<void>) | null = null;
 
@@ -118,6 +119,18 @@ export function guardInputMethods<T extends object>(target: T): T {
   for (const m of INPUT_METHODS) {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
+      // Under the test fence, text with Enter or Tab is sent a piece at a time: either key can move the focus to another
+      // window, and the foreground is checked again before the next piece goes out.
+      if (m === 'typeText' && fenceActive() && /[\r\n\t]/.test(String(args[0] ?? ''))) {
+        let last: unknown;
+        for (const piece of String(args[0]).match(/[^\r\n\t]*(?:\r\n|[\r\n\t])|[^\r\n\t]+$/g) ?? []) {
+          await g.before();
+          announce(m);
+          last = await f(piece, ...args.slice(1));
+          g.done(movesFocus(m, [piece]));
+        }
+        return last;
+      }
       await g.before();
       announce(m);
       const r = await f(...args);
@@ -159,7 +172,30 @@ export function guardInputMethods<T extends object>(target: T): T {
     });
   }
   guardHardKeys(target);
+  fencePointerMethods(target);
   return target;
+}
+
+/**
+ * The test fence (core/fence.ts): every pointer method of this object (a move, a press, a release, a click, a drag, a
+ * scroll) is checked before it runs: the pointer may only be inside the fenced window in front. Outermost, so a move
+ * followed by a bare press cannot reach another window. With no fence nothing is wrapped.
+ */
+function fencePointerMethods(target: object): void {
+  if (!fenceActive()) return;   // no fence: the methods stay exactly as they are
+  const names = new Set<string>();
+  for (let o: object | null = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k) || k === 'executeMouseAction') names.add(k);
+  }
+  const t = target as Record<string, unknown>;
+  for (const m of names) {
+    const f = t[m];
+    if (typeof f !== 'function') continue;
+    t[m] = async (...args: unknown[]) => {
+      if (inInput.getStore() !== 'user') await fencePointer(m, args);
+      return f.apply(target, args);
+    };
+  }
 }
 
 /**

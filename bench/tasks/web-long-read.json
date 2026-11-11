@@ -1,0 +1,30 @@
+{
+  "id": "web-long-read",
+  "archetype": "web-reading",
+  "os": [
+    "windows",
+    "macos",
+    "linux"
+  ],
+  "mechanisms": [
+    "M3"
+  ],
+  "guards": "Long text is read exactly and keeps its structure: one row of a table in the middle of a long page.",
+  "fixture": {
+    "kind": "web",
+    "page": "longread"
+  },
+  "prompt": "The \"Bench Reading\" page is long and has a table of station reference codes in the middle. Find the reference code of station Delta-17, type it exactly into the Answer field at the end of the page, and press Submit.",
+  "success": {
+    "path": "submitted",
+    "equals": "QX-4462-MY"
+  },
+  "oracle": {
+    "screenshots": 0,
+    "calls": 3
+  },
+  "caps": {
+    "calls": 12,
+    "seconds": 180
+  }
+}

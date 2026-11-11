@@ -13,6 +13,7 @@
  * them. The day log (`tool.done`) follows the same rule. Local only
  * (~/.clawdcursor/sessions/), last 50 sessions kept, off with CLAWDCURSOR_SESSION_LOG=0.
  */
+import { fenceActive } from '../core/fence';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -60,6 +61,7 @@ export function outcomeOf(isError: boolean, text: string): Outcome {
   // Only the head of a result says what happened; long bodies (page text, a
   // report) can contain these words as content.
   const head = text.slice(0, 300);
+  if (isError && fenceActive() && head.startsWith('FENCED: ')) return 'refused';   // the test fence (core/fence.ts) stopped it before it ran
   if (/PSRunner timeout|timed out after|ETIMEDOUT|walk timed out/i.test(head)) return 'timeout';
   if (/UI TREE \(PARTIAL|"truncated":\s*true/i.test(head)) return 'partial';
   if (head.startsWith('(no elements found)')

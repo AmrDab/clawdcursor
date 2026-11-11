@@ -49,6 +49,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AGENT_CDP_PORT } from './browser-config';
+import { fenceCdpOnly } from '../core/fence';
 import { guardInputMethods } from './pointer-guard';
 
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──
@@ -234,6 +235,9 @@ export class CDPDriver {
    */
   async connect(port?: number): Promise<boolean> {
     const targetPort = port ?? this.cdpPort;
+    // The test fence (core/fence.ts): only the agent's own port, never a browser the user put on the wire.
+    const only = fenceCdpOnly(AGENT_CDP_PORT);
+    if (only !== undefined && targetPort !== only) return false;
     try {
       this.browser = await chromium.connectOverCDP(
         `http://127.0.0.1:${targetPort}`,
@@ -319,7 +323,7 @@ export class CDPDriver {
     if (await this.connect(AGENT_CDP_PORT)) return true;       // → 'dedicated'
     // 3. A browser the user put on the debug port.
     if (await this.connect(this.cdpPort)) return true;         // → 'attached'
-    if (!opts.launch) return false;
+    if (!opts.launch || fenceCdpOnly(AGENT_CDP_PORT) !== undefined) return false;   // fenced: launch nothing
 
     const exe = (opts.exePaths ?? []).find(p => {
       try { return fs.existsSync(p); } catch { return false; }
