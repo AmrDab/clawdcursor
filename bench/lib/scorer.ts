@@ -116,11 +116,20 @@ export function countFalseOk(calls: LogCall[], fixture: FixtureState | null): nu
 export function agentErrorOf(r: Pick<RunRecord, 'calls' | 'agent'>): string | null {
   const a = r.agent;
   // Not reaching clawdcursor is the server's failure, whatever the agent's exit code says.
-  if (a.serverUnreachable || a.killed || r.calls.length || a.sigs.length) return null;
+  if (serverUnreachableOf(r) || a.killed || r.calls.length || a.sigs.length) return null;
   const threw = a.finalText.startsWith('adapter error:');
   if (!threw && (a.exitCode === 0 || a.exitCode === null)) return null;
   const said = a.finalText.replace(/^adapter error:\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 300);
   return said || `the agent exited with code ${a.exitCode} before its first tool call`;
+}
+
+/**
+ * Why clawdcursor could not be reached, if that is what happened. An adapter's report of it is honoured only when no
+ * tool call succeeded: a server that answered a call was reached, whatever a host printed about it.
+ */
+export function serverUnreachableOf(r: Pick<RunRecord, 'calls' | 'agent'>): string | null {
+  if (!r.agent.serverUnreachable || r.calls.some(c => c.ok)) return null;
+  return r.agent.serverUnreachable;
 }
 
 export function score(r: RunRecord): Score {
@@ -155,7 +164,8 @@ export function score(r: RunRecord): Score {
     ...(r.agent.killed ? { killed: r.agent.killed.rule } : {}),
     gate: { pass: true, failures: [] },
   };
-  if (r.agent.serverUnreachable) { s.serverError = r.agent.serverUnreachable; if (!manual) s.success = false; s.successes = 0; }
+  const unreachable = serverUnreachableOf(r);
+  if (unreachable) { s.serverError = unreachable; if (!manual) s.success = false; s.successes = 0; }
   const agentError = agentErrorOf(r);
   if (agentError) { s.agentError = agentError; s.success = null; s.successes = 0; s.falseSuccesses = 0; s.falseDone = false; }
   s.gate = gateOf(s);

@@ -429,6 +429,26 @@ describe('"could not reach clawdcursor" is a clawdcursor failure, never an agent
     expect(s.gate.pass).toBe(false);
   });
 
+  it('a completed task stays a success when a host claims the server was unreachable: a tool call succeeded, so it was reached', () => {
+    // Codex finished the task; one of its tool calls had failed along the way with "error" in its result, and the
+    // adapter (wrongly) took that for an unreachable server.
+    const r = cleanRun();
+    r.calls.push(call(4, 'accessibility', 'invoke', 'act-name', { ok: false, outcome: 'error', code: 'NOT_FOUND' }));
+    r.fixture!.events.push(ev(4));
+    r.agent = { ...r.agent, serverUnreachable: 'Codex could not reach the clawdcursor MCP server: {"type":"item.completed","item":{"type":"mcp_tool_call","server":"clawdcursor","result":"error"}}' };
+    const s = score(r);
+    expect(s.serverError).toBeUndefined();
+    expect(s).toMatchObject({ success: true, errors: 1 });
+    expect(s.gate.failures.join(' ')).not.toMatch(/could not reach clawdcursor/);
+    expect(buildReport(meta, [s]).gate.status).not.toBe('INCOMPLETE');
+  });
+
+  it('it is honoured when calls were made but none succeeded (every call failed at the transport)', () => {
+    const r = unreachable();
+    r.calls = [call(0, 'accessibility', 'read_tree', 'blind', { ok: false, outcome: 'error' })];
+    expect(score(r).gate.failures[0]).toMatch(/^could not reach clawdcursor/);
+  });
+
   it('a manual-verify task fails too: nothing could be done through an unreachable server', () => {
     const r = unreachable();
     r.task = { ...task, manualVerify: true, success: undefined };

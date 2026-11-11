@@ -370,11 +370,30 @@ describe('an adapter that cannot reach clawdcursor says so: it is the server\'s 
   });
 
   it('codex: an MCP failure that names the server, on stdout or stderr', () => {
-    expect(codexServerFailure('ERROR: MCP client for `clawdcursor` failed to start: connection refused')).toMatch(/^Codex could not reach the clawdcursor MCP server: ERROR: MCP client/);
-    expect(codexServerFailure('{"type":"error","message":"mcp server clawdcursor timed out during initialize"}')).not.toBeNull();
-    expect(codexServerFailure('mcp: clawdcursor ready (6 tools)')).toBeNull();
-    expect(codexServerFailure('ERROR: 401 Unauthorized')).toBeNull();                       // the agent's own login
-    expect(codexServerFailure('MCP client for `other` failed to start')).toBeNull();
+    expect(codexServerFailure('ERROR: MCP client for `clawdcursor` failed to start: connection refused', 'stderr')).toMatch(/^Codex could not reach the clawdcursor MCP server: ERROR: MCP client/);
+    expect(codexServerFailure('{"type":"error","message":"mcp server clawdcursor timed out during initialize"}', 'stdout')).not.toBeNull();
+    expect(codexServerFailure('{"type":"mcp_startup_failed","server":"clawdcursor","error":"mcp: connection refused"}', 'stdout')).not.toBeNull();
+    expect(codexServerFailure('mcp: clawdcursor ready (6 tools)', 'stderr')).toBeNull();
+    expect(codexServerFailure('ERROR: 401 Unauthorized', 'stderr')).toBeNull();                       // the agent's own login
+    expect(codexServerFailure('MCP client for `other` failed to start', 'stderr')).toBeNull();
+    expect(codexServerFailure('{"type":"error","message":"stream disconnected"}', 'stdout')).toBeNull();
+  });
+
+  it('codex: a tool call that FAILED is not an unreachable server, however its result reads', () => {
+    // An ordinary tool failure: the event names the server and its result says failed / error / refused / not connected.
+    const call = (text: string, type = 'item.completed') => JSON.stringify({ type, item: { id: 'item_4', type: 'mcp_tool_call', server: 'clawdcursor',
+      tool: 'accessibility', arguments: { action: 'invoke', name: 'Aply' }, status: 'failed',
+      result: { content: [{ type: 'text', text }], is_error: true }, error: { message: text } } });
+    for (const text of ['accessibility invoke "Aply" missed — element not found\n[failed · NOT_FOUND · mcp error]', 'FENCED: refused by clawdcursor mcp',
+      'mcp tool clawdcursor.browser: CDP not connected, connection refused', 'timed out after 15000 ms (clawdcursor mcp)']) {
+      expect(codexServerFailure(call(text), 'stdout'), text).toBeNull();
+      expect(codexServerFailure(call(text, 'item.started'), 'stdout'), text).toBeNull();
+    }
+    // ... and stdout that is not an event at all is never read as one.
+    expect(codexServerFailure('mcp clawdcursor failed', 'stdout')).toBeNull();
+    // The same words in an error event, or on stderr, still count.
+    expect(codexServerFailure(JSON.stringify({ type: 'error', message: 'mcp clawdcursor failed to connect' }), 'stdout')).not.toBeNull();
+    expect(codexServerFailure('mcp clawdcursor failed to connect', 'stderr')).not.toBeNull();
   });
 
   it('ollama: a failed MCP connection is reported, not thrown (a throw would read as an agent error)', async () => {

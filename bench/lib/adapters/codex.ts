@@ -76,13 +76,35 @@ export function parseCodexLine(line: string): { sig?: CallSig; id?: string; fina
   return {};
 }
 
-/**
- * Does this output say Codex could not start or reach the clawdcursor MCP server? Codex prints such a failure as an
- * error event or on stderr, naming the server.
- */
-export function codexServerFailure(text: string): string | null {
+/** Text that says the clawdcursor MCP server could not be started or reached. Only ever applied to startup / error output. */
+function unreachableIn(text: string): string | null {
   const line = text.split('\n').find(l => /mcp/i.test(l) && l.includes(SERVER_NAME) && /fail|error|timed? ?out|unable|could not|refused|not connect/i.test(l));
   return line ? `Codex could not reach the clawdcursor MCP server: ${line.replace(/\s+/g, ' ').trim().slice(0, 240)}` : null;
+}
+
+/**
+ * Did Codex fail to START or CONNECT to the clawdcursor MCP server?
+ *
+ * `stream` says where the text came from. On stderr every line is Codex's own diagnostics. On stdout (--json) only an
+ * error event or an MCP startup event counts. A tool call's own event never does: it names the server and carries the
+ * tool's result, and a tool that failed ("element not found", "refused") is an ordinary failure of a server that was
+ * reached, not an unreachable one.
+ */
+export function codexServerFailure(text: string, stream: 'stdout' | 'stderr'): string | null {
+  if (stream === 'stderr') return unreachableIn(text);
+  for (const line of text.split('\n')) {
+    let ev: { type?: unknown; item?: { type?: unknown } };
+    try { ev = JSON.parse(line); } catch { continue; }           // not an event: stdout carries events only
+    if (!ev || typeof ev !== 'object') continue;
+    const type = String(ev.type ?? '');
+    const itemType = String(ev.item?.type ?? '');
+    if (itemType === 'mcp_tool_call') continue;
+    if (type === 'error' || itemType === 'error' || /mcp.*(startup|start|connect|init)/i.test(type)) {
+      const found = unreachableIn(line);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
 /** The newest binary the Codex desktop app installed, when codex is not on PATH. */
@@ -132,9 +154,9 @@ export const codex: Adapter = {
     const seen = new Set<string>();
     const exitCode = await runCli(codexCommand({ exe, model: job.model, mcpUrl: job.mcpUrl, token: job.token, workDir: job.workDir, lastMessagePath, prompt: job.prompt }), {
       cwd: job.workDir, signal: job.signal, logFile: job.logFile,
-      onErr: text => { serverUnreachable ??= codexServerFailure(text) ?? undefined; },
+      onErr: text => { serverUnreachable ??= codexServerFailure(text, 'stderr') ?? undefined; },
       onLine: line => {
-        serverUnreachable ??= codexServerFailure(line) ?? undefined;
+        serverUnreachable ??= codexServerFailure(line, 'stdout') ?? undefined;
         const p = parseCodexLine(line);
         if (p.sig && !(p.id && seen.has(p.id))) { if (p.id) seen.add(p.id); job.onSig(p.sig); }
         if (p.finalText !== undefined) finalText = p.finalText;
