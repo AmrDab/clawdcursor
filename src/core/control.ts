@@ -98,7 +98,7 @@ let movedAt = 0;
 let acted: Foreground | undefined;
 /**
  * The window the outline goes around and the pill names: the one the agent's last input, or act by name on the window in
- * front, went to. Not the lease: an act by name does not take the foreground, so it must not change what input is refused.
+ * front, went to, or the one it focused or opened since. Not the lease: an act by name does not take the foreground, so it must not change what input is refused.
  */
 let working: Foreground | undefined;
 /**
@@ -237,10 +237,29 @@ function done(movesFocus: boolean): void {
   if (movesFocus) movedAt = Date.now();
 }
 
+/**
+ * The window the agent just focused or opened is where it works now: the outline and the pill go to it once it is in
+ * front, with no act needed (macOS eval 2026-11-10: after open_app or window focus the outline stayed on the previous app,
+ * hidden, through every read that followed). Only `working` moves: the lease, and what the next input is refused for,
+ * are still decided by before().
+ */
+async function arrived(): Promise<void> {
+  const q = pending;
+  const mine = (f: Foreground) => (q ? matches(q, f) : openedBy(f));
+  for (let tries = FOCUS_ARRIVAL_MS / 100; ; tries--) {
+    const now = await readForeground().catch(() => null);
+    if (!now) return;
+    if (mine(now)) { working = now; return; }
+    if (tries <= 0 || pending !== q) return;
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+
 /** The agent focused a window: the next input binds to it, not to whatever else is in front. */
-function focused(q: WindowQuery): void {
+async function focused(q: WindowQuery): Promise<void> {
   pending = q;
   movedAt = Date.now();
+  await arrived();
 }
 
 /**
@@ -249,13 +268,16 @@ function focused(q: WindowQuery): void {
  * the adapters report the title of the window that came up. When a launch reports neither, the next input binds to
  * whatever opens; an AI-assistant window is excused only if it is the app that was launched (`appName`).
  */
-function launched(r?: { pid?: number; title?: string }, appName?: string): void {
+async function launched(r?: { pid?: number; title?: string }, appName?: string): Promise<void> {
   movedAt = Date.now();
-  if (r?.pid || r?.title) { pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true }; return; }
-  lease = undefined;
-  working = undefined;
-  pending = null;
-  openedName = appName?.trim() || null;
+  if (r?.pid || r?.title) pending = { processId: r.pid || undefined, title: r.title || undefined, opened: true };
+  else {
+    lease = undefined;
+    working = undefined;
+    pending = null;
+    openedName = appName?.trim() || null;
+  }
+  await arrived();
 }
 
 /** A wait: the agent declares it does nothing, so a window that comes up during it is the user's, not the agent's (#294). */

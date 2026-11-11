@@ -28,7 +28,7 @@ import type { InvokeAction } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions } from '../../platform/browser-config';
@@ -183,16 +183,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const isOff = (el: typeof tree[number]) => el.offscreen === true || (el.bounds.width <= 0 && el.bounds.height <= 0);
         const ordered = [...tree.filter(el => !isOff(el)), ...tree.filter(isOff)];
         const page = ordered.slice(offset, offset + limit);
-        // One element per line: line breaks in a value are escaped. A cut value says so — an agent that took the first 40
-        // characters of a document for all of it rewrote the document without its tail (perception eval 2026-11-05).
+        // One element per line: line breaks in a value are escaped, and a cut value says so (blind-hints.ts shownValue).
         let cut = false;
-        const shown = (v?: string) => {
-          if (!v) return '';
-          const head = JSON.stringify(v.slice(0, 40));
-          if (v.length <= 40) return ` value=${head}`;
-          cut = true;
-          return ` value=${head}… (+${v.length - 40} chars not shown)`;
-        };
+        const shown = (v?: string) => shownValue(v, () => { cut = true; });
         const lines = page.map(el => isOff(el)
           ? `[${el.controlType || 'Element'}] "${el.name || ''}"${shown(el.value)} (offscreen — scroll to see)`
           : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${shown(el.value)}${el.focused ? ' [FOCUSED]' : ''}`,
