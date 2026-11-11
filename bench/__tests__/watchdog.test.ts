@@ -77,6 +77,13 @@ describe('the watchdog rules', () => {
     expect(d.onCall(call('accessibility', 'set_value', 'act-name', { app: 'Edge' }))).toMatchObject({ rule: 'call-cap' });
   });
 
+  it('call-cap counts a batch by its steps, like the scorer', () => {
+    const d = dog({ maxCalls: 4 });
+    const step = { tool: 'accessibility', action: 'set_value', cls: 'act-name' as const, ok: true, outcome: 'ok' };
+    expect(d.onCall(call('batch', '', 'act-other', { steps: [step, step, step] }))).toBeNull();
+    expect(d.onCall(call('batch', '', 'act-other', { steps: [step, step] }))).toMatchObject({ rule: 'call-cap' });
+  });
+
   it('time-cap', () => {
     const d = dog({ maxSeconds: 60 });
     expect(d.onTime(60)).toBeNull();

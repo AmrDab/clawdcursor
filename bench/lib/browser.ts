@@ -59,29 +59,36 @@ export interface FixtureBrowser { cdpPort: number; close(): Promise<void> }
 export async function openBrowser(b: BrowserExe, o: { profileDir: string; url: string; pos?: [number, number]; extraArgs?: string[] }): Promise<FixtureBrowser> {
   fs.mkdirSync(o.profileDir, { recursive: true });
   start(b.exe, browserArgs({ kind: b.kind, ...o }), { stdio: 'ignore' });
-  const cdpPort = await waitFor(() => profileDebugPort(o.profileDir), 30_000, 'the fixture browser to start');
-  const endpoint = `http://127.0.0.1:${cdpPort}`;
-  await waitFor(async () => {
-    const tabs = await (await fetch(`${endpoint}/json/list`)).json() as Array<{ type: string; url: string }>;
-    return tabs.some(t => t.type === 'page' && t.url.startsWith(o.url.split('?')[0]));
-  }, 30_000, 'the fixture page to open');
-  return {
-    cdpPort,
-    close: async () => {
+  const image = path.basename(b.exe);
+  // Stop whatever runs on this profile, by its own debug port when there is one, and remove the profile.
+  const close = async (cdpPort?: number) => {
+
       // Ask this instance (by its own debug port) to close, then stop whatever still runs on its profile.
       try {
-        const browser = await chromium.connectOverCDP(endpoint, { timeout: 5000 });
+        const browser = await chromium.connectOverCDP(`http://127.0.0.1:${cdpPort}`, { timeout: 5000 });
         const session = await browser.newBrowserCDPSession();
         await session.send('Browser.close').catch(() => { /* the connection closes with it */ });
       } catch { /* already gone */ }
       // The browser process can outlive its windows by a few seconds. Whatever still runs on this profile after that is stopped.
-      const image = path.basename(b.exe);
       const gone = async () => (await pidsByCommandLine(o.profileDir, image)).length === 0;
       if (!await waitFor(gone, 10_000, 'the fixture browser to exit', 500).catch(() => false)) {
         await killByCommandLine(o.profileDir, image);
         await waitFor(gone, 10_000, 'the fixture browser to be stopped', 500).catch(() => false);
       }
       try { fs.rmSync(o.profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* a temp dir: the OS cleans it */ }
-    },
   };
+  let cdpPort: number;
+  try {
+    cdpPort = await waitFor(() => profileDebugPort(o.profileDir), 30_000, 'the fixture browser to start');
+    const endpoint = `http://127.0.0.1:${cdpPort}`;
+    await waitFor(async () => {
+      const tabs = await (await fetch(`${endpoint}/json/list`)).json() as Array<{ type: string; url: string }>;
+      return tabs.some(t => t.type === 'page' && t.url.startsWith(o.url.split('?')[0]));
+    }, 30_000, 'the fixture page to open');
+  } catch (e) {
+    await close(profileDebugPort(o.profileDir) ?? undefined);   // the browser started but the page never showed: it is not left running
+    throw e;
+  }
+  const port = cdpPort;
+  return { cdpPort: port, close: () => close(port) };
 }

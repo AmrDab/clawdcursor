@@ -91,7 +91,7 @@ export class Watchdog {
 
   /** One line of the session log, for every rule but privacy (whose proofs take time: `judge`). */
   onCall(c: LogCall): Verdict | null {
-    this.calls++;
+    this.calls += c.steps?.length || 1;   // counted like the scorer: a batch by its steps
     if (!this.sigSeen) {
       // The log has no arguments: only a repeated read is surely the same call (rules.ts).
       const key = c.cls === 'blind' || c.cls === 'vision' ? `${c.tool}/${c.action ?? ''}/${c.outcome ?? ''}` : null;

@@ -280,6 +280,17 @@ if selftest {
     exit(0)
 }
 
+// Raw input, before any control handles it: a click on empty space or a key no control uses still reached the app, and the
+// scorer must not call the action that sent it a false success.
+NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown, .keyDown, .scrollWheel]) { event in
+    switch event.type {
+    case .keyDown: rec.event("key", "raw")
+    case .scrollWheel: rec.event("wheel", "raw")
+    default: rec.event("mouse", "raw")
+    }
+    return event
+}
+
 app.setActivationPolicy(.regular)
 let window = (dialog?.window ?? editor?.window)!
 if let p = pos, let screen = NSScreen.screens.first {

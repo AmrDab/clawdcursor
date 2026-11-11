@@ -1,9 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
-import { parseArgs, selectTasks } from '../run';
+import * as fs from 'fs';
+import * as os from 'os';
+import { EventEmitter } from 'events';
+import { agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, selectTasks } from '../run';
+import { Cleanup } from '../lib/cleanup';
 import { browserAppNames, browserArgs, findBrowser } from '../lib/browser';
 import { isolatedEnv, serverCommand } from '../lib/isolated';
-import { nativeArgs, parseCalcDisplay } from '../lib/live-fixtures';
+import { nativeArgs, parseCalcDisplay, parseCalcProbe } from '../lib/live-fixtures';
+import { evaluate } from '../lib/tasks';
 import { buildPrompt, PRIVACY_RULES } from '../lib/prompt';
 import { DONE_MARK, FAILED_MARK } from '../lib/scorer';
 import { loadTasks } from '../lib/tasks';
@@ -16,7 +21,10 @@ describe('the isolated clawdcursor', () => {
   });
 
   it('gets a temp home, its own session directory and the fixture browser port; nothing of the owner\'s setup', () => {
-    const env = isolatedEnv({ PATH: '/bin', HOME: '/home/owner', USERPROFILE: 'C:\\Users\\owner', APPDATA: 'C:\\Users\\owner\\AppData\\Roaming',
+    expect(isolatedEnv({}, { home: '/h', sessionDir: '/s', cdpPort: 1, fencePids: [4120, 4188] }).CLAWD_FENCE_PIDS).toBe('4120,4188');
+    // No fixture process known: the fence is still set, and then everything is outside it.
+    expect(isolatedEnv({}, { home: '/h', sessionDir: '/s', cdpPort: 1, fencePids: [] }).CLAWD_FENCE_PIDS).toBe('none');
+    const env = isolatedEnv({ PATH: '/bin', CLAWD_FENCE_PIDS: '1', HOME: '/home/owner', USERPROFILE: 'C:\\Users\\owner', APPDATA: 'C:\\Users\\owner\\AppData\\Roaming',
       CLAWDCURSOR_SESSION_DIR: '/home/owner/.clawdcursor/sessions', CLAWD_NO_BANNER: '1', CLAWD_AGENT_CDP_PORT: '9333', CLAWDCURSOR_LOG_DIR: '/x' },
     { home: '/tmp/bench/home', sessionDir: '/tmp/bench/sessions', cdpPort: 5555 });
     expect(env).toEqual({ PATH: '/bin', APPDATA: 'C:\\Users\\owner\\AppData\\Roaming', HOME: '/tmp/bench/home', USERPROFILE: '/tmp/bench/home',
@@ -57,6 +65,20 @@ describe('fixtures', () => {
     expect(nativeArgs({ state: '/tmp/s.json', mode: 'dialog', pos: [-1200, 300] })).toEqual(['--state', '/tmp/s.json', '--mode', 'dialog', '--pos', '-1200,300']);
   });
 
+  it('reads the Calculator probe: the display and the expression that produced it', () => {
+    expect(parseCalcProbe('display Display is 4,183\r\nexpression Expression is 47 × 89=\r\n')).toEqual({ display: '4183', expression: '47 × 89=' });
+    expect(parseCalcProbe('display Display is 4,183\r\n')).toEqual({ display: '4183', expression: '' });
+    expect(parseCalcProbe('')).toBeNull();
+  });
+
+  it('the Calculator task is exact: typing the result does not pass', () => {
+    const task = loadTasks().find(t => t.id === 'calc-multiply')!;
+    expect(evaluate(task.success!, { state: { display: '4183', expression: '47 × 89=' }, events: [] })).toBe(true);
+    expect(evaluate(task.success!, { state: { display: '4183', expression: '' }, events: [] })).toBe(false);          // typed 4183
+    expect(evaluate(task.success!, { state: { display: '4183', expression: '4183 × 1=' }, events: [] })).toBe(false);
+    expect(evaluate(task.success!, { state: { display: '4183', expression: '47 × 89' }, events: [] })).toBe(false);    // not evaluated
+  });
+
   it('reads the Calculator display as digits', () => {
     expect(parseCalcDisplay('Display is 4,183\r\n')).toBe('4183');
     expect(parseCalcDisplay('4183')).toBe('4183');
@@ -87,20 +109,21 @@ describe('the prompt', () => {
 
 describe('the command line', () => {
   it('plans by default: a live run must be asked for', () => {
-    expect(parseArgs([])).toEqual({ live: false, selfcheck: false, includeManual: false, updateBaseline: false });
+    expect(parseArgs([])).toEqual({ live: false, selfcheck: false, includeManual: false, updateBaseline: false, repeats: 1 });
     expect(parseArgs(['--live']).live).toBe(true);
   });
 
   it('reads every option', () => {
     expect(parseArgs(['--live', '--build', '.', '--models', 'claude-code:sonnet', '--tasks', 'a, b', '--out', 'o', '--baseline', 'b.json',
-      '--window-pos', '-1920,40', '--include-manual', '--update-baseline'])).toEqual({ live: true, selfcheck: false, includeManual: true,
-      updateBaseline: true, build: '.', models: 'claude-code:sonnet', tasks: ['a', 'b'], out: 'o', baseline: 'b.json', pos: [-1920, 40] });
+      '--window-pos', '-1920,40', '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, includeManual: true,
+      updateBaseline: true, repeats: 3, build: '.', models: 'claude-code:sonnet', tasks: ['a', 'b'], out: 'o', baseline: 'b.json', pos: [-1920, 40] });
   });
 
   it('rejects an unknown option, a missing value and a bad position', () => {
     expect(() => parseArgs(['--fast'])).toThrow('unknown option --fast');
     expect(() => parseArgs(['--build'])).toThrow('--build needs a value');
     expect(() => parseArgs(['--window-pos', 'left'])).toThrow('x,y');
+    expect(() => parseArgs(['--repeats', '0'])).toThrow('1 to 9');
   });
 });
 
@@ -137,5 +160,136 @@ describe('what ships', () => {
     const pkg = require(path.join(__dirname, '..', '..', 'package.json'));
     expect(pkg.files.some((f: string) => f.replace(/^!/, '').startsWith('bench'))).toBe(false);
     expect(pkg.scripts.bench).toBe('tsx bench/run.ts');
+  });
+});
+
+describe('a model that is shown no images', () => {
+  const all = loadTasks();
+  const blind = { label: 'ollama:qwen2.5:7b', adapter: { seesImages: false } };
+  const sighted = { label: 'claude-code:sonnet', adapter: { seesImages: true } };
+
+  it('does not run the tasks that need a screenshot: they are n/a, not failed', () => {
+    expect(all.filter(needsImages).map(t => t.id).sort()).toEqual(['cad-designcenter-orbit', 'web-canvas-draw', 'web-canvas-targets']);
+    for (const t of all.filter(needsImages)) {
+      expect(notApplicable(t, blind)).toMatch(/^n\/a for ollama:qwen2.5:7b/);
+      expect(notApplicable(t, sighted)).toBeNull();
+    }
+  });
+  it('runs every other task', () => {
+    for (const t of all.filter(t => !needsImages(t))) expect(notApplicable(t, blind)).toBeNull();
+  });
+});
+
+describe('the results directory', () => {
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'bench-out-test-'));
+
+  it('is created when it does not exist, and an empty one is used', () => {
+    const base = tmp();
+    const fresh = path.join(base, 'new', 'run');
+    expect(prepareOutDir(fresh)).toBe(fresh);
+    expect(fs.existsSync(fresh)).toBe(true);
+    expect(prepareOutDir(fresh)).toBe(fresh);
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+
+  it('is refused when it holds anything: old session logs would be read back as this run\'s', () => {
+    const base = tmp();
+    fs.mkdirSync(path.join(base, 'claude-code_sonnet', 'web-trap-new', 'sessions'), { recursive: true });
+    expect(() => prepareOutDir(base)).toThrow(/is not empty/);
+    const file = path.join(base, 'a-file');
+    fs.writeFileSync(file, 'x');
+    expect(() => prepareOutDir(file)).toThrow(/is not empty/);
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+});
+
+describe('where the agents run', () => {
+  it('is a new empty directory outside the owner\'s home', () => {
+    const dir = agentRoot();
+    try {
+      expect(fs.readdirSync(dir)).toEqual([]);
+      const home = (process.env.CLAWD_TEST_REAL_HOME ?? os.homedir()).toLowerCase();
+      if (process.platform === 'win32' && process.env.PUBLIC) expect(dir.toLowerCase().startsWith(home + path.sep)).toBe(false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('falls back to the temp directory', () => {
+    const dir = agentRoot('linux', {});
+    expect(dir.startsWith(os.tmpdir())).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('cleanup on Ctrl+C or a crash', () => {
+  it('closes everything still registered, newest first, each once', async () => {
+    const c = new Cleanup();
+    const order: string[] = [];
+    c.add(() => { order.push('temp homes'); });
+    const fixtureClosed = c.add(async () => { order.push('fixture'); });
+    c.add(() => { order.push('daemon'); });
+    c.add(() => { order.push('agent'); });
+    expect(c.pending).toBe(4);
+    await c.runAll();
+    expect(order).toEqual(['agent', 'daemon', 'fixture', 'temp homes']);
+    await c.runAll();
+    expect(order).toHaveLength(4);
+    fixtureClosed();
+  });
+
+  it('does not close what was already closed the normal way', async () => {
+    const c = new Cleanup();
+    const order: string[] = [];
+    const done = c.add(() => { order.push('daemon'); });
+    c.add(() => { order.push('fixture'); });
+    done();
+    await c.runAll();
+    expect(order).toEqual(['fixture']);
+  });
+
+  it('goes on when a closer throws or hangs', async () => {
+    const c = new Cleanup();
+    const order: string[] = [];
+    c.add(() => { order.push('last'); });
+    c.add(() => new Promise<void>(() => { /* never */ }));
+    c.add(() => { throw new Error('boom'); });
+    await c.runAll(30);
+    expect(order).toEqual(['last']);
+  });
+
+  it.each([['SIGINT', 130], ['SIGTERM', 143], ['uncaughtException', 1]])('on %s: closes everything, then exits with %i', async (signal, code) => {
+    const c = new Cleanup();
+    const target = new EventEmitter();
+    const closed: string[] = [];
+    c.add(async () => { await new Promise(r => setTimeout(r, 10)); closed.push('daemon'); });
+    c.add(() => { closed.push('agent'); });
+    const exits: number[] = [];
+    let closedAtExit: string[] = [];
+    const exited = new Promise<void>(resolve => {
+      c.install({ target, log: () => {}, exit: n => { exits.push(n); closedAtExit = [...closed]; resolve(); } });
+    });
+    target.emit(signal);
+    await exited;
+    expect(exits).toEqual([code]);
+    expect(closedAtExit).toEqual(['agent', 'daemon']);
+  });
+
+  it('a second Ctrl+C while closing exits at once', () => {
+    const c = new Cleanup();
+    const target = new EventEmitter();
+    c.add(() => new Promise<void>(() => { /* a closer that hangs */ }));
+    const exits: number[] = [];
+    c.install({ target, log: () => {}, exit: n => { exits.push(n); } });
+    target.emit('SIGINT');
+    expect(exits).toEqual([]);
+    target.emit('SIGINT');
+    expect(exits).toEqual([130]);
+  });
+
+  it('the handlers can be removed', () => {
+    const c = new Cleanup();
+    const target = new EventEmitter();
+    const uninstall = c.install({ target, log: () => {}, exit: () => {} });
+    expect(target.listenerCount('SIGINT')).toBe(1);
+    uninstall();
+    expect(target.listenerCount('SIGINT')).toBe(0);
   });
 });

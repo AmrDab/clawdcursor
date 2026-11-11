@@ -35,6 +35,7 @@ export function codexCommand(o: { exe: string; model: string; mcpUrl: string; to
       '-c', `${server}.bearer_token_env_var=${toml(TOKEN_ENV)}`,
       '-c', `${server}.default_tools_approval_mode=${toml('approve')}`,   // nobody is there to approve each call
       '-c', `approval_policy=${toml('never')}`,
+      '-c', 'project_doc_max_bytes=0',    // no AGENTS.md from the working directory or above it
       ...(o.model && o.model !== CODEX_DEFAULT ? ['--model', o.model] : []),
       '--cd', o.workDir,
       '--output-last-message', o.lastMessagePath,
@@ -77,6 +78,7 @@ export function findCodex(env: NodeJS.ProcessEnv = process.env): string | null {
 export const codex: Adapter = {
   id: 'codex',
   defaultModels: [CODEX_DEFAULT],
+  seesImages: true,
   async detect() {
     const exe = findCodex();
     if (!exe) return null;
@@ -90,7 +92,7 @@ export const codex: Adapter = {
     let finalText = '';
     const seen = new Set<string>();
     const exitCode = await runCli(codexCommand({ exe, model: job.model, mcpUrl: job.mcpUrl, token: job.token, workDir: job.workDir, lastMessagePath, prompt: job.prompt }), {
-      cwd: job.workDir, signal: job.signal, logFile: path.join(job.workDir, 'agent.log'),
+      cwd: job.workDir, signal: job.signal, logFile: job.logFile,
       onLine: line => {
         const p = parseCodexLine(line);
         if (p.sig && !(p.id && seen.has(p.id))) { if (p.id) seen.add(p.id); job.onSig(p.sig); }

@@ -63,7 +63,7 @@ describe('the allowlists', () => {
   });
 
   it('every fixture says which processes are its own', () => {
-    // One `roots` per fixture kind: native, Designcenter, Calculator (Windows, macOS), TextEdit, web.
-    expect(src.match(/roots: \(\) =>/g)!.length).toBe(6);
+    // One `roots` per fixture kind: native, Designcenter, Calculator, TextEdit, web.
+    expect(src.match(/roots: \(\) =>/g)!.length).toBe(5);
   });
 });

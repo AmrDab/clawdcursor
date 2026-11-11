@@ -37,19 +37,24 @@ export function serverCommand(cli: string, port: number): { cmd: string; args: s
  * (CLAWD_AGENT_CDP_PORT) is the fixture browser's: the `browser` tool attaches there first, so it never reaches for a
  * browser the owner put on the default debug port.
  */
-export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionDir: string; cdpPort: number }): NodeJS.ProcessEnv {
+export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionDir: string; cdpPort: number; fencePids?: number[] }): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {};
   // Nothing of the owner's clawdcursor setup leaks in.
   for (const [k, v] of Object.entries(base)) if (!/^(CLAWD|CLAWDCURSOR|OPENCLAW)_/i.test(k)) env[k] = v;
-  return { ...env, HOME: o.home, USERPROFILE: o.home, CLAWDCURSOR_SESSION_DIR: o.sessionDir, CLAWD_AGENT_CDP_PORT: String(o.cdpPort) };
+  return { ...env, HOME: o.home, USERPROFILE: o.home, CLAWDCURSOR_SESSION_DIR: o.sessionDir, CLAWD_AGENT_CDP_PORT: String(o.cdpPort),
+    // The fence (src/core/fence.ts): the daemon refuses, before acting or reading, anything outside these processes and
+    // their children. An empty list still sets it: then everything is outside.
+    ...(o.fencePids ? { CLAWD_FENCE_PIDS: o.fencePids.join(',') || 'none' } : {}) };
 }
 
 export interface IsolatedServer {
   port: number; pid: number; token: string; mcpUrl: string; sessionDir: string;
   stop(): Promise<void>;
+  /** At once, with no request to the daemon: for Ctrl+C and crashes. */
+  kill(): void;
 }
 
-export async function startIsolated(o: { cli: string; home: string; sessionDir: string; cdpPort: number; logFile: string }): Promise<IsolatedServer> {
+export async function startIsolated(o: { cli: string; home: string; sessionDir: string; cdpPort: number; logFile: string; fencePids?: number[] }): Promise<IsolatedServer> {
   fs.mkdirSync(o.home, { recursive: true });
   fs.mkdirSync(o.sessionDir, { recursive: true });
   const port = await freePort();
@@ -77,7 +82,8 @@ export async function startIsolated(o: { cli: string; home: string; sessionDir: 
       // Ask it to stop (it closes its session logs), then make sure.
       try { await fetch(`${base}/stop`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000) }); } catch { /* gone */ }
       try { await waitFor(() => exited !== undefined, 5000, 'the daemon to exit'); } catch { killTree(child.pid); }
-      fs.closeSync(log);
+      try { fs.closeSync(log); } catch { /* closed by kill() */ }
     },
+    kill: () => { killTree(child.pid); try { fs.closeSync(log); } catch { /* already closed */ } },
   };
 }

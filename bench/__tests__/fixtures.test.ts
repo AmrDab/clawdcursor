@@ -54,8 +54,25 @@ describe('the fixture server', () => {
 
   it('keeps runs apart, and an unknown run is empty', async () => {
     await post('one', { seq: 1, state: { a: 1 }, events: [] });
-    expect(server.state('two')).toEqual({ state: {}, events: [] });
+    expect(server.state('two')).toEqual({ state: {}, events: [], loads: 0 });
     expect(server.state('one').state).toEqual({ a: 1 });
+  });
+
+  it('counts page loads, and a reload does not wash a wrong click away', async () => {
+    // The agent presses the wrong button, reloads the page, then presses the right one.
+    await post('reload', { page: 'p1', seq: 1, state: { clicks: { whatsNew: 0, new: 0 } }, events: [{ type: 'load', target: 'page' }] });
+    await post('reload', { page: 'p1', seq: 2, state: { clicks: { whatsNew: 1, new: 0 } }, events: [{ type: 'click', target: 'whatsNew' }] });
+    expect(server.state('reload').loads).toBe(1);
+    await post('reload', { page: 'p2', seq: 1, state: { clicks: { whatsNew: 0, new: 0 } }, events: [{ type: 'load', target: 'page' }] });
+    await post('reload', { page: 'p2', seq: 2, state: { clicks: { whatsNew: 0, new: 1 } }, events: [{ type: 'click', target: 'new' }] });
+    const fx = server.state('reload');
+    expect(fx.loads).toBe(2);
+    expect(fx.state).toEqual({ clicks: { whatsNew: 0, new: 1 } });   // the new page's own state, not a stale one
+    // Every event of both pages is still there, in order: the wrong click did happen.
+    expect(fx.events.map(e => `${e.type}:${e.target}`)).toEqual(['load:page', 'click:whatsNew', 'load:page', 'click:new']);
+    // A late post of the old page does not replace the new page's state.
+    await post('reload', { page: 'p1', seq: 9, state: { clicks: { whatsNew: 9 } }, events: [] });
+    expect(server.state('reload').state).toEqual({ clicks: { whatsNew: 0, new: 1 } });
   });
 
   it('rejects a bad run id and bad JSON', async () => {
@@ -102,6 +119,12 @@ describe('the web pages', () => {
     const html = read('trap.html');
     const before = (a: string, b: string) => expect(html.indexOf(`data-bench="${a}"`)).toBeLessThan(html.indexOf(`data-bench="${b}"`));
     before('whatsNew', 'new'); before('pageClose', 'dialogClose'); before('hiddenLink', 'visibleLink'); before('exportLabel', 'exportButton');
+  });
+
+  it('the recorder names each page load and records raw mouse, key and wheel input', () => {
+    const js = read('bench.js');
+    expect(js).toMatch(/page: page, seq: \+\+seq/);
+    for (const type of ['mousedown', 'mouseup', 'keydown', 'keyup', 'wheel', 'pointermove']) expect(js, type).toContain(`'${type}'`);
   });
 
   it('load nothing from outside the fixture server', () => {
@@ -188,6 +211,11 @@ describe('the native fixtures agree across OSes', () => {
     for (const t of loadTasks().filter(x => x.fixture.kind === 'native')) walk(t.success);
     expect(paths.size).toBeGreaterThan(5);
     for (const k of paths) expect(KEYS).toContain(k);
+  });
+
+  it.each(Object.entries(sources))('%s records raw mouse, key and wheel input', (_os, src) => {
+    for (const kind of ['"mouse"', '"key"', '"wheel"']) expect(src).toContain(kind);
+    expect(src).toContain('"raw"');
   });
 
   it('the Linux fixture names its process, so no generic "python3" is allowed by the privacy guard', () => {

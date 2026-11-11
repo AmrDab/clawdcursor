@@ -41,6 +41,10 @@ describe('claude-code', () => {
     expect(a).not.toContain('--dangerously-skip-permissions');
   });
 
+  it('loads none of the owner\'s settings: no user hooks, plugins or CLAUDE.md', () => {
+    expect(cmd.args[cmd.args.indexOf('--setting-sources') + 1]).toBe('project');
+  });
+
   it('asks for one JSON line per message', () => {
     expect(cmd.args[cmd.args.indexOf('--output-format') + 1]).toBe('stream-json');
     expect(cmd.args).toContain('--verbose');
@@ -98,6 +102,7 @@ describe('codex', () => {
     expect(configs).toContain(`mcp_servers.clawdcursor.bearer_token_env_var="${TOKEN_ENV}"`);
     expect(configs).toContain('mcp_servers.clawdcursor.default_tools_approval_mode="approve"');
     expect(configs).toContain('approval_policy="never"');
+    expect(configs).toContain('project_doc_max_bytes=0');   // no AGENTS.md
   });
 
   it('keeps the token out of the command line: it travels in the environment', () => {
@@ -229,5 +234,9 @@ describe('ollama', () => {
 describe('the adapters', () => {
   it('are claude-code, codex and ollama', () => {
     expect(ADAPTERS.map(a => a.id)).toEqual(['claude-code', 'codex', 'ollama']);
+  });
+
+  it('say whether their model is shown images: the Ollama loop leaves them out', () => {
+    expect(ADAPTERS.map(a => a.seesImages)).toEqual([true, true, false]);
   });
 });

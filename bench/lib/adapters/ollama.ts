@@ -89,6 +89,7 @@ async function installedModels(): Promise<string[]> {
 export const ollama: Adapter = {
   id: 'ollama',
   defaultModels: ['qwen2.5:7b'],
+  seesImages: false,   // resultText() leaves images out
   async detect() {
     try {
       const models = await installedModels();

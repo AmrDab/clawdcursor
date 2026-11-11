@@ -102,7 +102,18 @@ async function openNative(mode: 'dialog' | 'editor', ctx: FixtureContext): Promi
 
 // ── real apps ───────────────────────────────────────────────────────────────
 
-/** "Display is 4,183" (Windows) or "4183" (macOS) -> "4183". */
+/**
+ * The probe's two lines: "display Display is 4,183" and "expression Expression is 47 × 89=". The expression is what
+ * makes the task exact: typing 4183 leaves it empty.
+ */
+export function parseCalcProbe(out: string): { display: string; expression: string } | null {
+  const line = (key: string) => out.split(/\r?\n/).find(l => l.startsWith(`${key} `))?.slice(key.length + 1).trim();
+  const display = line('display');
+  if (display === undefined) return null;
+  return { display: parseCalcDisplay(display), expression: (line('expression') ?? '').replace(/^Expression is\s*/i, '') };
+}
+
+/** "Display is 4,183" -> "4183". */
 export function parseCalcDisplay(text: string): string {
   return text.replace(/[^\d.-]/g, '').replace(/\.$/, '');
 }
@@ -136,10 +147,6 @@ export async function appUnavailable(app: 'calculator' | 'textedit' | 'designcen
       if (!pkg?.trim()) return 'Calculator (Store app) is not installed';
       return await running('CalculatorApp.exe') ? 'Calculator is already open: the owner\'s window is never reused (close it to run this task)' : null;
     }
-    if (platform === 'darwin') {
-      if (!fs.existsSync('/System/Applications/Calculator.app')) return 'Calculator is not installed';
-      return await running('Calculator') ? 'Calculator is already open: the owner\'s window is never reused' : null;
-    }
     return 'no Calculator task on this OS';
   }
   if (app === 'textedit') {
@@ -168,7 +175,7 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
     start(system32('calc.exe'), [], { stdio: 'ignore' });
     const probe = async () => {
       const out = await tryRun(POWERSHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(APPS_DIR, 'calculator-probe.ps1')]);
-      return out === null ? null : parseCalcDisplay(out);
+      return out === null ? null : parseCalcProbe(out);
     };
     await waitFor(probe, 30_000, 'Calculator to open');
     return {
@@ -176,21 +183,8 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
       // belongs to ApplicationFrameHost: that frame counts only with this exact title and one of these processes inside.
       window: 'Calculator', apps: ['Calculator'], frameTitle: 'Calculator',
       roots: () => imagePids('CalculatorApp.exe'),
-      state: async () => { const d = await probe(); return d === null ? null : { state: { display: d }, events: [] }; },
+      state: async () => { const d = await probe(); return d === null ? null : { state: d, events: [] }; },
       close: async () => { for (const pid of imagePids('CalculatorApp.exe')) killTree(pid); },
-    };
-  }
-  if (app === 'calculator') {
-    await tryRun('open', ['-a', 'Calculator']);
-    const probe = async () => {
-      const out = await osa('tell application "System Events" to tell process "Calculator" to get value of static text 1 of group 1 of window 1');
-      return out === null ? null : parseCalcDisplay(out);
-    };
-    await waitFor(probe, 30_000, 'Calculator to open');
-    return {
-      window: 'Calculator', apps: ['Calculator'], roots: () => imagePids('Calculator'),
-      state: async () => { const d = await probe(); return d === null ? null : { state: { display: d }, events: [] }; },
-      close: async () => { await osa('tell application "Calculator" to quit'); },
     };
   }
   const doc = path.join(ctx.workDir, 'bench-document.txt');

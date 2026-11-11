@@ -68,7 +68,9 @@ export interface TaskSpec {
 /** One recorded interaction with a fixture. `t` is epoch ms on the recorder's clock (the fixture server, or the native app). */
 export interface FixtureEvent { t: number; type: string; target?: string; value?: unknown; trusted?: boolean }
 
-export interface FixtureState { state: Record<string, unknown>; events: FixtureEvent[] }
+export interface FixtureState { state: Record<string, unknown>; events: FixtureEvent[];
+  /** Web fixtures: how many times the page was loaded. More than one fails the run (a reload resets the page's counters). */
+  loads?: number }
 
 /** One line of the isolated server's session log (src/surface/session-log.ts). It never carries arguments or text. */
 export interface LogCall {

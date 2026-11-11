@@ -11,8 +11,13 @@ export interface AgentJob {
   /** The isolated server's MCP endpoint and its bearer token. */
   mcpUrl: string;
   token: string;
-  /** An empty temp directory for this run: the agent's working directory and config files. */
+  /**
+   * An empty directory OUTSIDE the owner's home: the agent's working directory and its config file. Nothing of the
+   * owner's (CLAUDE.md, AGENTS.md, project settings) is in it or above it.
+   */
   workDir: string;
+  /** Where the agent's output is kept (the results directory). */
+  logFile: string;
   /** Each tool call the model makes, as it makes it. */
   onSig(s: CallSig): void;
   /** Aborted by the watchdog: the adapter stops the agent at once. */
@@ -25,6 +30,8 @@ export interface Adapter {
   id: string;
   /** Models to run when none is named. */
   defaultModels: string[];
+  /** False when tool results reach the model without images: tasks that need a screenshot are not run (n/a). */
+  seesImages: boolean;
   /** A version or detail line when this agent host is installed, else null. */
   detect(): Promise<string | null>;
   run(job: AgentJob): Promise<AgentResult>;

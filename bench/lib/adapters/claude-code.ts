@@ -22,6 +22,7 @@ export function claudeCommand(o: { exe: string; model: string; mcpConfigPath: st
       '--model', o.model,
       '--mcp-config', o.mcpConfigPath,
       '--strict-mcp-config',                               // no other MCP server: not the owner's clawdcursor, not their plugins'
+      '--setting-sources', 'project',                      // not the owner's user settings: no hooks, plugins or CLAUDE.md of theirs (the cwd is an empty directory)
       '--allowedTools', `mcp__${SERVER_NAME}__*`,
       '--tools', '',                                       // no built-in tool (Bash, Read, ...): the desktop is reached through clawdcursor only
       '--disable-slash-commands',                          // no skill from the owner's home: the server under test brings its own guidance
@@ -44,6 +45,7 @@ export function parseClaudeLine(line: string): { sigs: CallSig[]; finalText?: st
 export const claudeCode: Adapter = {
   id: 'claude-code',
   defaultModels: ['sonnet', 'haiku'],
+  seesImages: true,
   async detect() {
     const exe = which('claude');
     if (!exe) return null;
@@ -57,7 +59,7 @@ export const claudeCode: Adapter = {
     fs.writeFileSync(mcpConfigPath, claudeMcpConfig(job.mcpUrl, job.token), { mode: 0o600 });
     let finalText = '';
     const exitCode = await runCli(claudeCommand({ exe, model: job.model, mcpConfigPath, prompt: job.prompt }), {
-      cwd: job.workDir, signal: job.signal, logFile: path.join(job.workDir, 'agent.log'),
+      cwd: job.workDir, signal: job.signal, logFile: job.logFile,
       onLine: line => {
         const p = parseClaudeLine(line);
         p.sigs.forEach(job.onSig);

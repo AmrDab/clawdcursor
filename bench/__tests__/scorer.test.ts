@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReport, compare, countFalseOk, expectsEffect, gateOf, renderMarkdown, score, toBaseline, DONE_MARK, type RunRecord, type Score } from '../lib/scorer';
+import { aggregate, buildReport, compare, countFalseOk, expectsEffect, gateOf, renderMarkdown, score, toBaseline, DONE_MARK, type RunRecord, type Score } from '../lib/scorer';
 import { countLoops, loopKeys } from '../lib/rules';
 import type { AgentRun, FixtureState, LogCall, TaskSpec } from '../lib/types';
 
@@ -85,7 +85,8 @@ describe('score', () => {
     ];
     r.fixture = { state: { done: true }, events: [ev(1), ev(2)] };
     const s = score(r);
-    expect(s).toMatchObject({ calls: 3, screenshots: 2, screenshotRatio: 2, actName: 1, actCoords: 2, byName: 0.33, byCoords: 0.67 });
+    // Calls are counted like screenshots: the batch by its three steps. It was three round trips.
+    expect(s).toMatchObject({ calls: 5, roundTrips: 3, screenshots: 2, screenshotRatio: 2, actName: 1, actCoords: 2, byName: 0.33, byCoords: 0.67 });
     expect(s.gate.pass).toBe(true);  // 2 screenshots <= oracle 1 + 1
   });
 
@@ -191,7 +192,7 @@ describe('expectsEffect / countFalseOk', () => {
 describe('gateOf', () => {
   const base: Omit<Score, 'gate'> = { task: 't', model: 'm', archetype: 'web-form', mechanisms: ['M1'], manual: false, success: true,
     calls: 6, oracleCalls: 4, screenshots: 1, oracleScreenshots: 0, screenshotRatio: null, actName: 1, actCoords: 0, byName: 1, byCoords: 0,
-    errors: 0, falseSuccesses: 0, falseOk: 0, falseDone: false, loops: 0, seconds: 1 };
+    roundTrips: 6, errors: 0, falseSuccesses: 0, falseOk: 0, falseDone: false, reloaded: false, loops: 0, seconds: 1, runs: 1, successes: 1 };
 
   it('passes at the thresholds: calls = 1.5 x oracle, screenshots = oracle + 1', () => {
     expect(gateOf(base)).toEqual({ pass: true, failures: [] });
@@ -239,8 +240,70 @@ describe('report, baseline, comparison', () => {
     const md = renderMarkdown(report, compare(report, toBaseline(report)));
     expect(md).toContain('Gate: **PASS** (1/1 rows pass)');
     expect(md).toContain('## claude-code:sonnet');
-    expect(md).toContain('| web-sample | web-form | M1 | yes | 4 (4) | 0 (0) | - | 100% | 0% | 0 | 0 | 12s | pass |');
+    expect(md).toContain('| web-sample | web-form | M1 | yes | 4 (4) | 4 | 0 (0) | - | 100% | 0% | 0 | 0 | 12s | pass |');
     expect(md).toContain('- textedit-type-lines: macos only');
     expect(md).toContain('| web-sample | claude-code:sonnet | same | true | 0 | 0 | 0 | 0 |');
+  });
+});
+
+describe('counting', () => {
+  it('a batch cannot hide calls from the gate: its steps count, like its screenshots do', () => {
+    const r = cleanRun();
+    const step = { tool: 'accessibility', action: 'set_value', cls: 'act-name' as const, ok: true, outcome: 'ok' };
+    r.calls = [call(0, 'accessibility', 'read_tree', 'blind'), call(1, 'batch', '', 'act-other', { steps: Array.from({ length: 8 }, () => step) })];
+    r.fixture = { state: { done: true }, events: [ev(1)] };
+    const s = score(r);
+    expect(s).toMatchObject({ calls: 9, roundTrips: 2 });
+    expect(s.gate.failures).toEqual(['calls 9 > 6']);
+  });
+});
+
+describe('a reloaded page', () => {
+  it('fails the run, whatever the state says: a reload resets the page\'s counters', () => {
+    const r = cleanRun();
+    r.fixture = { ...r.fixture!, loads: 2 };
+    const s = score(r);
+    expect(s).toMatchObject({ success: false, reloaded: true });
+    expect(s.gate.failures[0]).toBe('the fixture page was reloaded');
+  });
+  it('one load is the normal case, and a native fixture has no loads at all', () => {
+    expect(score({ ...cleanRun(), fixture: { ...cleanRun().fixture!, loads: 1 } })).toMatchObject({ success: true, reloaded: false });
+    expect(score(cleanRun()).reloaded).toBe(false);
+  });
+});
+
+describe('repeats', () => {
+  const run = (over: Partial<Score>): Score => ({ ...score(cleanRun()), ...over });
+
+  it('one run is returned as it is', () => {
+    const s = score(cleanRun());
+    expect(aggregate([s])).toBe(s);
+  });
+
+  it('takes the median of every count, so one bad sample does not decide the gate', () => {
+    const s = aggregate([run({ calls: 4, screenshots: 0, seconds: 10 }), run({ calls: 30, screenshots: 9, seconds: 200, loops: 1, falseSuccesses: 2 }), run({ calls: 5, screenshots: 1, seconds: 12 })]);
+    expect(s).toMatchObject({ calls: 5, screenshots: 1, seconds: 12, loops: 0, falseSuccesses: 0, runs: 3, successes: 3, success: true });
+    expect(s.gate.pass).toBe(true);
+  });
+
+  it('is done when most runs were done', () => {
+    const lost = run({ success: false, successes: 0 });
+    expect(aggregate([run({}), run({}), lost])).toMatchObject({ success: true, successes: 2, runs: 3 });
+    const s = aggregate([run({}), lost, lost]);
+    expect(s).toMatchObject({ success: false, successes: 1 });
+    expect(s.gate.failures).toContain('task done in 1 of 3 runs');
+    expect(aggregate([run({}), lost]).success).toBe(false);   // half is not most
+  });
+
+  it('keeps a privacy stop and a reload from any run', () => {
+    const s = aggregate([run({}), run({ killed: 'privacy' }), run({})]);
+    expect(s.killed).toBe('privacy');
+    expect(s.gate.pass).toBe(false);
+    expect(aggregate([run({}), run({ reloaded: true }), run({})]).gate.failures).toContain('the fixture page was reloaded');
+  });
+
+  it('shows done as n/m in the table', () => {
+    const meta = { date: 'd', os: 'windows' as const, clawdcursor: '2', models: ['claude-code:sonnet'], skipped: [] };
+    expect(renderMarkdown(buildReport(meta, [aggregate([run({}), run({}), run({ success: false, successes: 0 })])]))).toContain('| 2/3 |');
   });
 });

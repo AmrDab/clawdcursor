@@ -63,7 +63,9 @@ document.getElementById('submit').addEventListener('click', function () {
 </body></html>`;
 }
 
-interface Run { seq: number; state: Record<string, unknown>; events: Array<FixtureEvent & { seq: number }> }
+interface Run { seq: number; state: Record<string, unknown>; events: Array<FixtureEvent & { seq: number; order: number }>;
+  /** Every load of the page is a new page instance with its own id: a reload cannot wash a wrong click away. */
+  pages: string[]; order: number }
 
 export interface FixtureServer {
   port: number;
@@ -79,7 +81,7 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
   const runs = new Map<string, Run>();
   const runOf = (id: string) => {
     let r = runs.get(id);
-    if (!r) { r = { seq: -1, state: {}, events: [] }; runs.set(id, r); }
+    if (!r) { r = { seq: -1, state: {}, events: [], pages: [], order: 0 }; runs.set(id, r); }
     return r;
   };
   const server = http.createServer((req, res) => {
@@ -97,13 +99,17 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
       req.on('data', c => { body += c; if (body.length > 1_000_000) req.destroy(); });
       req.on('end', () => {
         try {
-          const msg = JSON.parse(body) as { seq?: number; state?: Record<string, unknown>; events?: FixtureEvent[] };
+          const msg = JSON.parse(body) as { page?: string; seq?: number; state?: Record<string, unknown>; events?: FixtureEvent[] };
           const r = runOf(run);
+          const page = String(msg.page ?? '');
+          // A page instance not seen before: the page was loaded (again). Its sequence numbers start over.
+          if (!r.pages.includes(page)) { r.pages.push(page); r.seq = -1; }
+          const current = r.pages[r.pages.length - 1] === page;
           const seq = Number(msg.seq) || 0;
           const now = Date.now();
-          for (const e of msg.events ?? []) r.events.push({ ...e, t: now, seq });
+          for (const e of msg.events ?? []) r.events.push({ ...e, t: now, seq, order: r.pages.indexOf(page) * 1e6 + seq });
           // Posts can arrive out of order: the newest snapshot wins.
-          if (seq > r.seq && msg.state && typeof msg.state === 'object') { r.seq = seq; r.state = msg.state; }
+          if (current && seq > r.seq && msg.state && typeof msg.state === 'object') { r.seq = seq; r.state = msg.state; }
           send(204, '');
         } catch { send(400, 'bad json'); }
       });
@@ -118,9 +124,9 @@ export async function startFixtureServer(port = 0): Promise<FixtureServer> {
   });
   const stateOf = (run: string): FixtureState => {
     const r = runs.get(run);
-    if (!r) return { state: {}, events: [] };
-    const events = [...r.events].sort((a, b) => a.seq - b.seq).map(({ seq: _seq, ...e }) => e);
-    return { state: r.state, events };
+    if (!r) return { state: {}, events: [], loads: 0 };
+    const events = [...r.events].sort((a, b) => a.order - b.order).map(({ seq: _seq, order: _order, ...e }) => e);
+    return { state: r.state, events, loads: r.pages.length };
   };
   await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve); });
   const bound = (server.address() as AddressInfo).port;

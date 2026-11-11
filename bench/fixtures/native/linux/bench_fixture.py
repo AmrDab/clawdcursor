@@ -209,7 +209,8 @@ def main():
     name_process("BenchFixture")
     import gi
     gi.require_version("Gtk", "3.0")
-    from gi.repository import GLib, Gtk
+    gi.require_version("Gdk", "3.0")
+    from gi.repository import Gdk, GLib, Gtk
     GLib.set_prgname("BenchFixture")
     GLib.set_application_name("BenchFixture")
 
@@ -220,6 +221,21 @@ def main():
         # No window is shown: the handlers a click or a keystroke reaches are run directly.
         run_selftest()
         return 0
+
+    # Raw input, before any widget handles it: a click on empty space or a key no widget uses still reached the app, and
+    # the scorer must not call the action that sent it a false success.
+    raw_kinds = {Gdk.EventType.BUTTON_PRESS: "mouse", Gdk.EventType.KEY_PRESS: "key", Gdk.EventType.SCROLL: "wheel"}
+
+    def raw_input(event, *_):
+        kind = raw_kinds.get(event.type)
+        if kind:
+            rec.event(kind, "raw")
+        Gtk.main_do_event(event)
+
+    try:
+        Gdk.event_handler_set(raw_input)
+    except Exception:
+        pass  # the widgets' own events are still recorded
 
     win.connect("destroy", Gtk.main_quit)
     win.connect("focus-in-event", lambda *_: rec.event("focus", "window"))

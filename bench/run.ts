@@ -2,33 +2,33 @@
  * The clawdcursor benchmark runner (issue #384). See bench/README.md.
  *
  *   npm run bench                    the plan: what would run here. Starts nothing.
- *   npm run bench -- --selfcheck     proves fixtures and predicates in a headless browser. No agent, no window.
+ *   npm run bench -- --selfcheck     proves fixtures, predicates, isolation and the fence. No agent, no window.
  *   npm run bench -- --live [...]    runs the tasks. TAKES OVER THE MOUSE AND KEYBOARD until it ends.
  */
 import * as fs from 'fs';
-import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { ADAPTERS, detectModels, parseModels, type ModelRun } from './lib/adapters';
 import { findBrowser } from './lib/browser';
+import { Cleanup } from './lib/cleanup';
 import { startFixtureServer, type FixtureServer } from './lib/fixture-server';
 import { resolveCli, startIsolated } from './lib/isolated';
 import { appUnavailable, buildNative, openFixture, type FixtureContext, type NativeBuild } from './lib/live-fixtures';
-import { USER_CDP_PORT, cdpIsFixture, ownsFocus, readFocus } from './lib/ownership';
+import { USER_CDP_PORT, cdpIsFixture, ownsFocus, portOpen, readFocus } from './lib/ownership';
 import { freePort, sleep } from './lib/proc';
 import { buildPrompt } from './lib/prompt';
-import { buildReport, compare, renderMarkdown, score, toBaseline, type Baseline, type Score } from './lib/scorer';
+import { aggregate, buildReport, compare, renderMarkdown, score, toBaseline, type Baseline, type Score } from './lib/scorer';
 import { currentOs, loadTasks } from './lib/tasks';
 import { Watchdog, readSessionCalls, tailSessionDir, type Verdict } from './lib/watchdog';
 import type { AgentRun, CallSig, TaskSpec } from './lib/types';
 
 export interface Options {
-  live: boolean; selfcheck: boolean; includeManual: boolean; updateBaseline: boolean;
+  live: boolean; selfcheck: boolean; includeManual: boolean; updateBaseline: boolean; repeats: number;
   build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string; pos?: [number, number];
 }
 
 export function parseArgs(argv: string[]): Options {
-  const o: Options = { live: false, selfcheck: false, includeManual: false, updateBaseline: false };
+  const o: Options = { live: false, selfcheck: false, includeManual: false, updateBaseline: false, repeats: 1 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { const v = argv[++i]; if (v === undefined) throw new Error(`${a} needs a value`); return v; };
@@ -41,7 +41,10 @@ export function parseArgs(argv: string[]): Options {
     else if (a === '--tasks') o.tasks = value().split(',').map(s => s.trim()).filter(Boolean);
     else if (a === '--out') o.out = value();
     else if (a === '--baseline') o.baseline = value();
-    else if (a === '--window-pos') {
+    else if (a === '--repeats') {
+      o.repeats = Number(value());
+      if (!Number.isInteger(o.repeats) || o.repeats < 1 || o.repeats > 9) throw new Error('--repeats needs a number from 1 to 9');
+    } else if (a === '--window-pos') {
       const [x, y] = value().split(',').map(Number);
       if (!Number.isInteger(x) || !Number.isInteger(y)) throw new Error('--window-pos needs x,y');
       o.pos = [x, y];
@@ -65,28 +68,63 @@ export function selectTasks(all: TaskSpec[], o: Pick<Options, 'tasks' | 'include
   return { run, skipped };
 }
 
-const portOpen = (port: number) => new Promise<boolean>(resolve => {
-  const s = net.connect({ port, host: '127.0.0.1' });
-  s.once('connect', () => { s.destroy(); resolve(true); });
-  s.once('error', () => resolve(false));
-});
+/** A task whose scripted trajectory needs a screenshot cannot be done by a model that is shown no images. */
+export const needsImages = (t: TaskSpec) => t.oracle.screenshots > 0;
 
-interface Env { cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; pos?: [number, number] }
+/** Why this model does not run this task (it is then "n/a", not failed), or null. */
+export function notApplicable(t: TaskSpec, m: Pick<ModelRun, 'label'> & { adapter: { seesImages: boolean } }): string | null {
+  return needsImages(t) && !m.adapter.seesImages ? `n/a for ${m.label}: the task needs a screenshot and this model is shown no images` : null;
+}
 
-/** One task with one model: fixture, isolated server, agent under the watchdog, then the score. */
-async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number): Promise<Score | { skip: string }> {
-  const workDir = path.join(env.outDir, m.label.replace(/[^A-Za-z0-9._-]/g, '_'), task.id);
+/**
+ * The results directory must be new or empty: session logs and state files left by an earlier run would be read back
+ * as this run's.
+ */
+export function prepareOutDir(dir: string): string {
+  const out = path.resolve(dir);
+  if (fs.existsSync(out) && (!fs.statSync(out).isDirectory() || fs.readdirSync(out).length)) {
+    throw new Error(`${out} is not empty: results of an earlier run could be read back as this one's. Give --out a new directory.`);
+  }
+  fs.mkdirSync(out, { recursive: true });
+  return out;
+}
+
+/**
+ * Where the agents run: a new directory with nothing of the owner's in it or above it, so no CLAUDE.md, AGENTS.md or
+ * project settings load. The temp directory is inside the home directory on Windows; the Public folder is not.
+ */
+export function agentRoot(platform: string = process.platform, env: NodeJS.ProcessEnv = process.env): string {
+  const base = platform === 'win32' && env.PUBLIC && fs.existsSync(env.PUBLIC) ? env.PUBLIC : os.tmpdir();
+  return fs.mkdtempSync(path.join(base, 'clawdcursor-bench-agent-'));
+}
+
+interface Env {
+  cli: string; server: FixtureServer; native: NativeBuild | { missing: string }; outDir: string; tempRoot: string; agentRoot: string;
+  pos?: [number, number]; cleanup: Cleanup;
+}
+
+/** One task with one model: fixture, fenced isolated server, agent under the watchdog, then the score. */
+async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: number): Promise<Score | { skip: string }> {
+  const workDir = path.join(env.outDir, m.label.replace(/[^A-Za-z0-9._-]/g, '_'), repeat ? `${task.id}.${repeat + 1}` : task.id);
   fs.mkdirSync(workDir, { recursive: true });
   const ctx: FixtureContext = { server: env.server, browser: findBrowser(), native: env.native, workDir, runId: `r${n}-${task.id}`.slice(0, 64), pos: env.pos };
   const fixture = await openFixture(task, ctx);
   if ('skip' in fixture) return fixture;
+  const fixtureClosed = env.cleanup.add(() => fixture.close());
   const sessionDir = path.join(workDir, 'sessions');
+  const agentDir = path.join(env.agentRoot, `run-${n}`);
+  fs.mkdirSync(agentDir, { recursive: true });
   let daemon: Awaited<ReturnType<typeof startIsolated>> | undefined;
+  let daemonClosed = () => { /* not started */ };
   try {
     // clawdcursor's browser port: the fixture browser's. For a task with no browser, a free port nothing listens on.
     const cdpPort = fixture.cdp?.cdpPort ?? await freePort();
-    daemon = await startIsolated({ cli: env.cli, home: path.join(env.tempRoot, `home-${n}`), sessionDir, cdpPort, logFile: path.join(workDir, 'server.log') });
-    // What the privacy guard may rely on: the focus is in a process this task started, and (web) CDP can only reach its browser.
+    // The fence: the daemon itself refuses, before acting or reading, whatever is outside the fixture's processes.
+    const fencePids = await fixture.roots();
+    daemon = await startIsolated({ cli: env.cli, home: path.join(env.tempRoot, `home-${n}`), sessionDir, cdpPort, fencePids, logFile: path.join(workDir, 'server.log') });
+    const started0 = daemon;
+    daemonClosed = env.cleanup.add(() => started0.kill());
+    // The second layer, after the fact: the watchdog's proofs (the focus is in a process this task started; CDP can only reach its browser).
     const cdp = fixture.cdp;
     const proveCdp = async () => cdp !== undefined && await cdpIsFixture({ ...cdp, browserPids: fixture.roots });
     let cdpProven = await proveCdp();
@@ -96,6 +134,7 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number): Promise
       cdpIsFixture: () => cdpProven,
     });
     const abort = new AbortController();
+    const agentStopped = env.cleanup.add(() => abort.abort());
     let killed: Verdict | undefined;
     const stop = (v: Verdict | null) => { if (v && !killed) { killed = v; abort.abort(); } };
     const sigs: CallSig[] = [];
@@ -106,14 +145,15 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number): Promise
     const clock = setInterval(() => stop(dog.onTime((Date.now() - started) / 1000)), 500);
     let result = { finalText: '', exitCode: null as number | null };
     try {
-      result = await m.adapter.run({ prompt: buildPrompt(task, fixture.window), model: m.model, mcpUrl: daemon.mcpUrl, token: daemon.token, workDir,
-        signal: abort.signal, onSig: s => { sigs.push(s); stop(dog.onSig(s)); } });
+      result = await m.adapter.run({ prompt: buildPrompt(task, fixture.window), model: m.model, mcpUrl: daemon.mcpUrl, token: daemon.token,
+        workDir: agentDir, logFile: path.join(workDir, 'agent.log'), signal: abort.signal, onSig: s => { sigs.push(s); stop(dog.onSig(s)); } });
     } catch (e) {
       result.finalText = `adapter error: ${(e as Error).message}`;
     } finally {
       clearInterval(clock);
       clearInterval(cdpClock);
       stopTail();
+      agentStopped();
     }
     await judging;   // the last calls are judged before the score is written
     const seconds = (Date.now() - started) / 1000;
@@ -126,8 +166,10 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number): Promise
     return score({ task, model: m.label, calls, fixture: state, agent });
   } finally {
     await daemon?.stop().catch(() => { /* already down */ });
+    daemonClosed();
     await fixture.close().catch(() => { /* already closed */ });
-    try { fs.rmSync(path.join(workDir, 'mcp.json'), { force: true }); } catch { /* not written */ }
+    fixtureClosed();
+    try { fs.rmSync(agentDir, { recursive: true, force: true }); } catch { /* removed with the agent root */ }
   }
 }
 
@@ -142,7 +184,10 @@ async function plan(o: Options): Promise<void> {
   }
   for (const s of skipped) console.log(`  skip ${s.task.padEnd(26)} (${s.why})`);
   console.log('\nAgents:');
-  for (const f of found) console.log(`  ${f.id.padEnd(12)} ${f.detail ?? 'not installed'}`);
+  for (const f of found) {
+    const a = ADAPTERS.find(x => x.id === f.id);
+    console.log(`  ${f.id.padEnd(12)} ${f.detail ?? 'not installed'}${f.detail && a && !a.seesImages ? '  (no images: screenshot tasks are n/a)' : ''}`);
+  }
   const browser = findBrowser();
   console.log(`\nBrowser: ${browser ? browser.exe : 'none found (web tasks are skipped)'}`);
   try { const c = await resolveCli(o.build); console.log(`clawdcursor: ${c.version} (${c.source})`); }
@@ -150,7 +195,7 @@ async function plan(o: Options): Promise<void> {
   console.log('\nRun it with --live. A live run takes over the mouse and keyboard until it ends: do not use the computer meanwhile.');
 }
 
-async function live(o: Options): Promise<number> {
+async function live(o: Options): Promise<void> {
   const osName = currentOs();
   const { run, skipped } = selectTasks(loadTasks(), o);
   const models = o.models ? parseModels(o.models) : (await detectModels()).runs;
@@ -160,40 +205,55 @@ async function live(o: Options): Promise<number> {
   if (await portOpen(USER_CDP_PORT)) throw new Error(`a browser is listening on debug port ${USER_CDP_PORT}: clawdcursor would attach to it. Close it first.`);
   const { cli, version, source } = await resolveCli(o.build);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const outDir = path.resolve(o.out ?? path.join(os.tmpdir(), 'clawdcursor-bench', stamp));
+  const outDir = prepareOutDir(o.out ?? path.join(os.tmpdir(), 'clawdcursor-bench', stamp));
+  // Everything a run starts is registered here: Ctrl+C, a kill or a crash closes it all before the process exits.
+  const cleanup = new Cleanup();
+  const uninstall = cleanup.install();
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clawdcursor-bench-run-'));
-  fs.mkdirSync(outDir, { recursive: true });
-  console.log(`clawdcursor ${version} (${source}); ${run.length} task(s) x ${models.map(m => m.label).join(', ')}; results in ${outDir}`);
+  const agents = agentRoot();
+  const removeTemp = () => {
+    for (const dir of [tempRoot, agents]) { try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ } }
+  };
+  cleanup.add(removeTemp);
+  console.log(`clawdcursor ${version} (${source}); ${run.length} task(s) x ${models.map(m => m.label).join(', ')}${o.repeats > 1 ? ` x ${o.repeats} repeats` : ''}; results in ${outDir}`);
   const server = await startFixtureServer();
+  cleanup.add(() => server.close());
   const scores: Score[] = [];
   try {
     const native = run.some(t => t.fixture.kind === 'native') ? await buildNative(path.join(tempRoot, 'native')) : { missing: 'not needed' };
-    const env: Env = { cli, server, native, outDir, tempRoot, pos: o.pos };
+    const env: Env = { cli, server, native, outDir, tempRoot, agentRoot: agents, pos: o.pos, cleanup };
     let n = 0;
     for (const m of models) {
       for (const task of run) {
-        process.stdout.write(`${m.label} ${task.id} ... `);
-        try {
-          const s = await runOne(task, m, env, ++n);
-          if ('skip' in s) {
-            if (!skipped.some(k => k.task === task.id)) skipped.push({ task: task.id, why: s.skip });
-            console.log(`skipped (${s.skip})`);
-            continue;
+        const na = notApplicable(task, m);
+        if (na) { skipped.push({ task: task.id, why: na }); console.log(`${m.label} ${task.id} ... n/a`); continue; }
+        const repeats: Score[] = [];
+        for (let repeat = 0; repeat < o.repeats; repeat++) {
+          process.stdout.write(`${m.label} ${task.id}${o.repeats > 1 ? ` (${repeat + 1}/${o.repeats})` : ''} ... `);
+          try {
+            const s = await runOne(task, m, env, ++n, repeat);
+            if ('skip' in s) {
+              if (!skipped.some(k => k.task === task.id && k.why === s.skip)) skipped.push({ task: task.id, why: s.skip });
+              console.log(`skipped (${s.skip})`);
+              break;
+            }
+            repeats.push(s);
+            console.log(`${s.manual ? 'manual' : s.success ? 'done' : 'NOT done'}, ${s.calls} calls, ${s.screenshots} shots, ${s.seconds}s`
+              + `${s.killed ? `, stopped by the watchdog (${s.killed})` : ''}${s.gate.pass ? '' : `  [gate: ${s.gate.failures.join('; ')}]`}`);
+            if (s.killed === 'privacy') throw new Error('PRIVACY: the agent acted outside the fixture windows. The run is stopped.');
+          } catch (e) {
+            if ((e as Error).message.startsWith('PRIVACY')) { if (repeats.length) scores.push(aggregate(repeats)); throw e; }
+            skipped.push({ task: task.id, why: `${m.label}: ${(e as Error).message}` });
+            console.log(`error: ${(e as Error).message}`);
+            break;
           }
-          scores.push(s);
-          console.log(`${s.manual ? 'manual' : s.success ? 'done' : 'NOT done'}, ${s.calls} calls, ${s.screenshots} shots, ${s.seconds}s`
-            + `${s.killed ? `, stopped by the watchdog (${s.killed})` : ''}${s.gate.pass ? '' : `  [gate: ${s.gate.failures.join('; ')}]`}`);
-          if (s.killed === 'privacy') throw new Error('PRIVACY: the agent acted outside the fixture windows. The run is stopped.');
-        } catch (e) {
-          if ((e as Error).message.startsWith('PRIVACY')) throw e;
-          skipped.push({ task: task.id, why: `${m.label}: ${(e as Error).message}` });
-          console.log(`error: ${(e as Error).message}`);
         }
+        if (repeats.length) scores.push(aggregate(repeats));
       }
     }
   } finally {
-    await server.close();
-    try { fs.rmSync(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ }
+    await cleanup.runAll();
+    uninstall();
     const report = buildReport({ date: new Date().toISOString(), os: osName, clawdcursor: version, models: models.map(m => m.label), skipped }, scores);
     const baselineFile = path.resolve(o.baseline ?? path.join(__dirname, 'baseline', `${osName}.json`));
     const base: Baseline | null = fs.existsSync(baselineFile) ? JSON.parse(fs.readFileSync(baselineFile, 'utf8')) : null;
@@ -208,7 +268,6 @@ async function live(o: Options): Promise<number> {
     }
     process.exitCode = report.gate.pass ? 0 : 1;
   }
-  return process.exitCode ?? 1;
 }
 
 async function main(): Promise<void> {

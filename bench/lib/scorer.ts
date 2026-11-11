@@ -34,7 +34,10 @@ export interface Score {
   task: string; model: string; archetype: string; mechanisms: string[]; manual: boolean;
   /** null on a manual-verify task */
   success: boolean | null;
+  /** Calls, counted like screenshots and the by-name share: a batch counts by its steps, any other call as one. */
   calls: number; oracleCalls: number;
+  /** Top-level tool calls (a batch is one): what the model paid in round trips. Not gated. */
+  roundTrips: number;
   screenshots: number; oracleScreenshots: number;
   /** screenshots / oracle; null when the oracle takes none */
   screenshotRatio: number | null;
@@ -49,7 +52,11 @@ export interface Score {
   falseOk: number;
   /** the agent said DONE and the fixture state says otherwise */
   falseDone: boolean;
+  /** The fixture page was loaded more than once: a reload resets its counters, so the run does not count. */
+  reloaded: boolean;
   loops: number;
+  /** How many runs this row stands for (--repeats), and how many of them were done. */
+  runs: number; successes: number;
   seconds: number;
   /** the watchdog rule that stopped the agent */
   killed?: string;
@@ -104,7 +111,8 @@ export function score(r: RunRecord): Score {
   const actCoords = count('act-coords');
   const pointed = actName + actCoords;
   const manual = !!task.manualVerify;
-  const success = manual || !task.success ? null : (r.fixture ? evaluate(task.success, r.fixture) : false);
+  const reloaded = (r.fixture?.loads ?? 1) > 1;
+  const success = manual || !task.success ? null : (r.fixture && !reloaded ? evaluate(task.success, r.fixture) : false);
   // A probe (a real app) gives state without a timeline: nothing to match the calls against.
   const falseOk = r.fixture && r.fixture.events.length ? countFalseOk(r.calls, r.fixture) : 0;
   const falseDone = success === false && r.agent.finalText.includes(DONE_MARK);
@@ -112,15 +120,16 @@ export function score(r: RunRecord): Score {
   const s: Score = {
     task: task.id, model: r.model, archetype: task.archetype, mechanisms: task.mechanisms, manual,
     success,
-    calls: r.calls.length, oracleCalls: task.oracle.calls,
+    calls: us.length, oracleCalls: task.oracle.calls, roundTrips: r.calls.length,
     screenshots, oracleScreenshots: task.oracle.screenshots,
     screenshotRatio: task.oracle.screenshots ? round(screenshots / task.oracle.screenshots) : null,
     actName, actCoords,
     byName: pointed ? round(actName / pointed) : null,
     byCoords: pointed ? round(actCoords / pointed) : null,
     errors: r.calls.filter(c => !c.ok && c.outcome !== 'refused' && c.outcome !== 'consent_required').length,
-    falseSuccesses: falseOk + (falseDone ? 1 : 0), falseOk, falseDone,
+    falseSuccesses: falseOk + (falseDone ? 1 : 0), falseOk, falseDone, reloaded,
     loops,
+    runs: 1, successes: success ? 1 : 0,
     seconds: Math.round(r.agent.seconds),
     ...(r.agent.killed ? { killed: r.agent.killed.rule } : {}),
     gate: { pass: true, failures: [] },
@@ -135,7 +144,8 @@ const round = (n: number) => Math.round(n * 100) / 100;
 export function gateOf(s: Omit<Score, 'gate'>): Score['gate'] {
   if (s.manual) return { pass: true, failures: [] };
   const failures: string[] = [];
-  if (s.success !== true) failures.push('task not done (fixture state)');
+  if (s.reloaded) failures.push('the fixture page was reloaded');
+  else if (s.success !== true) failures.push(s.runs > 1 ? `task done in ${s.successes} of ${s.runs} runs` : 'task not done (fixture state)');
   const maxShots = s.oracleScreenshots + GATE.screenshotSlack;
   if (s.screenshots > maxShots) failures.push(`screenshots ${s.screenshots} > ${maxShots}`);
   const maxCalls = Math.ceil(s.oracleCalls * GATE.callFactor);
@@ -144,6 +154,41 @@ export function gateOf(s: Omit<Score, 'gate'>): Score['gate'] {
   if (s.loops > 0) failures.push(`loops ${s.loops}`);
   if (s.killed === 'privacy') failures.push('acted in an app that is not a fixture');
   return { pass: failures.length === 0, failures };
+}
+
+const median = (xs: number[]) => { const v = [...xs].sort((a, b) => a - b); return v[Math.floor((v.length - 1) / 2)]; };
+
+/**
+ * One row for several runs of the same task and model (--repeats): the median of every count, done when most runs were
+ * done, so one unlucky sample does not decide the gate. A privacy stop or a reload in any run stays.
+ */
+export function aggregate(runs: Score[]): Score {
+  if (runs.length === 1) return runs[0];
+  const first = runs[0];
+  const med = (key: 'calls' | 'roundTrips' | 'screenshots' | 'actName' | 'actCoords' | 'errors' | 'falseSuccesses' | 'falseOk' | 'loops' | 'seconds') => median(runs.map(r => r[key]));
+  const successes = runs.filter(r => r.success === true).length;
+  const actName = med('actName'), actCoords = med('actCoords');
+  const pointed = actName + actCoords;
+  const screenshots = med('screenshots');
+  const killed = runs.find(r => r.killed === 'privacy')?.killed ?? runs.find(r => r.killed)?.killed;
+  const s: Score = {
+    ...first,
+    success: first.manual ? null : successes * 2 > runs.length,
+    calls: med('calls'), roundTrips: med('roundTrips'), screenshots,
+    screenshotRatio: first.oracleScreenshots ? Math.round(screenshots / first.oracleScreenshots * 100) / 100 : null,
+    actName, actCoords,
+    byName: pointed ? Math.round(actName / pointed * 100) / 100 : null,
+    byCoords: pointed ? Math.round(actCoords / pointed * 100) / 100 : null,
+    errors: med('errors'), falseSuccesses: med('falseSuccesses'), falseOk: med('falseOk'),
+    falseDone: runs.filter(r => r.falseDone).length * 2 > runs.length,
+    reloaded: runs.some(r => r.reloaded),
+    loops: med('loops'), seconds: med('seconds'),
+    runs: runs.length, successes,
+    gate: { pass: true, failures: [] },
+  };
+  if (killed) s.killed = killed; else delete s.killed;
+  s.gate = gateOf(s);
+  return s;
 }
 
 export interface Report {
@@ -201,7 +246,8 @@ export function renderMarkdown(r: Report, deltas?: Delta[]): string {
   out.push(`# clawdcursor benchmark: ${r.meta.os}, clawdcursor ${r.meta.clawdcursor}`, '');
   out.push(`${r.meta.date}. Gate: **${r.gate.pass ? 'PASS' : 'FAIL'}** (${r.gate.gated - r.gate.failed}/${r.gate.gated} rows pass).`, '');
   out.push(`Gate per row: task done (fixture state), screenshots <= oracle + ${GATE.screenshotSlack}, calls <= ${GATE.callFactor} x oracle, `
-    + 'no false success, no loop. Manual-verify rows are not gated.', '');
+    + 'no false success, no loop. Manual-verify rows are not gated. Calls and screenshots count each step of a batch; '
+    + '"trips" are top-level calls. With repeats, a row is the median of its runs.', '');
   for (const model of r.meta.models) {
     const rows = r.scores.filter(s => s.model === model);
     if (!rows.length) continue;
@@ -209,12 +255,12 @@ export function renderMarkdown(r: Report, deltas?: Delta[]): string {
     out.push(`## ${model}`, '');
     out.push(`Done ${gated.filter(s => s.success).length}/${gated.length}, calls ${sum(rows, 'calls')} (oracle ${sum(rows, 'oracleCalls')}), `
       + `screenshots ${sum(rows, 'screenshots')} (oracle ${sum(rows, 'oracleScreenshots')}), false successes ${sum(rows, 'falseSuccesses')}, loops ${sum(rows, 'loops')}.`, '');
-    out.push('| Task | Type | Guards | Done | Calls (oracle) | Shots (oracle) | Shots / oracle | By name | By coords | False ok | Loops | Time | Gate |');
-    out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+    out.push('| Task | Type | Guards | Done | Calls (oracle) | Trips | Shots (oracle) | Shots / oracle | By name | By coords | False ok | Loops | Time | Gate |');
+    out.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
     for (const s of rows) {
-      const done = s.manual ? 'manual' : s.success ? 'yes' : 'NO';
+      const done = s.manual ? 'manual' : s.runs > 1 ? `${s.successes}/${s.runs}` : s.success ? 'yes' : 'NO';
       const gate = s.manual ? '-' : s.gate.pass ? 'pass' : `FAIL: ${s.gate.failures.join('; ')}`;
-      out.push(`| ${s.task} | ${s.archetype} | ${s.mechanisms.join(' ')} | ${done} | ${s.calls} (${s.oracleCalls}) | ${s.screenshots} (${s.oracleScreenshots}) | `
+      out.push(`| ${s.task} | ${s.archetype} | ${s.mechanisms.join(' ')} | ${done} | ${s.calls} (${s.oracleCalls}) | ${s.roundTrips} | ${s.screenshots} (${s.oracleScreenshots}) | `
         + `${s.screenshotRatio ?? '-'} | ${pct(s.byName)} | ${pct(s.byCoords)} | ${s.falseSuccesses} | ${s.loops} | ${s.seconds}s | `
         + `${gate}${s.killed ? ` (stopped: ${s.killed})` : ''} |`);
     }

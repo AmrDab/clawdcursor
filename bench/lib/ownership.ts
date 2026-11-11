@@ -58,7 +58,7 @@ export async function readFocus(platform: string = process.platform): Promise<Fo
   return { chain };
 }
 
-const portOpen = (port: number) => new Promise<boolean>(resolve => {
+export const portOpen = (port: number) => new Promise<boolean>(resolve => {
   const s = net.connect({ port, host: '127.0.0.1' });
   s.once('connect', () => { s.destroy(); resolve(true); });
   s.once('error', () => resolve(false));

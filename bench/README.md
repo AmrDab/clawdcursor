@@ -13,14 +13,21 @@ judged by a model:
 - **success** is a predicate on the fixture's own state: what the web page posted to the fixture server, the JSON file
   the native fixture writes, or a read-only probe of a real app;
 - **calls, screenshots, by-name and by-coordinates share** come from the isolated server's session log, which classes
-  every call (blind / vision / act-name / act-coords / act-other);
+  every call (blind / vision / act-name / act-coords / act-other). All of them count the same way: a batch by its
+  steps, any other call as one. "Trips" in the report are top-level calls (a batch is one); they are not gated;
 - **false successes**: an action the server reported ok during which the fixture recorded nothing, plus an agent that
   ended with `BENCH_RESULT: DONE` while the fixture state says otherwise;
 - **loops**: the same call (tool and arguments) three times in a row;
 - **time**, and **screenshots / oracle**.
 
-The oracle of a task is the cost of a scripted trajectory: one read, then one call per action, no batch. A batch counts
-as one call, so batching only helps.
+The oracle of a task is the cost of a scripted trajectory: one read, then one call per action, no batch. A batch saves
+round trips, not calls: its steps are counted.
+
+A web run in which the page was loaded more than once fails: a reload resets the page's counters. The fixture server
+keeps every event of every load.
+
+With `--repeats N` each task runs N times per model and its row is the median of the runs; it is done when most runs
+were done. A privacy stop or a reload in any run stays.
 
 ### The gate
 
@@ -41,7 +48,7 @@ Manual-verify tasks (Designcenter) give metrics only. `npm run bench -- --live` 
 
 ```
 npm run bench                         # the plan: tasks for this OS, agents found. Starts nothing.
-npm run bench -- --selfcheck --build .  # proves fixtures, predicates and isolation. No agent, no window.
+npm run bench -- --selfcheck --build .  # proves fixtures, predicates, isolation and the fence. No agent, no window.
 npm run build
 npm run bench -- --live --build .     # runs the tasks
 ```
@@ -58,7 +65,8 @@ Options of a live run:
 | `--tasks id,id` | only these tasks |
 | `--include-manual` | also the manual-verify tasks (open Designcenter with a part loaded first) |
 | `--window-pos x,y` | where the fixture window opens: run the suite on the second monitor to guard M4 |
-| `--out <dir>` | results directory (default: a new folder under the temp directory) |
+| `--out <dir>` | results directory: new or empty (default: a new folder under the temp directory). A directory that holds anything is refused, so an earlier run's logs cannot be read back. |
+| `--repeats N` | run each task N times per model and score the median (1 to 9, default 1) |
 | `--update-baseline` | write `bench/baseline/<os>.json` from this run |
 | `--baseline <file>` | compare with another baseline |
 
@@ -70,10 +78,14 @@ task the session log, the fixture state, the agent's log and the server's log.
 Only what is installed is used.
 
 - **claude-code**: `claude -p --model <m> --mcp-config <file> --strict-mcp-config --allowedTools "mcp__clawdcursor__*"`,
-  no built-in tools, prompt on stdin. Models: `sonnet`, `haiku`. Claude Code still loads the user's own `CLAUDE.md`.
-- **codex**: `codex exec --json --ignore-user-config --disable plugins --disable shell_tool -c mcp_servers.clawdcursor.*`.
-  The token travels in an environment variable. Model: `default` (Codex's own), or any name.
-- **ollama**: a function-calling loop in `lib/adapters/ollama.ts` against `127.0.0.1:11434`. The model sees no images.
+  `--setting-sources project`, no built-in tools, prompt on stdin. Models: `sonnet`, `haiku`.
+- **codex**: `codex exec --json --ignore-user-config --disable plugins --disable shell_tool -c project_doc_max_bytes=0
+  -c mcp_servers.clawdcursor.*`. The token travels in an environment variable. Model: `default` (Codex's own), or any name.
+- **ollama**: a function-calling loop in `lib/adapters/ollama.ts` against `127.0.0.1:11434`. The model is shown no
+  images, so the tasks whose oracle needs a screenshot (canvas, CAD) are not run for it: they are listed as n/a, not failed.
+
+Every agent runs in a new empty directory outside the owner's home (the Public folder on Windows), so no `CLAUDE.md`,
+`AGENTS.md`, hook or project setting of the owner's loads.
 
 ### Isolation and privacy
 
@@ -85,7 +97,13 @@ Only what is installed is used.
 - **Real apps** (Calculator, TextEdit) are used only when installed and not already running: an open window of the
   owner's is never reused. Notepad is never used.
 - **Every prompt** starts with the rules: only the fixture window, never list windows, never another app.
-- **The watchdog** follows the session log and stops the agent on:
+- **The fence** is the first layer, and it acts BEFORE anything happens: the daemon is started with
+  `CLAWD_FENCE_PIDS=<the fixture's processes>` and clawdcursor itself refuses (code `FENCED`) every input, act, window
+  action, launch, clipboard access, window list, OCR and capture outside those processes and their children, each
+  step of a batch included. A screenshot shows only the fenced window. See SECURITY.md and `src/core/fence.ts`.
+- **Ctrl+C, a kill or a crash** stops the agent, kills the daemon, closes every fixture and browser and removes the
+  temp homes before the runner exits.
+- **The watchdog** is the second layer. It follows the session log, after each call, and stops the agent on:
   1. *privacy*: a call that does something to a window, or such a step of a batch, that is not proven to be in the
      fixture. It fails closed, and an app name alone never passes:
      - the log names an app: it must be the fixture's name, and the keyboard focus must belong to a process the
@@ -120,7 +138,7 @@ Only what is installed is used.
 | native-dialog-fill | native dialog | all | M1 | 6 / 0 | text fields, a list, a checkbox, Apply |
 | native-dialog-modal | native dialog | all | M2 M5 | 3 / 0 | the modal's OK, not the window's OK behind it |
 | native-dialog-duplicate | native dialog | all | M2 | 2 / 0 | two "Edit" buttons told apart by their group |
-| calc-multiply | Store/UWP app | Windows, macOS | M1 | 3 / 0 | keys reach Calculator and the result is on the display |
+| calc-multiply | Store/UWP app | Windows | M1 | 3 / 0 | keys reach Calculator; the display AND the expression are read, so typing the result does not pass |
 | editor-type-lines | document editor | Windows | M1 M5 | 2 / 0 | two lines land whole in the fixture editor |
 | textedit-type-lines | document editor | macOS | M1 M5 | 2 / 0 | the same in TextEdit |
 | cad-designcenter-orbit | 3D/CAD viewport | Windows | M3 | 4 / 2 | manual verify: metrics only |
@@ -131,7 +149,7 @@ Where success is read:
   server (`lib/fixture-server.ts`, 127.0.0.1 only);
 - **native tasks**: the fixture (`fixtures/native/<os>`: WinForms built with Add-Type, AppKit built with swiftc, GTK
   through python3 gi) writes `{state, events}` to a JSON file on every change;
-- **Calculator**: the display, read through UI Automation (`fixtures/apps/calculator-probe.ps1`) or AppleScript;
+- **Calculator**: the display and the expression, read through UI Automation (`fixtures/apps/calculator-probe.ps1`);
 - **TextEdit**: the document text, through AppleScript.
 
 Not covered yet, from the epic's list of app types: Electron, Java or Qt, and a read-only terminal.
@@ -173,4 +191,4 @@ The rule: **a new bug becomes a new task for an existing mechanism.** It is not 
 
 `bench/__tests__` (vitest, no desktop, part of `npm run test:ci`): the scorer and the gate, the watchdog rules, task-spec
 validation, the fixture server, the adapters' command lines, and the Windows fixture's state recording (its self-test
-shows no window). CI also compiles and self-tests the macOS fixture and syntax-checks the Linux one. Live runs are manual.
+shows no window), and the cleanup on Ctrl+C. The fence has its own tests in `src/__tests__/fence.test.ts`. CI also compiles and self-tests the macOS fixture and syntax-checks the Linux one. Live runs are manual.

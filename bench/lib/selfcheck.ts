@@ -169,8 +169,9 @@ function wroteSession(dir: string, pid: number): boolean {
 
 /**
  * The isolation of the runner: the fixture browser (headless here) opens a page and is closed whole; the isolated daemon
- * starts in a temp home on its own port, refuses a request without its token and lists the six tools. No tool is
- * called, so nothing on the desktop is read or touched. The owner's ~/.clawdcursor must be byte-for-byte as before.
+ * starts in a temp home on its own port, refuses a request without its token and lists the six tools. It is fenced
+ * (CLAWD_FENCE_PIDS) to the headless browser, and a handful of calls prove the fence refuses them before anything on
+ * the desktop is read or touched. The owner's ~/.clawdcursor must be byte-for-byte as before.
  */
 export async function selfcheckIsolation(buildDir: string | undefined, log: (line: string) => void = console.log): Promise<boolean> {
   const real = path.join(os.homedir(), '.clawdcursor');
@@ -186,7 +187,9 @@ export async function selfcheckIsolation(buildDir: string | undefined, log: (lin
     const browser = exe ? await openBrowser(exe, { profileDir, url: server.url('trap', 'isolation'), extraArgs: ['--headless=new'] }) : null;
     const cdpPort = browser?.cdpPort ?? await freePort();
     if (!browser) log('skip fixture browser: no Chromium browser installed');
-    const daemon = await startIsolated({ cli, home: path.join(root, 'home'), sessionDir: path.join(root, 'sessions'), cdpPort, logFile: path.join(root, 'server.log') });
+    // Fenced to the headless fixture browser (or to nothing): no call below may reach the desktop.
+    const fencePids = exe && browser ? await pidsByCommandLine(profileDir, path.basename(exe.exe)) : [];
+    const daemon = await startIsolated({ cli, home: path.join(root, 'home'), sessionDir: path.join(root, 'sessions'), cdpPort, fencePids, logFile: path.join(root, 'server.log') });
     const daemonPid = daemon.pid;
     try {
       if (browser) {
@@ -205,6 +208,19 @@ export async function selfcheckIsolation(buildDir: string | undefined, log: (lin
       const client = new Client({ name: 'bench-selfcheck', version: '0' });
       await client.connect(new StreamableHTTPClientTransport(new URL(daemon.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${daemon.token}` } } }));
       const tools = (await client.listTools()).tools.map(t => t.name).sort().join(',');
+      // The fence, end to end: each of these is refused by the daemon BEFORE it reads or does anything (code FENCED).
+      // The window in front here is whatever the owner is using: it is not in the fence.
+      const fencedCalls: Array<[string, Record<string, unknown>]> = [
+        ['window', { action: 'list' }], ['system', { action: 'clipboard_read' }], ['computer', { action: 'screenshot' }],
+        ['accessibility', { action: 'read_tree' }], ['window', { action: 'open_url', url: 'http://127.0.0.1:9/' }],
+        ['batch', { steps: [{ name: 'system', arguments: { action: 'clipboard_read' } }, { name: 'window', arguments: { action: 'list' } }] }],
+      ];
+      for (const [name, args] of fencedCalls) {
+        const r = await client.callTool({ name, arguments: args }) as { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+        const text = (r.content ?? []).map(c => c.text ?? '').join('\n');
+        const image = (r.content ?? []).some(c => c.type === 'image');
+        ok = check(!!r.isError && text.includes('FENCED: ') && !image, `fence: ${name} ${String(args.action ?? '')} is refused before anything is read`) && ok;
+      }
       await client.close();
       ok = check(tools === 'accessibility,batch,browser,computer,system,window', `isolated clawdcursor: the six tools (${tools})`) && ok;
       ok = check(fs.existsSync(path.join(root, 'home', '.clawdcursor', 'token')), 'isolated clawdcursor: its data is in the temp home') && ok;

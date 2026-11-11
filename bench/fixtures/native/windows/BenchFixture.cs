@@ -82,6 +82,30 @@ public class Recorder
     }
 }
 
+// Raw input, before any control handles it: a click on empty space or a key no control uses still reached the app, and the
+// scorer must not call the action that sent it a false success.
+public class RawInput : IMessageFilter
+{
+    private readonly Recorder rec;
+    private DateTime lastMove = DateTime.MinValue;
+
+    public RawInput(Recorder rec) { this.rec = rec; }
+
+    public bool PreFilterMessage(ref Message m)
+    {
+        switch (m.Msg)
+        {
+            case 0x0201: case 0x0204: case 0x0207: rec.Event("mouse", "raw"); break;   // left, right, middle button down
+            case 0x0100: case 0x0104: rec.Event("key", "raw"); break;                  // key down, system key down
+            case 0x020A: case 0x020E: rec.Event("wheel", "raw"); break;                // wheel, horizontal wheel
+            case 0x0200:                                                               // mouse move, at most four a second
+                if ((DateTime.UtcNow - lastMove).TotalMilliseconds > 250) { lastMove = DateTime.UtcNow; rec.Event("move", "raw"); }
+                break;
+        }
+        return false;   // never swallowed: the app handles it as usual
+    }
+}
+
 // A form that can be shown without taking the focus (the self-test never activates a window).
 public class QuietForm : Form
 {
@@ -254,7 +278,7 @@ public static class BenchFixture
         form.StartPosition = FormStartPosition.Manual;
         form.Location = pos;
         rec.Write();
-        if (!selftest) { Application.Run(form); return 0; }
+        if (!selftest) { Application.AddMessageFilter(new RawInput(rec)); Application.Run(form); return 0; }
 
         // Self-test: off screen, never activated, driven through the controls' own handlers, then closed.
         form.Quiet = true;
