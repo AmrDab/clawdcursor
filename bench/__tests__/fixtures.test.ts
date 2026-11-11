@@ -153,3 +153,44 @@ describe.runIf(process.platform === 'win32')('the Windows native fixture', () =>
     expect(() => execFileSync(exe, ['--selftest'], { timeout: 30_000 })).toThrow();
   }, 40_000);
 });
+
+// The three native fixtures are one fixture in three toolkits: the same windows, control names and state keys.
+describe('the native fixtures agree across OSes', () => {
+  const dir = path.join(__dirname, '..', 'fixtures', 'native');
+  const sources = {
+    windows: fs.readFileSync(path.join(dir, 'windows', 'BenchFixture.cs'), 'utf8'),
+    macos: fs.readFileSync(path.join(dir, 'macos', 'BenchFixture.swift'), 'utf8'),
+    linux: fs.readFileSync(path.join(dir, 'linux', 'bench_fixture.py'), 'utf8'),
+  };
+  const KEYS = ['name', 'email', 'priority', 'subscribe', 'applied', 'billingEdit', 'shippingEdit', 'mainOk', 'mainCancel', 'modalOpen', 'modalResult', 'text'];
+  const NAMES = ['Bench Dialog', 'Bench Editor', 'Confirm delete', 'Name', 'Email', 'Priority', 'Subscribe', 'Billing', 'Shipping', 'Edit', 'Delete...',
+    'Apply', 'OK', 'Cancel', 'Document', 'Low', 'Normal', 'High'];
+
+  it.each(Object.entries(sources))('%s has every state key and every control name', (_os, src) => {
+    for (const k of KEYS) expect(src, k).toContain(`"${k}"`);
+    for (const n of NAMES) expect(src, n).toContain(`"${n}`);
+  });
+
+  it.each(Object.entries(sources))('%s takes the same command line and has a self-test', (_os, src) => {
+    for (const flag of ['--state', '--mode', '--pos', '--selftest']) expect(src).toContain(flag);
+    expect(src).toContain('Self Test');
+    expect(src).toContain('self@test.example');
+  });
+
+  it('every predicate path of the native tasks is a state key of the fixtures', () => {
+    const paths = new Set<string>();
+    const walk = (p: unknown): void => {
+      if (!p || typeof p !== 'object') return;
+      const o = p as Record<string, unknown>;
+      if (typeof o.path === 'string') paths.add(o.path.split('.')[0]);
+      for (const v of Object.values(o)) if (Array.isArray(v)) v.forEach(walk); else walk(v);
+    };
+    for (const t of loadTasks().filter(x => x.fixture.kind === 'native')) walk(t.success);
+    expect(paths.size).toBeGreaterThan(5);
+    for (const k of paths) expect(KEYS).toContain(k);
+  });
+
+  it('the Linux fixture names its process, so no generic "python3" is allowed by the privacy guard', () => {
+    expect(sources.linux).toContain('name_process("BenchFixture")');
+  });
+});

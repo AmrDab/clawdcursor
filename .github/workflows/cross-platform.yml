@@ -75,6 +75,25 @@ jobs:
             swiftc -O "$f" -o "$RUNNER_TEMP/$(basename "$f" .swift)" || exit 1
           done
 
+      # The benchmark's native fixtures (bench/, issue #384). The Windows one is built and self-tested by the unit tests.
+      # macOS: compiled, then its self-test (no window is shown) must record the state the tasks read.
+      - name: Build and self-test the benchmark's macOS fixture
+        if: runner.os == 'macOS'
+        run: |
+          swiftc -O bench/fixtures/native/macos/BenchFixture.swift -o "$RUNNER_TEMP/BenchFixture"
+          for mode in dialog editor; do
+            "$RUNNER_TEMP/BenchFixture" --state "$RUNNER_TEMP/bench-$mode.json" --mode "$mode" --selftest
+            cat "$RUNNER_TEMP/bench-$mode.json"; echo
+          done
+          grep -q '"modalResult":"ok"' "$RUNNER_TEMP/bench-dialog.json"
+          grep -q '"shippingEdit":1' "$RUNNER_TEMP/bench-dialog.json"
+          grep -q 'first line' "$RUNNER_TEMP/bench-editor.json"
+
+      # Linux: GTK needs a display, so the fixture is only syntax-checked here.
+      - name: Syntax-check the benchmark's Linux fixture
+        if: runner.os == 'Linux'
+        run: python3 -m py_compile bench/fixtures/native/linux/bench_fixture.py
+
       - name: Run test suite
         run: npm run test:ci
 
