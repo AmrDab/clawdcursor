@@ -5,14 +5,14 @@
     "url": "https://github.com/AmrDab"
   },
   "metadata": {
-    "description": "Safe cross-OS desktop & browser control for AI agents — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available.",
+    "description": "Cross-OS desktop & browser control for AI agents, through the accessibility tree first and screenshots last — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available.",
     "version": "1.0.0"
   },
   "plugins": [
     {
       "name": "clawdcursor",
       "source": "./",
-      "description": "Safe cross-OS desktop & browser control — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available. Registers the clawdcursor MCP server (compact tool surface) and bundles its usage skill. Launches via npx, so no separate install step is required.",
+      "description": "Cross-OS desktop & browser control, through the accessibility tree first and screenshots last — the fallback execution layer for when APIs, CLIs, and direct integrations aren't available. Registers the clawdcursor MCP server (compact tool surface) and bundles its usage skill. Launches via npx, so no separate install step is required.",
       "version": "2.0.0",
       "homepage": "https://clawdcursor.com",
       "license": "MIT",

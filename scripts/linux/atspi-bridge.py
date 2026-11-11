@@ -145,14 +145,22 @@ def safe(fn, default=None):
         return default
 
 
+def is_secure(acc: Any) -> bool:
+    """A password entry (AT-SPI role "password text"; AT-SPI has no separate "secure" state). Its value is never
+    returned by a read: not in the tree, a find, the focused element, get-value or page text. The same rule as
+    UIA IsPassword on Windows and AXSecureTextField on macOS."""
+    return (safe(lambda: acc.get_role_name(), '') or '').lower() == 'password text'
+
+
 def read_text(acc: Any, limit: Optional[int] = None) -> Optional[str]:
-    """Contents of the Text interface, or None when acc has none.
+    """Contents of the Text interface, or None when acc has none. A password entry reads as None: every text read in
+    this file goes through here, so none of them can return its contents.
 
     PyGObject's get_text_iface() hands back the Accessible itself, and on an
     Accessible `.get_text` is the deprecated no-argument getter, not
     Text.get_text(start, end) — so `txt.get_text(0, n)` raised and every text
     view / entry read as empty. Call the interface functions explicitly."""
-    if not safe(lambda: acc.get_text_iface()):
+    if is_secure(acc) or not safe(lambda: acc.get_text_iface()):
         return None
     count = safe(lambda: Atspi.Text.get_character_count(acc), 0) or 0
     if limit is not None:
@@ -262,13 +270,14 @@ def node_to_dict(acc: Any) -> Optional[dict]:
 
     # Value via Value or Text interface (whichever applies).
     value = None
+    secure = is_secure(acc)                      # a password entry: no value, from either interface
     try:
-        v = acc.get_value_iface()
+        v = None if secure else acc.get_value_iface()
         if v:
             value = str(v.get_current_value())
     except Exception:
         pass
-    if value is None:
+    if value is None and not secure:
         # A label's text IS its name; repeating it as the value is noise.
         value = read_text(acc, 512) or None
         if value is not None and value == name:
@@ -847,7 +856,7 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         # readable: the value itself was read, so "" is an empty field. A password entry withholds its value (its Text
         # is bullets): not readable, and not "empty".
         vi = safe(lambda: acc.get_value_iface())
-        if (safe(lambda: acc.get_role_name(), '') or '').lower() == 'password text':
+        if is_secure(acc):
             out["success"], out["value"], out["readable"], out["secure"] = True, '', False, True
         elif vi:
             out["success"], out["value"], out["readable"] = True, str(safe(lambda: vi.get_current_value(), '')), True

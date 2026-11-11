@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clawdcursor: safe desktop control for any AI agent</title>
-  <meta name="description" content="Local MCP server that gives any AI agent safe desktop control. Compiles the screen into a UI map (a11y tree + OCR) with stable element ids, acts by id not by pixel, verifies its own actions, stops the moment you say so. Windows · macOS · Linux. No cloud.">
-  <meta property="og:title" content="clawdcursor. It sees. It acts. It verifies.">
-  <meta property="og:description" content="Desktop control for any AI agent. Compiles the screen into a UI map, acts on stable element ids, verifies its own actions, stops when you say so. Local · cross-OS · any model.">
+  <title>clawdcursor: desktop control for any AI agent</title>
+  <meta name="description" content="A local MCP server that gives your AI agent control of the desktop. The agent reads the screen as text (accessibility tree, then OCR, screenshots last) and acts on elements by name. No model or API key of its own: your agent's host drives six tools. Windows · macOS · Linux.">
+  <meta property="og:title" content="clawdcursor: desktop control for any AI agent">
+  <meta property="og:description" content="A local MCP server your agent drives. It reads the screen as text, acts on elements by name, and stops when you press Stop. Windows · macOS · Linux · any model with tool calling.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://clawdcursor.com/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -17,94 +17,102 @@
 
   <!--
     AGENT-READABLE SUMMARY (v2.0.0)
-    clawdcursor: the local MCP server that gives any agent safe desktop control.
+    clawdcursor: a local MCP server that gives an AI agent control of the desktop.
 
     ── WHAT IT IS ──────────────────────────────────────────────────────────────
-    A local MCP server. Install once. Any tool-calling agent connects over MCP
-    and gets safe control of the real desktop: clicks, types, reads the screen,
-    opens apps, drives any GUI. No cloud, no telemetry by default. The server
-    binds to 127.0.0.1. Bearer-token auth on every HTTP request.
+    A tool layer. It has no model, no API key and no agent loop of its own.
+    The agent's host (Claude Code, Claude Desktop, Codex, Cursor, a local
+    Llama, any MCP client) brings the model and drives the tools: read the
+    screen, click, type, open apps, drive any GUI, with the user's own OS
+    permissions. Runs locally; the HTTP server binds 127.0.0.1 with a bearer
+    token. No telemetry. Use it as the fallback when no API, CLI or file edit
+    does the job.
 
-    ── TOOL SURFACE (PUBLIC) ────────────────────────────────────────────────────
-    6 compact compound tools, ~7,000 tokens of catalog (granular: ~20,000). RECOMMENDED.
-      computer      : mouse, keyboard, screenshot (raw I/O)
-      accessibility : drive UI by element name; compile a fused el_NN UI map
-                      and act on {element_id, snapshot_id} (survives layout shifts)
-      window        : launch, focus, resize apps
-      system        : clipboard, OCR, shortcuts, webview detection,
-                      pause_for_user (hand the desktop to the user for a
-                      sign-in / 2FA / CAPTCHA; continue when they click Resume)
-      browser       : Chrome DevTools Protocol for Electron/WebView2 apps
-      batch         : run a guarded sequence of the above in one call
+    ── CHANGED IN 2.0.0 (first published as 1.6.0, which is deprecated) ────────
+    Removed: the built-in agent loop, the `task` tool, `clawdcursor task`, the
+    scheduler, every provider / model / API-key setting and flag, and the
+    policy gate (tiers, confirm, blocked labels). `clawdcursor doctor` is a
+    diagnostic only. A thin outline around the working window replaced the
+    full-screen glow.
 
-    ── FLAGSHIP CAPABILITIES ─────────────────────────────────────────────────────
-    UI State Compiler: one fused, confidence-scored map of the screen
-      (accessibility + OCR) with stable el_NN ids. Act symbolically, not by pixel.
-    Reactive verification: pass `expect` on a consequential action and the call
-      verifies the outcome (with a settle window) and reports a DEVIATION if the
-      UI didn't obey, instead of silently "succeeding."
+    ── TOOL SURFACE ────────────────────────────────────────────────────────────
+    6 compact tools (--compact, recommended), about 7,000 tokens of catalog:
+      accessibility : read the UI tree, act on elements by name; compile_ui
+                      returns {element_id, snapshot_id} that survives layout shifts
+      system        : copy_all_text, OCR, clipboard, shortcuts, webview
+                      detection, pause_for_user (hand one step to the user)
+      window        : list, focus, resize, close; open apps, files and URLs
+      browser       : Chrome DevTools Protocol for browsers and Electron / WebView2 apps
+      computer      : raw mouse and keyboard; screenshot is the last resort
+      batch         : several calls in one round trip, each step guarded
+    89 granular tools (one per action, about 19,000 tokens) without --compact.
 
-    ── COMPATIBILITY / DEBUGGING ────────────────────────────────────────────────
-    100+ granular tools (one schema per verb), the default without --compact, or
-    `tools/list` on either transport. Use when your runtime requires every
-    primitive as a top-level MCP tool, or for direct debugging.
+    ── HOW TO USE IT: BLIND FIRST ──────────────────────────────────────────────
+    SEE: accessibility read_tree -> system copy_all_text -> system ocr ->
+         computer screenshot (last).
+    ACT: accessibility invoke / set_value by name -> accessibility smart_click
+         by visible label -> computer click x,y (last).
+    Keys are OS-aware: the server names the OS; `mod` is cmd on macOS, ctrl on
+    Windows and Linux. Pass `expect` on an action that matters: the call
+    re-reads the screen and reports a DEVIATION if the state is not there.
+    Each result ends with a status line: confirmed | unverified | refused | failed.
 
-    ── INSTALL ─────────────────────────────────────────────────────────────────
-    Recommended (any OS): npm i -g clawdcursor    (Node 20+; macOS: also run clawdcursor grant)
-    Windows one-liner:  powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
-    macOS / Linux:      curl -fsSL https://clawdcursor.com/install.sh | bash
+    ── INSTALL PER HOST ────────────────────────────────────────────────────────
+    Claude Code:    claude plugin marketplace add AmrDab/clawdcursor
+                    claude plugin install clawdcursor@clawdcursor
+    Claude Desktop: the .mcpb extension from
+                    https://github.com/AmrDab/clawdcursor/releases/latest
+    Codex, Cursor, Windsurf, Zed, others (stdio MCP):
+                    npm i -g clawdcursor            (Node 20+)
+                    clawdcursor consent --accept    (one-time consent; also
+                                                     registers the usage skill)
+                    clawdcursor grant               (macOS only)
+                    then register the command `clawdcursor mcp --compact`:
+                    { "mcpServers": { "clawdcursor":
+                      { "command": "clawdcursor", "args": ["mcp", "--compact"] } } }
+                    No global install: command "npx", args
+                    ["-y","clawdcursor","mcp","--compact"].
+    HTTP:           clawdcursor agent --compact   -> http://127.0.0.1:3847/mcp,
+                    bearer token in ~/.clawdcursor/token.
+    Update:         npm i -g clawdcursor@latest   (`clawdcursor update` is
+                    planned for 2.1). `clawdcursor versions` lists every copy.
+    Installer scripts (they run npm i -g clawdcursor):
+      Windows:        powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
+      macOS / Linux:  curl -fsSL https://clawdcursor.com/install.sh | bash
 
-    After install, pick your path:
-      clawdcursor consent --accept   # one-time desktop-control authorization (always required)
-                                     #   ALSO registers clawdcursor as a Skill in detected agents
-                                     #   (Claude Code, OpenClaw, Codex, Cursor). Re-run anytime:
-                                     #   clawdcursor register-skill
-      clawdcursor grant              # macOS only: approve Accessibility + Screen Recording
-      ── Editor-hosted agent (Claude Code/Cursor/…): that's ALL the setup.
-         Add the MCP entry below; your editor spawns `clawdcursor mcp` itself.
-      ── HTTP daemon: `clawdcursor agent`. `doctor` is NOT needed to drive
-         clawdcursor over MCP from your own agent.
-
-    ── PICK A MODE ─────────────────────────────────────────────────────────────
-    `clawdcursor mcp`   : stdio MCP server. Use when AI lives in your editor
-                          (Claude Code, Cursor, Windsurf, Zed). Editor spawns it
-                          on demand. Add this JSON to the editor's MCP config:
-                            { "mcpServers": { "clawdcursor":
-                              { "command": "clawdcursor", "args": ["mcp", "--compact"] } } }
-                          No global install? Swap "command" to "npx" with args
-                          ["-y","clawdcursor","mcp","--compact"] to fetch on demand.
-                          Claude Code: skip the JSON. Install the plugin
-                          (.claude-plugin/plugin.json); it registers this server via
-                          npx and bundles the usage skill. One step, no config.
-
-    `clawdcursor agent` : HTTP MCP daemon on 127.0.0.1:3847/mcp. Use when
-                          your agent is headless or remote and wants HTTP
-                          tools. clawdcursor never runs a model.
-
-    ── SAFETY ──────────────────────────────────────────────────────────────────
-    clawdcursor runs with the user's own permissions and does not decide what
-    the agent may do: no safety tiers. That is the agent's call and the MCP
-    host's permission prompts' (tools carry readOnlyHint / destructiveHint).
-    Before an irreversible action the user didn't ask for, ask with
-    system pause_for_user. Always enforced: the user's Stop, the pause, no
-    stray input into an AI assistant's window, and the hard key list (lock /
-    log-out combos are never sent; every other shortcut is allowed).
-    Bearer token required on HTTP. Local-only by default.
-    While an agent drives, a banner says what it is doing ("Typing in Edge")
-    and a thin amber outline marks the window it works in on every OS (Stop on the banner). At a roadblock the agent pauses: the outline
-    turns blue and the banner shows what to do, with Resume / End task.
+    ── WHAT PROTECTS THE USER ──────────────────────────────────────────────────
+    clawdcursor does not decide what the agent may do: there is no policy gate.
+    Always enforced: the user's Stop (pill, `clawdcursor stop`; holds across
+    restarts), the pause card (nothing runs while it is up; a choice or reply
+    comes only from the user; on the granular surface an agent's resume_task
+    can also end a pause, reported as unverified), no stray input into an AI assistant's window, a short per-OS
+    list of session-ending keys that are never sent, token-authenticated
+    loopback-only HTTP, screen text wrapped as untrusted data, one-time consent.
+    Per-action approval is the MCP host's job (tools carry readOnlyHint /
+    destructiveHint). If the host auto-approves tool calls, nothing asks before
+    an irreversible action; an opt-in confirm mode is planned for 2.1
+    (https://github.com/AmrDab/clawdcursor/issues/373). Agents: before an
+    irreversible action the user did not ask for, ask with system
+    pause_for_user. Never type or ask for credentials.
+    While an agent drives, a pill says what it is doing ("Typing in Edge") and
+    a thin outline marks its window: amber while working, blue while waiting
+    for the user.
 
     ── PLATFORMS ───────────────────────────────────────────────────────────────
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
     Linux X11, Linux Wayland.
 
-    ── MODEL ───────────────────────────────────────────────────────────────────
-    Any LLM with tool calling. Claude, GPT, Gemini, Llama, Kimi, Ollama, …
-    Your agent brings its own; clawdcursor never runs one.
+    ── NEXT: 2.1 ───────────────────────────────────────────────────────────────
+    One standard benchmark across app types, OSes and models as the release
+    gate, plus honest results, target resolution, perception without a tree,
+    screen geometry and timing.
+    https://github.com/AmrDab/clawdcursor/milestone/1
 
-    Source:  https://github.com/AmrDab/clawdcursor
-    Docs:    https://github.com/AmrDab/clawdcursor/tree/main/docs
-    License: MIT
+    Agent guide: https://clawdcursor.com/llms.txt
+    Source:      https://github.com/AmrDab/clawdcursor
+    Security:    https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md
+    Changelog:   https://github.com/AmrDab/clawdcursor/blob/main/CHANGELOG.md
+    License:     MIT
   -->
 
   <style>
@@ -445,8 +453,8 @@
   <!-- Hero -->
   <div class="hero">
     <div class="hero-badge"><div class="pulse"></div> v2.0.0 &middot; a tool your agent drives, on every OS</div>
-    <h1>It sees. It acts. It verifies.<br><span class="gr">Desktop control for any AI agent</span></h1>
-    <p>Your agent reads the screen as stable element ids, not pixels, verifies every action, and stops the moment you say so. Local, any model.</p>
+    <h1>It sees. It acts. It checks.<br><span class="gr">Desktop control for any AI agent</span></h1>
+    <p>A local MCP server your agent drives. It reads the screen as text, acts on elements by name, checks the result when asked, and stops when you press Stop. No model or API key of its own.</p>
     <div class="hero-btns">
       <a href="https://github.com/AmrDab/clawdcursor" class="btn-p" id="star-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -462,15 +470,15 @@
 
   <!-- Stats -->
   <div class="stats">
-    <div class="stat"><div class="stat-val">7</div><div class="stat-lbl">Compound tools (recommended)</div></div>
-    <div class="stat"><div class="stat-val">100+</div><div class="stat-lbl">Granular tools (compat / debug)</div></div>
+    <div class="stat"><div class="stat-val">6</div><div class="stat-lbl">Compact tools (recommended)</div></div>
+    <div class="stat"><div class="stat-val">89</div><div class="stat-lbl">Granular tools (one per action)</div></div>
     <div class="stat"><div class="stat-val">3</div><div class="stat-lbl">Operating Systems</div></div>
   </div>
 
   <!-- Install -->
   <section id="install" class="sect">
     <div class="sect-label">Quick Start</div>
-    <h2>Install in seconds.</h2>
+    <h2>Install once. Connect your agent.</h2>
 
     <div class="code-box install-card">
       <div class="code-hd install-hd">
@@ -492,18 +500,19 @@
       </div>
     </div>
 
-    <p class="sub" style="text-align:center;max-width:640px;margin:14px auto 0;">Then run <code style="font-size:0.95em">clawdcursor consent --accept</code>. On macOS also run <code style="font-size:0.95em">clawdcursor grant</code>. Done.</p>
+    <p class="sub" style="text-align:center;max-width:640px;margin:14px auto 0;">Then run <code style="font-size:0.95em">clawdcursor consent --accept</code>. On macOS also run <code style="font-size:0.95em">clawdcursor grant</code>. To update: <code style="font-size:0.95em">npm i -g clawdcursor@latest</code> (<code style="font-size:0.95em">clawdcursor update</code> is planned for 2.1).</p>
+    <p class="sub" style="text-align:center;max-width:640px;margin:10px auto 0;"><strong style="color:var(--text)">Claude Code:</strong> install the plugin instead, with <code style="font-size:0.95em">claude plugin marketplace add AmrDab/clawdcursor</code> then <code style="font-size:0.95em">claude plugin install clawdcursor@clawdcursor</code>. <strong style="color:var(--text)">Claude Desktop:</strong> open the <code style="font-size:0.95em">.mcpb</code> extension from the <a href="https://github.com/AmrDab/clawdcursor/releases/latest" target="_blank" rel="noopener" style="color:var(--accent2);">latest GitHub release</a>; no Node.js needed.</p>
   </section>
 
-  <!-- Three modes -->
+  <!-- Two modes -->
   <section class="sect" id="modes">
-    <div class="sect-label">Pick a mode</div>
-    <h2>How will your AI talk to it?</h2>
-    <p class="sub">Same tools, two entry shapes. Pick once at install.</p>
+    <div class="sect-label">Connect</div>
+    <h2>How will your agent talk to it?</h2>
+    <p class="sub">Same tools over two transports. clawdcursor never runs a model: your agent's host brings it.</p>
     <div class="modes-grid">
       <div class="mode-card b">
         <h3>clawdcursor mcp <span style="font-size:0.7rem;font-weight:500;color:var(--accent2);letter-spacing:0.04em;">recommended</span></h3>
-        <p style="margin:8px 0 12px;color:var(--text2);font-size:0.85rem;line-height:1.5;">AI lives in your editor. It spawns clawdcursor over stdio. No daemon, no port.</p>
+        <p style="margin:8px 0 12px;color:var(--text2);font-size:0.85rem;line-height:1.5;">Your agent's host starts clawdcursor over stdio. No daemon, no port. Config shapes for Codex, VS Code, Zed and opencode are in the <a href="https://github.com/AmrDab/clawdcursor#install" target="_blank" rel="noopener" style="color:var(--accent2);">README</a>.</p>
         <pre style="background:rgba(0,0,0,0.4);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:0.72rem;color:var(--accent2);overflow-x:auto;margin-bottom:12px;"><code>{
   "mcpServers": {
     "clawdcursor": {
@@ -514,19 +523,20 @@
 }</code></pre>
         <div class="tag-row">
           <span class="tag b">Claude Code</span>
+          <span class="tag b">Claude Desktop</span>
+          <span class="tag b">Codex</span>
           <span class="tag b">Cursor</span>
-          <span class="tag b">Windsurf</span>
-          <span class="tag b">OpenClaw</span>
+          <span class="tag">Windsurf</span>
           <span class="tag">Zed</span>
         </div>
         <div class="mode-stats">
-          <div><div class="mode-stat-val">7 / 100+</div><div class="mode-stat-lbl">Compact / Granular tools</div></div>
+          <div><div class="mode-stat-val">6 / 89</div><div class="mode-stat-lbl">Compact / Granular tools</div></div>
           <div><div class="mode-stat-val">stdio</div><div class="mode-stat-lbl">Transport</div></div>
         </div>
       </div>
       <div class="mode-card a">
         <h3>clawdcursor agent <span style="font-size:0.7rem;font-weight:500;color:var(--text3);letter-spacing:0.04em;">HTTP daemon</span></h3>
-        <p style="margin:8px 0 12px;color:var(--text2);font-size:0.85rem;line-height:1.5;">HTTP MCP on <code style="font-size:0.85em">127.0.0.1:3847/mcp</code>. <code style="font-size:0.85em;color:var(--accent2)">agent</code> serves the tools to a headless or remote agent; clawdcursor never runs a model.</p>
+        <p style="margin:8px 0 12px;color:var(--text2);font-size:0.85rem;line-height:1.5;">HTTP MCP on <code style="font-size:0.85em">127.0.0.1:3847/mcp</code>, for an agent that speaks MCP over HTTP. Every request needs the bearer token in <code style="font-size:0.85em">~/.clawdcursor/token</code>. Loopback only; use an SSH tunnel from another machine.</p>
         <div class="mode-stats">
           <div><div class="mode-stat-val">:3847</div><div class="mode-stat-lbl">HTTP MCP</div></div>
         </div>
@@ -537,90 +547,77 @@
   <!-- How it works: cheap paths first -->
   <section class="sect" id="pipeline">
     <div class="sect-label">How it works</div>
-    <h2>Cheap paths first.</h2>
-    <p class="sub">A11y tree before pixels. Vision only when needed.</p>
+    <h2>Blind first.</h2>
+    <p class="sub">The tree, then text, then OCR. A screenshot last. Your agent makes every call; clawdcursor carries it out.</p>
 
     <div class="pipe-flow">
       <div class="pipe-step router">
-        <h4><span class="pipe-num">1</span> Compile the screen</h4>
-        <span class="pipe-tag">No vision model</span>
-        <p>Fuse the a11y tree + OCR into one confidence-scored el_NN map. Act on an element by stable id. No image bytes to the model. Vision is last resort.</p>
+        <h4><span class="pipe-num">1</span> Read</h4>
+        <span class="pipe-tag">Text, not pixels</span>
+        <p><code style="font-size:0.82em">read_tree</code> lists a window's elements by name. <code style="font-size:0.82em">copy_all_text</code> gives a page's exact text. <code style="font-size:0.82em">ocr</code> reads the screen when the tree is empty. A screenshot is the last resort.</p>
       </div>
       <div class="pipe-arrow" aria-hidden="true">→</div>
       <div class="pipe-step agent">
-        <h4><span class="pipe-num">2</span> Escalate as needed</h4>
-        <span class="pipe-tag">Cheapest rung that works</span>
-        <p>OCR when the tree is sparse. A screenshot only when you truly need pixels: canvas-only apps or spatial reasoning.</p>
+        <h4><span class="pipe-num">2</span> Act by name</h4>
+        <span class="pipe-tag">Coordinates are the fallback</span>
+        <p><code style="font-size:0.82em">invoke</code> clicks an element by name and <code style="font-size:0.82em">set_value</code> fills a field. <code style="font-size:0.82em">smart_click</code> finds a visible label by OCR. Keys are OS-aware: <code style="font-size:0.82em">mod</code> is Cmd on macOS, Ctrl elsewhere.</p>
       </div>
       <div class="pipe-arrow" aria-hidden="true">→</div>
       <div class="pipe-step verifier">
-        <h4><span class="pipe-num">3</span> Verify &amp; gate</h4>
-        <span class="pipe-tag">Reactive + one chokepoint</span>
-        <p>Pass <code style="font-size:0.82em">expect</code> and the action confirms its outcome, reporting a DEVIATION if the UI didn't obey. A Stop on the pill halts every call.</p>
+        <h4><span class="pipe-num">3</span> Check</h4>
+        <span class="pipe-tag">confirmed · unverified · refused · failed</span>
+        <p>Every result ends with a status line. Pass <code style="font-size:0.82em">expect</code> and the call re-reads the screen, reporting a DEVIATION if the state is not there.</p>
       </div>
     </div>
 
   </section>
 
-  <!-- vs computer use -->
-  <section class="sect" id="vs-computer-use">
-    <div class="sect-label">Efficiency</div>
-    <h2>Leaner than computer use.</h2>
-    <p class="sub">Screenshot-based computer use sends the model a picture of the screen every time it looks. clawdcursor sends text the model can act on by name.</p>
-
-    <div class="stats">
-      <div class="stat"><div class="stat-val">38</div><div class="stat-lbl">Tokens to find a button by name</div></div>
-      <div class="stat"><div class="stat-val">~1,000+</div><div class="stat-lbl">Tokens for one screenshot</div></div>
-      <div class="stat"><div class="stat-val">12&ndash;47&times;</div><div class="stat-lbl">Fewer tokens on a measured task</div></div>
-    </div>
+  <!-- Approach: text first -->
+  <section class="sect" id="approach">
+    <div class="sect-label">Approach</div>
+    <h2>Text first, screenshots last.</h2>
+    <p class="sub">clawdcursor gives the model text it can act on by name, and keeps images for targets that nothing else describes.</p>
 
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
       <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
         <thead>
           <tr style="background:rgba(255,255,255,0.03);">
             <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);"></th>
-            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);">Screenshot-based computer use</th>
-            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--border);">clawdcursor</th>
+            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--border);">What clawdcursor does</th>
           </tr>
         </thead>
         <tbody>
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">What the model reads per look</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A screenshot: ~1,000&ndash;1,800 tokens</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text: 38 tokens to find a button, 50 to read a field</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading the screen</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text first: the accessibility tree (<code>read_tree</code>), then the window's own text (<code>copy_all_text</code>), then OCR. No image reaches the model on these reads.</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">How it clicks</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">x, y coordinates guessed from the picture</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">By name: <code>invoke "Equals"</code>. Coordinates are the fallback</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Screenshots</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Last. <code>computer screenshot</code> returns an image; it is for a target with no name and no visible text.</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Did the click work?</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">Take another screenshot</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);"><code>expect</code> checks it in the same call and reports a DEVIATION</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Clicking and typing</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">By name: <code>invoke "Equals"</code>, or <code>set_value</code> on a named field. <code>smart_click</code> finds a visible label by OCR. A coordinate click is the fallback.</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Checking an action</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);"><code>expect</code> re-reads the screen in the same call and reports a DEVIATION if the state is not there. Without it, the result says <code>unverified</code>.</td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Known steps in a row</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">A model turn + a screenshot per step</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call, every step still guarded (Stop, pause)</td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading text</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">Read off the pixels</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">The app's own text: tree values, <code>copy_all_text</code>, OCR</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call. Each step is refused by Stop and the pause exactly as a direct call would be.</td>
             </tr>
             <tr>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Which model</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text3);">One that can read screenshots and point at pixels</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Any model with tool calling</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Any model with tool calling. The text reads need no image input.</td>
             </tr>
         </tbody>
       </table>
     </div>
 
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
-      Measured on Windows 11 (October 2026): 127 &times; 49 in Calculator took clawdcursor 3 tool calls and ~176 tokens of screen input, with 0 screenshots. A screenshot loop needs 2 to 8 screenshots for the same task (2,072&ndash;8,288 tokens at 1024&times;768). Screenshot cost from
-      <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/computer-use-tool" target="_blank" rel="noopener" style="color:var(--accent2);">Anthropic's computer use docs</a>; clawdcursor tokens estimated as characters &divide; 3.5.
+      Measured figures will come from the 2.1 benchmark, which runs one standard test across app types, operating systems and models
+      (<a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a>).
     </p>
   </section>
 
@@ -636,13 +633,13 @@
       </div>
       <div class="feat-card">
         <div class="feat-icon">⌨️</div>
-        <h4>Shortcuts engine</h4>
-        <p>Platform-aware key combos. Cmd on macOS, Ctrl elsewhere. No LLM cost.</p>
+        <h4>OS-aware keys</h4>
+        <p>The agent is told which OS it is on. <code>mod</code> is Cmd on macOS and Ctrl elsewhere, and named shortcuts are offered only for this OS.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">📦</div>
         <h4>batch: one round-trip</h4>
-        <p>Collapse N deterministic tool calls into a single guarded batch. N calls &rarr; 1.</p>
+        <p>Run a known sequence of tool calls in one call. Each step is refused exactly as a direct call would be.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">⏸️</div>
@@ -652,7 +649,7 @@
       <div class="feat-card">
         <div class="feat-icon">🟠</div>
         <h4>Always visible</h4>
-        <p>A banner, and a thin amber outline around the window in use, on Windows, macOS and Linux while an agent drives. Double-click to stop.</p>
+        <p>While an agent drives, a pill says what it is doing and a thin amber outline marks the window in use, on Windows, macOS and Linux. Press Stop on the pill to stop.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🍎</div>
@@ -662,13 +659,84 @@
     </div>
   </section>
 
+  <!-- Safety: what is enforced, and what is not -->
+  <section class="sect" id="safety">
+    <div class="sect-label">Safety</div>
+    <h2>What protects you.</h2>
+    <p class="sub">clawdcursor runs with your own OS permissions and does not decide what your agent may do. Since 2.0 there is no policy gate. These hold for every call:</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">⏹️</div>
+        <h4>Stop</h4>
+        <p>Press Stop on the pill or run <code>clawdcursor stop</code>. Every clawdcursor process stops, a running batch included, and stays stopped across restarts until you resume.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🟦</div>
+        <h4>The pause card</h4>
+        <p>While the agent waits for you, no other tool call runs. A choice or a reply on the card comes only from you; the agent cannot click it or the pill. On the granular surface an agent can also end a pause with <code>resume_task</code>, reported as unverified.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">💬</div>
+        <h4>No stray input</h4>
+        <p>Input is refused when the window in front is an AI assistant the agent did not focus on purpose, or is no longer the window it was working in.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🔒</div>
+        <h4>Keys never sent</h4>
+        <p>A short per-OS list that locks the machine or ends the session, such as <code>Win+L</code>, <code>Ctrl+Alt+Del</code> and <code>Cmd+Shift+Q</code>. Every other shortcut is allowed.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🔑</div>
+        <h4>Local, with a token</h4>
+        <p>The HTTP server binds <code>127.0.0.1</code> only and requires a bearer token. The stdio server opens no port. No telemetry.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">📄</div>
+        <h4>Screen text is data</h4>
+        <p>Page text, OCR and the clipboard reach the agent wrapped as untrusted content that cannot close its own wrapper.</p>
+      </div>
+    </div>
+    <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
+      <strong style="color:var(--text);">What is not enforced.</strong> Approval before an action is your MCP host's job: the tools carry read-only and destructive annotations for hosts that prompt. If your host auto-approves tool calls, nothing asks before the agent sends, deletes or pays. For agents you do not fully trust, or for unattended runs, use a host with approval prompts. An opt-in confirm mode is planned for 2.1
+      (<a href="https://github.com/AmrDab/clawdcursor/issues/373" target="_blank" rel="noopener" style="color:var(--accent2);">#373</a>).
+      The full threat model is in <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md" target="_blank" rel="noopener" style="color:var(--accent2);">SECURITY.md</a>.
+    </p>
+  </section>
+
+  <!-- Release notes and roadmap -->
+  <section class="sect" id="whats-new">
+    <div class="sect-label">2.0.0</div>
+    <h2>What changed, and what is next.</h2>
+    <p class="sub">2.0.0 is a breaking release. It was first published as 1.6.0 and renumbered to follow semver; 1.6.0 is deprecated on npm.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🧰</div>
+        <h4>A tool layer</h4>
+        <p>The built-in agent loop, the <code>task</code> tool, <code>clawdcursor task</code> and every provider, model and API-key setting are gone. Your agent drives the six tools.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🚧</div>
+        <h4>No policy gate</h4>
+        <p>Tiers, "confirm" and blocked labels are removed: a click by coordinates went around them. The protections above replace them.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🧭</div>
+        <h4>Next: 2.1</h4>
+        <p>One standard benchmark across app types, OSes and models as the release gate, plus honest results, target resolution, perception without a tree, geometry and timing. <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a></p>
+      </div>
+    </div>
+    <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
+      Everything else is in the <a href="https://github.com/AmrDab/clawdcursor/blob/main/CHANGELOG.md" target="_blank" rel="noopener" style="color:var(--accent2);">changelog</a>.
+    </p>
+  </section>
+
   <!-- Tools catalog (collapsed by default) -->
   <section class="sect" id="tools-list">
     <details class="cli-details">
       <summary class="cli-summary">
         <span class="sect-label" style="margin-bottom:0;">Tools</span>
-        <span class="cli-summary-title">6 compact tools + 100+ granular <span class="cli-summary-chev" aria-hidden="true">›</span></span>
-        <span class="cli-summary-sub">The 6 compact tools are the recommended surface. The 100+ granular tools cover compatibility and debugging.</span>
+        <span class="cli-summary-title">6 compact tools, or 89 granular <span class="cli-summary-chev" aria-hidden="true">›</span></span>
+        <span class="cli-summary-sub">The 6 compact tools are the recommended surface. The 89 granular tools expose one tool per action.</span>
       </summary>
 
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;margin-top:18px;overflow-x:auto;-webkit-overflow-scrolling:touch;">
@@ -684,12 +752,12 @@
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">computer</code></td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Mouse, keyboard, screenshots. Raw I/O.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>screenshot</code> · <code>click</code> · <code>double_click</code> · <code>right_click</code> · <code>triple_click</code> · <code>hover</code> · <code>scroll</code> · <code>scroll_horizontal</code> · <code>drag</code> · <code>drag_path</code> · <code>type</code> · <code>key</code> · <code>wait</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>click</code> · <code>double_click</code> · <code>right_click</code> · <code>middle_click</code> · <code>triple_click</code> · <code>hover</code> · <code>move</code> · <code>move_relative</code> · <code>scroll</code> · <code>scroll_horizontal</code> · <code>drag</code> · <code>drag_path</code> · <code>mouse_down</code> · <code>mouse_up</code> · <code>type</code> · <code>key</code> · <code>key_press</code> · <code>key_down</code> · <code>key_up</code> · <code>wait</code> · <code>screenshot</code> · <code>screenshot_region</code> · <code>zoom</code></td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">accessibility</code></td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Drive UI by element name, not pixel. Survives DPI, resize, layout shifts.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>read_tree</code> · <code>find</code> · <code>get_element</code> · <code>focused</code> · <code>invoke</code> · <code>focus</code> · <code>set_value</code> · <code>get_value</code> · <code>expand</code> · <code>collapse</code> · <code>toggle</code> · <code>select</code> · <code>state</code> · <code>list_children</code> · <code>wait_for</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>read_tree</code> · <code>find</code> · <code>get_element</code> · <code>focused</code> · <code>invoke</code> · <code>focus</code> · <code>set_value</code> · <code>get_value</code> · <code>expand</code> · <code>collapse</code> · <code>toggle</code> · <code>select</code> · <code>state</code> · <code>list_children</code> · <code>wait_for</code> · <code>compile_ui</code> · <code>find_button</code> · <code>find_field</code> · <code>smart_click</code> · <code>smart_type</code> · <code>smart_read</code></td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">window</code></td>
@@ -698,20 +766,25 @@
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">system</code></td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Clipboard, OCR, shortcuts, undo, webview detection, CDP relaunch, task delegation. The meta surface for an external brain.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>clipboard_read</code> · <code>clipboard_write</code> · <code>system_time</code> · <code>ocr</code> · <code>undo</code> · <code>shortcuts_list</code> · <code>shortcuts_run</code> · <code>detect_webview</code> · <code>relaunch_with_cdp</code> · <code>pause_for_user</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Page text, OCR, clipboard, shortcuts, undo, webview detection, launching, and the pause that hands a step to you.</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>clipboard_read</code> · <code>clipboard_write</code> · <code>copy_all_text</code> · <code>report</code> · <code>system_time</code> · <code>ocr</code> · <code>undo</code> · <code>shortcuts_list</code> · <code>shortcuts_run</code> · <code>pause_for_user</code> · <code>detect_webview</code> · <code>relaunch_with_cdp</code> · <code>build_uri</code> · <code>open_uri</code> · <code>open_app</code> · <code>open_file</code> · <code>open_url</code></td>
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">browser</code></td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Chrome DevTools Protocol: real DOM access for Electron / WebView2 apps whose a11y tree is sparse.</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>connect</code> · <code>page_context</code> · <code>read_text</code> · <code>click</code> · <code>type</code> · <code>select_option</code> · <code>evaluate</code> · <code>wait_for</code> · <code>list_tabs</code> · <code>switch_tab</code> · <code>scroll</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Chrome DevTools Protocol: DOM access for browsers and for Electron / WebView2 apps whose accessibility tree is sparse.</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>navigate</code> · <code>connect</code> · <code>page_context</code> · <code>read_text</code> · <code>click</code> · <code>type</code> · <code>select_option</code> · <code>evaluate</code> · <code>wait_for</code> · <code>list_tabs</code> · <code>switch_tab</code> · <code>scroll</code></td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">batch</code></td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Several calls in one round trip. Halts with a per-step trace on a refusal, an error or a failed <code>expect</code>.</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>steps: [{ name, arguments, expect? }]</code></td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
-        <strong style="color:var(--text2);">Compact</strong> (~7,000 tokens of catalog, a third of granular): <code style="font-size:0.9em;color:var(--accent2);">computer({ "action": "key", "combo": "mod+s" })</code>.
+        <strong style="color:var(--text2);">Compact</strong> (about 7,000 tokens of catalog; granular is about 19,000):<code style="font-size:0.9em;color:var(--accent2);">computer({ "action": "key", "combo": "mod+s" })</code>.
         <strong style="color:var(--text2);">Granular:</strong> <code style="font-size:0.9em;color:var(--accent2);">key_press({ "key": "mod+s" })</code>.
         Both run the same tools behind the same guards. Leave out <code style="color:var(--accent2);">--compact</code> for the granular surface.
         See <a href="https://github.com/AmrDab/clawdcursor/blob/main/schema.snapshot.json" target="_blank" rel="noopener" style="color:var(--accent2);">schema.snapshot.json</a> for every parameter.
@@ -732,16 +805,18 @@
         <pre style="background:transparent;font-size:0.82rem;line-height:1.55;color:var(--text);overflow-x:auto;"><code><span style="color:var(--text3)"># Install &amp; setup</span>
 clawdcursor consent          <span style="color:var(--text3)"># one-time desktop-control authorization (always required)</span>
 clawdcursor grant            <span style="color:var(--text3)"># macOS only: Accessibility + Screen Recording prompts. MCP setup ends here.</span>
-clawdcursor doctor           <span style="color:var(--text3)"># setup diagnostics (not needed for MCP)</span>
-clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions, AI config)</span>
+clawdcursor doctor           <span style="color:var(--text3)"># diagnose the install: version, consent, screen capture, accessibility, permissions</span>
+clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions)</span>
 clawdcursor versions         <span style="color:var(--text3)"># every installed copy and its version</span>
+clawdcursor register-skill   <span style="color:var(--text3)"># register the usage skill in detected agents again</span>
 
 <span style="color:var(--text3)"># Run</span>
-clawdcursor mcp              <span style="color:var(--text3)"># stdio MCP server for editor hosts</span>
-clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with 6 compound tools (recommended)</span>
-clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP daemon at :3847/mcp (your agent drives the tools)</span>
-clawdcursor resume           <span style="color:var(--text3)"># continue a task paused for you (--end to stop it)</span>
-clawdcursor stop             <span style="color:var(--text3)"># stop every running mode</span>
+clawdcursor mcp              <span style="color:var(--text3)"># stdio MCP server; your agent's host starts it</span>
+clawdcursor mcp --compact    <span style="color:var(--text3)"># same, with the 6 compact tools (recommended)</span>
+clawdcursor agent            <span style="color:var(--text3)"># HTTP MCP server at 127.0.0.1:3847/mcp (--compact, --port, --no-vision)</span>
+clawdcursor stop             <span style="color:var(--text3)"># stop every running instance; agents stay stopped until resume</span>
+clawdcursor resume           <span style="color:var(--text3)"># continue a paused task, or give control back after a stop (--end to end the task)</span>
+clawdcursor report           <span style="color:var(--text3)"># send a redacted report of the last session, after a preview</span>
 clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawdcursor config and data</span></code></pre>
       </div>
     </details>
@@ -752,8 +827,8 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
 <!-- CTA -->
 <div class="wrap">
   <div class="cta">
-    <h2>Give your agent safe desktop control.</h2>
-    <p>Open source. Any model. Localhost-only by default, enforced. No telemetry.</p>
+    <h2>Give your agent the desktop.</h2>
+    <p>Open source (MIT). Any model with tool calling. Binds to 127.0.0.1 only. No telemetry.</p>
     <a href="https://github.com/AmrDab/clawdcursor" class="btn-p">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       Star on GitHub
@@ -766,6 +841,9 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
     <a href="https://clawdcursor.com">Home</a> ·
     <a href="https://github.com/AmrDab/clawdcursor">GitHub</a> ·
     <a href="https://github.com/AmrDab/clawdcursor/blob/main/CHANGELOG.md">Changelog</a> ·
+    <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md">Security</a> ·
+    <a href="https://github.com/AmrDab/clawdcursor/milestone/1">2.1 roadmap</a> ·
+    <a href="/llms.txt">llms.txt</a> ·
     <a href="https://discord.gg/hW29nrEZ8G">Discord</a>
   </p>
 </footer>
@@ -898,12 +976,12 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
     'oneliner|unix': 'curl -fsSL https://clawdcursor.com/install.sh | bash',
     'npm|win':  'npm i -g clawdcursor',
     'npm|unix': 'npm i -g clawdcursor',
-    'source|win':  'git clone https://github.com/AmrDab/clawdcursor.git && cd clawdcursor && npm i && npm run build && npm link',
+    'source|win':  'git clone https://github.com/AmrDab/clawdcursor.git; cd clawdcursor; npm i; if ($?) { npm run build }; if ($?) { npm link }',
     'source|unix': 'git clone https://github.com/AmrDab/clawdcursor.git && cd clawdcursor && npm i && npm run build && npm link',
   };
   const INSTALL_COMMENTS = {
-    oneliner: '# Works everywhere. Installs Node if needed, builds, links the global shim.',
-    npm: '# Simplest, any OS. (macOS: also run `clawdcursor grant` for the native helper.)',
+    oneliner: '# Checks Node 20+ and PATH, then runs npm i -g clawdcursor.',
+    npm: '# Any OS, Node 20+. (macOS: also run `clawdcursor grant` for the permissions.)',
     source: '# Clone, build, link. For hacking on clawdcursor itself.',
   };
   let _instM = 'npm', _instO = 'win';

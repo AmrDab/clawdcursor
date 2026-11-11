@@ -221,6 +221,18 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.get_value_no_value.value).toBeUndefined();
   });
 
+  it('a password entry never gives its value to a tree, find or text read (as UIA IsPassword / AXSecureTextField)', () => {
+    expect(out.secret_node).toMatchObject({ name: 'Secret', controlType: 'password text', value: null });
+    expect(out.secret_pin_node.value).toBeNull();          // nor through a Value interface
+    expect(out.secret_find).toHaveLength(1);
+    expect(out.secret_find[0].value).toBeNull();
+    expect(out.secret_tree).toHaveLength(1);
+    expect(out.secret_tree[0].value).toBeNull();
+    expect(out.secret_read_text).toBeNull();
+    expect(out.secret_full_text).toBe('');
+    expect(out.secret_anywhere).toBe(false);
+  });
+
   it('a spin button (a number box) reads and takes its number through Value', () => {
     expect(out.get_value_spin).toMatchObject({ success: true, value: '100.0', readable: true });
     expect(out.set_value_spin).toMatchObject({ success: true, method: 'Value' });

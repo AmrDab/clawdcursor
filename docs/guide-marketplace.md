@@ -1,7 +1,11 @@
 # ClawdCursor Guides Marketplace
 
-Status: live. Client implementation shipped in v0.9 Phase 3; the server-side
-repo went live the same release. This doc is the architecture spec.
+**Status: historical.** clawdcursor 2.0 does not read app guides. The client
+described below (the fetcher, the cache, `clawdcursor guides` and the guide
+loading in the built-in agent) was removed together with the built-in agent
+loop, so nothing in the 2.0 package fetches from the registry. The registry
+repo and the mirror at `clawdcursor.com/app-guides` are still published. This
+document is kept as the architecture record of the v0.9 design.
 
 - **Default client URL**: <https://raw.githubusercontent.com/AmrDab/clawdcursor-guides/main>
 - **Planned public URL**: <https://clawdcursor.com/app-guides>
@@ -101,11 +105,11 @@ without path rewriting.
 ### `<app>.json`
 
 The same `AppGuide` schema clawdcursor uses internally. See
-[`src/core/pipeline-types.ts`](../src/core/pipeline-types.ts) and
+`src/core/pipeline-types.ts` (removed in 2.0) and
 [`seed-registry/guides/youtube.json`](../seed-registry/guides/youtube.json)
 for a reference example. Required fields: `app`, plus at least one of
 `shortcuts` / `workflows` / `tips` / `layout`. The client linter at
-[`src/llm/knowledge/guide-linter.ts`](../src/llm/knowledge/guide-linter.ts)
+`src/llm/knowledge/guide-linter.ts` (removed in 2.0)
 runs both client-side (defense-in-depth) and as the validate.yml CI step
 (vendored copy at `scripts/lint-guide.mjs` in the guides repo — must
 stay in sync, see the SYNC RULE comment in that file).
@@ -201,7 +205,7 @@ first-principles reasoning, same as for any unknown app.
 ## CLI
 
 See `clawdcursor guides help` — implementation at
-[`src/llm/guide-registry.ts`](../src/llm/guide-registry.ts).
+`src/llm/guide-registry.ts` (removed in 2.0).
 
 ```
 clawdcursor guides list                 What's cached + ratings
