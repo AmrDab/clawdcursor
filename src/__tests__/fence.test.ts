@@ -17,7 +17,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 
 import {
   FENCE_ENV, FENCE_POLICY, FENCED, fenceActive, fenceCdpOnly, fenceCheck, fenceGate, fenceImage, fenceInput, fenceKind, fenceMask,
-  fencePlatform, fencePointer, fenceRoots, fenceTools, fenceWholeScreen, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
+  fenceOcrCapture, fenceOcrText, fencePlatform, fencePointer, fenceRoots, fenceTools, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
   primaryRect, wholly, __setFenceDesktopForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
 } from '../core/fence';
 import { classifyResult } from '../core/result-codes';
@@ -94,7 +94,10 @@ describe('with CLAWD_FENCE_PIDS unset, nothing changes', () => {
     await expect(fenceInput(owners, open)).resolves.toBeUndefined();
     await expect(fencePointer('mouseClick', [5000, 5000], open)).resolves.toBeUndefined();
     await expect(fencePointer('mouseDown', [], open)).resolves.toBeUndefined();
-    expect(() => fenceWholeScreen('OCR', open)).not.toThrow();
+    const ocr = { elements: [{ text: 'secret', x: 5000, y: 5000, width: 10, height: 10, line: 0 }], fullText: 'secret' };
+    expect(await fenceOcrText(ocr, open)).toBe(ocr);
+    const png = Buffer.from('png');
+    expect(await fenceOcrCapture(png, { x: 0, y: 0 }, open)).toBe(png);
     const image = Buffer.from('not even an image');
     expect(await fenceMask(image, { originX: 0, originY: 0, scale: 1 }, open)).toBe(image);
     expect(await fenceImage(image, 'image/png', { originX: 0, originY: 0, scale: 1 }, open)).toEqual({ data: image.toString('base64'), mimeType: 'image/png' });
@@ -154,7 +157,7 @@ describe('an allow list: every tool is classified, and what is not is refused', 
     expect(t.calls).toEqual([]);
   });
 
-  it.each(['get_windows', 'read_clipboard', 'write_clipboard', 'ocr_read_screen', 'smart_read', 'smart_click', 'smart_type',
+  it.each(['get_windows', 'read_clipboard', 'write_clipboard',
     'open_app', 'open_file', 'open_url', 'open_uri', 'navigate_browser', 'switch_tab_os', 'relaunch_with_cdp', 'detect_webview_apps',
     'shortcuts_execute', 'session_report', 'submit_report', 'logs_recent', 'verify', 'pause_for_user', 'resume_task',
     'cdp_evaluate'])('%s is refused whatever is in front', async name => {
@@ -171,7 +174,12 @@ describe('an allow list: every tool is classified, and what is not is refused', 
     expect(await refused(tool('undo_last'))).toBe(true);
   });
 
+  it('OCR and the smart tools are scoped, not refused: a read or an act of one fenced window', () => {
+    expect(['ocr_read_screen', 'smart_read', 'smart_click', 'smart_type', 'desktop_screenshot_region'].map(fenceKind)).toEqual(['read', 'read', 'act', 'act', 'capture']);
+  });
+
   it.each(['read_screen', 'find_element', 'compile_ui', 'find_action_button', 'find_input_field', 'a11y_get_value', 'copy_all_text',
+    'ocr_read_screen', 'smart_read', 'smart_click', 'smart_type',
     'get_active_window', 'invoke_element', 'set_field_value', 'type_text', 'key_press', 'mouse_click', 'mouse_hover', 'mouse_move_relative',
     'mouse_down', 'mouse_up'])('%s runs only with a fenced window in front', async name => {
     expect(await refused(tool(name))).toBe(false);
@@ -569,14 +577,157 @@ describe('one capture path', () => {
   });
 });
 
-describe('the platform window list, OCR and the browser driver', () => {
+describe('OCR is scoped to the fenced window', () => {
+  // A 1000x400 "screen": the fixture window is at (100,100) 400x300, the owner's at (600,100) 400x300.
+  const screenPng = () => sharp({ create: { width: 1000, height: 400, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+  const lit = async (png: Buffer, x: number, y: number) => {
+    const { data, info } = await sharp(png).raw().toBuffer({ resolveWithObject: true });
+    return data[(y * info.width + x) * info.channels] > 128;
+  };
+  /** A stand-in for the OS OCR: it "reads" a word wherever its pixels are still there. */
+  const fakeOcr = async (png: Buffer, at = { x: 0, y: 0 }) => {
+    const words = [{ text: 'Apply', x: 300, y: 250 }, { text: 'Password: hunter2', x: 700, y: 250 }, { text: 'Inbox (3)', x: 620, y: 120 }];
+    const meta = await sharp(png).metadata();
+    const elements = [];
+    for (const [line, w] of words.entries()) {
+      const ix = w.x - at.x, iy = w.y - at.y;
+      if (ix >= 0 && iy >= 0 && ix < meta.width! && iy < meta.height! && await lit(png, ix, iy)) elements.push({ text: w.text, x: w.x - 5, y: w.y - 5, width: 10, height: 10, line });
+    }
+    return { elements, fullText: elements.map(e => e.text).join('\n'), durationMs: 1 };
+  };
+
+  it('the pixels outside the fenced window are gone before the engine sees them', async () => {
+    const masked = await fenceOcrCapture(await screenPng(), { x: 0, y: 0 }, fenced);
+    expect(await lit(masked, 300, 250)).toBe(true);
+    expect(await lit(masked, 700, 250)).toBe(false);
+    expect(await lit(masked, 50, 50)).toBe(false);
+    const read = await fakeOcr(masked);
+    expect(read.fullText).toBe('Apply');
+  });
+
+  it('a region capture is masked from where the region is on screen', async () => {
+    // The agent asks for the region x 400..1000: the fixture's right fifth and all of the owner's window.
+    const region = await sharp({ create: { width: 600, height: 400, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+    const masked = await fenceOcrCapture(region, { x: 400, y: 0 }, fenced);
+    expect(await lit(masked, 50, 250)).toBe(true);      // screen x 450: the fixture
+    expect(await lit(masked, 300, 250)).toBe(false);    // screen x 700: the owner's window
+    expect((await fakeOcr(masked, { x: 400, y: 0 })).fullText).toBe('');
+  });
+
+  it('text the engine returns from outside the window is dropped, and the flat text rebuilt (should a capture ever skip the mask)', async () => {
+    const leaked = await fakeOcr(await screenPng());
+    expect(leaked.fullText).toContain('hunter2');
+    const kept = await fenceOcrText(leaked, fenced);
+    expect(kept.elements.map(e => e.text)).toEqual(['Apply']);
+    expect(kept.fullText).toBe('Apply');
+    expect(JSON.stringify(kept)).not.toMatch(/hunter2|Inbox/);
+  });
+
+  it('is refused with no fenced window in front: there is nothing it may read', async () => {
+    front = owners;
+    await expect(fenceOcrCapture(await screenPng(), { x: 0, y: 0 }, fenced)).rejects.toThrow(FENCED);
+    await expect(fenceOcrText({ elements: [], fullText: '' }, fenced)).rejects.toThrow(FENCED);
+  });
+
+  it('macOS: bounds in points, the capture in pixels', async () => {
+    __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary, captureScale: async () => 2 });
+    const big = await sharp({ create: { width: 2000, height: 800, channels: 3, background: { r: 255, g: 255, b: 255 } } }).png().toBuffer();
+    const masked = await fenceOcrCapture(big, { x: 0, y: 0 }, fenced);
+    expect(await lit(masked, 600, 500)).toBe(true);     // the point (300, 250) of the fixture window
+    expect(await lit(masked, 1400, 500)).toBe(false);   // the point (700, 250) of the owner's
+  });
+
+  it('the real OCR engine: the whole screen and a region both come back with the fenced window\'s text only', async () => {
+    process.env[FENCE_ENV] = '100';
+    const { OcrEngine } = await import('../platform/ocr-engine');
+    const engine = new OcrEngine() as unknown as {
+      available: boolean; grab: () => Promise<unknown>; runOcr: (file: string) => Promise<unknown>;
+      recognizeScreen(): Promise<{ fullText: string; elements: Array<{ text: string }> }>;
+      recognizeRegion(x: number, y: number, w: number, h: number): Promise<{ fullText: string }>;
+    };
+    engine.available = true;
+    const fs = await import('fs');
+    let regionAt = { x: 0, y: 0 };
+    engine.grab = async () => ({ data: Buffer.alloc(1000 * 400 * 4, 255), width: 1000, height: 400, channels: 4 });
+    engine.runOcr = async file => fakeOcr(fs.readFileSync(file), regionAt);
+    const whole = await engine.recognizeScreen();
+    expect(whole.fullText).toBe('Apply');
+    expect(JSON.stringify(whole)).not.toMatch(/hunter2|Inbox/);
+    // fakeOcr reports screen positions; the engine adds the region's offset to what the OS OCR returns, so undo it here.
+    regionAt = { x: 400, y: 0 };
+    engine.runOcr = async file => {
+      const r = await fakeOcr(fs.readFileSync(file), regionAt);
+      for (const e of r.elements) { e.x -= regionAt.x; e.y -= regionAt.y; }
+      return r;
+    };
+    expect((await engine.recognizeRegion(400, 0, 600, 400)).fullText).toBe('');
+    // With the owner's window in front there is nothing to read.
+    front = owners;
+    (engine as unknown as { invalidateCache(): void }).invalidateCache();
+    await expect(engine.recognizeScreen()).rejects.toThrow(FENCED);
+  });
+});
+
+describe('smart_click and smart_type cannot click outside the fence', () => {
+  /** The real tools, with an accessibility layer that points them at the owner's window. */
+  async function smart(name: 'smart_click' | 'smart_type', params: Record<string, unknown>, clickPoint: { x: number; y: number }) {
+    process.env[FENCE_ENV] = '100';
+    __setForegroundReaderForTests(async () => ({ processId: 101, processName: 'BenchFixture', bounds: fixture.bounds }));
+    const sent: string[] = [];
+    class Driver {
+      async mouseClick(x: number, y: number) { sent.push(`click ${x},${y}`); }
+      async typeText(t: string) { sent.push(`type ${t}`); }
+      async keyPress(k: string) { sent.push(`key ${k}`); }
+      getDpiRatio() { return 1; }
+    }
+    const el = { name: 'Send', controlType: 'Button', bounds: { x: clickPoint.x - 10, y: clickPoint.y - 10, width: 20, height: 20 } };
+    const fakeCtx = {
+      ensureInitialized: async () => {},
+      desktop: guardInputMethods(new Driver()),
+      a11y: {
+        getActiveWindow: async () => ({ processId: 101, processName: 'benchfixture', title: 'Bench Dialog', bounds: fixture.bounds }),
+        invokeElement: async () => ({ success: false, clickPoint }),
+        findElement: async () => [el],
+        getScreenContext: async () => '',
+        readClipboard: async () => '', writeClipboard: async () => {},
+      },
+      getScreenshotScaleFactor: () => 1, getMouseScaleFactor: () => 1,
+    } as unknown as ToolContext;
+    const t = getTools().find(x => x.name === name)!;
+    const result = await fenceTools([t], process.env)[0].handler(params, fakeCtx).catch((e: Error) => ({ text: e.message, isError: true }));
+    return { sent, result };
+  }
+
+  it('smart_click: the element it resolves to is in the owner\'s window: no click is sent', async () => {
+    const { sent, result } = await smart('smart_click', { target: 'Send' }, { x: 700, y: 250 });
+    expect(sent.filter(s => s.startsWith('click'))).toEqual([]);
+    expect(result.isError).toBe(true);
+  });
+
+  it('smart_type: a click to focus a field outside the fence is not sent', async () => {
+    const { sent } = await smart('smart_type', { target: 'To', text: 'for the owner' }, { x: 700, y: 250 });
+    expect(sent.filter(s => s.startsWith('click'))).toEqual([]);
+  });
+
+  it('smart_click inside the fenced window clicks', async () => {
+    const { sent } = await smart('smart_click', { target: 'Send' }, { x: 300, y: 250 });
+    expect(sent).toContain('click 300,250');
+  });
+
+  it('with the owner\'s window in front neither tool runs at all', async () => {
+    front = owners;
+    for (const name of ['smart_click', 'smart_type', 'smart_read', 'ocr_read_screen']) {
+      const t = tool(name);
+      expect(await refused(t, { target: 'Send', text: 'x' }), name).toBe(true);
+      expect(t.calls).toEqual([]);
+    }
+  });
+});
+
+describe('the platform window list and the browser driver', () => {
   it('the adapter lists fenced windows only; its own list stays for the gate', async () => {
     const adapter = fencePlatform({ listWindows: async () => [fixture, owners, calc, settings] }, fenced);
     expect((await adapter.listWindows()).map(w => w.title)).toEqual(['Bench Dialog', 'Calculator']);
-  });
-
-  it('OCR of the whole screen is refused', () => {
-    expect(() => fenceWholeScreen('OCR of the whole screen', fenced)).toThrow(FENCED);
   });
 
   it('the browser driver may attach only to the agent\'s own port', () => {
@@ -603,6 +754,7 @@ describe('through the real tool list', () => {
       ['computer', { action: 'mouse_down' }], ['computer', { action: 'move_relative', dx: 5, dy: 5 }],
       ['accessibility', { action: 'read_tree', processId: 200 }], ['accessibility', { action: 'read_tree', processId: '200' }],
       ['accessibility', { action: 'smart_read', scope: 'screen' }], ['accessibility', { action: 'smart_click', target: 'Send' }],
+      ['accessibility', { action: 'smart_type', target: 'To', text: 'x' }], ['system', { action: 'ocr', scope: 'window' }],
       ['browser', { action: 'evaluate', javascript: 'fetch("/api/state")' }],
     ] as Array<[string, Record<string, unknown>]>) {
       const r = await call(name, params);

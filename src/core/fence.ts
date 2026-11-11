@@ -15,8 +15,10 @@
  *   - window: focus / close / resize, only of a window identified as fenced;
  *   - capture: every image is built by `fenceImage`, which blacks out everything but the fenced window in front;
  *   - cdp: the browser driver, which attaches only to the agent's own debug port and launches nothing;
- *   - refuse: the window list, the clipboard, whole-screen OCR, launches and URL openers, script injection, shortcuts,
- *     reports and logs, a pause for the user.
+ *   - refuse: the window list, the clipboard, launches and URL openers, script injection, shortcuts, reports and logs,
+ *     a pause for the user.
+ * OCR (and the smart_* tools that fall back to it) is a read of one window: the engine's captures go through the same
+ * mask, so text outside the fenced window is never recognised.
  * Below the tools, where input is sent: keys go only to a fenced window in front, and the pointer may only move, press
  * and release inside it. The platform's window list holds fenced windows only. Fenced windows must be wholly on the
  * primary display. Whatever cannot be decided (no foreground, no process table, no bounds, no pointer position) is refused.
@@ -128,6 +130,8 @@ interface Desktop {
   primary(): Promise<Rect | null>;
   /** The pointer now, in the unit of window bounds; null when it cannot be told. */
   cursor(): Promise<{ x: number; y: number } | null>;
+  /** Capture pixels per unit of window bounds: 1 on Windows and Linux, the primary display's scale on macOS (bounds are points there). */
+  captureScale(): Promise<number>;
 }
 
 /** The adapter's own listWindows, kept when `fencePlatform` replaces it with the fenced-only one. */
@@ -147,10 +151,16 @@ const platformDesktop: Desktop = {
     return primaryRect(displays);
   },
   cursor: async () => (cursorReader ? cursorReader() : null),
+  captureScale: async () => {
+    if (process.platform !== 'darwin') return 1;
+    const displays = await (await (await import('../platform')).getPlatform()).listDisplays();
+    const ratio = Number(displays.find(d => d.primary)?.dpiRatio);
+    return ratio > 0 ? ratio : 1;
+  },
 };
 let desktop: Desktop = platformDesktop;
 export function __setFenceDesktopForTests(d: Partial<Desktop> | null): void {
-  desktop = d ? { primary: async () => ({ x: 0, y: 0, width: 100_000, height: 100_000 }), cursor: async () => null, foreground: async () => null, windows: async () => [], ...d } : platformDesktop;
+  desktop = d ? { primary: async () => ({ x: 0, y: 0, width: 100_000, height: 100_000 }), cursor: async () => null, foreground: async () => null, windows: async () => [], captureScale: async () => 1, ...d } : platformDesktop;
 }
 
 /**
@@ -297,10 +307,13 @@ export const FENCE_POLICY: Readonly<Record<string, FenceKind>> = {
   read_screen: 'read', find_element: 'read', a11y_get_element: 'read', a11y_get_value: 'read', a11y_list_children: 'read',
   get_element_state: 'read', get_focused_element: 'read', get_active_window: 'read', compile_ui: 'read', find_action_button: 'read',
   find_input_field: 'read', wait_for_element: 'read', copy_all_text: 'read',
+  // OCR reads pixels: the engine masks every capture to the fenced window first (fenceOcrCapture), so these are reads of
+  // one window too. smart_* fall back to that same OCR; a click they then make is checked like any other pointer press.
+  ocr_read_screen: 'read', smart_read: 'read',
 
   // Acts on one window.
   invoke_element: 'act', focus_element: 'act', set_field_value: 'act', a11y_collapse: 'act', a11y_expand: 'act', a11y_select: 'act',
-  a11y_toggle: 'act', type_text: 'act', key_press: 'act', key_down: 'act', key_up: 'act', undo_last: 'act',
+  a11y_toggle: 'act', smart_click: 'act', smart_type: 'act', type_text: 'act', key_press: 'act', key_down: 'act', key_up: 'act', undo_last: 'act',
   mouse_click: 'act', mouse_double_click: 'act', mouse_right_click: 'act', mouse_middle_click: 'act', mouse_triple_click: 'act',
   mouse_hover: 'act', mouse_move_relative: 'act', mouse_scroll: 'act', mouse_scroll_horizontal: 'act', mouse_drag: 'act',
   mouse_drag_stepped: 'act', mouse_down: 'act', mouse_up: 'act',
@@ -310,10 +323,8 @@ export const FENCE_POLICY: Readonly<Record<string, FenceKind>> = {
 
   desktop_screenshot: 'capture', screenshot_full: 'capture', desktop_screenshot_region: 'capture',
 
-  // No single target, or outside by nature: the window list, the clipboard, whole-screen OCR (smart_* fall back to it),
-  // launches and URL openers, shortcuts, reports and logs (they leave the machine or hold other sessions), the user's pause.
-  get_windows: 'refuse', read_clipboard: 'refuse', write_clipboard: 'refuse', ocr_read_screen: 'refuse',
-  smart_read: 'refuse', smart_click: 'refuse', smart_type: 'refuse',
+  // No single target, or outside by nature: the window list, the clipboard, launches and URL openers, shortcuts, reports and logs (they leave the machine or hold other sessions), the user's pause.
+  get_windows: 'refuse', read_clipboard: 'refuse', write_clipboard: 'refuse',
   open_app: 'refuse', open_file: 'refuse', open_url: 'refuse', open_uri: 'refuse', navigate_browser: 'refuse', switch_tab_os: 'refuse',
   relaunch_with_cdp: 'refuse', detect_webview_apps: 'refuse', shortcuts_execute: 'refuse',
   session_report: 'refuse', submit_report: 'refuse', logs_recent: 'refuse', verify: 'refuse',
@@ -480,9 +491,34 @@ export function fencePlatform<T extends { listWindows(): Promise<FenceWindow[]> 
   return adapter;
 }
 
-/** A read of the WHOLE screen (OCR) has no fenced form: refused. A no-op with no fence. */
-export function fenceWholeScreen(what: string, env: NodeJS.ProcessEnv = process.env): void {
-  if (fenceActive(env)) throw new Error(refusal(what));
+/**
+ * OCR under the fence, in two steps around the engine's one recognition call:
+ *
+ * `fenceOcrCapture`: the captured pixels go through the same mask as a screenshot before the OCR engine sees them, so
+ * text outside the fenced window in front is not there to be read. `at` is where the capture's top-left pixel is on
+ * screen; the capture is in real screen pixels.
+ */
+export async function fenceOcrCapture(png: Buffer, at: { x: number; y: number }, env: NodeJS.ProcessEnv = process.env): Promise<Buffer> {
+  if (!fenceActive(env)) return png;
+  return fenceMask(png, { originX: at.x, originY: at.y, scale: 1, boundsScale: await desktop.captureScale().catch(() => 1) }, env);
+}
+
+/**
+ * `fenceOcrText`: of what the engine returned (in screen pixels), only the elements inside the fenced window are kept,
+ * and the flat text is rebuilt from them. With the pixels masked nothing else should be there; this holds even if a
+ * capture path forgot the mask. A no-op with no fence.
+ */
+export async function fenceOcrText<T extends { elements: Array<{ text: string; x: number; y: number; width: number; height: number; line: number }>; fullText: string }>(
+  result: T, env: NodeJS.ProcessEnv = process.env): Promise<T> {
+  if (!fenceActive(env)) return result;
+  const front = await fencedFront('OCR', env);
+  const k = await desktop.captureScale().catch(() => 1);
+  const b = { x: front.bounds.x * k, y: front.bounds.y * k, width: front.bounds.width * k, height: front.bounds.height * k };
+  const inside = result.elements.filter(e => contains(b, e.x + e.width / 2, e.y + e.height / 2));
+  if (inside.length === result.elements.length) return result;
+  const lines = new Map<number, string[]>();
+  for (const e of inside) lines.set(e.line, [...(lines.get(e.line) ?? []), e.text]);
+  return { ...result, elements: inside, fullText: [...lines.values()].map(words => words.join(' ')).join('\n') };
 }
 
 /** The browser driver may attach to this port only (its own), and may launch nothing. Undefined with no fence. */

@@ -11,7 +11,7 @@
  * Caching: last result is kept for 300ms. Invalidated on any action execution.
  */
 
-import { fenceWholeScreen } from '../core/fence';
+import { fenceOcrCapture, fenceOcrText } from '../core/fence';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -177,7 +177,6 @@ export class OcrEngine {
    * that the capture or the engine failed (#274: a failure read as "No text detected").
    */
   async recognizeScreen(): Promise<OcrResult> {
-    fenceWholeScreen('OCR of the whole screen');   // the test fence (core/fence.ts): no fenced form of it exists
     if (!this.isAvailable()) return { ...EMPTY_RESULT };
 
     // Return cached if fresh
@@ -205,15 +204,19 @@ export class OcrEngine {
         (img as any).data = null;
       }
 
+      // The test fence (core/fence.ts): only the fenced window's pixels reach the OCR engine. A no-op with no fence.
+      pngBuffer = await fenceOcrCapture(pngBuffer, shot ? { x: shot.x, y: shot.y } : { x: 0, y: 0 });
+
       // Save to temp file — OS OCR reads from disk
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
       fs.writeFileSync(tmpPath, pngBuffer, { mode: 0o600, flag: 'wx' });
 
       try {
-        const result = await this.runOcr(tmpPath);
+        let result = await this.runOcr(tmpPath);
         result.durationMs = Date.now() - start;
         // Back to virtual-desktop coordinates when another monitor was read.
         if (shot) for (const el of result.elements) { el.x += shot.x; el.y += shot.y; }
+        result = await fenceOcrText(result);
 
         // Cache
         this.cachedResult = result;
@@ -251,12 +254,12 @@ export class OcrEngine {
       const shot = await bridgeCapture({ x, y, width: w, height: h });
       if (shot) {
         const tmp = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
-        fs.writeFileSync(tmp, shot.png, { mode: 0o600, flag: 'wx' });
+        fs.writeFileSync(tmp, await fenceOcrCapture(shot.png, { x: shot.x, y: shot.y }), { mode: 0o600, flag: 'wx' });
         try {
           const result = await this.runOcr(tmp);
           result.durationMs = Date.now() - start;
           for (const el of result.elements) { el.x += shot.x; el.y += shot.y; }
-          return result;
+          return await fenceOcrText(result);
         } finally {
           try { fs.unlinkSync(tmp); } catch { /* non-fatal */ }
         }
@@ -271,10 +274,10 @@ export class OcrEngine {
       const rh = Math.min(y + h, img.height) - ry;
       if (rw <= 0 || rh <= 0) throw new Error(`the region (${x},${y} ${w}x${h}) is outside the captured screen (${img.width}x${img.height})`);
 
-      const pngBuffer = await sharpFromGrab(img)
+      const pngBuffer = await fenceOcrCapture(await sharpFromGrab(img)
         .extract({ left: rx, top: ry, width: rw, height: rh })
         .png()
-        .toBuffer();
+        .toBuffer(), { x: rx, y: ry });
       // Release the raw RGBA buffer immediately after processing
       (img as any).data = null;
 
@@ -291,7 +294,7 @@ export class OcrEngine {
           el.y += ry;
         }
 
-        return result;
+        return await fenceOcrText(result);
       } finally {
         try { fs.unlinkSync(tmpPath); } catch { /* non-fatal */ }
       }

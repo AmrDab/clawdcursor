@@ -50,12 +50,12 @@ The fence is an **allow list**. Every tool is classified in one table (`FENCE_PO
 | Class | Tools | Rule |
 |---|---|---|
 | free | wait, the clock, the screen size, the display list, the pointer position | touch no window |
-| read | `read_tree`, `find`, `compile_ui`, `get_value`, `copy_all_text`, the active window, ... | one window, which must be fenced: the window handle or process named, else the window in front |
-| act | `invoke`, `set_value`, typing, keys, every mouse action, `undo` | the same, and checked again where the input is sent |
+| read | `read_tree`, `find`, `compile_ui`, `get_value`, `copy_all_text`, `ocr`, `smart_read`, the active window, ... | one window, which must be fenced: the window handle or process named, else the window in front. OCR captures are masked to that window before the OCR engine sees them, and text positioned outside it is dropped |
+| act | `invoke`, `set_value`, `smart_click`, `smart_type`, typing, keys, every mouse action, `undo` | the same, and checked again where the input is sent (a click `smart_click` makes after its OCR fallback is a pointer press like any other) |
 | window | focus, close, minimize, maximize, restore, resize | only a window identified as fenced; a name that also matches another window, or a process that also owns windows outside the fence (the Store apps' shared frame host), is refused |
 | capture | `screenshot`, `screenshot_region` / `zoom`, `screenshot_full` | every image is built by one helper that blacks out everything but the fenced window in front; an image that did not come through it never leaves |
 | cdp | the `browser` actions | the driver attaches only to the agent's own debug port (`CLAWD_AGENT_CDP_PORT`), never to a browser on the user's port, and launches nothing |
-| refuse | the window list, the clipboard, OCR, `smart_read` / `smart_click` / `smart_type` (they fall back to OCR of the whole screen), `open_app` / `open_file` / `open_url` / `open_uri` / `navigate`, `evaluate`, shortcuts, reports and logs, `pause_for_user` | no single target, or outside by nature |
+| refuse | the window list, the clipboard, `open_app` / `open_file` / `open_url` / `open_uri` / `navigate`, `evaluate`, shortcuts, reports and logs, `pause_for_user` | no single target, or outside by nature |
 
 Below the tools, where input is sent:
 

@@ -101,9 +101,8 @@ it is readable by the current user alone (an ACL on Windows, mode 0700 elsewhere
 - **The fence** is the first layer, and it acts BEFORE anything happens: the daemon is started with
   `CLAWD_FENCE_PIDS=<the fixture's processes>` and clawdcursor itself refuses (code `FENCED`) every input, act, window
   action, launch, clipboard access, window list, OCR and capture outside those processes and their children, each
-  step of a batch included. It is an allow list: a tool nobody classified is refused. The pointer may only move and
-  press inside the fixture window, a screenshot shows only that window, and `browser evaluate` is refused. See
-  SECURITY.md and `src/core/fence.ts`.
+  step of a batch included. It is an allow list: a tool nobody classified is refused. See "What the fence changes for
+  agents" below, SECURITY.md and `src/core/fence.ts`.
 - **Fixture windows open on the primary monitor only.** The fence refuses a fixture window anywhere else until its
   geometry is proven across monitors with different scaling, so M4 is guarded on the primary display for now.
 - **The fixture server takes state only from its own page script**: each run has a nonce that is inside the script,
@@ -127,6 +126,42 @@ it is readable by the current user alone (an ACL on Windows, mode 0700 elsewhere
   4. *call-cap* and *time-cap*: the task's `caps`.
 
   The proofs take one to three seconds, so an agent can make one more call before it is stopped.
+
+## What the fence changes for agents
+
+A benchmark run is not an ordinary session: the daemon is fenced to the fixture. Read the results with this in mind.
+
+Works as usual, scoped to the fixture window:
+
+- `accessibility` reads and acts (`read_tree`, `find`, `compile_ui`, `invoke`, `set_value`, `select`, `toggle`, ...);
+- `smart_read`, `smart_click`, `smart_type`, and `system ocr`: their OCR sees only the fixture window's pixels;
+- `computer` keys, typing, clicks, drags and scrolls: inside the fixture window;
+- `computer screenshot`, `screenshot_region` and `zoom`: the image keeps its size and coordinates, with everything
+  outside the fixture window black;
+- `window focus / close / minimize / maximize / restore / resize` on the fixture window;
+- `system copy_all_text`, `undo`; `browser` reads, clicks, typing and scrolling in the fixture browser;
+- waits, the clock, the screen size, the display list, the pointer position.
+
+Different from an ordinary session:
+
+- `read_tree` lists the fixture's windows only in its WINDOWS section;
+- a pointer move, press or release outside the fixture window is refused, also as a step of a drag path;
+- text with Enter or Tab is typed a piece at a time (the foreground is checked before each piece), so it is a little slower;
+- a `processId` given as a string is normalised; any other non-integer target is refused;
+- a window action on a Store app (Calculator) by title is refused while another Store app's window is open, because
+  both belong to one host process.
+
+Refused (code `FENCED`):
+
+- `window list`, `system clipboard_read` / `clipboard_write`;
+- `open_app`, `open_file`, `open_url`, `open_uri`, `navigate`, OS tab switching, `shortcuts_run`, `relaunch_with_cdp`,
+  `detect_webview`;
+- `browser evaluate` (a script could forge the fixture's state);
+- `system report`, `pause_for_user`;
+- anything while a window that is not the fixture's is in front, and any fixture window that is not wholly on the
+  primary monitor.
+
+None of the tasks needs a refused call: every fixture is already open and in front when the agent starts.
 
 ## The tasks
 
