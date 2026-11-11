@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { browserAppNames, openBrowser, type BrowserExe } from './browser';
 import type { FixtureServer } from './fixture-server';
-import { POWERSHELL, killTree, start, system32, tryRun, waitFor } from './proc';
+import { POWERSHELL, killTree, pidsByCommandLine, start, system32, tryRun, waitFor } from './proc';
 import type { FixtureState, TaskSpec } from './types';
 
 const NATIVE_DIR = path.join(__dirname, '..', 'fixtures', 'native');
@@ -20,8 +20,14 @@ const APPS_DIR = path.join(__dirname, '..', 'fixtures', 'apps');
 export interface LiveFixture {
   /** How the prompt names the window. */
   window: string;
-  /** App names the privacy guard allows for this task. */
+  /** The exact app names the session log may give this fixture. A name alone never passes the privacy guard. */
   apps: string[];
+  /** The processes the benchmark started for this fixture, now. The guard accepts the focus only in these or their children. */
+  roots(): Promise<number[]> | number[];
+  /** A Store app: the exact title its ApplicationFrameHost window must have to count as this fixture. */
+  frameTitle?: string;
+  /** A web fixture: its browser's debug port and temp profile, for the proof that CDP acts can only reach this instance. */
+  cdp?: { cdpPort: number; profileDir: string };
   /** null: this task has no state to read, or it could not be read. */
   state(): Promise<FixtureState | null>;
   close(): Promise<void>;
@@ -35,7 +41,6 @@ export interface FixtureContext {
   /** A fresh directory for this run. */
   workDir: string;
   runId: string;
-  cdpPort: number;
   /** Top-left corner for the fixture window (to run the suite on another monitor). */
   pos?: [number, number];
 }
@@ -60,8 +65,8 @@ export async function buildNative(outDir: string, platform: string = process.pla
   }
   const script = path.join(NATIVE_DIR, 'linux', 'bench_fixture.py');
   const gtk = await tryRun('python3', ['-c', 'import gi; gi.require_version("Gtk", "3.0"); from gi.repository import Gtk']);
-  // The process is python3: the session log cannot tell this fixture from another Python GUI.
-  return gtk !== null ? { cmd: 'python3', args: [script], apps: ['BenchFixture', 'bench_fixture', 'Python3', 'python3'] }
+  // The script names its own process BenchFixture (prctl): no generic "python3" in the allowlist.
+  return gtk !== null ? { cmd: 'python3', args: [script], apps: ['BenchFixture'] }
     : { missing: 'python3 with gi and GTK 3 is not installed' };
 }
 
@@ -89,6 +94,7 @@ async function openNative(mode: 'dialog' | 'editor', ctx: FixtureContext): Promi
   return {
     window: mode === 'editor' ? '"Bench Editor" (a desktop app)' : '"Bench Dialog" (a desktop app)',
     apps: ctx.native.apps,
+    roots: () => child.pid ? [child.pid] : [],
     state: async () => readStateFile(state),
     close: async () => killTree(child.pid),
   };
@@ -102,6 +108,22 @@ export function parseCalcDisplay(text: string): string {
 }
 
 const DESIGNCENTER_ROOT = 'C:\\Program Files\\Siemens';
+
+/** The pids of the running processes with this image name ("CalculatorApp.exe", or "TextEdit" on macOS). */
+export function imagePids(image: string, platform: string = process.platform): number[] {
+  try {
+    const out = platform === 'win32'
+      ? execFileSync(system32('tasklist.exe'), ['/FI', `IMAGENAME eq ${image}`, '/FO', 'CSV', '/NH'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString()
+      : execFileSync('pgrep', ['-x', image], { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
+    return parseImagePids(out, platform);
+  } catch { return []; }   // pgrep exits 1 when there is none
+}
+
+/** tasklist CSV rows ("Image","PID",...) or pgrep lines. */
+export function parseImagePids(out: string, platform: string): number[] {
+  const cells = platform === 'win32' ? out.split(/\r?\n/).map(l => l.split('","')[1]) : out.split(/\s+/);
+  return cells.map(Number).filter(n => Number.isInteger(n) && n > 0);
+}
 
 /** Why a real app cannot be used now (not installed, or the owner has it open), or null when it can. */
 export async function appUnavailable(app: 'calculator' | 'textedit' | 'designcenter', platform: string = process.platform): Promise<string | null> {
@@ -136,7 +158,10 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
   const osa = (script: string) => tryRun('osascript', ['-e', script]);
   if (app === 'designcenter') {
     // Starting a CAD session takes minutes and a licence: the person running the benchmark opens it with a part loaded.
-    return { window: 'Designcenter (already open, with a part loaded)', apps: ['Designcenter', 'Designcenter NX', 'ugraf', 'NX'],
+    // The one fixture the benchmark does not start: its processes are the Designcenter ones running when the task begins.
+    const cad = imagePids('ugraf.exe');
+    if (!cad.length) return { skip: 'Designcenter is not open: open it with a part loaded, then run with --include-manual' };
+    return { window: 'Designcenter (already open, with a part loaded)', apps: ['Designcenter', 'Designcenter NX'], roots: () => cad,
       state: async () => null, close: async () => { /* not ours to close */ } };
   }
   if (app === 'calculator' && process.platform === 'win32') {
@@ -147,10 +172,12 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
     };
     await waitFor(probe, 30_000, 'Calculator to open');
     return {
-      window: 'Calculator', apps: ['Calculator', 'CalculatorApp', 'ApplicationFrameHost'],
+      // No Calculator ran before this task (appUnavailable), so these are the processes this task started. Its window
+      // belongs to ApplicationFrameHost: that frame counts only with this exact title and one of these processes inside.
+      window: 'Calculator', apps: ['Calculator'], frameTitle: 'Calculator',
+      roots: () => imagePids('CalculatorApp.exe'),
       state: async () => { const d = await probe(); return d === null ? null : { state: { display: d }, events: [] }; },
-      // It was not running before this task (appUnavailable), so every Calculator process now is this task's.
-      close: async () => { try { execFileSync(system32('taskkill.exe'), ['/IM', 'CalculatorApp.exe', '/F'], { stdio: 'ignore' }); } catch { /* closed */ } },
+      close: async () => { for (const pid of imagePids('CalculatorApp.exe')) killTree(pid); },
     };
   }
   if (app === 'calculator') {
@@ -161,7 +188,7 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
     };
     await waitFor(probe, 30_000, 'Calculator to open');
     return {
-      window: 'Calculator', apps: ['Calculator'],
+      window: 'Calculator', apps: ['Calculator'], roots: () => imagePids('Calculator'),
       state: async () => { const d = await probe(); return d === null ? null : { state: { display: d }, events: [] }; },
       close: async () => { await osa('tell application "Calculator" to quit'); },
     };
@@ -172,7 +199,7 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
   const text = () => osa('tell application "TextEdit" to get text of document 1');
   await waitFor(async () => (await text()) !== null, 30_000, 'TextEdit to open');
   return {
-    window: 'TextEdit "bench-document.txt"', apps: ['TextEdit'],
+    window: 'TextEdit "bench-document.txt"', apps: ['TextEdit'], roots: () => imagePids('TextEdit'),
     state: async () => { const t = await text(); return t === null ? null : { state: { text: t.replace(/\n$/, '') }, events: [] }; },
     close: async () => { await osa('tell application "TextEdit" to quit saving no'); },
   };
@@ -187,11 +214,15 @@ export async function openFixture(task: TaskSpec, ctx: FixtureContext): Promise<
   if (f.kind === 'native') return openNative(f.mode, ctx);
   if (f.kind === 'app') return openApp(f.app, ctx);
   if (!ctx.browser) return { skip: 'no Chromium browser (Edge, Chrome or Chromium) is installed' };
-  const browser = await openBrowser(ctx.browser, { profileDir: path.join(ctx.workDir, 'browser-profile'), cdpPort: ctx.cdpPort,
-    url: ctx.server.url(f.page, ctx.runId, f.query), pos: ctx.pos });
+  const profileDir = path.join(ctx.workDir, 'browser-profile');
+  const browser = await openBrowser(ctx.browser, { profileDir, url: ctx.server.url(f.page, ctx.runId, f.query), pos: ctx.pos });
+  const image = path.basename(ctx.browser.exe);
   return {
     window: `the browser window showing the page "${PAGE_TITLES[f.page] ?? f.page}" (a private window, already open)`,
     apps: browserAppNames(ctx.browser.kind),
+    // Every process on this run's temp profile: the owner's browser, on its own profile, is never one of them.
+    roots: () => pidsByCommandLine(profileDir, image),
+    cdp: { cdpPort: browser.cdpPort, profileDir },
     state: async () => ctx.server.state(ctx.runId),
     close: () => browser.close(),
   };

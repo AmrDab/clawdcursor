@@ -75,7 +75,7 @@ export interface LogCall {
   t: string; tool: string; action?: string;
   cls: 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
   ok: boolean; ms: number; outcome?: string; app?: string; code?: string;
-  steps?: Array<{ tool: string; action?: string; cls: LogCall['cls']; ok: boolean; outcome: string }>;
+  steps?: Array<{ tool: string; action?: string; cls: LogCall['cls']; ok: boolean; outcome: string; app?: string }>;
 }
 
 /** A call as the adapter saw the model make it: `sig` is a hash of tool + arguments (the session log has no arguments). */

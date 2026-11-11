@@ -5,6 +5,7 @@
 import * as fs from 'fs';
 import { chromium } from 'playwright';
 import * as path from 'path';
+import { profileDebugPort } from './ownership';
 import { killByCommandLine, pidsByCommandLine, start, waitFor } from './proc';
 
 export interface BrowserExe { exe: string; kind: 'edge' | 'chrome' | 'chromium' }
@@ -32,17 +33,17 @@ export function findBrowser(platform: string = process.platform, exists: (p: str
   return (CANDIDATES[platform] ?? []).find(c => exists(c.exe)) ?? null;
 }
 
-/** The names the session log may give this browser (process name, display name): the privacy guard allows these. */
+/** The names the session log gives this browser. A name alone never passes the privacy guard: the process must be the fixture's (ownership.ts). */
 export function browserAppNames(kind: BrowserExe['kind']): string[] {
-  return kind === 'edge' ? ['Edge', 'msedge', 'Microsoft Edge']
-    : kind === 'chrome' ? ['Chrome', 'Google Chrome', 'google-chrome']
-      : ['Chromium', 'chromium-browser'];
+  return kind === 'edge' ? ['Edge', 'Microsoft Edge'] : kind === 'chrome' ? ['Chrome', 'Google Chrome'] : ['Chromium'];
 }
 
-export function browserArgs(o: { kind: BrowserExe['kind']; profileDir: string; cdpPort: number; url: string; pos?: [number, number]; extraArgs?: string[] }): string[] {
+export function browserArgs(o: { kind: BrowserExe['kind']; profileDir: string; url: string; pos?: [number, number]; extraArgs?: string[] }): string[] {
   return [
     `--user-data-dir=${o.profileDir}`,
-    `--remote-debugging-port=${o.cdpPort}`,
+    // Port 0: the browser picks a free port and writes it to DevToolsActivePort in ITS profile. Reading it there is the
+    // proof that this port is this instance's (ownership.ts).
+    '--remote-debugging-port=0',
     // A new profile in Edge signs in with the Windows account and brings the owner's tabs: a private window does not.
     o.kind === 'edge' ? '--inprivate' : '--incognito',
     '--no-first-run', '--no-default-browser-check', '--disable-sync', '--new-window',
@@ -53,17 +54,19 @@ export function browserArgs(o: { kind: BrowserExe['kind']; profileDir: string; c
   ];
 }
 
-export interface FixtureBrowser { close(): Promise<void> }
+export interface FixtureBrowser { cdpPort: number; close(): Promise<void> }
 
-export async function openBrowser(b: BrowserExe, o: { profileDir: string; cdpPort: number; url: string; pos?: [number, number]; extraArgs?: string[] }): Promise<FixtureBrowser> {
+export async function openBrowser(b: BrowserExe, o: { profileDir: string; url: string; pos?: [number, number]; extraArgs?: string[] }): Promise<FixtureBrowser> {
   fs.mkdirSync(o.profileDir, { recursive: true });
   start(b.exe, browserArgs({ kind: b.kind, ...o }), { stdio: 'ignore' });
-  const endpoint = `http://127.0.0.1:${o.cdpPort}`;
+  const cdpPort = await waitFor(() => profileDebugPort(o.profileDir), 30_000, 'the fixture browser to start');
+  const endpoint = `http://127.0.0.1:${cdpPort}`;
   await waitFor(async () => {
     const tabs = await (await fetch(`${endpoint}/json/list`)).json() as Array<{ type: string; url: string }>;
     return tabs.some(t => t.type === 'page' && t.url.startsWith(o.url.split('?')[0]));
   }, 30_000, 'the fixture page to open');
   return {
+    cdpPort,
     close: async () => {
       // Ask this instance (by its own debug port) to close, then stop whatever still runs on its profile.
       try {
@@ -73,9 +76,9 @@ export async function openBrowser(b: BrowserExe, o: { profileDir: string; cdpPor
       } catch { /* already gone */ }
       // The browser process can outlive its windows by a few seconds. Whatever still runs on this profile after that is stopped.
       const image = path.basename(b.exe);
-      const gone = () => pidsByCommandLine(o.profileDir, image).length === 0;
+      const gone = async () => (await pidsByCommandLine(o.profileDir, image)).length === 0;
       if (!await waitFor(gone, 10_000, 'the fixture browser to exit', 500).catch(() => false)) {
-        killByCommandLine(o.profileDir, image);
+        await killByCommandLine(o.profileDir, image);
         await waitFor(gone, 10_000, 'the fixture browser to be stopped', 500).catch(() => false);
       }
       try { fs.rmSync(o.profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* a temp dir: the OS cleans it */ }

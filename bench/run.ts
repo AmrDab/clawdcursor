@@ -14,6 +14,7 @@ import { findBrowser } from './lib/browser';
 import { startFixtureServer, type FixtureServer } from './lib/fixture-server';
 import { resolveCli, startIsolated } from './lib/isolated';
 import { appUnavailable, buildNative, openFixture, type FixtureContext, type NativeBuild } from './lib/live-fixtures';
+import { USER_CDP_PORT, cdpIsFixture, ownsFocus, readFocus } from './lib/ownership';
 import { freePort, sleep } from './lib/proc';
 import { buildPrompt } from './lib/prompt';
 import { buildReport, compare, renderMarkdown, score, toBaseline, type Baseline, type Score } from './lib/scorer';
@@ -76,21 +77,32 @@ interface Env { cli: string; server: FixtureServer; native: NativeBuild | { miss
 async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number): Promise<Score | { skip: string }> {
   const workDir = path.join(env.outDir, m.label.replace(/[^A-Za-z0-9._-]/g, '_'), task.id);
   fs.mkdirSync(workDir, { recursive: true });
-  const ctx: FixtureContext = { server: env.server, browser: findBrowser(), native: env.native, workDir, runId: `r${n}-${task.id}`.slice(0, 64),
-    cdpPort: await freePort(), pos: env.pos };
+  const ctx: FixtureContext = { server: env.server, browser: findBrowser(), native: env.native, workDir, runId: `r${n}-${task.id}`.slice(0, 64), pos: env.pos };
   const fixture = await openFixture(task, ctx);
   if ('skip' in fixture) return fixture;
   const sessionDir = path.join(workDir, 'sessions');
   let daemon: Awaited<ReturnType<typeof startIsolated>> | undefined;
   try {
-    daemon = await startIsolated({ cli: env.cli, home: path.join(env.tempRoot, `home-${n}`), sessionDir, cdpPort: ctx.cdpPort, logFile: path.join(workDir, 'server.log') });
-    const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps });
+    // clawdcursor's browser port: the fixture browser's. For a task with no browser, a free port nothing listens on.
+    const cdpPort = fixture.cdp?.cdpPort ?? await freePort();
+    daemon = await startIsolated({ cli: env.cli, home: path.join(env.tempRoot, `home-${n}`), sessionDir, cdpPort, logFile: path.join(workDir, 'server.log') });
+    // What the privacy guard may rely on: the focus is in a process this task started, and (web) CDP can only reach its browser.
+    const cdp = fixture.cdp;
+    const proveCdp = async () => cdp !== undefined && await cdpIsFixture({ ...cdp, browserPids: fixture.roots });
+    let cdpProven = await proveCdp();
+    const cdpClock = setInterval(() => { proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }); }, 5000);
+    const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps }, {
+      ownsFocus: async () => ownsFocus(await readFocus(), await fixture.roots(), fixture.frameTitle),
+      cdpIsFixture: () => cdpProven,
+    });
     const abort = new AbortController();
     let killed: Verdict | undefined;
     const stop = (v: Verdict | null) => { if (v && !killed) { killed = v; abort.abort(); } };
     const sigs: CallSig[] = [];
     const started = Date.now();
-    const stopTail = tailSessionDir(sessionDir, c => stop(dog.onCall(c)));
+    // One line at a time, in order: the privacy proofs of a line finish before the next line is judged.
+    let judging: Promise<void> = Promise.resolve();
+    const stopTail = tailSessionDir(sessionDir, c => { judging = judging.then(async () => stop(await dog.judge(c))).catch(() => undefined); });
     const clock = setInterval(() => stop(dog.onTime((Date.now() - started) / 1000)), 500);
     let result = { finalText: '', exitCode: null as number | null };
     try {
@@ -100,8 +112,10 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number): Promise
       result.finalText = `adapter error: ${(e as Error).message}`;
     } finally {
       clearInterval(clock);
+      clearInterval(cdpClock);
       stopTail();
     }
+    await judging;   // the last calls are judged before the score is written
     const seconds = (Date.now() - started) / 1000;
     await sleep(1500);   // a late effect still reaches the fixture's recorder
     const state = await fixture.state();
@@ -143,7 +157,7 @@ async function live(o: Options): Promise<number> {
   if (!models.length) throw new Error(`no agent host found (${ADAPTERS.map(a => a.id).join(', ')})`);
   for (const m of models) if (!await m.adapter.detect()) throw new Error(`${m.adapter.id} is not installed`);
   // The daemon tries the default browser debug port when it starts: a browser there is the owner's own session.
-  if (await portOpen(9223)) throw new Error('a browser is listening on debug port 9223: clawdcursor would attach to it. Close it first.');
+  if (await portOpen(USER_CDP_PORT)) throw new Error(`a browser is listening on debug port ${USER_CDP_PORT}: clawdcursor would attach to it. Close it first.`);
   const { cli, version, source } = await resolveCli(o.build);
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = path.resolve(o.out ?? path.join(os.tmpdir(), 'clawdcursor-bench', stamp));

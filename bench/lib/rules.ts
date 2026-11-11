@@ -33,3 +33,20 @@ export function appKey(name: string): string {
 }
 
 export const isActing = (c: Pick<LogCall, 'cls'>) => c.cls === 'act-name' || c.cls === 'act-coords' || c.cls === 'act-other';
+
+type Unit = Pick<LogCall, 'tool' | 'action' | 'cls'>;
+
+/** Actions that touch no window: waiting, reading the clock, moving the pointer without pressing, connecting. */
+const NO_TARGET = new Set(['wait', 'wait_for', 'connect', 'report', 'system_time', 'shortcuts_list', 'build_uri', 'detect_webview',
+  'pause_for_user', 'hover', 'move', 'move_relative']);
+const KEYS = new Set(['type', 'key', 'key_press', 'key_down', 'key_up']);
+
+/** Does this call do something to a window or an app? Anything acting that is not known to be harmless counts. */
+export function hasTarget(u: Unit): boolean {
+  return isActing(u) && u.tool !== 'batch' && !NO_TARGET.has(u.action ?? '');
+}
+
+/** Input, or an act on an element by name: the session log names the app of every one of these that hit the window in front. */
+export function isInput(u: Unit): boolean {
+  return u.cls === 'act-name' || u.cls === 'act-coords' || (u.tool === 'computer' && KEYS.has(u.action ?? ''));
+}

@@ -25,13 +25,13 @@ describe('the isolated clawdcursor', () => {
 });
 
 describe('the fixture browser', () => {
-  const args = (kind: 'edge' | 'chrome') => browserArgs({ kind, profileDir: '/tmp/p', cdpPort: 5555, url: 'http://127.0.0.1:1/form.html?run=r', pos: [1920, 40] });
+  const args = (kind: 'edge' | 'chrome') => browserArgs({ kind, profileDir: '/tmp/p', url: 'http://127.0.0.1:1/form.html?run=r', pos: [1920, 40] });
 
   it('is a separate instance (temp profile) in a private window, on the fixture page', () => {
     const a = args('edge');
     expect(a).toContain('--user-data-dir=/tmp/p');
     expect(a).toContain('--inprivate');
-    expect(a).toContain('--remote-debugging-port=5555');
+    expect(a).toContain('--remote-debugging-port=0');   // the port is read from the profile it wrote it to
     expect(a).toContain('--window-position=1920,40');
     expect(a[a.length - 1]).toBe('http://127.0.0.1:1/form.html?run=r');
     expect(args('chrome')).toContain('--incognito');
@@ -44,9 +44,10 @@ describe('the fixture browser', () => {
     expect(findBrowser('linux', () => false)).toBeNull();
   });
 
-  it('names what the privacy guard allows', () => {
-    expect(browserAppNames('edge')).toContain('Edge');
-    expect(browserAppNames('chrome')).toContain('Google Chrome');
+  it('is named by its display name only: no process or host name in the allowlist', () => {
+    expect(browserAppNames('edge')).toEqual(['Edge', 'Microsoft Edge']);
+    expect(browserAppNames('chrome')).toEqual(['Chrome', 'Google Chrome']);
+    expect(browserAppNames('chromium')).toEqual(['Chromium']);
   });
 });
 

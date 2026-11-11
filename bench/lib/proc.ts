@@ -29,23 +29,25 @@ export function killTree(pid: number | undefined): void {
  * The pids of the processes named `image` (e.g. "msedge.exe") whose command line contains `marker`: a temp path only a
  * process of this run can have. A browser re-launches itself, so the pid we spawned is not the pid that owns the window.
  */
-export function pidsByCommandLine(marker: string, image: string): number[] {
+export async function pidsByCommandLine(marker: string, image: string): Promise<number[]> {
   if (marker.length < 12) throw new Error('refusing to match processes on a short marker');
-  try {
-    const out = isWin
+  // Never execFileSync here: a blocked event loop lets the HTTP connections to the daemon and the model go stale.
+  const out = await new Promise<string>(resolve => {
+    const done = (_err: unknown, stdout: string | Buffer) => resolve(String(stdout ?? ''));   // pgrep exits 1 when nothing matches
+    if (isWin) {
       // The marker goes through the environment: no quoting of a path inside a PowerShell command.
-      ? execFileSync(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
+      execFile(POWERSHELL, ['-NoProfile', '-NonInteractive', '-Command',
         'Get-CimInstance Win32_Process | Where-Object { $_.Name -eq $env:BENCH_IMAGE -and $_.CommandLine -and $_.CommandLine.Contains($env:BENCH_MARKER) } '
         + '| ForEach-Object { $_.ProcessId }'],
-      { env: { ...process.env, BENCH_MARKER: marker, BENCH_IMAGE: image }, timeout: 30_000, stdio: ['ignore', 'pipe', 'ignore'] })
-      : execFileSync('pgrep', ['-f', '--', marker], { stdio: ['ignore', 'pipe', 'ignore'] });
-    return out.toString().split(/\s+/).map(Number).filter(n => Number.isInteger(n) && n > 0 && n !== process.pid);
-  } catch { return []; }   // pgrep exits 1 when nothing matches
+      { env: { ...process.env, BENCH_MARKER: marker, BENCH_IMAGE: image }, timeout: 30_000, windowsHide: true }, done);
+    } else execFile('pgrep', ['-f', '--', marker], { timeout: 30_000 }, done);
+  });
+  return out.split(/\s+/).map(Number).filter(n => Number.isInteger(n) && n > 0 && n !== process.pid);
 }
 
 /** Stop those processes. */
-export function killByCommandLine(marker: string, image: string): void {
-  for (const pid of pidsByCommandLine(marker, image)) {
+export async function killByCommandLine(marker: string, image: string): Promise<void> {
+  for (const pid of await pidsByCommandLine(marker, image)) {
     try {
       if (isWin) execFileSync(system32('taskkill.exe'), ['/PID', String(pid), '/F'], { stdio: 'ignore' });
       else process.kill(pid, 'SIGKILL');

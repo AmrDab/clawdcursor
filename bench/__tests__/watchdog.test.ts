@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { Watchdog, readSessionCalls, tailSessionDir } from '../lib/watchdog';
+import { Watchdog, readSessionCalls, tailSessionDir, type Proof } from '../lib/watchdog';
 import { appKey } from '../lib/rules';
 import type { LogCall } from '../lib/types';
 
@@ -10,15 +10,16 @@ vi.useRealTimers();
 
 const call = (tool: string, action: string, cls: LogCall['cls'], extra: Partial<LogCall> = {}): LogCall =>
   ({ t: new Date().toISOString(), tool, action, cls, ok: true, ms: 10, outcome: 'ok', ...extra });
-const dog = (over: Partial<{ maxCalls: number; maxSeconds: number; fixtureApps: string[] }> = {}) =>
-  new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge', 'msedge'], ...over });
+/** By default the runner can prove everything: the tests of the other rules are not about privacy. */
+const dog = (over: Partial<{ maxCalls: number; maxSeconds: number; fixtureApps: string[] }> = {}, proof: Partial<Proof> = {}) =>
+  new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge'], ...over }, { ownsFocus: () => true, cdpIsFixture: () => true, ...proof });
 
 describe('the watchdog rules', () => {
   it('lets a normal run through', () => {
     const d = dog();
     expect(d.onCall(call('accessibility', 'read_tree', 'blind'))).toBeNull();
     for (let i = 0; i < 5; i++) expect(d.onCall(call('accessibility', 'set_value', 'act-name', { app: 'Edge' }))).toBeNull();
-    expect(d.onCall(call('accessibility', 'invoke', 'act-name'))).toBeNull();
+    expect(d.onCall(call('accessibility', 'invoke', 'act-name', { app: 'Edge' }))).toBeNull();
     expect(d.onTime(59)).toBeNull();
   });
 
@@ -41,7 +42,7 @@ describe('the watchdog rules', () => {
     });
     it('from the log alone: three actions of one kind are not a loop (the log has no arguments)', () => {
       const d = dog();
-      for (let i = 0; i < 6; i++) expect(d.onCall(call('accessibility', 'set_value', 'act-name'))).toBeNull();
+      for (let i = 0; i < 6; i++) expect(d.onCall(call('accessibility', 'set_value', 'act-name', { app: 'Edge' }))).toBeNull();
     });
     it('once signatures arrive, the log comparison is off: three reads of different things pass', () => {
       const d = dog();
@@ -55,7 +56,7 @@ describe('the watchdog rules', () => {
   describe('repeat-failure: the same failure code 3 times', () => {
     it('counts a code across the task, not only in a row', () => {
       const d = dog();
-      const fail = () => call('accessibility', 'invoke', 'act-name', { ok: false, outcome: 'error', code: 'NOT_FOUND' });
+      const fail = () => call('accessibility', 'invoke', 'act-name', { ok: false, outcome: 'error', code: 'NOT_FOUND', app: 'Edge' });
       expect(d.onCall(fail())).toBeNull();
       expect(d.onCall(call('accessibility', 'read_tree', 'blind'))).toBeNull();
       expect(d.onCall(fail())).toBeNull();
@@ -65,15 +66,15 @@ describe('the watchdog rules', () => {
     it('keeps codes apart', () => {
       const d = dog();
       for (const code of ['NOT_FOUND', 'TIMEOUT', 'NOT_FOUND', 'TIMEOUT']) {
-        expect(d.onCall(call('accessibility', 'invoke', 'act-name', { ok: false, outcome: 'error', code }))).toBeNull();
+        expect(d.onCall(call('accessibility', 'invoke', 'act-name', { ok: false, outcome: 'error', code, app: 'Edge' }))).toBeNull();
       }
     });
   });
 
   it('call-cap: one call more than the task allows', () => {
     const d = dog({ maxCalls: 3 });
-    for (let i = 0; i < 3; i++) expect(d.onCall(call('accessibility', 'set_value', 'act-name'))).toBeNull();
-    expect(d.onCall(call('accessibility', 'set_value', 'act-name'))).toMatchObject({ rule: 'call-cap' });
+    for (let i = 0; i < 3; i++) expect(d.onCall(call('accessibility', 'set_value', 'act-name', { app: 'Edge' }))).toBeNull();
+    expect(d.onCall(call('accessibility', 'set_value', 'act-name', { app: 'Edge' }))).toMatchObject({ rule: 'call-cap' });
   });
 
   it('time-cap', () => {
@@ -82,29 +83,107 @@ describe('the watchdog rules', () => {
     expect(d.onTime(60.5)).toMatchObject({ rule: 'time-cap' });
   });
 
-  describe('privacy: an acting call in an app that is not a fixture', () => {
-    it('stops on the first one', () => {
-      expect(dog().onCall(call('computer', 'click', 'act-coords', { app: 'Outlook' }))).toMatchObject({ rule: 'privacy' });
-      expect(dog().onCall(call('computer', 'type', 'act-other', { app: 'File Explorer' }))).toMatchObject({ rule: 'privacy' });
+  describe('privacy: fails closed', () => {
+    const step = (tool: string, action: string, cls: LogCall['cls'], extra: object = {}) => ({ tool, action, cls, ok: true, outcome: 'ok', ...extra });
+    const none: Partial<Proof> = { ownsFocus: () => false, cdpIsFixture: () => false };
+
+    it('stops on an act in an app that is not the fixture', async () => {
+      expect(await dog().judge(call('computer', 'click', 'act-coords', { app: 'Outlook' }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('computer', 'type', 'act-other', { app: 'File Explorer' }))).toMatchObject({ rule: 'privacy' });
     });
-    it('allows the fixture app, however its name is written', () => {
+
+    it('stops on input or an act by name with NO app recorded (a background process)', async () => {
+      expect(await dog().judge(call('accessibility', 'invoke', 'act-name'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('accessibility', 'set_value', 'act-name'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('computer', 'click', 'act-coords'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('computer', 'key', 'act-other'))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a fixture app NAME is not enough: the focus must be in a process the benchmark started', async () => {
+      // The owner's own Edge window has the same name as the fixture browser.
+      const v = await dog({}, { ownsFocus: () => false }).judge(call('computer', 'click', 'act-coords', { app: 'Edge' }));
+      expect(v).toMatchObject({ rule: 'privacy' });
+      expect(v!.detail).toMatch(/not in a process the benchmark started/);
+      expect(await dog().judge(call('computer', 'click', 'act-coords', { app: 'Edge' }))).toBeNull();
+    });
+
+    it('accepts the fixture app however its name is written, with the proof', async () => {
       const d = dog({ fixtureApps: ['BenchFixture'] });
       for (const app of ['BenchFixture', 'benchfixture', 'Bench Fixture', 'BenchFixture.exe']) {
-        expect(d.onCall(call('accessibility', 'invoke', 'act-name', { app }))).toBeNull();
+        expect(await d.judge(call('accessibility', 'invoke', 'act-name', { app }))).toBeNull();
       }
     });
-    it('sees an acting step inside a batch', () => {
-      const steps = [{ tool: 'computer', action: 'click', cls: 'act-coords' as const, ok: true, outcome: 'ok' }];
-      expect(dog().onCall(call('batch', '', 'act-other', { app: 'Word', steps }))).toMatchObject({ rule: 'privacy' });
+
+    it('a CDP act (the log names no app) passes only when the reachable browser is proven to be the fixture\'s', async () => {
+      expect(await dog().judge(call('browser', 'click', 'act-other'))).toBeNull();
+      expect(await dog().judge(call('browser', 'navigate', 'act-other'))).toBeNull();
+      expect(await dog({}, { cdpIsFixture: () => false }).judge(call('browser', 'click', 'act-other'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog({}, { cdpIsFixture: () => false }).judge(call('browser', 'evaluate', 'act-other'))).toMatchObject({ rule: 'privacy' });
     });
-    it('does not fire on a read, or on an action with no app recorded', () => {
-      const d = dog();
-      expect(d.onCall(call('accessibility', 'read_tree', 'blind', { app: 'Outlook' }))).toBeNull();
-      expect(d.onCall(call('accessibility', 'invoke', 'act-name'))).toBeNull();
+
+    it('a window or launch call with no app passes only when the focus ends in a process the benchmark started', async () => {
+      expect(await dog().judge(call('window', 'focus', 'act-other'))).toBeNull();
+      expect(await dog({}, none).judge(call('window', 'focus', 'act-other'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog({}, none).judge(call('window', 'open_app', 'act-other'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog({}, none).judge(call('system', 'clipboard_write', 'act-other'))).toMatchObject({ rule: 'privacy' });
     });
-    it('comes before every other rule', () => {
+
+    it('checks every step of a batch, with the batch line\'s app', async () => {
+      const steps = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords'), step('accessibility', 'set_value', 'act-name')];
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Word', steps }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { steps }))).toMatchObject({ rule: 'privacy' });   // no app at all
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toBeNull();
+      expect(await dog({}, { ownsFocus: () => false }).judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a step that names its own app is judged by it', async () => {
+      const steps = [step('computer', 'click', 'act-coords', { app: 'Edge' }), step('computer', 'click', 'act-coords', { app: 'Outlook' })];
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a CDP step inside a batch needs the CDP proof, an input step next to it needs the app', async () => {
+      const steps = [step('browser', 'click', 'act-other')];
+      expect(await dog().judge(call('batch', '', 'act-other', { steps }))).toBeNull();
+      expect(await dog({}, { cdpIsFixture: () => false }).judge(call('batch', '', 'act-other', { steps }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { steps: [...steps, step('computer', 'type', 'act-other')] }))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a batch whose steps the log does not list is judged like input', async () => {
+      expect(await dog().judge(call('batch', '', 'act-other'))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge' }))).toBeNull();
+    });
+
+    it('does not fire on reads, on calls that touch no window, or on a call a guard refused', async () => {
+      const d = dog({}, none);
+      expect(await d.judge(call('accessibility', 'read_tree', 'blind', { app: 'Outlook' }))).toBeNull();
+      expect(await d.judge(call('computer', 'screenshot', 'vision'))).toBeNull();
+      expect(await d.judge(call('computer', 'wait', 'act-other'))).toBeNull();
+      expect(await d.judge(call('browser', 'connect', 'act-other'))).toBeNull();
+      expect(await d.judge(call('computer', 'hover', 'act-coords'))).toBeNull();
+      expect(await d.judge(call('computer', 'click', 'act-coords', { ok: false, outcome: 'refused' }))).toBeNull();
+    });
+
+    it('an unknown acting action is not assumed harmless', async () => {
+      expect(await dog({}, none).judge(call('system', 'some_new_action', 'act-other'))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('asks for the focus proof once per log line', async () => {
+      let asked = 0;
+      const d = dog({}, { ownsFocus: () => { asked++; return true; } });
+      const steps = [step('computer', 'click', 'act-coords'), step('computer', 'type', 'act-other'), step('window', 'focus', 'act-other')];
+      expect(await d.judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toBeNull();
+      expect(asked).toBe(1);
+    });
+
+    it('a probe that fails or throws counts as "not ours"', async () => {
+      const broken: Partial<Proof> = { ownsFocus: () => Promise.reject(new Error('probe failed')), cdpIsFixture: () => { throw new Error('probe failed'); } };
+      expect(await dog({}, broken).judge(call('computer', 'click', 'act-coords', { app: 'Edge' }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog({}, { cdpIsFixture: () => Promise.reject(new Error('x')) }).judge(call('browser', 'click', 'act-other'))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('comes before every other rule', async () => {
       const d = dog({ maxCalls: 0 });
-      expect(d.onCall(call('computer', 'click', 'act-coords', { app: 'Outlook', ok: false, code: 'X' }))).toMatchObject({ rule: 'privacy' });
+      expect(await d.judge(call('computer', 'click', 'act-coords', { app: 'Outlook', ok: false, code: 'X' }))).toMatchObject({ rule: 'privacy' });
     });
   });
 

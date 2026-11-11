@@ -45,7 +45,7 @@ export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionD
 }
 
 export interface IsolatedServer {
-  port: number; token: string; mcpUrl: string; sessionDir: string;
+  port: number; pid: number; token: string; mcpUrl: string; sessionDir: string;
   stop(): Promise<void>;
 }
 
@@ -72,7 +72,7 @@ export async function startIsolated(o: { cli: string; home: string; sessionDir: 
   }
   const token = fs.readFileSync(tokenFile, 'utf8').trim();
   return {
-    port, token, mcpUrl: `${base}/mcp`, sessionDir: o.sessionDir,
+    port, pid: child.pid ?? 0, token, mcpUrl: `${base}/mcp`, sessionDir: o.sessionDir,
     stop: async () => {
       // Ask it to stop (it closes its session logs), then make sure.
       try { await fetch(`${base}/stop`, { method: 'POST', headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(3000) }); } catch { /* gone */ }

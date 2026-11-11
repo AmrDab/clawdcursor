@@ -16,7 +16,8 @@ import { chromium, type Page } from 'playwright';
 import { findBrowser, openBrowser } from './browser';
 import { resolveCli, startIsolated } from './isolated';
 import { buildNative, nativeArgs, readStateFile } from './live-fixtures';
-import { freePort, tryRun, waitFor } from './proc';
+import { cdpIsFixture, ownsFocus, readFocus } from './ownership';
+import { freePort, pidsByCommandLine, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
 import { evaluate, loadTasks } from './tasks';
 import type { TaskSpec } from './types';
@@ -150,18 +151,20 @@ export async function selfcheckNative(log: (line: string) => void = console.log)
   }
 }
 
-/** Size and time of every file under a directory: to prove a run did not touch it. */
+/**
+ * What a daemon writes into its data directory when it starts: the token, consent, pidfile and config. The owner's own
+ * clawdcursor may be running and logging meanwhile, so the whole directory is not compared: these files are, and the
+ * session and log files are searched for the isolated daemon's pid.
+ */
 function fingerprint(dir: string): string {
-  const out: string[] = [];
-  const walk = (d: string) => {
-    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) walk(p);
-      else { const s = fs.statSync(p); out.push(`${p}|${s.size}|${s.mtimeMs}`); }
-    }
-  };
-  try { walk(dir); } catch { /* no such directory: nothing to touch */ }
-  return out.sort().join('\n');
+  return ['token', 'consent', 'start.pid', 'config.json'].map(f => {
+    try { const st = fs.statSync(path.join(dir, f)); return `${f}|${st.size}|${st.mtimeMs}`; } catch { return `${f}|none`; }
+  }).join('\n');
+}
+
+/** Did the process `pid` leave a session file in the owner's directory? (Session files are named ...-<pid>-<n>.jsonl.) */
+function wroteSession(dir: string, pid: number): boolean {
+  try { return fs.readdirSync(path.join(dir, 'sessions')).some(f => f.includes(`-${pid}-`)); } catch { return false; }
 }
 
 /**
@@ -178,16 +181,24 @@ export async function selfcheckIsolation(buildDir: string | undefined, log: (lin
   const server = await startFixtureServer();
   try {
     const { cli, version, source } = await resolveCli(buildDir);
-    const cdpPort = await freePort();
     const exe = findBrowser();
     const profileDir = path.join(root, 'browser-profile');
-    const browser = exe ? await openBrowser(exe, { profileDir, cdpPort, url: server.url('trap', 'isolation'), extraArgs: ['--headless=new'] }) : null;
+    const browser = exe ? await openBrowser(exe, { profileDir, url: server.url('trap', 'isolation'), extraArgs: ['--headless=new'] }) : null;
+    const cdpPort = browser?.cdpPort ?? await freePort();
     if (!browser) log('skip fixture browser: no Chromium browser installed');
     const daemon = await startIsolated({ cli, home: path.join(root, 'home'), sessionDir: path.join(root, 'sessions'), cdpPort, logFile: path.join(root, 'server.log') });
+    const daemonPid = daemon.pid;
     try {
       if (browser) {
         await waitFor(() => server.state('isolation').events.some(e => e.type === 'load'), 10_000, 'the page to report').catch(() => undefined);
         ok = check(server.state('isolation').events.some(e => e.type === 'load'), 'fixture browser: the page reports to the fixture server') && ok;
+        // The privacy guard's proofs, for real: the debug port belongs to a process on the temp profile; and this
+        // headless browser has no window, so the focus (wherever the owner is working) is not the fixture's.
+        const roots = () => pidsByCommandLine(profileDir, path.basename(exe!.exe));
+        ok = check(await cdpIsFixture({ cdpPort, profileDir, browserPids: roots }), 'privacy proof: the browser on the fixture debug port runs on the fixture profile') && ok;
+        ok = check(!await cdpIsFixture({ cdpPort, profileDir: root, browserPids: roots }) && !await cdpIsFixture({ cdpPort, profileDir, browserPids: () => [] }),
+          'privacy proof: a browser that is not on the fixture profile is refused') && ok;
+        ok = check(!ownsFocus(await readFocus(), await roots()), 'privacy proof: the focused window (not a fixture) is not accepted as one') && ok;
       }
       const bare = await fetch(daemon.mcpUrl, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
       ok = check(bare.status === 401, `isolated clawdcursor ${version} (${source}) on port ${daemon.port}: refuses a request without its token`) && ok;
@@ -202,7 +213,7 @@ export async function selfcheckIsolation(buildDir: string | undefined, log: (lin
       await browser?.close();
     }
     ok = check(!fs.existsSync(profileDir), 'fixture browser: closed, its temp profile removed') && ok;
-    ok = check(fingerprint(real) === before, `the owner's ${real} is untouched`) && ok;
+    ok = check(fingerprint(real) === before && !wroteSession(real, daemonPid), `the owner's ${real} is untouched (token, consent, pidfile, config, sessions)`) && ok;
   } catch (e) {
     ok = check(false, `isolation: ${(e as Error).message}`);
   } finally {
