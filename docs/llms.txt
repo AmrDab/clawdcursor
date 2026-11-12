@@ -109,7 +109,7 @@ clawdcursor never runs a model.
 ## Tool surface (compact — recommended, ~7,000 tokens of catalog vs ~19,000 granular)
 
 - accessibility — drive UI by element name; compile a fused el_NN UI map and act on {element_id, snapshot_id} (survives layout shifts)
-- system — page text (copy_all_text), OCR, clipboard, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
+- system — page text (copy_all_text; find for one value in a long page), OCR, clipboard, shortcuts, webview detection, pause_for_user (hand the desktop to the user at a roadblock)
 - window — list, focus, resize, close windows; open apps, files and URLs
 - browser — Chrome DevTools Protocol for browsers and Electron / WebView2 apps
 - computer — raw keyboard and mouse (type, keys, scroll, drag); click x,y and screenshot are the last resort

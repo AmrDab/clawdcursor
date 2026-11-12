@@ -346,7 +346,7 @@ describe('9. parameter descriptions per compound, and the description limit', ()
 describe('11. server instructions', () => {
   it('compact: TO SEE / TO ACT ladder, pause text untouched', async () => {
     const { instructions } = await connect(true);
-    expect(instructions).toContain('TO SEE: (1) accessibility read_tree lists the window\'s elements by name; (2) system copy_all_text gives the exact text of a page; (3) system ocr reads the screen when read_tree is empty. TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; (2) if the name is not found, accessibility smart_click with target = the visible label; (3) only for a target with no name and no text: computer screenshot, then computer click with x,y from that image.');
+    expect(instructions).toContain('TO SEE: (1) accessibility read_tree lists the window\'s elements by name; (2) system copy_all_text gives the exact text of a page (find returns only the lines with one value); (3) system ocr reads the screen when read_tree is empty. TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; (2) if the name is not found, accessibility smart_click with target = the visible label; (3) only for a target with no name and no text: computer screenshot, then computer click with x,y from that image.');
     expect(instructions).toContain('Roadblocks only the user can clear');
   });
 });

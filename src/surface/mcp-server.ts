@@ -157,7 +157,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
       (compact
         // Compact tools carry no per-tool cost prefix, so name the actions.
         ? 'TO SEE: (1) accessibility read_tree lists the window\'s elements by name; ' +
-          '(2) system copy_all_text gives the exact text of a page; ' +
+          '(2) system copy_all_text gives the exact text of a page (find returns only the lines with one value); ' +
           '(3) system ocr reads the screen when read_tree is empty. ' +
           'TO ACT: (1) accessibility invoke with name clicks an element, set_value types into a field; ' +
           '(2) if the name is not found, accessibility smart_click with target = the visible label; ' +

@@ -568,6 +568,14 @@
               "screen",
               "window"
             ]
+          },
+          "find": {
+            "type": "string",
+            "description": "Return only the lines that contain this text (case-insensitive, the whole text is searched), each with 2 lines around it so a table row's other cells show. E.g. \"Delta-17\"."
+          },
+          "offset": {
+            "type": "number",
+            "description": "Start at this character: a text over 20000 chars is cut, and the cut result names the offset of the next part."
           }
         }
       },
@@ -710,6 +718,10 @@
           "processId": {
             "type": "number",
             "description": "Process ID to search within"
+          },
+          "offset": {
+            "type": "number",
+            "description": "Skip this many matches: page past \"... and N more\" (default 0)"
           }
         }
       },
