@@ -296,22 +296,43 @@ describe('no full-screen glow', () => {
     expect(outline).toMatch(/if state\['monitor'\]:[\s\S]*?get_monitor_at_point\(px, py\)/);
   });
 
-  it('the beam is steady where the OS is set to reduce motion, and the paused form does not travel (#392)', () => {
+  it('the beam is still where the OS is set to reduce motion, and the paused form does not turn (#392)', () => {
     const ps = read('scripts', 'window-outline.ps1');
     expect(ps).toContain('still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;');
-    expect(ps).toContain('if (still || paused) {');
+    expect(ps).toContain('turning = !still && !paused;');
     expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift).toContain('let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion');
-    expect(swift).toContain('if paused || still {');
-    expect(swift).toContain('if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { continue }');
+    expect(swift).toContain('let turning = !paused && !still');
+    expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
+  });
+
+  // The look is a port of Border Beam and Thinking Orbs (libraries.dev, MIT): the library's own numbers, with its notice.
+  it('the beam and the orb carry the library\'s recipe and its licence notice (#392)', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
+    expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
+    expect(ps).toContain('const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 30, FadeInSeconds = 0.6;');
+    expect(ps).toContain('BeamMask = { 0, 0, 30, 0, 36, .1, 44, .35, 52, 1, 80, 1, 86, .35, 92, .1, 95, 0, 100, 0 }');
+    expect(ps).toContain('Colorful = { 255, 50, 100,  40, 140, 255,  50, 200, 80,  30, 185, 170,  100, 70, 255,  40, 140, 255,  255, 120, 40,  240, 50, 180,  180, 40, 240 }');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
+    expect(swift).toContain('conic([(0, 0), (30, 0), (36, 0.1), (44, 0.35), (52, 1), (80, 1), (86, 0.35), (92, 0.1), (95, 0), (100, 0)])');
+    expect(swift).toContain('turn.duration = 1.96');
+    const pill = read('scripts', 'banner.ps1');
+    expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
+    expect(pill).toContain('const double Speed = 3.9, Sized = 2.4;');
+    expect(swift).toContain('let box = 20.0, speed = 3.9, sized = 2.4');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
+    // Where the frame is, is read in physical pixels (per-monitor-v2); the strips themselves are not DPI aware, so
+    // Windows draws them at the monitor's scale.
+    expect(ps).toContain('IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2');
+    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-1))');
     // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.

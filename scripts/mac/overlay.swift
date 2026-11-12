@@ -4,7 +4,7 @@
 // scripts/linux/overlay.py, driven by src/core/banner.ts. Compiled once with
 // `swiftc -O` into ~/.clawdcursor/bin (like the OCR helper).
 //
-//   overlay pill   the top-center pill. Running: a small amber orb, "ClawdCursor",
+//   overlay pill   the top-center pill. Running: a small dotted orb, "ClawdCursor",
 //                  what the agent is doing (env CLAWD_BANNER_ACTIVITY, then
 //                  "ACTIVITY <text>" lines on stdin), the time since it appeared
 //                  and a Stop button; Stop or a double-click prints BANNER_STOP.
@@ -31,9 +31,13 @@
 //                  "TARGET MONITOR": the agent works with no window (the desktop):
 //                  the border goes around the screen the pointer is on, as it does
 //                  when the target app is in front with no window of its own.
-//                  The border is faint, and one soft highlight travels slowly around
-//                  it (#392); --paused: no travel, a slow breathe. With Reduce
-//                  Motion on it is the plain steady border.
+//                  The look is a port of Border Beam (below); --paused: its pulse,
+//                  in blue tones. With Reduce Motion on: one still frame.
+//
+// The beam and the pill's orb are ports of Border Beam and Thinking Orbs by Jakub Antalik (libraries.dev,
+// github.com/Jakubantalik/Libraries.dev, packages/border-beam and packages/thinking-orbs), MIT License,
+// Copyright (c) 2026 Jakub Antalik. The recipe table and the licence notice in full are at the top of
+// scripts/window-outline.ps1, the Windows drawer, which this one follows.
 //
 // When stdin closes (the parent is gone) the process exits.
 //
@@ -48,20 +52,6 @@ import AppKit
 
 func emit(_ line: String) {
     FileHandle.standardOutput.write((line + "\n").data(using: .utf8)!)
-}
-
-func hexColor(_ hex: String, alpha: CGFloat = 1) -> NSColor {
-    var h = hex
-    if h.hasPrefix("#") { h.removeFirst() }
-    let v = UInt32(h, radix: 16) ?? 0xF59E0B
-    return NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
-                   blue: CGFloat(v & 0xFF) / 255, alpha: alpha)
-}
-
-func option(_ name: String, _ fallback: String) -> String {
-    let args = CommandLine.arguments
-    if let i = args.firstIndex(of: name), i + 1 < args.count { return args[i + 1] }
-    return fallback
 }
 
 func rgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> NSColor {
@@ -146,6 +136,69 @@ func giveFocusBack() {
     if #available(macOS 14.0, *) { prev.activate() } else { prev.activate(options: []) }
 }
 
+/// Thinking Orbs' default state, "working", at its 20 pt size: particles running on tilted orbits around a slowly
+/// turning dotted sphere, in light ink on the dark pill. The numbers are the library's (spec/orbs-spec.json,
+/// src/engine/orbits.ts and core.ts); the Windows pill (scripts/banner.ps1, class Orb) lists them.
+final class OrbView: NSView {
+    let started = Date()
+    var redraw: Timer?
+    override var isFlipped: Bool { true }   // y grows downward, as on the canvas the numbers are for
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        redraw?.invalidate()
+        redraw = nil
+        // With Reduce Motion on: the one still frame (t = .6).
+        if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }
+        redraw = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.needsDisplay = true }
+    }
+
+    /// Deterministic hash in [0, 1) (core.ts hashD).
+    func hash(_ a: Double, _ b: Double) -> Double {
+        let h = sin(a * 12.9898 + b * 78.233) * 43758.5453
+        return h - floor(h)
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
+        let box = 20.0, speed = 3.9, sized = 2.4
+        let t = redraw == nil ? 0.6 : Date().timeIntervalSince(started) * speed
+        let centre = box / 2, radius = centre * 0.82, scale = pow(box / 300, 0.6)
+        // The shared spin and tilt (core.ts makeProj).
+        let yaw = t * 0.12, st = sin(0.3), ct = cos(0.3), sy = sin(yaw), cy = cos(yaw)
+        var dots: [(x: Double, y: Double, z: Double, r: Double, ink: Double, alpha: Double)] = []
+        for orbit in 0..<3 {
+            let h1 = hash(Double(orbit), 1.7), h2 = hash(Double(orbit), 5.2), h3 = hash(Double(orbit), 8.9)
+            let ro = radius * (0.45 + 0.52 * h1), th = h1 * 2 * Double.pi, phi = acos(2 * h2 - 1)
+            // The orbit's plane: u and v at right angles to its normal.
+            let nx = sin(phi) * cos(th), ny = cos(phi), nz = sin(phi) * sin(th)
+            var ux = -ny, uy = nx
+            let ul = max(1e-6, (ux * ux + uy * uy).squareRoot())
+            ux /= ul
+            uy /= ul
+            let vx = -nz * uy, vy = nz * ux, vz = nx * uy - ny * ux
+            let turn = (0.25 + 0.55 * h3) * (h3 > 0.5 ? 1 : -1)
+            for k in 0..<13 {
+                let ghost = k < 10   // ten dots along the path, then three particles
+                let a = ghost ? Double(k) * 2 * Double.pi / 10 : t * turn + Double(k - 10) * 2 * Double.pi / 3 + h2 * 6
+                let x = (ux * cos(a) + vx * sin(a)) * ro, y = (uy * cos(a) + vy * sin(a)) * ro, z = vz * sin(a) * ro
+                let x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct
+                let depth = (z2 / ro + 1) / 2
+                dots.append((x: centre + x1, y: centre - y1, z: z2,
+                             r: max(0.3, (ghost ? 0.9 * sized : (1.2 + 1.6 * depth) * sized) * scale),
+                             ink: ghost ? 0.72 : 0.3 - 0.22 * depth,
+                             alpha: ghost ? 0.5 * (0.4 + 0.6 * depth) : 1))
+            }
+        }
+        // Far to near; ink is grey 1 - ink on a dark ground.
+        for d in dots.sorted(by: { $0.z < $1.z }) {
+            let grey = CGFloat(1 - min(1, max(0, d.ink)))
+            ctx.setFillColor(red: grey, green: grey, blue: grey, alpha: CGFloat(d.alpha))
+            ctx.fillEllipse(in: CGRect(x: d.x - d.r, y: d.y - d.r, width: 2 * d.r, height: 2 * d.r))
+        }
+    }
+}
+
 final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     let mode: String
     init(mode: String) { self.mode = mode }
@@ -205,40 +258,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return b
     }
 
-    /// The running pill's orb (#392), in place of the blinking dot: three soft amber blobs drifting slowly inside a
-    /// 14 pt circle. The idea is the "thinking orbs" of libraries.dev by Jakub Antalik (MIT); nothing of it is copied:
-    /// these are radial gradient layers moved by Core Animation. With Reduce Motion on they stay where they are.
+    /// The running pill's orb (#392), in place of the blinking dot: Thinking Orbs' "working" state (OrbView).
     func makeOrb() -> NSView {
-        let orb = NSView(frame: NSRect(x: 0, y: 0, width: 14, height: 14))
-        orb.wantsLayer = true
-        orb.layer?.cornerRadius = 7
-        orb.layer?.masksToBounds = true
-        orb.layer?.backgroundColor = rgb(180, 98, 8).cgColor
-        let tones = [rgb(251, 191, 36), rgb(253, 224, 130), rgb(234, 88, 12)]
-        for (i, tone) in tones.enumerated() {
-            let size = CGFloat(13 - 2 * i)
-            let blob = CAGradientLayer()
-            blob.type = .radial
-            blob.colors = [tone.withAlphaComponent(0.92).cgColor, tone.withAlphaComponent(0).cgColor]
-            blob.startPoint = CGPoint(x: 0.5, y: 0.5)
-            blob.endPoint = CGPoint(x: 1, y: 1)
-            blob.bounds = CGRect(x: 0, y: 0, width: size, height: size)
-            let angle = CGFloat(i) * 2.1
-            let from = CGPoint(x: 7 + 3.2 * cos(angle), y: 7 + 3.2 * sin(angle))
-            blob.position = from
-            orb.layer?.addSublayer(blob)
-            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { continue }
-            // Each blob goes to the other side of the orb and back, at its own pace (5 to 8 seconds a round).
-            let drift = CABasicAnimation(keyPath: "position")
-            drift.fromValue = NSValue(point: from)
-            drift.toValue = NSValue(point: CGPoint(x: 14 - from.x, y: 14 - from.y))
-            drift.duration = 2.5 + 0.75 * Double(i)
-            drift.autoreverses = true
-            drift.repeatCount = .infinity
-            drift.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            blob.add(drift, forKey: "drift")
-        }
-        return orb
+        return OrbView(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     }
 
     // The running pill: [orb] ClawdCursor  <activity>  m:ss  [Stop]
@@ -262,8 +284,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return w
         }
         var x: CGFloat = 14
-        dot.frame = NSRect(x: x, y: (rowH - 14) / 2, width: 14, height: 14)
-        x += 14 + 6
+        dot.frame = NSRect(x: x - 2, y: (rowH - 20) / 2, width: 20, height: 20)
+        x += 20 + 2
         x += place(brand, x, 200) + 6
         x += place(act, x, 360) + 8
         x += place(clock, x, 100) + 12
@@ -651,20 +673,28 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return (frame: NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height), screen: false)
     }
 
-    /// The border beam (#392). The idea is the "border beam" of libraries.dev by Jakub Antalik (MIT): a conic gradient
-    /// turning behind a mask that leaves only the border, with a soft glow. Nothing of it is copied; here it is Core
-    /// Animation, composited by the window server: a CAGradientLayer of type .conic (faint all round, one bright
-    /// highlight) turned by a CABasicAnimation, masked by stroked CAShapeLayers - a solid 3 pt border, and two wider,
-    /// fainter strokes around it for the glow.
+    /// The border beam (#392): Border Beam's default preset (rotate, md, "colorful", dark) in Core Animation, with the
+    /// library's own stops, colours and opacities (the table is at the top of scripts/window-outline.ps1):
+    ///   - the beam window: a conic CAGradientLayer (0 until 30%, .1, .35, 1 from 52% to 80%, .35, .1, 0 from 95%)
+    ///     turning once in 1.96 s, as the mask of everything else;
+    ///   - the inner glow, opacity .42: the nine colour blobs (radial gradients, .9 size, alpha .45) and the inset white
+    ///     shadow, fading out 28 pt in from each edge;
+    ///   - the stroke ring, opacity .26: a 1 pt band at the edge with the blobs at full strength under the white conic
+    ///     highlight (peak .75 at 66%), which turns with the beam window.
+    /// The blobs keep their place and reach along their edge in proportion to the frame, and their reach across it in
+    /// points, as on Windows. The colours go through the library's brightness(1.3) saturate(1.2) once.
+    /// --paused: the pulse - the whole ring in the "ocean" blues (stroke .94, glow .34, brightness 1.9), its opacity
+    /// swinging .54..1 over 2.3 s. With Reduce Motion on: the whole ring, still.
+    /// Not here yet, and on Windows: the slow hue shift (-30..+30 degrees over 12 s) and the bloom (the ring blurred
+    /// 8 pt at opacity .24, at most 1% white).
     func windowOutline() {
         let paused = CommandLine.arguments.contains("--paused")
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        let color = hexColor(option("--color", "#f59e0b"))
-        let glow: CGFloat = 6   // points the window reaches outside the frame, for the glow
+        let turning = !paused && !still
 
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
-        win.backgroundColor = .clear   // only the border is drawn: nothing over the window's content
+        win.backgroundColor = .clear   // only the beam is drawn: nothing over the middle of the window
         win.hasShadow = false
         win.ignoresMouseEvents = true // click-through
         win.level = .floating   // above ordinary windows, below the pill and the menu bar
@@ -674,72 +704,172 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         view.wantsLayer = true
         win.contentView = view
 
-        // What turns: a square big enough to cover the frame at any angle, faint (35%) except for one soft highlight
-        // (the same either way round). Paused, or with Reduce Motion on, it is the full colour all round and does not turn.
-        let beam = CAGradientLayer()
-        beam.type = .conic
-        beam.startPoint = CGPoint(x: 0.5, y: 0.5)
-        beam.endPoint = CGPoint(x: 0.5, y: 0)
-        let faint = color.withAlphaComponent(0.35).cgColor
-        if paused || still {
-            beam.colors = [color.cgColor, color.cgColor]
-        } else {
-            beam.colors = [faint, faint, color.cgColor, faint]
-            beam.locations = [0, 0.7, 0.85, 1]
+        // Everything is laid out with y growing downward, as the recipe is.
+        let stage = CALayer()
+        stage.isGeometryFlipped = true
+        stage.masksToBounds = true
+        view.layer?.addSublayer(stage)
+
+        // brightness(b) saturate(1.2) on a colour (the feColorMatrix arithmetic, colorMatrix.ts with no hue turn).
+        let brightness = paused ? 1.9 : 1.3, saturation = 1.2
+        func filtered(_ r: Double, _ g: Double, _ b: Double, _ alpha: Double) -> CGColor {
+            let (r1, g1, b1) = (r * brightness, g * brightness, b * brightness)
+            let grey = 0.213 * r1 + 0.715 * g1 + 0.072 * b1
+            func mix(_ c: Double) -> CGFloat { CGFloat(min(1, max(0, grey + (c - grey) * saturation))) }
+            return NSColor(srgbRed: mix(r1), green: mix(g1), blue: mix(b1), alpha: CGFloat(alpha)).cgColor
         }
-        // The mask: the border itself, and (not with Reduce Motion: the plain border) the glow around it.
-        let mask = CALayer()
-        let strokes: [(width: CGFloat, alpha: CGFloat)] = still ? [(3, 1)] : [(2 * glow + 3, 0.10), (glow + 3, 0.20), (3, 1)]
-        let rings: [CAShapeLayer] = strokes.map { stroke in
+        // The nine blobs: where on the card (% of its width and height), how far they reach (pt), and their colour.
+        let places: [(x: Double, y: Double, rx: Double, ry: Double)] = [
+            (33, -7.4, 70, 40), (12, -5, 60, 35), (2.1, 68.3, 40, 70), (2.1, 68.3, 20, 35), (74.4, 100, 180, 32),
+            (55, 100, 85, 26), (93.9, 0, 74, 32), (100, 27.1, 26, 42), (100, 27.1, 52, 48)]
+        let colorful: [(Double, Double, Double)] = [(255, 50, 100), (40, 140, 255), (50, 200, 80), (30, 185, 170), (100, 70, 255),
+                                                    (40, 140, 255), (255, 120, 40), (240, 50, 180), (180, 40, 240)]
+        let ocean: [(Double, Double, Double)] = [(100, 80, 220), (60, 120, 255), (80, 100, 200), (50, 140, 220), (120, 80, 255),
+                                                 (70, 130, 255), (140, 100, 240), (90, 110, 230), (130, 70, 255)]
+        let tones = paused ? ocean : colorful
+        func blobLayers(alpha: Double) -> [CAGradientLayer] {
+            // The first blob is on top: added last.
+            return (0..<9).reversed().map { i in
+                let blob = CAGradientLayer()
+                blob.type = .radial
+                blob.startPoint = CGPoint(x: 0.5, y: 0.5)
+                blob.endPoint = CGPoint(x: 1, y: 1)
+                let (r, g, b) = tones[i]
+                blob.colors = [filtered(r / 255, g / 255, b / 255, alpha), filtered(r / 255, g / 255, b / 255, 0)]
+                blob.name = String(i)
+                return blob
+            }
+        }
+        func conic(_ stops: [(Double, Double)]) -> CAGradientLayer {
+            let layer = CAGradientLayer()
+            layer.type = .conic
+            layer.startPoint = CGPoint(x: 0.5, y: 0.5)
+            layer.endPoint = CGPoint(x: 0.5, y: 0)   // from straight up, clockwise
+            layer.colors = stops.map { NSColor.white.withAlphaComponent(CGFloat($0.1)).cgColor }
+            layer.locations = stops.map { NSNumber(value: $0.0 / 100) }
+            return layer
+        }
+
+        // The glow.
+        let inner = CALayer()
+        inner.opacity = paused ? 0.34 : 0.42
+        let innerBlobs = blobLayers(alpha: 0.45)
+        innerBlobs.forEach { inner.addSublayer($0) }
+        // The inset white shadow, alpha .27 falling off (squared) over 10 pt: four 2 pt bands.
+        let shadowBands: [(inset: CGFloat, alpha: CGFloat)] = [(1, 0.22), (3, 0.13), (5, 0.07), (7, 0.024)]
+        let shadows: [CAShapeLayer] = shadowBands.map { band in
             let ring = CAShapeLayer()
             ring.fillColor = nil
-            ring.strokeColor = NSColor.black.withAlphaComponent(stroke.alpha).cgColor
-            ring.lineWidth = stroke.width
-            mask.addSublayer(ring)
+            ring.strokeColor = NSColor.white.withAlphaComponent(band.alpha).cgColor
+            ring.lineWidth = 2
+            inner.addSublayer(ring)
             return ring
         }
-        let holder = CALayer()
-        holder.addSublayer(beam)
-        holder.mask = mask
-        view.layer?.addSublayer(holder)
-        if paused && !still {
-            // The paused form breathes: 100% to 60% and back, 2 seconds a round.
+        // ...fading out 28 pt in from each edge: four gradients, one along each side.
+        let edgeMask = CALayer()
+        let edges: [CAGradientLayer] = (0..<4).map { side in
+            let fade = CAGradientLayer()
+            fade.colors = [NSColor.white.cgColor, NSColor.white.withAlphaComponent(0).cgColor]
+            fade.startPoint = [CGPoint(x: 0.5, y: 0), CGPoint(x: 1, y: 0.5), CGPoint(x: 0.5, y: 1), CGPoint(x: 0, y: 0.5)][side]
+            fade.endPoint = [CGPoint(x: 0.5, y: 1), CGPoint(x: 0, y: 0.5), CGPoint(x: 0.5, y: 0), CGPoint(x: 1, y: 0.5)][side]
+            edgeMask.addSublayer(fade)
+            return fade
+        }
+        inner.mask = edgeMask
+
+        // The stroke ring.
+        let stroke = CALayer()
+        stroke.opacity = paused ? 0.94 : 0.26
+        let strokeBlobs = blobLayers(alpha: 1)
+        strokeBlobs.forEach { stroke.addSublayer($0) }
+        let highlight = conic([(0, 0), (54, 0), (57, 0.1), (60, 0.3), (63, 0.6), (66, 0.75), (69, 0.6), (72, 0.3), (75, 0.1), (78, 0), (100, 0)])
+        if turning { stroke.addSublayer(highlight) }
+        let band = CAShapeLayer()
+        band.fillColor = nil
+        band.strokeColor = NSColor.white.cgColor
+        band.lineWidth = 1
+        stroke.mask = band
+
+        // Both inside the beam window, which turns.
+        let lit = CALayer()
+        lit.addSublayer(inner)
+        lit.addSublayer(stroke)
+        stage.addSublayer(lit)
+        let window = conic([(0, 0), (30, 0), (36, 0.1), (44, 0.35), (52, 1), (80, 1), (86, 0.35), (92, 0.1), (95, 0), (100, 0)])
+        let windowHolder = CALayer()
+        windowHolder.addSublayer(window)
+        if turning {
+            lit.mask = windowHolder
+            // One turn in 1.96 s, clockwise; the highlight with it.
+            let start = CACurrentMediaTime()
+            for layer in [window, highlight] {
+                let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+                turn.fromValue = 0
+                turn.toValue = 2 * Double.pi
+                turn.duration = 1.96
+                turn.beginTime = start
+                turn.repeatCount = .infinity
+                layer.add(turn, forKey: "turn")
+            }
+        } else if paused && !still {
+            // The pulse: .54 to 1 and back, 2.3 s a round.
             let breathe = CABasicAnimation(keyPath: "opacity")
-            breathe.fromValue = 1
-            breathe.toValue = 0.6
-            breathe.duration = 1
+            breathe.fromValue = 0.54
+            breathe.toValue = 1
+            breathe.duration = 1.15
             breathe.autoreverses = true
             breathe.repeatCount = .infinity
             breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            holder.add(breathe, forKey: "breathe")
-        } else if !still {
-            // One turn in 3.5 seconds, clockwise on screen.
-            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
-            turn.fromValue = 0
-            turn.toValue = -2 * Double.pi
-            turn.duration = 3.5
-            turn.repeatCount = .infinity
-            beam.add(turn, forKey: "turn")
+            lit.add(breathe, forKey: "breathe")
         }
 
-        // The layers for a window of this size. The border is the 3 pt just inside the frame; a whole screen has square
-        // corners. A window's are rounded like its own, or a wedge of what is behind shows at each one. The system does
-        // not give a window's radius: about 16 pt for a standard window on macOS 26 (which reports itself as 16 to a
-        // binary built with an older SDK), about 10 pt before.
+        // The layers for a frame of this size. A whole screen has square corners; a window's are rounded like its own,
+        // or a wedge of what is behind shows at each one. The system does not give a window's radius: about 16 pt for a
+        // standard window on macOS 26 (which reports itself as 16 to a binary built with an older SDK), about 10 pt before.
         let windowRadius: CGFloat = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
         func layout(_ size: NSSize, screen: Bool) {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
             let bounds = CGRect(origin: .zero, size: size)
-            holder.frame = bounds
-            mask.frame = bounds
+            let w = Double(size.width), h = Double(size.height)
+            let radius = screen ? 0 : windowRadius
+            for layer in [stage, lit, inner, stroke, edgeMask, windowHolder, band] { layer.frame = bounds }
+            stage.cornerRadius = radius
+            // The blobs: the card they were laid out on is 350 x 140.
+            for (blobs, scale) in [(innerBlobs, 0.9), (strokeBlobs, 1.0)] {
+                for blob in blobs {
+                    let place = places[Int(blob.name ?? "0") ?? 0]
+                    let fx = place.x / 100, fy = place.y / 100
+                    let rx = (place.rx * scale).rounded(), ry = (place.ry * scale).rounded()
+                    var centre = CGPoint.zero, reach = CGSize.zero
+                    if fx <= 0.05 || fx >= 0.95 {   // on a side edge
+                        centre = CGPoint(x: fx < 0.5 ? fx * 350 : w - (1 - fx) * 350, y: fy * h)
+                        reach = CGSize(width: rx, height: ry * h / 140)
+                    } else {                        // on the top or bottom edge
+                        centre = CGPoint(x: fx * w, y: fy < 0.5 ? fy * 140 : h - (1 - fy) * 140)
+                        reach = CGSize(width: rx * w / 350, height: ry)
+                    }
+                    blob.frame = CGRect(x: centre.x - reach.width, y: centre.y - reach.height, width: 2 * reach.width, height: 2 * reach.height)
+                }
+            }
+            func ring(_ inset: CGFloat) -> CGPath {
+                let rect = bounds.insetBy(dx: inset, dy: inset)
+                let r = max(0, min(radius - inset, min(rect.width, rect.height) / 2))
+                return CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
+            }
+            band.path = ring(0.5)
+            for (i, shadow) in shadows.enumerated() { shadow.frame = bounds; shadow.path = ring(shadowBands[i].inset) }
+            let depth = min(28, size.width / 2, size.height / 2)
+            edges[0].frame = CGRect(x: 0, y: 0, width: size.width, height: depth)
+            edges[1].frame = CGRect(x: size.width - depth, y: 0, width: depth, height: size.height)
+            edges[2].frame = CGRect(x: 0, y: size.height - depth, width: size.width, height: depth)
+            edges[3].frame = CGRect(x: 0, y: 0, width: depth, height: size.height)
+            // The conic gradients: squares big enough to cover the frame at any angle, about its centre.
             let side = hypot(size.width, size.height)
-            beam.bounds = CGRect(x: 0, y: 0, width: side, height: side)
-            beam.position = CGPoint(x: bounds.midX, y: bounds.midY)
-            let edge = bounds.insetBy(dx: glow + 1.5, dy: glow + 1.5)   // the middle of the 3 pt border
-            let radius = screen ? 0 : max(0, windowRadius - 1.5)
-            let path = CGPath(roundedRect: edge, cornerWidth: min(radius, edge.width / 2), cornerHeight: min(radius, edge.height / 2), transform: nil)
-            rings.forEach { $0.frame = bounds; $0.path = path }
+            for layer in [window, highlight] {
+                layer.bounds = CGRect(x: 0, y: 0, width: side, height: side)
+                layer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+            }
             CATransaction.commit()
         }
 
@@ -747,14 +877,24 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         listenForCommands()
         var laidOut: (NSSize, Bool)? = nil
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let target = self?.targetFrame(), target.frame.width > 2 * glow, target.frame.height > 2 * glow else { win.orderOut(nil); return }
-            let frame = target.frame.insetBy(dx: -glow, dy: -glow)
+            guard let target = self?.targetFrame(), target.frame.width > 8, target.frame.height > 8 else { win.orderOut(nil); return }
+            let frame = target.frame
             if win.frame != frame { win.setFrame(frame, display: true) }
             if laidOut == nil || laidOut!.0 != frame.size || laidOut!.1 != target.screen {
                 layout(frame.size, screen: target.screen)
                 laidOut = (frame.size, target.screen)
             }
-            if !win.isVisible { win.orderFrontRegardless() }
+            if !win.isVisible {
+                win.orderFrontRegardless()
+                if !still {
+                    // Coming up: from clear to full over .6 s.
+                    let rise = CABasicAnimation(keyPath: "opacity")
+                    rise.fromValue = 0
+                    rise.toValue = 1
+                    rise.duration = 0.6
+                    stage.add(rise, forKey: "rise")
+                }
+            }
         }
     }
 }

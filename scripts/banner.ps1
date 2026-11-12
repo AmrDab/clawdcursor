@@ -1,7 +1,7 @@
 # banner.ps1 — "ClawdCursor — desktop control in progress" indicator.
 #
 # A small, always-on-top, borderless pill at the top-center of the monitor the
-# agent is working on: a small amber orb, what the agent is doing ("Typing in Edge"), the
+# agent is working on: a small dotted orb, what the agent is doing ("Typing in Edge"), the
 # time since it appeared, and a Stop button. Shown by the daemon while an
 # agent is actively driving the desktop, so a human at the machine ALWAYS
 # knows automation is live (transparency requirement — same spirit as the
@@ -49,6 +49,11 @@ public class NoActivateBannerForm : Form {
     [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int nIndex);
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
+    [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    // Back to the top of the always-on-top windows, without taking focus: the beam around a maximized window or a
+    // monitor reaches under the pill, and is raised over it whenever it is placed (window-outline.ps1).
+    // HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
+    public void Raise() { if (Visible) SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013); }
     // The pill is for the person at the screen, never part of what the agent sees: WDA_EXCLUDEFROMCAPTURE (0x11) leaves
     // it out of every screenshot and OCR capture (Windows 10 2004+; older Windows ignores it). It sat over the app's own
     // toolbar in captures and hid it.
@@ -120,60 +125,96 @@ public class NoActivateBannerForm : Form {
     }
 }
 
-// The running pill's orb (#392), in place of the blinking dot: three soft amber blobs drifting slowly inside a small
-// circle. The idea is the "thinking orbs" of libraries.dev by Jakub Antalik (MIT), drawn here with GDI+; nothing of it
-// is copied. The blobs are drawn once; a frame (about 20 a second, of this 16 px control only) puts them at their new
-// places. Where Windows is set to show no animations (SPI_GETCLIENTAREAANIMATION off) they stay where they are.
+// The running pill's orb (#392), in place of the blinking dot. A PORT of Thinking Orbs by Jakub Antalik
+// (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/thinking-orbs, MIT License, Copyright (c) 2026 Jakub
+// Antalik; the notice is in full at the top of scripts/window-outline.ps1): its default state, "working", at its
+// 20 px size - particles running on tilted orbits around a slowly turning dotted sphere, in light ink on the dark pill.
+// The numbers are the library's (spec/orbs-spec.json, src/engine/orbits.ts and core.ts):
+//   orbits   3 (12 x the 20 px preset's count .238), each a tilted circle of radius R(.45 + .52 h1), R = .82 x 10 px,
+//            its plane and speed (.25 + .55 h3, either way) from hashD(orbit, 1.7 / 5.2 / 8.9)
+//   ghosts   10 dots along each orbit (40 x .238), radius .9 x 2.4, ink .72, alpha .5 (.4 + .6 depth)
+//   workers  3 particles on each, radius (1.2 + 1.6 depth) x 2.4, ink .3 - .22 depth
+//   radii    x (20 / 300)^.6, never under .3 px; drawn far to near; ink is grey 255 (1 - ink) on a dark ground
+//   clock    t = seconds x 3.9 (the preset's speed); the sphere turns .12 t, tilted .3
+//   still    with animations off (SPI_GETCLIENTAREAANIMATION): the one frame at t = .6
+// This control only is drawn again, about 30 times a second.
 public class Orb : Control {
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
-    static readonly System.Drawing.Color[] tones = {
-        System.Drawing.Color.FromArgb(251, 191, 36), System.Drawing.Color.FromArgb(253, 224, 130), System.Drawing.Color.FromArgb(234, 88, 12) };
+    const int Box = 20, Orbits = 3, Ghosts = 10, Workers = 3;
+    const double Speed = 3.9, Sized = 2.4;
     readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
-    readonly System.Drawing.Bitmap[] blobs = new System.Drawing.Bitmap[tones.Length];
-    readonly System.Drawing.Drawing2D.GraphicsPath outside = new System.Drawing.Drawing2D.GraphicsPath();
-    readonly System.Drawing.SolidBrush deep = new System.Drawing.SolidBrush(System.Drawing.Color.FromArgb(180, 98, 8));
+    readonly int[] canvas = new int[Box * Box];
+    readonly System.Drawing.Bitmap picture = new System.Drawing.Bitmap(Box, Box, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+    readonly double[] dots = new double[Orbits * (Ghosts + Workers) * 6];   // x, y, z, radius, ink, alpha
+    readonly int[] order = new int[Orbits * (Ghosts + Workers)];
     System.Windows.Forms.Timer tick;
     public Orb() {
         SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
-        Size = new System.Drawing.Size(16, 16);
-        // Each blob: a disc of its tone, fading to nothing at its edge.
-        for (int i = 0; i < blobs.Length; i++) {
-            int d = 13 - 2 * i;
-            blobs[i] = new System.Drawing.Bitmap(d + 2, d + 2);
-            using (var g = System.Drawing.Graphics.FromImage(blobs[i]))
-            using (var shape = new System.Drawing.Drawing2D.GraphicsPath()) {
-                shape.AddEllipse(1, 1, d, d);
-                using (var fade = new System.Drawing.Drawing2D.PathGradientBrush(shape)) {
-                    fade.CenterColor = System.Drawing.Color.FromArgb(235, tones[i]);
-                    fade.SurroundColors = new[] { System.Drawing.Color.FromArgb(0, tones[i]) };
-                    g.FillPath(fade, shape);
-                }
-            }
-        }
-        outside.AddRectangle(new System.Drawing.RectangleF(-1, -1, 18, 18));
-        outside.AddEllipse(1, 1, 14, 14);
+        Size = new System.Drawing.Size(Box, Box);
         bool animate;
         if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;
         clock.Start();
         tick = new System.Windows.Forms.Timer();
-        tick.Interval = 50;
+        tick.Interval = 33;
         tick.Tick += (s, e) => Invalidate();
         tick.Start();
     }
+    // Deterministic hash in [0, 1) (core.ts hashD).
+    static double Hash(double a, double b) { double h = Math.Sin(a * 12.9898 + b * 78.233) * 43758.5453; return h - Math.Floor(h); }
     protected override void OnPaint(PaintEventArgs e) {
-        System.Drawing.Graphics g = e.Graphics;
-        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        g.Clear(BackColor);
-        g.FillEllipse(deep, 1, 1, 14, 14);
-        double t = clock.Elapsed.TotalSeconds;
-        for (int i = 0; i < blobs.Length; i++) {
-            // Each blob goes round its own small loop, at its own pace (5 to 8 seconds a turn).
-            double a = t * 2 * Math.PI / (5 + 1.5 * i) + i * 2.1;
-            float half = blobs[i].Width / 2f;
-            g.DrawImage(blobs[i], 8 + (float)(3.2 * Math.Cos(a)) - half, 8 + (float)(3.2 * Math.Sin(a * 1.3 + i)) - half);
+        double t = tick == null ? 0.6 : clock.Elapsed.TotalSeconds * Speed;
+        double centre = Box / 2.0, R = centre * 0.82, scale = Math.Pow(Box / 300.0, 0.6);
+        // The shared spin and tilt (core.ts makeProj).
+        double yaw = t * 0.12, st = Math.Sin(0.3), ct = Math.Cos(0.3), sy = Math.Sin(yaw), cy = Math.Cos(yaw);
+        int n = 0;
+        for (int orbit = 0; orbit < Orbits; orbit++) {
+            double h1 = Hash(orbit, 1.7), h2 = Hash(orbit, 5.2), h3 = Hash(orbit, 8.9);
+            double ro = R * (0.45 + 0.52 * h1), th = h1 * 2 * Math.PI, phi = Math.Acos(2 * h2 - 1);
+            // The orbit's plane: u and v at right angles to its normal.
+            double nx = Math.Sin(phi) * Math.Cos(th), ny = Math.Cos(phi), nz = Math.Sin(phi) * Math.Sin(th);
+            double ux = -ny, uy = nx, ul = Math.Max(1e-6, Math.Sqrt(ux * ux + uy * uy));
+            ux /= ul; uy /= ul;
+            double vx = -nz * uy, vy = nz * ux, vz = nx * uy - ny * ux;
+            double speed = (0.25 + 0.55 * h3) * (h3 > 0.5 ? 1 : -1);
+            for (int k = 0; k < Ghosts + Workers; k++, n++) {
+                bool ghost = k < Ghosts;
+                double a = ghost ? k * 2 * Math.PI / Ghosts : t * speed + (k - Ghosts) * 2 * Math.PI / Workers + h2 * 6;
+                double x = (ux * Math.Cos(a) + vx * Math.Sin(a)) * ro, y = (uy * Math.Cos(a) + vy * Math.Sin(a)) * ro, z = vz * Math.Sin(a) * ro;
+                double x1 = x * cy + z * sy, z1 = -x * sy + z * cy, y1 = y * ct - z1 * st, z2 = y * st + z1 * ct;
+                double depth = (z2 / ro + 1) / 2;
+                dots[6 * n] = centre + x1; dots[6 * n + 1] = centre - y1; dots[6 * n + 2] = z2;
+                dots[6 * n + 3] = Math.Max(0.3, (ghost ? 0.9 * Sized : (1.2 + 1.6 * depth) * Sized) * scale);
+                dots[6 * n + 4] = ghost ? 0.72 : 0.3 - 0.22 * depth;
+                dots[6 * n + 5] = ghost ? 0.5 * (0.4 + 0.6 * depth) : 1;
+                // Far to near: into its place among the dots so far.
+                int at = n;
+                for (; at > 0 && dots[6 * order[at - 1] + 2] > z2; at--) order[at] = order[at - 1];
+                order[at] = n;
+            }
         }
-        // What is outside the circle goes back to the pill's colour (a clip would leave a jagged edge).
-        using (var back = new System.Drawing.SolidBrush(BackColor)) g.FillPath(back, outside);
+        // The dots, far to near, over the pill's colour: each pixel by how much of it the dot covers (drawn here, on
+        // 400 pixels, and put on screen in one piece - forty anti-aliased GDI+ ellipses a frame cost far more).
+        int back = BackColor.ToArgb();
+        for (int i = 0; i < canvas.Length; i++) canvas[i] = back;
+        foreach (int d in order) {
+            double dx = dots[6 * d], dy = dots[6 * d + 1], r = dots[6 * d + 3];
+            double alpha = dots[6 * d + 5] * Math.Min(1, Math.PI * r * r);   // a dot smaller than a pixel covers that much of it
+            int grey = (int)Math.Round((1 - Math.Min(1, Math.Max(0, dots[6 * d + 4]))) * 255);
+            for (int py = Math.Max(0, (int)(dy - r - 1)); py <= Math.Min(Box - 1, (int)(dy + r + 1)); py++) {
+                for (int px = Math.Max(0, (int)(dx - r - 1)); px <= Math.Min(Box - 1, (int)(dx + r + 1)); px++) {
+                    double ex = px + 0.5 - dx, ey = py + 0.5 - dy, cover = r + 0.5 - Math.Sqrt(ex * ex + ey * ey);
+                    if (cover <= 0) continue;
+                    int a = (int)(256 * alpha * Math.Min(1, cover)), c = canvas[py * Box + px];
+                    int cr = (c >> 16) & 255, cg = (c >> 8) & 255, cb = c & 255;
+                    canvas[py * Box + px] = ((cr + ((grey - cr) * a >> 8)) << 16) | ((cg + ((grey - cg) * a >> 8)) << 8) | (cb + ((grey - cb) * a >> 8));
+                }
+            }
+        }
+        System.Drawing.Imaging.BitmapData bits = picture.LockBits(new System.Drawing.Rectangle(0, 0, Box, Box),
+            System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+        Marshal.Copy(canvas, 0, bits.Scan0, canvas.Length);
+        picture.UnlockBits(bits);
+        e.Graphics.DrawImageUnscaled(picture, 0, 0);
     }
 }
 '@
@@ -446,6 +487,7 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $script:bright = -not $script:bright
         if ($script:bright) { $dot.ForeColor = $blue }
         else                { $dot.ForeColor = [System.Drawing.Color]::FromArgb(25, 55, 110) }
+        $form.Raise()
     })
     $timer.Start()
 
@@ -473,7 +515,7 @@ function New-PillLabel([string]$text, [string]$font, [float]$size, $color) {
     $l.AutoSize = $true
     return $l
 }
-$dot      = New-Object Orb   # the amber orb: its blobs drift while the agent works
+$dot      = New-Object Orb   # the "working" orb: particles on their orbits while the agent works
 $dot.BackColor = $form.BackColor
 $brand    = New-PillLabel 'ClawdCursor' 'Segoe UI Semibold' 9 $muted
 $activity = New-PillLabel 'Working' 'Segoe UI Semibold' 9.5 ([System.Drawing.Color]::White)
@@ -496,7 +538,7 @@ $form.Controls.AddRange(@($dot, $brand, $activity, $elapsed, $stop))
 # Lay the row out left to right and size the pill to it (the activity text changes), centred again each time.
 function Update-Layout {
     $x = 12
-    $dot.Location = New-Object System.Drawing.Point($x, 11);          $x += $dot.Width + 5
+    $dot.Location = New-Object System.Drawing.Point(($x - 2), 9);     $x += $dot.Width + 2
     $brand.Location = New-Object System.Drawing.Point($x, 11);        $x += $brand.PreferredWidth + 4
     $activity.Location = New-Object System.Drawing.Point($x, 10);     $x += $activity.PreferredWidth + 6
     $elapsed.Location = New-Object System.Drawing.Point($x, 11);      $x += $elapsed.PreferredWidth + 10
@@ -514,6 +556,7 @@ $clock = [System.Diagnostics.Stopwatch]::StartNew()
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 700
 $timer.Add_Tick({
+    $form.Raise()
     $s = [int]$clock.Elapsed.TotalSeconds
     $t = '{0}:{1:00}' -f [int][Math]::Floor($s / 60), ($s % 60)
     if ($elapsed.Text -ne $t) { $elapsed.Text = $t; Update-Layout }

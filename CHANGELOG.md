@@ -5,17 +5,24 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
-- **The outline is a calm "beam", and the pill has an orb** (#392). The border around the agent's window is now faint,
-  with one soft highlight travelling slowly around it and a subtle glow; amber while the agent works, blue and gently
-  breathing while it waits for you. The running pill shows a small amber orb in place of the blinking dot.
-  - When the agent acts with no window (a click on the desktop), the border goes around the monitor the pointer is on.
+- **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
+  now the Border Beam of [libraries.dev](https://libraries.dev/beam): a colourful beam that goes round the window's
+  edge every two seconds, with a thin bright stroke and a soft glow just inside it. While the agent waits for you it
+  becomes the library's "pulse": the whole edge in blue tones, breathing. The running pill shows the "working"
+  Thinking Orb (particles on tilted orbits) in place of the blinking dot.
+  - When the agent acts with no window (a click on the desktop), the beam goes around the monitor the pointer is on.
     Nothing is drawn when the agent is idle, as before.
-  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the border is the
-    steady one and the orb does not move.
-  - Still click-through, never focused, and out of the agent's screenshots.
-  - Windows and macOS. On Linux the border stays steady for now (it also goes around the monitor for desktop acts).
-  - Inspired by the "Border beam" and "Thinking orbs" components of [libraries.dev](https://libraries.dev) by Jakub
-    Antalik (MIT). Reimplemented natively (layered windows on Windows, Core Animation on macOS); no code is copied.
+  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the beam is one
+    still frame and the orb does not move.
+  - Still click-through, never focused, and out of the agent's screenshots. The glow reaches about 28 px into the
+    window's edge.
+  - Windows and macOS. On Linux the border stays a plain steady one for now (it also goes around the monitor for
+    desktop acts).
+  - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
+    ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
+    and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default
+    preset (its colours, gradient stops, opacities and timings), redrawn natively: layered windows on Windows, Core
+    Animation on macOS. The MIT notice is in `scripts/window-outline.ps1`.
 
 ### Fixed
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now

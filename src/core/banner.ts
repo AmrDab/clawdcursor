@@ -1,13 +1,14 @@
 /**
  * Control banner — the on-screen "desktop control in progress" indicators:
- *   - the pill: topmost, never-focused; an amber orb, what the agent is doing
+ *   - the pill: topmost, never-focused; a small dotted orb, what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
- *   - the outline: a thin, click-through amber border around the window the
- *     agent is working in (control.ts workingWindow), and nothing else: no fill,
+ *   - the outline: a click-through beam along the edge of the window the agent
+ *     is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while that window is not
- *     in front. Faint, with one soft highlight travelling slowly around it (#392;
- *     the paused form only breathes; steady where the OS reduces motion). When
+ *     in front. It is the "border beam" of libraries.dev (#392): a colourful beam
+ *     going round the edge (the paused form breathes in blue; still where the OS
+ *     reduces motion), with a soft glow reaching a little into the window. When
  *     the agent acts with no window (the desktop) it goes around the monitor the
  *     pointer is on. Spawned/killed in lockstep with the pill; `TARGET <handle>
  *     <pid>` on its stdin names the window, `TARGET MONITOR` the monitor, a bare
