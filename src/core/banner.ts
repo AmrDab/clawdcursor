@@ -6,7 +6,7 @@
  *   - the outline: a click-through beam along the edge of the window the agent
  *     is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while that window is not
- *     in front. It is the "border beam" of libraries.dev (#392): a colourful beam
+ *     in front. It is the "border beam" of libraries.dev (#392): an amber beam
  *     going round the edge (the paused form breathes in blue; still where the OS
  *     reduces motion), with a soft glow reaching a little into the window. When
  *     the agent acts with no window (the desktop) it goes around the monitor the

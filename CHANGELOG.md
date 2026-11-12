@@ -6,10 +6,11 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Added
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
-  now the Border Beam of [libraries.dev](https://libraries.dev/beam): a colourful beam that goes round the window's
-  edge every two seconds, with a thin bright stroke and a soft glow just inside it. While the agent waits for you it
-  becomes the library's "pulse": the whole edge in blue tones, breathing. The running pill shows the "working"
-  Thinking Orb (particles on tilted orbits) in place of the blinking dot.
+  now the Border Beam of [libraries.dev](https://libraries.dev/beam), in clawdcursor's colours: an **amber** beam that
+  goes round the window's edge every two seconds while the agent works, with a thin bright stroke and a soft glow just
+  inside it; and while the agent waits for you, the library's "pulse" in **blue**: the whole edge, breathing. The
+  running pill shows the "working" Thinking Orb (particles on tilted orbits, in amber) in place of the blinking dot.
+  - On a light window (a white document) the beam is stronger, with a dark highlight, so it is not lost (Windows).
   - When the agent acts with no window (a click on the desktop), the beam goes around the monitor the pointer is on.
     Nothing is drawn when the agent is idle, as before.
   - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the beam is one
@@ -21,8 +22,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
     ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
     and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default
-    preset (its colours, gradient stops, opacities and timings), redrawn natively: layered windows on Windows, Core
-    Animation on macOS. The MIT notice is in `scripts/window-outline.ps1`.
+    preset (its layers, gradient stops, opacities and timings) with an amber colour variant of ours and its "ocean"
+    blues, redrawn natively: layered windows on Windows, Core Animation on macOS. The MIT notice is in
+    `scripts/window-outline.ps1`.
 
 ### Fixed
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now

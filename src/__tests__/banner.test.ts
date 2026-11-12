@@ -312,13 +312,19 @@ describe('no full-screen glow', () => {
     const ps = read('scripts', 'window-outline.ps1');
     expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
     expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
-    expect(ps).toContain('const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 30, FadeInSeconds = 0.6;');
+    expect(ps).toContain('const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 10, FadeInSeconds = 0.6;');
     expect(ps).toContain('BeamMask = { 0, 0, 30, 0, 36, .1, 44, .35, 52, 1, 80, 1, 86, .35, 92, .1, 95, 0, 100, 0 }');
-    expect(ps).toContain('Colorful = { 255, 50, 100,  40, 140, 255,  50, 200, 80,  30, 185, 170,  100, 70, 255,  40, 140, 255,  255, 120, 40,  240, 50, 180,  180, 40, 240 }');
+    // Our colours on its recipe: amber while the agent works, the library's "ocean" blues while it waits.
+    expect(ps).toContain('Amber = { 255, 170, 30,  255, 200, 60,  245, 130, 10,  255, 215, 90,  245, 158, 11,  255, 190, 50,  250, 120, 20,  255, 205, 70,  235, 140, 5 }');
+    expect(ps).toContain('int[] tones = paused ? Ocean : Amber;');
+    // On a light window the beam is stronger, with a dark highlight (the library's light theme), so it is not lost on white.
+    expect(ps).toContain('double strokeOpacity = paused ? 0.94 : light ? 0.6 : 0.26, innerOpacity = light ? 0.7 : paused ? 0.34 : 0.42;');
+    expect(ps).toContain('glare = light ? darkAt : whiteAt;');
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
     expect(swift).toContain('conic([(0, 0), (30, 0), (36, 0.1), (44, 0.35), (52, 1), (80, 1), (86, 0.35), (92, 0.1), (95, 0), (100, 0)])');
     expect(swift).toContain('turn.duration = 1.96');
+    expect(swift).toContain('let tones = paused ? ocean : amberTones');
     const pill = read('scripts', 'banner.ps1');
     expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
     expect(pill).toContain('const double Speed = 3.9, Sized = 2.4;');

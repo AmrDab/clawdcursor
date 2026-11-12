@@ -5,8 +5,10 @@
 # the window and nothing on the rest of the screen.
 #
 # THE LOOK IS A PORT of Border Beam by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev,
-# packages/border-beam, MIT - notice below): the default preset the site shows (type rotate, size md, colour
-# "colorful", dark theme). The numbers are its own, from spec/beam-spec.json (S), src/styles.ts (C) and the shader
+# packages/border-beam, MIT - notice below): the default preset the site shows (type rotate, size md, dark theme),
+# in OUR colours: amber while the agent works, blue while it waits for you. The colours are a variant made the way the
+# library makes its own ("colorful", "ocean", "sunset": nine blob colours, the same places, the same filter).
+# The numbers are its own, from spec/beam-spec.json (S), src/styles.ts (C) and the shader
 # ports/react-native/border-beam-native/src/rotateShader.ts (R), which mirrors ports/ios/.../BeamShaders.metal:
 #
 #   what                      value                                                                source
@@ -18,16 +20,18 @@
 #   stroke ring               1 px band at the edge, opacity .26: the colour blobs under a white   S:92, C:1801-1838
 #                             conic highlight (0 until 54%, .1 .3 .6 .75 .6 .3 .1 every 3%, 0      S:1736
 #                             from 78%), inside the beam window
-#   colour blobs (colorful)   nine radial gradients, colour at the centre to clear at the radius,  S:1271, R:126-140
-#                             the first on top: (255,50,100) (40,140,255) (50,200,80)
-#                             (30,185,170) (100,70,255) (40,140,255) (255,120,40) (240,50,180)
-#                             (180,40,240), at fixed places on the edge
+#   colour blobs              nine radial gradients, colour at the centre to clear at the radius,  S:1271, R:126-140
+#                             the first on top, at fixed places on the edge. OURS, "amber" (around
+#                             #f59e0b, from gold to orange as the library's variants range):
+#                             (255,170,30) (255,200,60) (245,130,10) (255,215,90) (245,158,11)
+#                             (255,190,50) (250,120,20) (255,205,70) (235,140,5)
 #   inner glow                the whole rounded rect, opacity .42: the same blobs at .9 size and   S:2024-2033
 #                             alpha .45, inside the beam window, fading out 28 px in from each     C:1840-1877
 #                             edge; an inset white shadow, alpha .27, over 9 px                    R:150-156
 #   bloom                     the 1 px ring with a second white conic (peak .85 at 70-70.5%),      S:1830, S:2034
 #                             blurred 8 px (gaussian), opacity .24, clipped to the frame           C:1879-1900
-#   colour filter             hue-rotate(-30..+30 deg, ease in and out over 12 s) brightness(1.3)  S:37-44, C:1697-1707
+#   colour filter             hue-rotate(-10..+10 deg, ease in and out over 12 s; the library's    S:37-44, C:1697-1707
+#                             default is 30, which would take amber to green) brightness(1.3)
 #                             saturate(1.2): the feColorMatrix arithmetic of colorMatrix.ts
 #   fade                      in over .6 s when it appears (out over .5 s)                         S:41-42
 #   pulse (our paused form)   no turn: the whole ring, stroke opacity .94, glow .34, brightness    S:124-143
@@ -45,9 +49,14 @@
 #     so a window of any size has the card's colours all the way round and the card's glow depth.
 #   - px above are CSS px. The strips are windows that are not DPI aware, so they are filled in CSS px and Windows
 #     draws them at the monitor's scale (as a page at that zoom is): at 150% under half the pixels, at 225% a fifth.
-#   - The wide soft glow is filled on every second frame for all but a small window (every third for the biggest); the
-#     thin bright ring on every frame.
+#   - About 22 frames a second for a small window, 16 for the rest. The white highlight on the ring, which is what
+#     the eye follows, moves on every frame; for all but a small window the glow behind it and the glow ahead of it
+#     take turns (one, the other, neither), so a frame changes about two strips and not all four.
 #   - The corners follow the window's own radius (the card's is 16).
+#   - On a light window (one line of pixels across its middle is read every ten seconds, and nothing is kept of it)
+#     the beam is the library's light theme - the highlight and the inset shadow dark instead of white (S:1736 light,
+#     S:99), saturate 1.5 - with the stroke and the glow at .6 and .7: the library's .12 and .26 are for a card that
+#     is the only thing on its page, and an amber glow that faint is lost on a white document.
 #   - The pulse form is the library's pulse-outside reduced to its breathe: its blobs do not drift, and each quarter
 #     is one of our four strips (top, right, bottom, left).
 #   - Where Windows is set to show no animations (SPI_GETCLIENTAREAANIMATION off): one still frame, the whole ring.
@@ -204,8 +213,10 @@ public class BeamStrip : Form {
     // DPI aware, which Windows then draws at the monitor's scale.
     public void Push(byte alpha, int x0, int y0, int x1, int y1) {
         if (bits == IntPtr.Zero || x1 < x0 || y1 < y0) return;
-        // Whole rows, in one go (a copy per row costs more than the pixels it saves).
-        Marshal.Copy(Pixels, y0 * W, new IntPtr(bits.ToInt64() + 4L * y0 * W), (y1 - y0 + 1) * W);
+        // A side strip (narrow, with many rows): whole rows in one go - a copy per row costs more than the pixels it
+        // saves. The top and bottom strips (a few long rows): only the part of each row that changed.
+        if (H >= W || (x0 == 0 && x1 == W - 1)) Marshal.Copy(Pixels, y0 * W, new IntPtr(bits.ToInt64() + 4L * y0 * W), (y1 - y0 + 1) * W);
+        else for (int y = y0; y <= y1; y++) Marshal.Copy(Pixels, y * W + x0, new IntPtr(bits.ToInt64() + 4L * (y * W + x0)), x1 - x0 + 1);
         Marshal.WriteInt32(native, 8, W); Marshal.WriteInt32(native, 12, H);                // size
         Marshal.WriteInt32(native, 16, 0); Marshal.WriteInt32(native, 20, 0);               // from (0, 0) of the bitmap
         Marshal.WriteInt32(native, 24, (alpha << 16) | (1 << 24));                          // AC_SRC_OVER, alpha, AC_SRC_ALPHA
@@ -275,24 +286,25 @@ public class WindowOutline {
     }
 
     // ── The recipe (Border Beam; see the table at the top of this file) ──
-    const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 30, FadeInSeconds = 0.6;
+    const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 10, FadeInSeconds = 0.6;
     const double EdgeFade = 28, ShadowBlur = 9, ShadowAlpha = 0.27, BloomBlur = 8, BloomOpacity = 0.24;
     const double InnerScale = 0.9, InnerAlpha = 0.45, CardW = 350, CardH = 140;
     static readonly double[] BeamMask = { 0, 0, 30, 0, 36, .1, 44, .35, 52, 1, 80, 1, 86, .35, 92, .1, 95, 0, 100, 0 };
     static readonly double[] WhiteStops = { 0, 0, 54, 0, 57, .1, 60, .3, 63, .6, 66, .75, 69, .6, 72, .3, 75, .1, 78, 0, 100, 0 };
+    static readonly double[] DarkStops = { 0, 0, 54, 0, 57, .08, 60, .2, 63, .4, 66, .55, 69, .4, 72, .2, 75, .08, 78, 0, 100, 0 };   // the light theme's highlight
     static readonly double[] BloomStops = { 0, 0, 58, 0, 62, .03, 65, .08, 67, .2, 69, .45, 70, .85, 70.5, .85, 71.5, .45, 73, .2, 75, .08, 78, .03, 82, 0 };
     // The nine blobs: where on the card (% of its width, % of its height) and how far they reach (px), then the
     // colours of the two palettes used here, in the same order.
     static readonly double[] BlobPlace = { 33, -7.4, 70, 40,  12, -5, 60, 35,  2.1, 68.3, 40, 70,  2.1, 68.3, 20, 35,  74.4, 100, 180, 32,
                                            55, 100, 85, 26,  93.9, 0, 74, 32,  100, 27.1, 26, 42,  100, 27.1, 52, 48 };
-    static readonly int[] Colorful = { 255, 50, 100,  40, 140, 255,  50, 200, 80,  30, 185, 170,  100, 70, 255,  40, 140, 255,  255, 120, 40,  240, 50, 180,  180, 40, 240 };
+    static readonly int[] Amber = { 255, 170, 30,  255, 200, 60,  245, 130, 10,  255, 215, 90,  245, 158, 11,  255, 190, 50,  250, 120, 20,  255, 205, 70,  235, 140, 5 };
     static readonly int[] Ocean = { 100, 80, 220,  60, 120, 255,  80, 100, 200,  50, 140, 220,  120, 80, 255,  70, 130, 255,  140, 100, 240,  90, 110, 230,  130, 70, 255 };
     // The pulse: each quarter's opacity, low and high, its period and its delay (s). Top, right, bottom, left.
     static readonly double[] Breathe = { .54, 1, 2.3, 0,  .54, 1, 3.036, .644,  .54, 1, 3.634, 1.909,  .54, 1, 1.932, 1.265 };
 
     const int Q = 4096;   // steps in a turn
     // The three conic gradients, a value (0..256) for each step of the turn from where the beam is.
-    static readonly int[] maskAt = Conic(BeamMask), whiteAt = Conic(WhiteStops), bloomAt = Conic(BloomStops);
+    static readonly int[] maskAt = Conic(BeamMask), whiteAt = Conic(WhiteStops), darkAt = Conic(DarkStops), bloomAt = Conic(BloomStops);
     static int[] Conic(double[] stops) {
         int[] at = new int[Q];
         for (int q = 0; q < Q; q++) {
@@ -315,6 +327,9 @@ public class WindowOutline {
     bool shown;
     bool paused;
     bool still;                 // Windows is set to show no animations: one still frame
+    bool light;                 // what the beam lies on is light: the light theme
+    int looks;                  // polls since that was last looked at
+    IntPtr lookedAt;            // ...and on which window
     string layout = "";         // what the tables were made for
     double zoom = 1;            // physical pixels to a CSS px on the frame's monitor
     double shownAt;             // when the beam came up (for the fade in)
@@ -367,6 +382,13 @@ public class WindowOutline {
         frame.Start();
     }
 
+    // Physical pixels to a CSS px on this monitor.
+    static double ZoomOf(IntPtr screen) {
+        uint dpi, dpiY;
+        if (GetDpiForMonitor(screen, 0, out dpi, out dpiY) != 0) dpi = 96; // MDT_EFFECTIVE_DPI
+        return dpi / 96.0;
+    }
+
     // Is this window somewhere above `t` in the z-order? (Walks up from `t`: few windows are above the one in front;
     // the cap is for a z-order that changes under the walk.)
     bool Above(IntPtr t) {
@@ -413,12 +435,17 @@ public class WindowOutline {
         // A window that became rounded or not (maximized, say) at the same size: the tables are made again.
         int radius = desk ? 0 : CornerRadiusAt96(t);
         if (!layout.EndsWith("r" + radius)) moved = true;
+        if (moved) zoom = ZoomOf(screen);
+        // Light or dark under it: looked at when the beam comes up or goes to another window, and every ten seconds.
+        if (!shown || t != lookedAt || ++looks >= 100) {
+            looks = 0;
+            lookedAt = t;
+            bool now = Light(r, light);
+            if (now != light) { light = now; moved = true; }
+        }
         if (placed && !moved) return;
         if (moved) {
-            uint dpi, dpiY;
-            if (GetDpiForMonitor(screen, 0, out dpi, out dpiY) != 0) dpi = 96; // MDT_EFFECTIVE_DPI
             if (!shown) shownAt = clock.Elapsed.TotalSeconds;
-            zoom = dpi / 96.0;
             // In CSS px from here: the frame as a page at this zoom would measure it.
             Layout(Math.Max(1, (int)Math.Round((r.Right - r.Left) / zoom)), Math.Max(1, (int)Math.Round((r.Bottom - r.Top) / zoom)), radius);
             last = r;
@@ -435,6 +462,40 @@ public class WindowOutline {
         shown = true;
     }
 
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr dc);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
+    [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleBitmap(IntPtr dc, int w, int h);
+    [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
+    [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr o);
+    [DllImport("gdi32.dll")] static extern bool DeleteDC(IntPtr dc);
+    [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+    [DllImport("gdi32.dll")] static extern uint GetPixel(IntPtr dc, int x, int y);
+
+    // Is what the beam lies on light? One line of the screen, a pixel high, across the middle of the frame, read in
+    // one go (reading the screen is slow, and slower a pixel at a time): the brightness of sixteen points on it, and
+    // nothing else, is used. A beam that was on a light window stays the light one until it is clearly dark, and the
+    // other way round.
+    bool Light(RECT r, bool was) {
+        int inset = (int)(48 * zoom), w = r.Right - r.Left - 2 * inset, h = r.Bottom - r.Top;
+        if (w < 2 * inset || h < 4 * inset) return was;
+        IntPtr screen = GetDC(IntPtr.Zero);
+        if (screen == IntPtr.Zero) return was;
+        IntPtr dc = CreateCompatibleDC(screen), line = CreateCompatibleBitmap(screen, w, 1), before = SelectObject(dc, line);
+        double sum = 0;
+        int n = 0;
+        if (BitBlt(dc, 0, 0, w, 1, screen, r.Left + inset, r.Top + h / 2, 0x00CC0020)) {   // SRCCOPY
+            for (int i = 0; i < 16; i++) {
+                uint c = GetPixel(dc, w * (2 * i + 1) / 32, 0);   // 0x00BBGGRR
+                if (c == 0xFFFFFFFF) continue;
+                sum += (0.213 * (c & 255) + 0.715 * ((c >> 8) & 255) + 0.072 * ((c >> 16) & 255)) / 255;
+                n++;
+            }
+        }
+        SelectObject(dc, before); DeleteObject(line); DeleteDC(dc); ReleaseDC(IntPtr.Zero, screen);
+        return n == 0 ? was : sum / n > (was ? 0.45 : 0.6);
+    }
+
     static double Clamp01(double v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
     // Distance to the edge of a rounded rectangle centred on the origin: negative inside it.
     static double Sdf(double x, double y, double halfW, double halfH, double radius) {
@@ -449,7 +510,7 @@ public class WindowOutline {
     // open: the inner glow under the stroke ring (colour and opacity), its share of the white highlight and of the
     // bloom, and its place on the turn. All in CSS px (the strips are drawn at the monitor's scale by Windows).
     void Layout(int w, int h, int radiusAt96) {
-        string key = w + "x" + h + "r" + radiusAt96;
+        string key = (light ? "light" : "dark") + w + "x" + h + "r" + radiusAt96;
         if (key == layout) return;
         layout = key;
         const double s = 1;
@@ -464,7 +525,7 @@ public class WindowOutline {
         // The blobs for this frame: centre and reach in device px, colour, for the stroke and (smaller, fainter) the
         // glow. A blob on the top or bottom edge keeps its place and reach along it in proportion to the width, and
         // its distance from the edge and reach across it in px; one on a side edge the other way round.
-        int[] tones = paused ? Ocean : Colorful;
+        int[] tones = paused ? Ocean : Amber;
         double[] bx = new double[9], by = new double[9], brx = new double[9], bry = new double[9], irx = new double[9], iry = new double[9];
         for (int i = 0; i < 9; i++) {
             double fx = BlobPlace[4 * i] / 100, fy = BlobPlace[4 * i + 1] / 100, rx = BlobPlace[4 * i + 2], ry = BlobPlace[4 * i + 3];
@@ -477,7 +538,9 @@ public class WindowOutline {
                 brx[i] = rx * w / CardW; bry[i] = ry * s; irx[i] = smallX * w / CardW; iry[i] = smallY * s;
             }
         }
-        double strokeOpacity = paused ? 0.94 : 0.26, innerOpacity = paused ? 0.34 : 0.42;
+        double strokeOpacity = paused ? 0.94 : light ? 0.6 : 0.26, innerOpacity = light ? 0.7 : paused ? 0.34 : 0.42;
+        // The inset shadow: white .27 on a dark window, black .14 on a light one.
+        double shade = light ? 0 : 1, shadeAlpha = light ? 0.14 : ShadowAlpha;
         double sigma = BloomBlur * s, edge = EdgeFade * s, shadow = (ShadowBlur + 1) * s;
         double halfW = w / 2.0, halfH = h / 2.0;
         for (int k = 0; k < 4; k++) {
@@ -507,8 +570,8 @@ public class WindowOutline {
                             if (v <= 0) continue;
                             r = tones[3 * n] / 255.0 * v + r * (1 - v); g = tones[3 * n + 1] / 255.0 * v + g * (1 - v); b = tones[3 * n + 2] / 255.0 * v + b * (1 - v); a = v + a * (1 - v);
                         }
-                        double fall = Clamp01(1 + sdf / shadow), white = ShadowAlpha * fall * fall;
-                        r = white + r * (1 - white); g = white + g * (1 - white); b = white + b * (1 - white); a = white + a * (1 - white);
+                        double fall = Clamp01(1 + sdf / shadow), cast = shadeAlpha * fall * fall;
+                        r = shade * cast + r * (1 - cast); g = shade * cast + g * (1 - cast); b = shade * cast + b * (1 - cast); a = cast + a * (1 - cast);
                         double part = inside * fade * innerOpacity;
                         r *= part; g *= part; b *= part; a *= part;
                     }
@@ -555,12 +618,12 @@ public class WindowOutline {
                 }
             }
         }
-        // About 22 frames a second (43 to a turn), 16 for a frame as big as a monitor. The glow, which is most of the
-        // pixels, is filled on every frame only for a small window: on every second, or every third for the biggest.
+        // About 22 frames a second (43 to a turn) for a small window, 16 for the rest; and what a frame does besides the
+        // highlight (Paint): everything, one side of the beam window, or on every third frame nothing.
         int total = 0;
         foreach (BeamStrip strip in strips) total += strip.W * strip.H;
-        frame.Interval = total > 300000 ? 62 : 45;
-        glowEvery = total > 300000 ? 3 : total > 60000 ? 2 : 1;
+        frame.Interval = total > 60000 ? 62 : 45;
+        glowEvery = total > 60000 ? 3 : 1;
     }
 
     // hue-rotate(deg) brightness(b) saturate(s) as one matrix on RGB (the feColorMatrix arithmetic browsers use;
@@ -604,16 +667,25 @@ public class WindowOutline {
         // Where the beam is, and the colour filter now.
         beam = turning ? (int)(now / TurnSeconds % 1 * Q) : 0;
         double swing = (1 - Math.Cos(2 * Math.PI * now / HueSeconds)) / 2;
-        filter = Filter(turning ? -HueRange + 2 * HueRange * swing : 0, paused ? 1.9 : 1.3, 1.2);
+        filter = Filter(turning ? -HueRange + 2 * HueRange * swing : 0, paused ? 1.9 : 1.3, light ? 1.5 : 1.2);
+        // The highlight and the bloom: white over a dark window, dark over a light one.
+        glare = light ? darkAt : whiteAt;
+        spark = light ? 0x01000000 : 0x01010101;
         // Coming up: from clear to full over .6 s.
         double risen = Clamp01((now - shownAt) / FadeInSeconds);
         byte opacity = (byte)(255 * (still ? 1 : risen * risen * (3 - 2 * risen)));
         bool rising = risen < 1;
-        // The ring (the bright, thin part) is lit on every frame; the wide soft glow on every `glowEvery`th.
-        bool glow = all || rising || tick++ % glowEvery == 0;
+        // The white highlight on the ring (the bright part, which the eye follows) is lit on every frame. The rest - the
+        // glow and the ring where the beam window opens and closes - only for a small window: otherwise the side
+        // behind the highlight on one frame, the side ahead of it on the next and neither on the third, so a frame
+        // changes about two strips, not all four.
+        int turnOf = all || rising || glowEvery == 1 ? -1 : tick++ % glowEvery;
+        bool behind = turnOf <= 0, ahead = turnOf < 0 || turnOf == 1, glow = behind || ahead;
+        int middle = (int)(0.66 * Q);
         int[] mask = maskAt;
         // The beam window, in steps after the beam: closed from 95% round to 30%, fully open from 52% to 80%.
         int closedFrom = (int)(0.95 * Q) + 2, closedTo = Q + (int)(0.30 * Q) - 2, openFrom = (int)(0.52 * Q) + 2, openTo = (int)(0.80 * Q) - 2;
+        int shineFrom = (int)(0.54 * Q) - 2, shineTo = (int)(0.78 * Q) + 2;
         for (int k = 0; k < 4; k++) {
             BeamStrip s = strips[k];
             int w = s.W, h = s.H;
@@ -638,11 +710,11 @@ public class WindowOutline {
                 if (t < f) act = 0;                                   // nothing of the beam on this line
                 else if (all) { act = 4; state[l] = 1; }
                 else if (t - f > Q / 2) act = glow ? (byte)4 : (byte)2;   // the line straight up from the centre: both ends of the turn
-                else if (!glow) {
-                    // Between the glow's frames: the ring only, wherever the beam window is not closed.
-                    int after = (f - beam) & (Q - 1), until = after + (t - f);
-                    if (after < closedTo - Q) { after += Q; until += Q; }
-                    act = after >= closedFrom && until <= closedTo ? (byte)0 : (byte)2;
+                else if (((f - beam) & (Q - 1)) >= middle && ((f - beam) & (Q - 1)) < closedFrom ? !ahead : !behind) {
+                    // Not this side's frame: the ring only, and only where the white highlight is (54% to 78% after
+                    // the beam).
+                    int after = (f - beam) & (Q - 1);
+                    act = after + (t - f) >= shineFrom && after <= shineTo ? (byte)2 : (byte)0;
                     open[l] = mask[((f + t) / 2 - beam) & (Q - 1)];
                 }
                 else {
@@ -658,7 +730,7 @@ public class WindowOutline {
                     open[l] = mask[((f + t) / 2 - beam) & (Q - 1)];
                 }
                 todo[l] = act;
-                if (act == 1 || act == 2) shine[l] = (whiteAt[((f + t) / 2 - beam) & (Q - 1)] * open[l]) >> 8;
+                if (act == 1 || act == 2) shine[l] = (glare[((f + t) / 2 - beam) & (Q - 1)] * open[l]) >> 8;
                 // The part of the line to go over exactly, after its run: the ring, or the bloom's reach.
                 if (act == 1 || act == 2 || act == 5) {
                     topNear[l] = act == 5 ? s.HaloNear[l] : s.RingNear[l];
@@ -703,11 +775,11 @@ public class WindowOutline {
                     if (!plain || act == 4) continue;
                     if (act == 5) { for (int x = topNear[y]; x <= topFar[y]; x++) Lit(s, i0 + x); continue; }
                     // The ring: the white highlight over the colour, both through the beam window.
-                    int m = open[y], glare = shine[y];
+                    int m = open[y], lineShine = shine[y];
                     for (int x = topNear[y], i = i0 + x; x <= topFar[y]; x++, i++) {
-                        int over = (ringOf[i] * glare) >> 8;
+                        int over = (ringOf[i] * lineShine) >> 8;
                         uint part = (uint)((m * (256 - over)) >> 8), c = (uint)bas[i];
-                        px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * 0x01010101;
+                        px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * spark;
                     }
                 }
             } else {
@@ -739,7 +811,7 @@ public class WindowOutline {
                         if (act == 5) { Lit(s, i); continue; }
                         int m = open[x], over = (ringOf[i] * shine[x]) >> 8;
                         uint part = (uint)((m * (256 - over)) >> 8), c = (uint)bas[i];
-                        px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * 0x01010101;
+                        px[i] = (int)((((c & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((c >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * spark;
                     }
                 }
             }
@@ -788,14 +860,15 @@ public class WindowOutline {
     void Lit(BeamStrip s, int i) {
         int step = (s.Turn[i] - beam) & (Q - 1);
         int m = maskAt[step];
-        int over = ((s.Ring[i] * whiteAt[step] * m) >> 16) + ((s.Bloom[i] * bloomAt[step]) >> 16);
+        int over = ((s.Ring[i] * glare[step] * m) >> 16) + ((s.Bloom[i] * bloomAt[step]) >> 16);
         uint part = (uint)((m * (256 - over)) >> 8), color = (uint)s.Base[i];
-        s.Pixels[i] = (int)((((color & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((color >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * 0x01010101;
+        s.Pixels[i] = (int)((((color & 0x00FF00FF) * part >> 8) & 0x00FF00FF) | (((color >> 8) & 0x00FF00FF) * part & 0xFF00FF00)) + over * spark;
     }
 
     // For the frame being painted.
     bool turning;
-    int beam, tick, glowEvery = 1;
+    int beam, tick, glowEvery = 1, spark = 0x01010101;
+    int[] glare = whiteAt;
     int[] filter;
     byte[] does = new byte[1];
     int[] level = new int[1], glint = new int[1], runs = new int[10], tops = new int[1], tope = new int[1];

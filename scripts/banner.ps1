@@ -128,40 +128,59 @@ public class NoActivateBannerForm : Form {
 // The running pill's orb (#392), in place of the blinking dot. A PORT of Thinking Orbs by Jakub Antalik
 // (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/thinking-orbs, MIT License, Copyright (c) 2026 Jakub
 // Antalik; the notice is in full at the top of scripts/window-outline.ps1): its default state, "working", at its
-// 20 px size - particles running on tilted orbits around a slowly turning dotted sphere, in light ink on the dark pill.
+// 20 px size - particles running on tilted orbits around a slowly turning dotted sphere, in amber on the dark pill
+// (the library's tint: its ink ramp on #f59e0b instead of white).
 // The numbers are the library's (spec/orbs-spec.json, src/engine/orbits.ts and core.ts):
 //   orbits   3 (12 x the 20 px preset's count .238), each a tilted circle of radius R(.45 + .52 h1), R = .82 x 10 px,
 //            its plane and speed (.25 + .55 h3, either way) from hashD(orbit, 1.7 / 5.2 / 8.9)
 //   ghosts   10 dots along each orbit (40 x .238), radius .9 x 2.4, ink .72, alpha .5 (.4 + .6 depth)
 //   workers  3 particles on each, radius (1.2 + 1.6 depth) x 2.4, ink .3 - .22 depth
-//   radii    x (20 / 300)^.6, never under .3 px; drawn far to near; ink is grey 255 (1 - ink) on a dark ground
+//   radii    x (20 / 300)^.6, never under .3 px; drawn far to near; on a dark ground the colour is the tint x (1 - ink)
 //   clock    t = seconds x 3.9 (the preset's speed); the sphere turns .12 t, tilted .3
 //   still    with animations off (SPI_GETCLIENTAREAANIMATION): the one frame at t = .6
-// This control only is drawn again, about 30 times a second.
+// This control only is drawn again, about 16 times a second (a particle moves a pixel or two a frame).
 public class Orb : Control {
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
     const int Box = 20, Orbits = 3, Ghosts = 10, Workers = 3;
     const double Speed = 3.9, Sized = 2.4;
     readonly System.Diagnostics.Stopwatch clock = new System.Diagnostics.Stopwatch();
     readonly int[] canvas = new int[Box * Box];
-    readonly System.Drawing.Bitmap picture = new System.Drawing.Bitmap(Box, Box, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
+    [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr hWnd, IntPtr dc);
+    [DllImport("gdi32.dll")] static extern int SetDIBitsToDevice(IntPtr dc, int x, int y, int w, int h, int sx, int sy, int first, int lines, int[] bits, int[] info, uint usage);
+    // BITMAPINFOHEADER for the canvas: 40 bytes, Box wide, top-down (a negative height), one plane, 32 bits a pixel.
+    static readonly int[] header = { 40, Box, -Box, 1 | (32 << 16), 0, 0, 0, 0, 0, 0 };
     readonly double[] dots = new double[Orbits * (Ghosts + Workers) * 6];   // x, y, z, radius, ink, alpha
     readonly int[] order = new int[Orbits * (Ghosts + Workers)];
     System.Windows.Forms.Timer tick;
     public Orb() {
-        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer, true);
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.Opaque, true);
         Size = new System.Drawing.Size(Box, Box);
         bool animate;
         if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;
         clock.Start();
         tick = new System.Windows.Forms.Timer();
-        tick.Interval = 33;
-        tick.Tick += (s, e) => Invalidate();
+        tick.Interval = 62;
+        // Straight to the control's pixels: a frame through WM_PAINT cost several times the drawing itself.
+        tick.Tick += (s, e) => {
+            if (!IsHandleCreated || !Visible) return;
+            Draw();
+            IntPtr dc = GetDC(Handle);
+            SetDIBitsToDevice(dc, 0, 0, Box, Box, 0, 0, 0, Box, canvas, header, 0);
+            ReleaseDC(Handle, dc);
+        };
         tick.Start();
     }
     // Deterministic hash in [0, 1) (core.ts hashD).
     static double Hash(double a, double b) { double h = Math.Sin(a * 12.9898 + b * 78.233) * 43758.5453; return h - Math.Floor(h); }
     protected override void OnPaint(PaintEventArgs e) {
+        Draw();
+        IntPtr dc = e.Graphics.GetHdc();
+        SetDIBitsToDevice(dc, 0, 0, Box, Box, 0, 0, 0, Box, canvas, header, 0);
+        e.Graphics.ReleaseHdc(dc);
+    }
+    // One frame of the orb, into the canvas.
+    void Draw() {
         double t = tick == null ? 0.6 : clock.Elapsed.TotalSeconds * Speed;
         double centre = Box / 2.0, R = centre * 0.82, scale = Math.Pow(Box / 300.0, 0.6);
         // The shared spin and tilt (core.ts makeProj).
@@ -199,22 +218,18 @@ public class Orb : Control {
         foreach (int d in order) {
             double dx = dots[6 * d], dy = dots[6 * d + 1], r = dots[6 * d + 3];
             double alpha = dots[6 * d + 5] * Math.Min(1, Math.PI * r * r);   // a dot smaller than a pixel covers that much of it
-            int grey = (int)Math.Round((1 - Math.Min(1, Math.Max(0, dots[6 * d + 4]))) * 255);
+            double lit = 1 - Math.Min(1, Math.Max(0, dots[6 * d + 4]));
+            int tr = (int)(245 * lit), tg = (int)(158 * lit), tb = (int)(11 * lit);   // amber, fading toward black with the ink
             for (int py = Math.Max(0, (int)(dy - r - 1)); py <= Math.Min(Box - 1, (int)(dy + r + 1)); py++) {
                 for (int px = Math.Max(0, (int)(dx - r - 1)); px <= Math.Min(Box - 1, (int)(dx + r + 1)); px++) {
                     double ex = px + 0.5 - dx, ey = py + 0.5 - dy, cover = r + 0.5 - Math.Sqrt(ex * ex + ey * ey);
                     if (cover <= 0) continue;
                     int a = (int)(256 * alpha * Math.Min(1, cover)), c = canvas[py * Box + px];
                     int cr = (c >> 16) & 255, cg = (c >> 8) & 255, cb = c & 255;
-                    canvas[py * Box + px] = ((cr + ((grey - cr) * a >> 8)) << 16) | ((cg + ((grey - cg) * a >> 8)) << 8) | (cb + ((grey - cb) * a >> 8));
+                    canvas[py * Box + px] = ((cr + ((tr - cr) * a >> 8)) << 16) | ((cg + ((tg - cg) * a >> 8)) << 8) | (cb + ((tb - cb) * a >> 8));
                 }
             }
         }
-        System.Drawing.Imaging.BitmapData bits = picture.LockBits(new System.Drawing.Rectangle(0, 0, Box, Box),
-            System.Drawing.Imaging.ImageLockMode.WriteOnly, System.Drawing.Imaging.PixelFormat.Format32bppRgb);
-        Marshal.Copy(canvas, 0, bits.Scan0, canvas.Length);
-        picture.UnlockBits(bits);
-        e.Graphics.DrawImageUnscaled(picture, 0, 0);
     }
 }
 '@
@@ -250,10 +265,17 @@ function Set-PillShape($f, [int]$r) {
     $fg = [NoActivateBannerForm]::GetForegroundWindow()
     $screen = if ($fg -ne [IntPtr]::Zero) { [System.Windows.Forms.Screen]::FromHandle($fg).WorkingArea }
               else { [System.Windows.Forms.Screen]::PrimaryScreen.WorkingArea }
-    $f.Location = New-Object System.Drawing.Point(
+    $at = New-Object System.Drawing.Point(
         [int]($screen.X + ($screen.Width - $f.Width) / 2), [int]($screen.Y + 8))
-    Set-Round $f $r
-    $f.Invalidate()
+    if ($f.Location -ne $at) { $f.Location = $at }
+    # A new outline only for a new size: this runs on every tick of the clock, and cutting the window's shape again
+    # and painting the whole pill each second cost more than everything else the pill does.
+    $shape = '{0}x{1}r{2}' -f $f.Width, $f.Height, $r
+    if ($script:shape -ne $shape) {
+        $script:shape = $shape
+        Set-Round $f $r
+        $f.Invalidate()
+    }
 }
 $form.Add_Paint({
     param($s, $e)

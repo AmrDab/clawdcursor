@@ -137,7 +137,7 @@ func giveFocusBack() {
 }
 
 /// Thinking Orbs' default state, "working", at its 20 pt size: particles running on tilted orbits around a slowly
-/// turning dotted sphere, in light ink on the dark pill. The numbers are the library's (spec/orbs-spec.json,
+/// turning dotted sphere, in amber ink (the library's tint) on the dark pill. The numbers are the library's (spec/orbs-spec.json,
 /// src/engine/orbits.ts and core.ts); the Windows pill (scripts/banner.ps1, class Orb) lists them.
 final class OrbView: NSView {
     let started = Date()
@@ -190,10 +190,10 @@ final class OrbView: NSView {
                              alpha: ghost ? 0.5 * (0.4 + 0.6 * depth) : 1))
             }
         }
-        // Far to near; ink is grey 1 - ink on a dark ground.
+        // Far to near; on a dark ground the tint (amber, #f59e0b) fades toward black with the ink (core.ts inkColor).
         for d in dots.sorted(by: { $0.z < $1.z }) {
-            let grey = CGFloat(1 - min(1, max(0, d.ink)))
-            ctx.setFillColor(red: grey, green: grey, blue: grey, alpha: CGFloat(d.alpha))
+            let ink = CGFloat(1 - min(1, max(0, d.ink)))
+            ctx.setFillColor(red: 245 / 255 * ink, green: 158 / 255 * ink, blue: 11 / 255 * ink, alpha: CGFloat(d.alpha))
             ctx.fillEllipse(in: CGRect(x: d.x - d.r, y: d.y - d.r, width: 2 * d.r, height: 2 * d.r))
         }
     }
@@ -673,8 +673,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         return (frame: NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height), screen: false)
     }
 
-    /// The border beam (#392): Border Beam's default preset (rotate, md, "colorful", dark) in Core Animation, with the
-    /// library's own stops, colours and opacities (the table is at the top of scripts/window-outline.ps1):
+    /// The border beam (#392): Border Beam's default preset (rotate, md, dark) in Core Animation, with the library's
+    /// own stops and opacities (the table is at the top of scripts/window-outline.ps1), in our colours: amber while
+    /// the agent works, blue while it waits:
     ///   - the beam window: a conic CAGradientLayer (0 until 30%, .1, .35, 1 from 52% to 80%, .35, .1, 0 from 95%)
     ///     turning once in 1.96 s, as the mask of everything else;
     ///   - the inner glow, opacity .42: the nine colour blobs (radial gradients, .9 size, alpha .45) and the inset white
@@ -685,8 +686,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// points, as on Windows. The colours go through the library's brightness(1.3) saturate(1.2) once.
     /// --paused: the pulse - the whole ring in the "ocean" blues (stroke .94, glow .34, brightness 1.9), its opacity
     /// swinging .54..1 over 2.3 s. With Reduce Motion on: the whole ring, still.
-    /// Not here yet, and on Windows: the slow hue shift (-30..+30 degrees over 12 s) and the bloom (the ring blurred
-    /// 8 pt at opacity .24, at most 1% white).
+    /// Not here yet, and on Windows: the slow hue shift (10 degrees either way over 12 s), the bloom (the ring blurred
+    /// 8 pt at opacity .24, at most 1% white), and the stronger light theme on a light window.
     func windowOutline() {
         let paused = CommandLine.arguments.contains("--paused")
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
@@ -722,11 +723,12 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let places: [(x: Double, y: Double, rx: Double, ry: Double)] = [
             (33, -7.4, 70, 40), (12, -5, 60, 35), (2.1, 68.3, 40, 70), (2.1, 68.3, 20, 35), (74.4, 100, 180, 32),
             (55, 100, 85, 26), (93.9, 0, 74, 32), (100, 27.1, 26, 42), (100, 27.1, 52, 48)]
-        let colorful: [(Double, Double, Double)] = [(255, 50, 100), (40, 140, 255), (50, 200, 80), (30, 185, 170), (100, 70, 255),
-                                                    (40, 140, 255), (255, 120, 40), (240, 50, 180), (180, 40, 240)]
+        // Ours: an "amber" variant (around #f59e0b, gold to orange), made as the library makes "colorful" or "sunset".
+        let amberTones: [(Double, Double, Double)] = [(255, 170, 30), (255, 200, 60), (245, 130, 10), (255, 215, 90), (245, 158, 11),
+                                                      (255, 190, 50), (250, 120, 20), (255, 205, 70), (235, 140, 5)]
         let ocean: [(Double, Double, Double)] = [(100, 80, 220), (60, 120, 255), (80, 100, 200), (50, 140, 220), (120, 80, 255),
                                                  (70, 130, 255), (140, 100, 240), (90, 110, 230), (130, 70, 255)]
-        let tones = paused ? ocean : colorful
+        let tones = paused ? ocean : amberTones
         func blobLayers(alpha: Double) -> [CAGradientLayer] {
             // The first blob is on top: added last.
             return (0..<9).reversed().map { i in
