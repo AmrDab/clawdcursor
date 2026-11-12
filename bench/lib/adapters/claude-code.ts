@@ -14,8 +14,19 @@ export function claudeMcpConfig(mcpUrl: string, token: string): string {
   return JSON.stringify({ mcpServers: { [SERVER_NAME]: { type: 'http', url: mcpUrl, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
 }
 
+/**
+ * A benchmark started from inside a Claude Code session (CLAUDECODE is set) inherits that session's own CLAUDE* and
+ * ANTHROPIC* variables (its base URL, entrypoint, host auth). The agent would then sign in as that session, not with the
+ * owner's own `claude` login: "Credit balance is too low" or "OAuth session expired" although `claude` works in a shell.
+ */
+export function hostSessionEnv(env: NodeJS.ProcessEnv = process.env): string[] {
+  if (!env.CLAUDECODE) return [];
+  return Object.keys(env).filter(k => /^(CLAUDE|ANTHROPIC)|^USE_(LOCAL|STAGING)_OAUTH$/.test(k));
+}
+
 export function claudeCommand(o: { exe: string; model: string; mcpConfigPath: string; prompt: string }): CliCommand {
   return {
+    unsetEnv: hostSessionEnv(),
     cmd: o.exe,
     args: [
       '-p',
@@ -36,6 +47,7 @@ export function claudeCommand(o: { exe: string; model: string; mcpConfigPath: st
 /** The preflight: print mode, no MCP server, no tool, none of the owner's settings; one JSON result. The prompt goes on stdin. */
 export function claudePreflightCommand(o: { exe: string; model: string }): CliCommand {
   return {
+    unsetEnv: hostSessionEnv(),
     cmd: o.exe,
     args: ['-p', '--model', o.model, '--strict-mcp-config', '--setting-sources', 'project', '--tools', '', '--disable-slash-commands',
       '--no-session-persistence', '--output-format', 'json'],

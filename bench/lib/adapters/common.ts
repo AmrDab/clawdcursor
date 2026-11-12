@@ -106,7 +106,8 @@ export async function runPreflight(c: CliCommand, workDir: string, signal: Abort
   return { exitCode, out, err };
 }
 
-export interface CliCommand { cmd: string; args: string[]; env?: Record<string, string>; stdin?: string }
+/** `unsetEnv`: variables of this process the agent must not inherit. */
+export interface CliCommand { cmd: string; args: string[]; env?: Record<string, string>; unsetEnv?: string[]; stdin?: string }
 
 /** The MCP server's name in every host: tools are mcp__clawdcursor__<tool> in Claude Code. */
 export const SERVER_NAME = 'clawdcursor';
@@ -131,7 +132,9 @@ export function runCli(c: CliCommand, o: { cwd: string; signal: AbortSignal; onL
   return new Promise((resolve, reject) => {
     // The executable itself with its arguments as an array: no shell, so nothing in a path or the environment is parsed
     // as a command. (A .cmd shim cannot be run this way: `which` only returns real executables.)
-    const child = start(c.cmd, c.args, { cwd: o.cwd, env: { ...process.env, ...c.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const env: NodeJS.ProcessEnv = { ...process.env, ...c.env };
+    for (const k of c.unsetEnv ?? []) delete env[k];
+    const child = start(c.cmd, c.args, { cwd: o.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
     const log = o.logFile ? fs.createWriteStream(o.logFile, { flags: 'wx', mode: 0o600 }) : null;
     const onAbort = () => killTree(child.pid);
     o.signal.addEventListener('abort', onAbort, { once: true });
