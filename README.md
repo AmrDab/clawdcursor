@@ -103,8 +103,7 @@ In tool terms:
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
 - **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 89 smaller tools, one per action. See [The tools](#the-tools).
-- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a 3 px outline marks the window it is working in: amber while it works, blue while it waits for you. Nothing is drawn over the window's content.
-- **The pause card:** for a sign-in or a 2FA code, your AI calls `system pause_for_user`. A card on screen says what is needed and can offer choices or a text box. Your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen.
+- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a border marks the window it is working in: an amber beam that runs round its edge while your AI works, steady blue while it waits for you. Clicks go through it, and it stays out of your AI's screenshots.
 
 ---
 
@@ -124,8 +123,7 @@ Clawd Cursor runs with **your own OS permissions**: anything you can do with a m
 What is enforced, whatever your AI sends:
 
 - **A Stop button.** Press Stop on the pill (or double-click it), or run `clawdcursor stop`. Every Clawd Cursor process stops, including a call or batch already running, and stays stopped across restarts until you resume.
-- **An outline around the window being worked on**, amber while your AI works and blue while it waits for you.
-- **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
+- **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you with `system pause_for_user`: a card on screen says what is needed and can offer choices or a text box, and your AI continues when you click Resume, or as soon as its `done_when` condition shows on screen. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
 - **No typing into AI assistant windows.** Input is refused when the window in front is an AI assistant your AI did not focus or open on purpose, or is no longer the window it was working in.
 - **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows and macOS (Linux from the next release). A screenshot or OCR can still show whatever is visible on screen.
 - **A short list of keys that are never sent**, because they lock the machine or end the session. Windows: `Win+L`, `Ctrl+Alt+Del`. macOS: `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, anything with Power or Eject. Linux: `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`, SysRq, Power. Every other shortcut is allowed.
@@ -137,7 +135,7 @@ What is not enforced by Clawd Cursor:
 
 - **There is no built-in policy engine.** Clawd Cursor does not decide which actions your AI may take, and nothing is refused for being "destructive". Your AI and your MCP host's approval prompts decide. (The policy gate of 1.x was removed in 2.0 because a click by coordinates went around it.)
 - **Per-action approval is your host's job.** The tools carry `readOnlyHint` / `destructiveHint` annotations for hosts that prompt. Approving a Clawd Cursor tool in a host means approving desktop control with your rights, not one narrow action. On the compact surface all six tools are marked destructive, because each covers many actions; the granular surface has one hint per action.
-- **If your host auto-approves tool calls, nothing asks before an irreversible action.** Your AI is instructed to ask on the pause card before sending, deleting, paying or closing unsaved work that you did not ask for, but that is an instruction, not a check. For agents you do not fully trust, or for unattended runs, use a host with approval prompts. An opt-in confirm mode is coming in 2.1 ([#373](https://github.com/AmrDab/clawdcursor/issues/373)).
+- **If your host auto-approves tool calls, nothing asks before an irreversible action.** Your AI is instructed to ask on the pause card before sending, deleting, paying or closing unsaved work that you did not ask for, but that is an instruction, not a check. For agents you do not fully trust, or for unattended runs, use a host with approval prompts, or, from 2.1, turn on confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)): with `CLAWD_CONFIRM=1` in the server's environment (in the Claude Desktop extension, the "Ask before Send / Delete / Pay / Close" setting), a click or key that would send, delete, pay or close waits on the pause card until you click Resume. Its limits are in [SECURITY.md](SECURITY.md).
 - **An agent with its own shell** on your machine is not confined by Clawd Cursor at all.
 
 Privacy:
@@ -153,16 +151,19 @@ Privacy:
 
 ## Error reports
 
-2.0.0 sends nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed.
+2.0.0 sends nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed. Every value is a number or comes from a fixed list, and tool and action names are Clawd Cursor's own.
 
-- **Sent with every report:** a random install id made on your computer, the Clawd Cursor version and your OS.
-- **Sent when the server starts:** OS version, CPU type, Node.js version, which AI app started it (from a fixed list: Claude Code, Cursor, Codex and others; anything else is "other"), and compact or granular tools.
-- **Sent when a call fails or takes over 10 seconds:** the tool and action name, the result code, how long it took, and whether the app was a browser, an Electron app or a native app.
-- **Sent on a crash or exit:** the error type or the exit reason (from a fixed list), and the file and line in Clawd Cursor's own code.
-- **Never sent:** error text, screen or OCR text, typed text, the clipboard, window titles, URLs, element names, the names of the apps your AI works in, file paths outside Clawd Cursor, user names or emails. No IP address is stored.
-- **To turn them off:** run `clawdcursor optout`, or ask your AI to opt out for you (it calls `system telemetry_optout`).
+- **With every report:** a random install id made on your computer (not derived from your hardware or accounts), the Clawd Cursor version and your OS family.
+- **`start`, when the server starts:** OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list: Claude Code, Claude Desktop, Cursor, Codex and others; anything else is "other"), and compact or granular tools.
+- **`call_failed`, when a call fails, times out or reads nothing:** the tool and action name, the result code (`NOT_FOUND`, `TIMEOUT`, ...), the outcome, how long it took, and whether the app was a browser, an Electron app or a native app.
+- **`slow_call`, when a call takes over 10 seconds:** the tool and action name, how long it took, and its slow internal steps (Clawd Cursor's own helper programs, by name, with their time).
+- **`exit`, when the server exits during a call, or was killed or crashed:** the exit reason (from a fixed list: `sigterm`, `host_gone`, ...), and the tool and action that were cut off and how long they had run.
+- **`crash`, on an uncaught error:** the error class (`TypeError`, ...), the error code (`ENOENT`, ...), and the stack reduced to file and line in Clawd Cursor's own code.
+- **Never sent:** error messages, typed text, the clipboard, screen or OCR text, screenshots, window titles, the names of the apps your AI works in, URLs, element names, file paths outside Clawd Cursor, user names, emails or IP addresses.
+- **Where it goes:** over HTTPS to `telemetry.clawdcursor.com`, a Cloudflare Worker run by the project. It checks every event against the same fixed lists and drops anything else, does not read or store your IP address or request headers, and deletes events after 90 days.
+- **To turn them off:** run `clawdcursor optout` (`clawdcursor optin` turns them back on), ask your AI (it calls `system {action:"telemetry_optout"}`; your AI can only turn them off), or set `CLAWD_TELEMETRY=0` or `DO_NOT_TRACK=1`. They are always off in CI and in test runs.
 
-From 2.1, `clawdcursor telemetry` prints the status and every field it sends.
+From 2.1, `clawdcursor telemetry` prints the status and every field it sends. The same list is in [docs/telemetry.md](docs/telemetry.md).
 
 ---
 
@@ -315,7 +316,7 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:3847/mcp -Headers $headers 
 | Claude Desktop extension | Download the new `.mcpb` from the [latest release](https://github.com/AmrDab/clawdcursor/releases/latest) and open it |
 | Claude Code plugin | `claude plugin marketplace update clawdcursor`, then `claude plugin update clawdcursor@clawdcursor` |
 
-Restart the host afterwards so it starts the new server. `clawdcursor versions` lists every copy on the machine and its version. A single `clawdcursor update` command is planned for 2.1.
+Restart the host afterwards so it starts the new server. `clawdcursor versions` lists every copy on the machine and its version. From 2.1, `clawdcursor update` updates the global npm package and lists the other copies that need their own update.
 
 **Coming from 1.x:** remove calls to the `task` tool and to `clawdcursor task`, drop the `--provider`, `--model`, `--base-url` and `--api-key` flags and the `AI_API_KEY` / `CLAWD_*_MODEL` variables, and configure the model in your agent host. Old config files still load; the model keys in them are ignored.
 
@@ -334,7 +335,7 @@ Restart the host afterwards so it starts the new server. `clawdcursor versions` 
 
 Earlier releases are in the [changelog](CHANGELOG.md).
 
-**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. An opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)) and `clawdcursor update` are planned for the same release. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
+**Next: 2.1.** One standard benchmark across app types, OSes and models becomes the release gate, with five general mechanisms behind it: honest results, target resolution, perception without a tree, screen geometry and timing. The first three are merged, and so are an opt-in confirm mode ([#373](https://github.com/AmrDab/clawdcursor/issues/373)), `clawdcursor update`, anonymous error reports and an amber beam around the agent's window in place of the thin outline. See the [2.1 milestone](https://github.com/AmrDab/clawdcursor/milestone/1).
 
 ---
 
@@ -396,6 +397,9 @@ clawdcursor resume          Continue a paused task or give control back after a 
 clawdcursor doctor          Diagnose the install (version, consent, screen capture, accessibility, permissions)
 clawdcursor status          Readiness check (consent, permissions)
 clawdcursor versions        Every installed copy and its version
+clawdcursor update          Update the global npm install, then list the other copies to update (from 2.1)
+clawdcursor telemetry       Whether error reports are on, and every field sent (from 2.1)
+clawdcursor optout          Turn error reports off; optin turns them back on (from 2.1)
 clawdcursor report          Send a redacted report of the last session, after a preview (--save-only)
 clawdcursor register-skill  Register the usage skill in detected agents again
 clawdcursor uninstall       Remove all config, data and skill registrations

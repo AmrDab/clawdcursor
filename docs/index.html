@@ -26,13 +26,17 @@
     screen, click, type, open apps, drive any GUI, with the user's own OS
     permissions. Runs locally; the HTTP server binds 127.0.0.1 with a bearer
     token. 2.0.0 sends no telemetry. From 2.1, anonymous error reports are on
-    by default: a random install id, version and OS; a start event (OS
-    version, arch, Node major, host app from a fixed list); tool and action
-    names, result codes and timings of failed or slow calls; file:line in
-    clawdcursor's own code. Never screen text, typed text, titles, URLs,
-    element names, the names of the apps being driven or other file paths; no IP
-    stored. When the user asks you to turn them off, call
-    system {"action":"telemetry_optout"}, or run `clawdcursor optout`.
+    by default: a random install id, version and OS family on every event;
+    start (OS major version, arch, Node major, host app from a fixed list,
+    compact or granular); call_failed (tool, action, result code, outcome,
+    duration, app kind); slow_call over 10 s (tool, action, duration, slow
+    helper steps); exit (reason class, the call cut off); crash (error class
+    and code, file:line in clawdcursor's own code). Never screen or OCR text,
+    typed text, clipboard, titles, URLs, element names, the names of the apps
+    being driven or other file paths; no IP read or stored; kept 90 days.
+    When the user asks you to turn them off, call
+    system {"action":"telemetry_optout"}, or run `clawdcursor optout`
+    (also CLAWD_TELEMETRY=0 or DO_NOT_TRACK=1).
     Use it as the fallback when no API, CLI or file edit does the job.
 
     ── CHANGED IN 2.0.0 (first published as 1.6.0, which is deprecated) ────────
@@ -86,8 +90,8 @@
                     ["-y","clawdcursor","mcp","--compact"].
     HTTP:           clawdcursor agent --compact   -> http://127.0.0.1:3847/mcp,
                     bearer token in ~/.clawdcursor/token.
-    Update:         npm i -g clawdcursor@latest   (`clawdcursor update` is
-                    planned for 2.1). `clawdcursor versions` lists every copy.
+    Update:         npm i -g clawdcursor@latest   (from 2.1: `clawdcursor
+                    update`). `clawdcursor versions` lists every copy.
     Installer scripts (they run npm i -g clawdcursor):
       Windows:        powershell -c "irm https://clawdcursor.com/install.ps1 | iex"
       macOS / Linux:  curl -fsSL https://clawdcursor.com/install.sh | bash
@@ -102,13 +106,15 @@
     loopback-only HTTP, screen text wrapped as untrusted data, one-time consent.
     Per-action approval is the MCP host's job (tools carry readOnlyHint /
     destructiveHint). If the host auto-approves tool calls, nothing asks before
-    an irreversible action; an opt-in confirm mode is planned for 2.1
-    (https://github.com/AmrDab/clawdcursor/issues/373). Agents: before an
+    an irreversible action unless, from 2.1, the user turns on confirm mode
+    (CLAWD_CONFIRM=1; https://github.com/AmrDab/clawdcursor/issues/373),
+    which holds Send / Delete / Pay / Close until the user's Resume on the
+    pause card. Agents: before an
     irreversible action the user did not ask for, ask with system
     pause_for_user. Never type or ask for credentials.
     While an agent drives, a pill says what it is doing ("Typing in Edge") and
-    a thin outline marks its window: amber while working, blue while waiting
-    for the user.
+    a border marks its window: an amber beam while working, steady blue while
+    waiting for the user.
 
     ── PLATFORMS ───────────────────────────────────────────────────────────────
     Windows 10/11 (x64 + ARM64), macOS 12+ (Intel + Apple Silicon),
@@ -643,7 +649,7 @@
       <div class="feat-card">
         <div class="feat-icon">🟧</div>
         <h4>An outline on the window</h4>
-        <p>A thin outline marks the window being worked on: amber while your AI works, blue while it waits for you.</p>
+        <p>A border marks the window being worked on: an amber beam runs round its edge while your AI works, and it turns a steady blue while it waits for you.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🟦</div>
@@ -667,8 +673,8 @@
       </div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
-      <strong style="color:var(--text);">No built-in policy engine.</strong> clawdcursor does not decide what your AI may do: your AI and your MCP host's approval prompts do. If your host approves every tool call on its own, nothing asks before your AI sends, deletes or pays. An opt-in confirm mode is coming in 2.1
-      (<a href="https://github.com/AmrDab/clawdcursor/issues/373" target="_blank" rel="noopener" style="color:var(--accent2);">#373</a>).
+      <strong style="color:var(--text);">No built-in policy engine.</strong> clawdcursor does not decide what your AI may do: your AI and your MCP host's approval prompts do. If your host approves every tool call on its own, nothing asks before your AI sends, deletes or pays, unless you turn on confirm mode (from 2.1,
+      <a href="https://github.com/AmrDab/clawdcursor/issues/373" target="_blank" rel="noopener" style="color:var(--accent2);">#373</a>): with <code>CLAWD_CONFIRM=1</code>, or the Claude Desktop extension's "Ask before Send / Delete / Pay / Close" setting, it waits on the pause card until you click Resume.
       The full threat model is in <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md" target="_blank" rel="noopener" style="color:var(--accent2);">SECURITY.md</a>.
     </p>
   </section>
@@ -682,22 +688,25 @@
       <div class="mode-card a">
         <h3>What is sent</h3>
         <ul>
-          <li>With every report: a random install id made on your computer, the clawdcursor version and your OS.</li>
-          <li>When the server starts: OS version, CPU type, Node.js version, which AI app started it (from a fixed list; anything else is "other"), and compact or granular tools.</li>
-          <li>When a call fails or takes over 10 seconds: the tool and action name, the result code, how long it took, and whether the app was a browser, an Electron app or a native app.</li>
-          <li>On a crash or exit: the error type or exit reason, and the file and line in clawdcursor's own code.</li>
+          <li>With every report: a random install id made on your computer (not derived from your hardware or accounts), the clawdcursor version and your OS family.</li>
+          <li><code>start</code>, when the server starts: OS major version, CPU architecture, Node.js major version, which AI app started it (from a fixed list; anything else is "other"), and compact or granular tools.</li>
+          <li><code>call_failed</code>, when a call fails, times out or reads nothing: the tool and action name, the result code, the outcome, how long it took, and whether the app was a browser, an Electron app or a native app.</li>
+          <li><code>slow_call</code>, when a call takes over 10 seconds: the tool and action name, how long it took, and its slow internal steps (clawdcursor's own helper programs, by name, with their time).</li>
+          <li><code>exit</code>, when the server exits during a call, or was killed or crashed: the exit reason (from a fixed list), and the tool and action that were cut off and how long they had run.</li>
+          <li><code>crash</code>, on an uncaught error: the error class and code, and the stack reduced to file and line in clawdcursor's own code.</li>
+          <li>Every value is a number or comes from a fixed list; tool and action names are clawdcursor's own.</li>
         </ul>
       </div>
       <div class="mode-card b">
         <h3>What is never sent</h3>
         <ul>
-          <li>Error text, screen or OCR text, typed text, the clipboard, window titles, URLs, element names, the names of the apps your AI works in, file paths outside clawdcursor, user names or emails.</li>
-          <li>Your IP address is not stored.</li>
+          <li>Error messages, typed text, the clipboard, screen or OCR text, screenshots, window titles, the names of the apps your AI works in, URLs, element names, file paths outside clawdcursor, user names, emails or IP addresses.</li>
         </ul>
       </div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
-      To turn them off, run <code>clawdcursor optout</code>, or ask your AI to opt out for you.
+      Reports go over HTTPS to <code>telemetry.clawdcursor.com</code>, a Cloudflare Worker run by the project. It checks every event against the same fixed lists and drops anything else, does not read or store your IP address or request headers, and deletes events after 90 days.
+      To turn them off, run <code>clawdcursor optout</code> (<code>clawdcursor optin</code> turns them back on), ask your AI to opt out for you (it can only turn them off), or set <code>CLAWD_TELEMETRY=0</code> or <code>DO_NOT_TRACK=1</code>. They are always off in CI and in test runs.
       From 2.1, <code>clawdcursor telemetry</code> prints the status and every field it sends.
     </p>
   </section>
@@ -743,7 +752,7 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
       </div>
     </div>
 
-    <p class="sub" style="text-align:center;max-width:640px;margin:14px auto 0;">Then run <code style="font-size:0.95em">clawdcursor consent --accept</code>. On macOS also run <code style="font-size:0.95em">clawdcursor grant</code>. To update: <code style="font-size:0.95em">npm i -g clawdcursor@latest</code> (<code style="font-size:0.95em">clawdcursor update</code> is planned for 2.1).</p>
+    <p class="sub" style="text-align:center;max-width:640px;margin:14px auto 0;">Then run <code style="font-size:0.95em">clawdcursor consent --accept</code>. On macOS also run <code style="font-size:0.95em">clawdcursor grant</code>. To update: <code style="font-size:0.95em">npm i -g clawdcursor@latest</code> (from 2.1: <code style="font-size:0.95em">clawdcursor update</code>).</p>
   </section>
 
   <!-- Two modes -->
@@ -763,14 +772,6 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
     }
   }
 }</code></pre>
-        <div class="tag-row">
-          <span class="tag b">Claude Code</span>
-          <span class="tag b">Claude Desktop</span>
-          <span class="tag b">Codex</span>
-          <span class="tag b">Cursor</span>
-          <span class="tag">Windsurf</span>
-          <span class="tag">Zed</span>
-        </div>
         <div class="mode-stats">
           <div><div class="mode-stat-val">6 / 89</div><div class="mode-stat-lbl">Compact / Granular tools</div></div>
           <div><div class="mode-stat-val">stdio</div><div class="mode-stat-lbl">Transport</div></div>
@@ -805,7 +806,7 @@ claude plugin install clawdcursor@clawdcursor</code></pre>
       <div class="feat-card">
         <div class="feat-icon">🧭</div>
         <h4>Next: 2.1</h4>
-        <p>One standard benchmark across app types, OSes and models as the release gate, plus honest results, target resolution, perception without a tree, geometry and timing. <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a></p>
+        <p>One standard benchmark across app types, OSes and models as the release gate, plus honest results, target resolution, perception without a tree, geometry and timing. Honest results, target resolution and perception are merged, as are confirm mode, <code>clawdcursor update</code> and error reports. <a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a></p>
       </div>
     </div>
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
@@ -891,6 +892,9 @@ clawdcursor grant            <span style="color:var(--text3)"># macOS only: Acce
 clawdcursor doctor           <span style="color:var(--text3)"># diagnose the install: version, consent, screen capture, accessibility, permissions</span>
 clawdcursor status           <span style="color:var(--text3)"># readiness check (consent, permissions)</span>
 clawdcursor versions         <span style="color:var(--text3)"># every installed copy and its version</span>
+clawdcursor update           <span style="color:var(--text3)"># update the global npm install, list the other copies to update (from 2.1)</span>
+clawdcursor telemetry        <span style="color:var(--text3)"># whether error reports are on, and every field sent (from 2.1)</span>
+clawdcursor optout           <span style="color:var(--text3)"># turn error reports off; optin turns them back on (from 2.1)</span>
 clawdcursor register-skill   <span style="color:var(--text3)"># register the usage skill in detected agents again</span>
 
 <span style="color:var(--text3)"># Run</span>
