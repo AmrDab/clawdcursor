@@ -14,7 +14,7 @@
  */
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
-import { selectOption } from '../platform/select-option';
+import { selectOption, selectedResult } from '../platform/select-option';
 import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
 import { quoteScreenText } from '../core/result-codes';
@@ -151,7 +151,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         'Uses UIA SelectionItemPattern on Windows; sets AXSelected on macOS. ' +
         'More reliable than clicking when an item is scrolled out of view. ' +
         'With `value`, `name` is a dropdown / list and `value` the option to choose ' +
-        '(e.g. name:"Plan" value:"Pro"); the result is read back and verified.',
+        '(e.g. name:"Plan" value:"Pro"). Either way the result is read back: a select that did not take is a failure.',
       parameters: {
         name:        { type: 'string', description: 'Accessibility name (with `value`: the dropdown / list)', required: true },
         value:       { type: 'string', description: 'Option to choose inside the named dropdown / list (exact option name)', required: false },
@@ -172,7 +172,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const res = await ctx.platform.invokeElement({
           name: String(name), controlType, processId: pid, action: 'select',
         });
-        if (res.success) return { text: `Selected ${quoteScreenText(name)}.` };
+        if (res.success) { const r = selectedResult(res, String(name)); return { text: r.text, ...(r.success ? {} : { isError: true }) }; }
         const notItem = await notSelectableReason(ctx.platform, { name: String(name), controlType, processId: pid });
         return { text: `a11y_select failed for ${quoteScreenText(name)}${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
       },

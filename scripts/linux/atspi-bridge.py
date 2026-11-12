@@ -910,6 +910,15 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
         idx = safe(lambda: acc.get_index_in_parent(), -1)
         if sel and idx is not None and idx >= 0 and safe(lambda: sel.select_child(idx), False):
             out["success"], out["method"] = True, "Selection"
+            # Toolkits update the selection a moment after the call: read it back until it is selected, or ~0.5 s.
+            # selected=False means the item never read as selected; absent, it cannot be read.
+            deadline = time.monotonic() + 0.5
+            picked = safe(lambda: sel.is_child_selected(idx))
+            while picked is False and time.monotonic() < deadline:
+                time.sleep(0.05)
+                picked = safe(lambda: sel.is_child_selected(idx))
+            if picked is not None:
+                out["selected"] = bool(picked)
         else:
             used = do_named_action(acc, 'select')
             if used is None:

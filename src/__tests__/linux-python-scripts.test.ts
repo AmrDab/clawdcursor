@@ -242,6 +242,7 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('invoke select uses the parent Selection interface', () => {
     expect(out.select.success).toBe(true);
     expect(out.select_idx).toEqual([1]);
+    expect(out.select.selected).toBe(true);   // read back after the select (#396)
   });
 
   it('invoke expand drives the expand action', () => {

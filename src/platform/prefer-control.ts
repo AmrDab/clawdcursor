@@ -35,6 +35,12 @@ export function failReason(res: { error?: unknown; data?: Record<string, unknown
 }
 
 export const holdsOptions = (r?: string) => HOLDS_OPTIONS.test(role(r));
+/** A list box or a dropdown list: where typing an option's text moves the selection to it. Not a tab strip, a radio group or a menu: there a letter is a shortcut. */
+export const typeAheadSelects = (r?: string) => /^(list|listbox|combobox|popupbutton)$/.test(role(r));
+/** An item of such a list. */
+export const isListItem = (r?: string) => /^(listitem|option)$/.test(role(r));
+/** A text box: what an editable combo box holds. */
+export const isTextBox = (r?: string) => /^(edit|textfield|textbox|entry|searchfield)$/.test(role(r));
 export const isSelectableItem = (r?: string) => SELECTABLE.test(role(r));
 
 const WANTED: Record<ByNameAction, RegExp[]> = {
@@ -75,6 +81,17 @@ export async function preferControl(
   q: { name: string; controlType?: string; processId?: number },
 ): Promise<string | undefined> {
   return (await findControls(platform, action, q)).controlType ?? q.controlType;
+}
+
+type Placed = { name?: string; bounds?: { x: number; y: number; width: number; height: number } } | null | undefined;
+/** Is the focused element `target` itself: in the same place, or of the same name and overlapping it? */
+export function sameElement(focused: Placed, target: Placed): boolean {
+  const a = focused?.bounds, b = target?.bounds;
+  if (!a || !b) return false;
+  const near = (p: number, q: number) => Math.abs(p - q) <= 8;
+  if (near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height)) return true;
+  const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  return overlap && !!focused?.name?.trim() && norm(focused.name) === norm(target?.name);
 }
 
 /**

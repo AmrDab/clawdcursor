@@ -178,6 +178,9 @@ class Selection:
         self.acc.children[i].states.add(StateType.SELECTED)
         return True
 
+    def is_child_selected(self, i):
+        return i in self.selected
+
 
 class Acc:
     def __init__(self, name, role, states=(StateType.ENABLED, StateType.SENSITIVE, StateType.VISIBLE, StateType.SHOWING),

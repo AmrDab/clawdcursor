@@ -49,6 +49,12 @@ try {
         public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
         [DllImport("user32.dll")]
         public static extern bool IsZoomed(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
+        [DllImport("user32.dll")]
+        public static extern int GetDlgCtrlID(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
         // Additional constants for force-focus path:
         //   HWND_TOPMOST    = -1
         //   HWND_NOTOPMOST  = -2
@@ -1304,6 +1310,53 @@ function Test-Activatable($el, $action) {
     return $false
 }
 
+# Select an item (SelectionItemPattern.Select) so that the APP hears of it, and read it back.
+# A WinForms ListBox takes UIA's Select() as LB_SETCURSEL, which moves the highlight WITHOUT the LBN_SELCHANGE its parent
+# gets when a user picks an item. UIA then reads the item as selected while the app's own selection-changed handler never
+# ran (#396: a form applied "no priority" after a select that reported ok). So the list box's parent is sent that
+# notification, as the control itself does. Only a WinForms list box: UIA's proxy for a plain Win32 "ListBox" and for a
+# combo box notifies by itself, and a second notification would run the app's handler twice.
+# The send is confined: to the list box's real PARENT window (GA_PARENT: never the owner of a popup list), in the list
+# box's own process, and only for a child list box that notifies at all (LBS_NOTIFY). Anything else: nothing is sent.
+# -> $true / $false: what the item's IsSelected reads afterwards ($null: it cannot be read). Throws without the pattern.
+function Select-Item($element) {
+    $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $was = $false
+    try { $was = [bool]$p.Current.IsSelected } catch { }
+    $p.Select()
+    # Chromium updates UIA after the call returns: read it back until it is selected, or ~0.5 s.
+    $selected = $null
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    do {
+        try { $selected = [bool]$p.Current.IsSelected } catch { $selected = $null; break }
+        if ($selected) { break }
+        Start-Sleep -Milliseconds 50
+    } while ($sw.ElapsedMilliseconds -lt 500)
+    if ($selected -and -not $was) {
+        try {
+            $list = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($element)
+            $h = [IntPtr][int]$list.Current.NativeWindowHandle
+            if ($h -ne [IntPtr]::Zero -and $list.Current.ClassName -match '^WindowsForms\d+\.LISTBOX\.') {
+                $dad = [Win32UIA]::GetAncestor($h, 1)             # GA_PARENT
+                $style = [Win32UIA]::GetWindowLong($h, -16)       # GWL_STYLE
+                $listPid = [uint32]0; $dadPid = [uint32]0
+                [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$listPid)
+                if ($dad -ne [IntPtr]::Zero) { [void][Win32UIA]::GetWindowThreadProcessId($dad, [ref]$dadPid) }
+                $isChild = ($style -band 0x40000000) -ne 0        # WS_CHILD
+                $notifies = ($style -band 0x0001) -ne 0           # LBS_NOTIFY
+                if ($isChild -and $notifies -and $listPid -ne 0 -and $listPid -eq $dadPid) {
+                    # WM_COMMAND, wParam = (LBN_SELCHANGE << 16) | control id, lParam = the list box. Bounded: a handler
+                    # that opens a modal box must not hold the bridge (SMTO_ABORTIFHUNG).
+                    $wParam = [IntPtr]((1 -shl 16) -bor ([Win32UIA]::GetDlgCtrlID($h) -band 0xFFFF))
+                    $res = [IntPtr]::Zero
+                    [void][Win32UIA]::SendMessageTimeout($dad, 0x0111, $wParam, $h, 2, 1500, [ref]$res)
+                }
+            }
+        } catch { }
+    }
+    return $selected
+}
+
 # ── Command: invoke-element (fuzzy name match) ────────────────────────────────
 function Cmd-InvokeElement {
     param($cmd)
@@ -1453,8 +1506,7 @@ function Cmd-InvokeElement {
                     return @{ success=$true; action="click"; method="TogglePattern" }
                 } catch {
                     try {
-                        $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-                        $p.Select()
+                        [void](Select-Item $element)
                         return @{ success=$true; action="click"; method="SelectionItemPattern" }
                     } catch {
                         # An expandable element (a <details> summary, a tree node, a disclosure button) has only
@@ -1690,8 +1742,11 @@ function Cmd-InvokeElement {
         }
         "select" {
             try {
-                $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-                $p.Select(); return @{ success=$true; action="select" }
+                $selected = Select-Item $element
+                $r = @{ success=$true; action="select" }
+                # selected: the item's own state, read back after the select (absent: it cannot be read).
+                if ($null -ne $selected) { $r.data = @{ selected = $selected } }
+                return $r
             } catch { return @{ success=$false; reason="unsupported"; error="SelectionItemPattern not supported" } }
         }
         default { return @{ success=$false; error="Unknown action: $action" } }
