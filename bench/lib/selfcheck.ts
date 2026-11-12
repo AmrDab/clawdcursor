@@ -15,80 +15,40 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { chromium, type Page } from 'playwright';
 import { findBrowser, openBrowser } from './browser';
 import { resolveCli, startIsolated } from './isolated';
-import { buildNative, nativeArgs, readStateFile } from './live-fixtures';
+import { buildNative, nativeArgs, openApp, openNativeFixture, readStateFile, type LiveFixture } from './live-fixtures';
+import { ORACLES, nativeDo, oracleCounts, runnable, scriptProblems } from './oracles';
+import { TASKS_DIR } from './tasks';
 import { cdpIsFixture, ownsFocus, readFocus } from './ownership';
 import { freePort, pidsByCommandLine, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
 import { evaluate, loadTasks } from './tasks';
 import type { TaskSpec } from './types';
 
-type Script = (p: Page) => Promise<void>;
+type Script = (p: Page) => Promise<unknown>;
 
-/** Per web task: [the right trajectory, a wrong one]. */
-const SCRIPTS: Record<string, [Script, Script]> = {
-  'web-form-fill': [
-    async p => {
-      await p.fill('#name', 'Ada Lovelace');
-      await p.fill('#qty', '7');
-      await p.selectOption('#shipping', 'Express');
-      await p.check('#gift');
-      await p.uncheck('#newsletter');
-      await p.click('summary');
-      await p.check('#fragile');
-      await p.click('#note');
-      await p.keyboard.type('Leave at the side door');
-      await p.click('#confirm');
-    },
-    async p => { await p.fill('#name', 'Ada Lovelace'); await p.click('#confirm'); },
-  ],
-  'web-trap-new': [p => p.click('[data-bench="new"]'), p => p.click('[data-bench="whatsNew"]')],
-  'web-trap-dialog-close': [p => p.click('[data-bench="dialogClose"]'), p => p.click('[data-bench="pageClose"]')],
-  'web-trap-hidden-link': [
-    p => p.click('[data-bench="visibleLink"]'),
-    p => p.evaluate(() => (document.querySelector('[data-bench="hiddenLink"]') as HTMLElement).click()),
-  ],
-  'web-trap-label-button': [p => p.click('[data-bench="exportButton"]'), p => p.click('[data-bench="exportLabel"]')],
-  'web-timing-late-dialog': [
-    async p => { await p.click('#start'); await p.click('#download', { timeout: 8000 }); },
-    async p => { await p.click('#start'); await p.waitForTimeout(300); },
-  ],
-  'web-timing-gated-field': [
-    async p => {
-      await p.click('#open');
-      await p.waitForFunction(() => document.getElementById('editorStatus')!.textContent === 'Ready', undefined, { timeout: 8000 });
-      await p.fill('#code', 'ORBIT-42');
-      await p.click('#save');
-    },
-    // Typed at once: the field throws it away, and Save before Ready saves nothing.
-    async p => { await p.click('#open'); await p.fill('#code', 'ORBIT-42'); await p.click('#save'); },
-  ],
-  'web-canvas-draw': [
-    async p => { await drag(p, [120, 120], [520, 520]); },
-    async p => { await drag(p, [120, 120], [520, 120]); },
-  ],
-  'web-canvas-targets': [
-    async p => { for (const [x, y] of [[110, 100], [520, 130], [320, 320], [130, 530], [540, 500]]) await p.mouse.click(x, y); },
-    async p => { for (const [x, y] of [[110, 100], [300, 100], [300, 500], [400, 400]]) await p.mouse.click(x, y); },
-  ],
-  'web-long-read': [
-    async p => {
-      const code = await p.locator('tr', { has: p.locator('td', { hasText: /^Delta-17$/ }) }).locator('td').nth(1).innerText();
-      await p.fill('#answer', code);
-      await p.click('#submit');
-    },
-    async p => { await p.fill('#answer', 'QX-4462-MX'); await p.click('#submit'); },
-  ],
+/**
+ * Per web task: a WRONG trajectory, the trap the task is about. The right one is the task's oracle script (oracles.ts):
+ * the predicate must hold after the oracle and must not hold after this.
+ */
+const WRONG: Record<string, Script> = {
+  'web-form-fill': async p => { await p.fill('#name', 'Ada Lovelace'); await p.click('#confirm'); },
+  'web-trap-new': p => p.click('[data-bench="whatsNew"]'),
+  'web-trap-dialog-close': p => p.click('[data-bench="pageClose"]'),
+  'web-trap-hidden-link': p => p.evaluate(() => (document.querySelector('[data-bench="hiddenLink"]') as HTMLElement).click()),
+  'web-trap-label-button': p => p.click('[data-bench="exportLabel"]'),
+  'web-timing-late-dialog': async p => { await p.click('#start'); await p.waitForTimeout(300); },
+  // Typed at once: the field throws it away, and Save before Ready saves nothing.
+  'web-timing-gated-field': async p => { await p.click('#open'); await p.fill('#code', 'ORBIT-42'); await p.click('#save'); },
+  'web-canvas-draw': async p => { await p.mouse.move(120, 120); await p.mouse.down(); await p.mouse.move(520, 120, { steps: 3 }); await p.mouse.up(); },
+  'web-canvas-targets': async p => { for (const [x, y] of [[110, 100], [300, 100], [300, 500], [400, 400]]) await p.mouse.click(x, y); },
+  'web-long-read': async p => { await p.fill('#answer', 'QX-4462-MX'); await p.click('#submit'); },
 };
 
-/** The canvas sits 20 px into the page: page coordinates here. */
-async function drag(p: Page, from: [number, number], to: [number, number]): Promise<void> {
-  await p.mouse.move(from[0], from[1]);
-  await p.mouse.down();
-  await p.mouse.move(to[0], to[1], { steps: 3 });
-  await p.mouse.up();
-}
+/** What a script measured against what the task's spec says. */
+export interface Measured { task: string; calls: number; screenshots: number; spec: { calls: number; screenshots: number }; ran: 'web' | 'native' | 'not run here' }
 
-export async function selfcheckWeb(log: (line: string) => void = console.log): Promise<boolean> {
+/** Run every web task's oracle script and its wrong trajectory in a headless browser. */
+export async function selfcheckWeb(log: (line: string) => void = console.log, measured: Measured[] = []): Promise<boolean> {
   const tasks = loadTasks().filter(t => t.fixture.kind === 'web');
   const server = await startFixtureServer();
   // An installed browser, headless: no window, nothing takes the focus.
@@ -97,14 +57,18 @@ export async function selfcheckWeb(log: (line: string) => void = console.log): P
   let ok = true;
   try {
     for (const task of tasks) {
-      const scripts = SCRIPTS[task.id];
-      if (!scripts) { log(`FAIL ${task.id}: no selfcheck script`); ok = false; continue; }
-      for (const [i, want] of [[0, true], [1, false]] as Array<[number, boolean]>) {
-        const got = await runScript(task, scripts[i], `${task.id}-${i}`, server, browser);
-        const pass = got.holds === want && (want ? got.events > 0 : true);
-        if (!pass) ok = false;
-        log(`${pass ? 'ok  ' : 'FAIL'} ${task.id} ${want ? 'right' : 'wrong'} trajectory: predicate ${got.holds}, ${got.events} events`);
-      }
+      const steps = ORACLES[task.id];
+      const wrong = WRONG[task.id];
+      if (!steps || !wrong || runnable(steps) !== 'web') { log(`FAIL ${task.id}: no oracle script or no wrong trajectory to run in a browser`); ok = false; continue; }
+      const right = await runScript(task, async p => { for (const step of steps) await step.web!(p); }, `${task.id}-oracle`, server, browser);
+      const counts = oracleCounts(steps);
+      const pass = right.holds && right.events > 0;
+      if (!pass) ok = false;
+      else measured.push({ task: task.id, ...counts, spec: task.oracle, ran: 'web' });
+      log(`${pass ? 'ok  ' : 'FAIL'} ${task.id} oracle script: predicate ${right.holds}, ${counts.calls} calls, ${counts.screenshots} screenshots`);
+      const bad = await runScript(task, wrong, `${task.id}-wrong`, server, browser);
+      if (bad.holds) ok = false;
+      log(`${bad.holds ? 'FAIL' : 'ok  '} ${task.id} wrong trajectory: predicate ${bad.holds}`);
     }
   } finally {
     await browser.close();
@@ -129,7 +93,7 @@ async function runScript(task: TaskSpec, script: Script, run: string, server: Aw
 }
 
 /** The native fixture of this OS: built, then run with --selftest (off screen, never activated, closes itself). */
-export async function selfcheckNative(log: (line: string) => void = console.log): Promise<boolean> {
+export async function selfcheckNative(log: (line: string) => void = console.log, measured: Measured[] = []): Promise<boolean> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-selfcheck-'));
   try {
     const built = await buildNative(dir);
@@ -144,6 +108,24 @@ export async function selfcheckNative(log: (line: string) => void = console.log)
           && JSON.stringify(fx.state.applied) === JSON.stringify({ name: 'Self Test', email: 'self@test.example', priority: 'High', subscribe: true }));
       if (!pass) ok = false;
       log(`${pass ? 'ok  ' : 'FAIL'} native fixture ${mode}: ${fx ? `${fx.events.length} events` : 'no state file'}`);
+    }
+    // Each native task's oracle script, through the fixture's own handlers (--do): the predicate must hold after it.
+    for (const task of loadTasks().filter(t => t.fixture.kind === 'native')) {
+      const steps = ORACLES[task.id];
+      if (!steps || runnable(steps) !== 'native' || task.fixture.kind !== 'native' || !task.success) { log(`FAIL ${task.id}: no oracle script to run in the fixture`); ok = false; continue; }
+      const counts = oracleCounts(steps);
+      if (process.platform !== 'win32') {   // only the WinForms fixture runs a script so far
+        measured.push({ task: task.id, ...counts, spec: task.oracle, ran: 'not run here' });
+        log(`skip ${task.id} oracle script: this OS's fixture does not run scripts yet (${counts.calls} calls)`);
+        continue;
+      }
+      const state = path.join(dir, `${task.id}.json`);
+      const ran = await tryRun(built.cmd, [...built.args, ...nativeArgs({ state, mode: task.fixture.mode }), '--selftest', '--do', nativeDo(steps)], 60_000);
+      const fx = ran === null ? null : readStateFile(state);
+      const holds = !!fx && evaluate(task.success, fx);
+      if (!holds) ok = false;
+      else measured.push({ task: task.id, ...counts, spec: task.oracle, ran: 'native' });
+      log(`${holds ? 'ok  ' : 'FAIL'} ${task.id} oracle script: predicate ${holds}, ${counts.calls} calls, ${counts.screenshots} screenshots`);
     }
     return ok;
   } finally {
@@ -235,6 +217,138 @@ export async function selfcheckIsolation(buildDir: string | undefined, log: (lin
   } finally {
     await server.close();
     try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ }
+  }
+  return ok;
+}
+
+/**
+ * `--selfcheck-fixtures`: the benchmark's own fixtures behind the real fence. Unlike --selfcheck this OPENS WINDOWS for a
+ * few seconds (the native fixture twice, and Calculator when it can be used), and focuses its own fixture. No agent runs.
+ *
+ * It is the check the first Codex run needed: the daemon is fenced to the fixture exactly as a live run fences it, and
+ * `window focus` and `read_tree` on the fixture must be ALLOWED, while a second, unfenced window must be REFUSED.
+ */
+export async function selfcheckFixtures(buildDir: string | undefined, log: (line: string) => void = console.log): Promise<boolean> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-selfcheck-'));
+  const check = (ok: boolean, what: string) => { log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); return ok; };
+  let ok = true;
+  type Reply = { isError?: boolean; content?: Array<{ type: string; text?: string }> };
+  const text = (r: Reply) => (r.content ?? []).map(c => c.text ?? '').join('\n');
+  /** A daemon fenced to `fixture`, and a client on it: what `run` sees is what an agent would. */
+  const fenced = async (fixture: LiveFixture, n: number, run: (call: (name: string, args: Record<string, unknown>) => Promise<Reply>) => Promise<void>) => {
+    const { cli } = await resolveCli(buildDir);
+    const daemon = await startIsolated({ cli, home: path.join(root, `home-${n}`), sessionDir: path.join(root, `sessions-${n}`), cdpPort: await freePort(),
+      fencePids: await fixture.roots(), logFile: path.join(root, `server-${n}.log`) });
+    const client = new Client({ name: 'bench-selfcheck-fixtures', version: '0' });
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(daemon.mcpUrl), { requestInit: { headers: { Authorization: `Bearer ${daemon.token}` } } }));
+      await run((name, args) => client.callTool({ name, arguments: args }) as Promise<Reply>);
+    } finally {
+      await client.close().catch(() => { /* not connected */ });
+      await daemon.stop();
+    }
+  };
+  const allowed = (r: Reply) => !text(r).includes('FENCED: ');
+  try {
+    const native = await buildNative(path.join(root, 'native'));
+    if ('missing' in native) log(`skip native fixture: ${native.missing}`);
+    else {
+      const dirs = ['fixture', 'other'].map(d => { const dir = path.join(root, d); fs.mkdirSync(dir, { mode: 0o700 }); return dir; });
+      // The window the run is fenced to, and a second window that is NOT in the fence: another process, whose title
+      // CONTAINS the fixture's title (on Windows, where the fixture takes a title). A focus that searched by title could
+      // take either.
+      const lookalike = process.platform === 'win32' ? 'Bench Dialog - notes (not the fixture)' : undefined;
+      const otherTitle = lookalike ?? 'Bench Editor';
+      const other = await openNativeFixture('editor', native, dirs[1], lookalike);
+      const fixture = await openNativeFixture('dialog', native, dirs[0]);
+      try {
+        const otherPid = (await other.roots())[0];
+        const fixturePid = (await fixture.roots())[0];
+        await fenced(fixture, 1, async call => {
+          const front = async () => { const t = await call('accessibility', { action: 'read_tree' }); return allowed(t) && /Apply/.test(text(t)) && /Subscribe/.test(text(t)); };
+          const focus = await call('window', { action: 'focus', processId: fixturePid });
+          ok = check(allowed(focus) && !focus.isError, `native fixture: window focus on it is allowed (${text(focus).split('\n')[0].slice(0, 80)})`) && ok;
+          const tree = await call('accessibility', { action: 'read_tree' });
+          ok = check(allowed(tree) && /Apply/.test(text(tree)) && /Subscribe/.test(text(tree)), 'native fixture: read_tree on it is allowed and shows its controls') && ok;
+          ok = check(!text(tree).includes(otherTitle), 'native fixture: read_tree does not list the window outside the fence') && ok;
+          const byPid = await call('accessibility', { action: 'read_tree', processId: fixturePid });
+          ok = check(allowed(byPid), 'native fixture: read_tree by its process id is allowed') && ok;
+          if (lookalike) {
+            // "Bench Dialog" is in both titles: refused, and the look-alike is never brought to the front.
+            const ambiguous = await call('window', { action: 'focus', title: 'Bench Dialog' });
+            ok = check(!allowed(ambiguous) && !!ambiguous.isError, 'a second window whose title contains the fixture\'s: focus by that title is refused (FENCED)') && ok;
+            ok = check(await front(), 'a second window whose title contains the fixture\'s: it was not focused (the fixture is still in front)') && ok;
+          }
+          const otherFocus = await call('window', { action: 'focus', title: otherTitle });
+          ok = check(!allowed(otherFocus) && !!otherFocus.isError, 'a window outside the fence: window focus is refused (FENCED)') && ok;
+          const otherByPid = await call('window', { action: 'focus', processId: otherPid });
+          ok = check(!allowed(otherByPid), 'a window outside the fence: window focus by its process id is refused (FENCED)') && ok;
+          const otherTree = await call('accessibility', { action: 'read_tree', processId: otherPid });
+          ok = check(!allowed(otherTree) && !/Document/.test(text(otherTree)), 'a window outside the fence: read_tree is refused (FENCED)') && ok;
+          ok = check(await front(), 'the window outside the fence was never focused: the fixture is still in front') && ok;
+          const again = await call('window', { action: 'focus', processId: fixturePid });
+          ok = check(allowed(again) && !again.isError, 'native fixture: still allowed after the refusals') && ok;
+        });
+      } finally {
+        await fixture.close();
+        await other.close();
+      }
+    }
+
+    // A Store app: its window belongs to ApplicationFrameHost, the fence is given the app's own process.
+    const calc = await openApp('calculator', { workDir: root });
+    if ('skip' in calc) log(`skip Calculator: ${calc.skip}`);
+    else {
+      try {
+        await fenced(calc, 2, async call => {
+          const tree = await call('accessibility', { action: 'read_tree' });
+          ok = check(allowed(tree) && /Calculator/.test(text(tree)), 'Calculator (a Store app): read_tree on it is allowed') && ok;
+          const focus = await call('window', { action: 'focus', title: 'Calculator' });
+          ok = check(allowed(focus), `Calculator: window focus by its title is allowed (${text(focus).split('\n')[0].slice(0, 80)})`) && ok;
+          const host = await call('window', { action: 'focus', processName: 'ApplicationFrameHost' });
+          ok = check(!allowed(host), 'Calculator: its shared host process by name is refused (FENCED)') && ok;
+        });
+      } finally {
+        await calc.close();
+      }
+    }
+  } catch (e) {
+    ok = check(false, `fixtures behind the fence: ${(e as Error).message}`);
+  } finally {
+    try { fs.rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 }); } catch { /* a temp dir */ }
+  }
+  return ok;
+}
+
+/**
+ * The oracles: every task's spec must carry exactly the counts of its script, and every script must have the shape of
+ * a minimal but realistic trajectory. `measured` holds the scripts that were RUN here (and held their predicate); the
+ * real-app tasks cannot be run without their app, so their scripts are only counted. With `write`, the counts are
+ * written into the specs instead of compared.
+ */
+export function selfcheckOracles(measured: Measured[], write: boolean, log: (line: string) => void = console.log): boolean {
+  let ok = true;
+  for (const task of loadTasks()) {
+    const steps = ORACLES[task.id];
+    if (!steps) { log(`FAIL ${task.id}: no oracle script (bench/lib/oracles.ts)`); ok = false; continue; }
+    const problems = scriptProblems(steps);
+    if (problems.length) { log(`FAIL ${task.id} oracle script: ${problems.join('; ')}`); ok = false; continue; }
+    const counts = oracleCounts(steps);
+    const ran = measured.find(m => m.task === task.id)?.ran ?? 'not run here';
+    if (task.oracle.calls === counts.calls && task.oracle.screenshots === counts.screenshots) {
+      log(`ok   ${task.id} oracle: ${counts.calls} calls, ${counts.screenshots} screenshots (script ${ran === 'not run here' ? 'counted, not run here' : `run: ${ran}`})`);
+      continue;
+    }
+    if (!write) {
+      log(`FAIL ${task.id} oracle: the spec says ${task.oracle.calls} calls / ${task.oracle.screenshots} screenshots, its script is ${counts.calls} / ${counts.screenshots}. Run --selfcheck --write-oracles.`);
+      ok = false;
+      continue;
+    }
+    const file = path.join(TASKS_DIR, `${task.id}.json`);
+    const spec = JSON.parse(fs.readFileSync(file, 'utf8'));
+    spec.oracle = { screenshots: counts.screenshots, calls: counts.calls };
+    fs.writeFileSync(file, JSON.stringify(spec, null, 2) + '\n');
+    log(`wrote ${task.id} oracle: ${counts.calls} calls, ${counts.screenshots} screenshots (was ${task.oracle.calls} / ${task.oracle.screenshots})`);
   }
   return ok;
 }

@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { browserAppNames, openBrowser, type BrowserExe } from './browser';
 import type { FixtureServer } from './fixture-server';
-import { POWERSHELL, killTree, pidsByCommandLine, start, system32, tryRun, waitFor } from './proc';
+import { POWERSHELL, hasWindow, killTree, pidsByCommandLine, startVisible, system32, tryRun, waitFor } from './proc';
 import type { FixtureState, TaskSpec } from './types';
 
 const NATIVE_DIR = path.join(__dirname, '..', 'fixtures', 'native');
@@ -75,8 +75,8 @@ export async function buildNative(outDir: string, platform: string = process.pla
  */
 export const nativeStatePath = (workDir: string) => path.join(workDir, 'native-fixture.live.json');
 
-export function nativeArgs(o: { state: string; mode: 'dialog' | 'editor'; pos?: [number, number] }): string[] {
-  return ['--state', o.state, '--mode', o.mode, ...(o.pos ? ['--pos', o.pos.join(',')] : [])];
+export function nativeArgs(o: { state: string; mode: 'dialog' | 'editor'; pos?: [number, number]; title?: string }): string[] {
+  return ['--state', o.state, '--mode', o.mode, ...(o.pos ? ['--pos', o.pos.join(',')] : []), ...(o.title ? ['--title', o.title] : [])];
 }
 
 /** The state file: written whole and moved into place, but a read can still land between the two. */
@@ -93,12 +93,24 @@ export function readStateFile(file: string): FixtureState | null {
 
 async function openNative(mode: 'dialog' | 'editor', ctx: FixtureContext): Promise<LiveFixture | { skip: string }> {
   if ('missing' in ctx.native) return { skip: ctx.native.missing };
-  const state = nativeStatePath(ctx.workDir);
-  const child = start(ctx.native.cmd, [...ctx.native.args, ...nativeArgs({ state, mode })], { stdio: 'ignore' });
-  await waitFor(() => fs.existsSync(state), 20_000, 'the native fixture to start');
+  return openNativeFixture(mode, ctx.native, ctx.workDir);
+}
+
+/** Start the native fixture with its window on screen, and wait until it has written its state AND has that window. */
+export async function openNativeFixture(mode: 'dialog' | 'editor', native: NativeBuild, workDir: string, title?: string): Promise<LiveFixture> {
+  const state = nativeStatePath(workDir);
+  const child = startVisible(native.cmd, [...native.args, ...nativeArgs({ state, mode, title })], { stdio: 'ignore' });
+  try {
+    await waitFor(() => fs.existsSync(state), 20_000, 'the native fixture to start');
+    // The state file alone is not enough: the first live run had the file and no window.
+    await waitFor(() => hasWindow(child.pid), 20_000, 'the native fixture\'s window to appear');
+  } catch (e) {
+    killTree(child.pid);
+    throw e;
+  }
   return {
     window: mode === 'editor' ? '"Bench Editor" (a desktop app)' : '"Bench Dialog" (a desktop app)',
-    apps: ctx.native.apps,
+    apps: native.apps,
     roots: () => child.pid ? [child.pid] : [],
     state: async () => readStateFile(state),
     close: async () => killTree(child.pid),
@@ -164,7 +176,7 @@ export async function appUnavailable(app: 'calculator' | 'textedit' | 'designcen
   return null;
 }
 
-async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: FixtureContext): Promise<LiveFixture | { skip: string }> {
+export async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Pick<FixtureContext, 'workDir'>): Promise<LiveFixture | { skip: string }> {
   const why = await appUnavailable(app);
   if (why) return { skip: why };
   const osa = (script: string) => tryRun('osascript', ['-e', script]);
@@ -177,7 +189,7 @@ async function openApp(app: 'calculator' | 'textedit' | 'designcenter', ctx: Fix
       state: async () => null, close: async () => { /* not ours to close */ } };
   }
   if (app === 'calculator' && process.platform === 'win32') {
-    start(system32('calc.exe'), [], { stdio: 'ignore' });
+    startVisible(system32('calc.exe'), [], { stdio: 'ignore' });
     const probe = async () => {
       const out = await tryRun(POWERSHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(APPS_DIR, 'calculator-probe.ps1')]);
       return out === null ? null : parseCalcProbe(out);

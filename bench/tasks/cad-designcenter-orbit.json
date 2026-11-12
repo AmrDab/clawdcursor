@@ -16,7 +16,7 @@
   "prompt": "In the Designcenter window that is open with a part loaded, rotate the model in the 3D viewport by dragging with the middle mouse button about 200 pixels to the right, then fit the view to the window.",
   "oracle": {
     "screenshots": 2,
-    "calls": 4
+    "calls": 5
   },
   "caps": {
     "calls": 20,

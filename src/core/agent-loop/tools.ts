@@ -1084,11 +1084,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       },
       changesScreen: true,
       async execute(args, ctx) {
-        const q: Record<string, string | number | undefined> = {};
-        if (typeof args.processName === 'string') q.processName = args.processName;
-        if (typeof args.processId === 'number') q.processId = args.processId;
-        if (typeof args.title === 'string') q.title = args.title;
-        const ok = await ctx.platform.focusWindow(q as any);
+        const q = buildWinQuery(args) ?? {};
+        const ok = await ctx.platform.focusWindow(q);
         await sleep(250);
         return { success: ok, text: ok ? 'Focused matching window.' : ctx.platform.takeFocusFailure?.() ?? 'No matching window found.' };
       },
@@ -2294,8 +2291,10 @@ async function clickBoundsFallback(
   return { success: true, text: `Clicked ${quoteScreenText(name)} via a11y bounds (coordinate fallback at ${cx},${cy} — element found but exposes no invoke/toggle/select pattern).`, targetLabel: name };
 }
 
-function buildWinQuery(args: Record<string, unknown>): { processName?: string; processId?: number; title?: string } | undefined {
-  const q: { processName?: string; processId?: number; title?: string } = {};
+function buildWinQuery(args: Record<string, unknown>): { processName?: string; processId?: number; title?: string; handle?: number } | undefined {
+  const q: { processName?: string; processId?: number; title?: string; handle?: number } = {};
+  // Not in any tool's schema: only the test fence (core/fence.ts) sets it, to the handle of the one window it matched.
+  if (typeof args.handle === 'number') return { handle: args.handle };
   if (typeof args.processName === 'string') q.processName = args.processName;
   if (typeof args.processId === 'number') q.processId = args.processId;
   if (typeof args.title === 'string') q.title = args.title;

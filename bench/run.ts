@@ -3,6 +3,7 @@
  *
  *   npm run bench                    the plan: what would run here. Starts nothing.
  *   npm run bench -- --selfcheck     proves fixtures, predicates, isolation and the fence. No agent, no window.
+ *   npm run bench -- --selfcheck-fixtures   the real fixture windows behind the real fence. Opens windows briefly; no agent.
  *   npm run bench -- --live [...]    runs the tasks. TAKES OVER THE MOUSE AND KEYBOARD until it ends.
  */
 import * as fs from 'fs';
@@ -25,17 +26,19 @@ import { Watchdog, readSessionCalls, tailSessionDir, type Verdict } from './lib/
 import type { AgentRun, CallSig, TaskSpec } from './lib/types';
 
 export interface Options {
-  live: boolean; selfcheck: boolean; includeManual: boolean; updateBaseline: boolean; repeats: number;
+  live: boolean; selfcheck: boolean; selfcheckFixtures: boolean; writeOracles: boolean; includeManual: boolean; updateBaseline: boolean; repeats: number;
   build?: string; models?: string; tasks?: string[]; out?: string; baseline?: string; claudeBin?: string; codexBin?: string;
 }
 
 export function parseArgs(argv: string[]): Options {
-  const o: Options = { live: false, selfcheck: false, includeManual: false, updateBaseline: false, repeats: 1 };
+  const o: Options = { live: false, selfcheck: false, selfcheckFixtures: false, writeOracles: false, includeManual: false, updateBaseline: false, repeats: 1 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const value = () => { const v = argv[++i]; if (v === undefined) throw new Error(`${a} needs a value`); return v; };
     if (a === '--live') o.live = true;
     else if (a === '--selfcheck') o.selfcheck = true;
+    else if (a === '--selfcheck-fixtures') o.selfcheckFixtures = true;
+    else if (a === '--write-oracles') o.writeOracles = true;
     else if (a === '--include-manual') o.includeManual = true;
     else if (a === '--update-baseline') o.updateBaseline = true;
     else if (a === '--build') o.build = value();
@@ -338,9 +341,18 @@ async function main(): Promise<void> {
   const o = parseArgs(process.argv.slice(2));
   if (o.claudeBin) setAgentBin('claude', o.claudeBin);
   if (o.codexBin) setAgentBin('codex', o.codexBin);
+  if (o.selfcheckFixtures) {
+    const { selfcheckFixtures } = await import('./lib/selfcheck');
+    process.exitCode = await selfcheckFixtures(o.build) ? 0 : 1;
+    return;
+  }
   if (o.selfcheck) {
-    const { selfcheckWeb, selfcheckNative, selfcheckIsolation } = await import('./lib/selfcheck');
-    const results = [await selfcheckNative(), await selfcheckWeb(), await selfcheckIsolation(o.build)];
+    const { selfcheckWeb, selfcheckNative, selfcheckIsolation, selfcheckOracles } = await import('./lib/selfcheck');
+    // The oracle scripts are run first (native, then web); what they measured is then held against the specs.
+    const measured: import('./lib/selfcheck').Measured[] = [];
+    const results = [await selfcheckNative(console.log, measured), await selfcheckWeb(console.log, measured)];
+    results.push(selfcheckOracles(measured, o.writeOracles && results.every(Boolean)));
+    results.push(await selfcheckIsolation(o.build));
     process.exitCode = results.every(Boolean) ? 0 : 1;
     return;
   }
