@@ -530,6 +530,19 @@ export class CDPDriver {
     }
   }
 
+  /**
+   * Attach to an existing Playwright Page object.
+   * Use this when an outer caller already holds a CDP connection — avoid duplicate CDP connections.
+   */
+  attachToPage(page: Page): void {
+    this.activePage = page;
+    this.connected = true;
+    this.ownsBrowser = false;
+    // An externally supplied page is by definition not our dedicated instance.
+    this.connectionMode = 'attached';
+    console.log(`   🔌 CDPDriver: attached to existing page`);
+  }
+
   /** Check if we're connected and the page is still alive */
   async isConnected(): Promise<boolean> {
     if (!this.connected || !this.activePage) return false;
