@@ -8,10 +8,10 @@
  * a stale one (e.g. an old Desktop extension still clicking with an old bug)
  * is visible instead of a mystery.
  */
-import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { getPackageRoot } from '../paths';
 
 export type CopyKind = 'global' | 'desktop-extension' | 'claude-code-plugin' | 'npx-cache';
 
@@ -40,20 +40,28 @@ const listDirs = (dir: string): string[] => {
   try { return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory()).map(d => path.join(dir, d.name)); } catch { return []; }
 };
 
+/**
+ * The npm global prefix `packageRoot` is installed under: <prefix>/node_modules/clawdcursor on Windows,
+ * <prefix>/lib/node_modules/clawdcursor elsewhere, with npm's `clawdcursor` launcher in the prefix (Windows) or its bin/.
+ * null: not an npm global install (npx cache, a project's node_modules, a source checkout, a Desktop extension).
+ */
+export function globalPrefixOf(packageRoot: string, platform: NodeJS.Platform = process.platform): string | null {
+  const nodeModules = path.dirname(packageRoot);
+  if (path.basename(nodeModules) !== 'node_modules') return null;
+  if (platform !== 'win32' && path.basename(path.dirname(nodeModules)) !== 'lib') return null;
+  const prefix = platform === 'win32' ? path.dirname(nodeModules) : path.dirname(path.dirname(nodeModules));
+  return fs.existsSync(platform === 'win32' ? path.join(prefix, 'clawdcursor.cmd') : path.join(prefix, 'bin', 'clawdcursor')) ? prefix : null;
+}
+
 export function defaultRoots(): CopyRoots {
   const platform = process.platform;
   const home = os.homedir();
   const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
-  let globalPrefix: string | null = process.env.npm_config_prefix ?? null;
-  if (!globalPrefix) {
-    try {
-      globalPrefix = execFileSync(platform === 'win32' ? 'npm.cmd' : 'npm', ['prefix', '-g'], {
-        encoding: 'utf-8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], shell: platform === 'win32',
-      }).trim() || null;
-    } catch {
-      globalPrefix = platform === 'win32' ? path.join(appData, 'npm') : null;
-    }
-  }
+  // Without running npm (#372): the configured prefix, else the one this copy is installed under, else npm's default
+  // (%APPDATA%\npm on Windows, the folder above node's bin/ elsewhere).
+  const globalPrefix = process.env.npm_config_prefix
+    || globalPrefixOf(getPackageRoot(), platform)
+    || (platform === 'win32' ? path.join(appData, 'npm') : path.dirname(path.dirname(process.execPath)));
   const npmCache = process.env.npm_config_cache
     ?? (platform === 'win32' ? path.join(process.env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local'), 'npm-cache') : path.join(home, '.npm'));
   const desktopExtensions = platform === 'win32'
@@ -132,9 +140,7 @@ const RELEASES = 'https://github.com/AmrDab/clawdcursor/releases/latest';
 /** What to do about a stale copy, in one line. */
 function fixFor(kind: CopyKind, platform: NodeJS.Platform): string {
   switch (kind) {
-    case 'global': return platform === 'win32'
-      ? 'run: irm https://clawdcursor.com/install.ps1 | iex'
-      : 'run: curl -fsSL https://clawdcursor.com/install.sh | bash';
+    case 'global': return 'run: clawdcursor update';
     case 'desktop-extension': return `install clawdcursor-${platform}.mcpb from ${RELEASES}`;
     case 'claude-code-plugin': return 'in Claude Code: /plugin marketplace update clawdcursor';
     default: return '';
