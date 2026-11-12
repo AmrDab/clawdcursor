@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { claudeCommand, claudeMcpConfig, claudePreflightCommand, parseClaudeLine, parseClaudePreflight } from '../lib/adapters/claude-code';
+import { claudeCommand, claudeMcpConfig, claudePreflightCommand, hostSessionEnv, parseClaudeLine, parseClaudePreflight } from '../lib/adapters/claude-code';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -38,6 +38,12 @@ describe('claude-code', () => {
     expect(cmd.args.slice(1, 3)).toEqual(['--model', 'haiku']);
     expect(cmd.stdin).toBe('Do the task.');
     expect(cmd.args).not.toContain('Do the task.');
+  });
+
+  it('started inside a Claude Code session, the agent does not inherit that session\'s sign-in variables', () => {
+    const inside = { CLAUDECODE: '1', CLAUDE_CODE_ENTRYPOINT: 'x', ANTHROPIC_BASE_URL: 'http://host', USE_LOCAL_OAUTH: '1', PATH: '/bin', HOME: '/h' };
+    expect(hostSessionEnv(inside).sort()).toEqual(['ANTHROPIC_BASE_URL', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'USE_LOCAL_OAUTH']);
+    expect(hostSessionEnv({ ANTHROPIC_API_KEY: 'k', PATH: '/bin' })).toEqual([]);   // outside a session: the owner's own settings stay
   });
 
   it('connects only the isolated server and allows only its tools', () => {
