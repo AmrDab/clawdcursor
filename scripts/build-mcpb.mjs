@@ -110,7 +110,7 @@ const manifest = {
     mcp_config: {
       command: 'node',
       args: ['${__dirname}/dist/surface/cli.js', 'mcp', '--compact'],
-      env: { CLAWDCURSOR_CONSENT: '${user_config.allow_desktop_control}' },
+      env: { CLAWDCURSOR_CONSENT: '${user_config.allow_desktop_control}', CLAWD_CONFIRM: '${user_config.confirm_actions}' },
     },
   },
   tools: [
@@ -134,6 +134,13 @@ const manifest = {
       title: 'Allow clawdcursor to control this computer',
       description: 'Required. Lets Claude use your mouse, keyboard and screen through clawdcursor, with your user rights. Stop on the on-screen pill halts it at any time, and session-ending key combos are never sent. Until this is on, every tool returns a consent prompt instead of acting.',
       required: true,
+      default: false,
+    },
+    confirm_actions: {
+      type: 'boolean',
+      title: 'Ask before Send / Delete / Pay / Close',
+      description: 'Optional. Before a click or key that looks irreversible (Send, Delete, Remove, Pay, Buy, Submit, Close, Discard), clawdcursor asks you on the on-screen card; only your Resume lets it through. Useful if Claude runs tools without asking you.',
+      required: false,
       default: false,
     },
   },

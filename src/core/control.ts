@@ -230,12 +230,13 @@ const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
   "If this assistant's window IS your target, focus it with window focus and retry.";
 
 /**
- * Is this error one of the guard's refusals (stopped, foreground changed, an AI assistant in front)? A tool that catches
+ * Is this error one of the guard's refusals (stopped, foreground changed, an AI assistant in front, held by confirm mode)? A tool that catches
  * errors from the input layer to try another way must let these through unchanged: the call was refused, it did not fail.
  */
 export function isGuardRefusal(err: unknown): boolean {
   const m = err instanceof Error ? err.message : String(err);
   return m.startsWith('stopped by the user') || m.startsWith('foreground changed: ') || isFenceRefusal(err)
+    || m.startsWith('held: confirm mode') || m.startsWith('not confirmed: confirm mode')
     || /^the window in front is .+ — nothing was sent. Focus your target window first/.test(m);
 }
 

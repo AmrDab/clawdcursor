@@ -17,7 +17,7 @@ import { defuseScreenDelimiters } from './untrusted-screen-content';
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
+  | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'NOT_CONFIRMED' | 'DANGEROUS_KEY'
   | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED' | 'CROSS_ORIGIN_FRAME'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
@@ -90,6 +90,9 @@ const RULES: Rule[] = [
     hint: 'that is the user\'s pill; target the app instead', next: REREAD },
   { code: 'PAUSED', outcome: 'refused', test: /a pause is waiting for the user on screen/i,
     hint: 'the user has not answered the pause yet; wait, do not act' },
+  // Confirm mode (confirm-mode.ts): the user did not let a held act through. A held act still waiting is PAUSED above.
+  { code: 'NOT_CONFIRMED', outcome: 'refused', test: /not confirmed: confirm mode/i,
+    hint: 'confirm mode held this act and the user did not let it through; nothing was sent, do not retry it' },
   { code: 'STOPPED', outcome: 'refused', test: /stopped by the user — they took control back/i,
     hint: 'the user stopped clawdcursor; nothing runs until their Resume gives control back',
     next: PAUSE('<what you want to do next>') },

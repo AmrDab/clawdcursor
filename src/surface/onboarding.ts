@@ -133,6 +133,7 @@ export async function runOnboarding(context: 'start' | 'consent' = 'start', star
     '  ●  Server binds to localhost only (127.0.0.1)',
     '  ●  It acts with your own permissions: what it does is up to the AI you connect and its permission prompts',
     '  ●  You can stop it at any time from the on-screen pill; it never locks the screen or logs you out',
+    '  ●  To be asked on screen before Send / Delete / Pay / Close, set CLAWD_CONFIRM=1 in its environment (confirm mode)',
   ].map(line => pc.gray(line)).join('\n');
 
   const divider = '  ' + '─'.repeat(58);
