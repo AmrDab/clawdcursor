@@ -8,6 +8,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ChildProcess } from 'child_process';
+import { fenceEnv } from './ownership';
 import { freePort, killTree, start, waitFor, which } from './proc';
 
 /**
@@ -63,7 +64,7 @@ export function isolatedEnv(base: NodeJS.ProcessEnv, o: { home: string; sessionD
   return { ...env, HOME: o.home, USERPROFILE: o.home, CLAWDCURSOR_SESSION_DIR: o.sessionDir, CLAWD_AGENT_CDP_PORT: String(o.cdpPort),
     // The fence (src/core/fence.ts): the daemon refuses, before acting or reading, anything outside these processes and
     // their children. An empty list still sets it: then everything is outside.
-    ...(o.fencePids ? { CLAWD_FENCE_PIDS: o.fencePids.join(',') || 'none' } : {}) };
+    ...(o.fencePids ? fenceEnv(o.fencePids) : {}) };
 }
 
 /** The daemon listens on the loopback interface only, and nothing here talks to any other host. */

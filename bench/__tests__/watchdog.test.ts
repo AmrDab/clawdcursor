@@ -4,6 +4,9 @@ import * as os from 'os';
 import * as path from 'path';
 import { Watchdog, readSessionCalls, tailSessionDir, type Proof } from '../lib/watchdog';
 import { appKey, isSharedHostName } from '../lib/rules';
+import { fenceEnv, inFixtureFence } from '../lib/ownership';
+import { isolatedEnv } from '../lib/isolated';
+import { __setFenceProcessTableForTests, inFence } from '../../src/core/fence';
 import type { LogCall } from '../lib/types';
 
 vi.useRealTimers();
@@ -307,6 +310,63 @@ describe('the watchdog rules', () => {
   it('appKey folds case, spaces and the extension', () => {
     expect(appKey('Microsoft Edge')).toBe('microsoftedge');
     expect(appKey('TextEdit.app')).toBe('textedit');
+  });
+});
+
+describe('privacy: the watchdog trusts the same process identity as the fence', () => {
+  // The first full run (2026-11-12), qwen2.5:7b on web-long-read, with Ollama loading the CPU: the fence let
+  // `computer type` into the fixture Edge (process 52324) and the keys reached the fixture page, but the watchdog asked
+  // again by scanning command lines; that one probe took about 40 s (its timeout is 30 s, and a failed scan reads as no
+  // process), did not list 52324, and the run was stopped for privacy.
+  // The owner's own Edge was process 21792 and was never touched.
+  const FIXTURE_EDGE = 52324, RENDERER = 52410, OWNER_EDGE = 21792;
+  const fencePids = [FIXTURE_EDGE, 52400];   // what the daemon was started with (CLAWD_FENCE_PIDS)
+  const typed = call('computer', 'type', 'act-other', { app: 'Microsoft Edge', appPid: FIXTURE_EDGE, appHandle: 10230290 });
+  let scans = 0;
+  /** The process table the fence reads (pid -> parent). `null`: the read fails, as a starved WMI query does. */
+  const table = (t: Array<[number, number]> | null) => __setFenceProcessTableForTests(async () => {
+    scans++;
+    if (!t) throw new Error('timed out');
+    return new Map(t);
+  });
+  const edgeDog = () => new Watchdog({ maxCalls: 20, maxSeconds: 180, fixtureApps: ['Edge', 'Microsoft Edge'] },
+    { ownsFocus: () => false, ownsPid: inFixtureFence(fencePids), cdpIsFixture: () => false });
+  afterEach(() => { __setFenceProcessTableForTests(null); scans = 0; });
+
+  it('the exact line that was stopped passes, with no scan at all, even when every scan fails', async () => {
+    table(null);
+    expect(await edgeDog().judge(typed)).toBeNull();
+    expect(scans).toBe(0);
+  });
+
+  it('a child of a fenced process passes, as the fence lets it through', async () => {
+    table([[RENDERER, FIXTURE_EDGE], [FIXTURE_EDGE, 900], [OWNER_EDGE, 900]]);
+    expect(await edgeDog().judge({ ...typed, appPid: RENDERER })).toBeNull();
+  });
+
+  it('an act in a process the benchmark did not start still stops the run: the owner\'s Edge, or anything with no answer', async () => {
+    table([[RENDERER, FIXTURE_EDGE], [FIXTURE_EDGE, 900], [OWNER_EDGE, 900]]);
+    const v = await edgeDog().judge({ ...typed, appPid: OWNER_EDGE });
+    expect(v).toMatchObject({ rule: 'privacy' });
+    expect(v!.detail).toContain(`process ${OWNER_EDGE}`);
+    // The fixture's parent is not the fixture.
+    expect(await edgeDog().judge({ ...typed, appPid: 900 })).toMatchObject({ rule: 'privacy' });
+    // No process table: a pid that is not itself fenced cannot be proven, so it stops (fails closed).
+    table(null);
+    expect(await edgeDog().judge({ ...typed, appPid: OWNER_EDGE })).toMatchObject({ rule: 'privacy' });
+    expect(await edgeDog().judge({ ...typed, appPid: RENDERER })).toMatchObject({ rule: 'privacy' });
+  });
+
+  it('the daemon is fenced to exactly the list the watchdog judges by, and both give the same answer for every pid', async () => {
+    const env = isolatedEnv({}, { home: 'h', sessionDir: 's', cdpPort: 1, fencePids });
+    expect(env.CLAWD_FENCE_PIDS).toBe(fenceEnv(fencePids).CLAWD_FENCE_PIDS);
+    table([[RENDERER, FIXTURE_EDGE], [FIXTURE_EDGE, 900], [OWNER_EDGE, 900]]);
+    for (const pid of [FIXTURE_EDGE, 52400, RENDERER, OWNER_EDGE, 900]) {
+      expect(await inFixtureFence(fencePids)(pid), String(pid)).toBe(await inFence(pid, env));
+    }
+    // Nothing fenced: nothing is the fixture's, for the daemon and the watchdog alike.
+    expect(isolatedEnv({}, { home: 'h', sessionDir: 's', cdpPort: 1, fencePids: [] }).CLAWD_FENCE_PIDS).toBe('none');
+    expect(await inFixtureFence([])(FIXTURE_EDGE)).toBe(false);
   });
 });
 
