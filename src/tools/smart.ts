@@ -24,7 +24,7 @@ import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
-import { untrusted, missText, structuredMissFields } from '../core/miss-text';
+import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
 // Shared OCR engine singleton — avoids re-initialization per call
 let sharedOcr: OcrEngine | null = null;
@@ -248,6 +248,11 @@ export function getSmartTools(): ToolDefinition[] {
           description: 'Limit search to a specific process. OCR matches outside the window of that process are refused, never clicked.',
           required: false,
         },
+        within: {
+          type: 'string',
+          description: 'Of several elements with that name, the one inside the window or dialog of this name (as an ambiguous list names it). Accessibility only: OCR and the browser fallback cannot tell windows apart and are not tried.',
+          required: false,
+        },
         timeout: {
           type: 'number',
           description: 'Max time in ms (default 5000)',
@@ -266,6 +271,7 @@ export function getSmartTools(): ToolDefinition[] {
         const lockedMsg = await screenLockedMessage();
         if (lockedMsg) return { text: JSON.stringify({ error: 'screen_locked', reason: lockedMsg, target, tried: [] }), isError: true };
         const processId = params.processId as number | undefined;
+        const within = typeof params.within === 'string' && params.within.trim() ? params.within.trim() : undefined;
         const timeoutMs = (params.timeout as number) || 10000; // default 10s, was 5s
         const attempted: string[] = [];
 
@@ -338,6 +344,8 @@ export function getSmartTools(): ToolDefinition[] {
         // whether OCR failed, read nothing, or read text that didn't match.
         let ocrDiag: string | null = null;
         const ocrPromise: Promise<OcrHit | null> = (async (): Promise<OcrHit | null> => {
+          // OCR reads text, not windows: it cannot honour `within`.
+          if (within) { ocrDiag = 'ocr: not tried (within names a window or dialog, which OCR cannot tell apart)'; return null; }
           try {
             const engine = getOcr();
             if (!engine.isAvailable()) { ocrDiag = 'ocr: engine unavailable'; return null; }
@@ -549,7 +557,7 @@ export function getSmartTools(): ToolDefinition[] {
 
         // Start a11y invoke in parallel
         type A11yHit =
-          | { method: 'invoke'; pending?: boolean; lateInvokeError?: string }
+          | { method: 'invoke'; pending?: boolean; lateInvokeError?: string; target?: unknown }
           | { method: 'bounds'; clickPoint: { x: number; y: number }; bounds?: { x: number; y: number; w: number; h: number }; text?: string };
         let guardRefusal: string | null = null;
         // Several visible elements have the name (the bridge's reason "ambiguous"): the call's answer is the list.
@@ -564,6 +572,7 @@ export function getSmartTools(): ToolDefinition[] {
               name: target,
               processId: processId || activeWin?.processId,
               action: 'click',
+              within,
             }).catch((err: unknown) => {
               if (aliases.length && /not found/i.test(err instanceof Error ? err.message : String(err))) return { success: false } as { success: boolean; clickPoint?: { x: number; y: number } };
               throw err;
@@ -573,12 +582,12 @@ export function getSmartTools(): ToolDefinition[] {
             // a button: try the spoken names before giving up.
             for (const alias of aliases) {
               if (result.success || result.clickPoint) break;
-              result = await ctx.a11y.invokeElement({ name: alias, processId: processId || activeWin?.processId, action: 'click' })
+              result = await ctx.a11y.invokeElement({ name: alias, processId: processId || activeWin?.processId, action: 'click', within })
                 .catch(() => result);
             }
             if (result.success) {
               const data = (result as any).data;
-              return { method: 'invoke', pending: data?.pending === true, lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined };
+              return { method: 'invoke', pending: data?.pending === true, lateInvokeError: typeof data?.lateInvokeError === 'string' ? data.lateInvokeError : undefined, target: (result as { target?: unknown }).target };
             }
             if (result.clickPoint) return { method: 'bounds', clickPoint: result.clickPoint };
             const miss = structuredMissFields(result);
@@ -590,7 +599,7 @@ export function getSmartTools(): ToolDefinition[] {
             // Invocation threw (e.g. RPC error on UWP apps) — try to get bounds for coordinate fallback.
             // Not for a plain "not found": a second full-tree search finds
             // nothing either and doubled the wait (live macOS: 24 s).
-            if (/not found/i.test(err instanceof Error ? err.message : String(err)) || remaining() < MIN_BUDGET_MS) return null;
+            if (/not found/i.test(err instanceof Error ? err.message : String(err)) || remaining() < MIN_BUDGET_MS || within) return null;
             try {
               // The platform's find marks an element on no monitor offscreen: never a place to click.
               const query = { name: target, processId: processId || activeWin?.processId };
@@ -659,7 +668,9 @@ export function getSmartTools(): ToolDefinition[] {
             ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : '';
           const late = (a11yResult as { lateInvokeError?: string }).lateInvokeError;
           const lateNote = late ? ` Note: an earlier action that was still running later failed:\n${untrusted(late)}` : '';
-          return { text: `Clicked "${target}" via UI Automation (invoke_element)${stillRunning}${lateNote}` };
+          // The element pressed, by its own name and role (#376), not the name asked for.
+          const pressed = targetText(targetOf((a11yResult as { target?: unknown }).target), target);
+          return { text: `Clicked ${pressed} via UI Automation (invoke_element)${stillRunning}${lateNote}` };
         }
 
         // OCR found the element — coordinate click. OCR returns PHYSICAL
@@ -763,6 +774,10 @@ export function getSmartTools(): ToolDefinition[] {
           attempted.push('UIA(invoke): element not found or not invocable');
         }
         attempted.push(ocrDiag ?? (ocrMatch === null ? 'ocr: no text match found' : 'ocr: unavailable'));
+        // `within` is for the accessibility tree only: the browser fallback cannot tell windows apart either.
+        if (within) {
+          return { text: `smart_click ${quoteScreenText(target)} within ${quoteScreenText(within)}: element not found by accessibility in that window or dialog; OCR and the browser fallback cannot tell windows apart, so they were not tried.`, isError: true };
+        }
 
         // ── Step 2: CDP click (browser content) ──
         // Deadline-gated so the outer wall-clock can't fire mid-evaluate.

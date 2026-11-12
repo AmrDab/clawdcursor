@@ -10,13 +10,24 @@
  */
 
 import { wrapUntrustedScreenContent } from './untrusted-screen-content';
+import { quoteScreenText } from './result-codes';
 
 export type MissReason = 'not_found' | 'unsupported' | 'invoke_threw' | 'disabled' | 'timeout' | 'no_window' | 'hidden' | 'ambiguous' | 'failed';
 const REASONS: ReadonlySet<string> = new Set<MissReason>(['not_found', 'unsupported', 'invoke_threw', 'disabled', 'timeout', 'no_window', 'hidden', 'ambiguous', 'failed']);
 
-/** One of the elements an ambiguous name could mean: screen text and a screen rect, shown only inside an untrusted block. */
-export interface MissCandidate { name: string; controlType: string; bounds?: { x: number; y: number; width: number; height: number } }
+/** A name and a role as the screen gives them, bounded: shown only inside an untrusted block, or quoted. */
+interface Named { name: string; controlType: string }
+/** One of the elements an ambiguous name could mean: screen text, a screen rect and the window or dialog it is in. */
+export interface MissCandidate extends Named { bounds?: { x: number; y: number; width: number; height: number }; container?: Named }
 const MAX_CANDIDATES = 8;
+
+function namedOf(raw: unknown): Named {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    name: String(o.name ?? '').replace(/\s+/g, ' ').slice(0, 80),
+    controlType: String(o.controlType ?? '').replace(/^ControlType\./, '').slice(0, 40),
+  };
+}
 
 function candidatesOf(raw: unknown): MissCandidate[] {
   if (!Array.isArray(raw)) return [];
@@ -25,12 +36,30 @@ function candidatesOf(raw: unknown): MissCandidate[] {
     const b = (o.bounds ?? {}) as Record<string, unknown>;
     const rect = [b.x, b.y, b.width, b.height];
     return {
-      name: String(o.name ?? '').replace(/\s+/g, ' ').slice(0, 80),
-      controlType: String(o.controlType ?? '').replace(/^ControlType\./, '').slice(0, 40),
+      ...namedOf(o),
       ...(rect.every(v => typeof v === 'number' && Number.isFinite(v))
         ? { bounds: { x: b.x as number, y: b.y as number, width: b.width as number, height: b.height as number } } : {}),
+      ...(o.container && typeof o.container === 'object' ? { container: namedOf(o.container) } : {}),
     };
   });
+}
+
+/** The element a by-name action acted on, and how its name matched the one asked for (#376). */
+export interface PressedTarget extends Named { match: 'exact' | 'prefix' | 'substring' }
+
+/** The bridge's `target` from a success reply, bounded and typed; undefined without one (an old bridge, an id match). */
+export function targetOf(raw: unknown): PressedTarget | undefined {
+  const t = (raw ?? {}) as Record<string, unknown>;
+  if (typeof t.name !== 'string' || (t.match !== 'exact' && t.match !== 'prefix' && t.match !== 'substring')) return undefined;
+  return { ...namedOf(t), match: t.match };
+}
+
+/** What a success line calls the element acted on: its role and its own name, and how that matched when not exactly. */
+export function targetText(t: PressedTarget | undefined, asked: string): string {
+  if (!t) return quoteScreenText(asked);
+  const role = t.controlType ? `[${t.controlType}] ` : '';
+  const how = t.match === 'exact' ? '' : ` (its name ${t.match === 'prefix' ? 'starts with' : 'contains'} ${quoteScreenText(asked)})`;
+  return `${role}${quoteScreenText(t.name)}${how}`;
 }
 
 /** The one wrapper (untrusted-screen-content.ts): the content cannot close the block. */
@@ -46,14 +75,20 @@ export function structuredMissFields(r: unknown): Record<string, unknown> {
   out.reason = reason;
   if (typeof o.detail === 'string' && o.detail) out.detail = o.detail.slice(0, 500);
   if (o.cascade === true) out.cascade = true;
-  if (reason === 'ambiguous') out.candidates = candidatesOf(o.candidates);
+  if (reason === 'ambiguous') {
+    out.candidates = candidatesOf(o.candidates);
+    // No element is named exactly that: the ones listed only contain the name (#376).
+    if (o.inexact === true) out.inexact = true;
+    // The window is minimized: its elements have no place on screen to click (#364).
+    if (o.minimized === true) out.minimized = true;
+  }
   if (typeof o.otherWindows === 'number' && Number.isFinite(o.otherWindows) && o.otherWindows > 0) {
     out.otherWindows = Math.min(Math.floor(o.otherWindows), 999);
   }
   return out;
 }
 
-interface MissData { reason?: unknown; detail?: unknown; cascade?: unknown; otherWindows?: unknown; error?: unknown; candidates?: unknown }
+interface MissData { reason?: unknown; detail?: unknown; cascade?: unknown; otherWindows?: unknown; error?: unknown; candidates?: unknown; inexact?: unknown; minimized?: unknown }
 
 /**
  * The reason, as text. With a known reason: our own sentence for it, the app's detail inside an untrusted block, the window
@@ -77,10 +112,20 @@ export function missText(d: MissData | undefined, fallback = 'element not found 
     case 'ambiguous': {
       const list = candidatesOf(d.candidates);
       const rows = list.map(c => `[${c.controlType || 'Element'}] ${JSON.stringify(c.name)}` +
+        (c.container ? ` in [${c.container.controlType || 'Element'}] ${JSON.stringify(c.container.name)}` : '') +
         (c.bounds ? ` @${c.bounds.x},${c.bounds.y} ${c.bounds.width}x${c.bounds.height}` : ''));
+      const block = rows.length ? `\n${untrusted(rows.join('\n'))}` : '';
+      const place = d.minimized === true
+        ? 'its window is minimized, so none has a place to click: restore the window first (window {"action":"restore"})'
+        : 'or click its position (@x,y is its top-left corner, in screen coordinates)';
+      if (d.inexact === true) {
+        return `no element is named exactly that: ${list.length || 'the'} element${list.length === 1 ? '' : 's'} on screen only contain${list.length === 1 ? 's' : ''} it, nothing was done; ` +
+          `to press one, call again with its full name as listed, ${place}:${block}`;
+      }
+      // within helps only when the listed ones are in different windows or dialogs.
+      const within = new Set(list.map(c => c.container?.name)).size > 1 ? 'pick one with within (the window or dialog it is in, as listed), or ' : '';
       return `${list.length || 'several'} elements on screen match that name, nothing was done; ` +
-        'name one by its controlType, or click its position (@x,y is its top-left corner, in screen coordinates):' +
-        (rows.length ? `\n${untrusted(rows.join('\n'))}` : '');
+        `${within}name it by its controlType, ${place}:${block}`;
     }
     default: own = 'the action failed';
   }

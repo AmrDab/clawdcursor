@@ -378,6 +378,32 @@ describe('what the pill and the session log call it', () => {
   });
 });
 
+describe('window focus by process name finds a Store app (#361)', () => {
+  const list = { windows: [
+    { title: 'Settings', processName: 'ApplicationFrameHost', processId: 38636, handle: 7004, bounds: { x: 0, y: 0, width: 800, height: 600 } },
+    { title: 'Calculator', processName: 'ApplicationFrameHost', processId: 38636, handle: 7003, bounds: { x: 0, y: 0, width: 400, height: 600 } },
+    { title: 'notes.txt - Notepad', processName: 'Notepad', processId: 4242, handle: 9001, bounds: { x: 0, y: 0, width: 400, height: 600 } },
+  ] };
+  const focusCalls = () => run.mock.calls.map(c => c[0] as Record<string, unknown>).filter(c => c.cmd === 'focus-window');
+  for (const name of ['CalculatorApp', 'Calculator', 'calculatorapp']) {
+    it(`processName "${name}": the frame that hosts it, by its handle (one frame host serves every Store app)`, async () => {
+      run.mockImplementation(async (cmd: { cmd?: string }) => cmd.cmd === 'get-screen-context' ? list
+        : cmd.cmd === 'focus-window' ? { success: true, foreground: true, processId: 38636, title: 'Calculator' } : {});
+      const a = new WindowsAdapter();
+      const ok = await a.focusWindow({ processName: name });
+      expect(ok, String(a.takeFocusFailure())).toBe(true);
+      expect(focusCalls()).toEqual([expect.objectContaining({ handle: 7003 })]);
+      expect(focusCalls()[0].processId).toBeUndefined();
+    });
+  }
+  it('an ordinary process still goes by its pid', async () => {
+    run.mockImplementation(async (cmd: { cmd?: string }) => cmd.cmd === 'get-screen-context' ? list
+      : cmd.cmd === 'focus-window' ? { success: true, foreground: true, processId: 4242 } : {});
+    expect(await new WindowsAdapter().focusWindow({ processName: 'notepad' })).toBe(true);
+    expect(focusCalls()).toEqual([expect.objectContaining({ processId: 4242 })]);
+  });
+});
+
 describe('the Windows adapter', () => {
   const fg = (extra: object = {}) => ({ success: true, handle: 7003, processId: 38636, processName: 'ApplicationFrameHost', appName: 'Application Frame Host',
     title: 'Calculator', className: 'ApplicationFrameWindow', bounds: { x: 10, y: 10, width: 400, height: 600 }, isMinimized: false, ...extra });

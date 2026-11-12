@@ -27,7 +27,7 @@ import { isProcessAlive } from './pidfile';
 export type CallClass = 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
 
 const VISION_ACTIONS = new Set(['screenshot', 'screenshot_region', 'zoom']);
-const COORD_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move',
+const COORD_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move', 'mouse_move',
   'move_relative', 'scroll', 'scroll_horizontal', 'drag', 'drag_path', 'mouse_down', 'mouse_up']);
 const NAME_ACTIONS = new Set(['invoke', 'smart_click', 'smart_type', 'set_value', 'toggle', 'select', 'expand',
   'collapse', 'focus_element', 'click_element']);

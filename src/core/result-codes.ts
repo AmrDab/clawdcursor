@@ -161,8 +161,8 @@ const RULES: Rule[] = [
   { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /the element exists but is not visible on screen/i,
     hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
   // Found more than once: which one is the caller's to say. The list is in the result.
-  { code: 'AMBIGUOUS', outcome: 'failed', test: /elements on screen match that name, nothing was done/i,
-    hint: 'several elements have that name; pass controlType to name one, or click the position of the one you mean',
+  { code: 'AMBIGUOUS', outcome: 'failed', test: /elements on screen match that name, nothing was done|no element is named exactly that: .{0,60}nothing was done/i,
+    hint: 'several elements have that name, or none has it exactly; name the one you mean in full, pass within (its window or dialog) or controlType, or click its position',
     next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)' } },
   { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
     hint: 'found, but the action failed', next: REREAD },
@@ -275,7 +275,7 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // quoted element name, which is screen text.
   if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
     || /^(?:Toggled|Selected|Set) \(read back ✓\) "/.test(text)
-    || /^Invoked \(read back ✓\) "/.test(text)) {
+    || /^Invoked \(read back ✓\) (?:\[[^\]]{1,40}\] )?"/.test(text)) {
     return { outcome: 'confirmed' };
   }
   // Nothing checked it. Only calls with an effect to check say so.

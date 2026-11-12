@@ -80,8 +80,8 @@ describe('ps-bridge — invoke-element name matching', () => {
     const rev = body.indexOf('Test-NameMatch $elName $nameLower');   // the reverse match, with its minimum length
     expect(fwd).toBeGreaterThan(-1);
     expect(rev).toBeGreaterThan(fwd);
-    // Each element gets the earliest pass it matches in: exact 1, contains 2, a real part of the request 3.
-    expect(body).toMatch(/elseif \(\$elName -eq \$nameLower\) \{ 1 \}\s+elseif \(\$elName\.Contains\(\$nameLower\)\) \{ 2 \} elseif \(Test-NameMatch \$elName \$nameLower\) \{ 3 \}/);
+    // Each element gets the earliest pass it matches in: exact 1, starts with the whole word(s) 2, contains 3, a real part of the request 4.
+    expect(body).toMatch(/elseif \(\$elName -eq \$nameLower\) \{ 1 \} elseif \(\$elName -match \$prefixRe\) \{ 2 \}\s+elseif \(\$elName\.Contains\(\$nameLower\)\) \{ 3 \} elseif \(Test-NameMatch \$elName \$nameLower\) \{ 4 \}/);
   });
 });
 

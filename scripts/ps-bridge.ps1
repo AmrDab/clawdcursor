@@ -202,6 +202,35 @@ function Add-StateFields($node, $el, $typeName) {
     } catch {}
 }
 
+# The value a tree node or a find hit shows for a field. Read the field VALUE for editable controls so the value-aware
+# fingerprint (which hashes element.value) moves when text is typed (audit 2026-06-11, M5). Guarded: only Edit / Document /
+# ComboBox / Spinner, never a password field, capped length, never throws. A Spinner (a web number box) without a
+# ValuePattern keeps its number in RangeValuePattern (#362: find showed none while get_value read "30").
+function Get-ShownValue($Element, $cur, $typeName) {
+    if (@('ControlType.Edit', 'ControlType.Document', 'ControlType.ComboBox', 'ControlType.Spinner') -notcontains $typeName) { return $null }
+    $isPassword = $false
+    try { $isPassword = $cur.IsPassword } catch { }
+    if ($isPassword) { return $null }
+    $nodeValue = $null
+    try {
+        $vp = $Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+        $v = $vp.Current.Value
+        if ($v -and $v.Length -gt 0) { $nodeValue = $v }
+    } catch { }
+    if ($null -eq $nodeValue -and $typeName -eq 'ControlType.Spinner') {
+        try { $nodeValue = [string]$Element.GetCurrentPattern([System.Windows.Automation.RangeValuePattern]::Pattern).Current.Value } catch { }
+    }
+    if ($null -eq $nodeValue) {
+        try {
+            $tp = $Element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+            $t = $tp.DocumentRange.GetText(2000)
+            if ($t -and $t.Length -gt 0) { $nodeValue = $t }
+        } catch { }
+    }
+    if ($nodeValue -and $nodeValue.Length -gt 2000) { $nodeValue = $nodeValue.Substring(0, 2000) }
+    return $nodeValue
+}
+
 # ── UI tree builder ───────────────────────────────────────────────────────────
 function ConvertTo-UINode {
     param(
@@ -264,31 +293,7 @@ function ConvertTo-UINode {
         @{ x = [Math]::Round($rect.X); y = [Math]::Round($rect.Y); width = [Math]::Round($rect.Width); height = [Math]::Round($rect.Height) }
     }
 
-    # Read the field VALUE for editable controls so the value-aware fingerprint
-    # (which hashes element.value) actually moves when text is typed on Windows —
-    # the tree node carried NO value before, so the D2 fix was inert here while
-    # working on macOS (audit 2026-06-11, M5). Guarded: only Edit/Document/
-    # ComboBox controls, never password fields, capped length, never throws.
-    $nodeValue = $null
-    if ($typeName -eq 'ControlType.Edit' -or $typeName -eq 'ControlType.Document' -or $typeName -eq 'ControlType.ComboBox') {
-        $isPassword = $false
-        try { $isPassword = $cur.IsPassword } catch { }
-        if (-not $isPassword) {
-            try {
-                $vp = $Element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
-                $v = $vp.Current.Value
-                if ($v -and $v.Length -gt 0) { $nodeValue = $v }
-            } catch { }
-            if ($null -eq $nodeValue) {
-                try {
-                    $tp = $Element.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
-                    $t = $tp.DocumentRange.GetText(2000)
-                    if ($t -and $t.Length -gt 0) { $nodeValue = $t }
-                } catch { }
-            }
-            if ($nodeValue -and $nodeValue.Length -gt 2000) { $nodeValue = $nodeValue.Substring(0, 2000) }
-        }
-    }
+    $nodeValue = Get-ShownValue $Element $cur $typeName
 
     $node = [ordered]@{
         name         = if ($cur.Name) { $cur.Name } else { "" }
@@ -1133,6 +1138,7 @@ function Cmd-FindElement {
             $r = [ordered]@{
                 name=$c.Name; automationId=$c.AutomationId; controlType=$c.ControlType.ProgrammaticName
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
+                value=(Get-ShownValue $el $c $c.ControlType.ProgrammaticName)
             }
             Add-StateFields $r $el $c.ControlType.ProgrammaticName
             if ($onMonitor) { $results += $r } else { $offMonitor += $r }
@@ -1219,13 +1225,15 @@ function Test-RectOnMonitor($rect, $monitors) {
 # match in tree order, whatever it was: a link of a web view the window does not show came before the ribbon button of
 # the same name, was invoked, and the invoke "succeeded" (live 2026-11-10, Designcenter NX: "New").
 #   1. The ones a user can see: UIA does not call them offscreen and their rect is on a monitor. The best name match
-#      among them wins (pass 1 exact, 2 the name contains the request, 3 a real part of it). A caption that takes no
-#      action gives way to a control that does, and a label inside its own control is that control. Several left:
-#      only the ones inside the dialog that has the focus ($inFocusedDialog) count - a toolbar and a dialog in
-#      the same window both have "Close". Still several: ambiguous - the caller lists them and nothing is pressed.
+#      among them wins (pass 1 exact, 2 the name starts with the request, 3 contains it, 4 is a real part of it). A
+#      caption that takes no action gives way to a control that does, and a label inside its own control is that control.
+#      Several left: only the ones inside the dialog that has the focus ($inFocusedDialog) count - a toolbar and a dialog
+#      in the same window both have "Close". Still several: ambiguous - the caller lists them and nothing is pressed.
 #   2. None visible: the best match that UIA calls offscreen but that has a place on a monitor, or no rect at all (a row
 #      scrolled out of its list, an item of a closed menu).
 #   3. Only matches whose rect is on NO monitor: hidden, never pressed.
+# A match that only CONTAINS the name (pass 3 or 4) is never pressed in silence, even alone: "New" pressed "What's New"
+# (#376). It comes back as ambiguous with `inexact`, and the caller names the one it means in full.
 # -placementUnknown, for a MINIMIZED window: every element is at -32000 and UIA calls all of them offscreen, so where an
 # element would be, and whether the window would show it, cannot be told. Placement then rules nothing in and nothing
 # out (no "visible", no "hidden", no label-inside-its-control: the rects say nothing) and the rest of the choice
@@ -1233,7 +1241,7 @@ function Test-RectOnMonitor($rect, $monitors) {
 # first in the tree (that was the hidden web view's link again).
 # $hits, in tree order: @{ index; pass; rect = @{ x; y; width; height } or $null; offscreen }. $isActionable and
 # $inFocusedDialog: { param($hit) }.
-# -> @{ index } | @{ ambiguous = indices } | @{ hidden = $true } | $null (no hits)
+# -> @{ index } | @{ ambiguous = indices; inexact } | @{ hidden = $true } | $null (no hits)
 function Select-InvokeTarget {
     param($hits, $monitors, [scriptblock]$isActionable, [scriptblock]$inFocusedDialog, [switch]$placementUnknown)
     $hits = @($hits)
@@ -1244,6 +1252,7 @@ function Select-InvokeTarget {
     if ($visible.Count -eq 0) {
         $rest = @($hits | Where-Object { -not (& $placed $_) -or (Test-RectOnMonitor $_.rect $monitors) } | Sort-Object { $_.pass }, { $_.index })
         if ($rest.Count -eq 0) { return @{ hidden = $true } }
+        if ($rest[0].pass -ge 3) { return @{ ambiguous = @($rest | Where-Object { $_.pass -eq $rest[0].pass } | ForEach-Object { $_.index }); inexact = $true } }
         return @{ index = $rest[0].index }
     }
     $best = ($visible | ForEach-Object { $_.pass } | Measure-Object -Minimum).Minimum
@@ -1261,8 +1270,8 @@ function Select-InvokeTarget {
         $inDialog = @($outer | Where-Object { & $inFocusedDialog $_ })
         if ($inDialog.Count -ge 1) { $outer = $inDialog }
     }
-    if ($outer.Count -eq 1) { return @{ index = $outer[0].index } }
-    return @{ ambiguous = @($outer | ForEach-Object { $_.index }) }
+    if ($outer.Count -eq 1 -and $best -lt 3) { return @{ index = $outer[0].index } }
+    return @{ ambiguous = @($outer | ForEach-Object { $_.index }); inexact = ($best -ge 3) }
 }
 
 # The nearest Window / dialog above the element that has the keyboard focus: the dialog the user is in. $null without one.
@@ -1287,6 +1296,27 @@ function Test-ElementUnder($el, $ancestor) {
         }
     } catch { }
     return $false
+}
+
+# An element's parent in the control view ($null at the top or when it does not answer).
+function Get-UiParent($el) {
+    try { return [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($el) } catch { return $null }
+}
+# The window, dialog or document an element is in (the nearest one above it), as an ambiguous list names it: two "Close"
+# buttons differ by it (#382). $null when none answers.
+function Get-ContainerOf($el) {
+    $p = Get-UiParent $el
+    for ($i = 0; $i -lt 60 -and $null -ne $p; $i++) {
+        try {
+            $c = $p.Current
+            $type = [string]$c.ControlType.ProgrammaticName
+            if ($type -eq 'ControlType.Window' -or $type -eq 'ControlType.Document' -or $c.LocalizedControlType -eq 'dialog') {
+                return @{ name = [string]$c.Name; controlType = $type }
+            }
+        } catch { return $null }
+        $p = Get-UiParent $p
+    }
+    return $null
 }
 
 # A minimized window keeps every element at -32000: on no monitor, yet a pattern invoke needs no place on screen. Its
@@ -1366,6 +1396,9 @@ function Cmd-InvokeElement {
     $wpid        = [int]$cmd.processId
     $action      = $cmd.action
     $value       = if ($cmd.value)       { $cmd.value }          else { "" }
+    $within      = if ($cmd.within)      { ([string]$cmd.within).Trim().ToLower() } else { "" }
+    # The element acted on, for the reply (the dispatcher adds it to a success): the one pressed, not the name asked for.
+    $script:invokeTarget = $null
 
     $scopeWindows = @(Get-ProcessScopeWindows $wpid)
     if ($scopeWindows.Count -eq 0) { return @{ success=$false; reason="no_window"; error="No window for pid $wpid" } }
@@ -1399,8 +1432,8 @@ function Cmd-InvokeElement {
             try { $n = ((($el.Current.Name -replace '\t.*$', '') -replace '&', '').Trim().TrimEnd(':').Trim()).ToLower() } catch {}
             $names.Add($n)
         }
-        # Pass 1: exact. Pass 2: the element's name contains the query. Pass 3:
-        # the query contains the element's name. 2 and 3 used to be one pass, so
+        # Pass 1: exact. Pass 2: the element's name starts with the query. Pass 3: it contains the query. Pass 4:
+        # the query contains the element's name. 3 and 4 used to be one pass, so
         # "File name" took the first element named just "Name" (a list column
         # header in the Save as dialog) and set_value typed into the file list
         # (live 2026-10-14).
@@ -1411,12 +1444,24 @@ function Cmd-InvokeElement {
         $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox, [System.Windows.Automation.ControlType]::Spinner)
         # The pass each element matches in (0: none): the earliest one, so a pass only holds what no earlier pass took.
         $passOf = New-Object 'System.Collections.Generic.List[int]'
+        # A prefix ends at a word boundary: "Newsletter" only contains "New".
+        $prefixRe = '^' + [regex]::Escape($nameLower) + '([^\p{L}\p{N}]|$)'
         foreach ($elName in $names) {
-            $passOf.Add($(if ($elName.Length -eq 0) { 0 } elseif ($elName -eq $nameLower) { 1 }
-                elseif ($elName.Contains($nameLower)) { 2 } elseif (Test-NameMatch $elName $nameLower) { 3 } else { 0 }))
+            $passOf.Add($(if ($elName.Length -eq 0) { 0 } elseif ($elName -eq $nameLower) { 1 } elseif ($elName -match $prefixRe) { 2 }
+                elseif ($elName.Contains($nameLower)) { 3 } elseif (Test-NameMatch $elName $nameLower) { 4 } else { 0 }))
         }
+        if ($within -ne "") {
+            # `within` names the window, dialog or document the element is in, as an ambiguous list shows it: its nearest one, so
+            # naming the outer window does not also take the dialog inside it.
+            for ($k = 0; $k -lt $names.Count; $k++) {
+                if ($passOf[$k] -eq 0) { continue }
+                $box = Get-ContainerOf $candidates[$k]
+                if (-not $box -or -not $box.name.Trim().ToLower().Contains($within)) { $passOf[$k] = 0 }
+            }
+        }
+        $pickedPass = 0
         if ($valueAction) {
-            foreach ($pass in 1, 2, 3) {
+            foreach ($pass in 1, 2, 3, 4) {
                 $firstHit = $null
                 for ($k = 0; $k -lt $names.Count; $k++) {
                     if ($passOf[$k] -ne $pass) { continue }
@@ -1425,7 +1470,7 @@ function Cmd-InvokeElement {
                     if ($EDITABLE -contains $ct) { $element = $candidates[$k]; break }
                 }
                 if ($null -eq $element) { $element = $firstHit }
-                if ($null -ne $element) { break }
+                if ($null -ne $element) { $pickedPass = $pass; break }
             }
         } else {
             # An action presses something: the element the user can see, never one on no monitor (Select-InvokeTarget).
@@ -1442,7 +1487,9 @@ function Cmd-InvokeElement {
                 [void]$hits.Add(@{ index = $k; pass = $passOf[$k]; rect = $r; offscreen = $off })
             }
             $pick = $null
+            $minimized = $false
             if ($hits.Count -gt 0) {
+                $minimized = Test-WindowMinimized $window
                 $dialogBox = @{}
                 # A minimized window: the same choice, with placement unknown. By pattern only - the miss below never
                 # hands out a point on no monitor.
@@ -1450,24 +1497,40 @@ function Cmd-InvokeElement {
                     param($h)
                     if (-not $dialogBox.ContainsKey('el')) { $dialogBox.el = Get-FocusedDialog }
                     $null -ne $dialogBox.el -and (Test-ElementUnder $candidates[$h.index] $dialogBox.el)
-                } -placementUnknown:(Test-WindowMinimized $window)
+                } -placementUnknown:$minimized
             }
             if ($null -ne $pick) {
                 if ($pick.hidden) { $hiddenOnly = $true }
-                elseif ($pick.ambiguous) {
-                    # Structured, like every miss: the names are screen text and go in fields, never in a sentence.
+                elseif ($null -ne $pick.ambiguous) {   # @(0), one candidate at index 0, is falsy
+                    # Structured, like every miss: the names are screen text and go in fields, never in a sentence. A place
+                    # only when it is on a monitor (a minimized window's -32000 is no place to click, #364), and the window
+                    # or dialog each one is in, so the caller can name it with `within` (#382).
+                    $monitors = Get-MonitorRects
                     $list = @(foreach ($i in @($pick.ambiguous | Select-Object -First 8)) {
                         $c = $candidates[$i].Current; $b = $c.BoundingRectangle
-                        @{ name = [string]$c.Name; controlType = [string]$c.ControlType.ProgrammaticName
-                           bounds = @{ x = [int]$b.X; y = [int]$b.Y; width = [int]$b.Width; height = [int]$b.Height } }
+                        $row = @{ name = [string]$c.Name; controlType = [string]$c.ControlType.ProgrammaticName }
+                        if (-not $b.IsEmpty -and -not [double]::IsInfinity($b.X)) {
+                            $at = @{ x = [int]$b.X; y = [int]$b.Y; width = [int]$b.Width; height = [int]$b.Height }
+                            if ($at.width -gt 0 -and $at.height -gt 0 -and (Test-RectOnMonitor $at $monitors)) { $row.bounds = $at }
+                        }
+                        $box = Get-ContainerOf $candidates[$i]
+                        if ($box) { $row.container = $box }
+                        $row
                     })
-                    return @{ success=$false; action=$action; reason="ambiguous"; candidates=$list; error="Several elements match" }
+                    $miss = @{ success=$false; action=$action; reason="ambiguous"; candidates=$list; error="Several elements match" }
+                    if ($pick.inexact) { $miss.inexact = $true }
+                    if ($minimized) { $miss.minimized = $true }
+                    return $miss
                 }
-                else { $element = $candidates[$pick.index] }
+                else { $element = $candidates[$pick.index]; $pickedPass = $passOf[$pick.index] }
             }
         }
     }
     if ($null -ne $element) { break }
+    }
+    if ($null -ne $element -and $pickedPass -gt 0) {
+        try { $script:invokeTarget = @{ name = [string]$element.Current.Name; controlType = [string]$element.Current.ControlType.ProgrammaticName
+            match = @('', 'exact', 'prefix', 'substring', 'substring')[$pickedPass] } } catch { }
     }
 
     if ($null -eq $element -and $hiddenOnly) {
@@ -2046,6 +2109,7 @@ while ($true) {
             $late = [UiaInvoker]::TakeLateError()
             if ($late) { $result.lateInvokeError = $late }
         }
+        if ($cmd.cmd -eq "invoke-element" -and $result -is [hashtable] -and $result.success -and $script:invokeTarget) { $result.target = $script:invokeTarget }
         # -InputObject (NOT pipe): piping an EMPTY array sends zero objects to
         # ConvertTo-Json, which then writes nothing → the bridge never answers
         # and PSRunner stalls for its full 20s timeout (every element MISS paid

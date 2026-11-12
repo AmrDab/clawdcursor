@@ -13,7 +13,7 @@
  * Permissions: Windows has no TCC-style gate — returns all-true.
  */
 
-import { withHostedApp, withHostedApps } from './frame-host';
+import { withHostedApp, withHostedApps, processNamesOf, isFrameHost } from './frame-host';
 import { beforePointerPress, isOwnUiPid } from './pointer-guard';
 import { resolveInstalledWindowsApp } from './win-app-resolve';
 import { execFile, spawn } from 'child_process';
@@ -55,7 +55,7 @@ import { llmSize } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { windowTextIncludes } from '../tools/window-text';
-import { structuredMissFields } from '../core/miss-text';
+import { structuredMissFields, targetOf } from '../core/miss-text';
 import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
 import * as os from 'os';
 
@@ -466,8 +466,12 @@ export class WindowsAdapter implements PlatformAdapter {
     if (processId === undefined && query.processName) {
       const target = query.processName.toLowerCase();
       const windows = await this.listWindows();
-      const hit = windows.find(w => w.processName.toLowerCase() === target)
-        ?? windows.find(w => w.processName.toLowerCase().includes(target));
+      const hit = windows.find(w => processNamesOf(w).includes(target))
+        ?? windows.find(w => processNamesOf(w).some(n => n.includes(target)));
+      // A Store app's window belongs to ApplicationFrameHost, one process for every Store app: its handle names it (#361).
+      if (hit && title === undefined && isFrameHost(hit.processName) && typeof hit.handle === 'number' && hit.handle > 0) {
+        return this.focusWindow({ handle: hit.handle });
+      }
       if (hit) processId = hit.processId;
       else if (title === undefined) {
         this.focusFailure = `No open window belongs to a process matching "${query.processName}".`;
@@ -729,7 +733,7 @@ export class WindowsAdapter implements PlatformAdapter {
     const windows = await this.listWindows();
     return windows.find(w => {
       if (query.processId !== undefined && w.processId === query.processId) return true;
-      if (query.processName && w.processName.toLowerCase() === query.processName.toLowerCase()) return true;
+      if (query.processName && processNamesOf(w).includes(query.processName.toLowerCase())) return true;
       if (query.title && windowTextIncludes(w.title, query.title)) return true;
       return false;
     }) ?? null;
@@ -867,6 +871,7 @@ export class WindowsAdapter implements PlatformAdapter {
     processId?: number;
     action?: InvokeAction;
     value?: string;
+    within?: string;
   }): Promise<{
     success: boolean;
     bounds?: { x: number; y: number; width: number; height: number };
@@ -917,6 +922,7 @@ export class WindowsAdapter implements PlatformAdapter {
         ...(query.name !== undefined ? { name: query.name } : {}),
         ...(ct !== undefined ? { controlType: ct } : {}),
         ...(query.value !== undefined ? { value: query.value } : {}),
+        ...(query.within ? { within: query.within } : {}),
       }) as any;
       return {
         success: result?.success === true,
@@ -932,8 +938,10 @@ export class WindowsAdapter implements PlatformAdapter {
         // element_value_contains actually see the value (review 2026-06-11).
         // The miss's reason and a late failure of an earlier invoke ride in data too: the tools read res.data.error /
         // res.data.lateInvokeError to tell the agent WHY, instead of "not found or not actionable".
-        data: (result?.data || result?.value !== undefined || result?.error || result?.reason || result?.lateInvokeError || result?.unverified === true) ? {
+        data: (result?.data || result?.value !== undefined || result?.error || result?.reason || result?.lateInvokeError || result?.unverified === true || result?.target) ? {
           ...(result?.data ?? {}),
+          // The element acted on (the bridge's pick), not the name asked for.
+          ...(result?.success === true && targetOf(result.target) ? { target: targetOf(result.target) } : {}),
           // The miss's machine-readable reason and its screen-derived values, as fields (see core/miss-text.ts).
           ...structuredMissFields(result),
           // `method` tells a real value from the bridge's last resort (get-value "Name": the element's own name).
@@ -1723,18 +1731,20 @@ export class WindowsAdapter implements PlatformAdapter {
    * Flatten the UIA tree into a single list, matching the macOS adapter's
    * contract. Drops purely structural unnamed nodes to keep the list useful.
    */
-  private flattenTree(node: any, acc: UiElement[], depth = 0): void {
+  private flattenTree(node: any, acc: UiElement[], depth = 0, inDocument = false): void {
     if (!node) return;
     // ConvertTo-UINode may return an array of children when it skipped an
     // unnamed container — just recurse through those (same depth: the
     // container was flattened out).
     if (Array.isArray(node)) {
-      for (const n of node) this.flattenTree(n, acc, depth);
+      for (const n of node) this.flattenTree(n, acc, depth, inDocument);
       return;
     }
-    if (node.controlType || node.name) acc.push({ ...this.normalizeElement(node), depth });
+    if (node.controlType || node.name) acc.push({ ...this.normalizeElement(node), depth, ...(inDocument ? { inDocument } : {}) });
+    // What a Document holds (a web view's page, an editor's text) is its content, not the app's controls (#383).
+    const inside = inDocument || node.controlType === 'ControlType.Document';
     if (Array.isArray(node.children)) {
-      for (const child of node.children) this.flattenTree(child, acc, depth + 1);
+      for (const child of node.children) this.flattenTree(child, acc, depth + 1, inside);
     }
   }
 

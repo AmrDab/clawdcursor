@@ -161,6 +161,44 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.weak_uncut).toBe(true);
   });
 
+  // #386: one rule for which element a name means, as on Windows and macOS.
+  it('a substring match is listed, never pressed; a prefix one is pressed and named in the reply (#376)', () => {
+    expect(out.rule_substring).toMatchObject({ success: false, reason: 'ambiguous', inexact: true, candidates: [{ name: "What's New", controlType: 'link' }] });
+    expect(out.rule_prefix).toMatchObject({ success: true, target: { name: 'Request tasks', controlType: 'push button', match: 'prefix' } });
+    // A value read is no press: it still reads the field whose label contains the name.
+    expect(out.rule_value_substring).toMatchObject({ success: true, value: 'x' });
+  });
+
+  it('the page\'s modal dialog beats the page behind it; a control beats its label', () => {
+    expect(out.rule_modal).toMatchObject({ success: true, target: { name: 'Request', match: 'exact' } });
+    expect(out.rule_modal_pressed_in_dialog).toBe(true);
+    expect(out.rule_label).toMatchObject({ success: true, target: { controlType: 'push button' } });
+  });
+
+  it('two equal matches: ambiguous, each with its container; within picks one (#382)', () => {
+    expect(out.rule_two).toMatchObject({ success: false, reason: 'ambiguous', candidates: [{ name: 'Close', container: { name: 'Page', controlType: 'document web' } }, { name: 'Close' }] });
+    expect(out.rule_two.inexact).toBeUndefined();
+    // within names the page: the page's own Close is pressed, not the dialog's inside it.
+    expect(out.rule_within).toMatchObject({ success: true });
+    expect(out.rule_within_pressed).toEqual([['press'], []]);
+  });
+
+  it('a prefix counts only up to a word boundary: "Newsletter" for "New" is listed, not pressed', () => {
+    expect(out.rule_word_prefix).toMatchObject({ success: false, reason: 'ambiguous', inexact: true });
+  });
+
+  it('the search stops at the first exact on-screen match for a read, and within a small allowance for a press', () => {
+    expect(out.early_read).toEqual([true, 0]);
+    const [found, visited, allowance] = out.early_press;
+    expect(found).toBe(true);
+    expect(visited).toBeGreaterThan(0);
+    expect(visited).toBeLessThanOrEqual(allowance);
+  });
+
+  it('the tree marks what a document holds as inDocument, not the app\'s own controls (#383)', () => {
+    expect(out.in_document).toEqual(['win', 'New', 'Start', "What's New*"]);
+  });
+
   // Review of #331: the scroll walk has no early exit, so a window over the budget is always cut; an EXACT match still scrolls.
   it('scroll-into-view after a budget cut proceeds with an exact match and refuses a substring-only one', () => {
     expect(out.scroll_after_cut.error ?? '').not.toMatch(/search cut/);

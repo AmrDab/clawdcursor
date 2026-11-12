@@ -50,7 +50,7 @@ const SELECT_SETUP = `
 $monitors = @(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 })
 function Rc($x, $y, $w, $h) { return @{ x = [int]$x; y = [int]$y; width = [int]$w; height = [int]$h } }
 function Hit($i, $rect) { return @{ index = $i; pass = 1; rect = $rect; offscreen = $false } }
-function Show($p) { if ($null -eq $p) { 'none' } elseif ($p.hidden) { 'hidden' } elseif ($p.ambiguous) { "ambiguous $($p.ambiguous -join ',')" } else { "index $($p.index)" } }
+function Show($p) { if ($null -eq $p) { 'none' } elseif ($p.hidden) { 'hidden' } elseif ($null -ne $p.ambiguous) { "ambiguous $($p.ambiguous -join ',')" } else { "index $($p.index)" } }
 $all = { param($h) $true }
 $toolbar = Hit 0 (Rc 2900 -1040 60 24)
 $dialog = Hit 1 (Rc 3500 -500 80 30)
@@ -84,7 +84,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Test-Activatable', 'Cmd-InvokeElement'];
+const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
 const click = (name: string) => `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = '${name}'; action = 'click' })`;
 
 describe.runIf(process.platform === 'win32')('ps-bridge (run for real): the dialog in focus decides between visible matches', () => {
@@ -159,6 +159,14 @@ ${click('New')}
     expect(out).toEqual(['success=False reason=ambiguous n=2 pressed=0']);
   });
 
+  it('minimized and ambiguous: the list says so and gives no -32000 position to click (#364)', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:minimized = $true
+$script:window = Window @((El 'web-link' 'New' -32000 -32000 160 28), (El 'ribbon' 'New' -32000 -32000 160 28))
+${click('New')}
+"minimized=$($r.minimized) bounds=$(@($r.candidates | Where-Object { $_.bounds }).Count)"`);
+    expect(out).toEqual(['minimized=True bounds=0']);
+  });
   it('minimized, a Text label and a Button of one name: the button, though the label is first in the tree', () => {
     const out = runPs(FNS, `${FAKE_WINDOW}
 $script:minimized = $true
@@ -170,7 +178,8 @@ ${click('New')}
 
   it('the minimized branch goes through the one choice: no "first match" shortcut is left in the bridge', () => {
     const inv = fnBody('Cmd-InvokeElement');
-    expect(inv).toMatch(/-placementUnknown:\(Test-WindowMinimized \$window\)/);
+    expect(inv).toMatch(/\$minimized = Test-WindowMinimized \$window/);
+    expect(inv).toMatch(/-placementUnknown:\$minimized/);
     expect(inv.match(/Select-InvokeTarget /g)).toHaveLength(1);
     expect(inv).not.toMatch(/Sort-Object \{ \$_\.pass \}/);
   });
@@ -198,6 +207,74 @@ $script:window = Window @((El 'play' 'Play' 3000 -900 80 30 $false))
 ${click('Play')}
 "success=$($r.success) reason=$($r.reason) clickPoint=$($r.clickPoint.x),$($r.clickPoint.y) bounds=$($r.bounds.width)x$($r.bounds.height)"`);
     expect(out).toEqual(['success=False reason=unsupported clickPoint=3040,-885 bounds=80x30']);
+  });
+});
+
+// One rule for which element a name means (#386): exact beats prefix beats substring, and a match that only CONTAINS the
+// name is never pressed in silence (#376); an ambiguous list names each one's window or dialog, and `within` picks (#382).
+describe.runIf(process.platform === 'win32')('ps-bridge (run for real): exact > prefix > substring, and within', () => {
+  const PARENTS = `
+function Get-UiParent($el) { return $el.Parent }
+function Box($name, $type) { return [pscustomobject]@{ Parent = $null; Current = [pscustomobject]@{ Name = $name; LocalizedControlType = ''; ControlType = [pscustomobject]@{ ProgrammaticName = $type } } } }
+function In($el, $box) { $el | Add-Member -MemberType NoteProperty -Name Parent -Value $box -Force; return $el }
+`;
+  it('Select-InvokeTarget: a prefix match alone is pressed; a substring match alone, or only substrings, is listed as inexact', () => {
+    const out = runPs(['Test-RectOnMonitor', 'Select-InvokeTarget'], `${SELECT_SETUP}
+function P($i, $pass, $off = $false) { return @{ index = $i; pass = $pass; rect = (Rc (2900 + 100 * $i) -1040 60 24); offscreen = $off } }
+function Say($p) { "$(Show $p) inexact=$([bool]$p.inexact)" }
+"1 $(Say (Select-InvokeTarget @((P 0 2)) $monitors $all))"                 # "New document" for "New"
+"2 $(Say (Select-InvokeTarget @((P 0 3)) $monitors $all))"                 # "What's New" for "New"
+"3 $(Say (Select-InvokeTarget @((P 0 3), (P 1 2)) $monitors $all))"        # the prefix beats the substring
+"4 $(Say (Select-InvokeTarget @((P 0 3 $true)) $monitors $all))"           # none visible, only a substring: still not pressed
+"5 $(Say (Select-InvokeTarget @((P 0 1), (P 1 3)) $monitors $all))"`);
+    expect(out).toEqual(['1 index 0 inexact=False', '2 ambiguous 0 inexact=True', '3 index 1 inexact=False', '4 ambiguous 0 inexact=True', '5 index 0 inexact=False']);
+  });
+
+  it('invoke "Request" with only "Request tasks": pressed, and the reply names the element pressed and the match', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:window = Window @((El 'req' 'Request tasks' 3500 -500 80 30))
+${click('Request')}
+"success=$($r.success) pressed=$($script:pressed -join ',') target=$($script:invokeTarget.name)|$($script:invokeTarget.controlType)|$($script:invokeTarget.match)"`);
+    expect(out).toEqual(['success=True pressed=req target=Request tasks|ControlType.Button|prefix']);
+  });
+
+  it('invoke "New" with only "What\'s New" on screen: nothing pressed, listed as inexact so the caller names it in full', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:window = Window @((El 'whats-new' "What's New" 3500 -500 80 30))
+${click('New')}
+"success=$($r.success) reason=$($r.reason) inexact=$($r.inexact) pressed=$($script:pressed.Count) first=$($r.candidates[0].name)"`);
+    expect(out).toEqual(["success=False reason=ambiguous inexact=True pressed=0 first=What's New"]);
+  });
+
+  it('two "Close": the list names the window or dialog of each; within picks the dialog\'s', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}${PARENTS}
+$main = Box 'Designcenter' 'ControlType.Window'
+$opts = Box 'Options' 'ControlType.Window'; $opts.Parent = $main
+$script:window = Window @((In (El 'main-close' 'Close' 2900 -1040 60 24) $main), (In (El 'dialog-close' 'Close' 3500 -500 80 30) $opts))
+${click('Close')}
+"reason=$($r.reason) $(($r.candidates | ForEach-Object { "$($_.container.controlType):$($_.container.name)" }) -join ' ')"
+$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'Close'; within = 'Options'; action = 'click' })
+"success=$($r.success) pressed=$($script:pressed -join ',')"`);
+    expect(out).toEqual(['reason=ambiguous ControlType.Window:Designcenter ControlType.Window:Options', 'success=True pressed=dialog-close']);
+  });
+
+  it('within names the outer window: its own Close is pressed, not the one of the dialog inside it, even with the dialog in focus', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}${PARENTS}
+$main = Box 'Designcenter' 'ControlType.Window'
+$opts = Box 'Options' 'ControlType.Window'; $opts.Parent = $main
+$script:window = Window @((In (El 'main-close' 'Close' 2900 -1040 60 24) $main), (In (El 'dialog-close' 'Close' 3500 -500 80 30) $opts))
+$script:dialogIds = @('dialog-close')
+$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'Close'; within = 'Designcenter'; action = 'click' })
+"success=$($r.success) pressed=$($script:pressed -join ',')"`);
+    expect(out).toEqual(['success=True pressed=main-close']);
+  });
+
+  it('invoke "New" with only "Newsletter": a prefix that does not end at a word is listed as inexact, not pressed', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:window = Window @((El 'letter' 'Newsletter' 3500 -500 80 30))
+${click('New')}
+"success=$($r.success) inexact=$($r.inexact) pressed=$($script:pressed.Count)"`);
+    expect(out).toEqual(['success=False inexact=True pressed=0']);
   });
 });
 

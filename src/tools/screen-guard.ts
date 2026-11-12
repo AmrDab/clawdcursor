@@ -6,7 +6,7 @@
 import type { ToolContext } from './types';
 import { checkImagePointer, recordShot, latestShotGuardsWindows, type ShotWindow } from '../core/screen-binding';
 
-const POINTER_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move',
+const POINTER_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move', 'mouse_move',
   'scroll', 'scroll_horizontal', 'drag', 'drag_path']);
 const POINTER_TOOLS = new Set(['mouse_click', 'mouse_double_click', 'mouse_right_click', 'mouse_middle_click',
   'mouse_triple_click', 'mouse_hover', 'mouse_scroll', 'mouse_scroll_horizontal', 'mouse_drag', 'mouse_drag_stepped']);
