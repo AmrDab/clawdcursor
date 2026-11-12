@@ -113,6 +113,15 @@ export function parseTable(stdout: string, win: boolean): ProcRow[] {
   return rows;
 }
 
+/** Why execFile failed, in a few words: an errno / Node code, the timeout (it kills with no code), a signal, or the exit code. */
+export function execFailReason(err: { code?: unknown; signal?: unknown; killed?: boolean }): string {
+  if (typeof err.code === 'string') return err.code;
+  if (err.killed) return 'timed out';
+  if (err.signal) return `killed by ${String(err.signal)}`;
+  if (typeof err.code === 'number') return `exit code ${err.code}`;
+  return 'process table unreadable';
+}
+
 function readTable(): Promise<ProcRow[]> {
   const win = process.platform === 'win32';
   const [cmd, args] = win
@@ -121,7 +130,7 @@ function readTable(): Promise<ProcRow[]> {
     : ['ps', ['-A', '-o', 'pid=,ppid=,comm=']];
   return new Promise((resolve, reject) => {
     execFile(cmd as string, args as string[], psOpts({ timeout: 8000, windowsHide: true, maxBuffer: 8 * 1024 * 1024 }), (err, stdout) => {
-      if (err) return reject(new Error(String((err as NodeJS.ErrnoException).code ?? 'process table unreadable')));
+      if (err) return reject(new Error(execFailReason(err)));
       resolve(parseTable(String(stdout), win));
     });
   });
@@ -150,14 +159,17 @@ export function walkAncestors(table: ProcRow[], self: number): Set<number> {
 
 /** The ancestors, or null when the table could not be read (then only the direct parent is known). */
 async function computeAncestors(read: () => Promise<ProcRow[]>): Promise<Set<number> | null> {
-  try {
-    const table = await read();
-    if (!table.length) throw new Error('empty process table');
-    return walkAncestors(table, process.pid);
-  } catch (err) {
-    // Once, and only the reason: no paths, no command lines.
-    if (!failedLogged) { failedLogged = true; logger.warn('host.ancestry_failed', { reason: String((err as { message?: string })?.message ?? err).slice(0, 80) }); }
-    return null;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const table = await read();
+      if (!table.length) throw new Error('empty process table');
+      return walkAncestors(table, process.pid);
+    } catch (err) {
+      if (attempt < 2) continue;   // once more: a cold PowerShell on a busy machine can miss the 8 s budget
+      // Once, and only the reason: no paths, no command lines.
+      if (!failedLogged) { failedLogged = true; logger.warn('host.ancestry_failed', { reason: String((err as { message?: string })?.message ?? err).slice(0, 80) }); }
+      return null;
+    }
   }
 }
 
