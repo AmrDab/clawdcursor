@@ -1,9 +1,11 @@
 /**
  * clawdcursor bug telemetry receiver (Cloudflare Worker + D1). A trust boundary: anyone can POST here, so every event is
- * checked field by field against the same allowlist the client uses (src/core/observability/telemetry.ts). An event with
+ * checked field by field against the same lists the client uses (src/core/observability/telemetry-lists.ts). An event with
  * an unknown field, a wrong type or a value outside its list is dropped. The client's IP address and request headers are
  * never read or stored; the only time kept is the server's own receive time. Events older than 90 days are deleted daily.
  */
+
+import { HOSTS, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, EXIT_REASONS, ARCHS, APP_KINDS, NAME as NAME_RE } from '../../src/core/observability/telemetry-lists';
 
 interface D1Statement { bind(...values: unknown[]): D1Statement; run(): Promise<unknown> }
 interface D1Database { prepare(sql: string): D1Statement; batch(statements: D1Statement[]): Promise<unknown> }
@@ -30,7 +32,8 @@ export const RESULT_CODES = ['CONSENT_REQUIRED', 'KEYBOARD_OWNED', 'SECURE_INPUT
   'ACTION_FAILED', 'NOT_CONNECTED', 'UNKNOWN'];
 
 const NUM = int(2 ** 31 - 1);   // the client clamps to this
-const NAME = match(/^(other|[a-z][a-z0-9_]{0,39})$/);   // clawdcursor's own tool / action names
+const NAME = match(NAME_RE);
+const own = <T>(o: Record<string, T>, k: string): T | null => (Object.prototype.hasOwnProperty.call(o, k) ? o[k] : null);
 const COMMON: Record<string, Rule> = {
   id: match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/),
   v: match(/^\d{1,3}\.\d{1,3}\.\d{1,4}(-[0-9A-Za-z.]{1,20})?$/),
@@ -40,28 +43,27 @@ const COMMON: Record<string, Rule> = {
 /** Per event: field → [rule, required]. */
 const EVENTS: Record<string, Record<string, [Rule, boolean]>> = {
   start: {
-    osVer: [int(1000), true], arch: [oneOf('x64', 'arm64', 'ia32', 'arm', 'other'), true], node: [int(1000), true],
-    host: [oneOf('claude-code', 'claude-desktop', 'cursor', 'windsurf', 'vscode', 'zed', 'codex', 'cline', 'gemini-cli', 'openclaw', 'other', 'unknown'), true],
+    osVer: [int(1000), true], arch: [oneOf(...ARCHS, 'other'), true], node: [int(1000), true],
+    host: [oneOf(...HOSTS.map(([, h]) => h), 'other', 'unknown'), true],
     surface: [oneOf('compact', 'granular'), true],
   },
   crash: {
     kind: [oneOf('uncaught', 'rejection'), true],
-    cls: [oneOf('Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'EvalError', 'URIError', 'AggregateError', 'AbortError',
-      'TimeoutError', 'SystemError', 'string', 'number', 'boolean', 'object', 'undefined', 'symbol', 'bigint', 'function', 'other'), true],
+    cls: [oneOf(...ERROR_CLASSES, 'other'), true],
     code: [match(/^(E[A-Z0-9]{1,20}|ERR_[A-Z0-9_]{1,40})$/), false],
     frames: [list(match(/^[\w.-]{1,40}(\/[\w.-]{1,60}){0,6}\.(js|ts|cjs|mjs):\d{1,7}$/), 10), true],
   },
   exit: {
-    reason: [oneOf('sigint', 'sigterm', 'host_closed', 'stdin_error', 'host_gone', 'killed_or_crashed', 'user_stop', 'other'), true],
+    reason: [oneOf(...EXIT_REASONS.map(([, r]) => r), 'other'), true],
     tool: [NAME, false], action: [NAME, false], ms: [NUM, false],
   },
   call_failed: {
     tool: [NAME, true], action: [NAME, false], code: [oneOf(...RESULT_CODES), false],
-    outcome: [oneOf('error', 'timeout', 'empty'), true], ms: [NUM, true], app: [oneOf('browser', 'electron', 'native', 'unknown'), true],
+    outcome: [oneOf(...FAILED), true], ms: [NUM, true], app: [oneOf(...APP_KINDS), true],
   },
   slow_call: {
     tool: [NAME, true], action: [NAME, false], ms: [NUM, true],
-    steps: [list(record({ name: match(/^(other|ps-bridge [a-z][a-z-]{1,39}|[a-z][a-z0-9.-]{0,29})$/), ms: NUM, n: NUM }), 10), true],
+    steps: [list(record({ name: v => oneOf(...HELPERS, 'other')(v) || match(PS_BRIDGE_STEP)(v), ms: NUM, n: NUM }), 10), true],
   },
 };
 
@@ -71,11 +73,12 @@ export type Event = Record<string, unknown> & { event: string; id: string; v: st
 export function validEvent(e: unknown): e is Event {
   if (!e || typeof e !== 'object' || Array.isArray(e)) return false;
   const o = e as Record<string, unknown>;
-  const fields = typeof o.event === 'string' && Object.prototype.hasOwnProperty.call(EVENTS, o.event) ? EVENTS[o.event] : null;
+  // Own properties only: "constructor" or "toString" must not find Object.prototype's members and pass as a rule.
+  const fields = typeof o.event === 'string' ? own(EVENTS, o.event) : null;
   if (!fields) return false;
   for (const [k, v] of Object.entries(o)) {
     if (k === 'event') continue;
-    const rule = COMMON[k] ?? (Object.prototype.hasOwnProperty.call(fields, k) ? fields[k][0] : null);
+    const rule = own(COMMON, k) ?? own(fields, k)?.[0];
     if (!rule || !rule(v)) return false;
   }
   return Object.keys(COMMON).every(k => k in o) && Object.entries(fields).every(([k, [, required]]) => !required || k in o);

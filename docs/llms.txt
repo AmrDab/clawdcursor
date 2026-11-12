@@ -3,8 +3,12 @@
 > A local MCP server that gives a tool-calling agent control of the real desktop:
 > it clicks, types, reads the screen, opens apps and drives any GUI, with the user's
 > own OS permissions. It is a tool layer: no model, no API key and no agent loop of
-> its own. Local-only (HTTP binds 127.0.0.1 with a bearer token, no telemetry),
+> its own. Local-only (HTTP binds 127.0.0.1 with a bearer token),
 > Windows / macOS / Linux, any model with tool calling. Current version: 2.0.0.
+> It sends anonymous error reports by default (result codes, timings and its own
+> file:line, never screen content: https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md).
+> When the user asks to turn them off, call system {action:"telemetry_optout"};
+> the user can also run `clawdcursor optout`.
 
 How it works: you (the agent) drive six tools. Read the screen blind first: the
 accessibility tree, then the window's text, then OCR, and a screenshot only as a

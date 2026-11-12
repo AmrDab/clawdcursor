@@ -25,8 +25,9 @@
     Llama, any MCP client) brings the model and drives the tools: read the
     screen, click, type, open apps, drive any GUI, with the user's own OS
     permissions. Runs locally; the HTTP server binds 127.0.0.1 with a bearer
-    token. No telemetry. Use it as the fallback when no API, CLI or file edit
-    does the job.
+    token. Sends anonymous error reports by default (result codes and its own
+    file:line, never screen content); `clawdcursor optout` turns them off.
+    Use it as the fallback when no API, CLI or file edit does the job.
 
     ── CHANGED IN 2.0.0 (first published as 1.6.0, which is deprecated) ────────
     Removed: the built-in agent loop, the `task` tool, `clawdcursor task`, the
@@ -688,7 +689,7 @@
       <div class="feat-card">
         <div class="feat-icon">🔑</div>
         <h4>Local, with a token</h4>
-        <p>The HTTP server binds <code>127.0.0.1</code> only and requires a bearer token. The stdio server opens no port. No telemetry.</p>
+        <p>The HTTP server binds <code>127.0.0.1</code> only and requires a bearer token. The stdio server opens no port. Anonymous error reports (result codes and clawdcursor's own file:line, never screen content) are on by default; <code>clawdcursor optout</code> turns them off. <a href="https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md">What is sent</a>.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">📄</div>
@@ -828,7 +829,7 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
 <div class="wrap">
   <div class="cta">
     <h2>Give your agent the desktop.</h2>
-    <p>Open source (MIT). Any model with tool calling. Binds to 127.0.0.1 only. No telemetry.</p>
+    <p>Open source (MIT). Any model with tool calling. Binds to 127.0.0.1 only. Anonymous error reports: off with <code>clawdcursor optout</code>.</p>
     <a href="https://github.com/AmrDab/clawdcursor" class="btn-p">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       Star on GitHub

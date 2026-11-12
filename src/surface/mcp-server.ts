@@ -334,7 +334,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // dying with an opaque "failed". Re-checked per call so `clawdcursor
         // consent --accept` takes effect immediately, with no restart. A host
         // that supports elicitation asks the user in-app first.
-        if (!hasConsent() && !(await askConsentInHost())) {
+        // Turning off error reports touches nothing on screen: it never waits on consent.
+        const telemetryOptout = tool.name === 'telemetry_optout' || (tool.name === 'system' && callAction === 'telemetry_optout');
+        if (!telemetryOptout && !hasConsent() && !(await askConsentInHost())) {
           sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
             undefined, clientInfo(), { outcome: 'consent_required' });
           return {

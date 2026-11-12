@@ -4,6 +4,9 @@ name = "clawdcursor-telemetry"
 main = "src/index.ts"
 compatibility_date = "2025-09-01"
 
+# The client sends to https://telemetry.clawdcursor.com/v1/events (TELEMETRY_URL); clawdcursor.com is on Cloudflare.
+routes = [{ pattern = "telemetry.clawdcursor.com", custom_domain = true }]
+
 # No request logs: they would hold the sender's IP address and headers.
 [observability]
 enabled = false

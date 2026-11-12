@@ -33,8 +33,9 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
     const { logger } = require('../core/observability/logger');
     logger.error('crash', { name: cls, ...(err?.code ? { code: err.code } : {}), stack: frames });
   } catch { /* stderr above has it */ }
-  // The crash report (telemetry.ts) gets a moment to go out.
-  try { require('../core/observability/telemetry').flushBeforeExit().finally(() => process.exit(1)); } catch { process.exit(1); }
+  // The crash report (telemetry.ts) is kept for the next start: a broken process exits now, it does not wait on the network.
+  try { require('../core/observability/telemetry').spoolBeforeExit(); } catch { /* never block the exit */ }
+  process.exit(1);
 });
 
 // v0.8.1: unhandledRejection handler.
@@ -61,7 +62,8 @@ process.on('unhandledRejection', (reason: any) => {
   // In server mode, (process.env.CLAWD_SERVER_MODE === '1') keep running.
   // In CLI / one-shot mode, exit to surface the bug.
   if (process.env.CLAWD_SERVER_MODE !== '1') {
-    try { require('../core/observability/telemetry').flushBeforeExit().finally(() => process.exit(1)); } catch { process.exit(1); }
+    try { require('../core/observability/telemetry').spoolBeforeExit(); } catch { /* never block the exit */ }
+    process.exit(1);
   }
 });
 
@@ -110,7 +112,7 @@ import { e } from './format';
 import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { endAllSessions } from './session-log';
-import { flushBeforeExit, setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
+import { spoolBeforeExit, setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
 import { privateRunDir, system32Exe } from '../platform/ps-spawn';
 
 const program = new Command();
@@ -433,12 +435,14 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     console.log(`\n${e('👋', '--')} Shutting down...`);
     endAllSessions('SIGINT (Ctrl+C)');
     releasePidFile('start');
-    void flushBeforeExit().finally(() => process.exit(0));
+    spoolBeforeExit();
+    process.exit(0);
   });
   process.on('SIGTERM', () => {
     endAllSessions('SIGTERM (a kill or the system stopped the daemon)');
     releasePidFile('start');
-    void flushBeforeExit().finally(() => process.exit(0));
+    spoolBeforeExit();
+    process.exit(0);
   });
 }
 
@@ -1025,8 +1029,8 @@ program
       if (mcpExiting) return;
       mcpExiting = true;
       sessionLog.end(reason);                      // synchronous: in the log before the exit
-      // Deferred — lets libuv unwind cleanly; a queued bug report (telemetry.ts) gets a moment to go out.
-      setImmediate(() => { void flushBeforeExit().finally(() => process.exit(0)); });
+      spoolBeforeExit();                           // a queued bug report goes out at the next start (telemetry.ts)
+      setImmediate(() => process.exit(0));         // deferred — lets libuv unwind cleanly
     };
     process.on('SIGINT', () => releaseMcp('SIGINT (Ctrl+C or the host stopping the server)'));
     process.on('SIGTERM', () => releaseMcp('SIGTERM (the host or a kill stopped the server)'));

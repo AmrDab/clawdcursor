@@ -6,12 +6,23 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+
+// ~/.clawdcursor in a temp folder: these tests write and delete the state file.
+vi.mock('../paths', async (importOriginal) => {
+  const real = await importOriginal<typeof import('../paths')>();
+  const { mkdtempSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const { join } = await import('path');
+  return { ...real, DATA_DIR: mkdtempSync(join(tmpdir(), 'clawd-data-')) };
+});
+
 import { logger } from '../core/observability/logger';
 import {
-  offReason, reduceStack, flush, allowNames, setHost, setTelemetryEnabled, readState, toEvent,
-  __setSenderForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE,
+  offReason, reduceStack, flush, allowNames, setHost, setTelemetryEnabled, readState, toEvent, spoolBeforeExit,
+  __setSenderForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE, SPOOL_FILE, TELEMETRY_URL,
 } from '../core/observability/telemetry';
 import { getPackageRoot } from '../paths';
+import { getAllTools, getCompactSurface } from '../tools/registry';
 import { validate, validEvent, RESULT_CODES, MAX_EVENTS } from '../../telemetry-worker/src/index';
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-telemetry-')), 'telemetry.json');
@@ -28,6 +39,7 @@ afterEach(() => {
   vi.unstubAllEnvs();
   __setSenderForTests(null);
   fs.rmSync(STATE_FILE, { force: true });
+  fs.rmSync(SPOOL_FILE, { force: true });
   vi.restoreAllMocks();
 });
 
@@ -77,10 +89,30 @@ describe('what is sent', () => {
     expect(new Set(events.map(e => e.id)).size).toBe(1);
   });
 
-  it('a clean exit with nothing running is not sent', () => {
+  it('a clean exit with nothing running is not sent; a kill found at the next start sends the reason alone', () => {
+    allowNames(['accessibility', 'read_tree']);
     expect(toEvent('mcp.exit', { reason: 'the host closed the connection (stdin ended)', pid: 1 })).toBeNull();
-    expect(toEvent('mcp.exit', { reason: 'killed or crashed: no clean exit was recorded', pid: 1, detectedAt: 'next start' }))
-      .toMatchObject({ event: 'exit', reason: 'killed_or_crashed' });
+    // lastFinishedCall worked: it is not the call the kill cut off.
+    const killed = toEvent('mcp.exit', { reason: 'killed or crashed: no clean exit was recorded', pid: 1, detectedAt: 'next start',
+      lastFinishedCall: { tool: 'accessibility', action: 'read_tree' } });
+    expect(killed).toMatchObject({ event: 'exit', reason: 'killed_or_crashed' });
+    expect(killed).not.toHaveProperty('tool');
+  });
+
+  it('an exit keeps what is queued for the next start instead of waiting on the network', async () => {
+    const bodies = enableForTest();
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
+    spoolBeforeExit();
+    expect(bodies).toEqual([]);
+    expect(fs.existsSync(SPOOL_FILE)).toBe(true);
+    await flush();   // the next process's first flush
+    expect(bodies.flatMap(b => JSON.parse(b) as unknown[])).toHaveLength(1);
+    expect(fs.existsSync(SPOOL_FILE)).toBe(false);
+  });
+
+  it('goes to the project\'s own domain, never a host anyone could register', () => {
+    expect(new URL(TELEMETRY_URL).hostname).toMatch(/(^|\.)clawdcursor\.com$/);
   });
 
   it('the notice goes to stderr once, and is remembered', () => {
@@ -133,6 +165,14 @@ describe('when it is off', () => {
     setTelemetryEnabled(true, file);
     expect(readState(file).id).toBe(s.id);
   });
+
+  it('a hand-written {"enabled":false} is off, and stays off after an event', () => {
+    enableForTest();
+    fs.writeFileSync(STATE_FILE, '{"enabled":false}');
+    expect(offReason()).toBe('clawdcursor optout');
+    logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
+    expect(JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))).toEqual({ enabled: false });
+  });
 });
 
 describe('reduceStack', () => {
@@ -176,8 +216,25 @@ describe('the Worker', () => {
       { ...good, code: 'free text' },
       (({ outcome: _o, ...rest }) => rest)(good),
       { ...good, event: 'crash', kind: 'uncaught', cls: 'Error', frames: ['C:\\Users\\alice\\x.js:1'] },
+      { event: 'slow_call', id: good.id, v: good.v, os: good.os, tool: 'computer', ms: 12000, steps: [{ name: 'keepassxc', ms: 2000, n: 1 }] },
     ];
     expect(validate(JSON.stringify([...bad, good]))).toEqual([good]);
+  });
+
+  it('drops, without throwing, an extra field named after an Object.prototype member', () => {
+    const text = '"alice@example.com https://bank.example/x"';
+    const g = JSON.stringify(good).slice(0, -1);
+    for (const k of ['constructor', 'toString', 'valueOf', '__proto__', 'hasOwnProperty']) {
+      expect(validate(`[${g},"${k}":${text}}, ${JSON.stringify(good)}]`)).toEqual([good]);
+    }
+  });
+
+  it('takes every tool and action name clawdcursor registers', () => {
+    for (const t of [...getAllTools(), ...getCompactSurface()]) {
+      for (const action of [undefined, ...(t.parameters.action?.enum ?? [])]) {
+        expect(validEvent(JSON.parse(JSON.stringify({ ...good, tool: t.name, action }))), `${t.name} ${action ?? ''}`).toBe(true);
+      }
+    }
   });
 
   it('rejects a body that is not a JSON array, too long, or too big', () => {
