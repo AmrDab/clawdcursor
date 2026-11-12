@@ -81,10 +81,10 @@ describe('describeCopies', () => {
     expect(lines[2]).toBe('npx cache holds: v2.0.13, v2.0.12 (used by the plugin / npx; old ones are harmless)');
   });
 
-  it('a newer release flags the global copy too, with the installer command for the OS', () => {
+  it('a newer release flags the global copy too, with the update command', () => {
     const { stale, lines } = describeCopies(copies.slice(0, 1), { latest: '2.0.16', platform: 'darwin' });
     expect(stale).toHaveLength(1);
-    expect(lines[0]).toMatch(/curl -fsSL https:\/\/clawdcursor\.com\/install\.sh \| bash/);
+    expect(lines[0]).toMatch(/run: clawdcursor update$/);
   });
 
   it('without a release check the newest copy found is the reference', () => {
