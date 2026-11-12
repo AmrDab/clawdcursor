@@ -1,16 +1,17 @@
 # clawdcursor
 
-> A local MCP server that gives a tool-calling agent control of the real desktop:
-> it clicks, types, reads the screen, opens apps and drives any GUI, with the user's
-> own OS permissions. It is a tool layer: no model, no API key and no agent loop of
-> its own. Local-only (HTTP binds 127.0.0.1 with a bearer token),
-> Windows / macOS / Linux, any model with tool calling. Current version: 2.0.0.
-> It sends anonymous error reports by default (result codes, timings and its own
-> file:line, never screen content: https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md).
-> When the user asks to turn them off, call system {action:"telemetry_optout"};
-> the user can also run `clawdcursor optout`.
+> Lets AI use your computer in real time. A local MCP server that gives a
+> tool-calling agent the real desktop: it picks the fastest way into each app (the
+> page itself in browsers, the accessibility tree in desktop apps, OCR when there is
+> no tree, screenshots last), and after every action it says whether it worked. It
+> runs with the user's own OS permissions. It is a tool layer: no model, no API key
+> and no agent loop of its own. Local-only (HTTP binds 127.0.0.1 with a bearer
+> token), Windows / macOS / Linux, any model with tool calling. Current version: 2.0.0.
 
-How it works: you (the agent) drive six tools. Read the screen blind first: the
+How it works: you (the agent) drive six tools. In a browser, work on the page
+itself with `browser` (Playwright over CDP: it opens its own Chrome/Edge window,
+separate profile, and connects automatically; any other browser is still readable
+through the accessibility tree). Elsewhere read the screen blind first: the
 accessibility tree, then the window's text, then OCR, and a screenshot only as a
 last resort, for a target with no name and no visible text. Act on elements by
 name; a coordinate click is the fallback. Pass `expect` on an action that matters
@@ -152,6 +153,14 @@ the pause card (use `choices` when there are options), not in your own chat.
 (`{placeholder?, multiline?}`, a text box); the answer is `{status:"replied", choice:"<exact option text>"}`
 or `{status:"replied", reply:"..."}`. It is the user's answer to your question: follow it. No tool call of yours can pick a
 choice. Never ask for a password or secret on it.
+
+## Error reports
+
+2.0.0 sends no telemetry. From 2.1, anonymous error reports are on by default, to
+fix bugs: error codes and clawdcursor's own file:line only; never screen text,
+typed text, titles, URLs, app names or file paths; no IP stored. When the user asks
+you to turn them off, run `clawdcursor optout`. Details:
+https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md
 
 ## Links
 

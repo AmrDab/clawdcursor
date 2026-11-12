@@ -3,10 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>clawdcursor: desktop control for any AI agent</title>
-  <meta name="description" content="A local MCP server that gives your AI agent control of the desktop. The agent reads the screen as text (accessibility tree, then OCR, screenshots last) and acts on elements by name. No model or API key of its own: your agent's host drives six tools. Windows · macOS · Linux.">
-  <meta property="og:title" content="clawdcursor: desktop control for any AI agent">
-  <meta property="og:description" content="A local MCP server your agent drives. It reads the screen as text, acts on elements by name, and stops when you press Stop. Windows · macOS · Linux · any model with tool calling.">
+  <title>clawdcursor: lets AI use your computer in real time</title>
+  <meta name="description" content="clawdcursor lets AI use your computer in real time. It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked. Free and open source. Windows, macOS, Linux.">
+  <meta property="og:title" content="clawdcursor: lets AI use your computer in real time">
+  <meta property="og:description" content="It picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there is no tree, and screenshots last. After every action it tells your AI whether it worked.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://clawdcursor.com/">
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -25,9 +25,11 @@
     Llama, any MCP client) brings the model and drives the tools: read the
     screen, click, type, open apps, drive any GUI, with the user's own OS
     permissions. Runs locally; the HTTP server binds 127.0.0.1 with a bearer
-    token. Sends anonymous error reports by default (result codes and its own
-    file:line, never screen content); `clawdcursor optout` turns them off.
-    Use it as the fallback when no API, CLI or file edit does the job.
+    token. 2.0.0 sends no telemetry. From 2.1, anonymous error reports are on
+    by default (error codes and clawdcursor's own file:line only; never screen
+    text, typed text, titles, URLs, app names or file paths; no IP stored).
+    `clawdcursor optout` turns them off; run it when the user asks you to opt
+    out. Use it as the fallback when no API, CLI or file edit does the job.
 
     ── CHANGED IN 2.0.0 (first published as 1.6.0, which is deprecated) ────────
     Removed: the built-in agent loop, the `task` tool, `clawdcursor task`, the
@@ -43,13 +45,16 @@
       system        : copy_all_text, OCR, clipboard, shortcuts, webview
                       detection, pause_for_user (hand one step to the user)
       window        : list, focus, resize, close; open apps, files and URLs
-      browser       : Chrome DevTools Protocol for browsers and Electron / WebView2 apps
+      browser       : Playwright over the Chrome DevTools Protocol, for browsers and
+                      Electron / WebView2 apps. It opens its own Chrome/Edge window
+                      (separate profile) and connects automatically.
       computer      : raw mouse and keyboard; screenshot is the last resort
       batch         : several calls in one round trip, each step guarded
     89 granular tools (one per action, about 19,000 tokens) without --compact.
 
     ── HOW TO USE IT: BLIND FIRST ──────────────────────────────────────────────
-    SEE: accessibility read_tree -> system copy_all_text -> system ocr ->
+    SEE: in a browser, the page itself (browser read_text); elsewhere
+         accessibility read_tree -> system copy_all_text -> system ocr ->
          computer screenshot (last).
     ACT: accessibility invoke / set_value by name -> accessibility smart_click
          by visible label -> computer click x,y (last).
@@ -217,6 +222,8 @@
     .pipe-step.router   { --step-color: #22c55e; }
     .pipe-step.agent    { --step-color: #3b82f6; }
     .pipe-step.verifier { --step-color: #a855f7; }
+    .pipe-step.shot     { --step-color: #f97316; }
+    .pipe-flow.four { grid-template-columns: 1fr auto 1fr auto 1fr auto 1fr; }
     .pipe-step h4 {
       display: flex; align-items: center; gap: 8px;
       font-size: 0.95rem; font-weight: 700; margin-bottom: 4px;
@@ -241,7 +248,7 @@
       user-select: none;
     }
     @media (max-width: 768px) {
-      .pipe-flow { grid-template-columns: 1fr; }
+      .pipe-flow, .pipe-flow.four { grid-template-columns: 1fr; }
       .pipe-arrow { transform: rotate(90deg); padding: 4px 0; }
     }
 
@@ -287,7 +294,7 @@
     .mode-card.a::before { background: linear-gradient(90deg, var(--accent), #06b6d4); }
     .mode-card.b::before { background: linear-gradient(90deg, var(--blue), var(--purple)); }
     .mode-card h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 10px; }
-    .mode-card ol { padding-left: 18px; color: var(--text2); font-size: 0.825rem; line-height: 1.65; }
+    .mode-card ol, .mode-card ul { padding-left: 18px; color: var(--text2); font-size: 0.825rem; line-height: 1.65; }
     .mode-card li { margin-bottom: 2px; }
     .mode-stats { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; gap: 24px; }
     .mode-stat-val { font-size: 1.3rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; color: var(--accent); }
@@ -453,9 +460,9 @@
 
   <!-- Hero -->
   <div class="hero">
-    <div class="hero-badge"><div class="pulse"></div> v2.0.0 &middot; a tool your agent drives, on every OS</div>
-    <h1>It sees. It acts. It checks.<br><span class="gr">Desktop control for any AI agent</span></h1>
-    <p>A local MCP server your agent drives. It reads the screen as text, acts on elements by name, checks the result when asked, and stops when you press Stop. No model or API key of its own.</p>
+    <div class="hero-badge"><div class="pulse"></div> v2.0.0 &middot; free and open source &middot; Windows, macOS, Linux</div>
+    <h1>Lets AI use your computer<br><span class="gr">in real time.</span></h1>
+    <p>clawdcursor picks the fastest way into each app: the page itself in browsers, the accessibility tree in desktop apps, text recognition when there's no tree, and screenshots last. After every action it tells your AI whether it worked.</p>
     <div class="hero-btns">
       <a href="https://github.com/AmrDab/clawdcursor" class="btn-p" id="star-btn">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -465,21 +472,248 @@
           <span id="star-count-num">&middot;&middot;&middot;</span>
         </span>
       </a>
-      <a href="#install" class="btn-s">Quick Start</a>
+      <a href="#install" class="btn-s">Install</a>
     </div>
   </div>
 
-  <!-- Stats -->
-  <div class="stats">
-    <div class="stat"><div class="stat-val">6</div><div class="stat-lbl">Compact tools (recommended)</div></div>
-    <div class="stat"><div class="stat-val">89</div><div class="stat-lbl">Granular tools (one per action)</div></div>
-    <div class="stat"><div class="stat-val">3</div><div class="stat-lbl">Operating Systems</div></div>
-  </div>
+  <!-- What it does -->
+  <section id="what" class="sect">
+    <div class="sect-label">What it does</div>
+    <h2>Your AI sees each app by name, and acts on it.</h2>
+    <p class="sub">clawdcursor is a free, open-source MCP server. Your AI connects to it and gets six tools to use a real Windows, macOS or Linux computer. It sees the parts of an app by name, such as "Email field" or "Confirm button", and acts on them: type into Email, press Confirm, choose High.</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🔎</div>
+        <h4>Reads what is there</h4>
+        <p>Where an app lists its parts, it reads the text exactly, not from a picture. A read or an action takes a fraction of a second.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🖱️</div>
+        <h4>Acts by name</h4>
+        <p>It clicks and types by name, so a moved or resized window does not throw it off. Clicking at a screen position is the fallback.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">✅</div>
+        <h4>Checks every step</h4>
+        <p>After each change it reads the result back and tells your AI one of three things: confirmed, unverified or failed.</p>
+      </div>
+    </div>
+    <p class="sub" style="margin:18px 0 10px;">Works with any AI that can call tools:</p>
+    <div class="tag-row">
+      <span class="tag b">Claude Code</span>
+      <span class="tag b">Claude Desktop</span>
+      <span class="tag b">Codex</span>
+      <span class="tag b">Cursor</span>
+      <span class="tag">Windsurf</span>
+      <span class="tag">Zed</span>
+      <span class="tag">local models</span>
+    </div>
+  </section>
+
+  <!-- Proof: the benchmark -->
+  <section id="proof" class="sect">
+    <div class="sect-label">Proof</div>
+    <h2>What we measured.</h2>
+    <p class="sub">Our own benchmark: the Codex agent on Windows, 15 tasks.</p>
+    <div class="stats" style="margin-bottom:18px;">
+      <div class="stat"><div class="stat-val">14/15</div><div class="stat-lbl">Tasks done</div></div>
+      <div class="stat"><div class="stat-val">4</div><div class="stat-lbl">Screenshots in all 15 tasks</div></div>
+      <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Loops</div></div>
+    </div>
+    <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;">
+      On every task where the app has an accessibility tree, the agent acted by name. All 4 screenshots were on the two drawing-canvas tasks, which is the fewest those tasks allow. The run also found one false "ok", an action reported as done that was not, and it is fixed.
+    </p>
+    <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
+      The scope is narrow: one OS, one agent, 15 tasks we built for the test. macOS, Linux and other models are not measured yet. From 2.1 the same benchmark runs on all three systems with several models, and a release ships only when it passes.
+      How it measures: <a href="https://github.com/AmrDab/clawdcursor/blob/main/bench/README.md" target="_blank" rel="noopener" style="color:var(--accent2);">bench/README.md</a>.
+    </p>
+  </section>
+
+  <!-- How it works: the fastest way in first -->
+  <section class="sect" id="how">
+    <div class="sect-label">How it works</div>
+    <h2>The fastest way in first. Screenshots last.</h2>
+    <p class="sub">For each app, clawdcursor uses the first of these that works. Your AI makes every decision; clawdcursor carries it out and checks it.</p>
+
+    <div class="pipe-flow four">
+      <div class="pipe-step router">
+        <h4><span class="pipe-num">1</span> The page</h4>
+        <span class="pipe-tag">Browsers</span>
+        <p>In a browser it works on the web page itself, through Playwright. It opens its own Chrome or Edge window and connects to it automatically. Any other browser can still be read through the accessibility tree.</p>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">→</div>
+      <div class="pipe-step agent">
+        <h4><span class="pipe-num">2</span> The tree</h4>
+        <span class="pipe-tag">Desktop apps</span>
+        <p>Apps list their buttons, fields and menus by name for screen readers. clawdcursor reads that list and acts on each part by name.</p>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">→</div>
+      <div class="pipe-step verifier">
+        <h4><span class="pipe-num">3</span> Text recognition</h4>
+        <span class="pipe-tag">No tree</span>
+        <p>When an app lists nothing, it reads the words on the screen (OCR) and can click a visible label.</p>
+      </div>
+      <div class="pipe-arrow" aria-hidden="true">→</div>
+      <div class="pipe-step shot">
+        <h4><span class="pipe-num">4</span> Screenshot</h4>
+        <span class="pipe-tag">Last</span>
+        <p>Only when nothing else works, such as on drawing canvases and 3D views. Your AI then gets a picture of the screen.</p>
+      </div>
+    </div>
+
+    <div class="pipe-legacy">
+      <strong style="color:var(--text);">After every action</strong> clawdcursor reads the result back and ends its answer with one word:
+      <code>confirmed</code> (it saw the change), <code>unverified</code> (nothing could check it) or <code>failed</code> (with the reason and what to try next).
+      <code>refused</code> means one of the protections below stopped the action.
+    </div>
+
+    <h3 style="font-size:1.05rem;font-weight:700;margin:32px 0 12px;">The words, in plain terms</h3>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+        <tbody>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">MCP</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Model Context Protocol: the standard way to plug tools into an AI app. clawdcursor is the tool side; your AI app (Claude Code, Codex, Cursor and others) connects to it.</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Accessibility tree</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">The list of buttons, fields and menus an app gives the system, each with a name. Screen readers for blind people use the same list.</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Acting by name</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Pressing "Send" because it is called Send, not because it sits at a spot on the screen.</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">OCR</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text recognition: reading the words in a picture of the screen. It runs on your computer.</td>
+            </tr>
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Playwright</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">A library that controls Chrome and Edge from the inside, through the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way.</td>
+            </tr>
+            <tr>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Compact tools</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">The six tools your AI sees with <code>--compact</code>: accessibility, system, window, browser, computer and batch. Without it there are 89 smaller tools, one per action.</td>
+            </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="sect" id="limits">
+    <div class="sect-label">Limits</div>
+    <h2>Where it is weaker.</h2>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">🧩</div>
+        <h4>It needs apps to describe themselves</h4>
+        <p>It depends on apps exposing accessibility info. Most do: web pages, native apps, Office and system dialogs.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🎨</div>
+        <h4>Apps that draw their own screen</h4>
+        <p>Drawing canvases, games and CAD views have no named parts. There it needs text recognition or screenshots.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">📏</div>
+        <h4>Measured on Windows only</h4>
+        <p>The numbers above come from one OS and one agent. macOS and Linux are supported but not benchmarked yet.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Safety: what is enforced, and what is not -->
+  <section class="sect" id="safety">
+    <div class="sect-label">Safety</div>
+    <h2>What protects you.</h2>
+    <p class="sub">clawdcursor runs with your own permissions: anything you can do with a mouse and keyboard, your AI can do through it. These hold on every call:</p>
+    <div class="feat-grid">
+      <div class="feat-card">
+        <div class="feat-icon">⏹️</div>
+        <h4>A Stop button</h4>
+        <p>While your AI works, a small pill on screen says what it is doing ("Typing in Edge"). Press Stop on it, or run <code>clawdcursor stop</code>. It stays stopped until you resume.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🟧</div>
+        <h4>An outline on the window</h4>
+        <p>A thin outline marks the window being worked on: amber while your AI works, blue while it waits for you.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🟦</div>
+        <h4>A pause card for you</h4>
+        <p>At a sign-in or a 2FA code, your AI hands that one step to you on a card and waits. Nothing else runs until you finish.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">💬</div>
+        <h4>No typing into AI chats</h4>
+        <p>It never types into an AI assistant's window by accident, so text meant for an app does not land in a chat.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🔒</div>
+        <h4>Passwords are not read</h4>
+        <p>Password field values are never read through the accessibility tree. Keys that lock the computer or end your session are never sent.</p>
+      </div>
+      <div class="feat-card">
+        <div class="feat-icon">🔑</div>
+        <h4>Local only</h4>
+        <p>It runs on your computer. The HTTP server listens on <code>127.0.0.1</code> only and needs a token. The usual setup opens no port at all.</p>
+      </div>
+    </div>
+    <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
+      <strong style="color:var(--text);">No built-in policy engine.</strong> clawdcursor does not decide what your AI may do: your AI and your MCP host's approval prompts do. If your host approves every tool call on its own, nothing asks before your AI sends, deletes or pays. An opt-in confirm mode is coming in 2.1
+      (<a href="https://github.com/AmrDab/clawdcursor/issues/373" target="_blank" rel="noopener" style="color:var(--accent2);">#373</a>).
+      The full threat model is in <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md" target="_blank" rel="noopener" style="color:var(--accent2);">SECURITY.md</a>.
+    </p>
+  </section>
+
+  <!-- Error reports (2.1) -->
+  <section class="sect" id="error-reports">
+    <div class="sect-label">Error reports</div>
+    <h2>Error reports, from 2.1.</h2>
+    <p class="sub">2.0.0 sends nothing. From 2.1, clawdcursor sends anonymous error reports by default, so bugs get found and fixed.</p>
+    <div class="modes-grid">
+      <div class="mode-card a">
+        <h3>What is sent</h3>
+        <ul>
+          <li>Error codes.</li>
+          <li>The file and line in clawdcursor's own code where the error happened.</li>
+        </ul>
+      </div>
+      <div class="mode-card b">
+        <h3>What is never sent</h3>
+        <ul>
+          <li>Screen text, typed text, window titles, URLs, app names or file paths.</li>
+          <li>Your IP address is not stored.</li>
+        </ul>
+      </div>
+    </div>
+    <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
+      To turn them off, run <code>clawdcursor optout</code>, or ask your AI to opt out for you.
+      Details: <a href="https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md" target="_blank" rel="noopener" style="color:var(--accent2);">docs/telemetry.md</a>.
+    </p>
+  </section>
 
   <!-- Install -->
   <section id="install" class="sect">
-    <div class="sect-label">Quick Start</div>
-    <h2>Install once. Connect your agent.</h2>
+    <div class="sect-label">Install</div>
+    <h2>Install it for your AI app.</h2>
+    <div class="feat-grid" style="margin-bottom:18px;">
+      <div class="feat-card" style="min-width:0;">
+        <h4>Claude Code</h4>
+        <p>Install the plugin:</p>
+        <pre style="background:rgba(0,0,0,0.4);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:0.72rem;color:var(--accent2);margin-top:8px;"><code>claude plugin marketplace add AmrDab/clawdcursor
+claude plugin install clawdcursor@clawdcursor</code></pre>
+      </div>
+      <div class="feat-card">
+        <h4>Claude Desktop</h4>
+        <p>Open the <code>.mcpb</code> extension from the <a href="https://github.com/AmrDab/clawdcursor/releases/latest" target="_blank" rel="noopener" style="color:var(--accent2);">latest release</a>. No Node.js needed.</p>
+      </div>
+      <div class="feat-card">
+        <h4>Codex, Cursor and others</h4>
+        <p>Install with npm (below), then add <code>clawdcursor mcp --compact</code> as an MCP server in your app.</p>
+      </div>
+    </div>
 
     <div class="code-box install-card">
       <div class="code-hd install-hd">
@@ -502,7 +736,6 @@
     </div>
 
     <p class="sub" style="text-align:center;max-width:640px;margin:14px auto 0;">Then run <code style="font-size:0.95em">clawdcursor consent --accept</code>. On macOS also run <code style="font-size:0.95em">clawdcursor grant</code>. To update: <code style="font-size:0.95em">npm i -g clawdcursor@latest</code> (<code style="font-size:0.95em">clawdcursor update</code> is planned for 2.1).</p>
-    <p class="sub" style="text-align:center;max-width:640px;margin:10px auto 0;"><strong style="color:var(--text)">Claude Code:</strong> install the plugin instead, with <code style="font-size:0.95em">claude plugin marketplace add AmrDab/clawdcursor</code> then <code style="font-size:0.95em">claude plugin install clawdcursor@clawdcursor</code>. <strong style="color:var(--text)">Claude Desktop:</strong> open the <code style="font-size:0.95em">.mcpb</code> extension from the <a href="https://github.com/AmrDab/clawdcursor/releases/latest" target="_blank" rel="noopener" style="color:var(--accent2);">latest GitHub release</a>; no Node.js needed.</p>
   </section>
 
   <!-- Two modes -->
@@ -543,165 +776,6 @@
         </div>
       </div>
     </div>
-  </section>
-
-  <!-- How it works: cheap paths first -->
-  <section class="sect" id="pipeline">
-    <div class="sect-label">How it works</div>
-    <h2>Blind first.</h2>
-    <p class="sub">The tree, then text, then OCR. A screenshot last. Your agent makes every call; clawdcursor carries it out.</p>
-
-    <div class="pipe-flow">
-      <div class="pipe-step router">
-        <h4><span class="pipe-num">1</span> Read</h4>
-        <span class="pipe-tag">Text, not pixels</span>
-        <p><code style="font-size:0.82em">read_tree</code> lists a window's elements by name. <code style="font-size:0.82em">copy_all_text</code> gives a page's exact text. <code style="font-size:0.82em">ocr</code> reads the screen when the tree is empty. A screenshot is the last resort.</p>
-      </div>
-      <div class="pipe-arrow" aria-hidden="true">→</div>
-      <div class="pipe-step agent">
-        <h4><span class="pipe-num">2</span> Act by name</h4>
-        <span class="pipe-tag">Coordinates are the fallback</span>
-        <p><code style="font-size:0.82em">invoke</code> clicks an element by name and <code style="font-size:0.82em">set_value</code> fills a field. <code style="font-size:0.82em">smart_click</code> finds a visible label by OCR. Keys are OS-aware: <code style="font-size:0.82em">mod</code> is Cmd on macOS, Ctrl elsewhere.</p>
-      </div>
-      <div class="pipe-arrow" aria-hidden="true">→</div>
-      <div class="pipe-step verifier">
-        <h4><span class="pipe-num">3</span> Check</h4>
-        <span class="pipe-tag">confirmed · unverified · refused · failed</span>
-        <p>Every result ends with a status line. Pass <code style="font-size:0.82em">expect</code> and the call re-reads the screen, reporting a DEVIATION if the state is not there.</p>
-      </div>
-    </div>
-
-  </section>
-
-  <!-- Approach: text first -->
-  <section class="sect" id="approach">
-    <div class="sect-label">Approach</div>
-    <h2>Text first, screenshots last.</h2>
-    <p class="sub">clawdcursor gives the model text it can act on by name, and keeps images for targets that nothing else describes.</p>
-
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch;">
-      <table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
-        <thead>
-          <tr style="background:rgba(255,255,255,0.03);">
-            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--text3);font-weight:600;border-bottom:1px solid var(--border);"></th>
-            <th style="text-align:left;padding:12px 16px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.08em;color:var(--accent);font-weight:600;border-bottom:1px solid var(--border);">What clawdcursor does</th>
-          </tr>
-        </thead>
-        <tbody>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Reading the screen</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Text first: the accessibility tree (<code>read_tree</code>), then the window's own text (<code>copy_all_text</code>), then OCR. No image reaches the model on these reads.</td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Screenshots</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Last. <code>computer screenshot</code> returns an image; it is for a target with no name and no visible text.</td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Clicking and typing</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">By name: <code>invoke "Equals"</code>, or <code>set_value</code> on a named field. <code>smart_click</code> finds a visible label by OCR. A coordinate click is the fallback.</td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Checking an action</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);"><code>expect</code> re-reads the screen in the same call and reports a DEVIATION if the state is not there. Without it, the result says <code>unverified</code>.</td>
-            </tr>
-            <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Known steps in a row</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">One <code>batch</code> call. Each step is refused by Stop and the pause exactly as a direct call would be.</td>
-            </tr>
-            <tr>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text);font-weight:600;">Which model</td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Any model with tool calling. The text reads need no image input.</td>
-            </tr>
-        </tbody>
-      </table>
-    </div>
-
-    <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
-      Measured figures will come from the 2.1 benchmark, which runs one standard test across app types, operating systems and models
-      (<a href="https://github.com/AmrDab/clawdcursor/milestone/1" target="_blank" rel="noopener" style="color:var(--accent2);">2.1 milestone</a>).
-    </p>
-  </section>
-
-  <!-- Features -->
-  <section class="sect">
-    <div class="sect-label">Features</div>
-    <h2>Any OS. Any model.</h2>
-    <div class="feat-grid">
-      <div class="feat-card">
-        <div class="feat-icon">💻</div>
-        <h4>Cross-platform</h4>
-        <p>Windows x64/ARM64 &middot; macOS 12+ &middot; Linux X11/Wayland</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">⌨️</div>
-        <h4>OS-aware keys</h4>
-        <p>The agent is told which OS it is on. <code>mod</code> is Cmd on macOS and Ctrl elsewhere, and named shortcuts are offered only for this OS.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">📦</div>
-        <h4>batch: one round-trip</h4>
-        <p>Run a known sequence of tool calls in one call. Each step is refused exactly as a direct call would be.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">⏸️</div>
-        <h4>Pauses for you</h4>
-        <p>At a sign-in, 2FA code or CAPTCHA the agent pauses instead of guessing. The prompt turns blue; click Resume and it carries on, or "Something else" to type it an answer.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🟠</div>
-        <h4>Always visible</h4>
-        <p>While an agent drives, a pill says what it is doing and a thin amber outline marks the window in use, on Windows, macOS and Linux. Press Stop on the pill to stop.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🍎</div>
-        <h4>Fast on macOS</h4>
-        <p>A native accessibility helper: 20 windows listed in 0.3 s, a window's tree read in 0.06&ndash;0.2 s.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- Safety: what is enforced, and what is not -->
-  <section class="sect" id="safety">
-    <div class="sect-label">Safety</div>
-    <h2>What protects you.</h2>
-    <p class="sub">clawdcursor runs with your own OS permissions and does not decide what your agent may do. Since 2.0 there is no policy gate. These hold for every call:</p>
-    <div class="feat-grid">
-      <div class="feat-card">
-        <div class="feat-icon">⏹️</div>
-        <h4>Stop</h4>
-        <p>Press Stop on the pill or run <code>clawdcursor stop</code>. Every clawdcursor process stops, a running batch included, and stays stopped across restarts until you resume.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🟦</div>
-        <h4>The pause card</h4>
-        <p>While the agent waits for you, no other tool call runs. A choice or a reply on the card comes only from you; the agent cannot click it or the pill. On the granular surface an agent can also end a pause with <code>resume_task</code>, reported as unverified.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">💬</div>
-        <h4>No stray input</h4>
-        <p>Input is refused when the window in front is an AI assistant the agent did not focus on purpose, or is no longer the window it was working in.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🔒</div>
-        <h4>Keys never sent</h4>
-        <p>A short per-OS list that locks the machine or ends the session, such as <code>Win+L</code>, <code>Ctrl+Alt+Del</code> and <code>Cmd+Shift+Q</code>. Every other shortcut is allowed.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">🔑</div>
-        <h4>Local, with a token</h4>
-        <p>The HTTP server binds <code>127.0.0.1</code> only and requires a bearer token. The stdio server opens no port. Anonymous error reports (result codes and clawdcursor's own file:line, never screen content) are on by default; <code>clawdcursor optout</code> turns them off. <a href="https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md">What is sent</a>.</p>
-      </div>
-      <div class="feat-card">
-        <div class="feat-icon">📄</div>
-        <h4>Screen text is data</h4>
-        <p>Page text, OCR and the clipboard reach the agent wrapped as untrusted content that cannot close its own wrapper.</p>
-      </div>
-    </div>
-    <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
-      <strong style="color:var(--text);">What is not enforced.</strong> Approval before an action is your MCP host's job: the tools carry read-only and destructive annotations for hosts that prompt. If your host auto-approves tool calls, nothing asks before the agent sends, deletes or pays. For agents you do not fully trust, or for unattended runs, use a host with approval prompts. An opt-in confirm mode is planned for 2.1
-      (<a href="https://github.com/AmrDab/clawdcursor/issues/373" target="_blank" rel="noopener" style="color:var(--accent2);">#373</a>).
-      The full threat model is in <a href="https://github.com/AmrDab/clawdcursor/blob/main/SECURITY.md" target="_blank" rel="noopener" style="color:var(--accent2);">SECURITY.md</a>.
-    </p>
   </section>
 
   <!-- Release notes and roadmap -->
@@ -772,7 +846,7 @@
             </tr>
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:12px 16px;vertical-align:top;"><code style="color:var(--accent2);font-weight:600;">browser</code></td>
-              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Chrome DevTools Protocol: DOM access for browsers and for Electron / WebView2 apps whose accessibility tree is sparse.</td>
+              <td style="padding:12px 16px;vertical-align:top;color:var(--text2);">Playwright over the Chrome DevTools Protocol: the web page itself, in its own Chrome or Edge window. Also Electron / WebView2 apps whose accessibility tree is sparse.</td>
               <td style="padding:12px 16px;vertical-align:top;color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:0.78rem;line-height:1.7;"><code>navigate</code> · <code>connect</code> · <code>page_context</code> · <code>read_text</code> · <code>click</code> · <code>type</code> · <code>select_option</code> · <code>evaluate</code> · <code>wait_for</code> · <code>list_tabs</code> · <code>switch_tab</code> · <code>scroll</code></td>
             </tr>
             <tr>
@@ -828,8 +902,8 @@ clawdcursor uninstall        <span style="color:var(--text3)"># remove all clawd
 <!-- CTA -->
 <div class="wrap">
   <div class="cta">
-    <h2>Give your agent the desktop.</h2>
-    <p>Open source (MIT). Any model with tool calling. Binds to 127.0.0.1 only. Anonymous error reports: off with <code>clawdcursor optout</code>.</p>
+    <h2>Let your AI use your computer.</h2>
+    <p>Free and open source (MIT). Works with any AI that can call tools. Runs on your computer only.</p>
     <a href="https://github.com/AmrDab/clawdcursor" class="btn-p">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
       Star on GitHub
