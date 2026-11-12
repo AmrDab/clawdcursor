@@ -123,6 +123,12 @@ function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
   return (!numeric && w && v.startsWith(w)) || (bare(w) && bare(v) === bare(w)) ? 'suffix' : 'mismatch';
 }
 
+/**
+ * The warning when a field that can be read still reads empty after typing (#377). Not a failure, and no retype: an app
+ * that takes keys through a hidden input it empties (an xterm.js terminal, Google Docs) reads the same way.
+ */
+export const EMPTY_AFTER_TYPING = 'read back: the focused field reads empty. The text may not have arrived (the keys went to another element, or a paste came too late), or the app takes keys through a hidden input it empties (a terminal, an online document editor). Read what the screen shows first (compile_ui or ocr); type again only if the text is not there.';
+
 /** What a read of a field gave. `readable`: the read itself worked, so an empty `value` means the field IS empty. */
 export type FieldRead = { value?: string; secure?: boolean; readable?: boolean };
 
@@ -131,10 +137,13 @@ export type FieldRead = { value?: string; secure?: boolean; readable?: boolean }
  * value is withheld), a field that exposes no text (empty value: many custom controls), or a value at the read cap.
  * Polls briefly: a field can lag the keys. `value` is what the field showed (for the caller to report). Never throws.
  *
- * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue). An empty read counts
- * only when the reader says the field is `readable` (a by-name value read does; see fieldRead): then a clear is
- * confirmed, and a field that still shows nothing after a set is a mismatch. Without that, an empty read is also what
- * an unreadable field gives, and stays 'unknown'.
+ * `whole`: the field was to be REPLACED, so it must hold the text and nothing else (holdsValue).
+ *
+ * An empty read counts only when the reader says the field is `readable` (a by-name value read does, see fieldRead, and
+ * so does the focused-element read): then a clear is confirmed, and a field that still shows nothing after typing or a
+ * set is a 'mismatch' with value '' (#377: a paste that read the clipboard after it was restored); typing callers report
+ * it as a warning only (EMPTY_AFTER_TYPING). Without `readable`, an empty read is also what an unreadable field gives,
+ * and stays 'unknown'.
  */
 export async function readBackTyped(
   focused: () => Promise<FieldRead | null | undefined>,
@@ -152,7 +161,7 @@ export async function readBackTyped(
     if (el?.secure) return { result: 'unknown', secure: true };
     const raw = typeof el?.value === 'string' ? el.value : '';
     const v = raw.length >= READ_CAP ? '' : flat(raw);
-    if (v || (whole && el?.readable === true && raw.length < READ_CAP)) {
+    if (v || (el?.readable === true && raw.length < READ_CAP)) {
       // Before a submit the field must END with the text (Return goes to whatever follows it); otherwise anywhere will
       // do — typing into the middle of a document.
       const result = whole ? holdsValue(v, want)
@@ -190,7 +199,8 @@ export function fieldRead(res: { success: boolean; data?: Record<string, unknown
  * value into the field instead; when it did ('typed') the field is read again and the result names that path. Any other
  * mismatch (a reformat, other text) stays a failure, and a field that cannot be read (a password field) is never typed into.
  */
-export type Retyped = 'typed' | 'skipped' | 'unfocused';
+/** How the typing fallback went: 'typed'; 'unfocused' (clicked, the focus did not go to the field, nothing typed); or why it was not tried. */
+export type Retyped = 'typed' | 'unfocused' | { skipped: string };
 export async function setResult(
   platform: Pick<PlatformAdapter, 'getFocusedElement' | 'invokeElement'>, value: string, label: string, how: string,
   named?: { name: string; controlType?: string; processId?: number },
@@ -201,28 +211,38 @@ export async function setResult(
     return fieldRead(await platform.invokeElement({ ...named, action: 'get-value' }));
   }, value, { whole: true });
   let rb = await read();
-  let retyped: Retyped = 'skipped';
+  let retyped: Retyped | undefined;
   const noEffect = rb.result === 'mismatch' && (!rb.value || (retry?.before !== undefined && flat(retry.before) === rb.value));
   if (named && retry && noEffect) {
     retyped = await retry.type();
     if (retyped === 'typed') rb = await read();
   }
+  return { ...setVerdict(rb, value, label, how, retyped), targetLabel: label };
+}
+
+/**
+ * The words every set ends with, from its one read-back (readBackTyped, whole value): confirmed, NOT verified, or a failure
+ * that says what the field shows. Also how a browser type (a CDP fill, #399) ends: it replaces the field's text too.
+ */
+export function setVerdict(
+  rb: { result: ReadBack; value?: string }, value: string, label: string, how: string, retyped?: Retyped,
+): { success: boolean; text: string } {
   const typed = retyped === 'typed';
   const set = `${quoteScreenText(label)} = ${value.length} chars${how}${typed ? ' (set via keys after the direct set had no effect)' : ''}`;
   const cut = (s: string) => quoteScreenText(s.length > 80 ? `${s.slice(0, 79)}…` : s);
   const shows = `the field shows ${cut(rb.value ?? '')}`;
   const alsoTyped = typed ? ' Typing it into the field (select-all + keys) after the direct set did not change that.'
-    : retyped === 'unfocused' ? ' To type it instead, the field was clicked, but could not focus the field to type into it; nothing was typed.' : '';
+    : retyped === 'unfocused' ? ' To type it instead, the field was clicked, but could not focus the field to type into it; nothing was typed.'
+    : typeof retyped === 'object' ? ` It was not typed into the field instead: ${retyped.skipped}.` : '';
   switch (rb.result) {
-    case 'match': return { success: true, text: `Set (read back ✓) ${set}`, targetLabel: label };
-    case 'unknown': return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.`, targetLabel: label };
-    case 'suffix': return { success: true, text: `Set ${set} — ${shows}, which may be the value in another format, or with a suggestion or old text after it: NOT verified.`, targetLabel: label };
+    case 'match': return { success: true, text: `Set (read back ✓) ${set}` };
+    case 'unknown': return { success: true, text: `Set ${set} — the field could not be read back: NOT verified. Read it to check.` };
+    case 'suffix': return { success: true, text: `Set ${set} — ${shows}, which may be the value in another format, or with a suggestion or old text after it: NOT verified.` };
     default: return {
       success: false,
       text: rb.value
         ? `Set ${quoteScreenText(label)} failed: ${shows}, not the value asked for (${cut(value)}) — its old text was not replaced, or the field rewrote it.${alsoTyped}`
         : `Set ${quoteScreenText(label)} failed: the field still shows nothing, not the value asked for (${cut(value)}) — the set had no effect.${alsoTyped}`,
-      targetLabel: label,
     };
   }
 }

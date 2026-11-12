@@ -17,7 +17,7 @@
  * A plain `select name:"High"` (the item itself, no value) ends in selectedResult: the item's own state, read by the bridge.
  */
 import type { PlatformAdapter } from './types';
-import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement } from './prefer-control';
+import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
 import { quoteScreenText } from '../core/result-codes';
 
 export interface SelectOptionResult {
@@ -59,6 +59,20 @@ export function selectedResult(res: { success: boolean; data?: Record<string, un
   return { success: true, verified: false, text: `Selected ${quoteScreenText(name)} — its selected state could not be read back: NOT verified. Read it to check.` };
 }
 
+/**
+ * How a select whose control the caller reads itself ends (a browser <select> over CDP, #399): `shown` is the chosen
+ * option's text and `option` its value; either one EXACTLY as asked confirms it. null: it could not be read.
+ */
+export function shownResult(shown: { value?: string; option?: string } | null | undefined, value: string, name: string): SelectOptionResult {
+  if (typeof shown?.value !== 'string') {
+    return { success: true, verified: false, text: `Selected ${quoteScreenText(value)} in ${quoteScreenText(name)} — the selection could not be read back: NOT verified. Read it to check.` };
+  }
+  if (showsValue(shown.value, value) || (shown.option !== undefined && showsValue(shown.option, value))) {
+    return { success: true, verified: true, text: `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)}.` };
+  }
+  return { success: false, verified: true, text: `Tried to select ${quoteScreenText(value)} in ${quoteScreenText(name)}, but it now shows ${quoteScreenText(shown.value)}.` };
+}
+
 type KeysPlatform = Pick<PlatformAdapter, 'invokeElement' | 'findElements'>
   & Partial<Pick<PlatformAdapter, 'getActiveWindow' | 'focusWindow' | 'getFocusedElement' | 'typeText'>>;
 
@@ -81,20 +95,13 @@ async function pickByKeys(
 ): Promise<'typed' | 'skipped' | 'unfocused'> {
   const { getActiveWindow, focusWindow, getFocusedElement, typeText } = platform;
   if (!getActiveWindow || !focusWindow || !getFocusedElement || !typeText) return 'skipped';
-  const inside = (f: { x: number; y: number; width: number; height: number }, b: typeof f) =>
-    f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
   const named = (await platform.findElements({ name: control.name, processId: control.processId }).catch(() => []))
     .filter(h => norm(h.name) === norm(control.name) && h.bounds);
   const el = named.find(h => typeAheadSelects(h.controlType) && (!control.controlType || norm(h.controlType) === norm(control.controlType)));
   if (!el || named.some(h => isTextBox(h.controlType) && inside(h.bounds, el.bounds))) return 'skipped';
   const pid = control.processId ?? el.processId;
   if (pid === undefined) return 'skipped';
-  const inFront = async () => (await getActiveWindow.call(platform).catch(() => null))?.processId === pid;
-  if (!await inFront()) {
-    await focusWindow.call(platform, { processId: pid }).catch(() => false);
-    await sleep(150);
-    if (!await inFront()) return 'skipped';
-  }
+  if (!await ensureInFront({ getActiveWindow: getActiveWindow.bind(platform), focusWindow: focusWindow.bind(platform) }, pid)) return 'skipped';
   const focus = await platform.invokeElement({ ...control, action: 'focus' }).catch(() => null);
   if (!focus?.success) return 'unfocused';
   await sleep(100);

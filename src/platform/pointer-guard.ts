@@ -43,6 +43,8 @@ interface InputGuard {
   launched(r?: { pid?: number; title?: string }, appName?: string): Promise<void>;
   /** Before an act on an element by name: stopped, or the window it would resolve to is an AI assistant nobody chose. */
   byName(processId?: number): Promise<void>;
+  /** An act went to this process, not to the window in front (a page act over CDP): the session log names its app (#365). */
+  byProcess?(pid: number | null | undefined): Promise<void>;
 }
 let inputGuard: InputGuard | null = null;
 /** Inside a guarded call ('agent': its inner steps are already covered), or clawdcursor's own housekeeping ('user'). */
@@ -100,7 +102,7 @@ const STOP_METHODS = [
  * Route an input layer's methods through the guard: the platform adapter, NativeDesktop, the accessibility bridge and the
  * CDP driver. One check per outermost call: a method that calls another (typeText → keyPress for a paste) is one input.
  */
-export function guardInputMethods<T extends object>(target: T): T {
+export function guardInputMethods<T extends object>(target: T, actedPid?: () => Promise<number | null>): T {
   const t = target as unknown as Record<string, unknown>;
   // `nested`: called from inside another guarded call (a paste's keyPress, navigate raising the browser), already checked.
   type Run = (g: InputGuard, f: (...a: unknown[]) => unknown, args: unknown[], nested: boolean) => unknown;
@@ -147,7 +149,15 @@ export function guardInputMethods<T extends object>(target: T): T {
     }
     return f(...args);
   });
-  for (const m of STOP_METHODS.filter(m => m !== 'invokeElement')) wrap(m, async (g, f, args, nested) => { if (!nested) { g.stopCheck(); announce(m); } return f(...args); });
+  for (const m of STOP_METHODS.filter(m => m !== 'invokeElement')) {
+    wrap(m, async (g, f, args, nested) => {
+      if (nested) return f(...args);
+      g.stopCheck();
+      announce(m);
+      // `actedPid`: the process these acts go to (the CDP driver's browser), told once the act ran (a navigate may connect first).
+      try { return await f(...args); } finally { if (actedPid) await g.byProcess?.(await actedPid().catch(() => null)).catch(() => {}); }
+    });
+  }
   // The agent's own focus and launches rebind the window it works in, nested or not (a navigate raises its browser).
   // The platform adapter takes a query and answers true/false; the accessibility bridge takes (title, processId) and
   // answers {success}.

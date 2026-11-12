@@ -15,6 +15,8 @@ function ctxWith(platform: string, setOk: boolean, found: any[]) {
     platform,
     invokeElement: vi.fn(async () => setOk ? { success: true } : { success: false, data: { error: 'element exposes neither EditableText nor Value' } }),
     findElements: vi.fn(async () => found),
+    // After the click the focus is on the input (checked before any key is sent, #363).
+    getFocusedElement: vi.fn(async () => found.find(e => e.controlType === 'Edit') ?? null),
     mouseClick: vi.fn(async () => {}),
     keyPress: vi.fn(async () => {}),
     typeText: vi.fn(async () => {}),
@@ -98,5 +100,68 @@ describe('agent-loop a11y_get_value', () => {
     await getTool.execute({ name: 'File name', controlType: 'ComboBox', processId: 7 }, ctx);
     expect(find).not.toHaveBeenCalled();
     expect(invoke).toHaveBeenCalledWith(expect.objectContaining({ controlType: 'ComboBox' }));
+  });
+});
+
+// #363: the typing fallback's gaps.
+describe('agent-loop set_field_value — the keyboard path is guarded and says why it did not type', () => {
+  const INPUT = { name: 'City', controlType: 'Edit', bounds: { x: 60, y: 8, width: 200, height: 22 } };
+
+  it('a clear the bridge will not set ("") is select-all + Delete, confirmed on a readable empty read', async () => {
+    const { ctx, p } = ctxWith('win32', false, [INPUT]);
+    p.getFocusedElement = vi.fn(async () => ({ ...INPUT, value: '', readable: true })) as any;
+    const r = await tool.execute({ name: 'City', value: '' }, ctx);
+    expect(p.keyPress).toHaveBeenCalledWith('mod+a');
+    expect(p.keyPress).toHaveBeenCalledWith('Delete');
+    expect(p.typeText).not.toHaveBeenCalled();
+    expect(r.success).toBe(true);
+    expect(r.text).toMatch(/^Set \(read back ✓\) "City" = 0 chars/);
+  });
+
+  it('the focus did not go to the field after the click: nothing is typed, and the result says so', async () => {
+    const { ctx, p } = ctxWith('linux', false, [INPUT]);
+    p.getFocusedElement = vi.fn(async () => ({ name: 'Search', controlType: 'Edit', bounds: { x: 0, y: 500, width: 300, height: 22 } })) as any;
+    const r = await tool.execute({ name: 'City', value: 'Lisbon' }, ctx);
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/keyboard focus did not go to it, so nothing was typed/);
+    expect(p.keyPress).not.toHaveBeenCalled();
+    expect(p.typeText).not.toHaveBeenCalled();
+  });
+
+  it('an unnamed inner Edit of a composite field (Win11 XAML) counts as the field', async () => {
+    const { ctx, p } = ctxWith('win32', false, [INPUT]);
+    p.getFocusedElement = vi.fn(async () => ({ name: '', controlType: 'Edit', bounds: { x: 64, y: 10, width: 150, height: 18 } })) as any;
+    await tool.execute({ name: 'City', value: 'Lisbon' }, ctx);
+    expect(p.typeText).toHaveBeenCalledWith('Lisbon');
+  });
+
+  it('a Store app is in front when its frame (ApplicationFrameHost) hosts it: the field\'s pid is the hosted one', async () => {
+    const { ctx, p } = ctxWith('win32', false, [{ ...INPUT, processId: 6768 }]);
+    p.getActiveWindow = vi.fn(async () => ({ processId: 38636, hostedProcessId: 6768 })) as any;
+    const r = await tool.execute({ name: 'City', value: 'Lisbon' }, ctx);
+    expect(p.focusWindow).not.toHaveBeenCalled();
+    expect(p.typeText).toHaveBeenCalledWith('Lisbon');
+    expect(r.text).not.toMatch(/would not come to the front/);
+  });
+
+  it('a foreground that cannot be read or is only guessed (Linux without xdotool) does not block: the focus check guards', async () => {
+    for (const front of [null, { processId: 1, guessed: true }]) {
+      const { ctx, p } = ctxWith('linux', false, [INPUT]);
+      p.getActiveWindow = vi.fn(async () => front) as any;
+      await tool.execute({ name: 'City', value: 'Lisbon', processId: 7 }, ctx);
+      expect(p.focusWindow).toHaveBeenCalledWith({ processId: 7 });
+      expect(p.typeText).toHaveBeenCalledWith('Lisbon');
+    }
+  });
+
+  it('a retry that was skipped says why', async () => {
+    const { ctx, p } = ctxWith('win32', true, [INPUT]);
+    // The direct set "worked" and the field still reads empty: no effect, so it is typed instead — but its window stays behind.
+    p.invokeElement = vi.fn(async (q: any) => q.action === 'get-value' ? { success: true, data: { value: '', readable: true } } : { success: true }) as any;
+    p.getActiveWindow = vi.fn(async () => ({ processId: 9 })) as any;
+    const r = await tool.execute({ name: 'City', value: 'Lisbon', processId: 7 }, ctx);
+    expect(r.success).toBe(false);
+    expect(r.text).toContain('It was not typed into the field instead: its window would not come to the front.');
+    expect(p.mouseClick).not.toHaveBeenCalled();
   });
 });

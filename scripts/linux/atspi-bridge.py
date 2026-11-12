@@ -487,7 +487,10 @@ def focused_element(process_id: Optional[int] = None,
         for top in toplevels_active_first(app):
             hit = _find_focused(top, 1, [0])
             if hit is not None:
-                return node_to_dict(hit)
+                d = node_to_dict(hit)
+                # readable: the value itself can be read (Value or Text), so "" is an empty field. Not a password entry.
+                d["readable"] = not is_secure(hit) and bool(safe(lambda: hit.get_value_iface()) or safe(lambda: hit.get_text_iface()))
+                return d
     return None
 
 

@@ -94,6 +94,28 @@ export function sameElement(focused: Placed, target: Placed): boolean {
   return overlap && !!focused?.name?.trim() && norm(focused.name) === norm(target?.name);
 }
 
+type Box = { x: number; y: number; width: number; height: number };
+/** Is box `f` inside box `b`? */
+export const inside = (f: Box, b: Box): boolean =>
+  f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
+
+/**
+ * Before keys go to process `pid`'s control: bring its window to the front. False only when a real read still shows
+ * another app in front. A Store app's window is its frame's (ApplicationFrameHost): the app is the process it hosts.
+ * A read that fails or only guesses (Linux without xdotool, Wayland) cannot tell: the caller's focus check after its
+ * click or focus call is the guard there.
+ */
+export async function ensureInFront(platform: Pick<PlatformAdapter, 'getActiveWindow' | 'focusWindow'>, pid: number): Promise<boolean> {
+  const front = async () => {
+    const w = await platform.getActiveWindow().catch(() => null);
+    return !w || w.guessed ? undefined : w.processId === pid || w.hostedProcessId === pid;
+  };
+  if (await front()) return true;
+  await platform.focusWindow({ processId: pid }).catch(() => false);
+  await new Promise(r => setTimeout(r, 150));
+  return (await front()) !== false;
+}
+
 /**
  * Why a plain `select name:"X"` (no value) failed when X is no item: names the roles that matched and how to pick an
  * option inside a dropdown. undefined when X is a selectable item or nothing by that name was found.

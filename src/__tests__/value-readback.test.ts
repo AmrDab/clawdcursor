@@ -20,7 +20,8 @@ function ctxWith(invoke: (q: any) => any, focused?: string) {
     platform: 'win32',
     invokeElement: vi.fn(async (q: any) => invoke(q)),
     findElements: vi.fn(async () => EDIT),
-    getFocusedElement: vi.fn(async (): Promise<any> => (focused === undefined ? null : { value: focused })),
+    // The focus is on the field after the click (the keyboard path checks that before typing, #363).
+    getFocusedElement: vi.fn(async (): Promise<any> => (focused === undefined ? null : { ...EDIT[0], value: focused })),
     mouseClick: vi.fn(async () => {}),
     keyPress: vi.fn(async () => {}),
     typeText: vi.fn(async () => {}),
@@ -83,8 +84,10 @@ describe('readBackTyped — whole value', () => {
     expect((await readBackTyped(r('  '), '', { whole: true, maxMs: 0 })).result).toBe('match');
     // a password field is never readable, whatever else the read says
     expect((await readBackTyped(async () => ({ value: '', readable: true, secure: true }), 'x', { whole: true, maxMs: 0 })).result).toBe('unknown');
-    // typing into a document (not `whole`) is unchanged
-    expect((await readBackTyped(r(''), 'x', { maxMs: 0 })).result).toBe('unknown');
+    // typing (not `whole`): a field that can be read and is still empty got none of it (#377)
+    expect(await readBackTyped(r(''), 'x', { maxMs: 0 })).toEqual({ result: 'mismatch', value: '' });
+    // ... and one that cannot be read still cannot be told
+    expect((await readBackTyped(async () => ({ value: '' }), 'x', { maxMs: 0 })).result).toBe('unknown');
   });
 
   it('fieldRead: what a by-name get-value says the field holds', () => {

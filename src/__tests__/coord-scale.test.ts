@@ -145,15 +145,21 @@ describe('click tool coordinate space', () => {
     expect(clicks[0]).toEqual({ x: 1107, y: 423 });
   });
 
-  it('result text carries a focus breadcrumb when focus changes', async () => {
+  it('result text ends with an effect line naming the app in front after the click', async () => {
     const clicks: Array<{ x: number; y: number }> = [];
-    // before window = Terminal, after = Edge → breadcrumb shows the change
+    // before = Terminal, after = Edge (another process) → the effect line names it
     const ctx = makeCtx(clicks);
     let n = 0;
-    (ctx.platform.getActiveWindow as any) = vi.fn(() =>
-      Promise.resolve({ title: n++ === 0 ? 'Terminal' : 'Edge', processName: 'x', processId: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
+    (ctx.platform.getActiveWindow as any) = vi.fn(() => n++ === 0
+      ? Promise.resolve({ title: 'Terminal', processName: 'wt', processId: 2, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })
+      : Promise.resolve({ title: 'Edge', processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
     const r = await click.execute({ x: 100, y: 100 }, ctx);
-    expect(r.text).toMatch(/focus "Terminal"→"Edge"/);
+    expect(r.text).toMatch(/\neffect: another app is in front: "msedge" "Edge"$/);
+  });
+
+  it('a clean click says the window stayed the same', async () => {
+    const r = await click.execute({ x: 100, y: 100 }, makeCtx([]));
+    expect(r.text).toMatch(/\neffect: same app in front$/);
   });
 
   // ── focus-theft warning (#bug 2026-06-11: OTP typed into the wrong window) ──
@@ -174,11 +180,35 @@ describe('click tool coordinate space', () => {
     const clicks: Array<{ x: number; y: number }> = [];
     const ctx = makeCtx(clicks);
     let n = 0;
-    // before = the popup that was focused, after = a different window → theft.
-    (ctx.platform.getActiveWindow as any) = vi.fn(() =>
-      Promise.resolve({ title: n++ === 0 ? 'Device Activation - Microsoft Edge' : 'Claude', processName: 'x', processId: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
+    // before = the popup that was focused, after = another app's window → theft.
+    (ctx.platform.getActiveWindow as any) = vi.fn(() => n++ === 0
+      ? Promise.resolve({ title: 'Device Activation - Microsoft Edge', processName: 'msedge', processId: 1, handle: 10, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })
+      : Promise.resolve({ title: 'Claude', processName: 'claude', processId: 2, handle: 20, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
     const r = await click.execute({ x: 100, y: 100 }, ctx);
     expect(r.text).toMatch(/FOCUS NOT CONFIRMED/);
+    expect(r.text).not.toMatch(/Windows foreground-lock/);   // the same words on every OS (#379)
+  });
+
+  // #379: a title is not a window's identity.
+  it('does NOT warn when only the title changed (a tab switch in the same window)', async () => {
+    const ctx = makeCtx([]);
+    let n = 0;
+    (ctx.platform.getActiveWindow as any) = vi.fn(() =>
+      Promise.resolve({ title: n++ === 0 ? 'Inbox - Chrome' : 'Docs - Chrome', processName: 'chrome', processId: 1, handle: 10, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
+    const r = await click.execute({ x: 100, y: 100 }, ctx);
+    expect(r.text).not.toMatch(/FOCUS NOT CONFIRMED/);
+    expect(r.text).toMatch(/\neffect: window same, title now "Docs - Chrome"$/);
+  });
+
+  it('does NOT warn when a dialog closed back to its owner (another window of the same app)', async () => {
+    const ctx = makeCtx([]);
+    let n = 0;
+    (ctx.platform.getActiveWindow as any) = vi.fn(() => n++ === 0
+      ? Promise.resolve({ title: 'Open', processName: 'chrome', processId: 1, handle: 11, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })
+      : Promise.resolve({ title: 'Upload - Chrome', processName: 'chrome', processId: 1, handle: 10, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false }));
+    const r = await click.execute({ x: 100, y: 100 }, ctx);
+    expect(r.text).not.toMatch(/FOCUS NOT CONFIRMED/);
+    expect(r.text).toMatch(/\neffect: another window of the same app is in front: "Upload - Chrome"$/);
   });
 
   it('does NOT warn on a clean click (activation ok, foreground stable)', async () => {

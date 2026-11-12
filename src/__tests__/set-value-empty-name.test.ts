@@ -9,6 +9,7 @@ function platform() {
   return {
     invokeElement: vi.fn(async () => ({ success: false, data: { error: 'no settable value' } })),
     findElements: vi.fn(async () => [{ name: 'Address and search bar', controlType: 'Edit', bounds: { x: 0, y: 0, width: 3000, height: 50 } }]),
+    getFocusedElement: vi.fn(async () => ({ name: 'Address and search bar', controlType: 'Edit', bounds: { x: 0, y: 0, width: 3000, height: 50 } })),
     mouseClick: vi.fn(async () => {}),
     keyPress: vi.fn(async () => {}),
     typeText: vi.fn(async () => {}),

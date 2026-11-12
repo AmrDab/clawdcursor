@@ -93,3 +93,29 @@ describe('type tool — clipboard paste for long text', () => {
     expect(platform.typeText).toHaveBeenCalledWith(LONG);
   });
 });
+
+// #377: a field that can be read and still reads empty after typing may have got none of the text — or be a hidden input
+// the app empties after each key (an xterm.js terminal's helper textarea, Google Docs), where the text did arrive.
+describe('type tool — a readable field that reads back empty', () => {
+  const field = (value: string, readable?: boolean) => ({ name: 'Name', controlType: 'Edit', bounds: { x: 0, y: 0, width: 100, height: 20 }, value, ...(readable ? { readable } : {}) });
+  const platform = (focused: any) => ({ keyPress: vi.fn(async () => {}), typeText: vi.fn(async () => {}), getFocusedElement: vi.fn(async () => focused) });
+
+  it('is a success with a warning, unverified: Return still goes, and the agent is told to look before any retype', async () => {
+    const { classifyResult } = await import('../core/result-codes');
+    const p = platform(field('', true));
+    const r = await typeTool().execute({ text: 'npm test\n' }, ctxWith(p));
+    expect(r.success).toBe(true);
+    expect(p.typeText).toHaveBeenCalledWith('npm test');
+    expect(p.keyPress).toHaveBeenCalledWith('Return');
+    expect(r.text).toMatch(/⚠ read back: the focused field reads empty/);
+    expect(r.text).toMatch(/type again only if the text is not there/);
+    expect(r.text).not.toMatch(/then type again/);
+    expect(classifyResult(r.text, false, true)?.outcome).toBe('unverified');
+  });
+
+  it('an empty read from a field that cannot be read is no verdict: success, unverified', async () => {
+    const r = await typeTool().execute({ text: 'hello' }, ctxWith(platform(field(''))));
+    expect(r.success).toBe(true);
+    expect(r.text).not.toMatch(/read back/);
+  });
+});
