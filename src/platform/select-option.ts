@@ -17,9 +17,8 @@
  * A plain `select name:"High"` (the item itself, no value) ends in selectedResult: the item's own state, read by the bridge.
  */
 import type { PlatformAdapter } from './types';
-import { findControls, holdsOptions, isSelectableItem, sameElement } from './prefer-control';
+import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement } from './prefer-control';
 import { quoteScreenText } from '../core/result-codes';
-import { showsValue } from '../tools/paste-guard';
 
 export interface SelectOptionResult {
   success: boolean;
@@ -30,6 +29,11 @@ export interface SelectOptionResult {
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+/**
+ * Does the control show the option? EXACTLY it: case and outer whitespace aside, nothing is forgiven. Not the rule a typed
+ * value is read back with (holdsValue): "10 GB", "10%", "10.0" and "$10" are other options than "10".
+ */
+const showsValue = (shown: string, want: string): boolean => norm(shown) === norm(want);
 
 /** Re-read until the control shows `want` or `ms` is up. Returns the last value it could read (null: it never could). */
 async function readUntil(read: () => Promise<string | null>, want: string, ms: number): Promise<string | null> {
@@ -63,10 +67,13 @@ type KeysPlatform = Pick<PlatformAdapter, 'invokeElement' | 'findElements'>
  * text — a list box or a closed dropdown list moves to the item that starts with what is typed. The keys go through the
  * platform's guarded input, like all input.
  *
+ * Only where type-ahead selects: a list box or a dropdown list (typeAheadSelects). In a tab strip, a radio group or a
+ * menu a letter is a shortcut and a space toggles, and an editable combo box (one with a text box inside it) takes the
+ * letters as text: none of those is typed into.
+ *
  * Keys go to whatever has the focus, so (as when a field is typed into): the control's window must be in front, and after
- * the focus call the keyboard focus must be on the control itself or on one of its items. An editable combo box puts the
- * focus in its text box: that is a field, and is not typed into here. No Return is sent: on a list or a closed dropdown it
- * presses the dialog's default button.
+ * the focus call the keyboard focus must be on the control itself or on one of its list items. No Return is sent: on a
+ * list or a closed dropdown it presses the dialog's default button.
  * 'skipped': nothing was done. 'unfocused': the focus is not on the control; nothing was typed.
  */
 async function pickByKeys(
@@ -74,8 +81,12 @@ async function pickByKeys(
 ): Promise<'typed' | 'skipped' | 'unfocused'> {
   const { getActiveWindow, focusWindow, getFocusedElement, typeText } = platform;
   if (!getActiveWindow || !focusWindow || !getFocusedElement || !typeText) return 'skipped';
-  const el = (await platform.findElements(control).catch(() => [])).find(h => norm(h.name) === norm(control.name) && h.bounds);
-  if (!el) return 'skipped';
+  const inside = (f: { x: number; y: number; width: number; height: number }, b: typeof f) =>
+    f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
+  const named = (await platform.findElements({ name: control.name, processId: control.processId }).catch(() => []))
+    .filter(h => norm(h.name) === norm(control.name) && h.bounds);
+  const el = named.find(h => typeAheadSelects(h.controlType) && (!control.controlType || norm(h.controlType) === norm(control.controlType)));
+  if (!el || named.some(h => isTextBox(h.controlType) && inside(h.bounds, el.bounds))) return 'skipped';
   const pid = control.processId ?? el.processId;
   if (pid === undefined) return 'skipped';
   const inFront = async () => (await getActiveWindow.call(platform).catch(() => null))?.processId === pid;
@@ -89,9 +100,8 @@ async function pickByKeys(
   await sleep(100);
   const focused = await getFocusedElement.call(platform).catch(() => null);
   const role = focused?.controlType;
-  const b = el.bounds, f = focused?.bounds;
-  const itemInside = !!f && isSelectableItem(role) && f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
-  if (!focused || focused.secure || !(itemInside || (holdsOptions(role) && sameElement(focused, el)))) return 'unfocused';
+  const itemInside = !!focused?.bounds && isListItem(role) && inside(focused.bounds, el.bounds);
+  if (!focused || focused.secure || !(itemInside || (typeAheadSelects(role) && sameElement(focused, el)))) return 'unfocused';
   await typeText.call(platform, value);
   return 'typed';
 }

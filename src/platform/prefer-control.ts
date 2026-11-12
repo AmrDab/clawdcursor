@@ -35,6 +35,12 @@ export function failReason(res: { error?: unknown; data?: Record<string, unknown
 }
 
 export const holdsOptions = (r?: string) => HOLDS_OPTIONS.test(role(r));
+/** A list box or a dropdown list: where typing an option's text moves the selection to it. Not a tab strip, a radio group or a menu: there a letter is a shortcut. */
+export const typeAheadSelects = (r?: string) => /^(list|listbox|combobox|popupbutton)$/.test(role(r));
+/** An item of such a list. */
+export const isListItem = (r?: string) => /^(listitem|option)$/.test(role(r));
+/** A text box: what an editable combo box holds. */
+export const isTextBox = (r?: string) => /^(edit|textfield|textbox|entry|searchfield)$/.test(role(r));
 export const isSelectableItem = (r?: string) => SELECTABLE.test(role(r));
 
 const WANTED: Record<ByNameAction, RegExp[]> = {

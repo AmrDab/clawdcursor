@@ -53,10 +53,20 @@ describe('select on an item: the result is what the item reads afterwards', () =
 describe('each bridge reads the item back after a select', () => {
   const script = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', ...p), 'utf8');
 
-  it('Windows: IsSelected after Select(), and a Win32 list box is told (LBN_SELCHANGE) as a user pick tells it', () => {
+  it('Windows: IsSelected after Select(), and a WinForms list box is told (LBN_SELCHANGE) as a user pick tells it', () => {
     const ps = script('ps-bridge.ps1');
     const fn = ps.slice(ps.indexOf('function Select-Item'), ps.indexOf('# ── Command: invoke-element'));
-    expect(fn).toMatch(/\$p\.Select\(\)[\s\S]*IsSelected[\s\S]*SendMessageTimeout\(\[Win32UIA\]::GetParent\(\$h\), 0x0111/);
+    expect(fn).toMatch(/\$p\.Select\(\)[\s\S]*IsSelected[\s\S]*SendMessageTimeout\(\$dad, 0x0111/);
+    // Only a WinForms list box: UIA's proxy for a plain Win32 "ListBox" (and a combo box) notifies by itself.
+    const cls = new RegExp(/-match '([^']+)'/.exec(fn)![1]);
+    expect(cls.test('WindowsForms10.LISTBOX.app.0.34f5582_r6_ad1')).toBe(true);
+    for (const other of ['ListBox', 'ComboLBox', 'WindowsForms10.COMBOBOX.app.0.34f5582_r6_ad1', 'TListBox', 'WindowsForms10.SysListView32.app.0']) expect(cls.test(other), other).toBe(false);
+    // Confined: the real parent (never GetParent, which answers with the OWNER of a popup), a child list box that
+    // notifies (LBS_NOTIFY), parent and list box in one process.
+    expect(ps).not.toMatch(/GetParent\(IntPtr|::GetParent\(/);
+    expect(fn).toMatch(/\$dad = \[Win32UIA\]::GetAncestor\(\$h, 1\)/);
+    expect(fn).toMatch(/if \(\$isChild -and \$notifies -and \$listPid -ne 0 -and \$listPid -eq \$dadPid\) \{[\s\S]*SendMessageTimeout/);
+    expect(fn.match(/SendMessageTimeout/g)).toHaveLength(1);
     expect(ps).toMatch(/"select" \{\s*try \{\s*\$selected = Select-Item \$element[\s\S]{0,300}selected = \$selected/);
     // No other path selects without it.
     expect(ps.match(/\.Select\(\)/g)).toHaveLength(1);
@@ -65,11 +75,17 @@ describe('each bridge reads the item back after a select', () => {
   it('macOS: AXSelected is read back on a row and on any other element', () => {
     const swift = script('mac', 'ax-helper.swift');
     const sel = swift.slice(swift.indexOf('case "select":'), swift.indexOf('default:', swift.indexOf('case "select":')));
-    expect(sel).toMatch(/selectRow\(row, action: action\)/);
-    expect(sel).toMatch(/setSelected\(el, action: action\)/);
-    const fn = swift.slice(swift.indexOf('func setSelected'), swift.indexOf('func selectRow'));
-    expect(fn).toMatch(/copyAttr\(el, "AXSelected"\)[\s\S]*"selected": true[\s\S]*"selected": false/);
-    expect(swift.slice(swift.indexOf('func selectRow'))).toMatch(/"selected": true/);
+    expect(sel).toMatch(/selectRow\(row, action: action, appName: appName\)/);
+    expect(sel).toMatch(/setSelected\(el, action: action, appName: appName\)/);
+    const body = (name: string) => { const at = swift.indexOf(`func ${name}(`); return swift.slice(at, swift.indexOf('\n}', at)); };
+    expect(body('selectedSoon')).toMatch(/copyAttr\(el, "AXSelected"\)/);
+    // A set that changed nothing is followed by ONE press and the same read; what was read is what is reported.
+    expect(body('setSelected')).toMatch(/selectedSoon\(el, tries: 10\)[\s\S]*if read == false \{\s*let p = press\(el\)[\s\S]*selectedSoon\(el, tries: 10\)[\s\S]*\["selected": read!\]/);
+    expect(body('setSelected').match(/press\(/g)).toHaveLength(1);
+    expect(body('selectRow')).toMatch(/selectedSoon\(row, tries: 6\) == true[\s\S]*let p = press\(row\)[\s\S]*selectedSoon\(row, tries: 6\) == true[\s\S]*return miss\(/);
+    expect(body('selectRow').match(/press\(/g)).toHaveLength(1);
+    // selectRow keeps its own doc comment.
+    expect(swift).toMatch(/\/\/\/ Select the row and check that it took[^\n]*\n\/\/\/[^\n]*\n\/\/\/[^\n]*\nfunc selectRow\(/);
   });
 
   it('Linux: is_child_selected after select_child', () => {
@@ -80,11 +96,12 @@ describe('each bridge reads the item back after a select', () => {
 });
 
 /** A dropdown the pattern route cannot change: only keys typed while IT has the focus do. */
-function stubborn(opts: { focusLands?: boolean; inFront?: boolean; keysWork?: boolean } = {}) {
-  const { focusLands = true, inFront = true, keysWork = true } = opts;
+function stubborn(opts: { focusLands?: boolean; inFront?: boolean; keysWork?: boolean; role?: string; textBox?: boolean } = {}) {
+  const { focusLands = true, inFront = true, keysWork = true, role = 'ComboBox', textBox = false } = opts;
   let current = 'Low';
   let focused: { name: string; controlType: string; bounds: { x: number; y: number; width: number; height: number } } | null = null;
-  const combo = { name: 'Priority', controlType: 'ComboBox', processId: 7, bounds: { x: 10, y: 10, width: 200, height: 24 } };
+  const combo = { name: 'Priority', controlType: role, processId: 7, bounds: { x: 10, y: 10, width: 200, height: 24 } };
+  const edit = { name: 'Priority', controlType: 'Edit', processId: 7, bounds: { x: 12, y: 12, width: 170, height: 20 } };
   const other = { name: 'Notes', controlType: 'Edit', bounds: { x: 10, y: 100, width: 200, height: 80 } };
   const sent: string[] = [];
   return {
@@ -95,7 +112,7 @@ function stubborn(opts: { focusLands?: boolean; inFront?: boolean; keysWork?: bo
       if (q.action === 'focus') { focused = focusLands ? combo : other; return { success: true }; }
       return { success: true };   // expand, collapse, select, click: accepted, and nothing changes
     }),
-    findElements: vi.fn(async (q: { name?: string }) => q.name === 'Priority' ? [combo]
+    findElements: vi.fn(async (q: { name?: string }) => q.name === 'Priority' ? (textBox ? [combo, edit] : [combo])
       : ['Low', 'High'].filter(n => n === q.name).map(n => ({ name: n, controlType: 'ListItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }))),
     getActiveWindow: vi.fn(async () => ({ processId: inFront ? 7 : 99 })),
     focusWindow: vi.fn(async () => false),
@@ -149,20 +166,46 @@ describe('select an option: the keyboard is tried once when the pattern route le
   });
 });
 
-describe('the value is compared as every value read-back compares it (holdsValue)', () => {
+describe('the keyboard is only for a list box or a dropdown list, where type-ahead selects', () => {
+  it.each(['List', 'ComboBox', 'list box', 'combo box', 'AXPopUpButton'])('%s: typed into', async role => {
+    const p = stubborn({ role });
+    expect((await selectOption(p as any, { name: 'Priority', value: 'High' }, { settleMs: 0 })).success).toBe(true);
+    expect(p.sent).toEqual(['High']);
+  });
+
+  // A letter is a shortcut there, and a space toggles.
+  it.each(['Tab', 'AXTabGroup', 'page tab list', 'AXRadioGroup', 'radiogroup', 'MenuButton'])('%s: an honest failure, and no key is sent', async role => {
+    const p = stubborn({ role });
+    const r = await selectOption(p as any, { name: 'Priority', value: 'High' }, { settleMs: 0 });
+    expect(p.sent).toEqual([]);
+    expect(p.invokeElement.mock.calls.some(c => c[0].action === 'focus')).toBe(false);
+    expect(r).toMatchObject({ success: false, verified: true });
+    expect(r.text).toBe('Tried to select "High" in "Priority", but it now shows "Low".');
+  });
+
+  it('an editable combo box (a text box inside it) is not typed into: the letters would be its text', async () => {
+    const p = stubborn({ textBox: true });
+    const r = await selectOption(p as any, { name: 'Priority', value: 'High', controlType: 'ComboBox' }, { settleMs: 0 });
+    expect(p.sent).toEqual([]);
+    expect(r.success).toBe(false);
+  });
+});
+
+describe('the control must show EXACTLY the option (not the lenient rule of a typed value)', () => {
   const shows = (shown: string) => ({
     invokeElement: vi.fn(async (q: { action?: string }) => q.action === 'get-value' ? { success: true, data: { value: shown } } : { success: true }),
     findElements: vi.fn(async (q: { name?: string }) => [{ name: q.name, controlType: q.name === 'Size' ? 'ComboBox' : 'ListItem' }]),
   });
 
-  it('case and runs of spaces do not matter', async () => {
-    const r = await selectOption(shows('  extra   LARGE ') as any, { name: 'Size', value: 'Extra large' }, { settleMs: 0 });
+  it('case and outer whitespace do not matter', async () => {
+    const r = await selectOption(shows('  EXTRA large ') as any, { name: 'Size', value: 'Extra large' }, { settleMs: 0 });
     expect(r).toMatchObject({ success: true, verified: true });
   });
 
-  it('another option that merely starts with it is not it', async () => {
-    const r = await selectOption(shows('Extra large (sold out)') as any, { name: 'Size', value: 'Extra large' }, { settleMs: 0 });
+  it.each(['10 GB', '10%', '10.0', '$10', '10,0', '100', 'Extra  large'])('"10" (or "Extra large") is not confirmed by %s', async shown => {
+    const want = shown.startsWith('Extra') ? 'Extra large' : '10';
+    const r = await selectOption(shows(shown) as any, { name: 'Size', value: want }, { settleMs: 0 });
     expect(r).toMatchObject({ success: false, verified: true });
-    expect(r.text).toMatch(/now shows "Extra large \(sold out\)"/);
+    expect(r.text).toContain(`now shows "${shown}"`);
   });
 });

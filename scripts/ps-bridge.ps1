@@ -50,7 +50,7 @@ try {
         [DllImport("user32.dll")]
         public static extern bool IsZoomed(IntPtr hWnd);
         [DllImport("user32.dll")]
-        public static extern IntPtr GetParent(IntPtr hWnd);
+        public static extern int GetWindowLong(IntPtr hWnd, int nIndex);
         [DllImport("user32.dll")]
         public static extern int GetDlgCtrlID(IntPtr hWnd);
         [DllImport("user32.dll")]
@@ -1311,10 +1311,13 @@ function Test-Activatable($el, $action) {
 }
 
 # Select an item (SelectionItemPattern.Select) so that the APP hears of it, and read it back.
-# A Win32 list box (a WinForms ListBox is one) takes UIA's Select() as LB_SETCURSEL, which moves the highlight WITHOUT the
-# LBN_SELCHANGE its parent gets when a user picks an item. UIA then reads the item as selected while the app's own
-# selection-changed handler never ran (#396: a form applied "no priority" after a select that reported ok). So the list
-# box's parent is sent that notification, as the control itself does. A combo box needs none: its proxy notifies.
+# A WinForms ListBox takes UIA's Select() as LB_SETCURSEL, which moves the highlight WITHOUT the LBN_SELCHANGE its parent
+# gets when a user picks an item. UIA then reads the item as selected while the app's own selection-changed handler never
+# ran (#396: a form applied "no priority" after a select that reported ok). So the list box's parent is sent that
+# notification, as the control itself does. Only a WinForms list box: UIA's proxy for a plain Win32 "ListBox" and for a
+# combo box notifies by itself, and a second notification would run the app's handler twice.
+# The send is confined: to the list box's real PARENT window (GA_PARENT: never the owner of a popup list), in the list
+# box's own process, and only for a child list box that notifies at all (LBS_NOTIFY). Anything else: nothing is sent.
 # -> $true / $false: what the item's IsSelected reads afterwards ($null: it cannot be read). Throws without the pattern.
 function Select-Item($element) {
     $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
@@ -1333,12 +1336,21 @@ function Select-Item($element) {
         try {
             $list = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($element)
             $h = [IntPtr][int]$list.Current.NativeWindowHandle
-            if ($h -ne [IntPtr]::Zero -and $list.Current.ClassName -match '(?i)(^|\.)listbox(\.|$)') {
-                # WM_COMMAND, wParam = (LBN_SELCHANGE << 16) | control id, lParam = the list box. Bounded: a handler that
-                # opens a modal box must not hold the bridge (SMTO_ABORTIFHUNG).
-                $wParam = [IntPtr]((1 -shl 16) -bor ([Win32UIA]::GetDlgCtrlID($h) -band 0xFFFF))
-                $res = [IntPtr]::Zero
-                [void][Win32UIA]::SendMessageTimeout([Win32UIA]::GetParent($h), 0x0111, $wParam, $h, 2, 1500, [ref]$res)
+            if ($h -ne [IntPtr]::Zero -and $list.Current.ClassName -match '^WindowsForms\d+\.LISTBOX\.') {
+                $dad = [Win32UIA]::GetAncestor($h, 1)             # GA_PARENT
+                $style = [Win32UIA]::GetWindowLong($h, -16)       # GWL_STYLE
+                $listPid = [uint32]0; $dadPid = [uint32]0
+                [void][Win32UIA]::GetWindowThreadProcessId($h, [ref]$listPid)
+                if ($dad -ne [IntPtr]::Zero) { [void][Win32UIA]::GetWindowThreadProcessId($dad, [ref]$dadPid) }
+                $isChild = ($style -band 0x40000000) -ne 0        # WS_CHILD
+                $notifies = ($style -band 0x0001) -ne 0           # LBS_NOTIFY
+                if ($isChild -and $notifies -and $listPid -ne 0 -and $listPid -eq $dadPid) {
+                    # WM_COMMAND, wParam = (LBN_SELCHANGE << 16) | control id, lParam = the list box. Bounded: a handler
+                    # that opens a modal box must not hold the bridge (SMTO_ABORTIFHUNG).
+                    $wParam = [IntPtr]((1 -shl 16) -bor ([Win32UIA]::GetDlgCtrlID($h) -band 0xFFFF))
+                    $res = [IntPtr]::Zero
+                    [void][Win32UIA]::SendMessageTimeout($dad, 0x0111, $wParam, $h, 2, 1500, [ref]$res)
+                }
             }
         } catch { }
     }
