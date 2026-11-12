@@ -81,10 +81,11 @@ describe('describeCopies', () => {
     expect(lines[2]).toBe('npx cache holds: v2.0.13, v2.0.12 (used by the plugin / npx; old ones are harmless)');
   });
 
-  it('a newer release flags the global copy too, with the update command', () => {
+  it('a newer release flags the global copy too, with a command that works on any old version', () => {
+    // v2.0.15 predates `clawdcursor update`, so the fix is the npm command, not that.
     const { stale, lines } = describeCopies(copies.slice(0, 1), { latest: '2.0.16', platform: 'darwin' });
     expect(stale).toHaveLength(1);
-    expect(lines[0]).toMatch(/run: clawdcursor update$/);
+    expect(lines[0]).toMatch(/run: npm install -g clawdcursor@latest$/);
   });
 
   it('without a release check the newest copy found is the reference', () => {

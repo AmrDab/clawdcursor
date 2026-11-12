@@ -33,20 +33,26 @@ export function howToUpdate(method: Exclude<InstallMethod, 'npm-global'>, platfo
   }
 }
 
-/** npm's own entry script, next to this Node (or the one npm itself named when it started us). */
-export function npmCliPath(env: NodeJS.ProcessEnv = process.env, execPath = process.execPath, platform: NodeJS.Platform = process.platform): string | null {
+/**
+ * npm's own entry script: the one npm named when it started us, else the npm installed next to this copy in the same
+ * global node_modules (Homebrew, nvm, the official installer), else the one bundled next to this Node.
+ */
+export function npmCliPath(packageRoot: string, env: NodeJS.ProcessEnv = process.env, execPath = process.execPath, platform: NodeJS.Platform = process.platform): string | null {
+  const sibling = path.join(path.dirname(packageRoot), 'npm', 'bin', 'npm-cli.js');
   const bundled = platform === 'win32'
     ? path.join(path.dirname(execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js')
     : path.join(path.dirname(path.dirname(execPath)), 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
-  return [env.npm_execpath, bundled].find(f => !!f && path.basename(f) === 'npm-cli.js' && fs.existsSync(f)) ?? null;
+  return [env.npm_execpath, sibling, bundled].find(f => !!f && path.basename(f) === 'npm-cli.js' && fs.existsSync(f)) ?? null;
 }
+
+/** It becomes an npm package spec: a plain version only, never a URL, a git ref, an alias or an extra argument. */
+export const isPlainVersion = (v: unknown): v is string => typeof v === 'string' && /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(v);
 
 async function latestPublished(): Promise<string> {
   const res = await fetch('https://registry.npmjs.org/clawdcursor/latest', { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
   if (!res.ok) throw new Error(`the npm registry answered ${res.status}`);
   const { version } = await res.json() as { version?: string };
-  // It becomes an npm package spec: a plain version only, never a URL, a git ref or an alias.
-  if (!version || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(version)) throw new Error('the npm registry named no valid version');
+  if (!isPlainVersion(version)) throw new Error('the npm registry named no valid version');
   return version;
 }
 
@@ -77,7 +83,7 @@ export async function runUpdate(): Promise<void> {
   }
 
   const prefix = globalPrefixOf(root)!;
-  const npm = npmCliPath();
+  const npm = npmCliPath(root);
   const command = `npm install -g clawdcursor@${latest}`;
   if (!npm) {
     console.error(`npm was not found next to Node (${process.execPath}). Run: ${command}`);

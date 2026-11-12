@@ -17,6 +17,7 @@ import { getPackageRoot } from '../paths';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
 import { findInstalledCopies, describeCopies } from './installed-copies';
+import { installMethod, howToUpdate } from './update';
 
 interface DiagResult {
   name: string;
@@ -279,7 +280,8 @@ async function checkForUpdates(results: DiagResult[]): Promise<string | undefine
 
       if (latestTag && latestTag !== currentVersion && compareVersions(latestTag, currentVersion) > 0) {
         console.log(`   ⬆️  Update available: v${latestTag} (you have v${currentVersion})`);
-        console.log('   Run: clawdcursor update');
+        const method = installMethod(getPackageRoot());
+        console.log(`   ${method === 'npm-global' ? 'Run: clawdcursor update' : howToUpdate(method)}`);
         results.push({
           name: 'Version',
           ok: false,

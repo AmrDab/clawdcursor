@@ -53,15 +53,30 @@ export function globalPrefixOf(packageRoot: string, platform: NodeJS.Platform = 
   return fs.existsSync(platform === 'win32' ? path.join(prefix, 'clawdcursor.cmd') : path.join(prefix, 'bin', 'clawdcursor')) ? prefix : null;
 }
 
+/**
+ * The npm global prefix that holds a clawdcursor, found without running npm (#372). Candidates in order: the configured
+ * prefix, the one this copy is installed under, the folder of each `clawdcursor` launcher on PATH (a prefix set in
+ * ~/.npmrc, Homebrew's, nvm's), then npm's default (%APPDATA%\npm on Windows, the folder above node's bin/ elsewhere).
+ */
+export function findGlobalPrefix(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, packageRoot: string, execPath: string, home: string): string | null {
+  const win = platform === 'win32';
+  const onPath = (env.PATH ?? env.Path ?? '').split(win ? ';' : ':').filter(Boolean)
+    .filter(dir => fs.existsSync(path.join(dir, win ? 'clawdcursor.cmd' : 'clawdcursor')))
+    .map(dir => (win ? dir : path.dirname(dir)));
+  const candidates = [
+    env.npm_config_prefix,
+    globalPrefixOf(packageRoot, platform),
+    ...onPath,
+    win ? path.join(env.APPDATA ?? path.join(home, 'AppData', 'Roaming'), 'npm') : path.dirname(path.dirname(execPath)),
+  ];
+  return candidates.find(p => !!p && fs.existsSync(path.join(p, win ? '' : 'lib', 'node_modules', 'clawdcursor', 'package.json'))) ?? null;
+}
+
 export function defaultRoots(): CopyRoots {
   const platform = process.platform;
   const home = os.homedir();
   const appData = process.env.APPDATA ?? path.join(home, 'AppData', 'Roaming');
-  // Without running npm (#372): the configured prefix, else the one this copy is installed under, else npm's default
-  // (%APPDATA%\npm on Windows, the folder above node's bin/ elsewhere).
-  const globalPrefix = process.env.npm_config_prefix
-    || globalPrefixOf(getPackageRoot(), platform)
-    || (platform === 'win32' ? path.join(appData, 'npm') : path.dirname(path.dirname(process.execPath)));
+  const globalPrefix = findGlobalPrefix(process.env, platform, getPackageRoot(), process.execPath, home);
   const npmCache = process.env.npm_config_cache
     ?? (platform === 'win32' ? path.join(process.env.LOCALAPPDATA ?? path.join(home, 'AppData', 'Local'), 'npm-cache') : path.join(home, '.npm'));
   const desktopExtensions = platform === 'win32'
@@ -140,7 +155,8 @@ const RELEASES = 'https://github.com/AmrDab/clawdcursor/releases/latest';
 /** What to do about a stale copy, in one line. */
 function fixFor(kind: CopyKind, platform: NodeJS.Platform): string {
   switch (kind) {
-    case 'global': return 'run: clawdcursor update';
+    // Not `clawdcursor update`: a stale global copy may predate that command.
+    case 'global': return 'run: npm install -g clawdcursor@latest';
     case 'desktop-extension': return `install clawdcursor-${platform}.mcpb from ${RELEASES}`;
     case 'claude-code-plugin': return 'in Claude Code: /plugin marketplace update clawdcursor';
     default: return '';
