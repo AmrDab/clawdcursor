@@ -686,12 +686,17 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// points, as on Windows. The colours go through the library's brightness(1.3) saturate(1.2) once.
     /// --paused: the pulse - the whole ring in the "ocean" blues (stroke .94, glow .34, brightness 1.9), its opacity
     /// swinging .54..1 over 2.3 s. With Reduce Motion on: the whole ring, still.
-    /// Not here yet, and on Windows: the slow hue shift (10 degrees either way over 12 s), the bloom (the ring blurred
-    /// 8 pt at opacity .24, at most 1% white), and the stronger light theme on a light window.
+    /// In Light Mode: the library's light theme as on a light window on Windows - the highlight and the inset shadow
+    /// dark instead of white, saturate 1.5, the stroke and the glow at .6 and .7 - so the beam is not lost on white.
+    /// Windows reads the pixels under the frame; here that needs Screen Recording, so the system appearance stands in.
+    /// Not here yet, and on Windows: the slow hue shift (10 degrees either way over 12 s) and the bloom (the ring
+    /// blurred 8 pt at opacity .24, at most 1% white).
     func windowOutline() {
         let paused = CommandLine.arguments.contains("--paused")
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let turning = !paused && !still
+        // shortcut: read once at start, the system appearance for the pixels under the frame; upgrade with Screen Recording.
+        let light = NSApp.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
 
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
@@ -712,7 +717,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         view.layer?.addSublayer(stage)
 
         // brightness(b) saturate(1.2) on a colour (the feColorMatrix arithmetic, colorMatrix.ts with no hue turn).
-        let brightness = paused ? 1.9 : 1.3, saturation = 1.2
+        let brightness = paused ? 1.9 : 1.3, saturation = light ? 1.5 : 1.2
         func filtered(_ r: Double, _ g: Double, _ b: Double, _ alpha: Double) -> CGColor {
             let (r1, g1, b1) = (r * brightness, g * brightness, b * brightness)
             let grey = 0.213 * r1 + 0.715 * g1 + 0.072 * b1
@@ -742,27 +747,27 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 return blob
             }
         }
-        func conic(_ stops: [(Double, Double)]) -> CAGradientLayer {
+        func conic(_ stops: [(Double, Double)], _ color: NSColor = .white) -> CAGradientLayer {
             let layer = CAGradientLayer()
             layer.type = .conic
             layer.startPoint = CGPoint(x: 0.5, y: 0.5)
             layer.endPoint = CGPoint(x: 0.5, y: 0)   // from straight up, clockwise
-            layer.colors = stops.map { NSColor.white.withAlphaComponent(CGFloat($0.1)).cgColor }
+            layer.colors = stops.map { color.withAlphaComponent(CGFloat($0.1)).cgColor }
             layer.locations = stops.map { NSNumber(value: $0.0 / 100) }
             return layer
         }
 
         // The glow.
         let inner = CALayer()
-        inner.opacity = paused ? 0.34 : 0.42
+        inner.opacity = light ? 0.7 : paused ? 0.34 : 0.42
         let innerBlobs = blobLayers(alpha: 0.45)
         innerBlobs.forEach { inner.addSublayer($0) }
-        // The inset white shadow, alpha .27 falling off (squared) over 10 pt: four 2 pt bands.
+        // The inset white shadow, alpha .27 falling off (squared) over 10 pt: four 2 pt bands. Black .14 in Light Mode.
         let shadowBands: [(inset: CGFloat, alpha: CGFloat)] = [(1, 0.22), (3, 0.13), (5, 0.07), (7, 0.024)]
         let shadows: [CAShapeLayer] = shadowBands.map { band in
             let ring = CAShapeLayer()
             ring.fillColor = nil
-            ring.strokeColor = NSColor.white.withAlphaComponent(band.alpha).cgColor
+            ring.strokeColor = (light ? NSColor.black.withAlphaComponent(band.alpha * 0.14 / 0.27) : NSColor.white.withAlphaComponent(band.alpha)).cgColor
             ring.lineWidth = 2
             inner.addSublayer(ring)
             return ring
@@ -781,10 +786,12 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         // The stroke ring.
         let stroke = CALayer()
-        stroke.opacity = paused ? 0.94 : 0.26
+        stroke.opacity = paused ? 0.94 : light ? 0.6 : 0.26
         let strokeBlobs = blobLayers(alpha: 1)
         strokeBlobs.forEach { stroke.addSublayer($0) }
-        let highlight = conic([(0, 0), (54, 0), (57, 0.1), (60, 0.3), (63, 0.6), (66, 0.75), (69, 0.6), (72, 0.3), (75, 0.1), (78, 0), (100, 0)])
+        let highlight = light
+            ? conic([(0, 0), (54, 0), (57, 0.08), (60, 0.2), (63, 0.4), (66, 0.55), (69, 0.4), (72, 0.2), (75, 0.08), (78, 0), (100, 0)], .black)
+            : conic([(0, 0), (54, 0), (57, 0.1), (60, 0.3), (63, 0.6), (66, 0.75), (69, 0.6), (72, 0.3), (75, 0.1), (78, 0), (100, 0)])
         if turning { stroke.addSublayer(highlight) }
         let band = CAShapeLayer()
         band.fillColor = nil

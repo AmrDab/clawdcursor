@@ -325,6 +325,8 @@ describe('no full-screen glow', () => {
     expect(swift).toContain('conic([(0, 0), (30, 0), (36, 0.1), (44, 0.35), (52, 1), (80, 1), (86, 0.35), (92, 0.1), (95, 0), (100, 0)])');
     expect(swift).toContain('turn.duration = 1.96');
     expect(swift).toContain('let tones = paused ? ocean : amberTones');
+    // macOS in Light Mode: the same light theme (the system appearance stands in for the pixels Windows reads).
+    expect(swift).toContain('stroke.opacity = paused ? 0.94 : light ? 0.6 : 0.26');
     const pill = read('scripts', 'banner.ps1');
     expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
     expect(pill).toContain('const double Speed = 3.9, Sized = 2.4;');
