@@ -141,6 +141,18 @@ describe('4. one ladder, one notation', () => {
     expect(t).toContain('SEE: `accessibility {"action":"read_tree"}` → `system {"action":"copy_all_text"}` → `system {"action":"ocr"}`.');
     expect(t).toContain('`accessibility {"action":"smart_click","target":"<label>"}` → `computer {"action":"screenshot"}`');
   });
+
+  it('every repo file linked from README, the site and llms.txt exists (docs/ is published as clawdcursor.com)', () => {
+    const root = path.join(__dirname, '..', '..');
+    const read = (f: string) => fs.readFileSync(path.join(root, f), 'utf8');
+    const links = [
+      ...[...read('README.md').matchAll(/\]\(([^)#:\s]+)[)#]/g)].map(m => m[1]),
+      ...['README.md', 'docs/index.html', 'docs/llms.txt'].flatMap(f =>
+        [...read(f).matchAll(/github\.com\/AmrDab\/clawdcursor\/(?:blob|tree)\/main\/([^\s"')<>#]+)/g)].map(m => m[1])),
+    ];
+    expect(links.length).toBeGreaterThan(5);
+    expect(links.filter(l => !fs.existsSync(path.join(root, l)))).toEqual([]);
+  });
 });
 
 describe('5. the "little or no structure" hint needs a sparse tree', () => {
