@@ -9,7 +9,18 @@
 import * as fs from 'fs';
 import * as net from 'net';
 import * as path from 'path';
+import { FENCE_ENV, inFence } from '../../src/core/fence';
 import { POWERSHELL, tryRun } from './proc';
+
+/** The fence's variable for these pids, exactly as the daemon is started with it (isolated.ts). An empty list fences everything out. */
+export const fenceEnv = (pids: number[]): NodeJS.ProcessEnv => ({ [FENCE_ENV]: pids.join(',') || 'none' });
+
+/**
+ * Was the process an act went to one the benchmark started, or a child of one? The fence's own answer (`inFence`) over
+ * the pids the daemon was fenced to: the watchdog and the fence share one identity and cannot disagree. Asking again
+ * by command line, as the watchdog did, made a second identity that a slow scan could answer with nothing.
+ */
+export const inFixtureFence = (fencePids: number[]) => (pid: number): Promise<boolean> => inFence(pid, fenceEnv(fencePids));
 
 export interface Focus {
   /** The focused process, then its parent, grandparent, ... */

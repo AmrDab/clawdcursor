@@ -159,7 +159,9 @@ it is readable by the current user alone (an ACL on Windows, mode 0700 elsewhere
        processes hosted in it.
      A privacy stop ends the whole run; the tasks it did not get to are listed in the report as
      "not run (privacy stop)". The watchdog uses the same identity as the fence: the process an act went to, and
-     for a Store app the app its frame hosts (never the shared host's name).
+     for a Store app the app its frame hosts (never the shared host's name). Whether that process is the fixture's is
+     decided by the fence's own code (`inFence`) over the same pids the daemon was fenced to (one of them, or a child
+     of one), not by a second scan of command lines.
   2. *loop*: the same call 3 times in a row;
   3. *repeat-failure*: the same failure code 3 times in a task;
   4. *call-cap* and *time-cap*: the task's `caps`.
@@ -219,7 +221,7 @@ None of the tasks needs a refused call: every fixture is already open and in fro
 | native-dialog-fill | native dialog | all | M1 | 8 / 0 | text fields, a list, a checkbox, Apply |
 | native-dialog-modal | native dialog | all | M2 M5 | 5 / 0 | the modal's OK, not the window's OK behind it |
 | native-dialog-duplicate | native dialog | all | M2 | 4 / 0 | two "Edit" buttons told apart by their group |
-| calc-multiply | Store/UWP app | Windows | M1 | 4 / 0 | keys reach Calculator; the display AND the expression are read, so typing the result does not pass |
+| calc-multiply | Store/UWP app | Windows | M1 | 9 / 0 | keys reach Calculator; the display AND the expression are read, so typing the result does not pass |
 | editor-type-lines | document editor | Windows | M1 M5 | 4 / 0 | two lines land whole in the fixture editor |
 | textedit-type-lines | document editor | macOS | M1 M5 | 4 / 0 | the same in TextEdit |
 | cad-designcenter-orbit | 3D/CAD viewport | Windows | M3 | 5 / 2 | manual verify: metrics only |

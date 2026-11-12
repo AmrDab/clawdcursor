@@ -27,10 +27,10 @@
   },
   "oracle": {
     "screenshots": 0,
-    "calls": 4
+    "calls": 9
   },
   "caps": {
-    "calls": 14,
+    "calls": 20,
     "seconds": 180
   }
 }

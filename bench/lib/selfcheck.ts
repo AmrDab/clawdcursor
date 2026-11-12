@@ -18,7 +18,7 @@ import { resolveCli, startIsolated } from './isolated';
 import { buildNative, nativeArgs, openApp, openNativeFixture, readStateFile, type LiveFixture } from './live-fixtures';
 import { ORACLES, nativeDo, oracleCounts, runnable, scriptProblems } from './oracles';
 import { TASKS_DIR } from './tasks';
-import { cdpIsFixture, ownsFocus, readFocus } from './ownership';
+import { cdpIsFixture, inFixtureFence, ownsFocus, readFocus } from './ownership';
 import { Watchdog, readSessionCalls } from './watchdog';
 import { freePort, pidsByCommandLine, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
@@ -330,7 +330,7 @@ export async function selfcheckFixtures(buildDir: string | undefined, log: (line
           ok = check(!!acted[0]?.appPid && roots.includes(acted[0].appPid) && Number.isInteger(acted[0].appHandle),
             `Calculator: the act line carries who it went to: process ${acted[0]?.appPid} (the Calculator the benchmark started: ${roots.join(', ')}), window ${acted[0]?.appHandle}`) && ok;
           const dog = new Watchdog({ maxCalls: 50, maxSeconds: 600, fixtureApps: calc.apps }, {
-            ownsFocus: async () => ownsFocus(await readFocus(), await calc.roots(), calc.frameTitle), ownsPid: async pid => (await calc.roots()).includes(pid),
+            ownsFocus: async () => ownsFocus(await readFocus(), await calc.roots(), calc.frameTitle), ownsPid: inFixtureFence(roots),
             cdpIsFixture: () => false });
           let verdict: { rule: string; detail: string } | null = null;
           for (const c of calls) verdict ??= await dog.judge(c);

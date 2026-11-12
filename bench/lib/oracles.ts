@@ -120,7 +120,13 @@ export const ORACLES: Record<string, OracleStep[]> = {
 
   // Real apps: the script is the same shape, but nothing here can run it without the app on screen. Its counts stand;
   // the live run is its execution.
-  'calc-multiply': [focus, read, { kind: 'act', call: 'computer type "47*89="' }, verify],
+  // Calculator by name, the path clawdcursor's guidance recommends ("act by name"): one invoke per button, as Haiku and
+  // Codex did in the first full run. Typing the expression is shorter, but it is not what an agent is told to do.
+  'calc-multiply': [
+    focus, read,
+    ...['Four', 'Seven', 'Multiply by', 'Eight', 'Nine', 'Equals'].map((name): OracleStep => ({ kind: 'act', call: `accessibility invoke "${name}"` })),
+    verify,
+  ],
   'textedit-type-lines': [focus, read, { kind: 'act', call: 'accessibility set_value (the document)' }, verify],
   'cad-designcenter-orbit': [focus, look, { kind: 'act', call: 'computer drag (middle button)' }, { kind: 'act', call: 'computer key (fit)' }, lookAgain],
 };

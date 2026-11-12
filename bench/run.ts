@@ -16,7 +16,7 @@ import { Cleanup } from './lib/cleanup';
 import { startFixtureServer, type FixtureServer } from './lib/fixture-server';
 import { probeMcp, resolveCli, startIsolated } from './lib/isolated';
 import { appUnavailable, buildNative, openFixture, type FixtureContext, type NativeBuild } from './lib/live-fixtures';
-import { USER_CDP_PORT, cdpIsFixture, ownsFocus, portOpen, readFocus } from './lib/ownership';
+import { USER_CDP_PORT, cdpIsFixture, inFixtureFence, ownsFocus, portOpen, readFocus } from './lib/ownership';
 import { execFileSync } from 'child_process';
 import { freePort, sleep, system32 } from './lib/proc';
 import { buildPrompt } from './lib/prompt';
@@ -188,7 +188,8 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const cdpClock = setInterval(() => { proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }); }, 5000);
     const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps }, {
       ownsFocus: async () => ownsFocus(await readFocus(), await fixture.roots(), fixture.frameTitle),
-      ownsPid: async pid => (await fixture.roots()).includes(pid),
+      // The process an act went to is judged by the fence's own rule, over the very pids the daemon was fenced to.
+      ownsPid: inFixtureFence(fencePids),
       cdpIsFixture: () => cdpProven,
     });
     const abort = new AbortController();
