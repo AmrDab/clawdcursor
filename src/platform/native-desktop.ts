@@ -11,7 +11,7 @@
 
 import { setFenceCursorReader } from '../core/fence';
 import { unguarded } from './pointer-guard';
-import { beforePointerPress, beforeCapture, guardInputMethods } from './pointer-guard';
+import { beforePointerPress, guardInputMethods } from './pointer-guard';
 import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
@@ -20,14 +20,13 @@ import { normalizeKey } from './keys';
 import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } from './native-helper';
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
-import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen';
+import { isWaylandSession, waylandScreenSize } from './wayland-screen';
 import { llmScale, llmSize, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo } from './mac-screen';
 import * as fs from 'fs';
 import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
-import { psOpts, powershellExe } from './ps-spawn';
 
 // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
@@ -74,22 +73,11 @@ const KEY_MAP: Record<string, Key> = {
 };
 
 
-export interface MonitorInfo {
-  index: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  primary: boolean;
-  name: string;
-}
-
 export class NativeDesktop extends EventEmitter {
   private config: ClawdConfig;
   private screenWidth = 0;
   private screenHeight = 0;
   private connected = false;
-  private monitors: MonitorInfo[] = [];
   private helper = IS_MAC ? getNativeHelper() : null;
   /** macOS: who owns the keyboard (see mac-keyboard.ts). Created on first use; the MCP tools type through THIS class. */
   private macKeyboardGuard: import('./mac-keyboard').MacKeyboardGuard | null = null;
@@ -109,95 +97,6 @@ export class NativeDesktop extends EventEmitter {
     this.config = config;
     guardInputMethods(this);  // the MCP tools type and click through this class (pointer-guard.ts)
     setFenceCursorReader(() => unguarded(() => this.getCursorPosition()));   // the test fence checks bare presses at the live pointer
-  }
-
-  /**
-   * Enumerate all connected monitors with their positions and sizes.
-   * Returns best-effort results — falls back to primary only on errors.
-   */
-  async getMonitors(): Promise<MonitorInfo[]> {
-    if (this.monitors.length > 0) return this.monitors;
-
-    try {
-      if (process.platform === 'win32') {
-        const { execFile } = await import('child_process');
-        const { promisify } = await import('util');
-        const execFileAsync = promisify(execFile);
-        const ps = `Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { "$($_.Bounds.X),$($_.Bounds.Y),$($_.Bounds.Width),$($_.Bounds.Height),$($_.Primary),$($_.DeviceName)" }`;
-        const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps], psOpts({ encoding: 'utf8' as const }));
-        const lines = stdout.trim().split('\n').filter(Boolean);
-        this.monitors = lines.map((line, i) => {
-          const [x, y, w, h, primary, name] = line.trim().split(',');
-          return {
-            index: i,
-            x: parseInt(x), y: parseInt(y),
-            width: parseInt(w), height: parseInt(h),
-            primary: primary.trim().toLowerCase() === 'true',
-            name: name?.trim() || `Monitor ${i + 1}`,
-          };
-        });
-      } else if (process.platform === 'darwin') {
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
-        // system_profiler gives display info; for bounds we use osascript
-        const { stdout } = await execAsync(`osascript -e 'tell application "System Events" to get bounds of every desktop'`).catch(() => ({ stdout: '' }));
-        if (stdout.trim()) {
-          // fallback: just return primary
-          this.monitors = [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
-        } else {
-          this.monitors = [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
-        }
-      } else {
-        // Linux: use xrandr
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
-        const { stdout } = await execAsync('xrandr --query 2>/dev/null').catch(() => ({ stdout: '' }));
-        const re = /(\S+) connected(?: primary)? (\d+)x(\d+)\+(\d+)\+(\d+)/g;
-        let m; let i = 0; const results: MonitorInfo[] = [];
-        while ((m = re.exec(stdout)) !== null) {
-          results.push({ index: i++, x: parseInt(m[4]), y: parseInt(m[5]), width: parseInt(m[2]), height: parseInt(m[3]), primary: stdout.includes(m[1] + ' connected primary'), name: m[1] });
-        }
-        this.monitors = results.length > 0 ? results : [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
-      }
-    } catch {
-      this.monitors = [{ index: 0, x: 0, y: 0, width: this.screenWidth, height: this.screenHeight, primary: true, name: 'Primary' }];
-    }
-
-    return this.monitors;
-  }
-
-  /**
-   * Capture a specific monitor by index.
-   * Falls back to primary grab if region capture fails.
-   */
-  async captureMonitor(monitorIndex = 0): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number }> {
-    const monitors = await this.getMonitors();
-    const mon = monitors[monitorIndex] ?? monitors.find(m => m.primary) ?? monitors[0];
-    if (!mon) return this.captureForLLM();
-
-    try {
-      let img: GrabImage;
-      await beforeCapture(); // clawdcursor's own pill must not be in the capture (X11 and Wayland alike)
-      if (isWaylandSession()) {
-        img = await grimGrab({ x: mon.x, y: mon.y, width: mon.width, height: mon.height });
-      } else {
-        const { Region } = await import('@nut-tree-fork/nut-js');
-        img = await screen.grabRegion(new Region(mon.x, mon.y, mon.width, mon.height));
-      }
-      const { scale: scaleFactor, width: llmW, height: llmH } = llmSize(mon.width, mon.height);
-      const processed = await sharpFromGrab(img)
-        .resize(llmW, llmH)
-        .png()
-        .toBuffer();
-      // Release the raw RGBA buffer immediately after processing
-      (img as any).data = null;
-      return { width: mon.width, height: mon.height, buffer: processed, timestamp: Date.now(), format: 'png', scaleFactor, llmWidth: llmW, llmHeight: llmH };
-    } catch {
-      // Fallback: full primary grab
-      return this.captureForLLM();
-    }
   }
 
   /**

@@ -4,7 +4,7 @@
  * These wrap the widened InvokeAction set (`expand`/`collapse`/`toggle`/
  * `select`) and the richer UiElement state fields added in Tranche 1A.
  * The adapter-level support is already in place for all three OSes:
- *   - Windows: ps-bridge.ps1 + invoke-element.ps1 (UIA ExpandCollapse,
+ *   - Windows: ps-bridge.ps1 (UIA ExpandCollapse,
  *     Selection, Toggle patterns)
  *   - macOS: invoke-element.jxa (AXExpanded / AXValue / AXSelected
  *     attributes + AXPress / AXShowMenu action fallbacks)
