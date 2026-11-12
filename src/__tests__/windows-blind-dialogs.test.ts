@@ -24,6 +24,7 @@ import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { psOpts } from '../platform/ps-spawn';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bridgePath = join(here, '..', '..', 'scripts', 'ps-bridge.ps1');
@@ -47,7 +48,7 @@ describe('ps-bridge — Win32 controls keep their real control type (bug 1)', ()
 
   it.runIf(process.platform === 'win32')('a ListView is reported as List, not Pane, after a FromHandle-first session', () => {
     const pidOut = execFileSync('powershell', ['-NoProfile', '-Command',
-      '(Get-Process explorer -ErrorAction SilentlyContinue | Select-Object -First 1).Id'], { encoding: 'utf8' }).trim();
+      '(Get-Process explorer -ErrorAction SilentlyContinue | Select-Object -First 1).Id'], psOpts({ encoding: 'utf8' })).trim();
     const pid = Number(pidOut);
     if (!pid) return; // no shell (headless runner): nothing to probe
     const input = [
@@ -56,7 +57,7 @@ describe('ps-bridge — Win32 controls keep their real control type (bug 1)', ()
       'EXIT', '',
     ].join('\n');
     const out = execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', bridgePath],
-      { input, encoding: 'utf8', timeout: 60_000 });
+      psOpts({ input, encoding: 'utf8', timeout: 60_000 }));
     const lines = out.split(/\r?\n/).filter(Boolean);
     const found = JSON.parse(lines[lines.length - 1]) as Array<{ className: string; controlType: string }>;
     const listViews = found.filter(e => e.className === 'SysListView32');
@@ -147,7 +148,7 @@ describe('ps-bridge — a Win32 Invoke that opens a modal box does not block the
     let out: string;
     try {
       out = execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', file],
-        { encoding: 'utf8', timeout: 60_000 });
+        psOpts({ encoding: 'utf8', timeout: 60_000 }));
     } finally { rmSync(dir, { recursive: true, force: true }); }
     const r = JSON.parse(out.trim().split(/\r?\n/).pop()!);
     expect(r.a).toBe('pending');

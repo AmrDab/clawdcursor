@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { psOpts } from '../platform/ps-spawn';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bridge = readFileSync(join(here, '..', '..', 'scripts', 'ps-bridge.ps1'), 'utf8');
@@ -31,7 +32,7 @@ describe('ps-bridge name matching', () => {
       ['', 'x', false],
     ];
     const script = `${fn}\n` + cases.map(([el, want]) => `Write-Output (Test-NameMatch '${el}' '${want}')`).join('\n');
-    const out = execFileSync('powershell', ['-NoProfile', '-Command', script], { encoding: 'utf8', timeout: 30_000 })
+    const out = execFileSync('powershell', ['-NoProfile', '-Command', script], psOpts({ encoding: 'utf8', timeout: 30_000 }))
       .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
     expect(out).toEqual(cases.map(c => (c[2] ? 'True' : 'False')));
   });

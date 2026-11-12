@@ -16,6 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'child_process';
 import { getProcessStartTime } from '../src/surface/pidfile';
+import { psOpts } from '../src/platform/ps-spawn';
 
 // Skip the suite if the platform-specific binary isn't on PATH. Stripped-
 // down container images (Alpine without procps, Windows nano-server without
@@ -23,7 +24,7 @@ import { getProcessStartTime } from '../src/surface/pidfile';
 function platformBinaryAvailable(): boolean {
   try {
     if (process.platform === 'win32') {
-      execFileSync('powershell', ['-NoProfile', '-Command', 'exit 0'], { stdio: 'ignore', timeout: 5000 });
+      execFileSync('powershell', ['-NoProfile', '-Command', 'exit 0'], psOpts({ stdio: 'ignore', timeout: 5000 }));
     } else {
       execFileSync('ps', ['-p', String(process.pid)], { stdio: 'ignore', timeout: 5000 });
     }

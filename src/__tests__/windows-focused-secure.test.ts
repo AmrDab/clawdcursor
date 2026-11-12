@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { psOpts } from '../platform/ps-spawn';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const bridgePath = join(here, '..', '..', 'scripts', 'ps-bridge.ps1');
@@ -25,7 +26,7 @@ describe('ps-bridge get-focused-element — password fields', () => {
 
   it.runIf(process.platform === 'win32')('the real bridge reports secure (false for an ordinary focused element)', () => {
     const out = execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', bridgePath],
-      { input: `${JSON.stringify({ cmd: 'get-focused-element' })}\nEXIT\n`, encoding: 'utf8', timeout: 60_000 });
+      psOpts({ input: `${JSON.stringify({ cmd: 'get-focused-element' })}\nEXIT\n`, encoding: 'utf8', timeout: 60_000 }));
     const reply = out.split(/\r?\n/).filter(Boolean).map(l => { try { return JSON.parse(l); } catch { return null; } })
       .find(j => j && j.ready !== true && 'success' in j);
     if (!reply || reply.success === false) return;   // nothing focused (headless runner)
