@@ -23,7 +23,8 @@
  *
  * Who answered matters: the pill, CLI, dashboard and POST /resume are the
  * human ('resumed'); an AI calling `resume_task` is 'resumed_unverified',
- * so the agent is told the user did NOT confirm it on screen.
+ * so the agent is told the user did NOT confirm it on screen. Only a click on
+ * the pill itself is marked `pill`: a model with a shell can run `clawdcursor resume`.
  *
  * A pause can also be a small card: `choices` (2-6 short options, one button each) and/or `input` (a text box). A
  * picked option settles as 'replied' with `choice` (the exact option text, looked up here from the index the pill
@@ -57,6 +58,8 @@ export interface PauseResult {
    * text), so it is NOT the user's confirmation — callers must not report it as one.
    */
   detected?: boolean;
+  /** Answered by a click on the pill itself, not through `clawdcursor resume`, the dashboard or POST /resume. */
+  pill?: boolean;
 }
 
 export interface PauseRequest {
@@ -287,7 +290,7 @@ class PauseGate {
 
     this.startWindow = null;
     void this.focusTracker.capture().then(w => { if (this.pending === entry) this.startWindow = w; }, () => { /* unknown */ });
-    controlBanner.showPaused(info, (answer, reply, choice) => { this.answer(answer, 'user', reply, choice); }, pid => { this.refocus(pid); });
+    controlBanner.showPaused(info, (answer, reply, choice) => { this.answer(answer, 'pill', reply, choice); }, pid => { this.refocus(pid); });
     return promise;
   }
 
@@ -295,13 +298,13 @@ class PauseGate {
    * Answer the pending pause: Resume continues the run, End task ends it, a reply (the pill's "Something else") continues
    * it with what the user typed, a choice (the index of one of the card's `choices`, as the pill reports it) continues
    * it with that option's text. `by: 'agent'` (an AI calling `resume_task`) resumes as unverified and can never
-   * choose: a choice is the user's.
+   * choose: a choice is the user's. `by: 'pill'` is the user's click on the pill itself.
    */
-  answer(a: PauseAnswer, by: 'user' | 'agent' = 'user', reply?: string, choice?: number): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
+  answer(a: PauseAnswer, by: 'pill' | 'user' | 'agent' = 'user', reply?: string, choice?: number): { ok: true; outcome: PauseOutcome } | { ok: false; error: string } {
     const p = this.pending;
     if (!p) return { ok: false, error: 'nothing is paused' };
     if (a === 'choice') {
-      if (by !== 'user') return { ok: false, error: 'a choice can only be made by the user on screen' };
+      if (by === 'agent') return { ok: false, error: 'a choice can only be made by the user on screen' };
       const text = Number.isInteger(choice) ? p.info.choices?.[choice as number] : undefined;
       if (text === undefined) return { ok: false, error: 'no such choice' };
       this.finish(p, { outcome: 'replied', choice: text });
@@ -315,7 +318,7 @@ class PauseGate {
       return { ok: true, outcome: 'replied' };
     }
     const outcome: PauseOutcome = a === 'end' ? 'ended' : by === 'agent' ? 'resumed_unverified' : 'resumed';
-    this.finish(p, { outcome });
+    this.finish(p, { outcome, ...(by === 'pill' ? { pill: true } : {}) });
     return { ok: true, outcome };
   }
 
