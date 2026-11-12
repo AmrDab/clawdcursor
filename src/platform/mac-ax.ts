@@ -257,6 +257,7 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
     ...(checked !== undefined ? { checked } : {}),
     automationId: automationId || undefined,
     description: raw.description || undefined,
+    ...(typeof raw.help === 'string' && raw.help ? { help: raw.help } : {}),
     processId: raw.processId ?? processId,
     ...(raw.readable === true && !secure ? { readable: true } : {}),
     depth,

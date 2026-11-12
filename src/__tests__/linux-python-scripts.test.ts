@@ -85,6 +85,16 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.seven.enabled).toBe(true);
   });
 
+  // #356: an unnamed drawing surface is sent with its role and bounds (Windows and macOS keep only a large one).
+  it('an unnamed canvas comes back as a role-only node with its bounds', () => {
+    expect(out.canvas).toMatchObject({ name: '', controlType: 'canvas', bounds: { x: 0, y: 100, width: 1000, height: 700 } });
+  });
+
+  // #359: the AT-SPI description is the tooltip; it is sent only when it says more than the name.
+  it('the accessible description comes back as help, unless it repeats the name or is empty', () => {
+    expect(out.help).toEqual(['Make text bold', null, null]);
+  });
+
   it('all-zero SCREEN extents fall back to WINDOW extents and say so', () => {
     expect(out.rel.bounds).toEqual({ x: 5, y: 6, width: 7, height: 8 });
     expect(out.rel.coordType).toBe('window');

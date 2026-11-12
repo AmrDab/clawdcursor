@@ -307,6 +307,10 @@ def node_to_dict(acc: Any) -> Optional[dict]:
         "processId": pid,
         "automationId": automation_id,
     }
+    # What the app shows on hover: toolkits (GTK, Qt, Chromium) expose a tooltip as the accessible description.
+    help_text = safe(lambda: acc.get_description(), '') or ''
+    if help_text and help_text != name:
+        out["help"] = help_text
     # Tick state and open state, the same fields the Windows and macOS adapters report (UiElement.checked/expanded).
     # SELECTED is a list item's state, not a tick: a ticked Chrome checkbox read selected:false.
     tick = checked_state(acc, role_name)

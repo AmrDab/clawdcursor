@@ -412,6 +412,8 @@ struct Walk {
     var unreadable = 0
     /// Set when the window itself could not be read — there is no tree to return.
     var rootError: AXError? = nil
+    /// The walk root's area: an unnamed leaf covering a quarter of it is kept (a drawn surface, #356).
+    var rootArea: CGFloat = 0
 }
 
 let nodeAttrs = [
@@ -447,6 +449,8 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     let desc = str(a["AXDescription"]) ?? ""
     let ident = str(a["AXIdentifier"]) ?? ""
     let kids = (a["AXChildren"] as? [AXUIElement]) ?? []
+    let sz = axSize(a["AXSize"]) ?? .zero
+    if depth == 0 { w.rootArea = sz.width * sz.height }
     var name = title.isEmpty ? desc : title
     // A secure field's value never leaves this process — it is not even kept.
     let value: String? = secure ? nil : str(a["AXValue"])
@@ -465,8 +469,10 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     if name.isEmpty && (alwaysKeepRoles.contains(role) || labelPeekRoles.contains(role)) { name = str(a["AXHelp"]) ?? "" }
 
     let hasValue = !(value ?? "").isEmpty
+    // A large unnamed leaf is a drawn surface (a canvas, a board): kept as a role-only node, so read_tree can say so.
+    let large = w.rootArea > 0 && sz.width * sz.height >= 0.25 * w.rootArea
     let keep = depth == 0 || !name.isEmpty || (!ident.isEmpty && !isGeneratedIdentifier(ident)) || hasValue
-        || alwaysKeepRoles.contains(role) || !children.isEmpty
+        || alwaysKeepRoles.contains(role) || !children.isEmpty || large
     if !keep { return nil }
 
     var node: [String: Any] = [
@@ -478,6 +484,8 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     if !subrole.isEmpty { node["subrole"] = subrole }
     if secure { node["secure"] = true } else if hasValue, let v = value { node["value"] = String(v.prefix(500)) }
     if !desc.isEmpty && desc != name { node["description"] = desc }
+    // The tooltip, when it says more than the name (it may BE the name: see above).
+    if let help = str(a["AXHelp"]), !help.isEmpty, help != name { node["help"] = help }
     if bool(a["AXEnabled"]) == false { node["enabled"] = false }
     if bool(a["AXFocused"]) == true { node["focused"] = true }
     if bool(a["AXSelected"]) == true { node["selected"] = true }
@@ -624,7 +632,7 @@ func otherWindowCount(_ app: NSRunningApplication, searched: [AXUIElement]) -> I
 }
 
 func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
-    let a = multi(h.element, ["AXPosition", "AXSize", "AXValue", "AXEnabled", "AXFocused", "AXSelected", "AXExpanded"])
+    let a = multi(h.element, ["AXPosition", "AXSize", "AXValue", "AXEnabled", "AXFocused", "AXSelected", "AXExpanded", "AXHelp"])
     let secure = h.subrole == "AXSecureTextField"
     var d: [String: Any] = [
         "name": h.name, "automationId": h.ident, "controlType": h.role,
@@ -636,6 +644,7 @@ func hitDict(_ h: Hit, pid: Int32) -> [String: Any] {
     if bool(a["AXEnabled"]) == false { d["enabled"] = false }
     if bool(a["AXFocused"]) == true { d["focused"] = true }
     if bool(a["AXSelected"]) == true { d["selected"] = true }
+    if let help = str(a["AXHelp"]), !help.isEmpty, help != h.name { d["help"] = help }
     // Same rule as the tree: a disclosure triangle's open state is its AXValue, so `state` of a web <summary> is not "not expandable".
     if let open = openState(role: h.role, expanded: a["AXExpanded"], value: a["AXValue"]) { d["expandable"] = true; d["expanded"] = open }
     return d

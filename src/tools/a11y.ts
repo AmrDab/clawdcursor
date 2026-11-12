@@ -15,7 +15,7 @@ import { untrusted } from '../core/miss-text';
 import { copyAllText } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint, shownValue } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint, shownValue, shownHelp } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
 
@@ -197,6 +197,7 @@ function elementLine(el: UiElement, value: string): string {
     // On no monitor (or scrolled out of view): no position, so nothing to click. read_tree says the same.
     (el.offscreen ? ' (offscreen)' : ` @${el.bounds.x},${el.bounds.y} ${el.bounds.width}x${el.bounds.height}`) +
     value +
+    shownHelp({ name: elementLabel(el), help: el.help }) +
     (el.disabled || el.enabled === false ? ' DISABLED' : '') +
     (el.focused ? ' FOCUSED' : '');
 }

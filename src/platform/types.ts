@@ -128,6 +128,9 @@ export interface UiElement {
    * Added 0.9.4 for issue #101 bug 5.
    */
   description?: string;
+  /** What the app shows on hover, when the platform exposes it: UIA HelpText, AXHelp, the AT-SPI description. Set only when
+   *  it differs from `name`; screen text, so quoted wherever it is shown (blind-hints.ts shownHelp). */
+  help?: string;
   /** Checkbox / toggle state when the element supports toggling (UIA TogglePattern). */
   checked?: boolean | 'mixed';
   /**

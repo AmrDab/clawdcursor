@@ -38,6 +38,7 @@ import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
+import { OPAQUE_MARK } from '../tools/blind-hints';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
 //
@@ -169,6 +170,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           'Prefer named-target actions (by a11y name) over pixel coordinates. ') +
       // The OS is read once, here, when the server starts: the agent knows from its first message which keys to send.
       osKeysGuide() +
+      'A surface with no names and no text (a drawing canvas, whiteboard, CAD viewport or map; read_tree says "Opaque area") ' +
+      'is where a screenshot is the right tool: plan every stroke from one screenshot, send them in ONE batch ' +
+      '(click with path, drag_path), then check with ONE screenshot_region of only the changed area, max_edge 512. ' +
       'Roadblocks only the user can clear (sign-in, 2FA, CAPTCHA, a step that needs their confirmation): call system {action:"pause_for_user", message} — ' +
       'ask for that ONE step only ("Sign in to Glama") and do everything before and after it yourself; for a sign-in, code or CAPTCHA, done_when ' +
       '(what shows on screen once they are done) ends the pause the moment they finish, with no Resume click — never for a confirmation or a choice. Never type or guess credentials. ' +
@@ -202,6 +206,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const VISION_STREAK_HINT = (n: number) => compact
     ? `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
     : `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
+  // The last blind read found nothing to act on in the window (an empty tree, an opaque area): the advice above cannot be followed there.
+  const CANVAS_HINT = compact
+    ? '[clawdcursor] The last text read found nothing to act on here, so a screenshot is right: send all remaining strokes in ONE batch (computer click with path, drag_path), then ONE computer screenshot_region of only the changed area with max_edge 512.'
+    : '[clawdcursor] The last text read found nothing to act on here, so a screenshot is right: send all remaining strokes in ONE batch (mouse_click with path, mouse_drag_stepped), then ONE desktop_screenshot_region of only the changed area with max_edge 512.';
+  let blindFoundNothing = false;
+  let nudgedThisStreak = false;
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
     .server?.getClientVersion?.();
 
@@ -405,19 +415,32 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         }));
         // A batch halts at its first failed step, so a halt a guard caused is a refusal, not an error.
         const batchRefused = result.isError && steps?.[steps.length - 1]?.outcome === 'refused';
+        const outcome = batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? '');
+        const blindBefore = sessionLog.summary.blind;
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
-          { outcome: batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? ''), space: typeof params?.space === 'string' ? params.space : undefined,
+          { outcome, space: typeof params?.space === 'string' ? params.space : undefined,
             ...acted(), steps, timing: run.steps, ...(result.pressedKeys ? { cls: 'act-other' as const } : {}) });
+        // What the latest blind read (alone or a batch step) found about the WHOLE window: an empty tree or an opaque area.
+        // A missed find, an empty clipboard or a timeout says nothing about the window. Only the tool's own words count,
+        // never the screen text inside the block.
+        if (sessionLog.summary.blind > blindBefore) {
+          const own = (result.text ?? '').split('</untrusted-screen-content>').pop()!;
+          blindFoundNothing = cls === 'blind' && (own.startsWith('(empty a11y tree') || own.includes(OPAQUE_MARK));
+        }
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After
-        // 3 screenshots with no text/a11y read in between (and every 5th
-        // after), say once what the cheaper, exact path is.
+        // 3 screenshots with no text/a11y read in between, say what the cheaper,
+        // exact path is — once per run of screenshots (#380: repeating it every
+        // 5th was noise). Where the last blind read found nothing (a canvas),
+        // say instead how to use screenshots well there (#356).
         const streak = sessionLog.visionOnlyStreak;
+        if (streak <= 1) nudgedThisStreak = false;
         // The first screenshot of a session that has read nothing yet is the cheapest moment to say it.
         const firstBlind = streak === 1 && sessionLog.summary.blind === 0;
-        if (cls === 'vision' && !result.isError && (firstBlind || (streak >= 3 && (streak - 3) % 5 === 0))) {
-          result = { ...result, text: `${result.text}\n\n${VISION_STREAK_HINT(streak)}` };
+        if (cls === 'vision' && !result.isError && !nudgedThisStreak && (blindFoundNothing || firstBlind || streak >= 3)) {
+          nudgedThisStreak = true;
+          result = { ...result, text: `${result.text}\n\n${blindFoundNothing ? CANVAS_HINT : VISION_STREAK_HINT(streak)}` };
         }
         const content: McpContentBlock[] = [];
         if (result.image) {

@@ -84,7 +84,7 @@ export function outcomeOf(isError: boolean, text: string): Outcome {
   if (isError && fenceActive() && head.startsWith('FENCED: ')) return 'refused';   // the test fence (core/fence.ts) stopped it before it ran
   if (/PSRunner timeout|timed out after|ETIMEDOUT|walk timed out/i.test(head)) return 'timeout';
   if (/UI TREE \(PARTIAL|"truncated":\s*true/i.test(head)) return 'partial';
-  if (head.startsWith('(no elements found)')
+  if (head.startsWith('(no elements found)') || head.startsWith('(empty a11y tree')
     || /no elements? (?:found|named)|no_clickable_target|could not read|Nothing was copied|no option named/i.test(head)) return 'empty';
   return isError ? 'error' : 'ok';
 }

@@ -1717,6 +1717,7 @@ export class WindowsAdapter implements PlatformAdapter {
       expandable: raw?.expandable,
       expanded: raw?.expanded,
       automationId: raw?.automationId,
+      ...(raw?.help ? { help: String(raw.help) } : {}),
       processId: raw?.processId ?? raw?.pid,
       ...(raw?.toggleState === 'On' ? { checked: true }
         : raw?.toggleState === 'Off' ? { checked: false }

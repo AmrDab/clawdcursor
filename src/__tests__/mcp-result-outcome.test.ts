@@ -392,6 +392,42 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     expect(text(r)).not.toMatch(/before any text was read/);
   });
 
+  // #380: the nudge repeated every 5th screenshot of a long run and changed nothing.
+  it('a run of screenshots is nudged once, at the third', async () => {
+    const ctx = { ...shotCtx(), a11y: { getScreenContext: async () => 'text' } as any };
+    await createMcpServer({ ctx, compact: true });
+    await capturedHandlers.get('accessibility')!({ action: 'read_tree' });
+    const nudged: number[] = [];
+    for (let i = 1; i <= 9; i++) {
+      if (/screenshots in a row with no text read/.test(text(await capturedHandlers.get('computer')!({ action: 'screenshot' })))) nudged.push(i);
+    }
+    expect(nudged).toEqual([3]);
+  });
+
+  // #356: after a read that found only an opaque board, "use compile_ui" cannot be followed; how to use screenshots well can.
+  it('after a read that reported an opaque area, the screenshot gets the canvas advice, once', async () => {
+    const tools = Array.from({ length: 9 }, (_, i) => ({ name: `Tool ${i}`, controlType: 'Button', bounds: { x: i * 40, y: 0, width: 36, height: 36 } }));
+    const tree = [{ name: 'Board app', controlType: 'Window', bounds: { x: 0, y: 0, width: 1000, height: 800 } }, ...tools,
+      { name: 'Board', controlType: 'Pane', bounds: { x: 0, y: 100, width: 1000, height: 700 } }];
+    const base = shotCtx();
+    const ctx = { ...base, platform: { ...base.platform, getUiTree: vi.fn(async () => tree), lastTreeTruncated: false } };
+    await createMcpServer({ ctx, compact: true });
+    expect(text(await capturedHandlers.get('accessibility')!({ action: 'read_tree' }))).toMatch(/→ Opaque area @0,100 1000×700 \(88% of the window\)/);
+    const first = text(await capturedHandlers.get('computer')!({ action: 'screenshot' }));
+    expect(first).toMatch(/send all remaining strokes in ONE batch \(computer click with path, drag_path\), then ONE computer screenshot_region of only the changed area with max_edge 512/);
+    expect(first).not.toMatch(/Cheaper and exact/);
+    for (let i = 0; i < 3; i++) expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/\[clawdcursor\]/);
+  });
+
+  // A missed name says nothing about the window: an agent on a form whose button is "Send", not "Submit", gets no drawing advice.
+  it('after a find that missed a name, the screenshot gets no canvas advice', async () => {
+    const base = shotCtx();
+    const ctx = { ...base, platform: { ...base.platform, findElements: vi.fn(async () => []), getUiTree: vi.fn(async () => []), lastFindScope: [] } };
+    await createMcpServer({ ctx, compact: true });
+    expect(text(await capturedHandlers.get('accessibility')!({ action: 'find', name: 'Submit' }))).toMatch(/^\(no elements found\)/);
+    expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/strokes/);
+  });
+
   // Live 2026-11-10: copy_all_text pressed Ctrl+A / Ctrl+C in the app and the session log still called it a blind read.
   it('copy_all_text that pressed keys is logged as an action and as text read, alone and as a batch step; one that read the tree is only a blind read', async () => {
     let clip = 'mine';
