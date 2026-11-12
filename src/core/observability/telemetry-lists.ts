@@ -5,7 +5,7 @@
 
 /** MCP client name → host. Anything else is "other"; no initialize yet is "unknown". */
 export const HOSTS: Array<[RegExp, string]> = [
-  [/^claude-code/, 'claude-code'], [/^claude-ai|claude desktop/, 'claude-desktop'], [/cursor/, 'cursor'], [/windsurf/, 'windsurf'],
+  [/^claude-code/, 'claude-code'], [/^claude-ai/, 'claude-desktop'], [/claude desktop/, 'claude-desktop'], [/cursor/, 'cursor'], [/windsurf/, 'windsurf'],
   [/visual studio code|vscode/, 'vscode'], [/^zed/, 'zed'], [/codex/, 'codex'], [/cline/, 'cline'], [/gemini/, 'gemini-cli'],
   [/openclaw/, 'openclaw'],
 ];

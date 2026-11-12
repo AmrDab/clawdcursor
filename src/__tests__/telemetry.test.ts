@@ -22,6 +22,7 @@ import {
   __setSenderForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE, SPOOL_FILE, TELEMETRY_URL,
 } from '../core/observability/telemetry';
 import { getPackageRoot } from '../paths';
+import { VERSION } from '../surface/version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { validate, validEvent, RESULT_CODES, MAX_EVENTS } from '../../telemetry-worker/src/index';
 
@@ -196,7 +197,7 @@ describe('reduceStack', () => {
 });
 
 describe('the Worker', () => {
-  const good = { event: 'call_failed', id: '0f8fad5b-d9cb-469f-a165-70867728950e', v: '2.0.0', os: 'win32',
+  const good = { event: 'call_failed', id: '0f8fad5b-d9cb-469f-a165-70867728950e', v: VERSION, os: 'win32',
     tool: 'computer', action: 'click', code: 'NOT_FOUND', outcome: 'error', ms: 120, app: 'native' };
 
   it('accepts a good batch', () => {
