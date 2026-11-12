@@ -103,9 +103,10 @@ const STOP_METHODS = [
  * answers on the pause card. Off by default; loaded only when on. Asked before the window check, which then reads the
  * window in front as it is after the user's answer.
  */
-async function confirmCheck(method: string, args: unknown[]): Promise<void> {
+async function confirmCheck(method: string, args: unknown[], target: object): Promise<void> {
   if (!/^(1|true)$/i.test((process.env.CLAWD_CONFIRM ?? '').trim())) return;
-  await (await import('../core/confirm-mode')).confirmBefore(method, args, [...new Set(heldKeys.values())]);
+  // The held keys as the agent named them: on Windows NativeDesktop holds `meta` as Ctrl, the adapter as the Windows key.
+  await (await import('../core/confirm-mode')).confirmBefore(method, args, [...heldKeys.keys()], target);
 }
 
 /**
@@ -144,7 +145,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
         return last;
       }
       g.stopCheck();
-      await confirmCheck(m, args);
+      await confirmCheck(m, args, target);
       await g.before();
       announce(m);
       const r = await f(...args);
@@ -156,7 +157,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
   wrap('invokeElement', async (g, f, args, nested) => {
     const q = (args[0] ?? {}) as { processId?: number; action?: string };
     if (!nested) {
-      if (q.action === 'get-value') g.stopCheck(); else { g.stopCheck(); await confirmCheck('invokeElement', args); await g.byName(q.processId); }
+      if (q.action === 'get-value') g.stopCheck(); else { g.stopCheck(); await confirmCheck('invokeElement', args, target); await g.byName(q.processId); }
       announce('invokeElement');
     }
     return f(...args);
@@ -165,7 +166,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
       g.stopCheck();
-      await confirmCheck(m, args);
+      await confirmCheck(m, args, target);
       announce(m);
       // `actedPid`: the process these acts go to (the CDP driver's browser), told once the act ran (a navigate may connect first).
       try { return await f(...args); } finally { if (actedPid) await g.byProcess?.(await actedPid().catch(() => null)).catch(() => {}); }

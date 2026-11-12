@@ -135,6 +135,9 @@ let readWindows: () => Promise<ListedWindow[]> = process.env.VITEST ? async () =
   return (await getPlatform()).listWindows();
 };
 
+/** The window in front now, a fresh read; null when it cannot be read. */
+export const foregroundNow = (): Promise<Foreground | null> => readForeground().catch(() => null);
+
 export function __setForegroundReaderForTests(f: (() => Promise<Foreground | null>) | null, reset = true): void {
   if (f) readForeground = f;
   if (reset) resetBinding();
