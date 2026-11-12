@@ -43,17 +43,79 @@
  *   const results = await cdp.querySelectorAll('button');
  */
 
-import { chromium, type Browser, type Page, type Locator } from 'playwright';
+import { chromium, type Browser, type ElementHandle, type Frame, type Locator, type Page } from 'playwright';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { AGENT_CDP_PORT } from './browser-config';
 import { fenceCdpOnly } from '../core/fence';
+import { quoteScreenText } from '../core/result-codes';
 import { guardInputMethods } from './pointer-guard';
 
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──
 const DEFAULT_CDP_PORT = 9223;
+/** How long an attach-only connect waits for the user's browser to open its port: a host may start it seconds before (#378). */
+const ATTACH_WAIT_MS = 10_000;
+/** How long one iframe may take to answer a probe before it is skipped (#398). */
+const CHILD_FRAME_MS = 1500;
+/** How long a selector action waits for the page's own element before taking an iframe's match (#398). */
+const MAIN_SETTLE_MS = 1000;
+/** At most this many iframe controls in page_context, across all iframes (#398). */
+const IFRAME_LINES = 60;
+/** At most this many characters of one iframe's text in read_text (#398). */
+const IFRAME_TEXT_CHARS = 1500;
+
+/** The origin a frame's content runs in: an about:blank / about:srcdoc frame (or one with no URL yet) takes its parent's. */
+function frameOrigin(f: Frame): string {
+  for (let x: Frame | null = f; x; x = x.parentFrame()) {
+    const u = x.url();
+    if (!u || /^about:/i.test(u)) continue;
+    try { return new URL(u).origin; } catch { return 'null'; }
+  }
+  return 'null';
+}
+
+/** An iframe as a result names it: its origin, never its full URL (a query can carry a token); an opaque one by its scheme. */
+function frameLabel(f: Frame): string {
+  const o = frameOrigin(f);
+  return o !== 'null' ? o : (/^[a-z][a-z0-9+.-]*:/i.exec(f.url())?.[0] ?? 'about:blank');
+}
+
+/** The iframe a caller named with `frame`: its URL holds that text (a URL or an origin). */
+function named(f: Frame, frame: string): boolean {
+  return f.url().includes(frame);
+}
+
+/** Wait until something answers on a CDP port, or `ms` pass: a browser takes seconds to open its port after it starts. */
+async function waitForCdp(port: number, ms: number): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    const up = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1500) })
+      .then(() => true, () => false);
+    if (up) return;
+    await new Promise(r => setTimeout(r, 400));
+  }
+}
+
+/** Why attaching to `port` failed, from what (if anything) answers there (#378). */
+async function whyNoCdp(port: number, err: unknown): Promise<string> {
+  let info: { webSocketDebuggerUrl?: string } | null;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(1500) });
+    info = res.ok ? await res.json().catch(() => null) : null;
+  } catch (e) {
+    const code = (e as { cause?: { code?: string } }).cause?.code;
+    return code === 'ECONNREFUSED'
+      ? `nothing is listening on port ${port} (ECONNREFUSED)`
+      : `port ${port} did not answer (${code ?? (e instanceof Error ? e.message : String(e))})`;
+  }
+  if (!info?.webSocketDebuggerUrl) {
+    return `port ${port} answers, but not as a Chromium DevTools endpoint (another program, or a browser that is not Chrome/Edge/Chromium)`;
+  }
+  const msg = (err instanceof Error ? err.message : String(err)).split('\n')[0].slice(0, 200);
+  return `the browser on port ${port} did not accept the attach: ${msg}`;
+}
 
 // ── Types ──
 
@@ -97,6 +159,8 @@ export interface CDPInteractionResult {
   matchCount?: number;
   /** Reads the element the act went to, as it shows now (#399): what the caller checks the act against. */
   read?: () => Promise<FieldShown | null>;
+  /** Origin of the iframe the element was found in; absent for the page itself (#398). */
+  frame?: string;
 }
 
 /** What a form element shows: `value` its text (a <select>: the chosen option's label, `option` its value). */
@@ -201,6 +265,10 @@ export class CDPDriver {
   /** How the live connection was established (see connectionMode). */
   getConnectionMode(): 'dedicated' | 'attached' | 'unknown' { return this.connectionMode; }
 
+  private connectError = '';
+  /** Why the last connect / ensureConnected failed, in words an agent can act on (#378); '' once connected. */
+  getConnectError(): string { return this.connectError; }
+
   private pidCache: { browser: Browser; pid: number | null } | null = null;
 
   /**
@@ -259,7 +327,10 @@ export class CDPDriver {
     const targetPort = port ?? this.cdpPort;
     // The test fence (core/fence.ts): only the agent's own port, never a browser the user put on the wire.
     const only = fenceCdpOnly(AGENT_CDP_PORT);
-    if (only !== undefined && targetPort !== only) return false;
+    if (only !== undefined && targetPort !== only) {
+      this.connectError = `port ${targetPort} is closed to clawdcursor by the test fence (only the agent's own browser on port ${only} may be driven)`;
+      return false;
+    }
     try {
       this.browser = await chromium.connectOverCDP(
         `http://127.0.0.1:${targetPort}`,
@@ -299,15 +370,18 @@ export class CDPDriver {
 
       if (!this.activePage) {
         console.warn('   ⚠️ CDPDriver: connected but no pages found');
+        this.connectError = `the browser on port ${targetPort} has no open page`;
         return false;
       }
 
       this.connected = true;
+      this.connectError = '';
       const title = await this.activePage.title().catch(() => '(unknown)');
       console.log(`   🔌 CDPDriver: connected to "${title}" at ${this.activePage.url()}`);
       return true;
     } catch (err) {
       console.log(`   ❌ CDPDriver: failed to connect to CDP port ${targetPort}: ${err}`);
+      this.connectError = await whyNoCdp(targetPort, err);
       return false;
     }
   }
@@ -343,15 +417,19 @@ export class CDPDriver {
     if (await this.isConnected()) return true;
     // 2. Our own dedicated instance from a previous run, if it's still alive.
     if (await this.connect(AGENT_CDP_PORT)) return true;       // → 'dedicated'
-    // 3. A browser the user put on the debug port.
+    // 3. A browser the user put on the debug port. Attach-only has nothing to fall back to, and the host may have
+    //    started that browser seconds ago: give its port a bounded wait before giving up (#378).
+    const fenced = fenceCdpOnly(AGENT_CDP_PORT) !== undefined;
+    if (!opts.launch && !fenced) await waitForCdp(this.cdpPort, ATTACH_WAIT_MS);
     if (await this.connect(this.cdpPort)) return true;         // → 'attached'
-    if (!opts.launch || fenceCdpOnly(AGENT_CDP_PORT) !== undefined) return false;   // fenced: launch nothing
+    if (!opts.launch || fenced) return false;   // fenced: launch nothing
 
     const exe = (opts.exePaths ?? []).find(p => {
       try { return fs.existsSync(p); } catch { return false; }
     });
     if (!exe) {
       console.log('   ❌ CDPDriver: no browser executable found to launch with CDP');
+      this.connectError = 'no browser on the debug port, and no Chrome or Edge executable was found to launch';
       return false;
     }
 
@@ -366,18 +444,11 @@ export class CDPDriver {
       child.unref();
     } catch (err) {
       console.log(`   ❌ CDPDriver: failed to spawn browser with CDP: ${err}`);
+      this.connectError = `could not start ${exe}: ${err}`;
       return false;
     }
 
-    // Browser cold-start can take a couple seconds — poll the CDP endpoint.
-    const deadline = Date.now() + 12_000;
-    while (Date.now() < deadline) {
-      const live = await fetch(`http://127.0.0.1:${AGENT_CDP_PORT}/json/version`, {
-        signal: AbortSignal.timeout(1500),
-      }).then(r => r.ok).catch(() => false);
-      if (live) break;
-      await new Promise(r => setTimeout(r, 400));
-    }
+    await waitForCdp(AGENT_CDP_PORT, 12_000);
     // We spawned a dedicated --user-data-dir instance — the agent owns it.
     const ok = await this.connect(AGENT_CDP_PORT);
     if (ok) await this.labelAgentBrowser();
@@ -704,10 +775,8 @@ export class CDPDriver {
    * Find form fields by their associated label text.
    * Handles both <label for="..."> and label wrapping the input.
    */
-  async findFieldByLabel(labelText: string): Promise<DOMElementInfo | null> {
-    const pg = this.requirePage();
-
-    const result: DOMElementInfo | null = await pg.evaluate(
+  async findFieldByLabel(labelText: string, frame: Frame = this.requirePage().mainFrame()): Promise<DOMElementInfo | null> {
+    const result: DOMElementInfo | null = await frame.evaluate(
       (searchLabel: string) => {
         const lower = searchLabel.toLowerCase();
 
@@ -808,21 +877,25 @@ export class CDPDriver {
    * Uses JS dispatchEvent (reliable on background CDP tabs with 0x0 viewport).
    * Falls back to Playwright click if JS dispatch doesn't work.
    */
-  async click(selector: string): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
+  async click(selector: string, inFrame?: string): Promise<CDPInteractionResult> {
+    this.requirePage();
     try {
+      const w = await this.frameWith(selector, inFrame);
+      if ('fail' in w) return w.fail;
+      const f = w.f;
+      const frame = this.frameUrl(f);
       // Primary: JS-based click (works on background tabs)
-      const clicked = await pg.evaluate((sel: string) => {
+      const clicked = await f.evaluate((sel: string) => {
         const el = document.querySelector(sel) as HTMLElement;
         if (!el) return false;
         el.click();
         return true;
       }, selector);
-      if (clicked) return { success: true, method: 'js.click' };
+      if (clicked) return { success: true, method: 'js.click', frame };
       // Fallback: Playwright click with force
-      await this.moveCursorToSelector(selector);
-      await pg.click(selector, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.click' };
+      await this.moveCursorToSelector(selector, f);
+      await f.click(selector, { timeout: 5000, force: true });
+      return { success: true, method: 'playwright.click', frame };
     } catch (err) {
       return {
         success: false,
@@ -839,66 +912,75 @@ export class CDPDriver {
    *   await cdp.clickByText('Send');
    *   await cdp.clickByText('Discard');
    */
-  async clickByText(text: string): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
-
+  async clickByText(text: string, deadline = Infinity, inFrame?: string): Promise<CDPInteractionResult> {
+    this.requirePage();
     try {
-      // Primary: JS-based click by text content (works on background tabs)
-      const jsClicked = await pg.evaluate((searchText: string) => {
-        const lower = searchText.toLowerCase();
-        // Deduplicate: elements matching multiple selectors should only appear once
-        const seen = new Set<Element>();
-        const candidates: HTMLElement[] = [];
-        for (const sel of ['button, [role="button"]', 'a[href]', '[role="link"], [role="menuitem"], [role="tab"]']) {
-          for (const el of document.querySelectorAll(sel)) {
-            if (!seen.has(el)) {
-              seen.add(el);
-              candidates.push(el as HTMLElement);
-            }
-          }
-        }
-        for (const htmlEl of candidates) {
-          const elText = (htmlEl.textContent || '').trim().toLowerCase();
-          const ariaLabel = (htmlEl.getAttribute('aria-label') || '').toLowerCase();
-          if (elText.includes(lower) || ariaLabel.includes(lower)) {
-            // Visibility check — skip hidden elements
-            const style = getComputedStyle(htmlEl);
-            if (style.display === 'none' || style.visibility === 'hidden') continue;
-            htmlEl.click();
-            return true;
-          }
-        }
-        return false;
-      }, text);
-      if (jsClicked) return { success: true, method: 'js.clickByText' };
-
-      // Fallback: Playwright locators with force
-      const locators = [
-        pg.getByRole('button', { name: text }),
-        pg.getByRole('link', { name: text }),
-        pg.getByRole('menuitem', { name: text }),
-        pg.getByText(text, { exact: false }),
-      ];
-
-      for (const locator of locators) {
-        try {
-          const count = await locator.count();
-          if (count > 0) {
-            await locator.first().click({ timeout: 3000, force: true });
-            return { success: true, method: 'playwright.getByText' };
-          }
-        } catch {
-          continue;
-        }
+      // Per frame, both passes (named controls, then locators) before the next frame: a match on the page always wins over
+      // an iframe's. `deadline` stops the iframe walk and caps the locator click (#101).
+      const found = await this.inFrames(async (f): Promise<{ el?: ElementHandle; loc?: Locator } | null> => {
+        const el = await this.controlByText(f, text);
+        if (el) return { el };
+        const loc = await this.locatorByText(f, text);
+        return loc ? { loc } : null;
+      }, { deadline, frame: inFrame });
+      if (!found) return { success: false, error: `no element found with text "${text}" in ${await this.searched(inFrame)}` };
+      if ('foreign' in found) return this.foreign(found.foreign);
+      const frame = this.frameUrl(found.frame);
+      if (found.hit.el) {
+        await found.hit.el.evaluate((el: Element) => (el as HTMLElement).click());   // a JS click works on background tabs
+        return { success: true, method: 'js.clickByText', frame };
       }
-
-      return { success: false, error: `No clickable element found with text "${text}"` };
+      await found.hit.loc!.click({ timeout: Math.max(1, Math.min(3000, deadline - Date.now())), force: true });
+      return { success: true, method: 'playwright.getByText', frame };
     } catch (err) {
       return {
         success: false,
         error: `clickByText("${text}") failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
+  }
+
+  /** clickByText's first pass in one frame: the first visible button, link, menu item or tab whose text or aria-label holds `text`. */
+  private async controlByText(f: Frame, text: string): Promise<ElementHandle | null> {
+    const h = await f.evaluateHandle((searchText: string) => {
+      const lower = searchText.toLowerCase();
+      // Deduplicate: elements matching multiple selectors should only appear once
+      const seen = new Set<Element>();
+      const candidates: HTMLElement[] = [];
+      for (const sel of ['button, [role="button"]', 'a[href]', '[role="link"], [role="menuitem"], [role="tab"]']) {
+        for (const el of document.querySelectorAll(sel)) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            candidates.push(el as HTMLElement);
+          }
+        }
+      }
+      for (const htmlEl of candidates) {
+        const elText = (htmlEl.textContent || '').trim().toLowerCase();
+        const ariaLabel = (htmlEl.getAttribute('aria-label') || '').toLowerCase();
+        if (elText.includes(lower) || ariaLabel.includes(lower)) {
+          // Visibility check — skip hidden elements
+          const style = getComputedStyle(htmlEl);
+          if (style.display === 'none' || style.visibility === 'hidden') continue;
+          return htmlEl;
+        }
+      }
+      return null;
+    }, text);
+    return h.asElement();
+  }
+
+  /** clickByText's second pass in one frame: the first Playwright locator (role name, then any text) with a match. */
+  private async locatorByText(f: Frame, text: string): Promise<Locator | null> {
+    for (const locator of [
+      f.getByRole('button', { name: text }),
+      f.getByRole('link', { name: text }),
+      f.getByRole('menuitem', { name: text }),
+      f.getByText(text, { exact: false }),
+    ]) {
+      if ((await locator.count().catch(() => 0)) > 0) return locator.first();
+    }
+    return null;
   }
 
   /**
@@ -908,20 +990,32 @@ export class CDPDriver {
    * For content-editable divs (like Gmail compose body), uses fill() which
    * works better than type() for non-input elements.
    */
-  async typeInField(selector: string, text: string): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
+  async typeInField(selector: string, text: string, inFrame?: string): Promise<CDPInteractionResult> {
+    let f = this.requirePage().mainFrame();
     try {
-      await this.moveCursorToSelector(selector);
+      const w = await this.frameWith(selector, inFrame);
+      if ('fail' in w) return w.fail;
+      f = w.f;
+    } catch { /* a bad selector: the fill below reports it */ }
+    return this.typeIn(f, selector, text);
+  }
+
+  /** typeInField within one frame. */
+  private async typeIn(f: Frame, selector: string, text: string): Promise<CDPInteractionResult> {
+    const pg = this.requirePage();
+    const frame = this.frameUrl(f);
+    try {
+      await this.moveCursorToSelector(selector, f);
       // Try fill() first — works for inputs, textareas, and [contenteditable]
-      await pg.fill(selector, text, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.fill', read: readerOf(pg.locator(selector).first()) };
+      await f.fill(selector, text, { timeout: 5000, force: true });
+      return { success: true, method: 'playwright.fill', read: readerOf(f.locator(selector).first()), frame };
     } catch {
       // Fall back to click + clear + type for stubborn elements
       try {
-        await pg.click(selector, { timeout: 3000, force: true });
+        await f.click(selector, { timeout: 3000, force: true });
         await pg.keyboard.press('Control+a');
         await pg.keyboard.type(text, { delay: 20 });
-        return { success: true, method: 'playwright.type', read: readerOf(pg.locator(selector).first()) };
+        return { success: true, method: 'playwright.type', read: readerOf(f.locator(selector).first()), frame };
       } catch (err) {
         return {
           success: false,
@@ -938,24 +1032,21 @@ export class CDPDriver {
    *   await cdp.typeByLabel('To', 'user@example.com');
    *   await cdp.typeByLabel('Subject', 'Meeting notes');
    */
-  async typeByLabel(label: string, text: string): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
+  async typeByLabel(label: string, text: string, inFrame?: string): Promise<CDPInteractionResult> {
+    this.requirePage();
     try {
-      // Playwright's getByLabel() handles <label>, aria-label, aria-labelledby
-      const locator = pg.getByLabel(label);
-      const count = await locator.count();
+      // Per frame, main first: Playwright's getByLabel() (handles <label>, aria-label, aria-labelledby), then our custom label finder.
+      const hit = await this.inFrames(async (f): Promise<Locator | string | null> => {
+        const locator = f.getByLabel(label);
+        if ((await locator.count()) > 0) return locator.first();
+        return (await this.findFieldByLabel(label, f))?.selector || null;
+      }, { frame: inFrame });
+      if (!hit) return { success: false, error: `field not found with label "${label}" in ${await this.searched(inFrame)}` };
+      if ('foreign' in hit) return this.foreign(hit.foreign);
+      if (typeof hit.hit === 'string') return this.typeIn(hit.frame, hit.hit, text);
 
-      if (count === 0) {
-        // Fall back to our custom label finder
-        const field = await this.findFieldByLabel(label);
-        if (field && field.selector) {
-          return this.typeInField(field.selector, text);
-        }
-        return { success: false, error: `No field found with label "${label}"` };
-      }
-
-      await locator.first().fill(text, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.getByLabel', read: readerOf(locator.first()) };
+      await hit.hit.fill(text, { timeout: 5000, force: true });
+      return { success: true, method: 'playwright.getByLabel', read: readerOf(hit.hit), frame: this.frameUrl(hit.frame) };
     } catch (err) {
       return {
         success: false,
@@ -1018,16 +1109,20 @@ export class CDPDriver {
   async selectOption(
     selector: string,
     valueOrLabel: string,
+    inFrame?: string,
   ): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
+    this.requirePage();
     try {
+      const w = await this.frameWith(selector, inFrame);
+      if ('fail' in w) return w.fail;
+      const f = w.f;
       // Try by value first, then by label
-      const selected = await pg.selectOption(selector, valueOrLabel, { timeout: 3000 });
+      const selected = await f.selectOption(selector, valueOrLabel, { timeout: 3000 });
       if (selected.length === 0) {
         // Try by label
-        await pg.selectOption(selector, { label: valueOrLabel }, { timeout: 3000 });
+        await f.selectOption(selector, { label: valueOrLabel }, { timeout: 3000 });
       }
-      return { success: true, method: 'playwright.selectOption', value: valueOrLabel, read: readerOf(pg.locator(selector).first()) };
+      return { success: true, method: 'playwright.selectOption', value: valueOrLabel, read: readerOf(f.locator(selector).first()), frame: this.frameUrl(f) };
     } catch (err) {
       return {
         success: false,
@@ -1080,10 +1175,8 @@ export class CDPDriver {
    * Get a text summary of the visible, interactive elements on the page.
    * Useful for building context for an LLM without screenshots.
    */
-  async getInteractiveElements(): Promise<DOMElementInfo[]> {
-    const pg = this.requirePage();
-
-    return pg.evaluate(() => {
+  async getInteractiveElements(frame: Frame = this.requirePage().mainFrame()): Promise<DOMElementInfo[]> {
+    return frame.evaluate(() => {
       const interactiveSelectors = [
         'a[href]',
         'button',
@@ -1155,7 +1248,7 @@ export class CDPDriver {
    * Get a text representation of the page's interactive elements.
    * Formatted for LLM consumption — compact, informative.
    */
-  async getPageContext(): Promise<string> {
+  async getPageContext(inFrame?: string): Promise<string> {
     try {
       const url = await this.getUrl();
       const title = await this.getTitle();
@@ -1175,14 +1268,40 @@ export class CDPDriver {
 
       context += `INTERACTIVE ELEMENTS (${shown.length}${hiddenLinks > 0 ? `, +${hiddenLinks} more links` : ''}):\n`;
 
-      for (const el of shown) {
+      const line = (el: DOMElementInfo, dx = 0, dy = 0) => {
         const label = el.ariaLabel || el.text || el.placeholder || el.name || el.id || '(unnamed)';
         const typeInfo = el.type ? ` type="${el.type}"` : '';
         const roleInfo = el.role ? ` role="${el.role}"` : '';
-        context += `  [${el.tagName}${typeInfo}${roleInfo}] "${label}"`;
-        if (el.id) context += ` #${el.id}`;
-        context += ` @${el.bounds.x},${el.bounds.y}\n`;
+        return `  [${el.tagName}${typeInfo}${roleInfo}] "${label}"${el.id ? ` #${el.id}` : ''} @${el.bounds.x + dx},${el.bounds.y + dy}\n`;
+      };
+      for (const el of shown) context += line(el);
+
+      // Iframes: their controls are not in the page's DOM; positions are offset by the iframe's own (#398). At most
+      // IFRAME_LINES in all, so a page full of ad and social frames does not bury its own controls. A cross-origin iframe
+      // (an ad, a third-party widget) is only counted, unless the caller named it with `inFrame`.
+      const kids = await this.childFrames();
+      const found = await Promise.all(kids.map(f => this.probe(Promise.all([
+        this.getInteractiveElements(f), f.frameElement().then(e => e.boundingBox()),
+      ]))));
+      let room = IFRAME_LINES, more = 0, moreIn = 0;
+      for (const [i, f] of kids.entries()) {
+        const [els, box] = found[i] ?? [[], null];
+        if (!els.length) continue;
+        const label = frameLabel(f);
+        const head = `${label}${f.name() ? ` name=${quoteScreenText(f.name())}` : ''}`;
+        const own = this.sameOrigin(f);
+        if (!own && !(inFrame && named(f, inFrame))) {
+          context += `\nCROSS-ORIGIN IFRAME ${head}: ${els.length} control${els.length === 1 ? '' : 's'}, not listed. To list or act in it, pass frame:"${label}"\n`;
+          continue;
+        }
+        const listed = els.slice(0, room);
+        room -= listed.length;
+        if (listed.length < els.length) { more += els.length - listed.length; moreIn++; }
+        if (!listed.length) continue;
+        context += `\nIFRAME ${head} (${els.length}; ${own ? 'click / type / read_text reach these' : `act in it with frame:"${label}"`}):\n`;
+        for (const el of listed) context += line(el, Math.round(box?.x ?? 0), Math.round(box?.y ?? 0));
       }
+      if (more) context += `\n+${more} more in ${moreIn} iframe${moreIn === 1 ? '' : 's'}, not listed\n`;
 
       return context;
     } catch (err) {
@@ -1199,17 +1318,41 @@ export class CDPDriver {
    * @param selector CSS selector for the target element (default: 'body')
    * @param maxLength Maximum characters to return (default: 3000)
    */
-  async readText(selector = 'body', maxLength = 3000): Promise<string> {
-    const pg = this.requirePage();
-    return pg.evaluate(
-      (args: { sel: string; max: number }) => {
-        const el = document.querySelector(args.sel);
-        if (!el) return `[element not found: ${args.sel}]`;
-        const raw = (el as HTMLElement).innerText || el.textContent || '';
-        return raw.replace(/\n{3,}/g, '\n\n').trim().substring(0, args.max);
-      },
-      { sel: selector, max: maxLength },
-    );
+  async readText(selector = 'body', maxLength = 3000, inFrame?: string): Promise<string> {
+    const main = this.requirePage().mainFrame();
+    // null: no such element in that frame. Cut inside the page, so a long page's full text never crosses CDP.
+    const read = (f: Frame, max: number) => f.evaluate((args: { sel: string; max: number }) => {
+      const el = document.querySelector(args.sel);
+      if (!el) return null;
+      const raw = (el as HTMLElement).innerText || el.textContent || '';
+      return raw.replace(/\n{3,}/g, '\n\n').trim().substring(0, args.max);
+    }, { sel: selector, max });
+    // With `inFrame`: only the iframes it names. Without: the page, then its same-origin iframes (an iframe's text is not
+    // in its parent's innerText), each in the room left and at most IFRAME_TEXT_CHARS; a cross-origin one is named, not read.
+    const kids = await this.childFrames();
+    const own = inFrame ? null : await read(main, maxLength);
+    let out = own ?? '';
+    let unread = 0;
+    const foreign = new Set<string>();
+    let reached = 0;
+    for (const f of kids) {
+      if (inFrame ? !named(f, inFrame) : !this.sameOrigin(f)) {
+        if (!inFrame) foreign.add(frameLabel(f));
+        continue;
+      }
+      reached++;
+      const room = Math.min(IFRAME_TEXT_CHARS, maxLength - out.length);
+      if (room <= 0) { unread++; continue; }
+      const t = await this.probe(read(f, room));
+      if (t) out += `${out ? '\n\n' : ''}--- iframe ${frameLabel(f)} ---\n${t}`;
+    }
+    if (inFrame && !reached) return `[no iframe on this page has a URL holding "${inFrame}"]`;
+    const notes = [
+      unread ? `[+${unread} iframe${unread === 1 ? '' : 's'} not read: past the ${maxLength}-character limit. Read one with a selector inside it]` : '',
+      foreign.size ? `[cross-origin iframe${foreign.size === 1 ? '' : 's'} not read: ${[...foreign].join(', ')}. To read one, pass frame:"<its origin>"]` : '',
+    ].filter(Boolean).join('\n');
+    out = own === null && !out ? `[element not found: ${selector}]` : out.substring(0, maxLength);
+    return notes ? `${out}\n\n${notes}` : out;
   }
 
   /**
@@ -1246,14 +1389,22 @@ export class CDPDriver {
   async waitForSelector(
     selector: string,
     timeoutMs = 10_000,
+    inFrame?: string,
   ): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
+    this.requirePage();
     try {
-      await pg.waitForSelector(selector, {
-        timeout: timeoutMs,
-        state: 'visible',
-      });
-      return { success: true };
+      // Polled across the frames inFrames searches: an iframe may also attach while we wait (#398). A match only in a
+      // cross-origin iframe does not end the wait: the page's own may still appear.
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const hit = await this.inFrames(f => f.locator(selector).first().isVisible(), { frame: inFrame });
+        if (hit && 'hit' in hit) return { success: true, frame: this.frameUrl(hit.frame) };
+        if (Date.now() >= deadline) {
+          if (hit) return this.foreign(hit.foreign);
+          return { success: false, error: `Timeout waiting for "${selector}": not visible in ${await this.searched(inFrame)} after ${timeoutMs}ms` };
+        }
+        await new Promise(r => setTimeout(r, 250));
+      }
     } catch (err) {
       return {
         success: false,
@@ -1369,16 +1520,135 @@ export class CDPDriver {
     }
   }
 
-  private async moveCursorToSelector(selector: string): Promise<void> {
-    const pg = this.requirePage();
+  private async moveCursorToSelector(selector: string, frame: Frame = this.requirePage().mainFrame()): Promise<void> {
     try {
-      const box = await pg.locator(selector).first().boundingBox();
+      const box = await frame.locator(selector).first().boundingBox();
       if (box) {
         await this.moveVirtualCursor(Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
       }
     } catch (err) {
       console.debug(`[CDPDriver] moveCursorToSelector failed: ${err}`);
     }
+  }
+
+  /**
+   * The page's rendered iframes, in document order: same-origin and cross-origin alike (Playwright attaches out-of-process
+   * iframes over CDP). document.querySelector and page locators stop at an iframe's edge, so a by-name action that only
+   * searched the page missed every control inside one (#398). A hidden or zero-size iframe (a tracker, a preloaded widget)
+   * is left out: its text is not on screen and its controls cannot be seen. Its owner element is checked in the parent
+   * frame, not against the viewport: a background tab reports a 0x0 viewport.
+   */
+  private async childFrames(): Promise<Frame[]> {
+    const pg = this.requirePage();
+    const kids = pg.frames().filter(f => f !== pg.mainFrame());
+    const shown = await Promise.all(kids.map(f => this.probe(f.frameElement().then(e => e.evaluate((el: Element) => {
+      const s = getComputedStyle(el);
+      const r = el.getBoundingClientRect();
+      return s.display !== 'none' && s.visibility !== 'hidden' && r.width > 0 && r.height > 0;
+    })))));
+    return kids.filter((_, i) => shown[i]);
+  }
+
+  /** One iframe's answer, or null if it throws (detached, navigated) or hangs past CHILD_FRAME_MS (a busy cross-origin ad). */
+  private async probe<T>(p: Promise<T>): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<null>(r => { timer = setTimeout(() => r(null), CHILD_FRAME_MS); });
+    try { return await Promise.race([p.catch(() => null), late]); } finally { clearTimeout(timer); }
+  }
+
+  /**
+   * Whether an iframe's content is the page's own: it and every iframe above it share the main frame's origin. Only these are
+   * searched without the caller naming them; an ad or a third-party widget is cross-origin.
+   */
+  private sameOrigin(f: Frame): boolean {
+    const main = this.requirePage().mainFrame();
+    const top = frameOrigin(main);
+    for (let x: Frame | null = f; x && x !== main; x = x.parentFrame()) {
+      if (top === 'null' || frameOrigin(x) !== top) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Where `find` finds something. Without `frame`: the main frame first (searched exactly as before; its errors are the
+   * caller's), so a match there always wins; then the same-origin iframes. A cross-origin iframe is only looked in to say
+   * the match is there ({foreign}): it is never acted in unless named. With `frame`: only the iframes whose URL holds it,
+   * whatever their origin. An iframe is a probe(), and none is started once `deadline` has passed. `find` only looks: the
+   * caller acts on the hit, so an abandoned probe never acts late.
+   */
+  private async inFrames<T>(
+    find: (f: Frame) => Promise<T | null | undefined | false>,
+    { deadline = Infinity, frame }: { deadline?: number; frame?: string } = {},
+  ): Promise<{ hit: T; frame: Frame } | { foreign: Frame } | null> {
+    const main = this.requirePage().mainFrame();
+    if (!frame) {
+      const first = await find(main);
+      if (first) return { hit: first, frame: main };
+    }
+    const kids = await this.childFrames();
+    for (const f of kids.filter(k => (frame ? named(k, frame) : this.sameOrigin(k)))) {
+      if (Date.now() >= deadline) return null;
+      const hit = await this.probe(find(f));
+      if (hit) return { hit, frame: f };
+    }
+    if (frame) return null;
+    for (const f of kids.filter(k => !this.sameOrigin(k))) {
+      if (Date.now() >= deadline) break;
+      if (await this.probe(find(f))) return { foreign: f };
+    }
+    return null;
+  }
+
+  /** The refusal for a match that is only in a cross-origin iframe: it names the iframe, and how to act there on purpose. */
+  private foreign(f: Frame): CDPInteractionResult {
+    const o = frameLabel(f);
+    return {
+      success: false,
+      error: `the only match is in a cross-origin iframe (${o}); nothing was done there, since an iframe from another site (an ad, a widget) is not acted in automatically. If it is the one you mean, pass frame:"${o}"`,
+    };
+  }
+
+  /**
+   * The frame holding `selector`. Without `frame`: the main frame when it has one, or gets one within MAIN_SETTLE_MS (the
+   * agent may act before the page's own element renders, while an unrelated widget iframe already has a match); else the
+   * first same-origin iframe that does; else the main frame, so Playwright's own wait and error apply there. A match only
+   * in a cross-origin iframe is refused. With `frame`: the first iframe it names that holds one.
+   */
+  private async frameWith(selector: string, frame?: string): Promise<{ f: Frame } | { fail: CDPInteractionResult }> {
+    const main = this.requirePage().mainFrame();
+    const has = async (f: Frame) => (await f.locator(selector).count()) > 0;
+    if (frame) {
+      const hit = await this.inFrames(has, { frame });
+      return hit && 'hit' in hit
+        ? { f: hit.frame }
+        : { fail: { success: false, error: `element not found: "${selector}" in ${await this.searched(frame)}` } };
+    }
+    const settle = Date.now() + MAIN_SETTLE_MS;
+    while (!(await has(main))) {
+      if (Date.now() >= settle) {
+        const hit = await this.inFrames(has);
+        if (!hit) return { f: main };
+        return 'foreign' in hit ? { fail: this.foreign(hit.foreign) } : { f: hit.frame };
+      }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    return { f: main };
+  }
+
+  /** For a result: the iframe's origin, or undefined for the page itself. */
+  private frameUrl(f: Frame): string | undefined {
+    return f === this.requirePage().mainFrame() ? undefined : frameLabel(f);
+  }
+
+  /** "the page" / "the page and its 2 iframes" / "the 1 iframe whose URL holds "x"", for a miss. */
+  private async searched(frame?: string): Promise<string> {
+    const kids = await this.childFrames();
+    if (frame) {
+      const n = kids.filter(k => named(k, frame)).length;
+      return `the ${n} iframe${n === 1 ? '' : 's'} whose URL holds "${frame}"`;
+    }
+    const n = kids.length;
+    return n ? `the page and its ${n} iframe${n === 1 ? '' : 's'}` : 'the page';
   }
 
   /**

@@ -12,11 +12,13 @@
  *      the user's tabs are never navigated. Mechanical, not prompt-dependent.
  *   4. connect() encodes ownership from the port it connected to.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── playwright mock ──────────────────────────────────────────────────────────
 const state = {
   livePorts: new Set<number>(),
+  // Ports where something answers HTTP, but not as Chromium's DevTools (#378).
+  otherHttpPorts: new Set<number>(),
   userPage: null as any,
   newPages: [] as any[],
   cdpCalls: [] as string[],
@@ -77,7 +79,19 @@ vi.mock('playwright', () => ({
 import { CDPDriver, agentBrowserArgs } from '../platform/cdp-driver';
 import { AGENT_CDP_PORT, DEFAULT_CDP_PORT } from '../platform/browser-config';
 
+// /json/version, as the ports in `state` would answer it: no test touches a real port.
+const fetchStub = vi.fn(async (url: string) => {
+  const port = Number(new URL(url).port);
+  if (state.livePorts.has(port)) return { ok: true, json: async () => ({ webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/x` }) };
+  if (state.otherHttpPorts.has(port)) return { ok: true, json: async () => ({}) };
+  throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } });
+});
+
+afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
+
 beforeEach(() => {
+  vi.stubGlobal('fetch', fetchStub);
+  state.otherHttpPorts.clear();
   state.livePorts.clear();
   state.userPage = fakePage('https://www.youtube.com/watch?v=music');
   state.newPages.length = 0;
@@ -106,10 +120,41 @@ describe('CDPDriver — ownership is encoded in the port', () => {
     expect(d.getConnectionMode()).toBe('attached');
   });
 
-  it('attach-only (no launch) with nothing on the wire → false', async () => {
+  it('attach-only (no launch) with nothing on the wire → false after a bounded wait, saying why (#378)', async () => {
+    vi.useFakeTimers();
     const d = new CDPDriver();
-    expect(await d.ensureConnected()).toBe(false);
+    const ok = d.ensureConnected();
+    await vi.advanceTimersByTimeAsync(11_000);
+    expect(await ok).toBe(false);
     expect(d.getConnectionMode()).toBe('unknown');
+    expect(d.getConnectError()).toBe(`nothing is listening on port ${DEFAULT_CDP_PORT} (ECONNREFUSED)`);
+  });
+
+  it('attach-only waits for a user browser that is still starting, then attaches (#378)', async () => {
+    vi.useFakeTimers();
+    setTimeout(() => state.livePorts.add(DEFAULT_CDP_PORT), 3000);   // the host started Chrome a moment ago
+    const d = new CDPDriver();
+    const ok = d.ensureConnected();
+    await vi.advanceTimersByTimeAsync(4000);
+    expect(await ok).toBe(true);
+    expect(d.getConnectionMode()).toBe('attached');
+    expect(d.getConnectError()).toBe('');
+  });
+
+  it('a port that answers, but not as Chromium DevTools, is named as such (#378)', async () => {
+    vi.useFakeTimers();
+    state.otherHttpPorts.add(DEFAULT_CDP_PORT);
+    const d = new CDPDriver();
+    const ok = d.ensureConnected();
+    await vi.advanceTimersByTimeAsync(1000);   // something answers: no wait
+    expect(await ok).toBe(false);
+    expect(d.getConnectError()).toMatch(new RegExp(`port ${DEFAULT_CDP_PORT} answers, but not as a Chromium DevTools endpoint`));
+  });
+
+  it('a driver that may launch does not wait on the user port', async () => {
+    const d = new CDPDriver();
+    expect(await d.ensureConnected({ launch: true, exePaths: [] })).toBe(false);   // real timers: a wait would time out
+    expect(d.getConnectError()).toMatch(/no Chrome or Edge executable was found/);
   });
 });
 

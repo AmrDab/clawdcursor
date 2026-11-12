@@ -26,6 +26,7 @@ function mockCdp(overrides: Partial<Record<string, any>> = {}) {
     click: vi.fn(async () => ({ success: true, method: 'selector' })),
     typeInField: vi.fn(async () => ({ success: true, method: 'fill' })),
     typeByLabel: vi.fn(async () => ({ success: true, method: 'label' })),
+    getConnectError: vi.fn(() => ''),
     ...overrides,
   };
 }
@@ -62,11 +63,17 @@ describe('browser_connect', () => {
 
   it('CLAWD_AGENT_CDP_OFF=1 → attach-only (never launches a new instance)', async () => {
     process.env.CLAWD_AGENT_CDP_OFF = '1';
-    const cdp = mockCdp({ ensureConnected: vi.fn(async () => false) });
+    const cdp = mockCdp({
+      ensureConnected: vi.fn(async () => false),
+      getConnectError: vi.fn(() => 'nothing is listening on port 9223 (ECONNREFUSED)'),
+    });
     const r = await tool('browser_connect').execute({}, ctx(cdp));
     expect(cdp.ensureConnected).toHaveBeenCalledWith(expect.objectContaining({ launch: false }));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/attach/i);
+    // Says why, and what to do about a browser that is still starting (#378).
+    expect(r.text).toContain('nothing is listening on port 9223 (ECONNREFUSED)');
+    expect(r.text).toMatch(/connect again in a few seconds; it must run with --remote-debugging-port=9223/);
   });
 });
 
@@ -100,7 +107,7 @@ describe('browser_navigate / read / click / type', () => {
   it('click by visible text uses clickByText; failure nudges to browser_read', async () => {
     const ok = mockCdp();
     expect((await tool('browser_click').execute({ text: 'Search' }, ctx(ok))).success).toBe(true);
-    expect(ok.clickByText).toHaveBeenCalledWith('Search');
+    expect(ok.clickByText).toHaveBeenCalledWith('Search', Infinity, undefined);
 
     const bad = mockCdp({ clickByText: vi.fn(async () => ({ success: false, error: 'not found' })) });
     const r = await tool('browser_click').execute({ text: 'Nope' }, ctx(bad));
@@ -115,6 +122,6 @@ describe('browser_navigate / read / click / type', () => {
     expect(r.text).toMatch(/selector or label/i);
     const ok = await tool('browser_type').execute({ text: 'adele', selector: '#search' }, ctx(cdp));
     expect(ok.success).toBe(true);
-    expect(cdp.typeInField).toHaveBeenCalledWith('#search', 'adele');
+    expect(cdp.typeInField).toHaveBeenCalledWith('#search', 'adele', undefined);
   });
 });

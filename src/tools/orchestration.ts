@@ -140,7 +140,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
         // driver.navigate() keeps attached-mode tab discipline: an existing
         // browser gets the agent's own tab, the user's tabs are never driven.
         const ok = await ctx.cdp.ensureConnected(agentBrowserConnectOptions()).catch(() => false);
-        if (!ok) return { text: 'Navigation failed: could not launch or attach to a CDP browser.', isError: true };
+        if (!ok) return { text: `Navigation failed: could not launch or attach to a CDP browser: ${ctx.cdp.getConnectError?.() || 'no reason given'}.`, isError: true };
         const r = await ctx.cdp.navigate(url);
         if (!r.success) return { text: `Navigation failed: ${r.error}`, isError: true };
         ctx.a11y.invalidateCache();
