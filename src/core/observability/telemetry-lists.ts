@@ -11,8 +11,8 @@ export const HOSTS: Array<[RegExp, string]> = [
 ];
 
 export const OUTCOMES = ['ok', 'empty', 'partial', 'timeout', 'error', 'refused', 'consent_required'];
-/** The outcomes sent as call_failed. */
-export const FAILED = ['error', 'timeout', 'empty'];
+/** The outcomes sent as call_failed. Not `empty`: a find that found nothing, an empty clipboard, is not a bug. */
+export const FAILED = ['error', 'timeout'];
 
 export const ERROR_CLASSES = ['Error', 'TypeError', 'RangeError', 'ReferenceError', 'SyntaxError', 'EvalError', 'URIError',
   'AggregateError', 'AbortError', 'TimeoutError', 'SystemError', 'string', 'number', 'boolean', 'object', 'undefined', 'symbol', 'bigint', 'function'];
@@ -21,6 +21,8 @@ export const ERROR_CLASSES = ['Error', 'TypeError', 'RangeError', 'ReferenceErro
 export const HELPERS = ['powershell', 'pwsh', 'python3', 'python', 'osascript', 'swift', 'swiftc', 'xdotool', 'ydotool', 'wtype', 'wmctrl',
   'xrandr', 'wlr-randr', 'swaymsg', 'xwininfo', 'xprop', 'grim', 'wl-paste', 'wl-copy', 'xclip', 'xsel', 'pbcopy', 'pbpaste', 'lsappinfo',
   'ioreg', 'open', 'xdg-open', 'gtk-launch', 'ps', 'sh', 'which', 'pkill', 'cmd', 'tesseract', 'screencapture'];
+/** The step a deliberate wait is timed as (steps.ts timeWait): a pause for the user, `wait`, a wait_for. Not clawdcursor's own work. */
+export const WAIT_STEP = 'wait';
 /** A ps-bridge.ps1 command step, e.g. "ps-bridge find-element". */
 export const PS_BRIDGE_STEP = /^ps-bridge [a-z][a-z-]{1,39}$/;
 

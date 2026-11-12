@@ -7,6 +7,7 @@ import { fenceImage } from '../core/fence';
 import type { ToolDefinition } from './types';
 import { setLastFrame } from '../core/agent-loop/coord-scale';
 import { pauseGate, parsePauseCard } from '../core/pause-gate';
+import { timeWait } from '../core/observability/steps';
 import { promptSatisfies } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { foreignOverlayState } from '../core/overlay-state';
@@ -129,10 +130,10 @@ export function getAgentTools(): ToolDefinition[] {
         // A request still QUEUED (behind another pause, ours or another process's) when this call returns has no one
         // waiting for it: cancel it, or it would surface later as a stale prompt. One already on screen is never cancelled.
         const queued = new AbortController();
-        const result = await Promise.race([
+        const result = await timeWait(() => Promise.race([
           pauseGate.requestWithReply({ message: text, key, doneWhen, donePollMs, ...card }, { signal: queued.signal }),
           new Promise<null>(r => { timer = setTimeout(() => r(null), boundMs); }),
-        ]);
+        ]));
         clearTimeout(timer);
         if (result === null && !pauseGate.continues(key)) {
           queued.abort();

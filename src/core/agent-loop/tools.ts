@@ -42,6 +42,7 @@ import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, type Retyped } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
+import { timeWait } from '../observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { quoteScreenText } from '../result-codes';
@@ -1323,7 +1324,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       changesScreen: false,
       async execute(args, ctx) {
         const timeout = typeof args.timeoutMs === 'number' ? Math.min(30000, args.timeoutMs) : 5000;
-        const element = await ctx.platform.waitForElement(
+        const element = await timeWait(() => ctx.platform.waitForElement(
           {
             name: typeof args.name === 'string' ? args.name : undefined,
             controlType: typeof args.controlType === 'string' ? args.controlType : undefined,
@@ -1331,7 +1332,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             intervalMs: typeof args.intervalMs === 'number' ? args.intervalMs : 250,
           },
           timeout,
-        );
+        ));
         if (!element) return { success: false, text: `wait_for_element: timed out after ${timeout}ms` };
         return { success: true, text: `Found element: ${quoteScreenText(String(element.name ?? ''))} [${element.controlType}] @${element.bounds.x},${element.bounds.y}` };
       },

@@ -26,6 +26,7 @@ import { SPACE_PARAM } from './desktop';
 import { preferControl, failReason } from '../platform/prefer-control';
 import { quoteScreenText } from '../core/result-codes';
 import { openFilePath } from './open-file';
+import { timeWait } from '../core/observability/steps';
 
 function notSupported(tool: string): { text: string; isError: true } {
   return {
@@ -551,10 +552,10 @@ export function getExtraTools(): ToolDefinition[] {
         if (!ctx.platform) return needPlatform('wait_for_element');
         if (ctx.platform.platform === 'linux') return notSupported('wait_for_element');
         const deadline = typeof timeoutMs === 'number' ? timeoutMs : 5000;
-        const element = await ctx.platform.waitForElement(
+        const element = await timeWait(() => ctx.platform!.waitForElement(
           { name, controlType, processId, intervalMs: intervalMs ?? 250 },
           deadline,
-        );
+        ));
         if (!element) {
           return { text: `wait_for_element: timed out after ${deadline}ms`, isError: true };
         }

@@ -97,6 +97,8 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (new URL(request.url).pathname !== '/v1/events') return new Response(null, { status: 404 });
     if (request.method !== 'POST') return new Response(null, { status: 405 });
+    // Before reading: a body declared too big is never buffered. The check after the read catches one that is not declared.
+    if (Number(request.headers.get('content-length')) > MAX_BODY) return new Response(null, { status: 413 });
     const raw = await request.arrayBuffer();
     if (raw.byteLength > MAX_BODY) return new Response(null, { status: 413 });
     const events = validate(new TextDecoder().decode(raw));
