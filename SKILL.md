@@ -118,7 +118,7 @@ of the granular surface's ~19,000 - so small models (Haiku, Kimi, Ollama) stay f
 
 **I want to read the screen:**
 - Structured (buttons, fields, text with coords)? → `accessibility {"action":"read_tree"}`. First choice.
-- The exact text of a page or document? → `system {"action":"copy_all_text"}`.
+- The exact text of a page or document? → `system {"action":"copy_all_text"}` (one value in a long page: add `"find":"<text>"`).
 - Raw OCR fallback (tree empty)? → `system {"action":"ocr"}`.
 - Pixel image? → `computer {"action":"screenshot"}`. Last resort - expensive.
 

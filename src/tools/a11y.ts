@@ -12,7 +12,7 @@ import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from './window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
-import { copyAllText } from '../platform/copy-all-text';
+import { copyAllText, pageTextPart, PAGE_TEXT_CAP } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint, shownValue, shownHelp } from './blind-hints';
@@ -541,11 +541,12 @@ export function getA11yTools(): ToolDefinition[] {
         controlType: { type: 'string', description: 'UI Automation control type. Either form works: "Button" or "ControlType.Button". An unrecognized type returns no results rather than silently searching unfiltered.', required: false },
         automationId: { type: 'string', description: 'Automation ID', required: false },
         processId: { type: 'number', description: 'Process ID to search within', required: false },
+        offset: { type: 'number', description: 'Skip this many matches: page past "... and N more" (default 0)', required: false },
       },
       category: 'window',
       compactGroup: 'accessibility',
       safetyTier: 0,
-      handler: async ({ name, controlType, automationId, processId }, ctx) => {
+      handler: async ({ name, controlType, automationId, processId, offset }, ctx) => {
         await ctx.ensureInitialized();
         let uiaHits: UiElement[];
         if (ctx.platform) {
@@ -559,10 +560,14 @@ export function getA11yTools(): ToolDefinition[] {
         }
         if (uiaHits.length) {
           // Element names are what the screen said: data, never instructions — and never rewritten by the compact surface (#248).
-          const more = uiaHits.length > 20 ? `\n... and ${uiaHits.length - 20} more` : '';
+          const skip = typeof offset === 'number' && offset > 0 ? Math.floor(offset) : 0;
+          if (skip >= uiaHits.length) return { text: `offset ${skip} is past the end: ${uiaHits.length} elements match.`, isError: true };
+          const page = uiaHits.slice(skip, skip + 20);
+          const rest = uiaHits.length - skip - page.length;
+          const more = rest > 0 ? `\n... and ${rest} more — find again with offset:${skip + page.length}` : '';
           // A search the platform cut returned only part of the list.
           const cut = ctx.platform?.lastFindError === 'partial' ? `\n(${ctx.platform.lastFindNote ?? 'The search was cut; the list is incomplete.'})` : '';
-          const found = foundLines(uiaHits.slice(0, 20));
+          const found = foundLines(page);
           return { text: `${SCREEN_COORDS_NOTE}\n${wrapUntrustedScreenContent(found.lines)}${more}${cut}${found.cut}` };
         }
         // A timeout is not "nothing there" — say so, or the agent concludes
@@ -666,11 +671,21 @@ export function getA11yTools(): ToolDefinition[] {
           required: false,
           enum: ['screen', 'window'],
         },
+        find: {
+          type: 'string',
+          description: 'Return only the lines that contain this text (case-insensitive, the whole text is searched), each with 2 lines around it so a table row\'s other cells show. E.g. "Delta-17".',
+          required: false,
+        },
+        offset: {
+          type: 'number',
+          description: `Start at this character: a text over ${PAGE_TEXT_CAP} chars is cut, and the cut result names the offset of the next part.`,
+          required: false,
+        },
       },
       category: 'clipboard',
       compactGroup: 'system',
       safetyTier: 1,
-      handler: async ({ scope }, ctx) => {
+      handler: async ({ scope, find, offset }, ctx) => {
         await ctx.ensureInitialized();
         if (!ctx.platform) return { text: 'copy_all_text: platform adapter unavailable.', isError: true };
         const r = await copyAllText(ctx.platform);
@@ -678,8 +693,10 @@ export function getA11yTools(): ToolDefinition[] {
         ctx.a11y.invalidateCache();
         const scopeNote = scope === 'screen' ? 'copy_all_text reads the focused window\'s document only; for the text of the whole screen use ocr.' : '';
         const note = [r.note, scopeNote].filter(Boolean).join('\n');
-        // Page text is third-party data, not instructions.
-        return { text: `${r.text.length} chars from ${r.window}:\n${wrapUntrustedScreenContent(r.text)}${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys };
+        // One result's worth, so every host shows it inline (#384). Page text is third-party data, not instructions.
+        const part = pageTextPart(r.text, r.window ?? 'the focused window', { find, offset });
+        const body = part.body ? `\n${wrapUntrustedScreenContent(part.body)}` : '';
+        return { text: `${part.head}${body}${part.tail}${note ? `\n${note}` : ''}`, pressedKeys: r.pressedKeys, ...(part.isError ? { isError: true } : {}) };
       },
     },
 
