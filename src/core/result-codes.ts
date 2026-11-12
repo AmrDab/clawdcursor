@@ -18,7 +18,7 @@ export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
 export type ResultCode =
   | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'DANGEROUS_KEY'
-  | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED'
+  | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED' | 'CROSS_ORIGIN_FRAME'
   | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
@@ -101,6 +101,9 @@ const RULES: Rule[] = [
     next: { mcp: 'window {"action":"focus","processName":"<your app>"}', agent: 'focus_window {"processName":"<your app>"}' } },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
     hint: 'it locks the screen or ends the session, so it is never sent; every other shortcut is allowed', next: PAUSE('Please <do this step> yourself') },
+  // The browser tool's only match was in an iframe from another site (an ad, a widget): never acted in unless named (cdp-driver.ts).
+  { code: 'CROSS_ORIGIN_FRAME', outcome: 'refused', test: /the only match is in a cross-origin iframe/i,
+    hint: 'the only match is in an iframe from another site; act there only if it is the one you mean, with the frame the result names' },
   { code: 'DEVIATION', outcome: 'failed', test: /\nDEVIATION: /, whole: true,
     hint: 'it ran but the expected effect was not seen; read the screen before retrying, it may have taken', next: REREAD },
   { code: 'STALE_SCREENSHOT', outcome: 'refused',

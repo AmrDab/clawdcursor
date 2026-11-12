@@ -107,7 +107,7 @@ describe('browser_navigate / read / click / type', () => {
   it('click by visible text uses clickByText; failure nudges to browser_read', async () => {
     const ok = mockCdp();
     expect((await tool('browser_click').execute({ text: 'Search' }, ctx(ok))).success).toBe(true);
-    expect(ok.clickByText).toHaveBeenCalledWith('Search');
+    expect(ok.clickByText).toHaveBeenCalledWith('Search', Infinity, undefined);
 
     const bad = mockCdp({ clickByText: vi.fn(async () => ({ success: false, error: 'not found' })) });
     const r = await tool('browser_click').execute({ text: 'Nope' }, ctx(bad));
@@ -122,6 +122,6 @@ describe('browser_navigate / read / click / type', () => {
     expect(r.text).toMatch(/selector or label/i);
     const ok = await tool('browser_type').execute({ text: 'adele', selector: '#search' }, ctx(cdp));
     expect(ok.success).toBe(true);
-    expect(cdp.typeInField).toHaveBeenCalledWith('#search', 'adele');
+    expect(cdp.typeInField).toHaveBeenCalledWith('#search', 'adele', undefined);
   });
 });
