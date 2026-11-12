@@ -84,7 +84,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-UiParent', 'Get-ContainerOf', 'Test-WithinNamed', 'Test-Activatable', 'Cmd-InvokeElement'];
+const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
 const click = (name: string) => `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = '${name}'; action = 'click' })`;
 
 describe.runIf(process.platform === 'win32')('ps-bridge (run for real): the dialog in focus decides between visible matches', () => {
@@ -256,6 +256,25 @@ ${click('Close')}
 $r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'Close'; within = 'Options'; action = 'click' })
 "success=$($r.success) pressed=$($script:pressed -join ',')"`);
     expect(out).toEqual(['reason=ambiguous ControlType.Window:Designcenter ControlType.Window:Options', 'success=True pressed=dialog-close']);
+  });
+
+  it('within names the outer window: its own Close is pressed, not the one of the dialog inside it, even with the dialog in focus', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}${PARENTS}
+$main = Box 'Designcenter' 'ControlType.Window'
+$opts = Box 'Options' 'ControlType.Window'; $opts.Parent = $main
+$script:window = Window @((In (El 'main-close' 'Close' 2900 -1040 60 24) $main), (In (El 'dialog-close' 'Close' 3500 -500 80 30) $opts))
+$script:dialogIds = @('dialog-close')
+$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'Close'; within = 'Designcenter'; action = 'click' })
+"success=$($r.success) pressed=$($script:pressed -join ',')"`);
+    expect(out).toEqual(['success=True pressed=main-close']);
+  });
+
+  it('invoke "New" with only "Newsletter": a prefix that does not end at a word is listed as inexact, not pressed', () => {
+    const out = runPs(FNS, `${FAKE_WINDOW}
+$script:window = Window @((El 'letter' 'Newsletter' 3500 -500 80 30))
+${click('New')}
+"success=$($r.success) inexact=$($r.inexact) pressed=$($script:pressed.Count)"`);
+    expect(out).toEqual(['success=False inexact=True pressed=0']);
   });
 });
 

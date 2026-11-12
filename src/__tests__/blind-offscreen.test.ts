@@ -142,19 +142,29 @@ describe('list_children — zero-bounds parent', () => {
 // the app's own controls. The app's controls come first; a large embedded document is one line until the agent pages to it.
 describe('read_screen — an embedded document or web view', () => {
   const page = (n: number): UiElement[] => Array.from({ length: n }, (_, i) => ({ ...on(`Tip ${i}`, 'Text', 200 + i), inDocument: true }));
+  // 22 controls of its own: a ribbon or toolbar, then the start page.
+  const tools = Array.from({ length: 18 }, (_, i) => on(`Tool ${i}`, 'Button', 60, 1));
   const app = (doc: UiElement[]): UiElement[] => [on('Designcenter', 'Window', 0, 0), on('Start page', 'Document', 100, 1), ...doc,
-    on('New', 'Button', 40, 1), on('Open', 'Button', 40, 1)];
+    on('New', 'Button', 40, 1), on('Open', 'Button', 40, 1), ...tools];
 
   it('lists the app\'s own controls first and folds a large document into one line', async () => {
-    const res = await tool('read_screen').execute({ limit: 10 }, ctxWith(app(page(120))));
+    const res = await tool('read_screen').execute({ limit: 30 }, ctxWith(app(page(120))));
     expect(res.text).toContain('"New"');
-    expect(res.text).toContain('"Open"');
+    expect(res.text).toContain('"Tool 17"');
     expect(res.text).not.toContain('"Tip 0"');
-    expect(res.text).toMatch(/an embedded document or web view of 120 elements — read_screen with offset:4 lists them; copy_all_text reads its text/);
+    expect(res.text).toMatch(/an embedded document or web view of 120 elements — read_screen with offset:22 lists them; copy_all_text reads its text/);
     expect(res.text).not.toMatch(/\+\d+ more/);
-    const paged = await tool('read_screen').execute({ offset: 4, limit: 10 }, ctxWith(app(page(120))));
+    const paged = await tool('read_screen').execute({ offset: 22, limit: 10 }, ctxWith(app(page(120))));
     expect(paged.text).toContain('"Tip 0"');
-    expect(paged.text).toMatch(/\+110 more — read_screen again with offset:14/);
+    expect(paged.text).toMatch(/\+110 more — read_screen again with offset:32/);
+  });
+
+  it('an Electron / WebView2 app, whose whole UI is its document, is listed, not folded', async () => {
+    const shell = [on('Code', 'Window', 0, 0), on('', 'Document', 30, 1), ...page(300)];
+    const res = await tool('read_screen').execute({ limit: 10 }, ctxWith(shell));
+    expect(res.text).toContain('"Tip 0"');
+    expect(res.text).not.toMatch(/embedded document/);
+    expect(res.text).toMatch(/\+292 more — read_screen again with offset:10/);
   });
 
   it('a small document is listed after the app\'s controls, not folded', async () => {

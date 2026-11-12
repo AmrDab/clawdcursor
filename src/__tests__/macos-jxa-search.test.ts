@@ -133,6 +133,13 @@ describe('macOS invoke-element.jxa', () => {
     expect(r.success).toBe(true);
     expect(fx.rows[49].clicked).toBe(true);
   });
+
+  it('a prefix counts only up to a word boundary: "Sub" for "Subscribe" is listed, not pressed; "Row" for "Row 01" is pressed (#386)', () => {
+    const fx = fixture();
+    expect(runInvoke(fx, ['-ProcessId', '4242', '-Name', 'Sub', '-Action', 'toggle'])).toMatchObject({ success: false, reason: 'ambiguous', inexact: true });
+    expect(fx.sub.pressed).toBeUndefined();
+    expect(runInvoke(fx, ['-ProcessId', '4242', '-Name', 'Row', '-Action', 'click']).success).toBe(true);
+  });
 });
 
 describe('macOS find-element.jxa', () => {

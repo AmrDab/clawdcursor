@@ -178,8 +178,21 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('two equal matches: ambiguous, each with its container; within picks one (#382)', () => {
     expect(out.rule_two).toMatchObject({ success: false, reason: 'ambiguous', candidates: [{ name: 'Close', container: { name: 'Page', controlType: 'document web' } }, { name: 'Close' }] });
     expect(out.rule_two.inexact).toBeUndefined();
+    // within names the page: the page's own Close is pressed, not the dialog's inside it.
     expect(out.rule_within).toMatchObject({ success: true });
-    expect(out.rule_within_pressed).toEqual(['press']);
+    expect(out.rule_within_pressed).toEqual([['press'], []]);
+  });
+
+  it('a prefix counts only up to a word boundary: "Newsletter" for "New" is listed, not pressed', () => {
+    expect(out.rule_word_prefix).toMatchObject({ success: false, reason: 'ambiguous', inexact: true });
+  });
+
+  it('the search stops at the first exact on-screen match for a read, and within a small allowance for a press', () => {
+    expect(out.early_read).toEqual([true, 0]);
+    const [found, visited, allowance] = out.early_press;
+    expect(found).toBe(true);
+    expect(visited).toBeGreaterThan(0);
+    expect(visited).toBeLessThanOrEqual(allowance);
   });
 
   it('the tree marks what a document holds as inDocument, not the app\'s own controls (#383)', () => {

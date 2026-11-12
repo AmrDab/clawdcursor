@@ -131,7 +131,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Get-UiParent', 'Get-ContainerOf', 'Test-WithinNamed', 'Test-Activatable', 'Cmd-InvokeElement'];
+  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
   const invoke = `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'New'; action = 'click' })`;
 
   it('invoke "New": the ribbon button on the second monitor is pressed, not the hidden web view\'s link before it', () => {
@@ -300,8 +300,12 @@ describe('the reply names the element acted on, and a partial match is listed, n
     expect(classifyResult(`a11y invoke "New" missed — ${text}.`, true, true, 'mcp').code).toBe('AMBIGUOUS');
   });
 
-  it('missText: several equal matches offer within; a minimized window offers a restore, not a position', () => {
-    expect(missText(structuredMissFields(AMBIGUOUS))).toMatch(/pick one with within \(the window or dialog it is in, as listed\)/);
+  it('missText: several equal matches offer within when they are in different windows; a minimized window offers a restore, not a position', () => {
+    const inBoxes = (...boxes: string[]) => missText(structuredMissFields({ ...AMBIGUOUS,
+      candidates: CANDIDATES.map((c, i) => ({ ...c, container: { name: boxes[i], controlType: 'ControlType.Window' } })) }));
+    expect(inBoxes('Designcenter', 'Options')).toMatch(/pick one with within \(the window or dialog it is in, as listed\)/);
+    // Both in one window: within cannot tell them apart, so it is not offered.
+    expect(inBoxes('Designcenter', 'Designcenter')).not.toMatch(/within/);
     const min = missText(structuredMissFields({ ...AMBIGUOUS, minimized: true, candidates: CANDIDATES.map(({ name, controlType }) => ({ name, controlType })) }));
     expect(min).toMatch(/its window is minimized, so none has a place to click: restore the window first/);
     expect(min).not.toMatch(/click its position/);
@@ -347,6 +351,15 @@ describe('the reply names the element acted on, and a partial match is listed, n
     const r = await invokeTool.execute({ name: 'close', within: 'Options' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);
     expect(invokeElement).toHaveBeenCalledWith(expect.objectContaining({ name: 'close', within: 'Options' }));
     expect(r.text).toBe('Invoked [Button] "Close" via a11y.');
+  });
+
+  it('accessibility invoke: an expand read back that names the role is still [confirmed]', async () => {
+    const invokeTool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const invokeElement = vi.fn(async () => ({ success: true, data: { expandState: 'Expanded', target: { name: 'Details', controlType: 'ControlType.Button', match: 'exact' } } }));
+    const platform = { invokeElement, mouseClick: vi.fn(), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as unknown as PlatformAdapter;
+    const r = await invokeTool.execute({ name: 'Details' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);
+    expect(r.text).toMatch(/^Invoked \(read back ✓\) \[Button\] "Details" via a11y/);
+    expect(classifyResult(r.text, false, true, 'mcp').outcome).toBe('confirmed');
   });
 
   it('the screen text in a target is quoted and bounded, never free text', () => {

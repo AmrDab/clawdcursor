@@ -193,8 +193,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const own = browser ? tree : tree.filter(el => !el.inDocument);
         const content = browser ? [] : tree.filter(el => el.inDocument);
         const ordered = [...onFirst(own), ...onFirst(content)];
-        // A large one is one line while the page still lists the app's controls; paging on (offset) lists it.
-        const fold = content.length > DOC_FOLD_MIN && offset < own.length;
+        // A large one is one line while the page still lists the app's controls; paging on (offset) lists it. Only when the
+        // app has controls of its own to list: an Electron / WebView2 app (VS Code, Slack) IS its document.
+        const fold = content.length > DOC_FOLD_MIN && own.length >= DOC_FOLD_MIN && offset < own.length;
         const page = ordered.slice(offset, fold ? Math.min(offset + limit, own.length) : offset + limit);
         // One element per line: line breaks in a value are escaped, and a cut value says so (blind-hints.ts shownValue).
         let cut = false;

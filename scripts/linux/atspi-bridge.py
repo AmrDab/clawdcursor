@@ -744,11 +744,12 @@ CONTAINER_ROLES = DIALOG_ROLES | {'frame', 'window', 'document web', 'document f
 
 
 def name_tier(n: str, name_l: str) -> int:
-    """1 the name is the one asked for, 2 it starts with it, 3 it contains it, 0 no match: exact beats prefix beats
+    """1 the name is the one asked for, 2 it starts with it as a whole word, 3 it contains it, 0 no match: exact beats prefix beats
     substring (#386). Case and padding ignored."""
     if n == name_l:
         return 1
-    if n.startswith(name_l):
+    # A prefix ends at a word boundary: "Newsletter" only contains "New".
+    if n.startswith(name_l) and not n[len(name_l)].isalnum():
         return 2
     return 3 if name_l in n else 0
 
@@ -771,10 +772,9 @@ def container_of(acc: Any) -> Optional[dict]:
     return None
 
 
-def is_within(acc: Any, want: str) -> bool:
-    """Is the element inside something whose name contains `want` (lower case)? The caller's `within` picks one of several
-    elements that share a name (#382)."""
-    return any(want in (safe(lambda p=p: p.get_name(), '') or '').lower() for p in ancestors(acc))
+# press: nodes still visited after the first exact on-screen match, to see a second element of that name.
+# shortcut: a duplicate further on than this is not seen and the first is pressed; raise it if ties are missed on big pages.
+TIE_ALLOWANCE = 500
 
 
 def find_target(app: Any, name: Optional[str], role: Optional[str], within: Optional[str] = None, press: bool = False):
@@ -790,26 +790,32 @@ def find_target(app: Any, name: Optional[str], role: Optional[str], within: Opti
     roles = role_alternatives(role)
     hits: list = []   # (tier, accessible), tree order
     seen = [0]  # nodes visited, not matches: a name that matches nothing must not walk a whole web page
+    # The walk ends here once an exact on-screen match is seen: at once for a read or a write (the first one is the answer),
+    # TIE_ALLOWANCE nodes later for a press (a second one of that name makes it ambiguous).
+    stop_at = [None]
 
     def visit(acc: Any, depth: int) -> None:
-        if acc is None or search_stop(seen, depth):
+        if acc is None or (stop_at[0] is not None and seen[0] >= stop_at[0]) or search_stop(seen, depth):
             return
         seen[0] += 1
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
         r = (safe(lambda: acc.get_role_name(), '') or '').lower()
         if roles is None or role_matches(roles, r):
             tier = name_tier(n, name_l) if name_l is not None else (1 if roles is not None else 0)
+            # `within` names the window, dialog or document the element is in, as an ambiguous list shows it (#382).
+            if tier and want and want not in ((container_of(acc) or {}).get("name") or '').lower():
+                tier = 0
             if tier:
                 hits.append((tier, acc))
+                if tier == 1 and stop_at[0] is None and is_showing(acc):
+                    stop_at[0] = seen[0] + (TIE_ALLOWANCE if press else 0)
         count = safe(lambda: acc.get_child_count(), 0) or 0
         for i in range(count):
             visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
 
-    # The active window and its popups (see scope_toplevels). No early exit: a second element of the name decides too.
+    # The active window and its popups (see scope_toplevels).
     for top in scope_toplevels(app):
         visit(top, 1)
-    if want:
-        hits = [h for h in hits if is_within(h[1], want)]
     showing = [h for h in hits if is_showing(h[1])]
     # No exact on-screen match was seen. If the walk ran out of budget or time, one may exist beyond the cut, so a weaker
     # match (prefix, substring, hidden) is not acted on: the caller is told to narrow the search. A depth cut is structural,

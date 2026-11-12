@@ -488,6 +488,13 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
 
 // MARK: - Find / invoke
 
+/// Does `s` start with `w` as a whole word? "Newsletter" only contains "New" (#386).
+func wordPrefix(_ s: String, _ w: String) -> Bool {
+    guard s.hasPrefix(w) else { return false }
+    guard let next = s.dropFirst(w.count).first else { return true }
+    return !next.isLetter && !next.isNumber
+}
+
 struct Hit {
     let element: AXUIElement
     let name: String
@@ -558,7 +565,7 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
                 let tl = title.lowercased(), dl = desc.lowercased(), il = ident.lowercased(), ll = label.lowercased(), hl = help.lowercased()
                 matches = matches && (tl.contains(w) || dl.contains(w) || il.contains(w) || ll.contains(w) || hl.contains(w))
                 exact = tl == w || dl == w || il == w || ll == w || hl == w
-                prefix = tl.hasPrefix(w) || dl.hasPrefix(w) || il.hasPrefix(w) || ll.hasPrefix(w) || hl.hasPrefix(w)
+                prefix = [tl, dl, il, ll, hl].contains { wordPrefix($0, w) }
             }
             if let id = aim.id {
                 // An identifier is exact, case included: find_element filters this reply with === afterwards, so a looser
@@ -671,19 +678,6 @@ func containerOf(_ el: AXUIElement) -> [String: String]? {
         cur = a["AXParent"]
     }
     return nil
-}
-
-/// Is the element inside something whose title or description contains `want` (lower case)? The caller's `within` picks one
-/// of several elements that share a name (#382).
-func isWithin(_ el: AXUIElement, _ want: String) -> Bool {
-    var cur = copyAttr(el, "AXParent").value
-    for _ in 0..<60 {
-        guard let c = cur, isElement(c) else { return false }
-        let a = multi(c as! AXUIElement, ["AXTitle", "AXDescription", "AXParent"])
-        if (str(a["AXTitle"]) ?? "").lowercased().contains(want) || (str(a["AXDescription"]) ?? "").lowercased().contains(want) { return true }
-        cur = a["AXParent"]
-    }
-    return false
 }
 
 func elementRect(_ el: AXUIElement) -> (rect: [String: Int], point: [String: Int])? {
@@ -1429,7 +1423,9 @@ func cmdInvoke() -> Never {
     let within = opts["within"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     for w in toSearch where !timeUp() {
         search(w, aim, maxDepth: 12, limit: 400, ctx: &found)
-        if !within.isEmpty { found.hits = found.hits.filter { isWithin($0.element, within) } }
+        // `within` names the window, sheet or web area the element is in, as an ambiguous list shows it: the nearest one, so
+        // naming the outer window (or the app) does not also take the sheet inside it (#382).
+        if !within.isEmpty { found.hits = found.hits.filter { (containerOf($0.element)?["name"] ?? "").lowercased().contains(within) } }
         if found.hits.contains(where: { $0.exact }) { break }
     }
     // scroll-to-visible never takes "the best-ranked" hit: it acts only on the one the caller meant (see scrollTarget), and only

@@ -49,6 +49,11 @@ var ACTION_ROLES = {
     'click':     ['button', 'menuitem', 'menubuttonitem', 'link', 'radiobutton', 'checkbox', 'popupbutton', 'cell', 'row', 'tab']
 };
 
+// Does s start with w as a whole word? "Newsletter" only contains "New" (#386).
+function wordPrefix(s, w) {
+    return s.indexOf(w) === 0 && !/[\p{L}\p{N}]/u.test(s.charAt(w.length));
+}
+
 /**
  * Breadth-first search of a window. Each level's names, descriptions and
  * roles come back in ONE Apple Event per container (batched collection
@@ -80,7 +85,7 @@ function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
                 var roleOk = !wantRole || normRole(rl).indexOf(wantRole) !== -1;
                 if (nameOk && roleOk && (nm || ds || rl)) {
                     out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want),
-                        prefix: !!want && (hay[0].indexOf(want) === 0 || hay[1].indexOf(want) === 0), depth: d });
+                        prefix: !!want && (wordPrefix(hay[0], want) || wordPrefix(hay[1], want)), depth: d });
                 }
                 var pop = (grand[k] || []).indexOf('AXPopover');
                 if (!LEAF[normRole(rl)]) next.push(el);

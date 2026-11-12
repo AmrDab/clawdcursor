@@ -1318,18 +1318,6 @@ function Get-ContainerOf($el) {
     }
     return $null
 }
-# Is the element inside something (a window, a dialog, a pane) whose name contains $want (lower case)? The caller's
-# `within` picks one of several elements that share a name (#382).
-function Test-WithinNamed($el, [string]$want) {
-    $p = Get-UiParent $el
-    for ($i = 0; $i -lt 60 -and $null -ne $p; $i++) {
-        $n = ''
-        try { $n = ([string]$p.Current.Name).Trim().ToLower() } catch { }
-        if ($n.Length -gt 0 -and $n.Contains($want)) { return $true }
-        $p = Get-UiParent $p
-    }
-    return $false
-}
 
 # A minimized window keeps every element at -32000: on no monitor, yet a pattern invoke needs no place on screen. Its
 # elements go through the same choice with their placement unknown (Select-InvokeTarget -placementUnknown).
@@ -1456,12 +1444,20 @@ function Cmd-InvokeElement {
         $EDITABLE = @([System.Windows.Automation.ControlType]::Edit, [System.Windows.Automation.ControlType]::Document, [System.Windows.Automation.ControlType]::ComboBox, [System.Windows.Automation.ControlType]::Spinner)
         # The pass each element matches in (0: none): the earliest one, so a pass only holds what no earlier pass took.
         $passOf = New-Object 'System.Collections.Generic.List[int]'
+        # A prefix ends at a word boundary: "Newsletter" only contains "New".
+        $prefixRe = '^' + [regex]::Escape($nameLower) + '([^\p{L}\p{N}]|$)'
         foreach ($elName in $names) {
-            $passOf.Add($(if ($elName.Length -eq 0) { 0 } elseif ($elName -eq $nameLower) { 1 } elseif ($elName.StartsWith($nameLower)) { 2 }
+            $passOf.Add($(if ($elName.Length -eq 0) { 0 } elseif ($elName -eq $nameLower) { 1 } elseif ($elName -match $prefixRe) { 2 }
                 elseif ($elName.Contains($nameLower)) { 3 } elseif (Test-NameMatch $elName $nameLower) { 4 } else { 0 }))
         }
         if ($within -ne "") {
-            for ($k = 0; $k -lt $names.Count; $k++) { if ($passOf[$k] -gt 0 -and -not (Test-WithinNamed $candidates[$k] $within)) { $passOf[$k] = 0 } }
+            # `within` names the window, dialog or document the element is in, as an ambiguous list shows it: its nearest one, so
+            # naming the outer window does not also take the dialog inside it.
+            for ($k = 0; $k -lt $names.Count; $k++) {
+                if ($passOf[$k] -eq 0) { continue }
+                $box = Get-ContainerOf $candidates[$k]
+                if (-not $box -or -not $box.name.Trim().ToLower().Contains($within)) { $passOf[$k] = 0 }
+            }
         }
         $pickedPass = 0
         if ($valueAction) {

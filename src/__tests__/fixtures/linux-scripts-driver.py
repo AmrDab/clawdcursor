@@ -532,8 +532,24 @@ OUT['rule_label'] = act(page_app(Acc('Save', 'label'), Acc('Save', 'push button'
 two = page_app(Acc('Toolbar', 'tool bar', children=[Acc('Close', 'push button', actions=['press'])]),
                Acc('Panel', 'panel', children=[Acc('Close', 'push button', actions=['press'])]))
 OUT['rule_two'] = act(two, 'Close')
-OUT['rule_within'] = act(two, 'Close', within='Panel')
-OUT['rule_within_pressed'] = two.children[0].children[0].children[1].children[0].action.done
+# `within` names the nearest window, dialog or document, as the list shows it: naming the page does not also take the
+# dialog's Close inside it, though the dialog would win without `within`.
+modal = page_app(Acc('Close', 'push button', actions=['press']), Acc('Ask', 'dialog', children=[Acc('Close', 'push button', actions=['press'])]))
+OUT['rule_within'] = act(modal, 'Close', within='Page')
+OUT['rule_within_pressed'] = [modal.children[0].children[0].children[0].action.done, modal.children[0].children[0].children[1].children[0].action.done]
+OUT['rule_word_prefix'] = act(page_app(Acc('Newsletter', 'link', actions=['jump'])), 'New')
+# The walk stops at the first exact on-screen match for a read, and soon after it for a press (a second one decides).
+visits = [0]
+class CountAcc(Acc):
+    def get_name(self):
+        visits[0] += 1
+        return self.name
+big = page_app(Acc('OK', 'push button', actions=['press']), *[CountAcc('row %d' % i, 'section') for i in range(3000)])
+bridge.begin_search()
+OUT['early_read'] = [bridge.find_target(big, 'OK', None)[0] is not None, visits[0]]
+visits[0] = 0
+bridge.begin_search()
+OUT['early_press'] = [bridge.find_target(big, 'OK', None, None, True)[0] is not None, visits[0], bridge.TIE_ALLOWANCE]
 OUT['rule_value_substring'] = act(page_app(Acc('Your name', 'entry', text='x', editable=True)), 'name', 'get-value')
 bridge.active_application = real_active_application
 

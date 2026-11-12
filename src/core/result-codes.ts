@@ -275,7 +275,7 @@ export function classifyResult(text: string, isError: boolean, acting: boolean, 
   // quoted element name, which is screen text.
   if (/ — verified \d+ check\(s\)$/.test(text) || /^VERIFIED:/.test(text) || /^Typed \d+ chars \((?:keys|paste), read back ✓\)/.test(text)
     || /^(?:Toggled|Selected|Set) \(read back ✓\) "/.test(text)
-    || /^Invoked \(read back ✓\) "/.test(text)) {
+    || /^Invoked \(read back ✓\) (?:\[[^\]]{1,40}\] )?"/.test(text)) {
     return { outcome: 'confirmed' };
   }
   // Nothing checked it. Only calls with an effect to check say so.

@@ -122,8 +122,10 @@ export function missText(d: MissData | undefined, fallback = 'element not found 
         return `no element is named exactly that: ${list.length || 'the'} element${list.length === 1 ? '' : 's'} on screen only contain${list.length === 1 ? 's' : ''} it, nothing was done; ` +
           `to press one, call again with its full name as listed, ${place}:${block}`;
       }
+      // within helps only when the listed ones are in different windows or dialogs.
+      const within = new Set(list.map(c => c.container?.name)).size > 1 ? 'pick one with within (the window or dialog it is in, as listed), or ' : '';
       return `${list.length || 'several'} elements on screen match that name, nothing was done; ` +
-        `pick one with within (the window or dialog it is in, as listed), or name it by its controlType, ${place}:${block}`;
+        `${within}name it by its controlType, ${place}:${block}`;
     }
     default: own = 'the action failed';
   }

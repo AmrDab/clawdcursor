@@ -587,6 +587,14 @@ describe('invoke — never acts without a selector', () => {
     expect(res.error).toMatch(/AXIdentifier|identifier/i);
     expect(calls.filter(c => c.file === 'osascript')).toHaveLength(0);
   });
+
+  it('the osascript fallback has no within, so a call with one is refused rather than pressed in the other window', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    const res = await ax.invoke({ processId: 7, name: 'Close', within: 'Save', action: 'click' });
+    expect(res).toMatchObject({ success: false, data: { refused: true } });
+    expect(res.error).toMatch(/within needs the accessibility helper/);
+    expect(calls.filter(c => c.file === 'osascript')).toHaveLength(0);
+  });
 });
 
 describe('invoke — a role alone never presses (review finding 6)', () => {

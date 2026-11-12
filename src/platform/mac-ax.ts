@@ -947,6 +947,14 @@ export function createMacAx(deps: MacAxDeps): MacAx {
             : `aiming by controlType alone needs the accessibility helper (it checks that exactly one element has the role), which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'} — aim by name instead`,
         };
       }
+      // invoke-element.jxa has no `within`: it would press its best guess, maybe in the other window.
+      if (given(q.within)) {
+        return {
+          success: false,
+          data: { refused: true },
+          error: `within needs the accessibility helper, which is not available${hint() || ' yet (building in the background, or swiftc is unavailable)'} — aim by a name only one element has`,
+        };
+      }
       const out = await viaJxa(
         'invoke-element.jxa',
         [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
