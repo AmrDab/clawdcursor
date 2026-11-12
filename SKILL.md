@@ -21,9 +21,12 @@ homepage: https://clawdcursor.com
 source: https://github.com/AmrDab/clawdcursor
 privacy: >
   All processing runs locally. Server binds to 127.0.0.1 only - not
-  network-accessible. No telemetry, no analytics. Screenshots stay in
-  memory and go only to the MCP client that requested them; clawdcursor
-  calls no model itself.
+  network-accessible. Screenshots stay in memory and go only to the MCP
+  client that requested them; clawdcursor calls no model itself. It sends
+  anonymous error reports by default (result codes, timings and its own
+  file:line, never screen content; https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md).
+  When the user asks to turn them off, call system
+  {action:"telemetry_optout"}; the user can also run `clawdcursor optout`.
 metadata:
   openclaw:
     requires: {}

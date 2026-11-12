@@ -1,0 +1,21 @@
+# Receives clawdcursor's anonymous bug reports (src/core/observability/telemetry.ts). Not part of the npm package.
+# Deploy: npx wrangler d1 execute clawdcursor-telemetry --remote --file schema.sql && npx wrangler deploy
+name = "clawdcursor-telemetry"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+
+# The client sends to https://telemetry.clawdcursor.com/v1/events (TELEMETRY_URL); clawdcursor.com is on Cloudflare.
+routes = [{ pattern = "telemetry.clawdcursor.com", custom_domain = true }]
+
+# No request logs: they would hold the sender's IP address and headers.
+[observability]
+enabled = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "clawdcursor-telemetry"
+database_id = "12d7ee45-a1b5-4b65-93b8-148e6bd86be1"
+
+# Daily: delete events older than 90 days.
+[triggers]
+crons = ["17 3 * * *"]

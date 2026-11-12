@@ -71,6 +71,23 @@ export function getExtraTools(): ToolDefinition[] {
       },
     },
 
+    {
+      name: 'telemetry_optout',
+      description:
+        'Turn off clawdcursor\'s anonymous error reports (error codes and its own file:line, never screen content). ' +
+        'Only when the user asks. There is no opt-in here: the user runs `clawdcursor optin` themselves.',
+      parameters: {},
+      category: 'orchestration',
+      compactGroup: 'system',
+      safetyTier: 0,
+      handler: async () => {
+        const { setTelemetryEnabled, STATE_FILE } = await import('../core/observability/telemetry');
+        return setTelemetryEnabled(false)
+          ? { text: 'Anonymous error reports are off. The user can turn them back on with `clawdcursor optin`.' }
+          : { text: `telemetry_optout: could not write ${STATE_FILE}; the user can run \`clawdcursor optout\` or set CLAWD_TELEMETRY=0.`, isError: true };
+      },
+    },
+
     // ── MOUSE ──────────────────────────────────────────────────────
 
     {

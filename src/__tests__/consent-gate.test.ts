@@ -52,6 +52,13 @@ vi.mock('../surface/onboarding', () => ({
   runOnboarding: vi.fn().mockResolvedValue(true),
 }));
 
+// The agent's opt-out writes ~/.clawdcursor/telemetry.json: a spy here, never the real file.
+const mockSetTelemetry = vi.fn((_on: boolean) => true);
+vi.mock('../core/observability/telemetry', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../core/observability/telemetry')>()),
+  setTelemetryEnabled: (on: boolean) => mockSetTelemetry(on),
+}));
+
 // ── Mock controlBanner so touch() is a no-op ────────────────────────────────
 vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
@@ -315,5 +322,16 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
       expect(mockElicitInput).not.toHaveBeenCalled();
       expect(result.isError).toBe(true);
     });
+  });
+
+  // ── 5. Turning off error reports needs no consent ──────────────────────────
+  it('system telemetry_optout works before consent (it touches nothing on screen)', async () => {
+    mockHasConsent.mockReturnValue(false);
+    await createMcpServer({ ctx: fakeCtx(), compact: true });
+
+    const result = await capturedHandlers.get('system')!({ action: 'telemetry_optout' });
+
+    expect(JSON.stringify(result.content)).not.toContain('consent --accept');
+    expect(mockSetTelemetry).toHaveBeenCalledWith(false);
   });
 });

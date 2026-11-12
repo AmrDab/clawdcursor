@@ -36,6 +36,7 @@ const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
 import { SessionLog, outcomeOf } from './session-log';
 import { withSteps, watchChildProcesses } from '../core/observability/steps';
+import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
 import { OPAQUE_MARK } from '../tools/blind-hints';
@@ -251,6 +252,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     return consentPrompt;
   };
   const tools = compact ? getCompactSurface() : getAllTools();
+  // Bug telemetry sends a tool or action name only when it is one of these (telemetry.ts), and the host only by an allowlist.
+  allowNames(tools.flatMap(t => [t.name, ...(t.parameters.action?.enum ?? [])]));
+  const lowLevel = (server as unknown as { server?: { oninitialized?: () => void } }).server;
+  if (lowLevel) lowLevel.oninitialized = () => setHost(clientInfo()?.name);
 
   for (const tool of tools) {
     // Convert parameter defs to a Zod schema map. The MCP SDK uses zod
@@ -329,7 +334,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // dying with an opaque "failed". Re-checked per call so `clawdcursor
         // consent --accept` takes effect immediately, with no restart. A host
         // that supports elicitation asks the user in-app first.
-        if (!hasConsent() && !(await askConsentInHost())) {
+        // Turning off error reports touches nothing on screen: it never waits on consent.
+        const telemetryOptout = tool.name === 'telemetry_optout' || (tool.name === 'system' && callAction === 'telemetry_optout');
+        if (!telemetryOptout && !hasConsent() && !(await askConsentInHost())) {
           sessionLog.record(tool.name, typeof params?.action === 'string' ? params.action : undefined, false, 0,
             undefined, clientInfo(), { outcome: 'consent_required' });
           return {

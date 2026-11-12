@@ -297,7 +297,7 @@ What is not enforced by Clawd Cursor:
 
 Privacy:
 
-- **No model calls and no telemetry.** Screenshots and screen text go only to the MCP client that asked for them. `clawdcursor report` is opt-in and previews what it sends.
+- **No model calls. Anonymous error reports, on by default.** Screenshots and screen text go only to the MCP client that asked for them. The error reports carry result codes, timings and clawdcursor's own `file:line`, never screen content, typed text, titles or paths ([exactly what is sent](docs/telemetry.md)). `clawdcursor optout`, or asking your agent (`system {action:"telemetry_optout"}`), turns them off. `clawdcursor report` is opt-in and previews what it sends.
 - **No screenshots, if you want.** `clawdcursor agent --no-vision`, or `CLAWD_DISABLE_VISION=1` (which also covers stdio), refuses every call that would return an image; the agent works from the accessibility tree and OCR text.
 - **Logs.** `~/.clawdcursor/logs/` records which tool ran and whether it worked, not typed text or screen content.
 - **Password fields.** Password field values are never returned by tree, find or value reads (Windows, macOS, Linux). A screenshot or OCR can still show whatever is visible on screen.

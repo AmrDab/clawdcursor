@@ -31,6 +31,8 @@ const PAUSE_SAFE = new Set([
   'done', 'give_up',
   // Waiting and reporting touch nothing on screen.
   'computer:wait', 'wait', 'system:report',
+  // Turning off error reports touches nothing on screen either.
+  'system:telemetry_optout', 'telemetry_optout',
 ]);
 
 export function isPauseSafeCall(toolName: string, action?: string): boolean {
@@ -40,7 +42,7 @@ export function isPauseSafeCall(toolName: string, action?: string): boolean {
 /** While the user has stopped clawdcursor: only asking them for control back, and reporting. Not even waiting or reading. */
 const STOP_SAFE = new Set([
   'system:pause_for_user', 'pause_for_user', 'ask_user',
-  'done', 'give_up', 'system:report',
+  'done', 'give_up', 'system:report', 'system:telemetry_optout', 'telemetry_optout',
 ]);
 
 export function isStopSafeCall(toolName: string, action?: string): boolean {
