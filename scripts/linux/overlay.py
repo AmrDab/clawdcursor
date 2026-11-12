@@ -33,6 +33,9 @@ by src/core/banner.ts:
                      names the window (a bare "TARGET": none); the border is drawn
                      while that is the active window, and follows it. "HIDE <ms>"
                      steps aside for a screen capture.
+                     The border is steady here: the travelling highlight of the
+                     Windows and macOS drawers (#392) waits until it can be
+                     checked on a live Linux desktop.
 
 When stdin closes (the parent is gone) the process exits.
   overlay.py --probe prints "ok" when GTK can open the display (banner.ts uses

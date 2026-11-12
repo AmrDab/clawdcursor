@@ -12,7 +12,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner } from '../core/banner';
+import { controlBanner, outlineFlags } from '../core/banner';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -200,6 +200,18 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
   });
 
+  it('the paused outline is spawned paused and blue on every OS; the running one with no flags (#392)', () => {
+    const modes: unknown[] = [];
+    controlBanner.__setOutlineSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); outlines.push(c); return c as unknown as ChildProcess; });
+    controlBanner.pin();
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    expect(modes).toEqual([{ paused: undefined }, { paused: expect.objectContaining({ id: 1 }) }]);
+    for (const os of ['win32', 'darwin', 'linux'] as const) expect(outlineFlags(false, os)).toEqual([]);
+    expect(outlineFlags(true, 'win32')).toEqual(['-Color', '#3b82f6', '-Paused']);
+    expect(outlineFlags(true, 'darwin')).toEqual(['--color', '#3b82f6', '--paused']);
+    expect(outlineFlags(true, 'linux')).toEqual(['--color', '#3b82f6', '--paused']);
+  });
+
   it('a window known only by its process (macOS) is sent with handle 0', () => {
     controlBanner.pin();
     controlBanner.setWorkingWindow({ processId: 100 });
@@ -273,7 +285,7 @@ describe('no full-screen glow', () => {
     }
   });
 
-  it('no outline drawer sizes a window to a screen', () => {
+  it('no outline drawer sizes a window to a screen (only the desktop itself in front is outlined as its monitor)', () => {
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
@@ -282,11 +294,34 @@ describe('no full-screen glow', () => {
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
+  it('the beam is still where the OS is set to reduce motion, and the paused form does not turn (#392)', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;');
+    expect(ps).toContain('turning = !still && !paused;');
+    expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    expect(swift).toContain('let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion');
+    expect(swift).toContain('let turning = !paused && !still');
+    expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
+  });
+
+  // The look is a port of Border Beam and Thinking Orbs (libraries.dev, MIT): its notice goes with it.
+  it('the beam and the orb carry the library\'s licence notice (#392)', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
+    expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
+    expect(read('scripts', 'mac', 'overlay.swift')).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
+    expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
+  });
+
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-4))');
+    // Where the frame is, is read in physical pixels (per-monitor-v2); the strips themselves are not DPI aware, so
+    // Windows draws them at the monitor's scale.
+    expect(ps).toContain('IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2');
+    expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-1))');
     // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
     expect(ps).toContain('if (placed && !moved) return;');
     // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
