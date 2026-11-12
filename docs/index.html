@@ -26,10 +26,14 @@
     screen, click, type, open apps, drive any GUI, with the user's own OS
     permissions. Runs locally; the HTTP server binds 127.0.0.1 with a bearer
     token. 2.0.0 sends no telemetry. From 2.1, anonymous error reports are on
-    by default (error codes and clawdcursor's own file:line only; never screen
-    text, typed text, titles, URLs, app names or file paths; no IP stored).
-    `clawdcursor optout` turns them off; run it when the user asks you to opt
-    out. Use it as the fallback when no API, CLI or file edit does the job.
+    by default: a random install id, version and OS; a start event (OS
+    version, arch, Node major, host app from a fixed list); tool and action
+    names, result codes and timings of failed or slow calls; file:line in
+    clawdcursor's own code. Never screen text, typed text, titles, URLs,
+    element names, the names of the apps being driven or other file paths; no IP
+    stored. When the user asks you to turn them off, call
+    system {"action":"telemetry_optout"}, or run `clawdcursor optout`.
+    Use it as the fallback when no API, CLI or file edit does the job.
 
     ── CHANGED IN 2.0.0 (first published as 1.6.0, which is deprecated) ────────
     Removed: the built-in agent loop, the `task` tool, `clawdcursor task`, the
@@ -46,16 +50,18 @@
                       detection, pause_for_user (hand one step to the user)
       window        : list, focus, resize, close; open apps, files and URLs
       browser       : Playwright over the Chrome DevTools Protocol, for browsers and
-                      Electron / WebView2 apps. It opens its own Chrome/Edge window
-                      (separate profile) and connects automatically.
+                      Electron / WebView2 apps. `navigate` opens clawdcursor's own
+                      Chrome/Edge window (separate profile) and connects; read_text,
+                      click and type then work on that page. A page already open in
+                      the user's own browser is read through the accessibility tree.
       computer      : raw mouse and keyboard; screenshot is the last resort
       batch         : several calls in one round trip, each step guarded
     89 granular tools (one per action, about 19,000 tokens) without --compact.
 
     ── HOW TO USE IT: BLIND FIRST ──────────────────────────────────────────────
-    SEE: in a browser, the page itself (browser read_text); elsewhere
-         accessibility read_tree -> system copy_all_text -> system ocr ->
-         computer screenshot (last).
+    SEE: accessibility read_tree -> system copy_all_text -> system ocr ->
+         computer screenshot (last). On a page you opened with browser
+         navigate, browser read_text reads the page itself.
     ACT: accessibility invoke / set_value by name -> accessibility smart_click
          by visible label -> computer click x,y (last).
     Keys are OS-aware: the server names the OS; `mod` is cmd on macOS, ctrl on
@@ -485,7 +491,7 @@
       <div class="feat-card">
         <div class="feat-icon">🔎</div>
         <h4>Reads what is there</h4>
-        <p>Where an app lists its parts, it reads the text exactly, not from a picture. A read or an action takes a fraction of a second.</p>
+        <p>Where an app lists its parts, it reads the text exactly, not from a picture.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🖱️</div>
@@ -521,7 +527,7 @@
       <div class="stat"><div class="stat-val">0</div><div class="stat-lbl">Loops</div></div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;line-height:1.65;">
-      On every task where the app has an accessibility tree, the agent acted by name. All 4 screenshots were on the two drawing-canvas tasks, which is the fewest those tasks allow. The run also found one false "ok", an action reported as done that was not, and it is fixed.
+      Where the app has an accessibility tree, the agent acted by name about 100% of the time. 12 of the 15 tasks stayed within their call budget. All 4 screenshots were on the two drawing-canvas tasks, which is the fewest those tasks allow. The run also found one false "ok", an action reported as done that was not: it is fixed on main and ships in the next release.
     </p>
     <p style="color:var(--text3);font-size:0.78rem;margin-top:14px;line-height:1.6;">
       The scope is narrow: one OS, one agent, 15 tasks we built for the test. macOS, Linux and other models are not measured yet. From 2.1 the same benchmark runs on all three systems with several models, and a release ships only when it passes.
@@ -533,18 +539,18 @@
   <section class="sect" id="how">
     <div class="sect-label">How it works</div>
     <h2>The fastest way in first. Screenshots last.</h2>
-    <p class="sub">For each app, clawdcursor uses the first of these that works. Your AI makes every decision; clawdcursor carries it out and checks it.</p>
+    <p class="sub">Your AI tries these in order and uses the first that works. Your AI makes every decision; clawdcursor carries it out and checks it.</p>
 
     <div class="pipe-flow four">
       <div class="pipe-step router">
         <h4><span class="pipe-num">1</span> The page</h4>
-        <span class="pipe-tag">Browsers</span>
-        <p>In a browser it works on the web page itself, through Playwright. It opens its own Chrome or Edge window and connects to it automatically. Any other browser can still be read through the accessibility tree.</p>
+        <span class="pipe-tag">Its own browser window</span>
+        <p>It opens its own Chrome or Edge window, with its own profile, and works on the web page itself through Playwright. A page already open in your own browser is read through the accessibility tree.</p>
       </div>
       <div class="pipe-arrow" aria-hidden="true">→</div>
       <div class="pipe-step agent">
         <h4><span class="pipe-num">2</span> The tree</h4>
-        <span class="pipe-tag">Desktop apps</span>
+        <span class="pipe-tag">Desktop apps, your browser</span>
         <p>Apps list their buttons, fields and menus by name for screen readers. clawdcursor reads that list and acts on each part by name.</p>
       </div>
       <div class="pipe-arrow" aria-hidden="true">→</div>
@@ -652,7 +658,7 @@
       <div class="feat-card">
         <div class="feat-icon">🔒</div>
         <h4>Passwords are not read</h4>
-        <p>Password field values are never read through the accessibility tree. Keys that lock the computer or end your session are never sent.</p>
+        <p>Password field values are never read through the accessibility tree, on Windows and macOS (Linux from the next release). Keys that lock the computer or end your session are never sent.</p>
       </div>
       <div class="feat-card">
         <div class="feat-icon">🔑</div>
@@ -676,21 +682,23 @@
       <div class="mode-card a">
         <h3>What is sent</h3>
         <ul>
-          <li>Error codes.</li>
-          <li>The file and line in clawdcursor's own code where the error happened.</li>
+          <li>With every report: a random install id made on your computer, the clawdcursor version and your OS.</li>
+          <li>When the server starts: OS version, CPU type, Node.js version, which AI app started it (from a fixed list; anything else is "other"), and compact or granular tools.</li>
+          <li>When a call fails or takes over 10 seconds: the tool and action name, the result code, how long it took, and whether the app was a browser, an Electron app or a native app.</li>
+          <li>On a crash or exit: the error type or exit reason, and the file and line in clawdcursor's own code.</li>
         </ul>
       </div>
       <div class="mode-card b">
         <h3>What is never sent</h3>
         <ul>
-          <li>Screen text, typed text, window titles, URLs, app names or file paths.</li>
+          <li>Error text, screen or OCR text, typed text, the clipboard, window titles, URLs, element names, the names of the apps your AI works in, file paths outside clawdcursor, user names or emails.</li>
           <li>Your IP address is not stored.</li>
         </ul>
       </div>
     </div>
     <p style="color:var(--text2);font-size:0.88rem;margin-top:18px;line-height:1.65;">
       To turn them off, run <code>clawdcursor optout</code>, or ask your AI to opt out for you.
-      Details: <a href="https://github.com/AmrDab/clawdcursor/blob/main/docs/telemetry.md" target="_blank" rel="noopener" style="color:var(--accent2);">docs/telemetry.md</a>.
+      From 2.1, <code>clawdcursor telemetry</code> prints the status and every field it sends.
     </p>
   </section>
 

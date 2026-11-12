@@ -33,7 +33,7 @@
 
 Clawd Cursor is a free, open-source (MIT) MCP server. Your AI (Claude, Codex, Cursor, a local model, any MCP client) connects to it and gets six tools to use a real Windows, macOS or Linux computer: `accessibility`, `system`, `window`, `browser`, `computer` and `batch`.
 
-It sees the parts of an app by name, through the same data screen readers use: "Email field", "Confirm button". Your AI acts on those parts by name: type into Email, press Confirm, choose High. After each change Clawd Cursor reads the result back and reports `confirmed`, `unverified` or `failed`. Text is read exactly, and a read or an action takes a fraction of a second.
+It sees the parts of an app by name, through the same data screen readers use: "Email field", "Confirm button". Your AI acts on those parts by name: type into Email, press Confirm, choose High. After each change Clawd Cursor reads the result back and reports `confirmed`, `unverified` or `failed`. Text is read exactly.
 
 Clawd Cursor has no model and no API key of its own: your AI makes every decision. Use it for the steps that only exist in a GUI. If an API, a command-line tool or a file edit does the job, use that instead.
 
@@ -46,10 +46,11 @@ Our own benchmark: the Codex agent on Windows, 15 tasks.
 | Measure | Result |
 |---|---|
 | Tasks done | 14 of 15 |
-| Acted by name | on every task where the app has an accessibility tree |
+| Acted by name | about 100% where the app has an accessibility tree |
+| Within the call budget | 12 of 15 |
 | Screenshots | 4 in total, all on the two drawing-canvas tasks (the fewest those tasks allow) |
 | Loops | 0 |
-| False "ok" | 1 found (an action reported as done that was not), and fixed |
+| False "ok" | 1 found (an action reported as done that was not): fixed on main, ships in the next release |
 
 The scope is narrow: one OS, one agent, 15 tasks we built for the test. macOS, Linux and other models are not measured yet. From 2.1 the same benchmark runs on all three systems with several models, and a release ships only when it passes. How it measures: [bench/README.md](bench/README.md).
 
@@ -57,10 +58,10 @@ The scope is narrow: one OS, one agent, 15 tasks we built for the test. macOS, L
 
 ## How it works
 
-For each app, Clawd Cursor uses the first of these that works. Your AI makes every decision; Clawd Cursor carries it out and checks it.
+Your AI tries these in order and uses the first that works. Your AI makes every decision; Clawd Cursor carries it out and checks it.
 
-1. **The page itself, in browsers.** The `browser` tool uses Playwright. It opens its own Chrome or Edge window, with its own profile, and connects to it automatically. Any other browser can still be read through the accessibility tree.
-2. **The accessibility tree, in desktop apps.** Apps list their buttons, fields and menus by name for screen readers. Clawd Cursor reads that list and acts on each part by name.
+1. **The page itself, in Clawd Cursor's own browser window.** `browser navigate` opens Chrome or Edge with its own profile and connects to it through Playwright; your AI then reads and clicks the page from the inside. A page already open in your own browser is read through the accessibility tree.
+2. **The accessibility tree, in desktop apps and your own browser.** Apps list their buttons, fields and menus by name for screen readers. Clawd Cursor reads that list and acts on each part by name.
 3. **Text recognition (OCR), when there is no tree.** It reads the words on the screen and can click a visible label.
 4. **Screenshots, last.** Only when nothing else works, such as on drawing canvases and 3D views.
 
@@ -70,8 +71,8 @@ After every action the result ends with one status line: `confirmed` (it saw the
 flowchart TB
     agent["Your AI (in its host)<br/>plans · chooses tools · checks results"] --> see{"SEE: the fastest way in first"}
 
-    see -- "browser" --> page["browser read_text<br/>the web page itself, through Playwright"]
-    see -- "desktop app" --> tree["accessibility read_tree · system copy_all_text<br/>element names, positions, exact text"]
+    see -- "own browser window" --> page["browser navigate, then read_text<br/>the web page itself, through Playwright"]
+    see -- "desktop app or your browser" --> tree["accessibility read_tree · system copy_all_text<br/>element names, positions, exact text"]
     see -- "no tree" --> ocr["system ocr<br/>the words on screen"]
     see -- "last" --> shot["computer screenshot<br/>sends an image to the model"]
 
@@ -90,7 +91,7 @@ flowchart TB
 
 In tool terms:
 
-- **See.** `browser read_text` in a browser. Elsewhere `accessibility read_tree` lists a window's parts by name, `system copy_all_text` gives the exact text of a page or document, and `system ocr` reads the screen when the tree is empty. `computer screenshot` and its variants (`screenshot_region`, `zoom`) come last: they are the only reads that put an image in the model's context.
+- **See.** `accessibility read_tree` lists a window's parts by name, `system copy_all_text` gives the exact text of a page or document, and `system ocr` reads the screen when the tree is empty. `computer screenshot` and its variants (`screenshot_region`, `zoom`) come last: they are the only reads that put an image in the model's context. On a page your AI opened with `browser navigate`, `browser read_text` reads the page itself.
 - **Act.** `accessibility invoke` clicks a part by name and `set_value` fills a field. If the name is not in the tree, `smart_click` finds the visible label by OCR. `compile_ui`, `find_button` and `find_field` return an `{element_id, snapshot_id}` pair that stays valid when the layout shifts. A click at a screen position is for a target with no name and no visible text.
 - **Keys.** The server tells your AI which OS it is on. `mod` means `cmd` on macOS and `ctrl` on Windows and Linux.
 
@@ -126,7 +127,7 @@ What is enforced, whatever your AI sends:
 - **An outline around the window being worked on**, amber while your AI works and blue while it waits for you.
 - **The pause card.** For a sign-in or a 2FA code your AI hands that one step to you. While the card is up, no other tool call runs. A choice or a typed reply on the card comes only from you: your AI cannot click its own card or the pill. On the granular surface an agent can also end a pause with `resume_task`; that is reported as unverified, never as your answer.
 - **No typing into AI assistant windows.** Input is refused when the window in front is an AI assistant your AI did not focus or open on purpose, or is no longer the window it was working in.
-- **Password values are never read.** Password field values are never returned by tree, find or value reads (Windows, macOS, Linux). A screenshot or OCR can still show whatever is visible on screen.
+- **Password values are never read.** Password field values are never returned by tree, find or value reads on Windows and macOS (Linux from the next release). A screenshot or OCR can still show whatever is visible on screen.
 - **A short list of keys that are never sent**, because they lock the machine or end the session. Windows: `Win+L`, `Ctrl+Alt+Del`. macOS: `Ctrl+Cmd+Q`, `Cmd+Shift+Q`, anything with Power or Eject. Linux: `Super+L`, `Ctrl+Alt+Del`, `Ctrl+Alt+Backspace`, `Ctrl+Alt+F1`&ndash;`F12`, SysRq, Power. Every other shortcut is allowed.
 - **Local only, with a token.** `clawdcursor agent` binds `127.0.0.1` only and requires the bearer token. `clawdcursor mcp` (stdio) opens no port.
 - **Screen text is marked as data.** Page text, OCR, the clipboard, titles and element names reach your AI inside `<untrusted-screen-content>` or quoted, and cannot break out of that wrapping. Whether the model obeys text it reads is the model's and the host's side of prompt-injection defence.
@@ -154,11 +155,14 @@ Privacy:
 
 2.0.0 sends nothing. **From 2.1**, Clawd Cursor sends anonymous error reports by default, so bugs get found and fixed.
 
-- **Sent:** error codes, and the file and line in Clawd Cursor's own code where the error happened.
-- **Never sent:** screen text, typed text, window titles, URLs, app names or file paths. No IP address is stored.
-- **To turn them off:** run `clawdcursor optout`, or ask your AI to opt out for you.
+- **Sent with every report:** a random install id made on your computer, the Clawd Cursor version and your OS.
+- **Sent when the server starts:** OS version, CPU type, Node.js version, which AI app started it (from a fixed list: Claude Code, Cursor, Codex and others; anything else is "other"), and compact or granular tools.
+- **Sent when a call fails or takes over 10 seconds:** the tool and action name, the result code, how long it took, and whether the app was a browser, an Electron app or a native app.
+- **Sent on a crash or exit:** the error type or the exit reason (from a fixed list), and the file and line in Clawd Cursor's own code.
+- **Never sent:** error text, screen or OCR text, typed text, the clipboard, window titles, URLs, element names, the names of the apps your AI works in, file paths outside Clawd Cursor, user names or emails. No IP address is stored.
+- **To turn them off:** run `clawdcursor optout`, or ask your AI to opt out for you (it calls `system telemetry_optout`).
 
-Details: [docs/telemetry.md](docs/telemetry.md).
+From 2.1, `clawdcursor telemetry` prints the status and every field it sends.
 
 ---
 
