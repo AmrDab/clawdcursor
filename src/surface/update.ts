@@ -29,7 +29,7 @@ export function howToUpdate(method: Exclude<InstallMethod, 'npm-global'>, platfo
     case 'npx': return 'npx runs the version it is given: use `npx clawdcursor@latest`. The Claude Code plugin pins its own: in Claude Code, /plugin marketplace update clawdcursor';
     case 'desktop-extension': return `install clawdcursor-${platform}.mcpb from https://github.com/AmrDab/clawdcursor/releases/latest`;
     case 'source': return 'a source checkout: git pull, then npm ci && npm run build';
-    case 'other': return 'not an npm global install: update it with the tool that installed it (with npm: npm install -g clawdcursor@latest)';
+    case 'other': return 'update it with the tool that installed it (with npm: npm install -g clawdcursor@latest)';
   }
 }
 
@@ -65,7 +65,7 @@ export async function runUpdate(): Promise<void> {
   }
 
   if (method !== 'npm-global') {
-    console.log(`This copy (v${VERSION}, ${root}) is ${method === 'other' ? 'not managed by npm -g' : `a ${method} install`}. Latest: v${latest}.`);
+    console.log(`This copy (v${VERSION}, ${root}) is not an npm global install, so it is not updated here. Latest: v${latest}.`);
     console.log(`  ${howToUpdate(method)}`);
     process.exitCode = 1;
     return;
