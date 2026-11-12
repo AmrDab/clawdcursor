@@ -77,6 +77,17 @@ export async function preferControl(
   return (await findControls(platform, action, q)).controlType ?? q.controlType;
 }
 
+type Placed = { name?: string; bounds?: { x: number; y: number; width: number; height: number } } | null | undefined;
+/** Is the focused element `target` itself: in the same place, or of the same name and overlapping it? */
+export function sameElement(focused: Placed, target: Placed): boolean {
+  const a = focused?.bounds, b = target?.bounds;
+  if (!a || !b) return false;
+  const near = (p: number, q: number) => Math.abs(p - q) <= 8;
+  if (near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height)) return true;
+  const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+  return overlap && !!focused?.name?.trim() && norm(focused.name) === norm(target?.name);
+}
+
 /**
  * Why a plain `select name:"X"` (no value) failed when X is no item: names the roles that matched and how to pick an
  * option inside a dropdown. undefined when X is a selectable item or nothing by that name was found.

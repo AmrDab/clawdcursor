@@ -826,6 +826,8 @@ export class LinuxAdapter implements PlatformAdapter {
       if (result?.secure === true) data.secure = true;
       if (result?.toggleState !== undefined) data.toggleState = result.toggleState;
       if (result?.toggleChanged !== undefined) data.toggleChanged = result.toggleChanged;
+      // select: the item's own state, read back after the act.
+      if (typeof result?.selected === 'boolean') data.selected = result.selected;
       // e.g. "exists but is not visible on screen" — say why, not just "missed".
       if (result?.success !== true && typeof result?.error === 'string') data.error = result.error;
       if (result?.success !== true) Object.assign(data, structuredMissFields(result));

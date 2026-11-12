@@ -289,6 +289,17 @@ export async function selfcheckFixtures(buildDir: string | undefined, log: (line
           ok = check(await front(), 'the window outside the fence was never focused: the fixture is still in front') && ok;
           const again = await call('window', { action: 'focus', processId: fixturePid });
           ok = check(allowed(again) && !again.isError, 'native fixture: still allowed after the refusals') && ok;
+          // A select must change the fixture, and say so only when it did (#396: "ok" on a list that stayed empty).
+          const first = (r: Reply) => text(r).split('\n')[0].slice(0, 90);
+          const priority = async () => (await fixture.state())?.state.priority;
+          const pick = await call('accessibility', { action: 'select', name: 'Priority', value: 'High', processId: fixturePid });
+          ok = check(!pick.isError && text(pick).includes('read back ✓') && await priority() === 'High',
+            `native fixture: select High in Priority changes the fixture (state: ${await priority()}) and is read back (${first(pick)})`) && ok;
+          const item = await call('accessibility', { action: 'select', name: 'Low', processId: fixturePid });
+          ok = check(!item.isError && text(item).includes('read back ✓') && await priority() === 'Low',
+            `native fixture: select on the item Low changes the fixture (state: ${await priority()}) and is read back (${first(item)})`) && ok;
+          const none = await call('accessibility', { action: 'select', name: 'Priority', value: 'Urgent', processId: fixturePid });
+          ok = check(!!none.isError && await priority() === 'Low', `native fixture: an option the list does not have is a failure, and nothing changes (${first(none)})`) && ok;
         });
       } finally {
         await fixture.close();

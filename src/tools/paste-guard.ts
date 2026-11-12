@@ -123,6 +123,9 @@ function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
   return (!numeric && w && v.startsWith(w)) || (bare(w) && bare(v) === bare(w)) ? 'suffix' : 'mismatch';
 }
 
+/** Does a control that was to show `want` show it, and nothing else? The 'match' of holdsValue: what a select reads back. */
+export const showsValue = (shown: string, want: string): boolean => holdsValue(flat(shown), flat(want)) === 'match';
+
 /** What a read of a field gave. `readable`: the read itself worked, so an empty `value` means the field IS empty. */
 export type FieldRead = { value?: string; secure?: boolean; readable?: boolean };
 

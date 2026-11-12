@@ -49,6 +49,12 @@ try {
         public static extern IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
         [DllImport("user32.dll")]
         public static extern bool IsZoomed(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetParent(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        public static extern int GetDlgCtrlID(IntPtr hWnd);
+        [DllImport("user32.dll")]
+        public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeoutMs, out IntPtr result);
         // Additional constants for force-focus path:
         //   HWND_TOPMOST    = -1
         //   HWND_NOTOPMOST  = -2
@@ -1304,6 +1310,41 @@ function Test-Activatable($el, $action) {
     return $false
 }
 
+# Select an item (SelectionItemPattern.Select) so that the APP hears of it, and read it back.
+# A Win32 list box (a WinForms ListBox is one) takes UIA's Select() as LB_SETCURSEL, which moves the highlight WITHOUT the
+# LBN_SELCHANGE its parent gets when a user picks an item. UIA then reads the item as selected while the app's own
+# selection-changed handler never ran (#396: a form applied "no priority" after a select that reported ok). So the list
+# box's parent is sent that notification, as the control itself does. A combo box needs none: its proxy notifies.
+# -> $true / $false: what the item's IsSelected reads afterwards ($null: it cannot be read). Throws without the pattern.
+function Select-Item($element) {
+    $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+    $was = $false
+    try { $was = [bool]$p.Current.IsSelected } catch { }
+    $p.Select()
+    # Chromium updates UIA after the call returns: read it back until it is selected, or ~0.5 s.
+    $selected = $null
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    do {
+        try { $selected = [bool]$p.Current.IsSelected } catch { $selected = $null; break }
+        if ($selected) { break }
+        Start-Sleep -Milliseconds 50
+    } while ($sw.ElapsedMilliseconds -lt 500)
+    if ($selected -and -not $was) {
+        try {
+            $list = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($element)
+            $h = [IntPtr][int]$list.Current.NativeWindowHandle
+            if ($h -ne [IntPtr]::Zero -and $list.Current.ClassName -match '(?i)(^|\.)listbox(\.|$)') {
+                # WM_COMMAND, wParam = (LBN_SELCHANGE << 16) | control id, lParam = the list box. Bounded: a handler that
+                # opens a modal box must not hold the bridge (SMTO_ABORTIFHUNG).
+                $wParam = [IntPtr]((1 -shl 16) -bor ([Win32UIA]::GetDlgCtrlID($h) -band 0xFFFF))
+                $res = [IntPtr]::Zero
+                [void][Win32UIA]::SendMessageTimeout([Win32UIA]::GetParent($h), 0x0111, $wParam, $h, 2, 1500, [ref]$res)
+            }
+        } catch { }
+    }
+    return $selected
+}
+
 # ── Command: invoke-element (fuzzy name match) ────────────────────────────────
 function Cmd-InvokeElement {
     param($cmd)
@@ -1453,8 +1494,7 @@ function Cmd-InvokeElement {
                     return @{ success=$true; action="click"; method="TogglePattern" }
                 } catch {
                     try {
-                        $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-                        $p.Select()
+                        [void](Select-Item $element)
                         return @{ success=$true; action="click"; method="SelectionItemPattern" }
                     } catch {
                         # An expandable element (a <details> summary, a tree node, a disclosure button) has only
@@ -1690,8 +1730,11 @@ function Cmd-InvokeElement {
         }
         "select" {
             try {
-                $p = $element.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
-                $p.Select(); return @{ success=$true; action="select" }
+                $selected = Select-Item $element
+                $r = @{ success=$true; action="select" }
+                # selected: the item's own state, read back after the select (absent: it cannot be read).
+                if ($null -ne $selected) { $r.data = @{ selected = $selected } }
+                return $r
             } catch { return @{ success=$false; reason="unsupported"; error="SelectionItemPattern not supported" } }
         }
         default { return @{ success=$false; error="Unknown action: $action" } }

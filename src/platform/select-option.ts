@@ -12,10 +12,14 @@
  *   5. read the control back and report whether it now shows `value`. A pick is applied a moment AFTER the press returns (a menu
  *      that is still closing, a page script), so a control that still shows the old value is re-read for `settleMs` before the
  *      pick is called a failure (macOS WebKit: "Tried to select Green, but it now shows Red" while the page already showed Green).
+ *   6. still the old value: ONE try through the keyboard (pickByKeys), then the same read-back.
+ *
+ * A plain `select name:"High"` (the item itself, no value) ends in selectedResult: the item's own state, read by the bridge.
  */
 import type { PlatformAdapter } from './types';
-import { findControls } from './prefer-control';
+import { findControls, holdsOptions, isSelectableItem, sameElement } from './prefer-control';
 import { quoteScreenText } from '../core/result-codes';
+import { showsValue } from '../tools/paste-guard';
 
 export interface SelectOptionResult {
   success: boolean;
@@ -35,13 +39,65 @@ async function readUntil(read: () => Promise<string | null>, want: string, ms: n
     await sleep(150);
     const v = await read();
     if (v !== null) last = v;
-    if (v !== null && norm(v) === norm(want)) return v;
+    if (v !== null && showsValue(v, want)) return v;
   }
   return last;
 }
 
+/**
+ * How a plain `select` on an item ends. The bridges read the item's selected state back after the act (`data.selected`):
+ * selected is confirmed, not selected is a failure, and a state that cannot be read is a success said to be NOT verified.
+ */
+export function selectedResult(res: { success: boolean; data?: Record<string, unknown> }, name: string): SelectOptionResult {
+  const selected = res.data?.selected;
+  if (selected === true) return { success: true, verified: true, text: `Selected (read back ✓) ${quoteScreenText(name)}.` };
+  if (selected === false) return { success: false, verified: true, text: `Select ${quoteScreenText(name)} failed: it still reads as not selected.` };
+  return { success: true, verified: false, text: `Selected ${quoteScreenText(name)} — its selected state could not be read back: NOT verified. Read it to check.` };
+}
+
+type KeysPlatform = Pick<PlatformAdapter, 'invokeElement' | 'findElements'>
+  & Partial<Pick<PlatformAdapter, 'getActiveWindow' | 'focusWindow' | 'getFocusedElement' | 'typeText'>>;
+
+/**
+ * The second try, after a pattern route the control ignored: give the control the keyboard focus and type the option's
+ * text — a list box or a closed dropdown list moves to the item that starts with what is typed. The keys go through the
+ * platform's guarded input, like all input.
+ *
+ * Keys go to whatever has the focus, so (as when a field is typed into): the control's window must be in front, and after
+ * the focus call the keyboard focus must be on the control itself or on one of its items. An editable combo box puts the
+ * focus in its text box: that is a field, and is not typed into here. No Return is sent: on a list or a closed dropdown it
+ * presses the dialog's default button.
+ * 'skipped': nothing was done. 'unfocused': the focus is not on the control; nothing was typed.
+ */
+async function pickByKeys(
+  platform: KeysPlatform, control: { name: string; controlType?: string; processId?: number }, value: string,
+): Promise<'typed' | 'skipped' | 'unfocused'> {
+  const { getActiveWindow, focusWindow, getFocusedElement, typeText } = platform;
+  if (!getActiveWindow || !focusWindow || !getFocusedElement || !typeText) return 'skipped';
+  const el = (await platform.findElements(control).catch(() => [])).find(h => norm(h.name) === norm(control.name) && h.bounds);
+  if (!el) return 'skipped';
+  const pid = control.processId ?? el.processId;
+  if (pid === undefined) return 'skipped';
+  const inFront = async () => (await getActiveWindow.call(platform).catch(() => null))?.processId === pid;
+  if (!await inFront()) {
+    await focusWindow.call(platform, { processId: pid }).catch(() => false);
+    await sleep(150);
+    if (!await inFront()) return 'skipped';
+  }
+  const focus = await platform.invokeElement({ ...control, action: 'focus' }).catch(() => null);
+  if (!focus?.success) return 'unfocused';
+  await sleep(100);
+  const focused = await getFocusedElement.call(platform).catch(() => null);
+  const role = focused?.controlType;
+  const b = el.bounds, f = focused?.bounds;
+  const itemInside = !!f && isSelectableItem(role) && f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
+  if (!focused || focused.secure || !(itemInside || (holdsOptions(role) && sameElement(focused, el)))) return 'unfocused';
+  await typeText.call(platform, value);
+  return 'typed';
+}
+
 export async function selectOption(
-  platform: Pick<PlatformAdapter, 'invokeElement' | 'findElements'>,
+  platform: KeysPlatform,
   q: { name: string; value: string; controlType?: string; processId?: number },
   opts: { settleMs?: number } = {},
 ): Promise<SelectOptionResult> {
@@ -69,7 +125,7 @@ export async function selectOption(
   };
 
   const before = await readValue();
-  if (before !== null && norm(before) === norm(value)) {
+  if (before !== null && showsValue(before, value)) {
     return { success: true, verified: true, text: `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)} (it already showed that).` };
   }
 
@@ -100,19 +156,28 @@ export async function selectOption(
       picked = true;
       await sleep(250);
       after = await readValue();
-      if (after === null || norm(after) === norm(value)) break outer;
+      if (after === null || showsValue(after, value)) break outer;
     }
     if (!option.controlType) break;
   }
   // Still the old value after the last attempt: give the control time to show the new one before calling this a failure.
-  if (picked && after !== null && norm(after) !== norm(value) && settleMs > 0) after = (await readUntil(readValue, value, settleMs)) ?? after;
+  if (picked && after !== null && !showsValue(after, value) && settleMs > 0) after = (await readUntil(readValue, value, settleMs)) ?? after;
   if (after !== null) {
-    const ok = norm(after) === norm(value);
+    let ok = showsValue(after, value);
     if (!ok && opened) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
+    // The pattern route left another value: the keyboard, once, and the same read-back.
+    const keyed = ok ? 'skipped' : await pickByKeys(platform, { name, controlType, processId }, value);
+    if (keyed === 'typed') {
+      after = (await readUntil(readValue, value, Math.max(settleMs, 450))) ?? after;
+      ok = showsValue(after, value);
+    }
+    const keys = keyed === 'typed' ? ' Typing it into the control did not change that.'
+      : keyed === 'unfocused' ? ' To type it instead, could not focus the control to type into it; nothing was typed.' : '';
     return {
       success: ok,
       verified: true,
-      text: ok ? `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)}.` : `Tried to select ${quoteScreenText(value)} in ${quoteScreenText(name)}, but it now shows ${quoteScreenText(after)}.`,
+      text: ok ? `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)}${keyed === 'typed' ? ' (via keys after the direct select had no effect)' : ''}.`
+        : `Tried to select ${quoteScreenText(value)} in ${quoteScreenText(name)}, but it now shows ${quoteScreenText(after)}.${keys}`,
     };
   }
   return {

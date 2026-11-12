@@ -734,12 +734,28 @@ func selectableRowAbove(_ el: AXUIElement) -> AXUIElement? {
 
 /// Select the row and check that it took: the effect, not the call, is the answer. A press that "succeeded" on the label and
 /// changed nothing was reported as a click; now a selection that did not happen is a miss, and the caller clicks coordinates.
+/// Set AXSelected on an element that is not a row (a tab, a radio button, a list item) and read it back for ~0.5 s:
+/// `selected` true or false is what the element reads afterwards, and it is left out when AXSelected cannot be read.
+/// nil: the set was refused, and the caller presses the element instead.
+func setSelected(_ el: AXUIElement, action: String) -> [String: Any]? {
+    guard AXUIElementSetAttributeValue(el, "AXSelected" as CFString, kCFBooleanTrue) == .success else { return nil }
+    var read: Bool? = nil
+    for _ in 0..<10 {
+        read = bool(copyAttr(el, "AXSelected").value)
+        if read != false { break }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    if read == true { return pressed(action, method: "AXSelected", pending: false, extra: ["selected": true]) }
+    if read == false { return pressed(action, method: "AXSelected", pending: false, extra: ["selected": false]) }
+    return pressed(action, method: "AXSelected", pending: false)
+}
+
 func selectRow(_ row: AXUIElement, action: String) -> [String: Any] {
-    if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false, extra: ["alreadySelected": true]) }
+    if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false, extra: ["alreadySelected": true, "selected": true]) }
     AXUIElementSetAttributeValue(row, "AXSelected" as CFString, kCFBooleanTrue)
     for _ in 0..<6 {
         Thread.sleep(forTimeInterval: 0.05)
-        if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false) }
+        if bool(copyAttr(row, "AXSelected").value) == true { return pressed(action, method: "AXSelected", pending: false, extra: ["selected": true]) }
     }
     return miss(action, "selecting the row did not take effect — click its coordinates instead", element: row)
 }
@@ -1130,9 +1146,7 @@ func perform(_ action: String, _ h: Hit, pid: pid_t, appName: String) -> [String
         return ["ok": true, "success": true, "action": action, "method": "AXPress", "data": ["toggleState": state, "toggleChanged": after != beforeValue]]
     case "select":
         if let row = selectableRowAbove(el) { return selectRow(row, action: action) }
-        if settable(el, "AXSelected"), AXUIElementSetAttributeValue(el, "AXSelected" as CFString, kCFBooleanTrue) == .success {
-            return ["ok": true, "success": true, "action": action, "method": "AXSelected"]
-        }
+        if settable(el, "AXSelected"), let done = setSelected(el, action: action) { return done }
         let p = press(el)
         if p.hung { hungDuringAction(action, appName) }
         if p.done { return pressed(action, method: "AXPress", pending: p.pending) }

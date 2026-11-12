@@ -28,7 +28,7 @@ import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../pl
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
-import { selectOption } from '../../platform/select-option';
+import { selectOption, selectedResult } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, shownValue, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
@@ -43,7 +43,7 @@ import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, fieldRead, typesAsKeys, type Retyped } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
-import { preferControl, notSelectableReason, failReason } from '../../platform/prefer-control';
+import { preferControl, notSelectableReason, failReason, sameElement } from '../../platform/prefer-control';
 import { quoteScreenText } from '../result-codes';
 import { missText, untrusted } from '../miss-text';
 
@@ -543,12 +543,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const processId = await resolveAgentPid(args, ctx);
         const controlType = typeof args.controlType === 'string' ? args.controlType : undefined;
         const res = await ctx.platform.invokeElement({ name, controlType, processId, action: 'select' });
-        const notItem = res.success ? undefined : await notSelectableReason(ctx.platform, { name, controlType, processId });
-        return {
-          success: res.success,
-          text: res.success ? `Selected ${quoteScreenText(name)}.` : `Could not select ${quoteScreenText(name)}${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`,
-          targetLabel: name,
-        };
+        if (res.success) { const r = selectedResult(res, name); return { success: r.success, text: r.text, targetLabel: name }; }
+        const notItem = await notSelectableReason(ctx.platform, { name, controlType, processId });
+        return { success: false, text: `Could not select ${quoteScreenText(name)}${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, targetLabel: name };
       },
     },
 
@@ -2387,11 +2384,7 @@ async function valueBefore(ctx: AgentToolContext, field: { name: string; control
 function focusIsField(focused: UiElement | null, field: UiElement): boolean {
   const role = String(focused?.controlType ?? '');
   if (!focused?.bounds || focused.secure || !EDITABLE_ROLE.test(role) || /^text$|password/i.test(role)) return false;
-  const a = focused.bounds, b = field.bounds;
-  const near = (p: number, q: number) => Math.abs(p - q) <= 8;
-  if (near(a.x, b.x) && near(a.y, b.y) && near(a.width, b.width) && near(a.height, b.height)) return true;
-  const overlap = a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-  return overlap && !!focused.name?.trim() && focused.name.trim().toLowerCase() === field.name.trim().toLowerCase();
+  return sameElement(focused, field);
 }
 
 /**
