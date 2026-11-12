@@ -10,7 +10,6 @@ recoverable, but readers should always defer to:
 - The shipped code under `src/`
 - The user-facing docs at the parent `docs/` directory
 - The [CHANGELOG](../../CHANGELOG.md) for the canonical release-by-release record
-- [`docs/guide-marketplace.md`](../guide-marketplace.md) for the marketplace architecture spec
 
 ## Contents
 
