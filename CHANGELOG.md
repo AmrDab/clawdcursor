@@ -18,6 +18,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   - Still click-through, never focused, and out of the agent's screenshots. The glow reaches about 28 px into the
     window's edge.
   - Windows and macOS. On Linux the border stays a plain steady one for now.
+  - On macOS the beam is drawn for power (#414): a thin amber ring with a brighter run going round it, in plain Core
+    Animation layers along the edge, so its GPU cost follows the edge and not the window's area; paused, a still blue
+    ring. The orb moves about 10 times a second on both systems.
   - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
     ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
     and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default

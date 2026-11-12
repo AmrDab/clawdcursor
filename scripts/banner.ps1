@@ -150,7 +150,8 @@ public class NoActivateBannerForm : Form {
 //   radii    x (20 / 300)^.6, never under .3 px; drawn far to near; on a dark ground the colour is the tint x (1 - ink)
 //   clock    t = seconds x 3.9 (the preset's speed); the sphere turns .12 t, tilted .3
 //   still    with animations off (SPI_GETCLIENTAREAANIMATION): the one frame at t = .6
-// This control only is drawn again, about 16 times a second (a particle moves a pixel or two a frame).
+// This control only is drawn again, about 10 times a second (#414: fewer wake-ups for the pill; a particle moves two or
+// three pixels a frame).
 public class Orb : Control {
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
     const int Box = 20, Orbits = 3, Ghosts = 10, Workers = 3;
@@ -172,7 +173,7 @@ public class Orb : Control {
         if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;
         clock.Start();
         tick = new System.Windows.Forms.Timer();
-        tick.Interval = 62;
+        tick.Interval = 100;
         // Straight to the control's pixels: a frame through WM_PAINT cost several times the drawing itself.
         tick.Tick += (s, e) => {
             if (!IsHandleCreated || !Visible) return;
@@ -545,7 +546,9 @@ function New-PillLabel([string]$text, [string]$font, [float]$size, $color) {
     $l.Text = $text; $l.UseMnemonic = $false
     $l.Font = New-Object System.Drawing.Font($font, $size)
     $l.ForeColor = $color
-    $l.BackColor = [System.Drawing.Color]::Transparent
+    # The pill's own colour, not Transparent: a transparent label repaints the whole pill under it (the outline, in the
+    # script's Paint handler) each time its text changes - the clock, every second (#414).
+    $l.BackColor = $form.BackColor
     $l.AutoSize = $true
     return $l
 }
