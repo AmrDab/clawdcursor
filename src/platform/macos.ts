@@ -647,7 +647,7 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async invokeElement(query: {
     name?: string; controlType?: string; automationId?: string; processId?: number;
-    action?: InvokeAction; value?: string;
+    action?: InvokeAction; value?: string; within?: string;
   }): Promise<{
     success: boolean;
     bounds?: { x: number; y: number; width: number; height: number };

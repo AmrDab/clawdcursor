@@ -6,7 +6,8 @@
  * The bridge itself needs a desktop; these tests read it, run its pure parts, and drive the TS layer with fakes.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
 import vm from 'node:vm';
@@ -42,7 +43,14 @@ const EDGE_TITLE = `CC Test Page - [InPrivate] - Microsoft${ZWSP} Edge`;
 function runPs(functions: string[], body: string): string[] {
   const defs = functions.map(f => fnBody(bridge, f)).join('\n');
   const script = `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes\n${defs}\n${body}`;
-  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  // From a file: Cmd-InvokeElement and Cmd-FindElement together are longer than a Windows command line may be. With a BOM,
+  // so PowerShell 5.1 reads UTF-8.
+  const dir = mkdtempSync(join(tmpdir(), 'cc-bridge-test-'));
+  const file = join(dir, 'run.ps1');
+  writeFileSync(file, String.fromCharCode(0xfeff) + script, 'utf8');
+  try {
+    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8' }).trim().split(/\r?\n/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 const FAKE_SEAMS = `
 function Get-ScopeWindowHandle { param($wpid) if ($wpid -eq 1) { return [IntPtr]11 }; if ($wpid -eq 5) { throw 'no foreground' }; return [IntPtr]::Zero }

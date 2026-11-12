@@ -498,6 +498,8 @@ struct Hit {
     let subrole: String
     let depth: Int
     let exact: Bool
+    /// One of its names starts with the one asked for ("New document" for "New"): it beats a name that only contains it.
+    let prefix: Bool
 }
 
 struct Aim {
@@ -551,10 +553,12 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
             let help = title.isEmpty && desc.isEmpty && label.isEmpty ? (str(a["AXHelp"]) ?? "") : ""
             var matches = !role.isEmpty
             var exact = false
+            var prefix = false
             if let w = wantName {
                 let tl = title.lowercased(), dl = desc.lowercased(), il = ident.lowercased(), ll = label.lowercased(), hl = help.lowercased()
                 matches = matches && (tl.contains(w) || dl.contains(w) || il.contains(w) || ll.contains(w) || hl.contains(w))
                 exact = tl == w || dl == w || il == w || ll == w || hl == w
+                prefix = tl.hasPrefix(w) || dl.hasPrefix(w) || il.hasPrefix(w) || ll.hasPrefix(w) || hl.hasPrefix(w)
             }
             if let id = aim.id {
                 // An identifier is exact, case included: find_element filters this reply with === afterwards, so a looser
@@ -566,7 +570,7 @@ func search(_ root: AXUIElement, _ aim: Aim, maxDepth: Int, limit: Int, stopAtEx
             if let rs = anyOfRoles { matches = matches && rs.contains(role) }
             if matches {
                 ctx.hits.append(Hit(element: el, name: [title, desc, label, help].first(where: { !$0.isEmpty }) ?? "", title: title, desc: desc, ident: ident, role: role,
-                                    subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact))
+                                    subrole: str(a["AXSubrole"]) ?? "", depth: depth, exact: exact, prefix: prefix))
                 // An identifier names one element; walking the rest of a big window would only cost time.
                 if stopAtExactId && exact && aim.name == nil && aim.role == nil { return }
             }
@@ -647,9 +651,39 @@ func rankHits(_ hits: [Hit], action: String?) -> [Hit] {
     let pref = actionRoles[action ?? ""] ?? []
     func score(_ h: Hit) -> Int {
         let rank = pref.firstIndex(of: normRole(h.role)) ?? -1
-        return (h.exact ? 0 : 1000) + (rank == -1 ? 100 : rank) * 10 + h.depth
+        // Exact beats prefix beats substring (#386), then the role the action wants, then the shallower.
+        return (h.exact ? 0 : h.prefix ? 500 : 1000) + (rank == -1 ? 100 : rank) * 10 + h.depth
     }
     return hits.enumerated().sorted { (score($0.element), $0.offset) < (score($1.element), $1.offset) }.map { $0.element }
+}
+
+/// The window, sheet or web area an element is in (the nearest one above it), as an ambiguous list names it (#382).
+func containerOf(_ el: AXUIElement) -> [String: String]? {
+    var cur = copyAttr(el, "AXParent").value
+    for _ in 0..<60 {
+        guard let c = cur, isElement(c) else { return nil }
+        let a = multi(c as! AXUIElement, ["AXRole", "AXTitle", "AXDescription", "AXParent"])
+        let role = str(a["AXRole"]) ?? ""
+        if ["AXWindow", "AXSheet", "AXWebArea", "AXPopover"].contains(role) {
+            let title = str(a["AXTitle"]) ?? ""
+            return ["name": title.isEmpty ? (str(a["AXDescription"]) ?? "") : title, "controlType": role]
+        }
+        cur = a["AXParent"]
+    }
+    return nil
+}
+
+/// Is the element inside something whose title or description contains `want` (lower case)? The caller's `within` picks one
+/// of several elements that share a name (#382).
+func isWithin(_ el: AXUIElement, _ want: String) -> Bool {
+    var cur = copyAttr(el, "AXParent").value
+    for _ in 0..<60 {
+        guard let c = cur, isElement(c) else { return false }
+        let a = multi(c as! AXUIElement, ["AXTitle", "AXDescription", "AXParent"])
+        if (str(a["AXTitle"]) ?? "").lowercased().contains(want) || (str(a["AXDescription"]) ?? "").lowercased().contains(want) { return true }
+        cur = a["AXParent"]
+    }
+    return false
 }
 
 func elementRect(_ el: AXUIElement) -> (rect: [String: Int], point: [String: Int])? {
@@ -1392,8 +1426,10 @@ func cmdInvoke() -> Never {
         guard let k = keyWindow(appElement(app.processIdentifier)).window else { emit(refuse(action, "the app has no key window - refusing to look for the element in another window")) }
         toSearch = [k]
     }
+    let within = opts["within"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
     for w in toSearch where !timeUp() {
         search(w, aim, maxDepth: 12, limit: 400, ctx: &found)
+        if !within.isEmpty { found.hits = found.hits.filter { isWithin($0.element, within) } }
         if found.hits.contains(where: { $0.exact }) { break }
     }
     // scroll-to-visible never takes "the best-ranked" hit: it acts only on the one the caller meant (see scrollTarget), and only
@@ -1433,7 +1469,23 @@ func cmdInvoke() -> Never {
     if !best.exact && (aim.name != nil || aim.id != nil) && (timeUp() || found.unreadable > 0) {
         fail("timeout", "the search could not read the whole window (\(found.unreadable) element(s) did not answer) — refusing to act on a partial match (\"\(best.name.isEmpty ? best.ident : best.name)\")\(wayForward)")
     }
-    emit(perform(action, best, pid: app.processIdentifier, appName: app.localizedName ?? "the app"))
+    // A name that only CONTAINS the one asked for ("What's New" for "New") is never pressed in silence (#376): the matches are
+    // listed and the caller names the one it means in full.
+    if pressingActions.contains(action) && aim.name != nil && !best.exact && !best.prefix {
+        let list = rankHits(found.hits, action: action).prefix(8).map { h -> [String: Any] in
+            var d: [String: Any] = ["name": h.name, "controlType": h.role]
+            if let g = elementRect(h.element) { d["bounds"] = g.rect }
+            if let c = containerOf(h.element) { d["container"] = c }
+            return d
+        }
+        emit(miss(action, "no element is named exactly that", reason: "ambiguous", extra: ["candidates": list, "inexact": true]))
+    }
+    var out = perform(action, best, pid: app.processIdentifier, appName: app.localizedName ?? "the app")
+    // The element acted on, not the name asked for: the caller's reply names it.
+    if out["success"] as? Bool == true && aim.name != nil {
+        out["target"] = ["name": best.name, "controlType": best.role, "match": best.exact ? "exact" : best.prefix ? "prefix" : "substring"]
+    }
+    emit(out)
 }
 
 // MARK: - type

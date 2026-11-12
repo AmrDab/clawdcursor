@@ -10,6 +10,7 @@
  */
 
 import { fenceWindowList } from '../core/fence';
+import { structuredMissFields } from '../core/miss-text';
 import { execFile } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
@@ -347,7 +348,9 @@ export class AccessibilityBridge {
     action: 'click' | 'set-value' | 'get-value' | 'focus' | 'expand' | 'collapse';
     value?: string;
     processId?: number;
-  }): Promise<{ success: boolean; value?: string; error?: string; clickPoint?: { x: number; y: number } }> {
+    /** Of several elements of that name, the one inside the window / dialog whose name contains this (#382). */
+    within?: string;
+  }): Promise<{ success: boolean; value?: string; error?: string; clickPoint?: { x: number; y: number }; target?: unknown } & Record<string, unknown>> {
     let processId = opts.processId;
 
     // v0.9.0 a11y scope fix: prefer foreground window when caller omits
@@ -391,6 +394,7 @@ export class AccessibilityBridge {
         ...(opts.automationId && { automationId: opts.automationId }),
         ...(opts.controlType  && { controlType:  opts.controlType }),
         ...(opts.value        && { value:        opts.value }),
+        ...(opts.within       && { within:       opts.within }),
       }) as any;
       return result;
     }
@@ -398,7 +402,7 @@ export class AccessibilityBridge {
       const res = await defaultMacAx().invoke({
         name: opts.name, controlType: opts.controlType, automationId: opts.automationId,
         // '' is a value (it clears the field) — `|| undefined` made the legacy path unable to.
-        processId, action: opts.action, value: opts.value,
+        processId, action: opts.action, value: opts.value, within: opts.within,
       });
       const value = typeof res.data?.value === 'string' ? res.data.value : undefined;
       const b = res.bounds;
@@ -406,6 +410,9 @@ export class AccessibilityBridge {
         success: res.success,
         ...(value !== undefined ? { value } : {}),
         ...(res.error ? { error: res.error } : {}),
+        // As the Windows bridge replies: the miss's reason and list, and the element acted on, at the top level.
+        ...structuredMissFields(res.data),
+        ...(res.data?.target ? { target: res.data.target } : {}),
         // A refused action hands back where the element is, so the caller can click it instead.
         ...(!res.success && b ? { clickPoint: { x: b.x + Math.floor(b.width / 2), y: b.y + Math.floor(b.height / 2) } } : {}),
       };
@@ -417,9 +424,12 @@ export class AccessibilityBridge {
         processId,
         action: opts.action,
         value: opts.value,
+        within: opts.within,
       });
       const value = res.data && typeof (res.data as any).value === 'string' ? (res.data as any).value : undefined;
-      if (res.success) return { success: true, ...(value !== undefined ? { value } : {}) };
+      if (res.success) return { success: true, ...(value !== undefined ? { value } : {}), ...(res.data?.target ? { target: res.data.target } : {}) };
+      // An ambiguous name is the answer, with its list: not a coordinate fallback, not "not found".
+      if (res.data?.reason === 'ambiguous') return { success: false, ...structuredMissFields(res.data) };
       // Failed invoke with bounds → let the caller fall back to a coordinate click.
       const b = res.bounds;
       if (b && b.width > 0) {

@@ -52,7 +52,7 @@ import { waitForLaunchedWindow, buildAppPredicate, type AppPredicate } from './l
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
-import { structuredMissFields } from '../core/miss-text';
+import { structuredMissFields, targetOf } from '../core/miss-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -800,6 +800,7 @@ export class LinuxAdapter implements PlatformAdapter {
     processId?: number;
     action?: InvokeAction;
     value?: string;
+    within?: string;
   }): Promise<{
     success: boolean;
     bounds?: { x: number; y: number; width: number; height: number };
@@ -808,6 +809,7 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!this.atspiAvailable) return { success: false };
     try {
       const args = ['--cmd', 'invoke', '--action', query.action ?? 'click'];
+      if (query.within) args.push(`--within=${query.within}`);
       // `--opt=…` form: a name or value starting with '-' must not be read as an option.
       if (query.name) args.push(`--name=${query.name}`);
       if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
@@ -828,6 +830,8 @@ export class LinuxAdapter implements PlatformAdapter {
       if (result?.toggleChanged !== undefined) data.toggleChanged = result.toggleChanged;
       // select: the item's own state, read back after the act.
       if (typeof result?.selected === 'boolean') data.selected = result.selected;
+      // The element acted on (the bridge's pick), not the name asked for.
+      if (result?.success === true && targetOf(result.target)) data.target = targetOf(result.target);
       // e.g. "exists but is not visible on screen" — say why, not just "missed".
       if (result?.success !== true && typeof result?.error === 'string') data.error = result.error;
       if (result?.success !== true) Object.assign(data, structuredMissFields(result));
@@ -926,6 +930,7 @@ export class LinuxAdapter implements PlatformAdapter {
       offscreen,
       automationId: raw?.automationId ?? undefined,
       processId: typeof raw?.processId === 'number' ? raw.processId : undefined,
+      ...(raw?.inDocument === true ? { inDocument: true } : {}),
     };
   };
 

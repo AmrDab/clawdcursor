@@ -34,6 +34,17 @@ export interface FrameWindow {
 
 export const isFrameHost = (processName: string | undefined): boolean => /^applicationframehost(\.exe)?$/i.test(String(processName ?? '').trim());
 
+/**
+ * The process names a window answers to, lower case: its own, and for a Store app's frame also the app it hosts
+ * ("calculatorapp", "calculator"). Finding a window by process name then finds a Store app by its own name, not only
+ * as ApplicationFrameHost (#361).
+ */
+export function processNamesOf(w: FrameWindow & { appName?: string }): string[] {
+  const names = [w.processName];
+  if (w.hostedProcessId) names.push(w.hostedProcessName, w.hostedAppName, w.appName);
+  return names.map(n => String(n ?? '').trim().toLowerCase()).filter(Boolean);
+}
+
 /** Window handle → the app that frame hosts, for every Store app frame on the desktop (the bridge's Win32 window read). */
 async function readFrames(): Promise<Map<string, HostedApp>> {
   const frames = new Map<string, HostedApp>();

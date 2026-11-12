@@ -33,7 +33,7 @@ import { getPackageRoot } from '../paths';
 import { macAxBinary } from './mac-ocr-binary';
 import type { InvokeAction, UiElement, WindowInfo } from './types';
 import { isOwnUiPid } from './pointer-guard';
-import { structuredMissFields } from '../core/miss-text';
+import { structuredMissFields, targetOf } from '../core/miss-text';
 
 const execFileAsync = promisify(execFile);
 
@@ -264,12 +264,14 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
 }
 
 /** Depth-first flatten of a node tree, parents before children. */
-export function flattenAxTree(node: any, processId?: number, depth = 0, acc: UiElement[] = []): UiElement[] {
+export function flattenAxTree(node: any, processId?: number, depth = 0, acc: UiElement[] = [], inDocument = false): UiElement[] {
   if (!node) return acc;
   const el = toUiElement(node, depth, processId);
-  if (el.controlType || el.name) acc.push(el);
+  if (el.controlType || el.name) acc.push(inDocument ? { ...el, inDocument } : el);
+  // What a web area holds is a page, not the app's controls (#383).
+  const inside = inDocument || el.controlType === 'WebArea';
   if (Array.isArray(node.children)) {
-    for (const child of node.children) flattenAxTree(child, processId, depth + 1, acc);
+    for (const child of node.children) flattenAxTree(child, processId, depth + 1, acc, inside);
   }
   return acc;
 }
@@ -566,6 +568,8 @@ export interface ElementQuery {
   /** Exact AXIdentifier (SwiftUI accessibilityIdentifier). */
   automationId?: string;
   processId?: number;
+  /** invoke: of several elements of that name, the one inside the window / sheet / group whose name contains this (#382). */
+  within?: string;
 }
 
 export interface InvokeResult {
@@ -582,6 +586,14 @@ function withMissFields(r: any, data: Record<string, unknown> | undefined): Reco
 }
 
 function toInvokeResult(r: any): InvokeResult {
+  // The element acted on (the helper's pick), not the name asked for.
+  const target = r?.success === true ? targetOf(r.target) : undefined;
+  const data = withMissFields(r, r?.refused === true
+    ? { ...(r?.data ?? (r?.value !== undefined ? { value: r.value } : {})), refused: true }
+    // `readable`: the value itself was read ("" is an empty field); false: the element has no value, or did not answer.
+    : r?.data ?? (r?.value !== undefined
+      ? { value: r.value, method: r.method, ...(typeof r.readable === 'boolean' ? { readable: r.readable } : {}) }
+      : undefined));
   return {
     success: r?.success === true,
     // A refused click reports the element's rect / centre so the caller can fall back to coordinates.
@@ -589,12 +601,7 @@ function toInvokeResult(r: any): InvokeResult {
     // get-value reports its payload at the top level; consumers read res.data?.value (`method` "name": no value, the
     // element's own name instead). `refused`: the helper declined to
     // act (ambiguous role, secure field) — callers must not route around that with a guess.
-    data: withMissFields(r, r?.refused === true
-      ? { ...(r?.data ?? (r?.value !== undefined ? { value: r.value } : {})), refused: true }
-      // `readable`: the value itself was read ("" is an empty field); false: the element has no value, or did not answer.
-      : r?.data ?? (r?.value !== undefined
-        ? { value: r.value, method: r.method, ...(typeof r.readable === 'boolean' ? { readable: r.readable } : {}) }
-        : undefined)),
+    data: target ? { ...(data ?? {}), target } : data,
     error: typeof r?.error === 'string' ? r.error : undefined,
   };
 }
@@ -911,7 +918,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
           data: { refused: true },
         };
       }
-      const text = viaStdin({ name, id: automationId, value: q.value });
+      const text = viaStdin({ name, id: automationId, value: q.value, within: given(q.within) });
       const reply = await viaHelper(
         ['invoke', ...(q.processId ? ['--pid', String(q.processId)] : []),
           '--action', q.action,

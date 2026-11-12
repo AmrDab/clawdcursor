@@ -874,6 +874,10 @@
             "type": "string",
             "description": "Value for set-value action"
           },
+          "within": {
+            "type": "string",
+            "description": "Of several elements with that name, the one inside the window or dialog whose name contains this (as an ambiguous list names it)"
+          },
           "element_id": {
             "type": "string",
             "description": "Target a compiled element from compile_ui (requires snapshot_id)"
@@ -2049,6 +2053,10 @@
           "processId": {
             "type": "number",
             "description": "Limit search to a specific process. OCR matches outside the window of that process are refused, never clicked."
+          },
+          "within": {
+            "type": "string",
+            "description": "Of several elements with that name, the one inside the window or dialog of this name (as an ambiguous list names it). Accessibility only: OCR and the browser fallback cannot tell windows apart and are not tried."
           },
           "timeout": {
             "type": "number",

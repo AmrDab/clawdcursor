@@ -46,7 +46,7 @@ import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { quoteScreenText } from '../result-codes';
 import { effectLine, windowChange, type WindowRead } from '../effect';
-import { missText, untrusted } from '../miss-text';
+import { missText, untrusted, targetOf, targetText } from '../miss-text';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
  *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
@@ -136,6 +136,9 @@ async function finderMap(ctx: AgentToolContext, rawMaxCost: unknown) {
   return map;
 }
 
+/** read_screen folds an embedded document of more elements than this into one line while it lists the app's own controls (#383). */
+const DOC_FOLD_MIN = 20;
+
 /** `disableVision` (--no-vision): the catalog has no `screenshot` tool. The agent loop and its batch both build from
  *  here, so neither can reach one the other dropped. */
 export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): UnifiedTool[] {
@@ -183,8 +186,16 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // they read as noise (live 2026-10-15: Settings → About's "Windows 11
         // Pro" / "25H2" sat past the 60-element cap).
         const isOff = (el: typeof tree[number]) => el.offscreen === true || (el.bounds.width <= 0 && el.bounds.height <= 0);
-        const ordered = [...tree.filter(el => !isOff(el)), ...tree.filter(isOff)];
-        const page = ordered.slice(offset, offset + limit);
+        const onFirst = (els: typeof tree) => [...els.filter(el => !isOff(el)), ...els.filter(isOff)];
+        // An app with an embedded web view or document (a start page): its own controls first, the content after (#383).
+        // Not in a browser, whose page IS what the agent came for.
+        const browser = activeIsBrowser || (pid !== undefined && await isBrowser());
+        const own = browser ? tree : tree.filter(el => !el.inDocument);
+        const content = browser ? [] : tree.filter(el => el.inDocument);
+        const ordered = [...onFirst(own), ...onFirst(content)];
+        // A large one is one line while the page still lists the app's controls; paging on (offset) lists it.
+        const fold = content.length > DOC_FOLD_MIN && offset < own.length;
+        const page = ordered.slice(offset, fold ? Math.min(offset + limit, own.length) : offset + limit);
         // One element per line: line breaks in a value are escaped, and a cut value says so (blind-hints.ts shownValue).
         let cut = false;
         const shown = (v?: string) => shownValue(v, () => { cut = true; });
@@ -192,12 +203,13 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           ? `[${el.controlType || 'Element'}] "${el.name || ''}"${shown(el.value)} (offscreen — scroll to see)`
           : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${shown(el.value)}${el.focused ? ' [FOCUSED]' : ''}`,
         );
-        const rest = ordered.length - (offset + page.length);
+        const rest = ordered.length - (offset + page.length) - (fold ? content.length : 0);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
         const hint = (isSparseTree(tree, activeIsBrowser) ? `\n${nextStep}` : '') +
           (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
-        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${more}${hint}` };
+        const folded = fold ? `\n+ an embedded document or web view of ${content.length} elements — read_screen with offset:${own.length} lists them; copy_all_text reads its text` : '';
+        return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${folded}${more}${hint}` };
       },
     },
 
@@ -236,6 +248,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             description: 'Action to perform (default: "click")',
           },
           value: { type: 'string', description: 'Value for set-value action' },
+          within: { type: 'string', description: 'Of several elements with that name, the one inside the window or dialog whose name contains this (as an ambiguous list names it)' },
           element_id: { type: 'string', description: 'Target a compiled element from compile_ui (requires snapshot_id)' },
           snapshot_id: { type: 'string', description: 'The compile_ui snapshot the element_id came from (requires element_id)' },
           expect: EXPECT_SCHEMA,
@@ -293,6 +306,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           ? rawAction as PermittedAction
           : 'click';
         const value = typeof args.value === 'string' ? args.value : undefined;
+        const within = typeof args.within === 'string' && args.within.trim() ? args.within.trim() : undefined;
 
         // OS-AGNOSTIC ACTIVATION CASCADE. "click" is the generic "activate this
         // element" intent — but a named target can be a Button (InvokePattern),
@@ -308,7 +322,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // and only the failing path pays the extra round-trips.
         const ladder: InvokeAction[] = action === 'click' ? ['click', 'select', 'toggle'] : [action];
         const { res, used } = await runActivationLadder(
-          (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value }), ladder);
+          (a) => ctx.platform.invokeElement({ name, controlType, processId, action: a, value, within }), ladder);
         // Found but no pattern took: click the surfaced bounds centre (same
         // fallback the el_NN path and smart_click already have). Live
         // regression 2026-10: `find` saw the Button, invoke reported "missed".
@@ -324,12 +338,14 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // waiting reports its error on the next invoke reply.
         const late = (res.data as { lateInvokeError?: unknown } | undefined)?.lateInvokeError;
         const lateNote = typeof late === 'string' && late ? ` Note: an earlier action that was still running later failed: ${untrusted(late)}.` : '';
+        // The element acted on, by its own name and role (#376), not the name asked for.
+        const acted = targetText(targetOf(res.data?.target), name);
         return {
           success: res.success,
           text: (res.success
             ? (res.data && 'value' in (res.data as object)
-                ? `Invoked ${quoteScreenText(name)} (${used}) → value:\n${wrapUntrustedScreenContent(String((res.data as any).value ?? ''))}`
-                : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${quoteScreenText(name)} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
+                ? `Invoked ${acted} (${used}) → value:\n${wrapUntrustedScreenContent(String((res.data as any).value ?? ''))}`
+                : `Invoked${expandReadBack(res.data) ? ' (read back ✓)' : ''} ${acted} via a11y${used !== 'click' ? ` (${used})` : ''}${expandNote(res.data)}.`
                   + (pending ? ' The action is still running — a dialog probably opened; re-read the screen before the next step.' : ''))
             : `a11y invoke ${quoteScreenText(name)} missed — ${missText(res.data)}.`) + lateNote,
           targetLabel: name,
@@ -2238,7 +2254,7 @@ export async function runActivationLadder(
   // The click rung is the one that read the element: its reason AND its bounds (for the coordinate fallback) stand.
   if (!res.success) {
     const keep: Record<string, unknown> = {};
-    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows', 'candidates']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
+    for (const k of ['error', 'reason', 'detail', 'cascade', 'otherWindows', 'candidates', 'inexact', 'minimized']) if (first.data?.[k] !== undefined) keep[k] = first.data[k];
     res = { ...res, bounds: first.bounds ?? res.bounds, ...(Object.keys(keep).length ? { data: { ...res.data, ...keep } } : {}) };
   }
   return { res, used };

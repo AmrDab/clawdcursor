@@ -36,7 +36,7 @@ vi.mock('../platform/ocr-engine', () => ({
 
 import { getSmartTools } from '../tools/smart';
 import { buildUnifiedTools, runActivationLadder } from '../core/agent-loop/tools';
-import { missText, structuredMissFields } from '../core/miss-text';
+import { missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 import { classifyResult } from '../core/result-codes';
 import type { AgentToolContext } from '../core/agent-loop/types';
 import type { PlatformAdapter } from '../platform/types';
@@ -131,7 +131,7 @@ function Window($els) {
   $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
   return $w }
 `;
-  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Test-Activatable', 'Cmd-InvokeElement'];
+  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Get-UiParent', 'Get-ContainerOf', 'Test-WithinNamed', 'Test-Activatable', 'Cmd-InvokeElement'];
   const invoke = `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'New'; action = 'click' })`;
 
   it('invoke "New": the ribbon button on the second monitor is pressed, not the hidden web view\'s link before it', () => {
@@ -285,5 +285,74 @@ describe('accessibility invoke (invoke_element)', () => {
   it('the ladder keeps the candidates of the rung that read the element', async () => {
     const { res } = await runActivationLadder(async () => ({ success: false, data: structuredMissFields(AMBIGUOUS) }), ['click', 'select', 'toggle']);
     expect((res.data as { candidates: unknown[] }).candidates).toHaveLength(2);
+  });
+});
+
+// #386: one rule for which element a name means. The bridges pick; the replies say what was picked.
+describe('the reply names the element acted on, and a partial match is listed, never pressed', () => {
+  const INEXACT = { success: false, action: 'click', reason: 'ambiguous', inexact: true, error: 'no element is named exactly that',
+    candidates: [{ name: "What's New", controlType: 'ControlType.Hyperlink', bounds: { x: 10, y: 20, width: 30, height: 40 }, container: { name: 'Start page', controlType: 'ControlType.Document' } }] };
+
+  it('missText: an inexact list asks for the full name, names each one\'s container, and is AMBIGUOUS', () => {
+    const text = missText(structuredMissFields(INEXACT));
+    expect(text).toMatch(/^no element is named exactly that: 1 element on screen only contains it, nothing was done; to press one, call again with its full name/);
+    expect(text).toContain('[Hyperlink] "What\'s New" in [Document] "Start page" @10,20 30x40');
+    expect(classifyResult(`a11y invoke "New" missed — ${text}.`, true, true, 'mcp').code).toBe('AMBIGUOUS');
+  });
+
+  it('missText: several equal matches offer within; a minimized window offers a restore, not a position', () => {
+    expect(missText(structuredMissFields(AMBIGUOUS))).toMatch(/pick one with within \(the window or dialog it is in, as listed\)/);
+    const min = missText(structuredMissFields({ ...AMBIGUOUS, minimized: true, candidates: CANDIDATES.map(({ name, controlType }) => ({ name, controlType })) }));
+    expect(min).toMatch(/its window is minimized, so none has a place to click: restore the window first/);
+    expect(min).not.toMatch(/click its position/);
+  });
+
+  it('smart_click: "Clicked [Button] "Request tasks" (its name starts with "Request")", from the bridge\'s target', async () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
+    try {
+      const { ctx, mouseClick } = ctxFor(async () => ({ success: true, action: 'click', method: 'InvokePattern',
+        target: { name: 'Request tasks', controlType: 'ControlType.Button', match: 'prefix' } }));
+      const r = await smartClick.handler({ target: 'Request', timeout: 1500 }, ctx);
+      expect(r.text).toMatch(/^Clicked \[Button\] "Request tasks" \(its name starts with "Request"\) via UI Automation/);
+      expect(mouseClick).not.toHaveBeenCalled();
+    } finally { Object.defineProperty(process, 'platform', realPlatform); }
+  });
+
+  it('smart_click: an inexact a11y answer is the answer; the OCR text is not clicked in its place', async () => {
+    const realPlatform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...realPlatform, value: 'win32' });
+    try {
+      const { ctx, mouseClick } = ctxFor(async () => INEXACT);
+      const r = await smartClick.handler({ target: 'New', timeout: 1500 }, ctx);
+      expect(r.isError).toBe(true);
+      expect(mouseClick).not.toHaveBeenCalled();
+      expect(r.text).toMatch(/no element is named exactly that/);
+    } finally { Object.defineProperty(process, 'platform', realPlatform); }
+  });
+
+  it('smart_click within: passed to the bridge; on a miss neither OCR nor the browser is tried', async () => {
+    const { ctx, mouseClick, a11y } = ctxFor(async () => ({ success: false, reason: 'not_found' }));
+    const r = await smartClick.handler({ target: 'New', within: 'Options', timeout: 1500 }, ctx);
+    expect(a11y.invokeElement).toHaveBeenCalledWith(expect.objectContaining({ name: 'New', within: 'Options' }));
+    expect(mouseClick).not.toHaveBeenCalled();
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/element not found by accessibility in that window or dialog/);
+  });
+
+  it('accessibility invoke: within reaches the platform; the success line names the element acted on', async () => {
+    const invokeTool = buildUnifiedTools().find(t => t.name === 'invoke_element')!;
+    const invokeElement = vi.fn(async () => ({ success: true, data: { target: { name: 'Close', controlType: 'Button', match: 'exact' } } }));
+    const platform = { invokeElement, mouseClick: vi.fn(), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as unknown as PlatformAdapter;
+    const r = await invokeTool.execute({ name: 'close', within: 'Options' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);
+    expect(invokeElement).toHaveBeenCalledWith(expect.objectContaining({ name: 'close', within: 'Options' }));
+    expect(r.text).toBe('Invoked [Button] "Close" via a11y.');
+  });
+
+  it('the screen text in a target is quoted and bounded, never free text', () => {
+    const t = targetOf({ name: 'a"b\n' + 'x'.repeat(200), controlType: 'ControlType.Button', match: 'exact' })!;
+    expect(t.name.length).toBeLessThanOrEqual(80);
+    expect(targetText(t, 'a')).toMatch(/^\[Button\] "a'b x+"$/);
+    expect(targetOf({ name: 'x', match: 'fuzzy' })).toBeUndefined();
   });
 });

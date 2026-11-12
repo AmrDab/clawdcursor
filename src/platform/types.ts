@@ -136,6 +136,11 @@ export interface UiElement {
    * flat list where geometry can't — e.g. scrolled-out elements with empty bounds.
    */
   depth?: number;
+  /**
+   * Inside an embedded document or web view (below a UIA Document, an AXWebArea, an AT-SPI document): its content, not the
+   * app's own controls. read_tree lists the app's controls first (#383).
+   */
+  inDocument?: boolean;
 }
 
 export interface PermissionStatus {
@@ -352,10 +357,13 @@ export interface PlatformAdapter {
     processId?: number;
     action?: InvokeAction;
     value?: string;
+    /** Of several elements of that name, the one inside the window / dialog / pane whose name contains this (#382). */
+    within?: string;
   }): Promise<{
     success: boolean;
     bounds?: { x: number; y: number; width: number; height: number };
-    /** Action-specific payload, e.g. `{ value }` for get-value, `{ toggleState }` for toggle. */
+    /** Action-specific payload, e.g. `{ value }` for get-value, `{ toggleState }` for toggle. On a by-name success, `target`:
+     *  the element acted on and how its name matched (core/miss-text.ts targetOf). */
     data?: Record<string, unknown>;
   }>;
 

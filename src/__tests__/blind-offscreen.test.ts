@@ -137,3 +137,30 @@ describe('list_children — zero-bounds parent', () => {
     expect(JSON.parse(res.text).children.map((c: { name: string }) => c.name)).toContain('25H2');
   });
 });
+
+// #383 (Designcenter, 2.0.0): read_tree with a limit listed 99+ elements of the start page's embedded web text before any of
+// the app's own controls. The app's controls come first; a large embedded document is one line until the agent pages to it.
+describe('read_screen — an embedded document or web view', () => {
+  const page = (n: number): UiElement[] => Array.from({ length: n }, (_, i) => ({ ...on(`Tip ${i}`, 'Text', 200 + i), inDocument: true }));
+  const app = (doc: UiElement[]): UiElement[] => [on('Designcenter', 'Window', 0, 0), on('Start page', 'Document', 100, 1), ...doc,
+    on('New', 'Button', 40, 1), on('Open', 'Button', 40, 1)];
+
+  it('lists the app\'s own controls first and folds a large document into one line', async () => {
+    const res = await tool('read_screen').execute({ limit: 10 }, ctxWith(app(page(120))));
+    expect(res.text).toContain('"New"');
+    expect(res.text).toContain('"Open"');
+    expect(res.text).not.toContain('"Tip 0"');
+    expect(res.text).toMatch(/an embedded document or web view of 120 elements — read_screen with offset:4 lists them; copy_all_text reads its text/);
+    expect(res.text).not.toMatch(/\+\d+ more/);
+    const paged = await tool('read_screen').execute({ offset: 4, limit: 10 }, ctxWith(app(page(120))));
+    expect(paged.text).toContain('"Tip 0"');
+    expect(paged.text).toMatch(/\+110 more — read_screen again with offset:14/);
+  });
+
+  it('a small document is listed after the app\'s controls, not folded', async () => {
+    const res = await tool('read_screen').execute({}, ctxWith(app(page(3))));
+    const lines = res.text.split('\n');
+    expect(lines.findIndex(l => l.includes('"Open"'))).toBeLessThan(lines.findIndex(l => l.includes('"Tip 0"')));
+    expect(res.text).not.toMatch(/embedded document/);
+  });
+});

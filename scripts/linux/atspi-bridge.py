@@ -363,8 +363,9 @@ def element_bounds(acc: Any):
     return (0, 0, 0, 0), 'screen'
 
 
-def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> None:
-    """Depth-first flatten with caps on depth + total node count. `cut[0]` is set when the depth cap drops a subtree."""
+def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None, in_document: bool = False) -> None:
+    """Depth-first flatten with caps on depth + total node count. `cut[0]` is set when the depth cap drops a subtree.
+    What a document (a web view's page) holds is marked `inDocument`: its content, not the app's controls (#383)."""
     if acc is None: return
     if depth > MAX_TREE_DEPTH:
         if cut is not None: cut[0] = True
@@ -373,7 +374,11 @@ def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> Non
 
     node = node_to_dict(acc)
     if node is not None:
+        if in_document:
+            node["inDocument"] = True
         out.append(node)
+    role = node.get("controlType") if node is not None else safe(lambda: acc.get_role_name(), '')
+    in_document = in_document or str(role or '').lower().startswith('document')
 
     try:
         child_count = acc.get_child_count()
@@ -384,7 +389,7 @@ def walk(acc: Any, out: list, depth: int = 0, cut: Optional[list] = None) -> Non
             child = acc.get_child_at_index(i)
         except Exception:
             continue
-        walk(child, out, depth + 1, cut)
+        walk(child, out, depth + 1, cut, in_document)
         if len(out) > MAX_TREE_NODES: return
 
 
@@ -731,59 +736,102 @@ def role_matches(alts: list, role_name: str) -> bool:
     return any(a in role_name or a.replace(' ', '') in squeezed for a in alts)
 
 
-def find_target(app: Any, name: Optional[str], role: Optional[str]):
-    """(accessible, showing) for the best match under `app`: name exact
-    (case-insensitive, padding ignored) before substring, role substring;
-    ON-SCREEN matches before hidden ones. Only the ACTIVE window (and its popups) is searched
-    when the app has one (see scope_toplevels). A hidden 0x0 duplicate (a hidden toolbar's "Save" vs the Save
-    dialog's button) used to win just by coming first in the tree.
-    (None, False) when nothing matches."""
+PRESS_ACTIONS = {'click', 'toggle', 'select', 'expand', 'collapse'}
+# Roles that hold an element that shares a name with a control and takes no action itself: the control wins.
+LABEL_ROLE_NAMES = {'label', 'static', 'heading', 'paragraph', 'section', 'caption', 'image', 'separator', 'panel', 'filler'}
+DIALOG_ROLES = {'dialog', 'alert', 'file chooser'}
+CONTAINER_ROLES = DIALOG_ROLES | {'frame', 'window', 'document web', 'document frame'}
+
+
+def name_tier(n: str, name_l: str) -> int:
+    """1 the name is the one asked for, 2 it starts with it, 3 it contains it, 0 no match: exact beats prefix beats
+    substring (#386). Case and padding ignored."""
+    if n == name_l:
+        return 1
+    if n.startswith(name_l):
+        return 2
+    return 3 if name_l in n else 0
+
+
+def ancestors(acc: Any):
+    p = safe(lambda: acc.get_parent())
+    for _ in range(60):
+        if p is None:
+            return
+        yield p
+        p = safe(lambda p=p: p.get_parent())
+
+
+def container_of(acc: Any) -> Optional[dict]:
+    """The dialog, window or document an element is in (the nearest one above it), as an ambiguous list names it (#382)."""
+    for p in ancestors(acc):
+        r = (safe(lambda p=p: p.get_role_name(), '') or '').lower()
+        if r in CONTAINER_ROLES:
+            return {"name": safe(lambda p=p: p.get_name(), '') or '', "controlType": r}
+    return None
+
+
+def is_within(acc: Any, want: str) -> bool:
+    """Is the element inside something whose name contains `want` (lower case)? The caller's `within` picks one of several
+    elements that share a name (#382)."""
+    return any(want in (safe(lambda p=p: p.get_name(), '') or '').lower() for p in ancestors(acc))
+
+
+def find_target(app: Any, name: Optional[str], role: Optional[str], within: Optional[str] = None, press: bool = False):
+    """(accessible, showing, candidates, inexact) for the element a name means under `app`. Only the ACTIVE window (and its
+    popups) is searched when the app has one (see scope_toplevels). The one rule (#386), as on Windows and macOS:
+    ON-SCREEN before hidden (a hidden 0x0 duplicate - a hidden toolbar's "Save" - used to win just by coming first); then
+    exact before prefix before substring; for a press, a control before a label of the same name and an element in a
+    dialog before one behind it. A press is never made on several equal matches, nor on a match that only CONTAINS the name
+    ("What's New" for "New", #376): then accessible is None and `candidates` lists them (`inexact`: only partial matches).
+    (None, False, [], False) when nothing matches."""
     name_l = name.lower().strip() if name else None
+    want = within.lower().strip() if within else ''
     roles = role_alternatives(role)
-    exact: list = []
-    partial: list = []
+    hits: list = []   # (tier, accessible), tree order
     seen = [0]  # nodes visited, not matches: a name that matches nothing must not walk a whole web page
 
-    def visit(acc: Any, depth: int) -> bool:
-        """True once the best possible hit (exact + showing) is found."""
+    def visit(acc: Any, depth: int) -> None:
         if acc is None or search_stop(seen, depth):
-            return False
+            return
         seen[0] += 1
         n = (safe(lambda: acc.get_name(), '') or '').lower().strip()
         r = (safe(lambda: acc.get_role_name(), '') or '').lower()
-        if (roles is None or role_matches(roles, r)) and name_l is not None:
-            if n == name_l:
-                exact.append(acc)
-                if is_showing(acc):
-                    return True
-            elif name_l in n:
-                partial.append(acc)
-        elif roles is not None and name_l is None and role_matches(roles, r):
-            partial.append(acc)
+        if roles is None or role_matches(roles, r):
+            tier = name_tier(n, name_l) if name_l is not None else (1 if roles is not None else 0)
+            if tier:
+                hits.append((tier, acc))
         count = safe(lambda: acc.get_child_count(), 0) or 0
         for i in range(count):
-            if visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1):
-                return True
-        return False
+            visit(safe(lambda i=i: acc.get_child_at_index(i)), depth + 1)
 
-    # The active window and its popups (see scope_toplevels).
+    # The active window and its popups (see scope_toplevels). No early exit: a second element of the name decides too.
     for top in scope_toplevels(app):
-        if visit(top, 1):
-            return exact[-1], True
+        visit(top, 1)
+    if want:
+        hits = [h for h in hits if is_within(h[1], want)]
+    showing = [h for h in hits if is_showing(h[1])]
     # No exact on-screen match was seen. If the walk ran out of budget or time, one may exist beyond the cut, so a weaker
-    # match (substring, hidden) is not acted on: the caller is told to narrow the search. A depth cut is structural, not a
-    # shortage, and does not refuse.
-    if SEARCH_CUT[0] in ('element budget', 'time limit') and (exact or partial):
+    # match (prefix, substring, hidden) is not acted on: the caller is told to narrow the search. A depth cut is structural,
+    # not a shortage, and does not refuse.
+    if SEARCH_CUT[0] in ('element budget', 'time limit') and hits and not any(t == 1 for t, _ in showing):
         SEARCH_WEAK[0] = True
-        return None, False
-    for group in (exact, partial):
-        for acc in group:
-            if is_showing(acc):
-                return acc, True
-    for group in (exact, partial):
-        if group:
-            return group[0], False
-    return None, False
+        return None, False, [], False
+    if not hits:
+        return None, False, [], False
+    pool = showing or hits
+    best = min(t for t, _ in pool)
+    same = [acc for t, acc in pool if t == best]
+    if not press or not showing:
+        return same[0], bool(showing), [], False
+    if len(same) > 1:
+        same = [a for a in same if (safe(lambda a=a: a.get_role_name(), '') or '').lower() not in LABEL_ROLE_NAMES] or same
+    if len(same) > 1:
+        same = [a for a in same if any((safe(lambda p=p: p.get_role_name(), '') or '').lower() in DIALOG_ROLES
+                                       for p in ancestors(a))] or same
+    if len(same) == 1 and best < 3:
+        return same[0], True, [], False
+    return None, True, same[:8], best >= 3
 
 
 def do_named_action(acc: Any, verb: str) -> Optional[str]:
@@ -955,14 +1003,32 @@ def perform_action(acc: Any, action: str, value: Optional[str]) -> dict:
 
 def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[int],
                action: str, value: Optional[str], window_title: Optional[str] = None,
-               exclude_pids: Optional[set] = None) -> dict:
+               exclude_pids: Optional[set] = None, within: Optional[str] = None) -> dict:
     if not name and not role:
         return {"success": False, "action": action, "error": "name or role required"}
     app = active_application(process_id, window_title, exclude_pids)
     if app is None:
         return {"success": False, "action": action, "error": "application not found"}
     begin_search()
-    target, showing = find_target(app, name, role)
+    target, showing, candidates, inexact = find_target(app, name, role, within, action in PRESS_ACTIONS)
+    if candidates:
+        # Structured, like every miss: the names are page text and go in fields, never in a sentence.
+        rows = []
+        for acc in candidates:
+            row = {"name": safe(lambda acc=acc: acc.get_name(), '') or '',
+                   "controlType": safe(lambda acc=acc: acc.get_role_name(), '') or ''}
+            (x, y, w, h), ct = element_bounds(acc)
+            if ct == 'screen' and w > 0 and h > 0:   # window-relative extents are no screen position
+                row["bounds"] = {"x": x, "y": y, "width": w, "height": h}
+            box = container_of(acc)
+            if box:
+                row["container"] = box
+            rows.append(row)
+        out = {"success": False, "action": action, "reason": "ambiguous", "candidates": rows,
+               "error": "several elements match" if not inexact else "no element is named exactly that"}
+        if inexact:
+            out["inexact"] = True
+        return out
     if target is None:
         if SEARCH_WEAK[0]:
             return {"success": False, "action": action, "partial": True, "reason": SEARCH_CUT[0],
@@ -981,10 +1047,12 @@ def cmd_invoke(name: Optional[str], role: Optional[str], process_id: Optional[in
         return {"success": False, "action": action, "notVisible": True, "reason": "hidden",
                 "error": "the element exists but is not visible on screen "
                          "(hidden or 0x0, e.g. in a closed menu) — nothing was done"}
-    return perform_action(target, action, value)
-
-
-LABEL_ROLE_NAMES = {'label', 'static', 'heading', 'paragraph', 'section', 'caption', 'image', 'separator', 'panel', 'filler'}
+    out = perform_action(target, action, value)
+    if out.get("success") and name:
+        # The element acted on, not the name asked for: the caller's reply names it.
+        out["target"] = {"name": safe(lambda: target.get_name(), '') or '', "controlType": safe(lambda: target.get_role_name(), '') or '',
+                         "match": ('', 'exact', 'prefix', 'substring')[name_tier((safe(lambda: target.get_name(), '') or '').lower().strip(), name.lower().strip())]}
+    return out
 
 
 def collect_scroll_matches(top: Any, name: Optional[str], role: Optional[str]):
@@ -1119,6 +1187,8 @@ def main() -> int:
     p.add_argument('--action', default='click',
                    choices=['click', 'focus', 'set-value', 'get-value', 'toggle', 'select', 'expand', 'collapse'])
     p.add_argument('--value', default=None)
+    # invoke: pick among elements of one name, the one inside the window / dialog / pane of this name
+    p.add_argument('--within', default=None)
     # scroll-into-view: where the element was last seen, "x,y,w,h"
     p.add_argument('--bounds', default=None)
     # scroll-into-view: the active window's screen origin "x,y" (for window-relative extents)
@@ -1137,7 +1207,7 @@ def main() -> int:
             result = cmd_page_text(args.process_id, args.window_title, excl)
         elif args.cmd == 'invoke':
             result = cmd_invoke(args.name, args.role, args.process_id, args.action, args.value,
-                                args.window_title, excl)
+                                args.window_title, excl, args.within)
         elif args.cmd == 'scroll-into-view':
             result = cmd_scroll_into_view(args.name, args.role, args.process_id, args.window_title, excl, args.bounds, args.origin)
         else:

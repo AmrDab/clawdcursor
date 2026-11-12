@@ -79,7 +79,8 @@ function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
                 var nameOk = !want || hay[0].indexOf(want) !== -1 || hay[1].indexOf(want) !== -1;
                 var roleOk = !wantRole || normRole(rl).indexOf(wantRole) !== -1;
                 if (nameOk && roleOk && (nm || ds || rl)) {
-                    out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want), depth: d });
+                    out.push({ el: el, name: nm || ds, role: rl, exact: !!want && (hay[0] === want || hay[1] === want),
+                        prefix: !!want && (hay[0].indexOf(want) === 0 || hay[1].indexOf(want) === 0), depth: d });
                 }
                 var pop = (grand[k] || []).indexOf('AXPopover');
                 if (!LEAF[normRole(rl)]) next.push(el);
@@ -91,12 +92,12 @@ function collectMatches(win, targetName, targetRole, maxDepth, deadline) {
     return out;
 }
 
-// Exact name beats substring; then the role the action wants; then shallower.
+// Exact name beats prefix beats substring; then the role the action wants; then shallower.
 function pickBest(matches, action) {
     var pref = ACTION_ROLES[action] || [];
     function score(m) {
         var rank = pref.indexOf(normRole(m.role));
-        return (m.exact ? 0 : 1000) + (rank === -1 ? 100 : rank) * 10 + m.depth;
+        return (m.exact ? 0 : m.prefix ? 500 : 1000) + (rank === -1 ? 100 : rank) * 10 + m.depth;
     }
     var best = null;
     for (var i = 0; i < matches.length; i++) {
@@ -209,6 +210,13 @@ function run(argv) {
         }
         var best = pickBest(matches, params.action);
         targetElement = best ? best.el : null;
+        // A name that only CONTAINS the one asked for ("What's New" for "New") is never pressed in silence (#376).
+        if (best && params.name && !best.exact && !best.prefix && /^(click|toggle|select|expand|collapse)$/.test(params.action)) {
+            return JSON.stringify({
+                success: false, reason: 'ambiguous', inexact: true, error: 'no element is named exactly that',
+                candidates: matches.slice(0, 8).map(function (m) { return { name: String(m.name || ''), controlType: String(m.role || '') }; })
+            });
+        }
         
         if (!targetElement) {
             var searchDesc = '';

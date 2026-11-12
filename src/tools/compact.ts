@@ -67,6 +67,7 @@ const COMPUTER_ACTIONS: ActionRoute[] = [
   { action: 'triple_click',  delegate: 'mouse_triple_click' },
   { action: 'hover',         delegate: 'mouse_hover' },
   { action: 'move',          delegate: 'mouse_hover' },       // alias
+  { action: 'mouse_move',    delegate: 'mouse_hover' },       // alias (computer-use name)
   { action: 'move_relative', delegate: 'mouse_move_relative' },
   { action: 'scroll',        delegate: 'mouse_scroll' },
   { action: 'scroll_horizontal', delegate: 'mouse_scroll_horizontal' },
@@ -78,7 +79,8 @@ const COMPUTER_ACTIONS: ActionRoute[] = [
   // it remaps to the granular `key_press`'s `key` parameter (see argRemap
   // doc-comment above).
   { action: 'type',      delegate: 'type_text' },
-  { action: 'key',       delegate: 'key_press', argRemap: { combo: 'key' } },
+  // `text` too: computer-use's key action names the chord `text` (#381).
+  { action: 'key',       delegate: 'key_press', argRemap: { combo: 'key', text: 'key' } },
   { action: 'key_press', delegate: 'key_press', argRemap: { combo: 'key' } },
   { action: 'key_down',  delegate: 'key_down',  argRemap: { combo: 'key' } },
   { action: 'key_up',    delegate: 'key_up',    argRemap: { combo: 'key' } },
@@ -460,6 +462,8 @@ async function dispatchCompound(
     // `shot` is checked by the MCP wrapper / batch (screen-guard.ts), not by the granular tool.
     if (k === 'action' || k === 'shot') continue;
     const mapped = route.argRemap?.[k] ?? k;
+    // An alias never overrides the real name given in the same call.
+    if (mapped !== k && args[mapped] !== undefined) continue;
     forwarded[mapped] = v;
   }
 

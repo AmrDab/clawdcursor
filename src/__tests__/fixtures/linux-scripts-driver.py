@@ -512,4 +512,34 @@ dialog.states.discard(StateType.ACTIVE)
 OUT['scope_names_none_active'] = [t.name for t in bridge.scope_toplevels(scope_app)]
 dialog.states.add(StateType.ACTIVE)
 
+# One rule for which element a name means (#386): exact > prefix > substring, a substring is never pressed in silence (#376),
+# the web page's modal dialog beats the page behind it, a control beats its label, an ambiguous list names each one's
+# container, and `within` picks (#382).
+def page_app(*kids):
+    return Acc('app', 'application', pid=6161, children=[Acc('Chrome', 'frame', pid=6161, states=(StateType.ENABLED, StateType.VISIBLE, StateType.SHOWING, StateType.ACTIVE),
+                                                         children=[Acc('Page', 'document web', children=list(kids))])])
+def act(app, name, action='click', within=None):
+    global wide_acc
+    wide_acc = app
+    return bridge.cmd_invoke(name, None, 6161, action, None, None, None, within)
+bridge.active_application = lambda *a, **k: wide_acc
+OUT['rule_substring'] = act(page_app(Acc("What's New", 'link', actions=['jump'])), 'New')
+OUT['rule_prefix'] = act(page_app(Acc('Request tasks', 'push button', actions=['press'])), 'Request')
+OUT['rule_modal'] = act(page_app(Acc('Request', 'push button', actions=['press']),
+                                 Acc('Ask', 'dialog', children=[Acc('Request', 'push button', actions=['press'])])), 'Request')
+OUT['rule_modal_pressed_in_dialog'] = OUT['rule_modal'].get('success') is True and wide_acc.children[0].children[0].children[1].children[0].action.done == ['press']
+OUT['rule_label'] = act(page_app(Acc('Save', 'label'), Acc('Save', 'push button', actions=['press'])), 'Save')
+two = page_app(Acc('Toolbar', 'tool bar', children=[Acc('Close', 'push button', actions=['press'])]),
+               Acc('Panel', 'panel', children=[Acc('Close', 'push button', actions=['press'])]))
+OUT['rule_two'] = act(two, 'Close')
+OUT['rule_within'] = act(two, 'Close', within='Panel')
+OUT['rule_within_pressed'] = two.children[0].children[0].children[1].children[0].action.done
+OUT['rule_value_substring'] = act(page_app(Acc('Your name', 'entry', text='x', editable=True)), 'name', 'get-value')
+bridge.active_application = real_active_application
+
+# #383: what a document (a web view's page) holds is marked inDocument; the app's own controls are not.
+doc_out = []
+bridge.walk(Acc('win', 'frame', children=[Acc('New', 'push button'), Acc('Start', 'document web', children=[Acc("What's New", 'link')])]), doc_out, 1)
+OUT['in_document'] = [e['name'] + ('*' if e.get('inDocument') else '') for e in doc_out]
+
 sys.stdout.write(json.dumps(OUT))

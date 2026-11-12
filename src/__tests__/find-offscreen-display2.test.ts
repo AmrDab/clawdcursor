@@ -115,7 +115,7 @@ describe.runIf(process.platform === 'win32')('ps-bridge find-element (run for re
     return bridge.slice(start, bridge.indexOf('\nfunction ', start + 10));
   };
   const run = (body: string) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${['Test-NameMatch', 'Test-RectOnMonitor', 'Cmd-FindElement'].map(fnBody).join('\n')}\n${body}`],
+    `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${['Test-NameMatch', 'Test-RectOnMonitor', 'Get-ShownValue', 'Cmd-FindElement'].map(fnBody).join('\n')}\n${body}`],
   { encoding: 'utf8' }).trim().split(/\r?\n/);
   const FAKES = `
 function Get-ProcessScopeWindows { param($wpid) return $script:window }
