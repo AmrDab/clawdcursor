@@ -293,6 +293,7 @@ OUT['empty_state'] = bridge.node_to_dict(empty_state)
 OUT['sensitive_only'] = bridge.node_to_dict(sensitive_only)
 OUT['rel'] = bridge.node_to_dict(rel)
 OUT['seven'] = bridge.node_to_dict(seven)
+OUT['canvas'] = bridge.node_to_dict(Acc('', 'canvas', screen=(0, 100, 1000, 700)))
 OUT['help'] = [bridge.node_to_dict(Acc('Bold', 'push button', description=d)).get('help') for d in ('Make text bold', 'Bold', '')]
 
 OUT['click'] = bridge.cmd_invoke('7', None, 4242, 'click', None)

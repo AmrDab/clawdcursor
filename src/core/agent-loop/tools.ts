@@ -208,7 +208,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
         const sparse = isSparseTree(tree, activeIsBrowser);
         // A browser page that exposes nothing may be asleep rather than drawn: the sparse advice covers it, not "canvas".
-        const opaque = activeIsBrowser && sparse ? null : opaqueArea(tree);
+        // A cut walk returns panes late in tree order without their children: empty there is not drawn.
+        const opaque = partial || (activeIsBrowser && sparse) ? null : opaqueArea(tree);
         const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (sparse ? `\n${nextStep}` : '') +
           (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
@@ -696,7 +697,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           y: { type: 'number' },
           path: {
             type: 'array',
-            description: 'Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button.',
+            description: 'Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button. At most 100 points and 30 s (points × interval_ms) per call.',
             items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] },
           },
           interval_ms: { type: 'number', description: 'With path: milliseconds between clicks (default 100, max 5000).' },
@@ -2375,6 +2376,8 @@ function focusBreadcrumb(before: WindowRead, after: WindowRead): string {
   return line ? `\n${line}` : '';
 }
 
+const PATH_MAX_POINTS = 100;
+const PATH_MAX_MS = 30_000;
 /**
  * click with `path`: one click per point, in order, `interval_ms` apart. Each mouseClick goes through the input guard, so
  * the user's Stop (and a window change) refuses the next point; the reply then says how many landed first.
@@ -2389,6 +2392,10 @@ async function clickPath(args: Record<string, unknown>, ctx: AgentToolContext) {
   const button = args.button === 'right' ? 'right' : 'left';
   const count = args.count === 2 ? 2 : 1;
   const interval = typeof args.interval_ms === 'number' && args.interval_ms >= 0 ? Math.min(5000, args.interval_ms) : 100;
+  // One call must end well inside a client's request timeout, or the client gives up while clicks keep landing.
+  if (points.length > PATH_MAX_POINTS || points.length * interval > PATH_MAX_MS) {
+    return { success: false, isError: true, text: `click: a path is at most ${PATH_MAX_POINTS} points and ${PATH_MAX_MS / 1000} s (points × interval_ms); got ${points.length} points × ${interval} ms. Split it into several calls.` };
+  }
   const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
   const scale = space === 'image' ? imageScale(ctx) : 1;
   const scaled = points.map(p => space === 'image'

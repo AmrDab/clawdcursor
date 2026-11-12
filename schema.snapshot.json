@@ -1124,7 +1124,7 @@
           },
           "path": {
             "type": "array",
-            "description": "Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button.",
+            "description": "Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button. At most 100 points and 30 s (points × interval_ms) per call.",
             "items": {
               "type": "object",
               "properties": {

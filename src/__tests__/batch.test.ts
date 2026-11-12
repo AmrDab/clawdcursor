@@ -256,9 +256,9 @@ describe('batch tool — parsing', () => {
   });
 });
 
-// #355: "do N actions, then check once" is one call — the last image comes back, and a run of the same step is one line.
+// #355: "do N actions, then check once" is one call — the last image comes back, and every step keeps its own line.
 describe('batch tool — the final image and repeated steps', () => {
-  it('returns the image of the last step that made one, and folds a run of identical successful steps', async () => {
+  it('returns the image of the last step that made one, and each step its own result', async () => {
     let n = 0;
     tools.computer = tool('computer', vi.fn(async (a: any) => a.action === 'screenshot_region'
       ? { text: 'zoomed', image: { data: `img${++n}`, mimeType: 'image/png' } }
@@ -271,9 +271,16 @@ describe('batch tool — the final image and repeated steps', () => {
     const r = await getBatchTools()[0].handler({ steps }, ctx);
     expect(r.image).toEqual({ data: 'img2', mimeType: 'image/png' });
     expect(r.text).toContain("all 5 steps completed. The image attached is step 4's.");
-    expect(r.text).toContain('  1-3. [ok] computer.click x3 — clicked 3');
+    expect(r.text).toContain('  1. [ok] computer.click — clicked 1\n  2. [ok] computer.click — clicked 2\n  3. [ok] computer.click — clicked 3');
     expect(r.text).toContain('  0. [ok] computer.screenshot_region — zoomed');
     expect(r.steps).toHaveLength(5);   // the session log still gets every step
+  });
+
+  it('three reads of different fields each keep their own value', async () => {
+    tools.accessibility = { ...tool('accessibility', vi.fn(async (a: any) => ({ text: `value of ${a.name}` }))), safetyTier: 0 };
+    const steps = ['First name', 'Last name', 'Email'].map(name => ({ name: 'accessibility', arguments: { action: 'get_value', name } }));
+    const r = await getBatchTools()[0].handler({ steps }, ctx);
+    for (const name of ['First name', 'Last name', 'Email']) expect(r.text).toContain(`value of ${name}`);
   });
 
   it('with no image, says nothing about one', async () => {

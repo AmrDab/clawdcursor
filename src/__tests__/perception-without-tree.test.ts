@@ -3,6 +3,8 @@
  * line (#356) and tooltips on read_tree / find lines (#359). The OS-specific reads are in the bridges; this is the shared code.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import { imageCost, imageScale } from '../core/agent-loop/coord-scale';
 import { opaqueArea, opaqueAreaLine, shownHelp } from '../tools/blind-hints';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
@@ -46,6 +48,38 @@ describe('opaque area (#356)', () => {
     const paragraph = [el('About', 'Window', 0, 0, 1000, 800), ...toolbar, el('A long paragraph of text', 'Text', 0, 100, 1000, 600)];
     expect(opaqueArea(paragraph)).toBeNull();
   });
+
+  it('an editor or a list is never a canvas: with text, empty, or inside a scroll wrapper of its own size', () => {
+    const win = el('TextEdit', 'Window', 0, 0, 1000, 800);
+    expect(opaqueArea([win, el('', 'ScrollArea', 0, 50, 1000, 750), el('', 'TextArea', 0, 50, 1000, 750, { value: 'hello' })])).toBeNull();
+    expect(opaqueArea([win, el('', 'Pane', 0, 50, 1000, 750), el('', 'Edit', 0, 50, 1000, 750)])).toBeNull();
+    expect(opaqueArea([win, el('Text editor', 'Document', 0, 50, 1000, 750)])).toBeNull();
+    expect(opaqueArea([win, ...toolbar, el('', 'List', 0, 100, 1000, 700)])).toBeNull();
+  });
+
+  it('a canvas inside a named page is still reported: the page around it is not its content', () => {
+    const tree = [el('Board - Browser', 'Window', 0, 0, 1000, 800), el('Board', 'Document', 0, 50, 1000, 750),
+      ...toolbar.map(b => ({ ...b, bounds: { ...b.bounds, y: 60 } })), el('', 'Image', 0, 120, 1000, 680)];
+    expect(opaqueArea(tree)?.bounds).toEqual({ x: 0, y: 120, width: 1000, height: 680 });
+  });
+});
+
+// opaqueArea sees only what the bridges send: Windows and macOS dropped every unnamed childless node, the drawn surface included.
+describe('the bridges keep a large unnamed leaf (#356)', () => {
+  const read = (f: string) => fs.readFileSync(path.join(__dirname, '../../scripts', f), 'utf8');
+  it('ps-bridge: the pass-through branch returns a role-only node for a leaf covering a quarter of the walk root', () => {
+    const ps = read('ps-bridge.ps1');
+    expect(ps).toMatch(/if \(\$RawDepth -eq 0\) \{ \$r0 = \$cur\.BoundingRectangle; \$script:walkRootArea = /);
+    const leaf = ps.slice(ps.indexOf('if ($childNodes.Count -eq 0) {'), ps.indexOf('return $childNodes'));
+    expect(leaf).toMatch(/\$r\.Width \* \$r\.Height -ge 0\.25 \* \$script:walkRootArea/);
+    expect(leaf).toMatch(/return \[ordered\]@\{ name = ""; automationId = ""; controlType = \$typeName/);
+  });
+  it('ax-helper: the keep rule keeps a node covering a quarter of the walk root', () => {
+    const swift = read('mac/ax-helper.swift');
+    expect(swift).toMatch(/if depth == 0 \{ w\.rootArea = sz\.width \* sz\.height \}/);
+    expect(swift).toMatch(/let large = w\.rootArea > 0 && sz\.width \* sz\.height >= 0\.25 \* w\.rootArea/);
+    expect(swift).toMatch(/\|\| !children\.isEmpty \|\| large\n/);
+  });
 });
 
 describe('tooltips on element lines (#359)', () => {
@@ -88,6 +122,14 @@ describe('click with a path (#355)', () => {
     await expect(click().execute({ path: [{ x: 1, y: 1 }, { x: 2, y: 2 }, { x: 3, y: 3 }], space: 'screen', interval_ms: 0 }, ctx))
       .rejects.toThrow(/^stopped by the user[\s\S]*\(1 of 3 points were clicked first\)$/);
     expect(n).toBe(1);
+  });
+
+  it('a path that would outlast a client timeout is refused before anything is clicked', async () => {
+    const ctx = ctxWith(async () => {});
+    const pts = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i, y: i }));
+    expect((await click().execute({ path: pts(101), interval_ms: 0 }, ctx)).text).toMatch(/at most 100 points and 30 s/);
+    expect((await click().execute({ path: pts(20), interval_ms: 5000 }, ctx)).success).toBe(false);
+    expect(ctx.platform.mouseClick).not.toHaveBeenCalled();
   });
 
   it('a malformed path is refused before anything is clicked', async () => {

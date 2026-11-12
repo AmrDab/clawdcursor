@@ -190,7 +190,10 @@ export function getDesktopTools(): ToolDefinition[] {
           const refusal = displayRefusal(displays, display, target);
           if (refusal) return { text: refusal, isError: true };
           const b = target!.bounds;
-          mapping = target!.primary ? null : { originX: b.x, originY: b.y, scale: llmScale(b.width, b.height), display: target!.index };
+          // The latest screenshot of that monitor knows its own scale (max_edge); only another monitor's is rebuilt at the default size.
+          if (mapping?.display !== target!.index) {
+            mapping = target!.primary ? null : { originX: b.x, originY: b.y, scale: llmScale(b.width, b.height), display: target!.index };
+          }
         }
         const multi = !!mapping;
         const sf = space === 'screen' ? screenToPhysical(ctx) : ctx.getScreenshotScaleFactor();

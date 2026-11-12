@@ -46,26 +46,32 @@ export function shownHelp(el: { name?: string; help?: string }): string {
 const OPAQUE_SHARE = 0.25;
 /** Text roles on UIA / AX (role prefix stripped) / AT-SPI. */
 const TEXT_ROLE = /^(?:Text|StaticText|label|static|paragraph)$/i;
+/** Editors and collections (UIA / AX / AT-SPI as normalized): empty, they are still something to type into or pick from. */
+const FIELD_ROLE = /^(?:Edit|Document|TextArea|TextField|List|Table|DataGrid|Tree|Outline)$/i;
 
 /**
  * A large part of the window in which nothing has a name or a value: a drawing canvas, a whiteboard, a CAD viewport, a page
  * drawn in a <canvas>. The window is the largest element read; the area is the largest element covering at least a quarter
- * of it with no named element's centre inside. Null when there is none. Geometry only, so the same on every OS.
+ * of it with no readable element (named, with a value, or a field) centred inside. Null when there is none.
+ * Geometry only; the Windows and macOS bridges keep a large unnamed leaf for it (ps-bridge.ps1, ax-helper.swift).
  */
 export function opaqueArea(tree: ReadonlyArray<UiElement>): { bounds: UiElement['bounds']; share: number } | null {
   const area = (el: UiElement) => (el.offscreen || el.bounds.width <= 0 || el.bounds.height <= 0 ? 0 : el.bounds.width * el.bounds.height);
   const windowArea = Math.max(0, ...tree.map(area));
   if (!windowArea) return null;
-  const readable = tree.filter(el => area(el) > 0 && (named(el) || !!el.value));
-  // Smaller and centred in it: the window around the area is centred in it too.
+  const win = tree.find(el => area(el) === windowArea);
+  const readable = tree.filter(el => el !== win && area(el) > 0 && (named(el) || !!el.value || FIELD_ROLE.test(el.controlType ?? '')));
+  // No larger and centred in it: an editor with the same bounds as its scroll wrapper is its content; the page around a canvas is not.
   const inside = (c: UiElement, el: UiElement) => {
-    if (area(el) >= area(c)) return false;
+    if (area(el) > area(c)) return false;
     const cx = el.bounds.x + el.bounds.width / 2, cy = el.bounds.y + el.bounds.height / 2;
     return cx >= c.bounds.x && cx <= c.bounds.x + c.bounds.width && cy >= c.bounds.y && cy <= c.bounds.y + c.bounds.height;
   };
-  // A text element's name IS its content (a long paragraph is one big Text): readable, not opaque.
+  // A text element's name IS its content (a long paragraph is one big Text): readable, not opaque. A field is never drawn,
+  // and a ScrollArea (AX) only scrolls its content, which may be taller than it (an NSTextView).
   const best = tree
     .filter(c => area(c) >= OPAQUE_SHARE * windowArea && !c.value && !TEXT_ROLE.test(c.controlType ?? '')
+      && !FIELD_ROLE.test(c.controlType ?? '') && c.controlType !== 'ScrollArea'
       && !readable.some(el => el !== c && inside(c, el)))
     .sort((a, b) => area(b) - area(a))[0];
   return best ? { bounds: best.bounds, share: area(best) / windowArea } : null;

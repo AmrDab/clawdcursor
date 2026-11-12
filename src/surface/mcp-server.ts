@@ -206,7 +206,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const VISION_STREAK_HINT = (n: number) => compact
     ? `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: accessibility compile_ui or smart_read (names + positions), system copy_all_text (exact page text); act by name with accessibility invoke / smart_click — coordinate clicks are the fallback.`
     : `[clawdcursor] ${n === 1 ? 'A screenshot before any text was read.' : `${n} screenshots in a row with no text read.`} Cheaper and exact: compile_ui / smart_read (names + positions), copy_all_text (exact page text); act by name with invoke_element / smart_click — coordinate clicks are the fallback.`;
-  // The last blind read found nothing to act on (empty, timed out, an opaque area): the advice above cannot be followed there.
+  // The last blind read found nothing to act on in the window (an empty tree, an opaque area): the advice above cannot be followed there.
   const CANVAS_HINT = compact
     ? '[clawdcursor] The last text read found nothing to act on here, so a screenshot is right: send all remaining strokes in ONE batch (computer click with path, drag_path), then ONE computer screenshot_region of only the changed area with max_edge 512.'
     : '[clawdcursor] The last text read found nothing to act on here, so a screenshot is right: send all remaining strokes in ONE batch (mouse_click with path, mouse_drag_stepped), then ONE desktop_screenshot_region of only the changed area with max_edge 512.';
@@ -416,14 +416,17 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         // A batch halts at its first failed step, so a halt a guard caused is a refusal, not an error.
         const batchRefused = result.isError && steps?.[steps.length - 1]?.outcome === 'refused';
         const outcome = batchRefused ? 'refused' : outcomeOf(!!result.isError, result.text ?? '');
+        const blindBefore = sessionLog.summary.blind;
         const cls = sessionLog.record(tool.name, action, !result.isError, Date.now() - started,
           result.isError ? result.text : undefined, clientInfo(),
           { outcome, space: typeof params?.space === 'string' ? params.space : undefined,
             ...acted(), steps, timing: run.steps, ...(result.pressedKeys ? { cls: 'act-other' as const } : {}) });
-        // What the latest blind read found. Only the tool's own words count, never the screen text inside the block.
-        if (cls === 'blind') {
-          blindFoundNothing = outcome === 'empty' || outcome === 'timeout'
-            || (result.text ?? '').split('</untrusted-screen-content>').pop()!.includes(OPAQUE_MARK);
+        // What the latest blind read (alone or a batch step) found about the WHOLE window: an empty tree or an opaque area.
+        // A missed find, an empty clipboard or a timeout says nothing about the window. Only the tool's own words count,
+        // never the screen text inside the block.
+        if (sessionLog.summary.blind > blindBefore) {
+          const own = (result.text ?? '').split('</untrusted-screen-content>').pop()!;
+          blindFoundNothing = cls === 'blind' && (own.startsWith('(empty a11y tree') || own.includes(OPAQUE_MARK));
         }
         // Blind first, then vision: field data showed agents drifting into a
         // screenshot → coordinate-click loop after an early blind miss. After

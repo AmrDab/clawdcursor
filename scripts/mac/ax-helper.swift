@@ -412,6 +412,8 @@ struct Walk {
     var unreadable = 0
     /// Set when the window itself could not be read — there is no tree to return.
     var rootError: AXError? = nil
+    /// The walk root's area: an unnamed leaf covering a quarter of it is kept (a drawn surface, #356).
+    var rootArea: CGFloat = 0
 }
 
 let nodeAttrs = [
@@ -447,6 +449,8 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     let desc = str(a["AXDescription"]) ?? ""
     let ident = str(a["AXIdentifier"]) ?? ""
     let kids = (a["AXChildren"] as? [AXUIElement]) ?? []
+    let sz = axSize(a["AXSize"]) ?? .zero
+    if depth == 0 { w.rootArea = sz.width * sz.height }
     var name = title.isEmpty ? desc : title
     // A secure field's value never leaves this process — it is not even kept.
     let value: String? = secure ? nil : str(a["AXValue"])
@@ -465,8 +469,10 @@ func buildNode(_ el: AXUIElement, _ depth: Int, _ w: inout Walk) -> [String: Any
     if name.isEmpty && (alwaysKeepRoles.contains(role) || labelPeekRoles.contains(role)) { name = str(a["AXHelp"]) ?? "" }
 
     let hasValue = !(value ?? "").isEmpty
+    // A large unnamed leaf is a drawn surface (a canvas, a board): kept as a role-only node, so read_tree can say so.
+    let large = w.rootArea > 0 && sz.width * sz.height >= 0.25 * w.rootArea
     let keep = depth == 0 || !name.isEmpty || (!ident.isEmpty && !isGeneratedIdentifier(ident)) || hasValue
-        || alwaysKeepRoles.contains(role) || !children.isEmpty
+        || alwaysKeepRoles.contains(role) || !children.isEmpty || large
     if !keep { return nil }
 
     var node: [String: Any] = [

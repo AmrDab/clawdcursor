@@ -18,6 +18,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { getDesktopTools, SPACE_PARAM } from '../tools/desktop';
+import { setLastFrame } from '../core/agent-loop/coord-scale';
 
 const region = getDesktopTools().find(t => t.name === 'desktop_screenshot_region')!;
 const ctx = () => ({
@@ -54,6 +55,16 @@ describe('the zoom reply', () => {
     expect(r.text).toContain('Region: (600,300) 350x210 screen-space → zoomed to 700x420px, about 390 image tokens.');
     expect(r.text).toContain('x = 600 + zx·350/700');
     expect(r.text).toMatch(/space:"screen"/);
+  });
+});
+
+describe('screenshot max_edge', () => {
+  it("reaches the capture, so the frame and the click scale it sets are the small image's", async () => {
+    const shot = getDesktopTools().find(t => t.name === 'desktop_screenshot')!;
+    const captureForLLM = vi.fn(async () => ({ buffer: Buffer.from('x'), llmWidth: 512, llmHeight: 288, width: 2560, height: 1440, scaleFactor: 5 }));
+    const r = await shot.handler({ max_edge: 512 }, { ensureInitialized: async () => {}, desktop: { captureForLLM } } as never);
+    expect(captureForLLM).toHaveBeenCalledWith(512);
+    expect(r.text).toContain('Screenshot: 512x288px');
   });
 });
 
@@ -110,6 +121,16 @@ describe('zoom with display', () => {
     expect(r.text).toMatch(/screenshot with display:1 first/);
     const plain = await region.handler({ x: 100, y: 50, width: 200, height: 120 }, ctx);
     expect(plain.text).not.toMatch(/display #/);
+  }));
+
+  it('maps by the latest screenshot of that display when there is one (its max_edge scale)', () => onWindows(async () => {
+    const { ctx, captureRegionForLLM } = withDisplays();
+    // screenshot {display:1, max_edge:512} of 1920x1080: 512x288 at 3.75 screen px per image px.
+    setLastFrame({ originX: 2796, originY: -1080, scale: 3.75, display: 1 });
+    try {
+      await region.handler({ x: 100, y: 50, width: 200, height: 120, display: 1 }, ctx);
+      expect(captureRegionForLLM).toHaveBeenCalledWith(2796 + 375, -1080 + 188, 750, 450, 1280);
+    } finally { setLastFrame(null); }
   }));
 
   it('the primary display maps by the plain screenshot scale', () => onWindows(async () => {

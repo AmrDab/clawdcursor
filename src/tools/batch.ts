@@ -222,16 +222,7 @@ export async function executeBatch(
 }
 
 function renderResult(r: BatchResult): string {
-  // A run of the same successful step (17 pen clicks) is one line: "3-19. [ok] computer.click x17 — <the last one's text>".
-  const lines: string[] = [];
-  for (let j = 0; j < r.steps.length;) {
-    const s = r.steps[j];
-    let k = j;
-    while (s.status === 'ok' && r.steps[k + 1]?.status === 'ok' && r.steps[k + 1].label === s.label) k++;
-    const last = r.steps[k];
-    lines.push(k > j ? `  ${s.i}-${last.i}. [ok] ${s.label} x${k - j + 1} — ${last.text}` : `  ${s.i}. [${s.status}] ${s.label} — ${s.text}`);
-    j = k + 1;
-  }
+  const lines = r.steps.map(s => `  ${s.i}. [${s.status}] ${s.label} — ${s.text}`);
   const head = r.allDone
     ? `batch: all ${r.total} steps completed.`
     : `batch: ${r.completed}/${r.total} completed, halted at step ${r.stoppedAt} — ${r.stopReason}`;

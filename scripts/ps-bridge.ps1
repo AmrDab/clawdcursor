@@ -251,6 +251,8 @@ function ConvertTo-UINode {
         return $null
     }
     try { $cur = $Element.Current } catch { return $null }
+    # The walk root's area: an unnamed leaf covering a quarter of it is kept below.
+    if ($RawDepth -eq 0) { $r0 = $cur.BoundingRectangle; $script:walkRootArea = if ($r0.IsEmpty) { 0 } else { $r0.Width * $r0.Height } }
 
     $typeName = $cur.ControlType.ProgrammaticName
     $hasName = $cur.Name -and $cur.Name.Trim().Length -gt 0
@@ -281,7 +283,16 @@ function ConvertTo-UINode {
             }
         } catch {}
         # Skip unnamed leaves — but recurse into unnamed containers that have children
-        if ($childNodes.Count -eq 0) { return $null }
+        if ($childNodes.Count -eq 0) {
+            # A large unnamed leaf is a drawn surface (a canvas, a board): kept as a role-only node, so read_tree can say so (#356).
+            $r = $cur.BoundingRectangle
+            if (-not $r.IsEmpty -and $script:walkRootArea -gt 0 -and $r.Width * $r.Height -ge 0.25 * $script:walkRootArea) {
+                return [ordered]@{ name = ""; automationId = ""; controlType = $typeName; className = ""; isEnabled = $true
+                    bounds = @{ x = [Math]::Round($r.X); y = [Math]::Round($r.Y); width = [Math]::Round($r.Width); height = [Math]::Round($r.Height) }
+                    value = $null; children = @() }
+            }
+            return $null
+        }
         return $childNodes
     }
 

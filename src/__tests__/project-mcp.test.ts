@@ -323,6 +323,12 @@ describe('toolContextToAgent', () => {
     expect(agentCtx.activeApp).toBeUndefined();
   });
 
+  // The projected clicks scale by the latest screenshot's own factor (a max_edge screenshot): dropping it misplaces every click.
+  it("carries the latest screenshot's image-to-mouse scale", async () => {
+    const ctx = makeMockToolContext({ getMouseScaleFactor: vi.fn().mockReturnValue(5) });
+    expect((await toolContextToAgent(ctx)).imageToMouse).toBe(5);
+  });
+
   it('calls ensureInitialized on the ToolContext', async () => {
     const ctx = makeMockToolContext();
     await toolContextToAgent(ctx);

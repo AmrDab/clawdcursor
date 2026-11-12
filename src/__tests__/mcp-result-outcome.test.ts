@@ -419,6 +419,15 @@ describe('the first screenshot of a session that read nothing is nudged to blind
     for (let i = 0; i < 3; i++) expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/\[clawdcursor\]/);
   });
 
+  // A missed name says nothing about the window: an agent on a form whose button is "Send", not "Submit", gets no drawing advice.
+  it('after a find that missed a name, the screenshot gets no canvas advice', async () => {
+    const base = shotCtx();
+    const ctx = { ...base, platform: { ...base.platform, findElements: vi.fn(async () => []), getUiTree: vi.fn(async () => []), lastFindScope: [] } };
+    await createMcpServer({ ctx, compact: true });
+    expect(text(await capturedHandlers.get('accessibility')!({ action: 'find', name: 'Submit' }))).toMatch(/^\(no elements found\)/);
+    expect(text(await capturedHandlers.get('computer')!({ action: 'screenshot' }))).not.toMatch(/strokes/);
+  });
+
   // Live 2026-11-10: copy_all_text pressed Ctrl+A / Ctrl+C in the app and the session log still called it a blind read.
   it('copy_all_text that pressed keys is logged as an action and as text read, alone and as a batch step; one that read the tree is only a blind read', async () => {
     let clip = 'mine';
