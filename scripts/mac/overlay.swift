@@ -767,6 +767,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     // The layer is only as big as its piece of the ring.
                     let box = path.boundingBoxOfPath.insetBy(dx: -(dash.width / 2 + 1), dy: -(dash.width / 2 + 1))
                     var shift = CGAffineTransform(translationX: -box.minX, y: -box.minY)
+                    side.contentsScale = win.backingScaleFactor   // added by hand, so 1 otherwise: soft on Retina
                     side.frame = box
                     side.path = path.copy(using: &shift)
                     // One dash per ring: a point `along` it is lit while (along + phase) mod perimeter < lit. The phase
