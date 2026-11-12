@@ -440,12 +440,16 @@ export class WindowsAdapter implements PlatformAdapter {
     return f;
   }
 
-  async focusWindow(query: { processName?: string; processId?: number; title?: string }): Promise<boolean> {
+  async focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean> {
     // The PSRunner focus-window command takes title and/or processId. Look up by
     // processName first so callers can pass just that.
     this.focusFailure = null;
-    let processId = query.processId;
-    let title = query.title;
+    // An exact window handle names the window by itself: nothing else is passed on, so nothing else can match.
+    const byHandle = query.handle !== undefined;
+    if (byHandle && !(Number.isInteger(query.handle) && (query.handle as number) > 0)) { this.focusFailure = 'The window handle is not a positive integer.'; return false; }
+    let processId = byHandle ? undefined : query.processId;
+    let title = byHandle ? undefined : query.title;
+    if (byHandle) query = { handle: query.handle };
 
     if (processId === undefined && query.processName) {
       const target = query.processName.toLowerCase();
@@ -463,6 +467,7 @@ export class WindowsAdapter implements PlatformAdapter {
       const result = await psRunner.run({
         cmd: 'focus-window',
         restore: true,
+        ...(byHandle ? { handle: query.handle } : {}),
         ...(title !== undefined ? { title } : {}),
         ...(processId !== undefined ? { processId } : {}),
       }) as any;
@@ -502,7 +507,7 @@ export class WindowsAdapter implements PlatformAdapter {
 
   async setWindowState(
     state: WindowState,
-    query?: { processName?: string; processId?: number; title?: string },
+    query?: { processName?: string; processId?: number; title?: string; handle?: number },
   ): Promise<boolean> {
     // Resolve the target: either the caller-supplied window or the
     // foreground one. We drive the transition through a single PowerShell
@@ -511,7 +516,11 @@ export class WindowsAdapter implements PlatformAdapter {
     let pid: number | undefined;
     let hwnd: number | undefined;
 
-    if (query) {
+    // An exact window handle is the target by itself (the handle is written into the script below: an integer or nothing).
+    if (query?.handle !== undefined) {
+      if (!Number.isInteger(query.handle) || query.handle <= 0) return false;
+      hwnd = query.handle;
+    } else if (query) {
       // The pid is written into the script below. A tool step (batch) can hand over any JSON, so anything but an integer is
       // refused rather than written there (GHSA-9ppf-38v8-h97v).
       if (query.processId !== undefined && !Number.isInteger(query.processId)) return false;
@@ -632,11 +641,14 @@ export class WindowsAdapter implements PlatformAdapter {
 
   async setWindowBounds(
     bounds: { x?: number; y?: number; width?: number; height?: number },
-    query?: { processName?: string; processId?: number; title?: string },
+    query?: { processName?: string; processId?: number; title?: string; handle?: number },
   ): Promise<boolean> {
     // SetWindowPos takes hwnd + x/y/w/h. Use SWP_NOZORDER to keep z-order.
     let hwnd: number | undefined;
-    if (query) {
+    if (query?.handle !== undefined) {
+      if (!Number.isInteger(query.handle) || query.handle <= 0) return false;
+      hwnd = query.handle;   // an exact window handle is the target by itself
+    } else if (query) {
       const match = await this.resolveWindow(query);
       if (match && typeof (match as any).handle === 'number') hwnd = (match as any).handle;
       // FAIL CLOSED, like setWindowState: a named window that matched nothing

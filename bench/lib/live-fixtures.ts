@@ -75,8 +75,8 @@ export async function buildNative(outDir: string, platform: string = process.pla
  */
 export const nativeStatePath = (workDir: string) => path.join(workDir, 'native-fixture.live.json');
 
-export function nativeArgs(o: { state: string; mode: 'dialog' | 'editor'; pos?: [number, number] }): string[] {
-  return ['--state', o.state, '--mode', o.mode, ...(o.pos ? ['--pos', o.pos.join(',')] : [])];
+export function nativeArgs(o: { state: string; mode: 'dialog' | 'editor'; pos?: [number, number]; title?: string }): string[] {
+  return ['--state', o.state, '--mode', o.mode, ...(o.pos ? ['--pos', o.pos.join(',')] : []), ...(o.title ? ['--title', o.title] : [])];
 }
 
 /** The state file: written whole and moved into place, but a read can still land between the two. */
@@ -97,9 +97,9 @@ async function openNative(mode: 'dialog' | 'editor', ctx: FixtureContext): Promi
 }
 
 /** Start the native fixture with its window on screen, and wait until it has written its state AND has that window. */
-export async function openNativeFixture(mode: 'dialog' | 'editor', native: NativeBuild, workDir: string): Promise<LiveFixture> {
+export async function openNativeFixture(mode: 'dialog' | 'editor', native: NativeBuild, workDir: string, title?: string): Promise<LiveFixture> {
   const state = nativeStatePath(workDir);
-  const child = startVisible(native.cmd, [...native.args, ...nativeArgs({ state, mode })], { stdio: 'ignore' });
+  const child = startVisible(native.cmd, [...native.args, ...nativeArgs({ state, mode, title })], { stdio: 'ignore' });
   try {
     await waitFor(() => fs.existsSync(state), 20_000, 'the native fixture to start');
     // The state file alone is not enough: the first live run had the file and no window.

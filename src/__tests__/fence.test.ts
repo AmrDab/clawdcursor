@@ -18,7 +18,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 import {
   FENCE_ENV, FENCE_POLICY, FENCED, fenceActive, fenceCapturing, fenceCdpOnly, fenceCheck, fenceGate, fenceImage, fenceInput, fenceKind, fenceMask,
   fenceOcrCapture, fenceOcrText, fencePlatform, fencePointer, fenceRoots, fenceTools, fenceWindowList, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
-  primaryRect, wholly, __setFenceDesktopForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
+  primaryRect, wholly, __setFenceDesktopForTests, __setFencePlatformForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
 } from '../core/fence';
 import { classifyResult } from '../core/result-codes';
 import { outcomeOf } from '../surface/session-log';
@@ -63,10 +63,12 @@ beforeEach(() => {
   front = fixture; windows = [fixture, owners]; cursor = { x: 300, y: 250 }; primary = { x: 0, y: 0, width: 3840, height: 2400 };
   __setFenceProcessTableForTests(async () => TABLE);
   __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary });
+  __setFencePlatformForTests('win32');   // where the window tools take an exact handle
 });
 afterEach(() => {
   __setFenceProcessTableForTests(null);
   __setFenceDesktopForTests(null);
+  __setFencePlatformForTests(null);
   __setForegroundReaderForTests(async () => null);
   delete process.env[FENCE_ENV];
 });
@@ -367,11 +369,66 @@ describe('window actions', () => {
     expect(await refused(tool('focus_window', targeted), { title: 'Calculator' })).toBe(true);
   });
 
-  it('a name that matches only the fixture is pinned to its process, and keeps its title', async () => {
-    const t = tool('focus_window', targeted);
+  it('a window call is pinned to the HANDLE of the window that matched: the tool gets no title and no process to search by', async () => {
     windows = [fixture, { ...owners, title: 'Inbox' }];
+    for (const params of [{ title: 'Bench Dialog' }, { title: 'bench' }, { processName: 'benchfixture' }, { processId: 101 }, { processId: '101', title: 'Bench Dialog' }, { handle: 7001 }]) {
+      const t = tool('focus_window', targeted);
+      expect(await refused(t, params), JSON.stringify(params)).toBe(false);
+      expect(t.calls, JSON.stringify(params)).toEqual([{ handle: 7001 }]);
+    }
+    // What is not a target stays: a resize keeps its size.
+    const r = tool('resize_window', targeted);
+    await run(r, { title: 'Bench Dialog', width: 800, height: 600 });
+    expect(r.calls).toEqual([{ width: 800, height: 600, handle: 7001 }]);
+  });
+
+  it('a second window whose title CONTAINS the fixture\'s title is never the target', async () => {
+    // "Bench Dialog" is the fixture; the owner has "Bench Dialog - notes.txt" open in another app. A platform that takes
+    // "the first title that contains the text" would be free to pick either.
+    const lookalike = { ...owners, title: 'Bench Dialog - notes.txt', handle: 7009 };
+    windows = [lookalike, fixture];
+    for (const name of ['focus_window', 'close_window', 'minimize_window_to_taskbar', 'resize_window']) {
+      // By title: both match, one is outside the fence: refused, nothing runs.
+      const byTitle = tool(name, targeted);
+      expect(await refused(byTitle, { title: 'Bench Dialog' }), name).toBe(true);
+      expect(byTitle.calls, name).toEqual([]);
+      // By the fixture's process: allowed, and what reaches the platform is the fixture's handle alone: no title at all.
+      const byPid = tool(name, targeted);
+      expect(await refused(byPid, { processId: 101 }), name).toBe(false);
+      expect(byPid.calls, name).toEqual([{ handle: 7001 }]);
+      expect(JSON.stringify(byPid.calls)).not.toMatch(/title|7009/);
+      // With the lookalike in front and no target named, the foreground check refuses.
+      front = lookalike;
+      expect(await refused(tool(name, targeted)), name).toBe(true);
+      front = fixture;
+    }
+    // The lookalike's own handle is refused.
+    expect(await refused(tool('focus_window', targeted), { handle: 7009 })).toBe(true);
+  });
+
+  it('no call under the fence ever hands the platform a title by itself', async () => {
+    windows = [fixture, calc, settings, { ...owners, title: 'Inbox' }];
+    for (const params of [{ title: 'Bench Dialog' }, { title: 'Calculator' }, { title: 'Calc' }, { title: 'bench', processName: 'BenchFixture' }]) {
+      const t = tool('focus_window', targeted);
+      await run(t, params);
+      for (const call of t.calls) {
+        expect(call.title, JSON.stringify(params)).toBeUndefined();
+        expect(typeof call.handle, JSON.stringify(params)).toBe('number');
+      }
+    }
+  });
+
+  it('where the window tools take no handle (macOS, Linux): pinned to the process, the title kept beside it, never alone', async () => {
+    __setFencePlatformForTests('linux');
+    windows = [fixture, { ...owners, title: 'Inbox' }];
+    const t = tool('focus_window', targeted);
     expect(await refused(t, { title: 'Bench Dialog' })).toBe(false);
     expect(t.calls).toEqual([{ title: 'Bench Dialog', processId: 101 }]);
+    // A process that also owns a window outside the fence cannot be pinned: refused.
+    windows = [fixture, { ...owners, processId: 101, title: 'Inbox', handle: 7010 }];
+    expect(await refused(tool('focus_window', targeted), { title: 'Bench Dialog' })).toBe(false);   // 101 is fenced: both windows are
+    windows = [fixture, calc, settings];
+    expect(await refused(tool('focus_window', targeted), { title: 'Calculator' })).toBe(true);
   });
 
   it('with no target they act on the window in front', async () => {
@@ -388,19 +445,19 @@ describe('window actions', () => {
       expect(await refused(tool('type_text'))).toBe(true);
     });
 
-    it('by its whole, unique title while the frame host also owns a window of the owner: allowed, and resolved by title alone', async () => {
+    it('by its title while the frame host also owns a window of the owner: allowed, pinned to its handle', async () => {
       windows = [fixture, calc, settings];
-      const t = tool('focus_window', targeted);
-      expect(await refused(t, { title: 'Calculator' })).toBe(false);
-      // No processId is passed on: the frame host's pid would also match the owner's Settings window.
-      expect(t.calls).toEqual([{ title: 'Calculator' }]);
+      for (const title of ['Calculator', 'Calc']) {
+        const t = tool('focus_window', targeted);
+        expect(await refused(t, { title }), title).toBe(false);
+        // Neither the title nor the frame host's pid is passed on: the pid would match the owner's Settings window too.
+        expect(t.calls, title).toEqual([{ handle: 7003 }]);
+      }
       const c = tool('close_window', targeted);
       expect(await refused(c, { title: 'calculator', processName: 'ApplicationFrameHost' })).toBe(true);   // the name matches Settings too
     });
 
-    it('by part of its title, or a title another window also contains, while the host is shared: refused', async () => {
-      windows = [fixture, calc, settings];
-      expect(await refused(tool('close_window', targeted), { title: 'Calc' })).toBe(true);
+    it('a title another window also contains: refused', async () => {
       windows = [fixture, calc, settings, { ...owners, title: 'How to use Calculator - Edge' }];
       expect(await refused(tool('close_window', targeted), { title: 'Calculator' })).toBe(true);
       windows = [fixture, calc, { ...settings, title: 'Calculator' }];                                   // another Store app with the same title
@@ -439,11 +496,11 @@ describe('window actions', () => {
       expect(await refused(tool('read_screen'))).toBe(true);
     });
 
-    it('by title: allowed when every window of the frame host is fenced, pinned and still named', async () => {
+    it('by title when every window of the frame host is fenced: the same handle pin', async () => {
       windows = [fixture, calc];
       const t = tool('close_window', targeted);
       expect(await refused(t, { title: 'Calculator' })).toBe(false);
-      expect(t.calls).toEqual([{ title: 'Calculator', processId: 300 }]);
+      expect(t.calls).toEqual([{ handle: 7003 }]);
     });
 
     it('by the frame host\'s pid alone: refused', async () => {

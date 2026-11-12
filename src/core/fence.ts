@@ -136,6 +136,11 @@ export interface FenceWindow {
   bounds?: Rect;
 }
 
+/** Can the window tools be told this exact window? On Windows they take its handle; elsewhere they do not. */
+let handlePlatform: string = process.platform;
+export function __setFencePlatformForTests(platform: string | null): void { handlePlatform = platform ?? process.platform; }
+const pinsByHandle = (w: FenceWindow) => handlePlatform === 'win32' && typeof w.handle === 'number' && Number.isInteger(w.handle) && w.handle > 0;
+
 const isFrameHost = (w: FenceWindow) => /^applicationframehost(\.exe)?$/i.test(String(w.processName ?? '').trim());
 
 /**
@@ -444,19 +449,22 @@ export async function fenceGate(tool: Pick<ToolDefinition, 'name' | 'parameters'
     for (const w of any) if (!await windowInFence(w, env)) throw new Error(refusal(`${tool.name}: a window outside the fence also matches part of that target, and which one it means`));
     const owner = matched[0].processId;
     if (matched.some(w => w.processId !== owner)) throw new Error(refusal(`${tool.name}: that target matches windows of several processes, and which one it means`));
-    let shared = false;
-    if (handle === undefined) for (const w of all) if (w.processId === owner && !await windowInFence(w, env)) shared = true;
-    if (!shared) return { ...params, ...(tool.parameters && 'processId' in tool.parameters ? { processId: owner } : {}) };
-    // The process also owns windows outside the fence (ApplicationFrameHost hosts every Store app's window), so a call
-    // by process could resolve to one of those. It goes through only when the TITLE alone identifies the window: the
-    // title given is the whole title of the one fenced window, and no other open window's title contains it. The tool
-    // is then given the title and nothing else to resolve by.
-    const exact = !!title && matched.length === 1 && lower(matched[0].title).trim() === title.trim()
-      && all.filter(w => lower(w.title).includes(title)).length === 1;
-    if (!exact) throw new Error(refusal(`${tool.name}: the process of that window also owns windows outside the fence, and a call that does not name the window by its whole, unique title`));
-    const byTitle: Record<string, unknown> = { ...params };
-    delete byTitle.processId; delete byTitle.pid; delete byTitle.processName;
-    return byTitle;
+    // What the tool is given to find the window with. On Windows: the HANDLE of the one window that matched, and nothing
+    // else. A title is matched by "contains" further down and a process can own several windows, so neither says
+    // which window as a handle does. (The window tools take a handle on Windows only.)
+    const pinned = matched.length === 1 && pinsByHandle(matched[0]) ? matched[0].handle : undefined;
+    if (kind === 'window' && pinned !== undefined) {
+      const byHandle: Record<string, unknown> = { ...params, handle: pinned };
+      for (const k of ['title', 'processName', 'processId', 'pid', 'windowId', 'hwnd']) delete byHandle[k];
+      return byHandle;
+    }
+    // No handle to pin: the tool resolves by process (and title). A process that also owns windows outside the fence
+    // (ApplicationFrameHost hosts every Store app's window) could resolve to one of those: refused. A title is never
+    // handed over by itself.
+    if (handle === undefined) {
+      for (const w of all) if (w.processId === owner && !await windowInFence(w, env)) throw new Error(refusal(`${tool.name}: the process of that window also owns windows outside the fence, and a call by process`));
+    }
+    return { ...params, ...(tool.parameters && 'processId' in tool.parameters ? { processId: owner } : {}) };
   }
   if (pid !== undefined) {
     if (!await inFence(pid, env)) throw new Error(refusal(`${tool.name}: process ${pid}`));

@@ -1,7 +1,7 @@
 // The native benchmark fixture for Windows: a WinForms app that writes its own state to a JSON file.
 // Built by build.ps1 with PowerShell's Add-Type (the C# 5 compiler of .NET Framework: no newer syntax here).
 //
-//   BenchFixture.exe --state <file> [--mode dialog|editor] [--pos x,y] [--selftest [--do "name=..;click=apply"]]
+//   BenchFixture.exe --state <file> [--mode dialog|editor] [--pos x,y] [--title <text>] [--selftest [--do "name=..;click=apply"]]
 //
 // --do runs a task's scripted actions in the self-test (off screen, never activated), one token per action:
 //   name=<text>  email=<text>  priority=<Low|Normal|High>  subscribe=<on|off>  text=<text, \n for a line break>
@@ -264,6 +264,7 @@ public static class BenchFixture
         Point pos = new Point(120, 120);
         bool selftest = false;
         string script = null;
+        string title = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--state" && i + 1 < args.Length) state = args[++i];
@@ -275,6 +276,7 @@ public static class BenchFixture
             }
             else if (args[i] == "--selftest") selftest = true;
             else if (args[i] == "--do" && i + 1 < args.Length) script = args[++i];
+            else if (args[i] == "--title" && i + 1 < args.Length) title = args[++i];
         }
         if (state == null || (mode != "dialog" && mode != "editor")) return 2;
 
@@ -282,6 +284,7 @@ public static class BenchFixture
         Recorder rec = new Recorder(state);
         QuietForm form = mode == "editor" ? (QuietForm)new EditorForm(rec) : new DialogForm(rec);
         form.StartPosition = FormStartPosition.Manual;
+        if (title != null) form.Text = title;   // only the fence check uses this: a second window with a look-alike title
         form.Location = pos;
         rec.Write();
         if (!selftest) { Application.AddMessageFilter(new RawInput(rec)); Application.Run(form); return 0; }

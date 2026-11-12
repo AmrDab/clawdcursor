@@ -185,8 +185,8 @@ Different from an ordinary session:
 - a pointer move, press or release outside the fixture window is refused, also as a step of a drag path;
 - text with Enter or Tab is typed a piece at a time (the foreground is checked before each piece), so it is a little slower;
 - a `processId` given as a string is normalised; any other non-integer target is refused;
-- a window action on a Store app (Calculator) by title is refused while another Store app's window is open, because
-  both belong to one host process.
+- a window action reaches the platform as the exact handle of the one fixture window that matched; a title that a
+  window outside the fixture also contains is refused.
 
 Refused (code `FENCED`):
 

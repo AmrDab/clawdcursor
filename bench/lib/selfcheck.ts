@@ -254,25 +254,40 @@ export async function selfcheckFixtures(buildDir: string | undefined, log: (line
     if ('missing' in native) log(`skip native fixture: ${native.missing}`);
     else {
       const dirs = ['fixture', 'other'].map(d => { const dir = path.join(root, d); fs.mkdirSync(dir, { mode: 0o700 }); return dir; });
-      // The window the run is fenced to, and a second window that is NOT in the fence (the same app, another process).
-      const other = await openNativeFixture('editor', native, dirs[1]);
+      // The window the run is fenced to, and a second window that is NOT in the fence: another process, whose title
+      // CONTAINS the fixture's title (on Windows, where the fixture takes a title). A focus that searched by title could
+      // take either.
+      const lookalike = process.platform === 'win32' ? 'Bench Dialog - notes (not the fixture)' : undefined;
+      const otherTitle = lookalike ?? 'Bench Editor';
+      const other = await openNativeFixture('editor', native, dirs[1], lookalike);
       const fixture = await openNativeFixture('dialog', native, dirs[0]);
       try {
         const otherPid = (await other.roots())[0];
+        const fixturePid = (await fixture.roots())[0];
         await fenced(fixture, 1, async call => {
-          const focus = await call('window', { action: 'focus', title: 'Bench Dialog' });
+          const front = async () => { const t = await call('accessibility', { action: 'read_tree' }); return allowed(t) && /Apply/.test(text(t)) && /Subscribe/.test(text(t)); };
+          const focus = await call('window', { action: 'focus', processId: fixturePid });
           ok = check(allowed(focus) && !focus.isError, `native fixture: window focus on it is allowed (${text(focus).split('\n')[0].slice(0, 80)})`) && ok;
           const tree = await call('accessibility', { action: 'read_tree' });
           ok = check(allowed(tree) && /Apply/.test(text(tree)) && /Subscribe/.test(text(tree)), 'native fixture: read_tree on it is allowed and shows its controls') && ok;
-          ok = check(!/Bench Editor/.test(text(tree)), 'native fixture: read_tree does not list the window outside the fence') && ok;
-          const byPid = await call('accessibility', { action: 'read_tree', processId: (await fixture.roots())[0] });
+          ok = check(!text(tree).includes(otherTitle), 'native fixture: read_tree does not list the window outside the fence') && ok;
+          const byPid = await call('accessibility', { action: 'read_tree', processId: fixturePid });
           ok = check(allowed(byPid), 'native fixture: read_tree by its process id is allowed') && ok;
-          const otherFocus = await call('window', { action: 'focus', title: 'Bench Editor' });
+          if (lookalike) {
+            // "Bench Dialog" is in both titles: refused, and the look-alike is never brought to the front.
+            const ambiguous = await call('window', { action: 'focus', title: 'Bench Dialog' });
+            ok = check(!allowed(ambiguous) && !!ambiguous.isError, 'a second window whose title contains the fixture\'s: focus by that title is refused (FENCED)') && ok;
+            ok = check(await front(), 'a second window whose title contains the fixture\'s: it was not focused (the fixture is still in front)') && ok;
+          }
+          const otherFocus = await call('window', { action: 'focus', title: otherTitle });
           ok = check(!allowed(otherFocus) && !!otherFocus.isError, 'a window outside the fence: window focus is refused (FENCED)') && ok;
+          const otherByPid = await call('window', { action: 'focus', processId: otherPid });
+          ok = check(!allowed(otherByPid), 'a window outside the fence: window focus by its process id is refused (FENCED)') && ok;
           const otherTree = await call('accessibility', { action: 'read_tree', processId: otherPid });
           ok = check(!allowed(otherTree) && !/Document/.test(text(otherTree)), 'a window outside the fence: read_tree is refused (FENCED)') && ok;
-          const again = await call('window', { action: 'focus', title: 'Bench Dialog' });
-          ok = check(allowed(again), 'native fixture: still allowed after the refusals') && ok;
+          ok = check(await front(), 'the window outside the fence was never focused: the fixture is still in front') && ok;
+          const again = await call('window', { action: 'focus', processId: fixturePid });
+          ok = check(allowed(again) && !again.isError, 'native fixture: still allowed after the refusals') && ok;
         });
       } finally {
         await fixture.close();

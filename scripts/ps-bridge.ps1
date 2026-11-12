@@ -895,9 +895,19 @@ function Cmd-FocusWindow {
     $allWins += Get-OwnedWindowElements $listed
 
     $target = $null
+    # An exact window handle (the test fence pins a window this way): that window and no other. No title search, no
+    # fallback to the process: a title is matched by "contains" below, and a Store app's host process owns the windows
+    # of every Store app.
+    $handle = if ($cmd.handle) { [int64]$cmd.handle } else { 0 }
+    if ($handle -ne 0) {
+        foreach ($w in $allWins) {
+            try { if ([int64]$w.Current.NativeWindowHandle -eq $handle) { $target = $w; break } } catch {}
+        }
+        if ($null -eq $target) { return @{ success=$false; error="Window not found: handle=$handle" } }
+    }
     # When BOTH pid and title are supplied, AND-match. Disambiguates tabbed
     # apps like Win11 Notepad where multiple windows share one pid.
-    if ($wpid -gt 0 -and $title -ne "") {
+    elseif ($wpid -gt 0 -and $title -ne "") {
         $tl = ConvertTo-TitleKey $title
         foreach ($w in $allWins) {
             try {
