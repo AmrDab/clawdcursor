@@ -86,7 +86,7 @@ export function getCdpTools(): ToolDefinition[] {
         if (!selector && !text) return { text: 'Provide either selector or text parameter.', isError: true };
         const result = text ? await ctx.cdp.clickByText(text) : await ctx.cdp.click(selector!);
         return {
-          text: result.success ? `Clicked: ${selector || `"${text}"`} (method: ${result.method})` : `Click failed: ${result.error}`,
+          text: result.success ? `Clicked: ${selector || `"${text}"`} (method: ${result.method})${result.frame ? ` in iframe ${quoteScreenText(result.frame)}` : ''}` : `Click failed: ${result.error}`,
           isError: !result.success,
         };
       },
@@ -109,7 +109,7 @@ export function getCdpTools(): ToolDefinition[] {
         const result = label ? await ctx.cdp.typeByLabel(label, text) : await ctx.cdp.typeInField(selector!, text);
         if (!result.success) return { text: `Type failed: ${result.error}`, isError: true };
         // The fill replaced the field's text: read it back, as every set is (#399).
-        const v = setVerdict(await readBackTyped(async () => result.read?.() ?? null, String(text), { whole: true }), String(text), selector || label, ' (browser)');
+        const v = setVerdict(await readBackTyped(async () => result.read?.() ?? null, String(text), { whole: true }), String(text), selector || label, ` (browser)${result.frame ? ` in iframe ${quoteScreenText(result.frame)}` : ''}`);
         return { text: v.text, isError: !v.success };
       },
     },
@@ -129,7 +129,7 @@ export function getCdpTools(): ToolDefinition[] {
         const result = await ctx.cdp.selectOption(selector, value);
         if (!result.success) return { text: `Select failed: ${result.error}`, isError: true };
         const v = shownResult(await result.read?.(), String(value), String(selector));   // the chosen option, read back (#399)
-        return { text: v.text, isError: !v.success };
+        return { text: `${v.text}${result.frame ? ` (in iframe ${quoteScreenText(result.frame)})` : ''}`, isError: !v.success };
       },
     },
 
@@ -169,7 +169,7 @@ export function getCdpTools(): ToolDefinition[] {
       handler: async ({ selector, timeout }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
         const result = await ctx.cdp.waitForSelector(selector, timeout ?? 10000);
-        return { text: result.success ? `Element "${selector}" found` : `Wait failed: ${result.error}`, isError: !result.success };
+        return { text: result.success ? `Element "${selector}" found${result.frame ? ` in iframe ${quoteScreenText(result.frame)}` : ''}` : `Wait failed: ${result.error}`, isError: !result.success };
       },
     },
 

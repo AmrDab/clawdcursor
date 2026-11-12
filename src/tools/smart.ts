@@ -790,32 +790,18 @@ export function getSmartTools(): ToolDefinition[] {
           try {
             const connected = await ctx.cdp.isConnected();
             if (connected) {
-              const page = ctx.cdp.getPage();
-              if (page) {
-                const clicked = await page.evaluate((text: string) => {
-                  const selectors = 'button, a, [role="button"], [role="link"], [role="menuitem"], input[type="submit"], input[type="button"], [onclick]';
-                  const elements = document.querySelectorAll(selectors);
-                  for (const el of elements) {
-                    const htmlEl = el as HTMLElement;
-                    const elText = htmlEl.textContent?.trim() || htmlEl.getAttribute('aria-label') || htmlEl.getAttribute('title') || '';
-                    if (elText.toLowerCase().includes(text.toLowerCase())) {
-                      htmlEl.click();
-                      return true;
-                    }
-                  }
-                  return false;
-                }, target).catch(() => false);
-
-                if (clicked) {
-                  ctx.a11y.invalidateCache();
-                  return { text: `Clicked "${target}" via CDP (JS click)` };
-                }
-                attempted.push('CDP: no text match found');
+              // The browser tool's own click by text: every frame of the page, iframes included (#398).
+              const r = await ctx.cdp.clickByText(target);
+              if (r.success) {
+                ctx.a11y.invalidateCache();
+                return { text: `Clicked "${target}" via CDP (${r.method})${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}` };
               }
+              attempted.push(`CDP: ${r.error?.substring(0, 120)}`);
             } else {
               attempted.push('CDP: not connected');
             }
           } catch (err: any) {
+            if (isGuardRefusal(err)) return { text: err.message, isError: true };
             attempted.push(`CDP: ${err.message?.substring(0, 80)}`);
           }
         } else {

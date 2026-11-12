@@ -26,6 +26,7 @@ function mockCdp(overrides: Partial<Record<string, any>> = {}) {
     click: vi.fn(async () => ({ success: true, method: 'selector' })),
     typeInField: vi.fn(async () => ({ success: true, method: 'fill' })),
     typeByLabel: vi.fn(async () => ({ success: true, method: 'label' })),
+    getConnectError: vi.fn(() => ''),
     ...overrides,
   };
 }
@@ -62,11 +63,17 @@ describe('browser_connect', () => {
 
   it('CLAWD_AGENT_CDP_OFF=1 → attach-only (never launches a new instance)', async () => {
     process.env.CLAWD_AGENT_CDP_OFF = '1';
-    const cdp = mockCdp({ ensureConnected: vi.fn(async () => false) });
+    const cdp = mockCdp({
+      ensureConnected: vi.fn(async () => false),
+      getConnectError: vi.fn(() => 'nothing is listening on port 9223 (ECONNREFUSED)'),
+    });
     const r = await tool('browser_connect').execute({}, ctx(cdp));
     expect(cdp.ensureConnected).toHaveBeenCalledWith(expect.objectContaining({ launch: false }));
     expect(r.success).toBe(false);
     expect(r.text).toMatch(/attach/i);
+    // Says why, and what to do about a browser that is still starting (#378).
+    expect(r.text).toContain('nothing is listening on port 9223 (ECONNREFUSED)');
+    expect(r.text).toMatch(/connect again in a few seconds; it must run with --remote-debugging-port=9223/);
   });
 });
 

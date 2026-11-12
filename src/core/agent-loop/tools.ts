@@ -32,7 +32,7 @@ import { selectOption, selectedResult } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
-import { agentBrowserConnectOptions } from '../../platform/browser-config';
+import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
 import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence, EXPECT_DESCRIPTION } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
@@ -1899,7 +1899,12 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // so both land on the one driver instance.
         const connectOpts = agentBrowserConnectOptions();
         const ok = await ctx.cdp.ensureConnected(connectOpts).catch(() => false);
-        if (!ok) return { success: false, text: `browser_connect: could not ${connectOpts.launch ? 'launch or attach to' : 'attach to'} a CDP browser — fall back to read_text/smart_click.` };
+        if (!ok) {
+          // Why, and what to do: the driver already waited for an attach-only port (#378).
+          const why = ctx.cdp.getConnectError() || 'no reason given';
+          const next = connectOpts.launch ? '' : ` If the browser was only just started, connect again in a few seconds; it must run with --remote-debugging-port=${DEFAULT_CDP_PORT}.`;
+          return { success: false, text: `browser_connect: could not ${connectOpts.launch ? 'launch or attach to' : 'attach to'} a CDP browser: ${why}.${next} Otherwise fall back to read_text/smart_click.` };
+        }
         const url = await ctx.cdp.getUrl().catch(() => null);
         const title = await ctx.cdp.getTitle().catch(() => null);
         // Disclose provenance honestly: 'attached' means we connected to a
@@ -1971,7 +1976,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const selector = typeof args.selector === 'string' ? args.selector.trim() : '';
         if (!text && !selector) return { success: false, isError: true, text: 'browser_click: provide text or selector.' };
         const r = text ? await ctx.cdp.clickByText(text) : await ctx.cdp.click(selector);
-        return r.success ? { success: true, text: `browser_click: clicked ${text ? `"${text}"` : selector} (${r.method})` } : { success: false, text: `browser_click failed: ${r.error}. Call browser_read to see the actual elements, then retry.` };
+        return r.success ? { success: true, text: `browser_click: clicked ${text ? `"${text}"` : selector} (${r.method})${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}` } : { success: false, text: `browser_click failed: ${r.error}. Call browser_read to see the actual elements, then retry.` };
       },
     },
     {
@@ -1997,7 +2002,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const r = label ? await ctx.cdp.typeByLabel(label, text) : await ctx.cdp.typeInField(selector, text);
         if (!r.success) return { success: false, text: `browser_type failed: ${r.error}` };
         // The fill replaced the field's text: read it back, as every set is (#399).
-        return setVerdict(await readBackTyped(async () => r.read?.() ?? null, text, { whole: true }), text, selector || label, ' (browser)');
+        return setVerdict(await readBackTyped(async () => r.read?.() ?? null, text, { whole: true }), text, selector || label, ` (browser)${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}`);
       },
     },
 
