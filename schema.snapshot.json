@@ -2233,6 +2233,16 @@
       "costClass": "act"
     },
     {
+      "name": "telemetry_optout",
+      "description": "Turn off clawdcursor's anonymous error reports (error codes and its own file:line, never screen content). Only when the user asks. There is no opt-in here: the user runs `clawdcursor optin` themselves.",
+      "category": "orchestration",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      },
+      "costClass": "inspect"
+    },
+    {
       "name": "type_text",
       "description": "Type text into the currently focused input. Prefer set_field_value when a field has an a11y name.",
       "category": "keyboard",

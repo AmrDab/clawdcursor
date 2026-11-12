@@ -376,7 +376,7 @@ export const FENCE_POLICY: Readonly<Record<string, FenceKind>> = {
   minimize_window: 'refuse',
   open_app: 'refuse', open_file: 'refuse', open_url: 'refuse', open_uri: 'refuse', navigate_browser: 'refuse', switch_tab_os: 'refuse',
   relaunch_with_cdp: 'refuse', detect_webview_apps: 'refuse', shortcuts_execute: 'refuse',
-  session_report: 'refuse', submit_report: 'refuse', logs_recent: 'refuse', verify: 'refuse',
+  session_report: 'refuse', submit_report: 'refuse', logs_recent: 'refuse', verify: 'refuse', telemetry_optout: 'refuse',
   pause_for_user: 'refuse', resume_task: 'refuse',
 };
 

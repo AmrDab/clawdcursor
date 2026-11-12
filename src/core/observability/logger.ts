@@ -27,6 +27,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import pc from 'picocolors';
+import { observe as telemetry } from './telemetry';
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
@@ -487,6 +488,7 @@ function formatMs(ms: number): string {
 // ─── Public logger entry points ─────────────────────────────────────
 
 function emit(level: Level, msg: string, meta?: Record<string, unknown>): void {
+  telemetry(msg, meta);   // allowlisted bug reports (telemetry.ts), whatever the log level
   if (LEVEL_ORDER[level] < minLevel) return;
   // File log ALWAYS gets the full JSON record (machine contract).
   const record = {
