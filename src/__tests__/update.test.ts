@@ -10,7 +10,7 @@ import * as path from 'path';
 
 const h = vi.hoisted(() => ({ root: '' }));
 vi.mock('../paths', async (orig) => ({ ...(await orig<typeof import('../paths')>()), getPackageRoot: () => h.root }));
-vi.mock('../surface/version', () => ({ VERSION: '2.0.0' }));
+vi.mock('../surface/version', () => ({ VERSION: '1.8.0' }));
 vi.mock('child_process', async (orig) => ({ ...(await orig<typeof import('child_process')>()), spawnSync: vi.fn() }));
 
 import { spawnSync } from 'child_process';
@@ -104,7 +104,7 @@ describe("npm's entry script", () => {
 });
 
 describe('the version from the registry becomes a package spec only when it is a plain version', () => {
-  it.each(['2.1.0', '2.1.0-rc.1'])('accepts %s', v => expect(isPlainVersion(v)).toBe(true));
+  it.each(['1.9.0', '1.9.0-rc.1'])('accepts %s', v => expect(isPlainVersion(v)).toBe(true));
   it.each(['latest', 'npm:x@1.0.0', 'https://evil.example/x.tgz', '1.0.0 --foo', 'github:a/b', '', undefined, 3])(
     'rejects %s', v => expect(isPlainVersion(v)).toBe(false));
 });
@@ -129,20 +129,20 @@ describe('runUpdate', () => {
   afterEach(() => { process.exitCode = undefined; vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
   it('installs the newer version into the prefix this copy lives in: node + npm-cli.js, no shell, no sudo', async () => {
-    registry('2.1.0');
+    registry('1.9.0');
     spawn.mockReturnValue({ status: 0 } as any);
     await runUpdate();
     expect(spawn).toHaveBeenCalledTimes(1);
     const [cmd, args, opts] = spawn.mock.calls[0] as unknown as [string, string[], { shell?: unknown }];
     expect(cmd).toBe(process.execPath);
     expect(args).toEqual([path.join(prefix, ...inPrefix('node_modules', 'npm', 'bin', 'npm-cli.js')),
-      'install', '-g', '--prefix', prefix, 'clawdcursor@2.1.0', '--loglevel', 'error']);
+      'install', '-g', '--prefix', prefix, 'clawdcursor@1.9.0', '--loglevel', 'error']);
     expect(opts?.shell).toBeUndefined();
     expect(process.exitCode).toBeUndefined();
   });
 
   it('a failed npm run exits 1 and is not retried with sudo', async () => {
-    registry('2.1.0');
+    registry('1.9.0');
     spawn.mockReturnValue({ status: 1 } as any);
     await runUpdate();
     expect(spawn).toHaveBeenCalledTimes(1);
@@ -151,14 +151,14 @@ describe('runUpdate', () => {
   });
 
   it('up to date: runs nothing', async () => {
-    registry('2.0.0');
+    registry('1.8.0');
     await runUpdate();
     expect(spawn).not.toHaveBeenCalled();
     expect(process.exitCode).toBeUndefined();
   });
 
   it('a copy that is not an npm global install is not touched', async () => {
-    registry('2.1.0');
+    registry('1.9.0');
     h.root = path.join(root, 'checkout', 'clawdcursor');
     await runUpdate();
     expect(spawn).not.toHaveBeenCalled();
