@@ -1699,7 +1699,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       changesScreen: false,
       async execute(args) {
         const ms = Math.min(5000, Math.max(0, Number(args.ms ?? 0)));
-        if (await sleepUnlessStopped(ms)) return { success: false, text: `wait: ${STOPPED_TEXT}` };
+        if (await timeWait(() => sleepUnlessStopped(ms))) return { success: false, text: `wait: ${STOPPED_TEXT}` };
         return { success: true, text: `Waited ${ms}ms.` };
       },
     },
@@ -2426,7 +2426,7 @@ async function clickPath(args: Record<string, unknown>, ctx: AgentToolContext) {
   const raised = await ensureTargetForeground(ctx, fg0);
   const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
   for (let i = 0; i < scaled.length; i++) {
-    if (i > 0 && await sleepUnlessStopped(interval)) throw new Error(`${STOPPED_TEXT} (${i} of ${scaled.length} points were clicked first)`);
+    if (i > 0 && await timeWait(() => sleepUnlessStopped(interval))) throw new Error(`${STOPPED_TEXT} (${i} of ${scaled.length} points were clicked first)`);
     try { await ctx.platform.mouseClick(scaled[i].x, scaled[i].y, { button, count }); }
     catch (e) {
       if (i === 0) throw e;
