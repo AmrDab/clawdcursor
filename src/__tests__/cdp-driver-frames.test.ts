@@ -53,7 +53,7 @@ function fakeFrame(url: string, has: Has = {}) {
     getByRole: () => none(),
     getByText: (t: string) => (has.plain ?? []).includes(t) ? some(() => f.clicked.push(`text:${t}`)) : none(),
     getByLabel: (label: string) => (has.labels ?? []).includes(label) ? some(() => f.filled.push(label)) : none(),
-    locator: (sel: string) => (sel in (has.selectors ?? {})) ? some(() => {}) : none(),
+    locator: (sel: string) => (sel in (has.selectors ?? {})) ? some(() => {}, () => f.filled.filter(x => x.startsWith(`${sel}=`)).pop()?.slice(sel.length + 1)) : none(),
     async fill(sel: string, text: string) { f.filled.push(`${sel}=${text}`); },
     async selectOption(sel: string, v: string) {
       if (!(has.options ?? []).includes(v)) return [];
@@ -66,8 +66,11 @@ function fakeFrame(url: string, has: Has = {}) {
 function none() {
   return { count: async () => 0, first: () => ({ isVisible: async () => false, boundingBox: async () => null }) };
 }
-function some(act: () => void) {
-  const el = { isVisible: async () => true, boundingBox: async () => null, fill: async () => { act(); }, click: async () => { act(); } };
+function some(act: () => void, shown: () => string | undefined = () => undefined) {
+  const el = {
+    isVisible: async () => true, boundingBox: async () => null, fill: async () => { act(); }, click: async () => { act(); },
+    evaluate: async () => { const v = shown(); return v === undefined ? null : { value: v, option: v, readable: true }; },   // readerOf (#399)
+  };
   return { count: async () => 1, first: () => el };
 }
 
@@ -359,8 +362,12 @@ describe('the browser tools take frame', () => {
   it('type (cdp_type), select_option and wait_for pass frame to the driver', async () => {
     const form = fakeFrame(`${ADS}/form`, { selectors: { '#email': '', '#plan': '' }, options: ['pro'] });
     const d = driverOn(fakeFrame(`${APP}/`), form);
-    expect((await agentTool('browser_type').execute({ selector: '#email', text: 'a@b.c', frame: ADS }, { cdp: d } as never)).success).toBe(true);
-    expect((await cdpTool('cdp_select_option').handler({ selector: '#plan', value: 'pro', frame: ADS }, { cdp: d } as never)).isError).toBe(false);
+    const typed = await agentTool('browser_type').execute({ selector: '#email', text: 'a@b.c', frame: ADS }, { cdp: d } as never);
+    expect(typed.success).toBe(true);
+    expect(typed.text).toContain('read back ✓');   // read back in the iframe it was typed into
+    const picked = await cdpTool('cdp_select_option').handler({ selector: '#plan', value: 'pro', frame: ADS }, { cdp: d } as never);
+    expect(picked.isError).toBe(false);
+    expect(picked.text).toContain('read back ✓');
     expect((await cdpTool('cdp_wait_for_selector').handler({ selector: '#plan', timeout: 300, frame: ADS }, { cdp: d } as never)).isError).toBe(false);
     expect(form.filled).toEqual(['#email=a@b.c', '#plan=pro']);
   });
