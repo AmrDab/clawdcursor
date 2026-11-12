@@ -1014,10 +1014,11 @@ export function getSmartTools(): ToolDefinition[] {
         const how = `${viaKeys ? 'keys' : 'paste'}${rb.result === 'match' ? ', read back ✓' : ''}`;
         const fieldShows = rb.value !== undefined
           ? ` It shows: ${wrapUntrustedScreenContent(rb.value.length > 80 ? `${rb.value.slice(0, 79)}…` : rb.value)}` : '';
-        // A field that can be read and is still empty got none of it (#377). A replace that left other text in the field (not
-        // the text with a suggestion after it) did not do what was asked.
+        // A field that can be read and is still empty may have got none of it (#377), or be a hidden input the app empties
+        // (a terminal): a warning, not a failure. A replace that left other text in the field (not the text with a
+        // suggestion after it) did not do what was asked.
         const empty = rb.result === 'mismatch' && rb.value === '';
-        const failed = empty || (replace && rb.result === 'mismatch');
+        const failed = !empty && replace && rb.result === 'mismatch';
         const readBack = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}`
           : failed
           ? ` ⚠ read back: the field shows different text, not the text asked for (its old text was not replaced, or the field rewrote it).${fieldShows}`

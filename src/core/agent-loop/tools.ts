@@ -43,7 +43,7 @@ import { findActionButton, findInputField } from '../sense/ui-map-find';
 import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, type Retyped } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
-import { preferControl, notSelectableReason, failReason, sameElement } from '../../platform/prefer-control';
+import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { quoteScreenText } from '../result-codes';
 import { effectLine, windowChange, type WindowRead } from '../effect';
 import { missText, untrusted } from '../miss-text';
@@ -922,11 +922,10 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const shown = 'secure' in rb && rb.secure ? `${head} into a password field (not echoed)` : `${head}: "${truncate(text, 60)}"`;
         // What the field shows, as data, short: the evidence the caller needs.
         const fieldShows = rb.value !== undefined ? ` It shows: ${wrapUntrustedScreenContent(truncate(rb.value, 80))}` : '';
-        // The focused field can be read and is still empty: the text did not arrive (#377). Nothing to submit.
-        if (rb.result === 'mismatch' && rb.value === '') {
-          return { success: false, text: `${shown}, but ${EMPTY_AFTER_TYPING}${submit ? ' Return not pressed.' : ''}${inputWarningNote(ctx)}` };
-        }
-        if ((rb.result === 'suffix' || rb.result === 'mismatch') && submit) {
+        // The focused field can be read and is still empty (#377): a warning, not proof — a hidden input the app empties
+        // (a terminal) reads the same, and there Return must still go.
+        const empty = rb.result === 'mismatch' && rb.value === '';
+        if (!empty && (rb.result === 'suffix' || rb.result === 'mismatch') && submit) {
           // Return would submit what the field shows, not what was typed (live: an address bar's suggestion swapped the
           // whole URL). Not pressed; the caller sees what the field shows and decides.
           const what = rb.result === 'suffix'
@@ -938,7 +937,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           };
         }
         if (submit) await ctx.platform.keyPress('Return');
-        const note = rb.result === 'suffix' || rb.result === 'mismatch'
+        const note = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}` : rb.result === 'suffix' || rb.result === 'mismatch'
           ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`
           : '';
         return { success: true, text: `${shown}${note}${inputWarningNote(ctx)}` };
@@ -2388,9 +2387,7 @@ function focusIsField(focused: UiElement | null, field: UiElement, secureOk = fa
   const role = String(focused?.controlType ?? '');
   if (!focused?.bounds || !EDITABLE_ROLE.test(role) || /^text$/i.test(role)) return false;
   if (!secureOk && (focused.secure || /password/i.test(role))) return false;
-  const f = focused.bounds, b = field.bounds;
-  const inside = !!b && f.width > 0 && f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
-  return inside || sameElement(focused, field);
+  return (!!field.bounds && focused.bounds.width > 0 && inside(focused.bounds, field.bounds)) || sameElement(focused, field);
 }
 
 /**
@@ -2412,14 +2409,7 @@ async function typeIntoField(
   const target = await editableTarget(ctx, name, controlType, processId, !secureOk);
   if (!target) return { skipped: `no editable field named ${quoteScreenText(name)} is on screen${secureOk ? '' : ' (a password field is never typed into on a guess)'}` };
   const pid = processId ?? target.el.processId;
-  if (pid !== undefined) {
-    const inFront = async () => (await ctx.platform.getActiveWindow().catch(() => null))?.processId === pid;
-    if (!await inFront()) {
-      await ctx.platform.focusWindow({ processId: pid }).catch(() => false);
-      await sleep(150);
-      if (!await inFront()) return { skipped: 'its window would not come to the front' };
-    }
-  }
+  if (pid !== undefined && !await ensureInFront(ctx.platform, pid)) return { skipped: 'its window would not come to the front' };
   await ctx.platform.mouseClick(target.x, target.y);
   await sleep(100);
   if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el, secureOk)) return 'unfocused';

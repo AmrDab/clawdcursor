@@ -123,8 +123,11 @@ function holdsValue(shown: string, want: string): Exclude<ReadBack, 'unknown'> {
   return (!numeric && w && v.startsWith(w)) || (bare(w) && bare(v) === bare(w)) ? 'suffix' : 'mismatch';
 }
 
-/** How typing into a field that can be read, and still reads empty, ends (#377). result-codes reads it as READBACK_MISMATCH. */
-export const EMPTY_AFTER_TYPING = 'the field reads back empty after typing: the text did not arrive (the keys went to another element, or a paste read the clipboard too late). Click into the field, then type again.';
+/**
+ * The warning when a field that can be read still reads empty after typing (#377). Not a failure, and no retype: an app
+ * that takes keys through a hidden input it empties (an xterm.js terminal, Google Docs) reads the same way.
+ */
+export const EMPTY_AFTER_TYPING = 'read back: the focused field reads empty. The text may not have arrived (the keys went to another element, or a paste came too late), or the app takes keys through a hidden input it empties (a terminal, an online document editor). Read what the screen shows first (compile_ui or ocr); type again only if the text is not there.';
 
 /** What a read of a field gave. `readable`: the read itself worked, so an empty `value` means the field IS empty. */
 export type FieldRead = { value?: string; secure?: boolean; readable?: boolean };
@@ -138,8 +141,9 @@ export type FieldRead = { value?: string; secure?: boolean; readable?: boolean }
  *
  * An empty read counts only when the reader says the field is `readable` (a by-name value read does, see fieldRead, and
  * so does the focused-element read): then a clear is confirmed, and a field that still shows nothing after typing or a
- * set is a 'mismatch' with value '' (#377: a paste that read the clipboard after it was restored). Without that, an
- * empty read is also what an unreadable field gives, and stays 'unknown'.
+ * set is a 'mismatch' with value '' (#377: a paste that read the clipboard after it was restored); typing callers report
+ * it as a warning only (EMPTY_AFTER_TYPING). Without `readable`, an empty read is also what an unreadable field gives,
+ * and stays 'unknown'.
  */
 export async function readBackTyped(
   focused: () => Promise<FieldRead | null | undefined>,

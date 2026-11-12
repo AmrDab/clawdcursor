@@ -135,6 +135,25 @@ describe('agent-loop set_field_value — the keyboard path is guarded and says w
     expect(p.typeText).toHaveBeenCalledWith('Lisbon');
   });
 
+  it('a Store app is in front when its frame (ApplicationFrameHost) hosts it: the field\'s pid is the hosted one', async () => {
+    const { ctx, p } = ctxWith('win32', false, [{ ...INPUT, processId: 6768 }]);
+    p.getActiveWindow = vi.fn(async () => ({ processId: 38636, hostedProcessId: 6768 })) as any;
+    const r = await tool.execute({ name: 'City', value: 'Lisbon' }, ctx);
+    expect(p.focusWindow).not.toHaveBeenCalled();
+    expect(p.typeText).toHaveBeenCalledWith('Lisbon');
+    expect(r.text).not.toMatch(/would not come to the front/);
+  });
+
+  it('a foreground that cannot be read or is only guessed (Linux without xdotool) does not block: the focus check guards', async () => {
+    for (const front of [null, { processId: 1, guessed: true }]) {
+      const { ctx, p } = ctxWith('linux', false, [INPUT]);
+      p.getActiveWindow = vi.fn(async () => front) as any;
+      await tool.execute({ name: 'City', value: 'Lisbon', processId: 7 }, ctx);
+      expect(p.focusWindow).toHaveBeenCalledWith({ processId: 7 });
+      expect(p.typeText).toHaveBeenCalledWith('Lisbon');
+    }
+  });
+
   it('a retry that was skipped says why', async () => {
     const { ctx, p } = ctxWith('win32', true, [INPUT]);
     // The direct set "worked" and the field still reads empty: no effect, so it is typed instead — but its window stays behind.

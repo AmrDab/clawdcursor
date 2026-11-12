@@ -17,7 +17,7 @@
  * A plain `select name:"High"` (the item itself, no value) ends in selectedResult: the item's own state, read by the bridge.
  */
 import type { PlatformAdapter } from './types';
-import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement } from './prefer-control';
+import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
 import { quoteScreenText } from '../core/result-codes';
 
 export interface SelectOptionResult {
@@ -95,20 +95,13 @@ async function pickByKeys(
 ): Promise<'typed' | 'skipped' | 'unfocused'> {
   const { getActiveWindow, focusWindow, getFocusedElement, typeText } = platform;
   if (!getActiveWindow || !focusWindow || !getFocusedElement || !typeText) return 'skipped';
-  const inside = (f: { x: number; y: number; width: number; height: number }, b: typeof f) =>
-    f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
   const named = (await platform.findElements({ name: control.name, processId: control.processId }).catch(() => []))
     .filter(h => norm(h.name) === norm(control.name) && h.bounds);
   const el = named.find(h => typeAheadSelects(h.controlType) && (!control.controlType || norm(h.controlType) === norm(control.controlType)));
   if (!el || named.some(h => isTextBox(h.controlType) && inside(h.bounds, el.bounds))) return 'skipped';
   const pid = control.processId ?? el.processId;
   if (pid === undefined) return 'skipped';
-  const inFront = async () => (await getActiveWindow.call(platform).catch(() => null))?.processId === pid;
-  if (!await inFront()) {
-    await focusWindow.call(platform, { processId: pid }).catch(() => false);
-    await sleep(150);
-    if (!await inFront()) return 'skipped';
-  }
+  if (!await ensureInFront({ getActiveWindow: getActiveWindow.bind(platform), focusWindow: focusWindow.bind(platform) }, pid)) return 'skipped';
   const focus = await platform.invokeElement({ ...control, action: 'focus' }).catch(() => null);
   if (!focus?.success) return 'unfocused';
   await sleep(100);

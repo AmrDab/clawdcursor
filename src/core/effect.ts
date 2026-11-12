@@ -15,14 +15,22 @@ export type WindowRead = { processId?: number; hostedProcessId?: number; handle?
  */
 export type WindowChange = 'same-window' | 'other-window' | 'same-app' | 'other-app';
 
+/** The window's own handle. A handle that is only the process id (macOS has none; an older Windows bridge) names no window. */
+const handleOf = (w: NonNullable<WindowRead>) => (w.handle === w.processId ? undefined : w.handle);
+
 export function windowChange(before: WindowRead, after: WindowRead): WindowChange | undefined {
   if (!before || !after || before.guessed || after.guessed) return undefined;
+  const hb = handleOf(before), ha = handleOf(after);
+  // The same window of the same process is the same window, even when one read missed the app a Store frame hosts
+  // (still starting) — unless both name their hosted app and the apps differ (a frame came to host another app).
+  const hostsDiffer = before.hostedProcessId !== undefined && after.hostedProcessId !== undefined
+    && before.hostedProcessId !== after.hostedProcessId;
+  if (hb !== undefined && hb === ha && before.processId === after.processId && !hostsDiffer) return 'same-window';
   // A Store app's window belongs to the one frame process: the app is the process the frame hosts.
   const a = before.hostedProcessId ?? before.processId, b = after.hostedProcessId ?? after.processId;
   if (!a || !b) return undefined;
   if (a !== b) return 'other-app';
-  if (before.handle === undefined || after.handle === undefined) return 'same-app';
-  return before.handle === after.handle ? 'same-window' : 'other-window';
+  return hb === undefined || ha === undefined ? 'same-app' : 'other-window';
 }
 
 const short = (s: string) => quoteScreenText(s.length > 40 ? `${s.slice(0, 39)}…` : s);
