@@ -112,13 +112,13 @@ describe('the prompt', () => {
 
 describe('the command line', () => {
   it('plans by default: a live run must be asked for', () => {
-    expect(parseArgs([])).toEqual({ live: false, selfcheck: false, selfcheckFixtures: false, includeManual: false, updateBaseline: false, repeats: 1 });
+    expect(parseArgs([])).toEqual({ live: false, selfcheck: false, selfcheckFixtures: false, writeOracles: false, includeManual: false, updateBaseline: false, repeats: 1 });
     expect(parseArgs(['--live']).live).toBe(true);
   });
 
   it('reads every option', () => {
     expect(parseArgs(['--live', '--build', '.', '--models', 'claude-code:sonnet', '--tasks', 'a, b', '--out', 'o', '--baseline', 'b.json',
-      '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, selfcheckFixtures: false, includeManual: true,
+      '--include-manual', '--update-baseline', '--repeats', '3'])).toEqual({ live: true, selfcheck: false, selfcheckFixtures: false, writeOracles: false, includeManual: true,
       updateBaseline: true, repeats: 3, build: '.', models: 'claude-code:sonnet', tasks: ['a', 'b'], out: 'o', baseline: 'b.json' });
   });
 

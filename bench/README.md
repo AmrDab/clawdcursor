@@ -20,8 +20,14 @@ judged by a model:
 - **loops**: the same call (tool and arguments) three times in a row;
 - **time**, and **screenshots / oracle**.
 
-The oracle of a task is the cost of a scripted trajectory: one read, then one call per action, no batch. A batch saves
-round trips, not calls: its steps are counted.
+The oracle of a task is the length of a **scripted trajectory, minimal but realistic** (`lib/oracles.ts`): focus or
+confirm the fixture window, one look (the accessibility tree or the page text; a screenshot where there is no tree),
+one call per action, a bounded wait where the task says something comes later, and one verifying look at the end. No
+batch. The numbers are measured, not typed in: `--selfcheck` runs every web script in a headless browser and every
+native script through the fixture's own self-test, and checks that the task's predicate holds afterwards; a unit test
+holds each spec to the count of its script; `--selfcheck --write-oracles` writes the counts into the specs. The scripts
+of the real-app tasks (Calculator, TextEdit, Designcenter) have the same shape but cannot be run without the app, so
+they are counted only. A batch saves round trips, not calls: its steps are counted.
 
 A web run in which the page was loaded more than once fails: a reload resets the page's counters. The fixture server
 keeps every event of every load.
@@ -71,6 +77,7 @@ no tools. If one cannot run, the run stops there with the reason, for example
 ```
 npm run bench                         # the plan: tasks for this OS, agents found. Starts nothing.
 npm run bench -- --selfcheck --build .  # proves fixtures, predicates, isolation and the fence. No agent, no window.
+npm run bench -- --selfcheck-fixtures --build .  # the real fixture windows behind the real fence. Opens windows briefly; no agent.
 npm run build
 npm run bench -- --live --build .     # runs the tasks
 ```
@@ -197,23 +204,23 @@ None of the tasks needs a refused call: every fixture is already open and in fro
 
 | Task | App type | OS | Guards | Oracle (calls / shots) | What it catches |
 |---|---|---|---|---|---|
-| web-form-fill | web form | all | M1 | 10 / 0 | every control takes its value: text, spinner, select, checkboxes, `<details>`, contenteditable, Confirm |
-| web-trap-new | web, target resolution | all | M2 | 2 / 0 | "New" is not "What's New" |
-| web-trap-dialog-close | web, target resolution | all | M2 | 2 / 0 | the dialog's Close, not the page's |
-| web-trap-hidden-link | web, target resolution | all | M2 | 2 / 0 | the visible link, not the off-screen one with the same name |
-| web-trap-label-button | web, target resolution | all | M2 | 2 / 0 | the button, not the label next to it |
-| web-timing-late-dialog | web, timing | all | M5 | 4 / 0 | a dialog that opens 3 s after the click |
-| web-timing-gated-field | web, timing | all | M5 M1 | 5 / 0 | a field that throws input away until it has loaded |
-| web-canvas-draw | canvas, no tree | all | M3 M4 | 2 / 1 | one look, then a drag that lands where the image said |
-| web-canvas-targets | canvas, no tree | all | M3 M4 | 6 / 1 | coordinate clicks within 30 px at the primary display's scale |
-| web-long-read | long text | all | M3 | 3 / 0 | one table row in the middle of a long page, read exactly |
-| native-dialog-fill | native dialog | all | M1 | 6 / 0 | text fields, a list, a checkbox, Apply |
-| native-dialog-modal | native dialog | all | M2 M5 | 3 / 0 | the modal's OK, not the window's OK behind it |
-| native-dialog-duplicate | native dialog | all | M2 | 2 / 0 | two "Edit" buttons told apart by their group |
-| calc-multiply | Store/UWP app | Windows | M1 | 3 / 0 | keys reach Calculator; the display AND the expression are read, so typing the result does not pass |
-| editor-type-lines | document editor | Windows | M1 M5 | 2 / 0 | two lines land whole in the fixture editor |
-| textedit-type-lines | document editor | macOS | M1 M5 | 2 / 0 | the same in TextEdit |
-| cad-designcenter-orbit | 3D/CAD viewport | Windows | M3 | 4 / 2 | manual verify: metrics only |
+| web-form-fill | web form | all | M1 | 12 / 0 | every control takes its value: text, spinner, select, checkboxes, `<details>`, contenteditable, Confirm |
+| web-trap-new | web, target resolution | all | M2 | 4 / 0 | "New" is not "What's New" |
+| web-trap-dialog-close | web, target resolution | all | M2 | 4 / 0 | the dialog's Close, not the page's |
+| web-trap-hidden-link | web, target resolution | all | M2 | 4 / 0 | the visible link, not the off-screen one with the same name |
+| web-trap-label-button | web, target resolution | all | M2 | 4 / 0 | the button, not the label next to it |
+| web-timing-late-dialog | web, timing | all | M5 | 6 / 0 | a dialog that opens 3 s after the click |
+| web-timing-gated-field | web, timing | all | M5 M1 | 7 / 0 | a field that throws input away until it has loaded |
+| web-canvas-draw | canvas, no tree | all | M3 M4 | 4 / 2 | one look, then a drag that lands where the image said |
+| web-canvas-targets | canvas, no tree | all | M3 M4 | 8 / 2 | coordinate clicks within 30 px at the primary display's scale |
+| web-long-read | long text | all | M3 | 5 / 0 | one table row in the middle of a long page, read exactly |
+| native-dialog-fill | native dialog | all | M1 | 8 / 0 | text fields, a list, a checkbox, Apply |
+| native-dialog-modal | native dialog | all | M2 M5 | 5 / 0 | the modal's OK, not the window's OK behind it |
+| native-dialog-duplicate | native dialog | all | M2 | 4 / 0 | two "Edit" buttons told apart by their group |
+| calc-multiply | Store/UWP app | Windows | M1 | 4 / 0 | keys reach Calculator; the display AND the expression are read, so typing the result does not pass |
+| editor-type-lines | document editor | Windows | M1 M5 | 4 / 0 | two lines land whole in the fixture editor |
+| textedit-type-lines | document editor | macOS | M1 M5 | 4 / 0 | the same in TextEdit |
+| cad-designcenter-orbit | 3D/CAD viewport | Windows | M3 | 5 / 2 | manual verify: metrics only |
 
 Where success is read:
 
@@ -246,7 +253,7 @@ The rule: **a new bug becomes a new task for an existing mechanism.** It is not 
      "fixture": { "kind": "web", "page": "trap" },
      "prompt": "what the agent is asked to do (the privacy rules are added by the runner)",
      "success": { "all": [{ "path": "clicks.new", "equals": 1 }, { "path": "clicks.whatsNew", "equals": 0 }] },
-     "oracle": { "screenshots": 0, "calls": 2 },
+     "oracle": { "screenshots": 0, "calls": 4 },
      "caps": { "calls": 10, "seconds": 120 }
    }
    ```
@@ -254,8 +261,9 @@ The rule: **a new bug becomes a new task for an existing mechanism.** It is not 
    Predicates: `path` (dotted, into the state) or `count` (`{type, target}` of recorded events), with `equals`,
    `notEquals`, `matches`, `gte`, `lte`, `sameMembers`, `exists`; combined with `all`, `any`, `not`. The predicate must
    also say what must NOT have happened (the trap).
-4. For a web task, add the right and the wrong trajectory to `lib/selfcheck.ts`, and run
-   `npm run bench -- --selfcheck`: the predicate must hold on the first and fail on the second.
+4. Add the task's oracle script to `lib/oracles.ts` (focus, one look, the actions, one verifying look) and, for a web
+   task, the wrong trajectory to `lib/selfcheck.ts`. Run `npm run bench -- --selfcheck --write-oracles`: the predicate
+   must hold after the script and fail after the wrong trajectory, and the script's counts become the spec's oracle.
 5. `npx vitest run bench` validates the spec. Then run the task live on the current release: it should fail there, and
    pass with the fix.
 

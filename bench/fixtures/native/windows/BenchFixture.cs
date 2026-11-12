@@ -1,7 +1,11 @@
 // The native benchmark fixture for Windows: a WinForms app that writes its own state to a JSON file.
 // Built by build.ps1 with PowerShell's Add-Type (the C# 5 compiler of .NET Framework: no newer syntax here).
 //
-//   BenchFixture.exe --state <file> [--mode dialog|editor] [--pos x,y] [--selftest]
+//   BenchFixture.exe --state <file> [--mode dialog|editor] [--pos x,y] [--selftest [--do "name=..;click=apply"]]
+//
+// --do runs a task's scripted actions in the self-test (off screen, never activated), one token per action:
+//   name=<text>  email=<text>  priority=<Low|Normal|High>  subscribe=<on|off>  text=<text, \n for a line break>
+//   click=<apply|delete|modalOk|modalCancel|billingEdit|shippingEdit|mainOk|mainCancel>
 //
 // The same controls, names and state keys as the macOS (BenchFixture.swift) and Linux (bench_fixture.py) fixtures.
 using System;
@@ -259,6 +263,7 @@ public static class BenchFixture
         string state = null, mode = "dialog";
         Point pos = new Point(120, 120);
         bool selftest = false;
+        string script = null;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--state" && i + 1 < args.Length) state = args[++i];
@@ -269,6 +274,7 @@ public static class BenchFixture
                 pos = new Point(int.Parse(xy[0], CultureInfo.InvariantCulture), int.Parse(xy[1], CultureInfo.InvariantCulture));
             }
             else if (args[i] == "--selftest") selftest = true;
+            else if (args[i] == "--do" && i + 1 < args.Length) script = args[++i];
         }
         if (state == null || (mode != "dialog" && mode != "editor")) return 2;
 
@@ -285,7 +291,17 @@ public static class BenchFixture
         form.ShowInTaskbar = false;
         form.Location = new Point(-32000, -32000);
         form.Show();
-        if (mode == "editor")
+        if (script != null)
+        {
+            // A task's scripted actions, through the same handlers a click or a keystroke reaches. An unknown token is an error.
+            foreach (string token in script.Split(';'))
+            {
+                int eq = token.IndexOf('=');
+                if (eq <= 0 || !Do(form, token.Substring(0, eq).Trim(), token.Substring(eq + 1))) { form.Close(); return 3; }
+                Application.DoEvents();
+            }
+        }
+        else if (mode == "editor")
         {
             ((EditorForm)form).Document.Text = "first line\r\nsecond line";
         }
@@ -304,5 +320,36 @@ public static class BenchFixture
         Application.DoEvents();
         form.Close();
         return 0;
+    }
+
+    private static bool Do(QuietForm form, string key, string value)
+    {
+        EditorForm e = form as EditorForm;
+        if (e != null)
+        {
+            if (key != "text") return false;
+            e.Document.Text = value.Replace("\\n", "\r\n");
+            return true;
+        }
+        DialogForm d = (DialogForm)form;
+        switch (key)
+        {
+            case "name": d.NameBox.Text = value; return true;
+            case "email": d.EmailBox.Text = value; return true;
+            case "priority":
+                int at = d.Priority.Items.IndexOf(value);
+                if (at < 0) return false;
+                d.Priority.SelectedIndex = at;
+                return true;
+            case "subscribe": d.Subscribe.Checked = value == "on"; return true;
+            case "click":
+                Button b = value == "apply" ? d.Apply : value == "delete" ? d.Delete : value == "billingEdit" ? d.BillingEdit
+                    : value == "shippingEdit" ? d.ShippingEdit : value == "mainOk" ? d.MainOk : value == "mainCancel" ? d.MainCancel
+                    : value == "modalOk" && d.Confirm != null ? d.Confirm.Ok : value == "modalCancel" && d.Confirm != null ? d.Confirm.CancelB : null;
+                if (b == null) return false;
+                b.PerformClick();
+                return true;
+            default: return false;
+        }
     }
 }
