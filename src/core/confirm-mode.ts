@@ -26,6 +26,7 @@
  * click at its bounds) is not asked again.
  */
 import { pauseGate, type PauseResult } from './pause-gate';
+import { timeWait } from './observability/steps';
 import { foregroundNow } from './control';
 import { keysOf } from '../platform/hard-keys';
 import { normalizeKey } from '../platform/keys';
@@ -192,7 +193,7 @@ export async function confirmBefore(method: string, args: unknown[], held: strin
   // Registered before the race below, so it runs first: a Resume that comes after this call returned is kept for the retry.
   void asked.then(r => { if (granted(r)) approved.set(key, { until: Date.now() + APPROVAL_MS, once: true }); });
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const r = await Promise.race([asked, new Promise<null>(res => { timer = setTimeout(() => res(null), WAIT_MS); timer.unref?.(); })]);
+  const r = await timeWait(() => Promise.race([asked, new Promise<null>(res => { timer = setTimeout(() => res(null), WAIT_MS); timer.unref?.(); })]));
   clearTimeout(timer);
   if (r === null) {
     // Still queued behind another pause: never shown, so it is dropped rather than shown later (as pause_for_user).

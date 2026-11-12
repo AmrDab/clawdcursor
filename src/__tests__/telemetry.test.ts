@@ -24,7 +24,9 @@ import {
 import { getPackageRoot } from '../paths';
 import { VERSION } from '../surface/version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
-import { validate, validEvent, RESULT_CODES, MAX_EVENTS } from '../../telemetry-worker/src/index';
+import { withSteps, timeWait } from '../core/observability/steps';
+import { buildUnifiedTools } from '../core/agent-loop/tools';
+import worker, { validate, validEvent, RESULT_CODES, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-telemetry-')), 'telemetry.json');
 
@@ -112,6 +114,44 @@ describe('what is sent', () => {
     expect(fs.existsSync(SPOOL_FILE)).toBe(false);
   });
 
+  it('slow_call counts only clawdcursor\'s own time: a wait for the user, `wait` or a wait_for is slow by design', async () => {
+    allowNames(['system', 'pause_for_user', 'batch']);
+    // A wait is timed as the step "wait", inside the call.
+    const run = await withSteps('system', 'pause_for_user', () => timeWait(() => new Promise(r => setTimeout(r, 20))));
+    expect(run.steps.wait).toMatchObject({ n: 1 });
+    // The real `wait` a batch step runs is timed the same way.
+    const wait = buildUnifiedTools().find(t => t.name === 'wait')!;
+    const inBatch = await withSteps('batch', undefined, () => wait.execute({ ms: 20 }, {} as never));
+    expect(inBatch.steps.wait).toMatchObject({ n: 1 });
+    expect(toEvent('tool.done', { tool: 'system', action: 'pause_for_user', ms: 45_000, outcome: 'ok', steps: { wait: { n: 1, ms: 44_990 } } })).toBeNull();
+    // A batch that waited 20 s and spent 13 s on its own work: slow, by its own work, without the wait.
+    expect(toEvent('tool.done', { tool: 'batch', ms: 33_000, outcome: 'ok', steps: { wait: { n: 2, ms: 20_000 }, powershell: { n: 4, ms: 12_000 } } }))
+      .toMatchObject({ event: 'slow_call', tool: 'batch', ms: 13_000, steps: [{ name: 'powershell', ms: 12_000, n: 4 }] });
+  });
+
+  it('an empty result (a find that found nothing) is not a failed call', () => {
+    allowNames(['accessibility', 'find']);
+    expect(toEvent('tool.done', { tool: 'accessibility', action: 'find', ms: 300, outcome: 'empty' })).toBeNull();
+    expect(validEvent({ event: 'call_failed', id: '0f8fad5b-d9cb-469f-a165-70867728950e', v: VERSION, os: 'win32', tool: 'x', outcome: 'empty', ms: 1, app: 'native' })).toBe(false);
+  });
+
+  it('the 200-event cap is per UTC day: a long-running daemon reports again the next day', async () => {
+    const bodies = enableForTest();
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date('2030-01-01T12:00:00Z'));
+      for (let i = 0; i < 201; i++) logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
+      await flush();
+      expect(bodies.flatMap(b => JSON.parse(b) as unknown[])).toHaveLength(200);
+      bodies.length = 0;
+      vi.setSystemTime(new Date('2030-01-02T00:00:01Z'));
+      logger.info('tool.done', { tool: 'x', ms: 1, outcome: 'error' });
+      await flush();
+      expect(bodies.flatMap(b => JSON.parse(b) as unknown[])).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it('goes to the project\'s own domain, never a host anyone could register', () => {
     expect(new URL(TELEMETRY_URL).hostname).toMatch(/(^|\.)clawdcursor\.com$/);
   });
@@ -147,6 +187,7 @@ describe('when it is off', () => {
     expect(offReason({ DO_NOT_TRACK: '1' }, file)).toBe('DO_NOT_TRACK');
     expect(offReason({ CI: 'true' }, file)).toBe('CI');
     expect(offReason({ CI: 'false' }, file)).toBeNull();
+    expect(offReason({ CLAWD_FENCE_PIDS: '4120,4188' }, file)).toBe('CLAWD_FENCE_PIDS');   // a benchmark run (bench/lib/isolated.ts)
     expect(offReason({ VITEST: 'true' }, file)).toBe('test run');
     expect(offReason({ NODE_ENV: 'test' }, file)).toBe('test run');
     setTelemetryEnabled(false, file);
@@ -243,6 +284,14 @@ describe('the Worker', () => {
     expect(validate('not json')).toBeNull();
     expect(validate(JSON.stringify(Array(MAX_EVENTS + 1).fill(good)))).toBeNull();
     expect(validate(JSON.stringify([{ ...good, pad: 'x'.repeat(33 * 1024) }]))).toBeNull();
+  });
+
+  it('refuses a body declared too big before reading it', async () => {
+    const arrayBuffer = vi.fn(async () => new ArrayBuffer(0));
+    const req = { url: 'https://telemetry.clawdcursor.com/v1/events', method: 'POST',
+      headers: new Headers({ 'content-length': String(MAX_BODY + 1) }), arrayBuffer } as unknown as Request;
+    expect((await worker.fetch(req, {} as Env)).status).toBe(413);
+    expect(arrayBuffer).not.toHaveBeenCalled();
   });
 
   it('knows every result code the client can send', () => {

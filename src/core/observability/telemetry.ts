@@ -2,7 +2,7 @@
  * Anonymous bug telemetry (#366): result codes, timings and clawdcursor's own stack frames, to find and fix bugs.
  *
  * On by default. Off with `clawdcursor optout`, the agent's system {action:"telemetry_optout"}, CLAWD_TELEMETRY=0,
- * DO_NOT_TRACK=1, in CI and in test runs. `clawdcursor telemetry` prints the status and every field sent.
+ * DO_NOT_TRACK=1, in CI, in test runs and in fenced runs (the benchmark). `clawdcursor telemetry` prints the status and every field sent.
  *
  * No call site sends anything: ONE mapper (toEvent) reads the day log's own lines (logger.ts emit) — mcp.start, tool.done,
  * mcp.exit, crash, unhandledRejection — and keeps only allowlisted fields whose values are numbers or from a closed list.
@@ -19,7 +19,7 @@ import { DATA_DIR, getPackageRoot } from '../../paths';
 import { VERSION } from '../../surface/version';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { WEBVIEW2_APPS_PATTERN } from '../app-categories';
-import { HOSTS, OUTCOMES, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, EXIT_REASONS, ARCHS } from './telemetry-lists';
+import { HOSTS, OUTCOMES, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, WAIT_STEP, EXIT_REASONS, ARCHS } from './telemetry-lists';
 
 /** Where events go: the one place to change it. A host on the project's own domain (telemetry-worker/wrangler.toml routes it). */
 export const TELEMETRY_URL = 'https://telemetry.clawdcursor.com/v1/events';
@@ -28,7 +28,7 @@ export const STATE_FILE = path.join(DATA_DIR, 'telemetry.json');
 export const SPOOL_FILE = path.join(DATA_DIR, 'telemetry-spool.jsonl');
 
 const SLOW_CALL_MS = 10_000;
-const MAX_EVENTS = 200;          // per process
+const MAX_EVENTS = 200;          // per process and UTC day
 const FLUSH_MS = 5_000;
 const BATCH = 50;                // the Worker's limits
 const MAX_BODY = 30 * 1024;      // under the Worker's 32 KB
@@ -82,6 +82,7 @@ export function offReason(env: NodeJS.ProcessEnv = process.env, file = STATE_FIL
   if (/^(0|off|false|no)$/i.test(env.CLAWD_TELEMETRY ?? '')) return 'CLAWD_TELEMETRY';
   if (/^(1|true|yes)$/i.test(env.DO_NOT_TRACK ?? '')) return 'DO_NOT_TRACK';
   if (env.CI && !/^(0|false)$/i.test(env.CI)) return 'CI';
+  if (env.CLAWD_FENCE_PIDS) return 'CLAWD_FENCE_PIDS';   // the fence is for unattended runs: the benchmark, CI (core/fence.ts)
   if (env.VITEST || env.NODE_ENV === 'test') return 'test run';
   if (!readState(file).enabled) return 'clawdcursor optout';
   return null;
@@ -174,11 +175,14 @@ export function toEvent(msg: string, meta: Record<string, unknown> | undefined):
       if (FAILED.includes(outcome)) {
         return pick({ ...base, event: 'call_failed', ...call, code: codeOf(m.code, /^[A-Z][A-Z_]{1,23}$/), outcome, app: appKind(m.app) });
       }
-      if (ms > SLOW_CALL_MS) {
-        const steps = Object.entries((m.steps ?? {}) as Record<string, { n?: unknown; ms?: unknown }>)
+      // Only clawdcursor's own time: a deliberate wait (a pause for the user, `wait`, a wait_for) is slow by design.
+      const totals = (m.steps ?? {}) as Record<string, { n?: unknown; ms?: unknown }>;
+      const workMs = Math.max(0, ms - (num(totals[WAIT_STEP]?.ms) ?? 0));
+      if (workMs > SLOW_CALL_MS) {
+        const steps = Object.entries(totals).filter(([step]) => step !== WAIT_STEP)
           .map(([step, t]) => ({ name: PS_BRIDGE_STEP.test(step) || HELPERS.includes(step) ? step : 'other', ms: num(t?.ms) ?? 0, n: num(t?.n) ?? 0 }))
           .filter(s => s.ms >= 1000).sort((a, b) => b.ms - a.ms).slice(0, 10);
-        return pick({ ...base, event: 'slow_call', ...call, steps });
+        return pick({ ...base, event: 'slow_call', ...call, ms: workMs, steps });
       }
       return null;
     }
@@ -199,12 +203,15 @@ export function __setSenderForTests(s: Sender | null): void { sender = s ?? fetc
 
 const queue: TelemetryEvent[] = [];
 let taken = 0;
+let takenDay = '';
 let timer: ReturnType<typeof setTimeout> | undefined;
 
 /** Called by logger.ts for every day-log line. Never throws, never waits. */
 export function observe(msg: string, meta: Record<string, unknown> | undefined): void {
   try {
     const event = toEvent(msg, meta);
+    const day = new Date().toISOString().slice(0, 10);   // the cap is per UTC day: a daemon running for weeks still reports
+    if (day !== takenDay) { takenDay = day; taken = 0; }
     if (!event || taken >= MAX_EVENTS || offReason() !== null) return;
     taken++;
     const state = readState();

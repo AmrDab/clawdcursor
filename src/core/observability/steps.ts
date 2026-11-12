@@ -13,6 +13,7 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { ChildProcess } from 'child_process';
 import * as path from 'path';
 import { logger } from './logger';
+import { WAIT_STEP } from './telemetry-lists';
 
 export const SLOW_STEP_MS = 1000;
 
@@ -62,6 +63,9 @@ export async function timeStep<T>(name: string, fn: () => Promise<T>): Promise<T
   try { return await fn(); }
   finally { call?.add(name, performance.now() - t0); }
 }
+
+/** A deliberate wait (a pause for the user, `wait`, a wait_for): slow by design, so it is not counted as a slow call. */
+export function timeWait<T>(fn: () => Promise<T>): Promise<T> { return timeStep(WAIT_STEP, fn); }
 
 let watching = false;
 

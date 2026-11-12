@@ -11,6 +11,7 @@ import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 import { DEFAULT_CDP_PORT } from '../platform/browser-config';
 import { readBackTyped, setVerdict } from './paste-guard';
 import { shownResult } from '../platform/select-option';
+import { timeWait } from '../core/observability/steps';
 
 /** The `frame` argument, shared by the actions that take it. */
 const FRAME_DESC = 'Optional: work inside the iframe whose URL holds this text (a URL or an origin, e.g. "https://forms.example"). '
@@ -176,7 +177,7 @@ export function getCdpTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ selector, timeout, frame }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
-        const result = await ctx.cdp.waitForSelector(selector, timeout ?? 10000, frame);
+        const result = await timeWait<any>(() => ctx.cdp.waitForSelector(selector, timeout ?? 10000, frame));
         return { text: result.success ? `Element "${selector}" found${result.frame ? ` in iframe ${quoteScreenText(result.frame)}` : ''}` : `Wait failed: ${result.error}`, isError: !result.success };
       },
     },
