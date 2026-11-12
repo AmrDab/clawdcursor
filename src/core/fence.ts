@@ -24,6 +24,7 @@
  * primary display. Whatever cannot be decided (no foreground, no process table, no bounds, no pointer position) is refused.
  */
 import { AsyncLocalStorage } from 'async_hooks';
+import { hostedAppOf } from '../platform/frame-host';
 import { execFile } from 'child_process';
 import * as os from 'os';
 import type { ToolDefinition, ToolResult } from '../tools/types';
@@ -141,27 +142,14 @@ let handlePlatform: string = process.platform;
 export function __setFencePlatformForTests(platform: string | null): void { handlePlatform = platform ?? process.platform; }
 const pinsByHandle = (w: FenceWindow) => handlePlatform === 'win32' && typeof w.handle === 'number' && Number.isInteger(w.handle) && w.handle > 0;
 
-const isFrameHost = (w: FenceWindow) => /^applicationframehost(\.exe)?$/i.test(String(w.processName ?? '').trim());
-
 /**
  * Is this window one of a fenced process? A Store app's window belongs to ApplicationFrameHost, one process for every
- * Store app on the desktop, so such a window counts by the app it HOSTS (the process of its CoreWindow), never by the
- * host. The window lists and the foreground read do not carry that: it is looked up by the window's handle.
+ * Store app on the desktop, so such a window counts by the app it HOSTS, never by the host. Which app that is comes
+ * from the one place that resolves it for the window list, the pill and the session log too (platform/frame-host.ts).
  */
 async function windowInFence(w: FenceWindow, env: NodeJS.ProcessEnv): Promise<boolean> {
   if (await inFence(w.processId, env)) return true;
-  let hosted = w.hostedProcessId;
-  if (hosted === undefined && w.handle !== undefined && isFrameHost(w)) hosted = (await frameHosts()).get(String(w.handle));
-  return inFence(hosted, env);
-}
-
-/** Window handle → the process that frame hosts, read at most once a second (the bridge's Win32 window read). */
-let hostsCache: { at: number; map: Map<string, number> } | null = null;
-async function frameHosts(): Promise<Map<string, number>> {
-  if (hostsCache && Date.now() - hostsCache.at < 1000) return hostsCache.map;
-  const map = await desktop.frameHosts().catch(() => new Map<string, number>());
-  hostsCache = { at: Date.now(), map };
-  return map;
+  return inFence((await hostedAppOf(w).catch(() => undefined))?.processId, env);
 }
 
 interface Desktop {
@@ -174,8 +162,6 @@ interface Desktop {
   cursor(): Promise<{ x: number; y: number } | null>;
   /** Capture pixels per unit of window bounds: 1 on Windows and Linux, the primary display's scale on macOS (bounds are points there). */
   captureScale(): Promise<number>;
-  /** Windows: for each Store app frame window, by handle, the process it hosts. Empty elsewhere. */
-  frameHosts(): Promise<Map<string, number>>;
 }
 
 /** The adapter's own listWindows, kept when `fencePlatform` replaces it with the fenced-only one. */
@@ -201,21 +187,10 @@ const platformDesktop: Desktop = {
     const ratio = Number(displays.find(d => d.primary)?.dpiRatio);
     return ratio > 0 ? ratio : 1;
   },
-  frameHosts: async () => {
-    const map = new Map<string, number>();
-    if (process.platform !== 'win32') return map;
-    const { psRunner } = await import('../platform/ps-runner');
-    const reply = await psRunner.run({ cmd: 'list-windows' }) as { windows?: Array<{ handle?: unknown; hostedProcessId?: unknown }> } | null;
-    for (const w of reply?.windows ?? []) {
-      if (w.handle !== undefined && Number.isInteger(w.hostedProcessId) && (w.hostedProcessId as number) > 0) map.set(String(w.handle), w.hostedProcessId as number);
-    }
-    return map;
-  },
 };
 let desktop: Desktop = platformDesktop;
 export function __setFenceDesktopForTests(d: Partial<Desktop> | null): void {
-  desktop = d ? { primary: async () => ({ x: 0, y: 0, width: 100_000, height: 100_000 }), cursor: async () => null, foreground: async () => null, windows: async () => [], captureScale: async () => 1, frameHosts: async () => new Map<string, number>(), ...d } : platformDesktop;
-  hostsCache = null;
+  desktop = d ? { primary: async () => ({ x: 0, y: 0, width: 100_000, height: 100_000 }), cursor: async () => null, foreground: async () => null, windows: async () => [], captureScale: async () => 1, ...d } : platformDesktop;
 }
 
 /**

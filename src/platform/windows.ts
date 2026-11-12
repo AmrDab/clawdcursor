@@ -13,6 +13,7 @@
  * Permissions: Windows has no TCC-style gate — returns all-true.
  */
 
+import { withHostedApp } from './frame-host';
 import { beforePointerPress, isOwnUiPid } from './pointer-guard';
 import { resolveInstalledWindowsApp } from './win-app-resolve';
 import { execFile, spawn } from 'child_process';
@@ -378,13 +379,21 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       const result = await psRunner.run({ cmd: 'get-screen-context', maxDepth: 0 }) as any;
       const raw = Array.isArray(result?.windows) ? result.windows : [];
-      return raw.map(this.normalizeWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
+      const windows: WindowInfo[] = raw.map(this.normalizeWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
+      // A Store app's window belongs to ApplicationFrameHost: say which app it hosts (frame-host.ts).
+      return Promise.all(windows.map(w => withHostedApp(w)));
     } catch {
       return [];
     }
   }
 
+  /** The window in front, with a Store app named as the app its frame hosts, not as ApplicationFrameHost (frame-host.ts). */
   async getActiveWindow(): Promise<WindowInfo | null> {
+    const w = await this.readActiveWindow();
+    return w ? withHostedApp(w) : null;
+  }
+
+  private async readActiveWindow(): Promise<WindowInfo | null> {
     try {
       const fg = await psRunner.run({ cmd: 'get-foreground-window' }) as any;
       if (!fg || fg.success === false) return null;
@@ -393,6 +402,9 @@ export class WindowsAdapter implements PlatformAdapter {
       const extra = {
         ...(typeof fg.className === 'string' && fg.className ? { className: fg.className } : {}),
         ...(typeof fg.appName === 'string' && fg.appName ? { appName: fg.appName } : {}),
+        // The app a Store app's frame hosts, when the bridge says so (else it is looked up by the window's handle).
+        ...(Number.isInteger(fg.hostedProcessId) && fg.hostedProcessId > 0 ? { hostedProcessId: fg.hostedProcessId as number,
+          hostedProcessName: String(fg.hostedProcessName ?? ''), hostedAppName: typeof fg.hostedAppName === 'string' ? fg.hostedAppName : undefined } : {}),
       };
       // The bridge answers with the focused window's own bounds / minimized
       // state: no need to enumerate every window (200+ ms) and, unlike the
@@ -1634,7 +1646,8 @@ export class WindowsAdapter implements PlatformAdapter {
         ...this.normalizeWindow(raw),
         ...(typeof raw?.className === 'string' && raw.className ? { className: raw.className } : {}),
         ...(Number.isInteger(raw?.hostedProcessId) && raw.hostedProcessId > 0
-          ? { hostedProcessId: raw.hostedProcessId, hostedProcessName: String(raw.hostedProcessName ?? '') } : {}),
+          ? { hostedProcessId: raw.hostedProcessId, hostedProcessName: String(raw.hostedProcessName ?? ''),
+            ...(typeof raw.hostedAppName === 'string' && raw.hostedAppName ? { hostedAppName: raw.hostedAppName } : {}) } : {}),
       }))
       .filter(w => !isOwnUiPid(w.processId));
   }

@@ -157,7 +157,9 @@ it is readable by the current user alone (an ACL on Windows, mode 0700 elsewhere
      - no app, a window or launch call: the focus must end in a process the benchmark started;
      - a Store app's window belongs to ApplicationFrameHost: it counts only with the exact title and one of the launched
        processes hosted in it.
-     A privacy stop ends the whole run.
+     A privacy stop ends the whole run; the tasks it did not get to are listed in the report as
+     "not run (privacy stop)". The watchdog uses the same identity as the fence: the process an act went to, and
+     for a Store app the app its frame hosts (never the shared host's name).
   2. *loop*: the same call 3 times in a row;
   3. *repeat-failure*: the same failure code 3 times in a task;
   4. *call-cap* and *time-cap*: the task's `caps`.

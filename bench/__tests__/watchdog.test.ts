@@ -3,7 +3,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Watchdog, readSessionCalls, tailSessionDir, type Proof } from '../lib/watchdog';
-import { appKey } from '../lib/rules';
+import { appKey, isSharedHostName } from '../lib/rules';
+import { ownsFocus, type Focus } from '../lib/ownership';
 import type { LogCall } from '../lib/types';
 
 vi.useRealTimers();
@@ -88,6 +89,47 @@ describe('the watchdog rules', () => {
     const d = dog({ maxSeconds: 60 });
     expect(d.onTime(60)).toBeNull();
     expect(d.onTime(60.5)).toMatchObject({ rule: 'time-cap' });
+  });
+
+  describe('privacy: a Store app is the app its frame hosts, the same identity the fence uses', () => {
+    // The desk: ApplicationFrameHost (38636) owns both frames; Calculator is 6768 (started by the benchmark), Settings 7100 (the owner's).
+    const calcFocus: Focus = { chain: [38636, 900], frame: { hosted: [38636, 6768], title: 'Calculator' } };
+    const settingsFocus: Focus = { chain: [38636, 900], frame: { hosted: [38636, 7100], title: 'Settings' } };
+    const calcDog = (focus: Focus | null) => new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+      { ownsFocus: () => ownsFocus(focus, [6768], 'Calculator'), cdpIsFixture: () => false });
+    const invoke = (app: string) => call('accessibility', 'invoke', 'act-name', { app });
+
+    it('an act on the fenced Calculator is allowed, named as the app or as its shared host', async () => {
+      expect(await calcDog(calcFocus).judge(invoke('Calculator'))).toBeNull();
+      // What the second Codex run logged for every invoke, and what stopped it: the host's name for Calculator.
+      expect(await calcDog(calcFocus).judge(invoke('Application Frame Host'))).toBeNull();
+      expect(await calcDog(calcFocus).judge(invoke('ApplicationFrameHost'))).toBeNull();
+      expect(await calcDog(calcFocus).judge(call('computer', 'type', 'act-other', { app: 'Application Frame Host' }))).toBeNull();
+    });
+
+    it('an act on another Store app (Settings) still stops the run, under either name', async () => {
+      expect(await calcDog(settingsFocus).judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
+      expect(await calcDog(settingsFocus).judge(invoke('Settings'))).toMatchObject({ rule: 'privacy' });
+      // Even logged as "Calculator": the frame in front hosts another app.
+      expect(await calcDog(settingsFocus).judge(invoke('Calculator'))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a frame with the right app but another title, or no readable focus, stops the run', async () => {
+      expect(await calcDog({ chain: [38636], frame: { hosted: [6768], title: 'Calculator - Settings' } }).judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
+      expect(await calcDog(null).judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('the shared host name admits nothing for a fixture that is not a Store app', async () => {
+      const native = new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['BenchFixture'] }, { ownsFocus: () => ownsFocus(settingsFocus, [4120]), cdpIsFixture: () => false });
+      expect(await native.judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('only that one name is exempt from the name check: any other unknown name stops at once', async () => {
+      expect(isSharedHostName('Application Frame Host')).toBe(true);
+      expect(isSharedHostName('ApplicationFrameHost.exe')).toBe(true);
+      expect(isSharedHostName('Application Frame Host Helper')).toBe(false);
+      expect(await calcDog(calcFocus).judge(invoke('Outlook'))).toMatchObject({ rule: 'privacy' });
+    });
   });
 
   describe('privacy: fails closed', () => {

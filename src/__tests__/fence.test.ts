@@ -20,6 +20,7 @@ import {
   fenceOcrCapture, fenceOcrText, fencePlatform, fencePointer, fenceRoots, fenceTools, fenceWindowList, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
   primaryRect, wholly, __setFenceDesktopForTests, __setFencePlatformForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
 } from '../core/fence';
+import { __setFrameHostReaderForTests } from '../platform/frame-host';
 import { classifyResult } from '../core/result-codes';
 import { outcomeOf } from '../surface/session-log';
 import { isGuardRefusal, __setForegroundReaderForTests } from '../core/control';
@@ -64,11 +65,13 @@ beforeEach(() => {
   __setFenceProcessTableForTests(async () => TABLE);
   __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary });
   __setFencePlatformForTests('win32');   // where the window tools take an exact handle
+  __setFrameHostReaderForTests(async () => new Map());
 });
 afterEach(() => {
   __setFenceProcessTableForTests(null);
   __setFenceDesktopForTests(null);
   __setFencePlatformForTests(null);
+  __setFrameHostReaderForTests(null);
   __setForegroundReaderForTests(async () => null);
   delete process.env[FENCE_ENV];
 });
@@ -468,8 +471,7 @@ describe('window actions', () => {
       // As the platform reports them on Windows: no hostedProcessId on either frame.
       const bareCalc = { ...calc, hostedProcessId: undefined };
       const bareSettings = { ...settings, hostedProcessId: undefined };
-      const lookup = { frameHosts: async () => new Map([['7003', 400], ['7004', 201]]) };
-      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary, ...lookup });
+      __setFrameHostReaderForTests(async () => new Map([['7003', { processId: 400, processName: 'CalculatorApp' }], ['7004', { processId: 201, processName: 'SystemSettings' }]]));
       windows = [fixture, bareCalc, bareSettings];
       front = bareCalc;
       for (const name of ['read_screen', 'type_text', 'key_press', 'desktop_screenshot']) expect(await refused(tool(name)), name).toBe(false);
@@ -483,15 +485,13 @@ describe('window actions', () => {
     });
 
     it('a frame whose hosted process cannot be looked up is outside the fence', async () => {
-      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary,
-        frameHosts: async () => { throw new Error('bridge down'); } });
+      __setFrameHostReaderForTests(async () => { throw new Error('bridge down'); });
       front = { ...calc, hostedProcessId: undefined };
       expect(await refused(tool('read_screen'))).toBe(true);
     });
 
     it('only ApplicationFrameHost is looked up: another process cannot borrow a fenced window\'s handle', async () => {
-      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary,
-        frameHosts: async () => new Map([['7002', 400]]) });
+      __setFrameHostReaderForTests(async () => new Map([['7002', { processId: 400, processName: 'CalculatorApp' }]]));
       front = owners;   // OUTLOOK.EXE, handle 7002
       expect(await refused(tool('read_screen'))).toBe(true);
     });

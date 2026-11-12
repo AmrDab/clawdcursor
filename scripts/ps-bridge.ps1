@@ -775,7 +775,7 @@ function Cmd-GetProcessPaths {
 # window structure; it sends no message).
 # A UWP app's window belongs to ApplicationFrameHost; the app itself owns the Windows.UI.Core.CoreWindow child,
 # reported as hostedProcessId / hostedProcessName so the app is known by identity, not by its (localized) title.
-function Cmd-ListWindows {
+function Use-LaunchWin {
     if (-not ([System.Management.Automation.PSTypeName]'LaunchWin').Type) {
         Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices;
@@ -787,6 +787,27 @@ public static class LaunchWin {
 }
 "@
     }
+}
+
+# The app a Store (UWP) frame window hosts: the process that owns its Windows.UI.Core.CoreWindow child, with that
+# process's name and display name. $null for any other window, and for a frame whose app has not come up yet.
+# ONE place for it: the window list, the foreground read, and through them the fence, the pill and the session log
+# all name a Store app by this, never by ApplicationFrameHost, which is one process for every Store app.
+function Get-HostedApp([IntPtr]$h, [string]$cls, [int]$wpid) {
+    if ($cls -ne 'ApplicationFrameWindow') { return $null }
+    Use-LaunchWin
+    $core = [LaunchWin]::CoreOf($h)
+    if ($core -eq [IntPtr]::Zero) { return $null }
+    $cp = 0
+    [void][Win32UIA]::GetWindowThreadProcessId($core, [ref]$cp)
+    if ($cp -eq 0 -or $cp -eq $wpid) { return $null }
+    $n = ''
+    try { $n = [System.Diagnostics.Process]::GetProcessById([int]$cp).ProcessName } catch {}
+    return @{ processId = [int]$cp; processName = $n; appName = (Get-AppName ([int]$cp) $n) }
+}
+
+function Cmd-ListWindows {
+    Use-LaunchWin
     $names = @{}
     $nameOf = {
         param([int]$id)
@@ -815,14 +836,8 @@ public static class LaunchWin {
             bounds = @{ x = $r.L; y = $r.T; width = ($r.R - $r.L); height = ($r.B - $r.T) }
             isMinimized = [bool][ScreenPM]::IsIconic($h)
         }
-        if ($cls -eq 'ApplicationFrameWindow') {
-            $core = [LaunchWin]::CoreOf($h)
-            if ($core -ne [IntPtr]::Zero) {
-                $cp = 0
-                [void][Win32UIA]::GetWindowThreadProcessId($core, [ref]$cp)
-                if ($cp -ne 0 -and $cp -ne $wpid) { $w.hostedProcessId = [int]$cp; $w.hostedProcessName = (& $nameOf ([int]$cp)) }
-            }
-        }
+        $hosted = Get-HostedApp $h $cls ([int]$wpid)
+        if ($hosted) { $w.hostedProcessId = $hosted.processId; $w.hostedProcessName = $hosted.processName; $w.hostedAppName = $hosted.appName }
         $list += $w
     }
     return @{ windows = @($list) }
@@ -872,7 +887,11 @@ function Cmd-GetForegroundWindow {
         }
     } catch {}
     $cls = ''; try { $cls = [ScreenPM]::ClassOf($fgWin) } catch {}
-    return [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; appName=(Get-AppName $wpid $pName); title=$title; className=$cls; bounds=$bounds; isMinimized=$isMin; success=$true }
+    $fg = [ordered]@{ handle=[int]$fgWin; processId=$wpid; processName=$pName; appName=(Get-AppName $wpid $pName); title=$title; className=$cls; bounds=$bounds; isMinimized=$isMin; success=$true }
+    # A Store app in front: say which app the frame hosts (Calculator), not only its host.
+    $hosted = $null; try { $hosted = Get-HostedApp $fgWin $cls ([int]$wpid) } catch {}
+    if ($hosted) { $fg.hostedProcessId = $hosted.processId; $fg.hostedProcessName = $hosted.processName; $fg.hostedAppName = $hosted.appName }
+    return $fg
 }
 
 # ── Command: focus-window ─────────────────────────────────────────────────────

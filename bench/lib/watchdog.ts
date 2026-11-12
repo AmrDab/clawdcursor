@@ -10,7 +10,7 @@
  */
 import * as fs from 'fs';
 import * as path from 'path';
-import { LOOP_RUN, appKey, hasTarget, isInput } from './rules';
+import { LOOP_RUN, appKey, hasTarget, isInput, isSharedHostName } from './rules';
 import type { CallSig, LogCall } from './types';
 
 export interface Verdict { rule: 'privacy' | 'loop' | 'repeat-failure' | 'call-cap' | 'time-cap'; detail: string }
@@ -40,7 +40,8 @@ export class Watchdog {
   /**
    * The privacy guard. Each call that does something to a window (and each such step of a batch) must be PROVEN to be
    * in the fixture, or the run stops:
-   *   - the log names its app: the name must be the fixture's, and the focus must belong to a process the benchmark started;
+   *   - the log names its app: the name must be the fixture's (or the shared host of every Store app, which names none),
+ *     and the focus must belong to a process the benchmark started: for a Store app, the app its frame hosts;
    *   - no app, `browser` tool (the 2.0 log names no app for a CDP act): the only reachable browser must be the fixture's own;
    *   - no app, input or an act by name (the log leaves the app out when it went to a background process): stop;
    *   - no app, anything else (window focus, open_app, ...): the focus must belong to a process the benchmark started.
@@ -59,7 +60,9 @@ export class Watchdog {
       const what = `${u.tool} ${u.action ?? ''}`.trim();
       const stop = (why: string): Verdict => ({ rule: 'privacy', detail: `${what} ${why}` });
       if (u.app) {
-        if (!this.allowed.has(appKey(u.app))) return stop(`acted in "${u.app}", which is not a fixture app`);
+        // The same identity as the fence: the process the act went to (for a Store app: the app its frame hosts). A name
+        // that is only the shared host of every Store app is not a verdict either way: the proof below decides.
+        if (!isSharedHostName(u.app) && !this.allowed.has(appKey(u.app))) return stop(`acted in "${u.app}", which is not a fixture app`);
         if (!await ownsFocus()) return stop(`acted in "${u.app}", but the focus is not in a process the benchmark started`);
       } else if (u.tool === 'browser') {
         if (!await Promise.resolve(this.proof.cdpIsFixture()).catch(() => false)) return stop('acted through CDP, and the browser it reached is not proven to be the fixture\'s own');
