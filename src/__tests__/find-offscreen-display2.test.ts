@@ -30,6 +30,7 @@ import { getA11yTools } from '../tools/a11y';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { psOpts } from '../platform/ps-spawn';
 
 // Physical pixels, as the bridge reports: a 3840x2400 primary at 225% and a 1920x1080 monitor at 100% above it.
 const monitors = [
@@ -116,7 +117,7 @@ describe.runIf(process.platform === 'win32')('ps-bridge find-element (run for re
   };
   const run = (body: string) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
     `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${['Test-NameMatch', 'Test-RectOnMonitor', 'Get-ShownValue', 'Cmd-FindElement'].map(fnBody).join('\n')}\n${body}`],
-  { encoding: 'utf8' }).trim().split(/\r?\n/);
+  psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
   const FAKES = `
 function Get-ProcessScopeWindows { param($wpid) return $script:window }
 function Get-MonitorRects { return ,@(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 }) }

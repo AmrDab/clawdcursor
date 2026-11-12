@@ -543,34 +543,6 @@ export class CDPDriver {
     console.log(`   🔌 CDPDriver: attached to existing page`);
   }
 
-  /**
-   * Switch to a tab whose URL contains the given substring.
-   * Useful after navigation when the agent needs to find a specific page.
-   */
-  async switchToTabByUrl(urlSubstring: string): Promise<boolean> {
-    if (!this.browser) return false;
-    try {
-      const contexts = this.browser.contexts();
-      for (const ctx of contexts) {
-        for (const page of ctx.pages()) {
-          const pageUrl = page.url().toLowerCase();
-          if (pageUrl.includes(urlSubstring.toLowerCase())) {
-            this.activePage = page;
-            this.cursorInjected = false; // Reset — new page doesn't have our overlay
-            await page.bringToFront().catch(() => {});
-            const title = await page.title().catch(() => '(unknown)');
-            console.log(`   🔌 CDPDriver: switched to tab "${title}" at ${page.url()}`);
-            return true;
-          }
-        }
-      }
-      return false;
-    } catch (err) {
-      console.debug(`[CDPDriver] switchToTabByUrl failed: ${err}`);
-      return false;
-    }
-  }
-
   /** Check if we're connected and the page is still alive */
   async isConnected(): Promise<boolean> {
     if (!this.connected || !this.activePage) return false;
@@ -706,69 +678,6 @@ export class CDPDriver {
   async querySelector(selector: string): Promise<DOMElementInfo | null> {
     const results = await this.querySelectorAll(selector, 1);
     return results.length > 0 ? results[0] : null;
-  }
-
-  /**
-   * Find elements by their visible text content.
-   * Useful for clicking buttons like "Compose", "Send", "Save Draft".
-   *
-   * @param text Text to search for (case-insensitive, partial match)
-   * @param tagFilter Optional tag name filter (e.g., 'button', 'a', 'div')
-   */
-  async findByText(
-    text: string,
-    tagFilter?: string,
-  ): Promise<DOMElementInfo[]> {
-    const pg = this.requirePage();
-
-    const results = await pg.evaluate(
-      (args: { searchText: string; tag: string }) => {
-        const lower = args.searchText.toLowerCase();
-        const candidates = args.tag
-          ? document.querySelectorAll(args.tag)
-          : document.querySelectorAll('button, a, [role="button"], [role="link"], [role="menuitem"], input[type="submit"], input[type="button"]');
-
-        const matches: any[] = [];
-
-        for (const el of candidates) {
-          const htmlEl = el as HTMLElement;
-          const elText = (htmlEl.textContent || '').trim().toLowerCase();
-          const ariaLabel = (htmlEl.getAttribute('aria-label') || '').toLowerCase();
-          const title = (htmlEl.getAttribute('title') || '').toLowerCase();
-
-          if (elText.includes(lower) || ariaLabel.includes(lower) || title.includes(lower)) {
-            const rect = htmlEl.getBoundingClientRect();
-            if (rect.width > 0 && rect.height > 0) {
-              matches.push({
-                tagName: htmlEl.tagName.toLowerCase(),
-                text: (htmlEl.textContent || '').trim().substring(0, 100),
-                id: htmlEl.id || '',
-                className: typeof htmlEl.className === 'string' ? htmlEl.className : '',
-                role: htmlEl.getAttribute('role') || '',
-                ariaLabel: htmlEl.getAttribute('aria-label') || '',
-                type: (htmlEl as HTMLInputElement).type || '',
-                placeholder: (htmlEl as HTMLInputElement).placeholder || '',
-                name: htmlEl.getAttribute('name') || '',
-                bounds: {
-                  x: Math.round(rect.x),
-                  y: Math.round(rect.y),
-                  width: Math.round(rect.width),
-                  height: Math.round(rect.height),
-                },
-                isVisible: true,
-                isEnabled: !(htmlEl as HTMLInputElement).disabled,
-                selector: htmlEl.id ? `#${htmlEl.id}` : '',
-              });
-            }
-          }
-        }
-
-        return matches;
-      },
-      { searchText: text, tag: tagFilter || '' },
-    );
-
-    return results;
   }
 
   /**
@@ -1356,22 +1265,6 @@ export class CDPDriver {
   }
 
   /**
-   * Read the current value of a form field (safe, parameterized — no CSS injection risk).
-   * @param selector CSS selector for the input/textarea element
-   */
-  async readFieldValue(selector: string): Promise<string> {
-    const pg = this.requirePage();
-    return pg.evaluate(
-      (sel: string) => {
-        const el = document.querySelector(sel);
-        if (!el) return '';
-        return ((el as HTMLInputElement).value ?? el.textContent ?? '').substring(0, 60);
-      },
-      selector,
-    );
-  }
-
-  /**
    * Evaluate arbitrary JavaScript in the page context.
    * Use this for custom interactions not covered by the standard methods.
    *
@@ -1409,22 +1302,6 @@ export class CDPDriver {
       return {
         success: false,
         error: `Timeout waiting for "${selector}": ${err instanceof Error ? err.message : String(err)}`,
-      };
-    }
-  }
-
-  /**
-   * Wait for navigation to complete (e.g., after clicking a link).
-   */
-  async waitForNavigation(timeoutMs = 15_000): Promise<CDPInteractionResult> {
-    const pg = this.requirePage();
-    try {
-      await pg.waitForLoadState('domcontentloaded', { timeout: timeoutMs });
-      return { success: true, value: pg.url() };
-    } catch (err) {
-      return {
-        success: false,
-        error: `Navigation timeout: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
   }
@@ -1658,7 +1535,7 @@ export class CDPDriver {
   private requirePage(): Page {
     if (!this.activePage || !this.connected) {
       throw new Error(
-        'CDPDriver: not connected. Call connect() first or attach a Page with attachToPage().',
+        'CDPDriver: not connected. Call connect() first.',
       );
     }
     return this.activePage;

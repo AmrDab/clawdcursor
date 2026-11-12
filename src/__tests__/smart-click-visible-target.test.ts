@@ -14,6 +14,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { execFileSync } from 'child_process';
+import { psOpts } from '../platform/ps-spawn';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -56,7 +57,7 @@ function runPs(functions: string[], body: string): string[] {
   const file = join(dir, 'run.ps1');
   writeFileSync(file, String.fromCharCode(0xfeff) + script, 'utf8');
   try {
-    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8' }).trim().split(/\r?\n/);
+    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 

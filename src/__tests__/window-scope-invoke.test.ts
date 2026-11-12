@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { execFileSync } from 'child_process';
+import { psOpts } from '../platform/ps-spawn';
 import vm from 'node:vm';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
@@ -49,7 +50,7 @@ function runPs(functions: string[], body: string): string[] {
   const file = join(dir, 'run.ps1');
   writeFileSync(file, String.fromCharCode(0xfeff) + script, 'utf8');
   try {
-    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], { encoding: 'utf8' }).trim().split(/\r?\n/);
+    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 }
 const FAKE_SEAMS = `
@@ -127,7 +128,7 @@ $c = @((& $fake 10 $true $false), (& $fake 20 $false $false), (& $fake 21 $false
   it('ps-bridge.ps1 parses', () => {
     const file = join(root, 'scripts/ps-bridge.ps1').replace(/'/g, "''");
     const script = `$e=$null; [void][System.Management.Automation.Language.Parser]::ParseFile('${file}',[ref]$null,[ref]$e); Write-Output $e.Count`;
-    expect(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim()).toBe('0');
+    expect(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], psOpts({ encoding: 'utf8' })).trim()).toBe('0');
   });
 });
 
@@ -258,7 +259,7 @@ describe('window titles are compared without invisible characters', () => {
   it.runIf(process.platform === 'win32')('ConvertTo-TitleKey (run for real) maps the live Edge title and the typed one to the same key', () => {
     const fn = fnBody(bridge, 'ConvertTo-TitleKey');
     const script = `${fn}\n$a = ConvertTo-TitleKey ([string]::Concat('CC Test Page - [InPrivate] - Microsoft', [char]0x200B, ' Edge'))\n$b = ConvertTo-TitleKey 'cc test page  -  [inprivate] - MICROSOFT Edge '\nWrite-Output ($a -eq $b); Write-Output $a`;
-    const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { encoding: 'utf8' }).trim().split(/\r?\n/);
+    const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
     expect(out[0]).toBe('True');
     expect(out[1]).toBe('cc test page - [inprivate] - microsoft edge');
   });

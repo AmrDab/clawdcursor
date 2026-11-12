@@ -37,34 +37,6 @@ interface PermissionStatus {
   bundleId?: string;
 }
 
-interface UIElement {
-  role?: string;
-  title?: string;
-  value?: string;
-  description?: string;
-  position?: { x: number; y: number };
-  size?: { width: number; height: number };
-  enabled: boolean;
-  focused: boolean;
-  children?: UIElement[];
-}
-
-interface WindowInfo {
-  windowId: number;
-  ownerPid: number;
-  ownerName: string;
-  windowName: string;
-  bounds: { X: number; Y: number; Width: number; Height: number };
-}
-
-interface CapturedScreen {
-  success: boolean;
-  width: number;
-  height: number;
-  format: 'png';
-  imageBase64: string;
-}
-
 export class NativeHelper {
   private process: ChildProcess | null = null;
   private requestId = 0;
@@ -241,50 +213,8 @@ export class NativeHelper {
 
   // MARK: - Public API
 
-  async checkPermissions(): Promise<PermissionStatus> {
-    return this.call<PermissionStatus>('checkPermissions');
-  }
-
-  async traverseAccessibilityTree(pid: number, options?: {
-    maxDepth?: number;
-    maxElements?: number;
-  }): Promise<{ pid: number; elementCount: number; tree: UIElement }> {
-    return this.call('traverseAccessibilityTree', { pid, ...options });
-  }
-
-  async click(x: number, y: number, options?: {
-    button?: 'left' | 'right';
-    clickCount?: number;
-  }): Promise<{ success: boolean; x: number; y: number }> {
-    return this.call('click', { x, y, ...options });
-  }
-
-  async moveMouse(x: number, y: number): Promise<{ success: boolean; x: number; y: number }> {
-    return this.call('moveMouse', { x, y });
-  }
-
-  async dragMouse(startX: number, startY: number, endX: number, endY: number): Promise<{ success: boolean }> {
-    return this.call('dragMouse', { startX, startY, endX, endY });
-  }
-
   async type(text: string, options?: { delayMs?: number }): Promise<{ success: boolean; length: number }> {
     return this.call('type', { text, ...options });
-  }
-
-  async pressKey(key: string, modifiers?: string[]): Promise<{ success: boolean; key: string; modifiers: string[] }> {
-    return this.call('pressKey', { key, modifiers });
-  }
-
-  async openApp(name?: string, bundleId?: string): Promise<{ success: boolean; pid: number }> {
-    return this.call('openApp', { name, bundleId });
-  }
-
-  async getWindowList(): Promise<{ windows: WindowInfo[] }> {
-    return this.call('getWindowList');
-  }
-
-  async captureScreen(): Promise<CapturedScreen> {
-    return this.call('captureScreen');
   }
 }
 

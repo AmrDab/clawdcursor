@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import { __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests, __setParentPidForTests, parseTable, walkAncestors } from '../core/ai-hosts';
+import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests, __setParentPidForTests, parseTable, walkAncestors, execFailReason } from '../core/ai-hosts';
 import { classifyResult } from '../core/result-codes';
 
 type Win = { processId: number; processName: string; title?: string };
@@ -316,6 +316,24 @@ describe('a failed or slow ancestry read is not "no ancestors"', () => {
     fg = { processId: 888, processName: 'notepad' };
     await d.typeText('y');
     expect(d.sent).toEqual(['type y']);
+  });
+
+  it('a read that fails once is tried again before failing open', async () => {
+    let calls = 0;
+    await __startHostAncestryReadForTests(async () => {
+      if (++calls === 1) throw new Error('timed out');
+      return [{ pid: process.pid, ppid: 777, created: 0, name: 'node' }, { pid: 777, ppid: 1, created: 0, name: 'WindowsTerminal' }];
+    });
+    expect(calls).toBe(2);
+    fg = { processId: 777, processName: 'WindowsTerminal' };
+    await expect(fakeLayer().typeText('x')).rejects.toThrow(/the app this agent runs in/);
+  });
+
+  it('the logged reason names a timeout, a signal or an exit code, not "unreadable"', () => {
+    expect(execFailReason({ code: null, killed: true, signal: 'SIGTERM' })).toBe('timed out');
+    expect(execFailReason({ code: null, signal: 'SIGKILL' })).toBe('killed by SIGKILL');
+    expect(execFailReason({ code: 1 })).toBe('exit code 1');
+    expect(execFailReason({ code: 'ENOENT' })).toBe('ENOENT');
   });
 
   it('while the read is pending the direct parent is refused at once, without waiting', async () => {

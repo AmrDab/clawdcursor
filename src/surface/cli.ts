@@ -504,6 +504,14 @@ program
   });
 
 program
+  .command('update')
+  .description('⬆️  Update the global npm install to the latest version, then list the other copies (Desktop extension, Claude Code plugin) that need their own update')
+  .action(async () => {
+    const { runUpdate } = await import('./update');
+    await runUpdate();
+  });
+
+program
   .command('grant')
   .description('🔐 Request macOS permissions (triggers system permission dialogs)')
   .action(async () => {

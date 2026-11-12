@@ -114,8 +114,5 @@ describe('capture pixel format', () => {
 
     const region = await desktop.captureRegionForLLM(1, 0, 1, 1);
     expect(await pixels(region.buffer)).toEqual(TRUE_X11);
-
-    const mon = await desktop.captureMonitor(0);
-    expect(await pixels(mon.buffer)).toEqual([...TRUE_WIN, ...TRUE_X11]);
   });
 });

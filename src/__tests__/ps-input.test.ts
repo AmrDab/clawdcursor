@@ -9,6 +9,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { setWindowsClipboard } from '../platform/ps-input';
+import { psOpts } from '../platform/ps-spawn';
 
 const SRC = path.join(__dirname, '..');
 const QUOTES = ["'", '‘', '’', '‚', '‛'];
@@ -32,7 +33,7 @@ describe.runIf(process.platform === 'win32')('setWindowsClipboard (live)', () =>
   const marker = path.join(os.tmpdir(), `clawd-ghsa-${process.pid}`);
   const readClipboard = () => Buffer.from(execFileSync('powershell.exe', ['-NoProfile', '-Command',
     '$t = Get-Clipboard -Raw; if ($null -eq $t) { $t = "" }; [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($t))'],
-  ).toString().trim(), 'base64').toString('utf8');
+    psOpts()).toString().trim(), 'base64').toString('utf8');
   let before = '';
   beforeAll(() => { before = readClipboard(); }); // not at collection: a skipped describe body still runs
   afterAll(async () => { await setWindowsClipboard(before, 5000).catch(() => {}); fs.rmSync(marker, { force: true }); });

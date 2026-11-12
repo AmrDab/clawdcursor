@@ -41,7 +41,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { DEFAULT_CONFIG } from '../types';
-import { powershellExe } from '../platform/ps-spawn';
+import { powershellExe, psOpts } from '../platform/ps-spawn';
 
 export type LockMode = 'start' | 'mcp' | 'serve';
 
@@ -115,7 +115,7 @@ export function getProcessStartTime(pid: number, timeoutMs = 5000): number | nul
           '-Command',
           `try { (Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop).CreationDate.ToFileTimeUtc() } catch { '' }`,
         ],
-        { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: timeoutMs },
+        psOpts({ encoding: 'utf-8' as const, stdio: ['ignore', 'pipe', 'ignore'] as ['ignore', 'pipe', 'ignore'], timeout: timeoutMs }),
       ).trim();
       if (!out) return null;
       const fileTime = BigInt(out);

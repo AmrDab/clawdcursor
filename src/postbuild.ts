@@ -25,6 +25,7 @@ ${startBlock}
   Other:
     clawdcursor status      Check setup readiness
     clawdcursor versions    List every installed copy (global, Desktop extension, plugin)
+    clawdcursor update      Update the global install to the latest version
     clawdcursor stop        Stop a running daemon
     clawdcursor uninstall   Remove all config and data
 `);
