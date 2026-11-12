@@ -183,6 +183,31 @@ describe('confirm mode (#373)', () => {
     expect(sent).toEqual(['text Sent']);
   });
 
+  it('a browser click is checked inside iframes too: clickByText("Sen") presses Send in a child frame (#398)', async () => {
+    process.env.CLAWD_CONFIRM = '1';
+    const button = (text: string) => ({ textContent: text, getAttribute: () => null });
+    // Each frame's callback runs against that frame's own document.
+    const frame = (...texts: string[]) => ({
+      evaluate: async (f: (a: unknown) => unknown, arg: unknown) => {
+        (globalThis as { document?: unknown }).document = { querySelectorAll: () => texts.map(button), querySelector: () => null };
+        return f(arg);
+      },
+    });
+    const main = frame('Sent items');
+    const page = { ...main, frames: () => [main, frame('Send')], title: async () => 'Inbox' };
+    const sent: string[] = [];
+    const cdp = guardInputMethods({
+      getPage: () => page,
+      async clickByText(t: string) { sent.push(`text ${t}`); return { success: true }; },
+    });
+    const p = cdp.clickByText('Sen');
+    await flush();
+    expect(pauseGate.current()?.message).toMatch(/click "Send" in "Inbox"/);
+    pauseGate.answer('end');
+    await expect(p).rejects.toThrow(/^not confirmed/);
+    expect(sent).toEqual([]);
+  });
+
   it('typed text with a key held is a press with it: key_down ctrl (cmd on macOS), then type "w" or a newline, is held', async () => {
     process.env.CLAWD_CONFIRM = '1';
     const { d, sent } = fakeDesktop();

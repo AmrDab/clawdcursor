@@ -96,10 +96,17 @@ async function namesFor(target: object | undefined, q: Record<string, unknown>):
 /**
  * The names of the page elements a CDP click(selector) / clickByText(text) would press: the element the selector picks,
  * or the buttons, links, menu items and tabs whose text or aria-label has the text (cdp-driver.ts matches part of it).
+ * Every frame is read, iframes included: the driver's clicks reach into them (#398). A frame that hangs is left out after 1.5 s.
  */
-/* global document -- the callback below runs in the page */
 async function pageNames(page: Page, bySelector: boolean, q: string): Promise<string[]> {
-  return page.evaluate(({ bySelector, q }) => {
+  const frames: Array<Pick<Page, 'evaluate'>> = typeof page.frames === 'function' ? page.frames() : [page];
+  const late = () => new Promise<string[]>(r => setTimeout(() => r([]), 1500).unref?.());
+  return (await Promise.all(frames.map(f => Promise.race([frameNames(f, bySelector, q), late()])))).flat();
+}
+
+/* global document -- the callback below runs in the page */
+async function frameNames(f: Pick<Page, 'evaluate'>, bySelector: boolean, q: string): Promise<string[]> {
+  return f.evaluate(({ bySelector, q }) => {
     const name = (el: Element) => `${el.getAttribute('aria-label') ?? ''} ${(el.textContent ?? '').trim()} ${(el as HTMLInputElement).value ?? ''}`;
     if (bySelector) { const el = document.querySelector(q); return el ? [name(el)] : []; }
     const lower = q.toLowerCase();
