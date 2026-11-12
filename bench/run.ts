@@ -188,6 +188,7 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const cdpClock = setInterval(() => { proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }); }, 5000);
     const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps }, {
       ownsFocus: async () => ownsFocus(await readFocus(), await fixture.roots(), fixture.frameTitle),
+      ownsPid: async pid => (await fixture.roots()).includes(pid),
       cdpIsFixture: () => cdpProven,
     });
     const abort = new AbortController();

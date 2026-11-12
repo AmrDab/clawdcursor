@@ -65,7 +65,8 @@ beforeEach(() => {
   __setFenceProcessTableForTests(async () => TABLE);
   __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary });
   __setFencePlatformForTests('win32');   // where the window tools take an exact handle
-  __setFrameHostReaderForTests(async () => new Map());
+  // What the bridge says each frame hosts, by window handle: the fence asks it for every decision.
+  __setFrameHostReaderForTests(async () => new Map([['7003', { processId: 400, processName: 'CalculatorApp' }], ['7004', { processId: 201, processName: 'SystemSettings' }]]));
 });
 afterEach(() => {
   __setFenceProcessTableForTests(null);
@@ -482,6 +483,41 @@ describe('window actions', () => {
       // The fenced window list shows the fixture's Store app, and not the owner's.
       const adapter = fencePlatform({ listWindows: async () => [fixture, owners, bareCalc, bareSettings] }, fenced);
       expect((await adapter.listWindows()).map(w => w.title)).toEqual(['Bench Dialog', 'Calculator']);
+    });
+
+    it('the cache says Calculator, a fresh read says another app: the fence refuses', async () => {
+      // The display cache learns that frame 7003 hosts Calculator (pid 400, fenced).
+      const { hostedAppOf, withHostedApp } = await import('../platform/frame-host');
+      const bare = { ...calc, hostedProcessId: undefined };
+      expect(await hostedAppOf(bare)).toMatchObject({ processId: 400 });
+      front = bare;
+      windows = [fixture, bare];
+      expect(await refused(tool('type_text'))).toBe(false);
+      // Then the handle is reused (or the frame comes to host another app): the bridge now says pid 201, the owner's.
+      let reads = 0;
+      __setFrameHostReaderForTests(async () => { reads++; return new Map([['7003', { processId: 201, processName: 'SystemSettings' }]]); }, { keepCache: true });
+      // For DISPLAY the remembered answer may still be shown for a few seconds ...
+      expect((await withHostedApp(bare)).hostedProcessId).toBe(400);
+      expect(reads).toBe(0);
+      // ... but every fence decision reads fresh, and refuses.
+      for (const name of ['type_text', 'read_screen', 'key_press', 'mouse_click', 'desktop_screenshot', 'invoke_element']) {
+        const t = tool(name);
+        expect(await refused(t), name).toBe(true);
+        expect(t.calls, name).toEqual([]);
+      }
+      expect(await refused(tool('focus_window', targeted), { title: 'Calculator' })).toBe(true);
+      expect(await refused(tool('close_window', targeted), { handle: 7003 })).toBe(true);
+      expect(reads).toBeGreaterThanOrEqual(8);   // one read per decision, none from the cache
+      // The fenced window list drops it too.
+      expect((await fencePlatform({ listWindows: async () => [fixture, bare] }, fenced).listWindows()).map(w => w.title)).toEqual(['Bench Dialog']);
+    });
+
+    it('a window object that CLAIMS to host a fenced app is not believed: the bridge is asked', async () => {
+      // As it would look after the display cache filled it in: hostedProcessId 400, while the bridge says 201.
+      __setFrameHostReaderForTests(async () => new Map([['7003', { processId: 201, processName: 'SystemSettings' }]]));
+      front = { ...calc, hostedProcessId: 400 };
+      expect(await refused(tool('type_text'))).toBe(true);
+      await expect(fenceInput(front, fenced)).rejects.toThrow(FENCED);
     });
 
     it('a frame whose hosted process cannot be looked up is outside the fence', async () => {

@@ -21,6 +21,8 @@ export const FAILURE_REPEATS = 3;
 export interface Proof {
   /** The keyboard focus belongs to a process the benchmark started for this task (or a child of one). */
   ownsFocus(): Promise<boolean> | boolean;
+  /** This process is one the benchmark started for this task (or a child of one). */
+  ownsPid(pid: number): Promise<boolean> | boolean;
   /** The only browser clawdcursor's `browser` tool can reach is the fixture's own instance. */
   cdpIsFixture(): Promise<boolean> | boolean;
 }
@@ -41,7 +43,9 @@ export class Watchdog {
    * The privacy guard. Each call that does something to a window (and each such step of a batch) must be PROVEN to be
    * in the fixture, or the run stops:
    *   - the log names its app: the name must be the fixture's (or the shared host of every Store app, which names none),
- *     and the focus must belong to a process the benchmark started: for a Store app, the app its frame hosts;
+ *     and the process the act went to, recorded with the act (`appPid`: for a Store app the app its frame hosts), must
+ *     be one the benchmark started. A shared-host act with no such record stops. Only a log that records no process
+ *     at all falls back to where the focus is now;
    *   - no app, `browser` tool (the 2.0 log names no app for a CDP act): the only reachable browser must be the fixture's own;
    *   - no app, input or an act by name (the log leaves the app out when it went to a background process): stop;
    *   - no app, anything else (window focus, open_app, ...): the focus must belong to a process the benchmark started.
@@ -60,10 +64,19 @@ export class Watchdog {
       const what = `${u.tool} ${u.action ?? ''}`.trim();
       const stop = (why: string): Verdict => ({ rule: 'privacy', detail: `${what} ${why}` });
       if (u.app) {
-        // The same identity as the fence: the process the act went to (for a Store app: the app its frame hosts). A name
-        // that is only the shared host of every Store app is not a verdict either way: the proof below decides.
-        if (!isSharedHostName(u.app) && !this.allowed.has(appKey(u.app))) return stop(`acted in "${u.app}", which is not a fixture app`);
-        if (!await ownsFocus()) return stop(`acted in "${u.app}", but the focus is not in a process the benchmark started`);
+        // The same identity as the fence: the PROCESS the act went to (for a Store app: the app its frame hosts), as
+        // clawdcursor read it when it sent the act (`appPid`). Where the focus is by the time this line is read proves
+        // nothing about where the act went, so it decides only for a log that carries no such evidence.
+        const shared = isSharedHostName(u.app);   // the host of every Store app: a name that names none of them
+        if (!shared && !this.allowed.has(appKey(u.app))) return stop(`acted in "${u.app}", which is not a fixture app`);
+        const pid = c.appPid;
+        if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+          if (!await Promise.resolve(this.proof.ownsPid(pid)).catch(() => false)) return stop(`acted in "${u.app}" (process ${pid}), which the benchmark did not start`);
+        } else if (shared) {
+          return stop(`acted in "${u.app}" with no record of which app that was`);
+        } else if (!await ownsFocus()) {
+          return stop(`acted in "${u.app}", but the focus is not in a process the benchmark started`);
+        }
       } else if (u.tool === 'browser') {
         if (!await Promise.resolve(this.proof.cdpIsFixture()).catch(() => false)) return stop('acted through CDP, and the browser it reached is not proven to be the fixture\'s own');
       } else if (opaque(u) || isInput(u)) {

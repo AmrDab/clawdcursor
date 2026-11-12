@@ -315,14 +315,20 @@ export async function selfcheckFixtures(buildDir: string | undefined, log: (line
           const calls = readSessionCalls(path.join(root, 'sessions-2'));
           const acted = calls.filter(c => c.tool === 'accessibility' && c.action === 'invoke');
           ok = check(acted.length === 1 && acted[0].app === 'Calculator', `Calculator: the session log names the app acted in "Calculator" (it says "${acted[0]?.app ?? '(none)'}")`) && ok;
+          const roots = await calc.roots();
+          ok = check(!!acted[0]?.appPid && roots.includes(acted[0].appPid) && Number.isInteger(acted[0].appHandle),
+            `Calculator: the act line carries who it went to: process ${acted[0]?.appPid} (the Calculator the benchmark started: ${roots.join(', ')}), window ${acted[0]?.appHandle}`) && ok;
           const dog = new Watchdog({ maxCalls: 50, maxSeconds: 600, fixtureApps: calc.apps }, {
-            ownsFocus: async () => ownsFocus(await readFocus(), await calc.roots(), calc.frameTitle), cdpIsFixture: () => false });
+            ownsFocus: async () => ownsFocus(await readFocus(), await calc.roots(), calc.frameTitle), ownsPid: async pid => (await calc.roots()).includes(pid),
+            cdpIsFixture: () => false });
           let verdict: { rule: string; detail: string } | null = null;
           for (const c of calls) verdict ??= await dog.judge(c);
           ok = check(verdict === null, `Calculator: the watchdog agrees with the fence: no privacy stop${verdict ? ` (${verdict.rule}: ${verdict.detail})` : ''}`) && ok;
-          // The same act as a build that names only the host would have logged it: still inside, by the process proof.
+          // The same act under the shared host's name: inside by the process recorded with it; with no such record, stopped.
           const asHost = await dog.judge({ ...acted[0], app: 'Application Frame Host' });
-          ok = check(asHost === null, 'Calculator: an act logged under the shared host name is judged by its process, and passes') && ok;
+          ok = check(asHost === null, 'Calculator: an act logged under the shared host name passes by the process recorded with it') && ok;
+          const noRecord = await dog.judge({ ...acted[0], app: 'Application Frame Host', appPid: undefined, appHandle: undefined });
+          ok = check(noRecord?.rule === 'privacy', 'Calculator: a shared-host act with no process recorded is stopped, wherever the focus is') && ok;
         });
       } finally {
         await calc.close();

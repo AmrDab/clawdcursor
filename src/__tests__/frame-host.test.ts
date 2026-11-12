@@ -20,10 +20,15 @@ vi.mock('../platform/ps-runner', () => ({ psRunner: { run: vi.fn(), start: vi.fn
 
 import { psRunner } from '../platform/ps-runner';
 import { WindowsAdapter } from '../platform/windows';
-import { hostedAppOf, isFrameHost, withHostedApp, __setFrameHostReaderForTests, type HostedApp } from '../platform/frame-host';
+import { freshHostedAppOf, hostedAppOf, isFrameHost, withHostedApp, withHostedApps, __setFrameHostReaderForTests, type HostedApp } from '../platform/frame-host';
+import { actTarget, SessionLog, readSession } from '../surface/session-log';
+import { buildSessionReport } from '../surface/report';
+import * as os from 'os';
 import { appLabel, activityLabel } from '../core/banner';
 import { actedIn, workingIn, __setForegroundReaderForTests } from '../core/control';
-import { guardedInput } from '../platform/pointer-guard';
+import { guardedInput, guardInputMethods } from '../platform/pointer-guard';
+
+const isGuardRefusalLike = (m: unknown) => typeof m === 'string' && m.startsWith('foreground changed: ');
 
 const run = vi.mocked(psRunner.run);
 const CALC: HostedApp = { processId: 6768, processName: 'CalculatorApp', appName: 'Calculator' };
@@ -71,6 +76,172 @@ describe('which app a frame hosts', () => {
     expect(await hostedAppOf({ processName: 'ApplicationFrameHost' })).toBeUndefined();
     __setFrameHostReaderForTests(async () => { throw new Error('bridge down'); });
     expect(await hostedAppOf(frame(7003))).toBeUndefined();
+  });
+});
+
+describe('for a decision: always a fresh read', () => {
+  it('asks the bridge every time, whatever is remembered', async () => {
+    await hostedAppOf(frame(7003));
+    expect(reads).toBe(1);
+    for (let i = 0; i < 4; i++) expect(await freshHostedAppOf(frame(7003))).toEqual(CALC);
+    expect(reads).toBe(5);
+  });
+
+  it('a handle that now hosts another app: the fresh read says so while the display answer is still the old one', async () => {
+    expect(await hostedAppOf(frame(7003))).toEqual(CALC);
+    __setFrameHostReaderForTests(async () => new Map([['7003', SETTINGS]]), { keepCache: true });
+    expect(await hostedAppOf(frame(7003, { hostedProcessId: undefined }))).toEqual(CALC);   // display: remembered
+    expect(await freshHostedAppOf(frame(7003))).toEqual(SETTINGS);                           // decision: now
+    // What a decision just read is also the newest thing to show.
+    expect(await hostedAppOf(frame(7003))).toEqual(SETTINGS);
+  });
+
+  it('ignores what the window object carries, and gives no answer rather than a remembered one', async () => {
+    expect(await freshHostedAppOf(frame(7003, { hostedProcessId: 111, hostedProcessName: 'PhotosApp' }))).toEqual(CALC);
+    await hostedAppOf(frame(7003));
+    __setFrameHostReaderForTests(async () => { throw new Error('bridge down'); }, { keepCache: true });
+    expect(await freshHostedAppOf(frame(7003))).toBeUndefined();
+    __setFrameHostReaderForTests(async () => new Map(), { keepCache: true });
+    expect(await freshHostedAppOf(frame(7003))).toBeUndefined();        // the frame is gone, or hosts nothing now
+    expect(await freshHostedAppOf({ processName: 'ApplicationFrameHost' })).toBeUndefined();
+    expect(await freshHostedAppOf({ processName: 'OUTLOOK', handle: 7003 })).toBeUndefined();
+  });
+});
+
+describe('a window list is resolved with one bridge read', () => {
+  const five = () => [7003, 7004, 7005, 7006, 7007].map(h => frame(h, { title: `w${h}` }));
+  const slow = () => {
+    __setFrameHostReaderForTests(async () => { reads++; await new Promise(r => setTimeout(r, 30)); return new Map([['7003', CALC], ['7004', SETTINGS]]); });
+  };
+
+  it('five Store app frames, none known yet: 1 read', async () => {
+    slow();
+    const list = await withHostedApps([...five(), { processName: 'notepad', handle: 55, appName: 'Notepad' }]);
+    expect(reads).toBe(1);
+    expect(list.map(w => w.appName)).toEqual(['Calculator', 'Settings', 'Application Frame Host', 'Application Frame Host', 'Application Frame Host', 'Notepad']);
+  });
+
+  it('the same list again right away: no read (three of its frames host nothing yet, and that is remembered too)', async () => {
+    slow();
+    await withHostedApps(five());
+    await withHostedApps(five());
+    expect(reads).toBe(1);
+  });
+
+  it('five frames resolved one by one at the same moment share that one read', async () => {
+    slow();
+    await Promise.all(five().map(w => withHostedApp(w)));
+    expect(reads).toBe(1);
+  });
+
+  it('a list with no Store app frame, or whose frames already say what they host, asks nothing', async () => {
+    await withHostedApps([{ processName: 'notepad', handle: 55 }, { processName: 'explorer', handle: 56 }]);
+    await withHostedApps([frame(7003, { hostedProcessId: 6768, hostedProcessName: 'CalculatorApp' })]);
+    expect(reads).toBe(0);
+  });
+
+  it('the Windows adapter lists windows with one frame read', async () => {
+    slow();
+    run.mockResolvedValue({ windows: [7003, 7004, 7005, 7006, 7007].map(h => ({ title: `w${h}`, processName: 'ApplicationFrameHost', processId: 38636, handle: h,
+      bounds: { x: 0, y: 0, width: 1, height: 1 } })) });
+    const list = await new WindowsAdapter().listWindows();
+    expect(list).toHaveLength(5);
+    expect(reads).toBe(1);
+  });
+
+  it('a bridge that fails leaves the list as it was', async () => {
+    __setFrameHostReaderForTests(async () => { throw new Error('bridge down'); });
+    expect((await withHostedApps(five())).every(w => w.appName === 'Application Frame Host')).toBe(true);
+  });
+});
+
+describe('the input lease is on the app, not on the window\'s process', () => {
+  // Both windows belong to ApplicationFrameHost (38636). With no fence at all.
+  const calcWindow = { processId: 38636, processName: 'ApplicationFrameHost', appName: 'Calculator', title: 'Calculator', handle: 7003, hostedProcessId: 6768 };
+  const settingsWindow = { processId: 38636, processName: 'ApplicationFrameHost', appName: 'Settings', title: 'Settings', handle: 7004, hostedProcessId: 7100 };
+  const sent: string[] = [];
+  const type = (text: string) => guardedInput('typeText', [text], async () => { sent.push(text); return 'sent'; });
+  beforeEach(() => { sent.length = 0; });
+
+  it('the user switches from Calculator to Settings between two calls: the next input is refused as a foreground change', async () => {
+    let front = calcWindow;
+    __setForegroundReaderForTests(async () => front);
+    await type('47*89=');
+    await new Promise(r => setTimeout(r, 0));
+    // Not the agent's doing: no focus call, and its last input was not one that moves the focus.
+    front = settingsWindow;
+    await expect(type('into settings')).rejects.toThrow(/^foreground changed: you were working in "Calculator" \(pid 6768\), but "Settings" \(pid 7100\) is in front now/);
+    expect(sent).toEqual(['47*89=']);
+    expect(isGuardRefusalLike(await type('again').catch((e: Error) => e.message))).toBe(true);
+    expect(sent).toEqual(['47*89=']);
+  });
+
+  it('staying in Calculator goes on working', async () => {
+    __setForegroundReaderForTests(async () => ({ ...calcWindow }));
+    await type('1');
+    await type('2');
+    expect(sent).toEqual(['1', '2']);
+  });
+
+  it('the same window whose app was not resolved yet at the first call is not a switch', async () => {
+    let front: typeof calcWindow | Omit<typeof calcWindow, 'hostedProcessId'> = { processId: 38636, processName: 'ApplicationFrameHost', appName: 'Application Frame Host', title: 'Calculator', handle: 7003 };
+    __setForegroundReaderForTests(async () => front);
+    await type('1');
+    front = calcWindow;
+    await type('2');
+    expect(sent).toEqual(['1', '2']);
+  });
+
+  it('two ordinary apps are told apart as before', async () => {
+    let front = { processId: 42, processName: 'notepad', handle: 55 };
+    __setForegroundReaderForTests(async () => front);
+    await type('a');
+    front = { processId: 43, processName: 'winword', handle: 56 };
+    await expect(type('b')).rejects.toThrow(/^foreground changed: you were working in "notepad" \(pid 42\)/);
+  });
+
+  it('an act by name on the Store app in front counts, by the app\'s process or the frame\'s', async () => {
+    let front = calcWindow;
+    __setForegroundReaderForTests(async () => front);
+    const bridge = guardInputMethods({ invokeElement: async (_q: object) => 'invoked' });
+    await bridge.invokeElement({ processId: 6768, name: 'Zero', action: 'click' });
+    expect(appLabel(actedIn()!.processName, actedIn()!.appName)).toBe('Calculator');
+    await type('0');                                   // the lease is Calculator's: typing goes on
+    front = settingsWindow;                            // (setting the reader again would reset the lease)
+    await expect(type('x')).rejects.toThrow(/foreground changed/);
+  });
+});
+
+describe('the act line of the session log says who the act went to, as numbers', () => {
+  it('the app\'s process (for a Store app, the hosted one) and the window handle', () => {
+    expect(actTarget({ processId: 38636, hostedProcessId: 6768, handle: 18814450 })).toEqual({ appPid: 6768, appHandle: 18814450 });
+    expect(actTarget({ processId: 42, handle: 55 })).toEqual({ appPid: 42, appHandle: 55 });
+    expect(actTarget({ processId: 42, handle: 'AXWindow-3' })).toEqual({ appPid: 42 });   // a handle that is not a number is left out
+    expect(actTarget({ processId: 0 })).toEqual({});
+    expect(actTarget(undefined)).toEqual({});
+  });
+
+  it('is written to the session file, and only numbers', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'frame-host-session-'));
+    const before = process.env.CLAWDCURSOR_SESSION_DIR;
+    process.env.CLAWDCURSOR_SESSION_DIR = dir;
+    try {
+      const log = new SessionLog({ version: 't', surface: 'compact' });
+      log.record('accessibility', 'invoke', true, 12, undefined, undefined, { app: 'Calculator', appPid: 6768, appHandle: 18814450 });
+      log.record('accessibility', 'read_tree', true, 5);
+      log.record('computer', 'type', true, 5, undefined, undefined, { app: 'Calculator', appPid: 'Calculator' as never, appHandle: 1.5 });
+      const { calls } = readSession(log.file!);
+      expect(calls[0]).toMatchObject({ app: 'Calculator', appPid: 6768, appHandle: 18814450 });
+      expect('appPid' in calls[1]).toBe(false);
+      expect('appPid' in calls[2] || 'appHandle' in calls[2]).toBe(false);          // not numbers: not written
+      // `clawdcursor report` sends a summary of this file: neither number, and no app name, is in it.
+      const report = JSON.stringify(buildSessionReport(log.file!));
+      expect(report).toContain('invoke');
+      expect(report).not.toMatch(/appPid|appHandle|6768|18814450|Calculator/);
+    } finally {
+      if (before === undefined) delete process.env.CLAWDCURSOR_SESSION_DIR; else process.env.CLAWDCURSOR_SESSION_DIR = before;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

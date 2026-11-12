@@ -77,6 +77,8 @@ export interface LogCall {
   t: string; tool: string; action?: string;
   cls: 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
   ok: boolean; ms: number; outcome?: string; app?: string; code?: string;
+  /** Who the act went to, read by clawdcursor when it sent it: the app's process (for a Store app, the app its frame hosts) and the window handle. */
+  appPid?: number; appHandle?: number;
   steps?: Array<{ tool: string; action?: string; cls: LogCall['cls']; ok: boolean; outcome: string; app?: string }>;
 }
 

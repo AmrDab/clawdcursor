@@ -24,7 +24,7 @@
  * primary display. Whatever cannot be decided (no foreground, no process table, no bounds, no pointer position) is refused.
  */
 import { AsyncLocalStorage } from 'async_hooks';
-import { hostedAppOf } from '../platform/frame-host';
+import { freshHostedAppOf } from '../platform/frame-host';
 import { execFile } from 'child_process';
 import * as os from 'os';
 import type { ToolDefinition, ToolResult } from '../tools/types';
@@ -145,11 +145,14 @@ const pinsByHandle = (w: FenceWindow) => handlePlatform === 'win32' && typeof w.
 /**
  * Is this window one of a fenced process? A Store app's window belongs to ApplicationFrameHost, one process for every
  * Store app on the desktop, so such a window counts by the app it HOSTS, never by the host. Which app that is comes
- * from the one place that resolves it for the window list, the pill and the session log too (platform/frame-host.ts).
+ * from the one place that resolves it for the window list, the pill and the session log too (platform/frame-host.ts),
+ * but read FRESH from the bridge for every decision: not from that helper's display cache, and not from the
+ * `hostedProcessId` the window object carries (it may have come from the cache). A window handle can be reused and a
+ * frame can come to host another app; an allow must not rest on what the frame hosted a few seconds ago.
  */
 async function windowInFence(w: FenceWindow, env: NodeJS.ProcessEnv): Promise<boolean> {
   if (await inFence(w.processId, env)) return true;
-  return inFence((await hostedAppOf(w).catch(() => undefined))?.processId, env);
+  return inFence((await freshHostedAppOf(w).catch(() => undefined))?.processId, env);
 }
 
 interface Desktop {

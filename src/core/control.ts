@@ -128,10 +128,23 @@ export function __setForegroundReaderForTests(f: (() => Promise<Foreground | nul
 }
 
 // A process name is the app's to choose (macOS localizedName, a Linux WM_CLASS): quoted like any other screen text.
-const name = (f: Foreground) => `${quoteScreenText(String(f.processName ?? ''))} (pid ${f.processId})`;
+// A Store app is named as the app its frame hosts: "ApplicationFrameHost (pid N)" is the same words for Calculator and Settings.
+const name = (f: Foreground) => f.hostedProcessId
+  ? `${quoteScreenText(String(f.appName ?? f.processName ?? ''))} (pid ${f.hostedProcessId})`
+  : `${quoteScreenText(String(f.processName ?? ''))} (pid ${f.processId})`;
+/**
+ * Are these two foreground reads the same app? By the app's own process: for a Store app that is the process its frame
+ * HOSTS (frame-host.ts), because every Store app's window belongs to the one ApplicationFrameHost process. Comparing
+ * the window's process alone, a switch from Calculator to Settings between two calls looked like no switch at all,
+ * and the next input went to Settings. The same window handle is the same window whatever it hosts by now (an app
+ * still starting has no hosted process yet).
+ */
+const sameTarget = (a: Foreground, b: Foreground): boolean =>
+  (a.hostedProcessId ?? a.processId) === (b.hostedProcessId ?? b.processId)
+  || (a.handle !== undefined && a.handle === b.handle && a.processId === b.processId);
 const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
 const matches = (q: WindowQuery, f: Foreground) =>
-  (q.processId !== undefined && q.processId === f.processId)
+  (q.processId !== undefined && (q.processId === f.processId || q.processId === f.hostedProcessId))
   || (!!q.processName && lower(f.processName).includes(lower(q.processName)))
   || (!!q.title && !!f.title && windowTextIncludes(f.title, q.title));
 
@@ -162,12 +175,12 @@ async function before(): Promise<void> {
     }
     pending = null;
     explicit = true;
-  } else if (lease && lease.processId !== now.processId && !ownMove) {
+  } else if (lease && !sameTarget(lease, now) && !ownMove) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
   }
-  explicit = explicit || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
+  explicit = explicit || openedBy(now) || (leaseExplicit && !!lease && sameTarget(lease, now));
   await refuseAiHost(now, explicit);
   openedName = null;
   leaseExplicit = explicit;
@@ -216,8 +229,9 @@ async function byName(processId?: number): Promise<void> {
   // The fence: the process named, else the window in front, must be inside it. Checked before the background-process return below.
   if (processId !== undefined) await fenceCheck('act by name', { pid: processId });
   else await fenceInput(now);
-  if (!now || (processId !== undefined && processId !== now.processId)) return;
-  const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
+  // A target in another process is the agent's own choice. (An element of a Store app may be named by the app's process or by its frame's.)
+  if (!now || (processId !== undefined && processId !== now.processId && processId !== now.hostedProcessId)) return;
+  const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && !!lease && sameTarget(lease, now));
   await refuseAiHost(now, explicit);
   acted = now;
   working = now;
@@ -227,7 +241,7 @@ async function byName(processId?: number): Promise<void> {
  * The app the agent last acted in, by input or by name (the session log names it). Each act keeps its own foreground
  * read, so the same object back means the agent did not act on the window in front in between.
  */
-export function actedIn(): { processName: string; appName?: string } | undefined {
+export function actedIn(): { processName: string; appName?: string; processId: number; handle?: number | string; hostedProcessId?: number } | undefined {
   return acted;
 }
 

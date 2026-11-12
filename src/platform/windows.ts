@@ -13,7 +13,7 @@
  * Permissions: Windows has no TCC-style gate — returns all-true.
  */
 
-import { withHostedApp } from './frame-host';
+import { withHostedApp, withHostedApps } from './frame-host';
 import { beforePointerPress, isOwnUiPid } from './pointer-guard';
 import { resolveInstalledWindowsApp } from './win-app-resolve';
 import { execFile, spawn } from 'child_process';
@@ -381,7 +381,7 @@ export class WindowsAdapter implements PlatformAdapter {
       const raw = Array.isArray(result?.windows) ? result.windows : [];
       const windows: WindowInfo[] = raw.map(this.normalizeWindow).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
       // A Store app's window belongs to ApplicationFrameHost: say which app it hosts (frame-host.ts).
-      return Promise.all(windows.map(w => withHostedApp(w)));
+      return withHostedApps(windows);   // one bridge read for the whole list, at most
     } catch {
       return [];
     }

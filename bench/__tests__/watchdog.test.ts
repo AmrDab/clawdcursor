@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { Watchdog, readSessionCalls, tailSessionDir, type Proof } from '../lib/watchdog';
 import { appKey, isSharedHostName } from '../lib/rules';
-import { ownsFocus, type Focus } from '../lib/ownership';
 import type { LogCall } from '../lib/types';
 
 vi.useRealTimers();
@@ -13,7 +12,7 @@ const call = (tool: string, action: string, cls: LogCall['cls'], extra: Partial<
   ({ t: new Date().toISOString(), tool, action, cls, ok: true, ms: 10, outcome: 'ok', ...extra });
 /** By default the runner can prove everything: the tests of the other rules are not about privacy. */
 const dog = (over: Partial<{ maxCalls: number; maxSeconds: number; fixtureApps: string[] }> = {}, proof: Partial<Proof> = {}) =>
-  new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge'], ...over }, { ownsFocus: () => true, cdpIsFixture: () => true, ...proof });
+  new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge'], ...over }, { ownsFocus: () => true, ownsPid: () => true, cdpIsFixture: () => true, ...proof });
 
 describe('the watchdog rules', () => {
   it('lets a normal run through', () => {
@@ -91,44 +90,75 @@ describe('the watchdog rules', () => {
     expect(d.onTime(60.5)).toMatchObject({ rule: 'time-cap' });
   });
 
-  describe('privacy: a Store app is the app its frame hosts, the same identity the fence uses', () => {
-    // The desk: ApplicationFrameHost (38636) owns both frames; Calculator is 6768 (started by the benchmark), Settings 7100 (the owner's).
-    const calcFocus: Focus = { chain: [38636, 900], frame: { hosted: [38636, 6768], title: 'Calculator' } };
-    const settingsFocus: Focus = { chain: [38636, 900], frame: { hosted: [38636, 7100], title: 'Settings' } };
-    const calcDog = (focus: Focus | null) => new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
-      { ownsFocus: () => ownsFocus(focus, [6768], 'Calculator'), cdpIsFixture: () => false });
-    const invoke = (app: string) => call('accessibility', 'invoke', 'act-name', { app });
+  describe('privacy: an act is judged by the process it went to, recorded WITH the act', () => {
+    // The desk: ApplicationFrameHost (38636) owns both Store app frames. Calculator is process 6768, started by the
+    // benchmark; Settings is 7100, the owner's. clawdcursor writes the app's process and the window's handle on the act line.
+    const CALC = 6768, SETTINGS = 7100;
+    /** The focus proof is whatever the test says: these lines must not be decided by it. */
+    const calcDog = (focusIsOurs: boolean) => new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+      { ownsFocus: () => focusIsOurs, ownsPid: pid => pid === CALC, cdpIsFixture: () => false });
+    const invoke = (app: string, appPid?: number) => call('accessibility', 'invoke', 'act-name', { app, ...(appPid ? { appPid, appHandle: 18814450 } : {}) });
 
-    it('an act on the fenced Calculator is allowed, named as the app or as its shared host', async () => {
-      expect(await calcDog(calcFocus).judge(invoke('Calculator'))).toBeNull();
-      // What the second Codex run logged for every invoke, and what stopped it: the host's name for Calculator.
-      expect(await calcDog(calcFocus).judge(invoke('Application Frame Host'))).toBeNull();
-      expect(await calcDog(calcFocus).judge(invoke('ApplicationFrameHost'))).toBeNull();
-      expect(await calcDog(calcFocus).judge(call('computer', 'type', 'act-other', { app: 'Application Frame Host' }))).toBeNull();
+    it('a frame-host act whose recorded process is the Calculator the benchmark started passes', async () => {
+      // What stopped the second Codex run: every invoke was logged under the host's name.
+      expect(await calcDog(false).judge(invoke('Application Frame Host', CALC))).toBeNull();
+      expect(await calcDog(false).judge(invoke('ApplicationFrameHost', CALC))).toBeNull();
+      expect(await calcDog(false).judge(call('computer', 'type', 'act-other', { app: 'Application Frame Host', appPid: CALC }))).toBeNull();
+      expect(await calcDog(false).judge(invoke('Calculator', CALC))).toBeNull();
     });
 
-    it('an act on another Store app (Settings) still stops the run, under either name', async () => {
-      expect(await calcDog(settingsFocus).judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
-      expect(await calcDog(settingsFocus).judge(invoke('Settings'))).toMatchObject({ rule: 'privacy' });
-      // Even logged as "Calculator": the frame in front hosts another app.
-      expect(await calcDog(settingsFocus).judge(invoke('Calculator'))).toMatchObject({ rule: 'privacy' });
+    it('with the process of another Store app (Settings) it stops the run', async () => {
+      const v = await calcDog(true).judge(invoke('Application Frame Host', SETTINGS));
+      expect(v).toMatchObject({ rule: 'privacy' });
+      expect(v!.detail).toContain(`process ${SETTINGS}`);
+      // ... wherever the focus is by the time the line is read, and even if the line says "Calculator".
+      expect(await calcDog(true).judge(invoke('Calculator', SETTINGS))).toMatchObject({ rule: 'privacy' });
+      // The frame host's own process is not an app.
+      expect(await calcDog(true).judge(invoke('Application Frame Host', 38636))).toMatchObject({ rule: 'privacy' });
     });
 
-    it('a frame with the right app but another title, or no readable focus, stops the run', async () => {
-      expect(await calcDog({ chain: [38636], frame: { hosted: [6768], title: 'Calculator - Settings' } }).judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
-      expect(await calcDog(null).judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
+    it('with NO process recorded it stops the run: where the focus is now does not decide', async () => {
+      const v = await calcDog(true).judge(invoke('Application Frame Host'));
+      expect(v).toMatchObject({ rule: 'privacy' });
+      expect(v!.detail).toMatch(/no record of which app/);
+      for (const bad of [0, -1, 1.5, NaN]) {
+        expect(await calcDog(true).judge({ ...invoke('Application Frame Host'), appPid: bad }), String(bad)).toMatchObject({ rule: 'privacy' });
+      }
     });
 
-    it('the shared host name admits nothing for a fixture that is not a Store app', async () => {
-      const native = new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['BenchFixture'] }, { ownsFocus: () => ownsFocus(settingsFocus, [4120]), cdpIsFixture: () => false });
-      expect(await native.judge(invoke('Application Frame Host'))).toMatchObject({ rule: 'privacy' });
+    it('the live focus check is not asked for a line that carries its process', async () => {
+      let asked = 0;
+      const d = new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+        { ownsFocus: () => { asked++; return true; }, ownsPid: pid => pid === CALC, cdpIsFixture: () => false });
+      await d.judge(invoke('Application Frame Host', CALC));
+      await d.judge(invoke('Calculator', CALC));
+      await d.judge(invoke('Application Frame Host', SETTINGS));
+      expect(asked).toBe(0);
     });
 
-    it('only that one name is exempt from the name check: any other unknown name stops at once', async () => {
+    it('every step of a batch is judged by the line\'s recorded process', async () => {
+      const steps = [{ tool: 'accessibility', action: 'invoke', cls: 'act-name' as const, ok: true, outcome: 'ok' }, { tool: 'computer', action: 'type', cls: 'act-other' as const, ok: true, outcome: 'ok' }];
+      expect(await calcDog(false).judge(call('batch', '', 'act-other', { app: 'Application Frame Host', appPid: CALC, steps }))).toBeNull();
+      expect(await calcDog(true).judge(call('batch', '', 'act-other', { app: 'Application Frame Host', appPid: SETTINGS, steps }))).toMatchObject({ rule: 'privacy' });
+      expect(await calcDog(true).judge(call('batch', '', 'act-other', { app: 'Application Frame Host', steps }))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a proof that fails or throws counts as "not ours"', async () => {
+      const d = new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+        { ownsFocus: () => true, ownsPid: () => Promise.reject(new Error('no process list')), cdpIsFixture: () => false });
+      expect(await d.judge(invoke('Calculator', CALC))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('only the shared host\'s name is exempt from the name check: any other unknown name stops at once', async () => {
       expect(isSharedHostName('Application Frame Host')).toBe(true);
       expect(isSharedHostName('ApplicationFrameHost.exe')).toBe(true);
       expect(isSharedHostName('Application Frame Host Helper')).toBe(false);
-      expect(await calcDog(calcFocus).judge(invoke('Outlook'))).toMatchObject({ rule: 'privacy' });
+      expect(await calcDog(true).judge(invoke('Outlook', CALC))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a log that records no process at all (an older build) still falls back to the name and the focus, for a named app', async () => {
+      expect(await calcDog(true).judge(invoke('Calculator'))).toBeNull();
+      expect(await calcDog(false).judge(invoke('Calculator'))).toMatchObject({ rule: 'privacy' });
     });
   });
 

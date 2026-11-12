@@ -54,7 +54,8 @@ export function isInput(u: Unit): boolean {
 /**
  * A name that says nothing about which app it is: ApplicationFrameHost owns the window of EVERY Store app. clawdcursor
  * names a Store app by the app it hosts ("Calculator"); a build that does not, or a frame it could not resolve, logs
- * this. The name can then neither admit nor condemn the act: the process proof alone decides (it knows what the frame hosts).
+ * this. The name can then neither admit nor condemn the act: the process recorded with the act decides, and without
+ * one the act is not allowed.
  */
 export function isSharedHostName(name: string): boolean {
   return appKey(name) === 'applicationframehost';
