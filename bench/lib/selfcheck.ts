@@ -19,6 +19,7 @@ import { buildNative, nativeArgs, openApp, openNativeFixture, readStateFile, typ
 import { ORACLES, nativeDo, oracleCounts, runnable, scriptProblems } from './oracles';
 import { TASKS_DIR } from './tasks';
 import { cdpIsFixture, ownsFocus, readFocus } from './ownership';
+import { Watchdog, readSessionCalls } from './watchdog';
 import { freePort, pidsByCommandLine, tryRun, waitFor } from './proc';
 import { startFixtureServer } from './fixture-server';
 import { evaluate, loadTasks } from './tasks';
@@ -307,6 +308,37 @@ export async function selfcheckFixtures(buildDir: string | undefined, log: (line
           ok = check(allowed(focus), `Calculator: window focus by its title is allowed (${text(focus).split('\n')[0].slice(0, 80)})`) && ok;
           const host = await call('window', { action: 'focus', processName: 'ApplicationFrameHost' });
           ok = check(!allowed(host), 'Calculator: its shared host process by name is refused (FENCED)') && ok;
+          // One act by name, in the benchmark's own Calculator (the 0 key): what stopped the second Codex run. The session
+          // log must name the app it went to as the APP, and the watchdog, with its real proofs, must let it pass.
+          const press = await call('accessibility', { action: 'invoke', name: 'Zero' });
+          ok = check(allowed(press) && !press.isError, `Calculator: an act by name on it is allowed (${text(press).split('\n')[0].slice(0, 70)})`) && ok;
+          const calls = readSessionCalls(path.join(root, 'sessions-2'));
+          const acted = calls.filter(c => c.tool === 'accessibility' && c.action === 'invoke');
+          ok = check(acted.length === 1 && acted[0].app === 'Calculator', `Calculator: the session log names the app acted in "Calculator" (it says "${acted[0]?.app ?? '(none)'}")`) && ok;
+          const roots = await calc.roots();
+          ok = check(!!acted[0]?.appPid && roots.includes(acted[0].appPid) && Number.isInteger(acted[0].appHandle),
+            `Calculator: the act line carries who it went to: process ${acted[0]?.appPid} (the Calculator the benchmark started: ${roots.join(', ')}), window ${acted[0]?.appHandle}`) && ok;
+          const dog = new Watchdog({ maxCalls: 50, maxSeconds: 600, fixtureApps: calc.apps }, {
+            ownsFocus: async () => ownsFocus(await readFocus(), await calc.roots(), calc.frameTitle), ownsPid: async pid => (await calc.roots()).includes(pid),
+            cdpIsFixture: () => false });
+          let verdict: { rule: string; detail: string } | null = null;
+          for (const c of calls) verdict ??= await dog.judge(c);
+          ok = check(verdict === null, `Calculator: the watchdog agrees with the fence: no privacy stop${verdict ? ` (${verdict.rule}: ${verdict.detail})` : ''}`) && ok;
+          // A batch: each step carries its OWN verified target, and the watchdog judges each step by it.
+          const two = await call('batch', { steps: [{ name: 'accessibility', arguments: { action: 'invoke', name: 'Zero' } }, { name: 'accessibility', arguments: { action: 'invoke', name: 'Zero' } }] });
+          const batchLine = readSessionCalls(path.join(root, 'sessions-2')).filter(c => c.tool === 'batch').pop();
+          const stepPids = (batchLine?.steps ?? []).map(st => st.appPid);
+          ok = check(allowed(two) && stepPids.length === 2 && stepPids.every(p => !!p && roots.includes(p)),
+            `Calculator: each step of a batch records its own target process (${stepPids.join(', ')})`) && ok;
+          const batchVerdict = batchLine ? await dog.judge(batchLine) : { rule: 'missing', detail: 'no batch line' };
+          ok = check(batchVerdict === null, `Calculator: the watchdog passes the batch step by step${batchVerdict ? ` (${batchVerdict.rule}: ${batchVerdict.detail})` : ''}`) && ok;
+          const stripped = batchLine ? await dog.judge({ ...batchLine, steps: batchLine.steps!.map(st => ({ ...st, appPid: undefined })) }) : null;
+          ok = check(stripped?.rule === 'privacy', 'Calculator: the same batch with no process on its steps is stopped, though the batch line has one') && ok;
+          // The same act under the shared host's name: inside by the process recorded with it; with no such record, stopped.
+          const asHost = await dog.judge({ ...acted[0], app: 'Application Frame Host' });
+          ok = check(asHost === null, 'Calculator: an act logged under the shared host name passes by the process recorded with it') && ok;
+          const noRecord = await dog.judge({ ...acted[0], app: 'Application Frame Host', appPid: undefined, appHandle: undefined });
+          ok = check(noRecord?.rule === 'privacy', 'Calculator: a shared-host act with no process recorded is stopped, wherever the focus is') && ok;
         });
       } finally {
         await calc.close();

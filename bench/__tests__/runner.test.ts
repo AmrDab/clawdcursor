@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { EventEmitter } from 'events';
 import { execFileSync } from 'child_process';
-import { RESULT_FILES, agentRoot, needsImages, notApplicable, parseArgs, prepareOutDir, readBaseline, selectTasks, writeTaskResults } from '../run';
+import { RESULT_FILES, agentRoot, needsImages, notApplicable, notRunAfter, parseArgs, prepareOutDir, readBaseline, selectTasks, writeTaskResults } from '../run';
 import { which } from '../lib/proc';
 import { globalPackageRoots, resolveCli } from '../lib/isolated';
 import { Cleanup } from '../lib/cleanup';
@@ -13,7 +13,7 @@ import { isolatedEnv, serverCommand } from '../lib/isolated';
 import { nativeArgs, nativeStatePath, parseCalcDisplay, parseCalcProbe, readStateFile } from '../lib/live-fixtures';
 import { evaluate } from '../lib/tasks';
 import { buildPrompt, PRIVACY_RULES } from '../lib/prompt';
-import { DONE_MARK, FAILED_MARK } from '../lib/scorer';
+import { DONE_MARK, FAILED_MARK, buildReport, renderMarkdown } from '../lib/scorer';
 import { loadTasks } from '../lib/tasks';
 
 describe('the isolated clawdcursor', () => {
@@ -464,5 +464,31 @@ describe('a fixture whose window the benchmark needs is started with its window 
   it('has a flag for the check that opens the real fixtures behind the fence', () => {
     expect(parseArgs(['--selfcheck-fixtures']).selfcheckFixtures).toBe(true);
     expect(parseArgs([]).selfcheckFixtures).toBe(false);
+  });
+});
+
+describe('a privacy stop ends the run: what it did not get to is reported', () => {
+  const tasks = loadTasks().filter(t => ['calc-multiply', 'web-canvas-draw', 'web-trap-new'].includes(t.id));
+  const model = (label: string, seesImages = true) => ({ label, model: label.split(':')[1], adapter: { seesImages } }) as never;
+  const codex = model('codex:default');
+  const local = model('ollama:qwen2.5:7b', false);
+
+  it('the rest of that model\'s tasks, then every task of the models after it', () => {
+    expect(notRunAfter([codex, local], tasks, codex, tasks[0])).toEqual([
+      { model: 'codex:default', task: 'web-canvas-draw' }, { model: 'codex:default', task: 'web-trap-new' },
+      { model: 'ollama:qwen2.5:7b', task: 'calc-multiply' }, { model: 'ollama:qwen2.5:7b', task: 'web-trap-new' },   // the canvas task is n/a for it anyway
+    ]);
+  });
+
+  it('nothing when the stop came on the last task of the last model, and models before it are not listed', () => {
+    expect(notRunAfter([codex, local], tasks, local, tasks[2])).toEqual([]);
+    expect(notRunAfter([codex, local], tasks, local, tasks[0]).map(x => x.model)).toEqual(['ollama:qwen2.5:7b']);
+  });
+
+  it('they are listed in the report as not run, not as failures', () => {
+    const skipped = notRunAfter([codex], tasks, codex, tasks[0]).map(x => ({ task: x.task, why: `${x.model}: not run (privacy stop)` }));
+    const md = renderMarkdown(buildReport({ date: 'd', os: 'windows', clawdcursor: '2', models: ['codex:default'], skipped }, []));
+    expect(md).toContain('- web-canvas-draw: codex:default: not run (privacy stop)');
+    expect(md).toContain('- web-trap-new: codex:default: not run (privacy stop)');
   });
 });

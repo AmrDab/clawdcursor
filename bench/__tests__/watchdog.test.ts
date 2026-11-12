@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { Watchdog, readSessionCalls, tailSessionDir, type Proof } from '../lib/watchdog';
-import { appKey } from '../lib/rules';
+import { appKey, isSharedHostName } from '../lib/rules';
 import type { LogCall } from '../lib/types';
 
 vi.useRealTimers();
@@ -12,7 +12,7 @@ const call = (tool: string, action: string, cls: LogCall['cls'], extra: Partial<
   ({ t: new Date().toISOString(), tool, action, cls, ok: true, ms: 10, outcome: 'ok', ...extra });
 /** By default the runner can prove everything: the tests of the other rules are not about privacy. */
 const dog = (over: Partial<{ maxCalls: number; maxSeconds: number; fixtureApps: string[] }> = {}, proof: Partial<Proof> = {}) =>
-  new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge'], ...over }, { ownsFocus: () => true, cdpIsFixture: () => true, ...proof });
+  new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Edge'], ...over }, { ownsFocus: () => true, ownsPid: () => true, cdpIsFixture: () => true, ...proof });
 
 describe('the watchdog rules', () => {
   it('lets a normal run through', () => {
@@ -90,6 +90,111 @@ describe('the watchdog rules', () => {
     expect(d.onTime(60.5)).toMatchObject({ rule: 'time-cap' });
   });
 
+  describe('privacy: an act is judged by the process it went to, recorded WITH the act', () => {
+    // The desk: ApplicationFrameHost (38636) owns both Store app frames. Calculator is process 6768, started by the
+    // benchmark; Settings is 7100, the owner's. clawdcursor writes the app's process and the window's handle on the act line.
+    const CALC = 6768, SETTINGS = 7100;
+    /** The focus proof is whatever the test says: these lines must not be decided by it. */
+    const calcDog = (focusIsOurs: boolean) => new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+      { ownsFocus: () => focusIsOurs, ownsPid: pid => pid === CALC, cdpIsFixture: () => false });
+    const invoke = (app: string, appPid?: number) => call('accessibility', 'invoke', 'act-name', { app, ...(appPid ? { appPid, appHandle: 18814450 } : {}) });
+
+    it('a frame-host act whose recorded process is the Calculator the benchmark started passes', async () => {
+      // What stopped the second Codex run: every invoke was logged under the host's name.
+      expect(await calcDog(false).judge(invoke('Application Frame Host', CALC))).toBeNull();
+      expect(await calcDog(false).judge(invoke('ApplicationFrameHost', CALC))).toBeNull();
+      expect(await calcDog(false).judge(call('computer', 'type', 'act-other', { app: 'Application Frame Host', appPid: CALC }))).toBeNull();
+      expect(await calcDog(false).judge(invoke('Calculator', CALC))).toBeNull();
+    });
+
+    it('with the process of another Store app (Settings) it stops the run', async () => {
+      const v = await calcDog(true).judge(invoke('Application Frame Host', SETTINGS));
+      expect(v).toMatchObject({ rule: 'privacy' });
+      expect(v!.detail).toContain(`process ${SETTINGS}`);
+      // ... wherever the focus is by the time the line is read, and even if the line says "Calculator".
+      expect(await calcDog(true).judge(invoke('Calculator', SETTINGS))).toMatchObject({ rule: 'privacy' });
+      // The frame host's own process is not an app.
+      expect(await calcDog(true).judge(invoke('Application Frame Host', 38636))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('with NO process recorded it stops the run: where the focus is now does not decide', async () => {
+      const v = await calcDog(true).judge(invoke('Application Frame Host'));
+      expect(v).toMatchObject({ rule: 'privacy' });
+      expect(v!.detail).toMatch(/no verified record of which process/);
+      for (const bad of [0, -1, 1.5, NaN]) {
+        expect(await calcDog(true).judge({ ...invoke('Application Frame Host'), appPid: bad }), String(bad)).toMatchObject({ rule: 'privacy' });
+      }
+    });
+
+    it('the live focus check is not asked for a line that carries its process', async () => {
+      let asked = 0;
+      const d = new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+        { ownsFocus: () => { asked++; return true; }, ownsPid: pid => pid === CALC, cdpIsFixture: () => false });
+      await d.judge(invoke('Application Frame Host', CALC));
+      await d.judge(invoke('Calculator', CALC));
+      await d.judge(invoke('Application Frame Host', SETTINGS));
+      expect(asked).toBe(0);
+    });
+
+    describe('a batch: every step is judged by the process THAT STEP recorded', () => {
+      const s = (tool: string, action: string, cls: LogCall['cls'], app?: string, appPid?: number) =>
+        ({ tool, action, cls, ok: true, outcome: 'ok', ...(app ? { app } : {}), ...(appPid ? { appPid, appHandle: 18814450 } : {}) });
+      const batch = (steps: ReturnType<typeof s>[], line: Partial<LogCall> = {}) => call('batch', '', 'act-other', { steps, ...line });
+
+      it('every step in the Calculator the benchmark started: passes', async () => {
+        const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other', 'Application Frame Host', CALC), s('computer', 'wait', 'act-other')];
+        expect(await calcDog(false).judge(batch(steps, { app: 'Calculator', appPid: CALC }))).toBeNull();
+      });
+
+      it('one step in the middle went to Settings, the last one back to Calculator: the run stops', async () => {
+        // The batch LINE carries its last act (Calculator). Judged by the line, this batch would pass.
+        const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other', 'Application Frame Host', SETTINGS),
+          s('accessibility', 'invoke', 'act-name', 'Calculator', CALC)];
+        const v = await calcDog(true).judge(batch(steps, { app: 'Calculator', appPid: CALC }));
+        expect(v).toMatchObject({ rule: 'privacy' });
+        expect(v!.detail).toMatch(/^batch step computer type .*process 7100/);
+      });
+
+      it('a step with no process of its own is unproven, whatever the batch line says: the run stops', async () => {
+        const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other')];
+        expect(await calcDog(true).judge(batch(steps, { app: 'Calculator', appPid: CALC }))).toMatchObject({ rule: 'privacy' });
+        const named = [s('computer', 'type', 'act-other', 'Calculator')];   // a name, but no verified process
+        expect(await calcDog(true).judge(batch(named, { app: 'Calculator', appPid: CALC }))).toMatchObject({ rule: 'privacy' });
+        const shared = [s('computer', 'type', 'act-other', 'Application Frame Host')];
+        expect(await calcDog(true).judge(batch(shared, { app: 'Application Frame Host', appPid: CALC }))).toMatchObject({ rule: 'privacy' });
+      });
+
+      it('a step that touches no window needs nothing, and a refused step never ran', async () => {
+        const steps = [s('computer', 'wait', 'act-other'), s('accessibility', 'read_tree', 'blind'), { ...s('computer', 'type', 'act-other'), ok: false, outcome: 'refused' }];
+        expect(await calcDog(false).judge(batch(steps))).toBeNull();
+      });
+    });
+
+    it('a pid the log marks as anything but a positive integer is no evidence', async () => {
+      for (const bad of ['6768', true, null, {}, [6768]]) {
+        expect(await calcDog(true).judge({ ...invoke('Application Frame Host'), appPid: bad as never }), JSON.stringify(bad)).toMatchObject({ rule: 'privacy' });
+      }
+    });
+
+    it('a proof that fails or throws counts as "not ours"', async () => {
+      const d = new Watchdog({ maxCalls: 20, maxSeconds: 60, fixtureApps: ['Calculator'] },
+        { ownsFocus: () => true, ownsPid: () => Promise.reject(new Error('no process list')), cdpIsFixture: () => false });
+      expect(await d.judge(invoke('Calculator', CALC))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('only the shared host\'s name is exempt from the name check: any other unknown name stops at once', async () => {
+      expect(isSharedHostName('Application Frame Host')).toBe(true);
+      expect(isSharedHostName('ApplicationFrameHost.exe')).toBe(true);
+      expect(isSharedHostName('Application Frame Host Helper')).toBe(false);
+      expect(await calcDog(true).judge(invoke('Outlook', CALC))).toMatchObject({ rule: 'privacy' });
+    });
+
+    it('a log that records no process at all (an older build) still falls back to the name and the focus, for a named app', async () => {
+      expect(await calcDog(true).judge(invoke('Calculator'))).toBeNull();
+      expect(await calcDog(false).judge(invoke('Calculator'))).toMatchObject({ rule: 'privacy' });
+    });
+  });
+
   describe('privacy: fails closed', () => {
     const step = (tool: string, action: string, cls: LogCall['cls'], extra: object = {}) => ({ tool, action, cls, ok: true, outcome: 'ok', ...extra });
     const none: Partial<Proof> = { ownsFocus: () => false, cdpIsFixture: () => false };
@@ -135,16 +240,20 @@ describe('the watchdog rules', () => {
       expect(await dog({}, none).judge(call('system', 'clipboard_write', 'act-other'))).toMatchObject({ rule: 'privacy' });
     });
 
-    it('checks every step of a batch, with the batch line\'s app', async () => {
-      const steps = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords'), step('accessibility', 'set_value', 'act-name')];
-      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Word', steps }))).toMatchObject({ rule: 'privacy' });
-      expect(await dog().judge(call('batch', '', 'act-other', { steps }))).toMatchObject({ rule: 'privacy' });   // no app at all
-      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toBeNull();
-      expect(await dog({}, { ownsFocus: () => false }).judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toMatchObject({ rule: 'privacy' });
+    it('checks every step of a batch by what the step itself recorded, never by the batch line', async () => {
+      const bare = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords'), step('accessibility', 'set_value', 'act-name')];
+      // Steps that recorded nothing are unproven, with a fixture's name on the line or not.
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Word', steps: bare }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { steps: bare }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', appPid: 500, steps: bare }))).toMatchObject({ rule: 'privacy' });
+      // Steps with their own app and process, all the fixture's: allowed.
+      const own = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords', { app: 'Edge', appPid: 500 }), step('accessibility', 'set_value', 'act-name', { app: 'Edge', appPid: 500 })];
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', appPid: 500, steps: own }))).toBeNull();
+      expect(await dog({}, { ownsPid: () => false }).judge(call('batch', '', 'act-other', { app: 'Edge', appPid: 500, steps: own }))).toMatchObject({ rule: 'privacy' });
     });
 
     it('a step that names its own app is judged by it', async () => {
-      const steps = [step('computer', 'click', 'act-coords', { app: 'Edge' }), step('computer', 'click', 'act-coords', { app: 'Outlook' })];
+      const steps = [step('computer', 'click', 'act-coords', { app: 'Edge', appPid: 500 }), step('computer', 'click', 'act-coords', { app: 'Outlook', appPid: 500 })];
       expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toMatchObject({ rule: 'privacy' });
     });
 
@@ -177,7 +286,8 @@ describe('the watchdog rules', () => {
     it('asks for the focus proof once per log line', async () => {
       let asked = 0;
       const d = dog({}, { ownsFocus: () => { asked++; return true; } });
-      const steps = [step('computer', 'click', 'act-coords'), step('computer', 'type', 'act-other'), step('window', 'focus', 'act-other')];
+      // Two window steps (no process is ever recorded for those: the focus decides) and an input step with its own process.
+      const steps = [step('window', 'focus', 'act-other'), step('computer', 'type', 'act-other', { app: 'Edge', appPid: 500 }), step('window', 'maximize', 'act-other')];
       expect(await d.judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toBeNull();
       expect(asked).toBe(1);
     });

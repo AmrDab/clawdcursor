@@ -29,6 +29,7 @@ import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-gu
 import { logger } from '../core/observability/logger';
 import { clipScreenText } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
+import { actedIn, actRecord } from '../core/control';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -64,7 +65,9 @@ export interface BatchStep {
 
 type StepStatus = 'ok' | 'guard_failed' | 'blocked' | 'error' | 'unknown_tool' | 'skipped';
 
-export interface StepOutcome { i: number; label: string; status: StepStatus; text: string; pressedKeys?: boolean; }
+export interface StepOutcome { i: number; label: string; status: StepStatus; text: string; pressedKeys?: boolean;
+  /** What THIS step acted on, verified when it was sent: not the batch's last target. */
+  app?: string; appPid?: number; appHandle?: number; }
 
 export interface BatchResult {
   total: number;
@@ -182,13 +185,16 @@ export async function executeBatch(
 
     // Execute via the real handler.
     let res: ToolResult;
+    const before = actedIn();
     try {
       res = await tool.handler(args, ctx);
     } catch (e) {
       res = { text: `threw: ${e instanceof Error ? e.message : String(e)}`, isError: true };
     }
+    // This step's own target (if it acted on a window at all), as the input guard verified it when the step ran.
+    const target = actRecord(before);
     if (res.isError) {
-      outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys });
+      outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys, ...target });
       return halt(i, `step ${i} (${label}) errored`);
     }
 
@@ -201,7 +207,7 @@ export async function executeBatch(
 
     // A screenshot step names its id first, so it survives the step text's truncation.
     const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
-    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys });
+    outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys, ...target });
     completed++;
   }
 
@@ -280,7 +286,8 @@ export function getBatchTools(): ToolDefinition[] {
           isError: !result.allDone,
           steps: result.steps.map(s => {
             const a = stepArgs(steps[s.i]).action;
-            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys };
+            return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys,
+              ...(s.app ? { app: s.app } : {}), ...(s.appPid ? { appPid: s.appPid } : {}), ...(s.appHandle ? { appHandle: s.appHandle } : {}) };
           }),
         };
       },

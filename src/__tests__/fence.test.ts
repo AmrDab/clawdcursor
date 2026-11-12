@@ -20,6 +20,7 @@ import {
   fenceOcrCapture, fenceOcrText, fencePlatform, fencePointer, fenceRoots, fenceTools, fenceWindowList, inFence, isFenceRefusal, normaliseTargets, pointerPoints,
   primaryRect, wholly, __setFenceDesktopForTests, __setFencePlatformForTests, __setFenceProcessTableForTests, type FenceWindow, type Rect,
 } from '../core/fence';
+import { __setFrameHostReaderForTests } from '../platform/frame-host';
 import { classifyResult } from '../core/result-codes';
 import { outcomeOf } from '../surface/session-log';
 import { isGuardRefusal, __setForegroundReaderForTests } from '../core/control';
@@ -64,11 +65,14 @@ beforeEach(() => {
   __setFenceProcessTableForTests(async () => TABLE);
   __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary });
   __setFencePlatformForTests('win32');   // where the window tools take an exact handle
+  // What the bridge says each frame hosts, by window handle: the fence asks it for every decision.
+  __setFrameHostReaderForTests(async () => new Map([['7003', { processId: 400, processName: 'CalculatorApp' }], ['7004', { processId: 201, processName: 'SystemSettings' }]]));
 });
 afterEach(() => {
   __setFenceProcessTableForTests(null);
   __setFenceDesktopForTests(null);
   __setFencePlatformForTests(null);
+  __setFrameHostReaderForTests(null);
   __setForegroundReaderForTests(async () => null);
   delete process.env[FENCE_ENV];
 });
@@ -468,8 +472,7 @@ describe('window actions', () => {
       // As the platform reports them on Windows: no hostedProcessId on either frame.
       const bareCalc = { ...calc, hostedProcessId: undefined };
       const bareSettings = { ...settings, hostedProcessId: undefined };
-      const lookup = { frameHosts: async () => new Map([['7003', 400], ['7004', 201]]) };
-      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary, ...lookup });
+      __setFrameHostReaderForTests(async () => new Map([['7003', { processId: 400, processName: 'CalculatorApp' }], ['7004', { processId: 201, processName: 'SystemSettings' }]]));
       windows = [fixture, bareCalc, bareSettings];
       front = bareCalc;
       for (const name of ['read_screen', 'type_text', 'key_press', 'desktop_screenshot']) expect(await refused(tool(name)), name).toBe(false);
@@ -482,16 +485,49 @@ describe('window actions', () => {
       expect((await adapter.listWindows()).map(w => w.title)).toEqual(['Bench Dialog', 'Calculator']);
     });
 
+    it('the cache says Calculator, a fresh read says another app: the fence refuses', async () => {
+      // The display cache learns that frame 7003 hosts Calculator (pid 400, fenced).
+      const { hostedAppOf, withHostedApp } = await import('../platform/frame-host');
+      const bare = { ...calc, hostedProcessId: undefined };
+      expect(await hostedAppOf(bare)).toMatchObject({ processId: 400 });
+      front = bare;
+      windows = [fixture, bare];
+      expect(await refused(tool('type_text'))).toBe(false);
+      // Then the handle is reused (or the frame comes to host another app): the bridge now says pid 201, the owner's.
+      let reads = 0;
+      __setFrameHostReaderForTests(async () => { reads++; return new Map([['7003', { processId: 201, processName: 'SystemSettings' }]]); }, { keepCache: true });
+      // For DISPLAY the remembered answer may still be shown for a few seconds ...
+      expect((await withHostedApp(bare)).hostedProcessId).toBe(400);
+      expect(reads).toBe(0);
+      // ... but every fence decision reads fresh, and refuses.
+      for (const name of ['type_text', 'read_screen', 'key_press', 'mouse_click', 'desktop_screenshot', 'invoke_element']) {
+        const t = tool(name);
+        expect(await refused(t), name).toBe(true);
+        expect(t.calls, name).toEqual([]);
+      }
+      expect(await refused(tool('focus_window', targeted), { title: 'Calculator' })).toBe(true);
+      expect(await refused(tool('close_window', targeted), { handle: 7003 })).toBe(true);
+      expect(reads).toBeGreaterThanOrEqual(8);   // one read per decision, none from the cache
+      // The fenced window list drops it too.
+      expect((await fencePlatform({ listWindows: async () => [fixture, bare] }, fenced).listWindows()).map(w => w.title)).toEqual(['Bench Dialog']);
+    });
+
+    it('a window object that CLAIMS to host a fenced app is not believed: the bridge is asked', async () => {
+      // As it would look after the display cache filled it in: hostedProcessId 400, while the bridge says 201.
+      __setFrameHostReaderForTests(async () => new Map([['7003', { processId: 201, processName: 'SystemSettings' }]]));
+      front = { ...calc, hostedProcessId: 400 };
+      expect(await refused(tool('type_text'))).toBe(true);
+      await expect(fenceInput(front, fenced)).rejects.toThrow(FENCED);
+    });
+
     it('a frame whose hosted process cannot be looked up is outside the fence', async () => {
-      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary,
-        frameHosts: async () => { throw new Error('bridge down'); } });
+      __setFrameHostReaderForTests(async () => { throw new Error('bridge down'); });
       front = { ...calc, hostedProcessId: undefined };
       expect(await refused(tool('read_screen'))).toBe(true);
     });
 
     it('only ApplicationFrameHost is looked up: another process cannot borrow a fenced window\'s handle', async () => {
-      __setFenceDesktopForTests({ foreground: async () => front, windows: async () => windows, cursor: async () => cursor, primary: async () => primary,
-        frameHosts: async () => new Map([['7002', 400]]) });
+      __setFrameHostReaderForTests(async () => new Map([['7002', { processId: 400, processName: 'CalculatorApp' }]]));
       front = owners;   // OUTLOOK.EXE, handle 7002
       expect(await refused(tool('read_screen'))).toBe(true);
     });
@@ -682,7 +718,7 @@ describe('typing', () => {
   });
 
   it('keys go only to a fenced window in front', async () => {
-    await expect(fenceInput(fixture, fenced)).resolves.toBeUndefined();
+    expect(await fenceInput(fixture, fenced)).toBe(101);          // the fenced process the allow rested on
     await expect(fenceInput(owners, fenced)).rejects.toThrow(/^FENCED: input/);
     await expect(fenceInput(null, fenced)).rejects.toThrow(FENCED);
     process.env[FENCE_ENV] = '100';

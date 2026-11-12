@@ -16,7 +16,9 @@
  *    working in. A change right after the agent's own focus-moving input (a click, Return, a shortcut) or focus call is
  *    its own doing; a change after a gap — a wait, a pause between calls — is the user's.
  */
-import { fenceCheck, fenceInput, isFenceRefusal } from './fence';
+import { fenceActive, fenceCheck, fenceInput, isFenceRefusal } from './fence';
+import { freshHostedAppOf, isFrameHost } from '../platform/frame-host';
+import { appLabel } from './banner';
 import * as fs from 'fs';
 import { quoteScreenText } from './result-codes';
 import * as path from 'path';
@@ -86,7 +88,13 @@ export async function sleepUnlessStopped(ms: number): Promise<boolean> {
 
 interface Foreground { processId: number; processName: string; appName?: string; title?: string; handle?: number | string; guessed?: boolean;
   /** For the fence (fence.ts): the app a Store app's frame hosts, and where the window is. */
-  hostedProcessId?: number; bounds?: { x: number; y: number; width: number; height: number } }
+  hostedProcessId?: number; bounds?: { x: number; y: number; width: number; height: number };
+  /**
+   * The process this act went to, VERIFIED when it was sent: the pid the fence allowed it by, else (no fence) the window's
+   * own process, or for a Store app the process its frame hosts read fresh from the bridge. Never the display cache's
+   * answer. Undefined when it could not be verified: the session log then records no process for the act.
+   */
+  actPid?: number }
 /** undefined = not bound yet: the next input binds to whatever is in front. */
 let lease: Foreground | undefined;
 /** A window the agent focused or opened: bound when it is in front (activation can lag the call). */
@@ -128,10 +136,39 @@ export function __setForegroundReaderForTests(f: (() => Promise<Foreground | nul
 }
 
 // A process name is the app's to choose (macOS localizedName, a Linux WM_CLASS): quoted like any other screen text.
-const name = (f: Foreground) => `${quoteScreenText(String(f.processName ?? ''))} (pid ${f.processId})`;
+// A Store app is named as the app its frame hosts: "ApplicationFrameHost (pid N)" is the same words for Calculator and Settings.
+const name = (f: Foreground) => f.hostedProcessId
+  ? `${quoteScreenText(String(f.appName ?? f.processName ?? ''))} (pid ${f.hostedProcessId})`
+  : `${quoteScreenText(String(f.processName ?? ''))} (pid ${f.processId})`;
+/**
+ * Are these two foreground reads the same app? By the app's own process: for a Store app that is the process its frame
+ * HOSTS (frame-host.ts), because every Store app's window belongs to the one ApplicationFrameHost process. Comparing
+ * the window's process alone, a switch from Calculator to Settings between two calls looked like no switch at all,
+ * and the next input went to Settings. The same window handle is the same window whatever it hosts by now (an app
+ * still starting has no hosted process yet).
+ */
+const sameTarget = (a: Foreground, b: Foreground): boolean => {
+  if ((a.hostedProcessId ?? a.processId) === (b.hostedProcessId ?? b.processId)) return true;
+  // Both say which app they host, and they differ: another app, even in the very same frame window (a frame can come
+  // to host another app, and a handle can be reused).
+  if (a.hostedProcessId !== undefined && b.hostedProcessId !== undefined) return false;
+  // One of them does not know its app yet (still starting): the same window of the same process is the same window.
+  return a.handle !== undefined && a.handle === b.handle && a.processId === b.processId;
+};
+
+/**
+ * The process an act is about to go to, verified now. `decided` is the fence's own answer when there is a fence. With
+ * no fence: an ordinary window is its own process (this read IS the fresh one); a Store app frame is asked about again,
+ * fresh, because what `now` carries may be the display cache's.
+ */
+async function verifiedPid(now: Foreground, decided: number | undefined): Promise<number | undefined> {
+  if (decided !== undefined) return decided;
+  if (!isFrameHost(now.processName)) return now.processId;
+  return (await freshHostedAppOf(now).catch(() => undefined))?.processId;
+}
 const lower = (s: string) => s.toLowerCase().replace(/\.(exe|app)$/, '');
 const matches = (q: WindowQuery, f: Foreground) =>
-  (q.processId !== undefined && q.processId === f.processId)
+  (q.processId !== undefined && (q.processId === f.processId || q.processId === f.hostedProcessId))
   || (!!q.processName && lower(f.processName).includes(lower(q.processName)))
   || (!!q.title && !!f.title && windowTextIncludes(f.title, q.title));
 
@@ -151,7 +188,7 @@ async function before(): Promise<void> {
     await new Promise(r => setTimeout(r, 100));
     now = (await readForeground().catch(() => null)) ?? now;
   }
-  await fenceInput(now);   // the pointer's own bounds are checked where it moves and presses (pointer-guard.ts)
+  const decided = await fenceInput(now);   // the pointer's own bounds are checked where it moves and presses (pointer-guard.ts)
   if (isOwnUiPid(now.processId)) throw new Error(`foreground changed: clawdcursor's own on-screen control is in front, not ${lease ? name(lease) : 'an app'} — nothing was sent. Wait for the user, then focus your window with window {"action":"focus"}.`);
   const ownMove = Date.now() - movedAt < OWN_MOVE_MS;
   let explicit = false;
@@ -162,18 +199,19 @@ async function before(): Promise<void> {
     }
     pending = null;
     explicit = true;
-  } else if (lease && lease.processId !== now.processId && !ownMove) {
+  } else if (lease && !sameTarget(lease, now) && !ownMove) {
     throw new Error(
       `foreground changed: you were working in ${name(lease)}, but ${name(now)} is in front now — the user may have switched. ` +
       'Nothing was sent. If you meant to work there, focus it with window {"action":"focus"} first; otherwise focus your own window again.');
   }
-  explicit = explicit || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
+  explicit = explicit || openedBy(now) || (leaseExplicit && !!lease && sameTarget(lease, now));
   await refuseAiHost(now, explicit);
   openedName = null;
   leaseExplicit = explicit;
-  lease = now;
-  acted = now;
-  working = now;
+  const at: Foreground = { ...now, actPid: await verifiedPid(now, decided) };
+  lease = at;
+  acted = at;
+  working = at;
 }
 
 const AI_HOST_REFUSAL = (n: string, kind: 'list' | 'ancestor') =>
@@ -214,20 +252,23 @@ async function byName(processId?: number): Promise<void> {
   stopCheck();
   const now = await readForeground().catch(() => null);
   // The fence: the process named, else the window in front, must be inside it. Checked before the background-process return below.
-  if (processId !== undefined) await fenceCheck('act by name', { pid: processId });
-  else await fenceInput(now);
-  if (!now || (processId !== undefined && processId !== now.processId)) return;
-  const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && lease?.processId === now.processId);
+  let decided: number | undefined;
+  if (processId !== undefined) { await fenceCheck('act by name', { pid: processId }); if (fenceActive()) decided = processId; }
+  else decided = await fenceInput(now);
+  // A target in another process is the agent's own choice. (An element of a Store app may be named by the app's process or by its frame's.)
+  if (!now || (processId !== undefined && processId !== now.processId && processId !== now.hostedProcessId)) return;
+  const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && !!lease && sameTarget(lease, now));
   await refuseAiHost(now, explicit);
-  acted = now;
-  working = now;
+  const at: Foreground = { ...now, actPid: await verifiedPid(now, decided) };
+  acted = at;
+  working = at;
 }
 
 /**
  * The app the agent last acted in, by input or by name (the session log names it). Each act keeps its own foreground
  * read, so the same object back means the agent did not act on the window in front in between.
  */
-export function actedIn(): { processName: string; appName?: string } | undefined {
+export function actedIn(): { processName: string; appName?: string; processId: number; handle?: number | string; hostedProcessId?: number; actPid?: number } | undefined {
   return acted;
 }
 
@@ -295,3 +336,18 @@ function settle(): void {
 }
 
 setInputGuard({ stopCheck, before, done, focused, launched, byName });
+
+/**
+ * What an act that just ran went to, for the session log: the app's name as on the pill, the VERIFIED process (`actPid`)
+ * and the window handle. `since` is `actedIn()` from before the call: the same object back means this call did not act
+ * on a window, and there is nothing to record. A direct call and each step of a batch are recorded through this.
+ */
+export function actRecord(since: unknown): { app?: string; appPid?: number; appHandle?: number } {
+  const w = acted;
+  if (!w || w === since) return {};
+  const id = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
+  const app = appLabel(w.processName, w.appName);
+  const appPid = id(w.actPid);
+  const appHandle = id(w.handle);
+  return { ...(app ? { app } : {}), ...(appPid ? { appPid } : {}), ...(appHandle ? { appHandle } : {}) };
+}

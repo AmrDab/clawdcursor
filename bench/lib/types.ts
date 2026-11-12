@@ -77,7 +77,10 @@ export interface LogCall {
   t: string; tool: string; action?: string;
   cls: 'blind' | 'vision' | 'act-name' | 'act-coords' | 'act-other';
   ok: boolean; ms: number; outcome?: string; app?: string; code?: string;
-  steps?: Array<{ tool: string; action?: string; cls: LogCall['cls']; ok: boolean; outcome: string; app?: string }>;
+  /** Who the act went to, read by clawdcursor when it sent it: the app's process (for a Store app, the app its frame hosts) and the window handle. */
+  appPid?: number; appHandle?: number;
+  /** Each step of a batch carries its OWN target (app, appPid, appHandle), recorded when that step ran. */
+  steps?: Array<{ tool: string; action?: string; cls: LogCall['cls']; ok: boolean; outcome: string; app?: string; appPid?: number; appHandle?: number }>;
 }
 
 /** A call as the adapter saw the model make it: `sig` is a hash of tool + arguments (the session log has no arguments). */

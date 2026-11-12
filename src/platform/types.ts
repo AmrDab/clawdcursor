@@ -75,6 +75,8 @@ export interface WindowInfo {
    */
   hostedProcessId?: number;
   hostedProcessName?: string;
+  /** The hosted app's own display name ("Calculator"). `appName` carries it once the window is resolved (frame-host.ts). */
+  hostedAppName?: string;
   /** True when this is the adapter's best guess at the window in front (Linux without xdotool), not what the OS said. */
   guessed?: boolean;
 }

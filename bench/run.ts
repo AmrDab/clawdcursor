@@ -80,6 +80,22 @@ export function notApplicable(t: TaskSpec, m: Pick<ModelRun, 'label'> & { adapte
 }
 
 /**
+ * A privacy stop ends the whole run at (model, task). The pairs it did not get to: the rest of that model's tasks, then
+ * every task of the models after it. Pairs a model would not have run anyway (n/a) are left out.
+ */
+export function notRunAfter(models: ModelRun[], tasks: TaskSpec[], stoppedModel: Pick<ModelRun, 'label'>, stoppedTask: Pick<TaskSpec, 'id'>): Array<{ model: string; task: string }> {
+  const left: Array<{ model: string; task: string }> = [];
+  let reached = false;
+  for (const m of models) {
+    for (const t of tasks) {
+      if (reached && !notApplicable(t, m)) left.push({ model: m.label, task: t.id });
+      if (m.label === stoppedModel.label && t.id === stoppedTask.id) reached = true;
+    }
+  }
+  return left;
+}
+
+/**
  * The results directory must be new or empty: session logs and state files left by an earlier run would be read back
  * as this run's.
  */
@@ -172,6 +188,7 @@ async function runOne(task: TaskSpec, m: ModelRun, env: Env, n: number, repeat: 
     const cdpClock = setInterval(() => { proveCdp().then(ok => { cdpProven = ok; }, () => { cdpProven = false; }); }, 5000);
     const dog = new Watchdog({ maxCalls: task.caps.calls, maxSeconds: task.caps.seconds, fixtureApps: fixture.apps }, {
       ownsFocus: async () => ownsFocus(await readFocus(), await fixture.roots(), fixture.frameTitle),
+      ownsPid: async pid => (await fixture.roots()).includes(pid),
       cdpIsFixture: () => cdpProven,
     });
     const abort = new AbortController();
@@ -307,7 +324,12 @@ async function live(o: Options): Promise<void> {
               + `${s.killed ? `, stopped by the watchdog (${s.killed})` : ''}${s.gate.pass ? '' : `  [gate: ${s.gate.failures.join('; ')}]`}`);
             if (s.killed === 'privacy') throw new Error('PRIVACY: the agent acted outside the fixture windows. The run is stopped.');
           } catch (e) {
-            if ((e as Error).message.startsWith('PRIVACY')) { if (repeats.length) scores.push(aggregate(repeats)); throw e; }
+            if ((e as Error).message.startsWith('PRIVACY')) {
+              if (repeats.length) scores.push(aggregate(repeats));
+              // The run ends here. What it did not get to is said, not left out of the report.
+              skipped.push(...notRunAfter(models, run, m, task).map(x => ({ task: x.task, why: `${x.model}: not run (privacy stop)` })));
+              throw e;
+            }
             skipped.push({ task: task.id, why: `${m.label}: ${(e as Error).message}` });
             console.log(`error: ${(e as Error).message}`);
             break;
