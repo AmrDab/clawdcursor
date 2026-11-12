@@ -35,8 +35,8 @@
 #                             saturate(1.2): the feColorMatrix arithmetic of colorMatrix.ts
 #   fade                      in over .6 s when it appears (out over .5 s)                         S:41-42
 #   pulse (our paused form)   no turn: the whole ring, stroke opacity .94, glow .34, brightness    S:124-143
-#                             1.9; each quarter's opacity swings .54..1 on its own cosine clock    S:5187 (bop-*)
-#                             (2.3 s, 3.036 s, 1.932 s, 3.634 s). "ocean" blobs: (100,80,220)      S:1401
+#                             1.9, held still (#392: "blue and steady"; the library breathes it).  S:5187 (bop-*)
+#                             "ocean" blobs: (100,80,220)                                          S:1401
 #                             (60,120,255) (80,100,200) (50,140,220) (120,80,255) (70,130,255)
 #                             (140,100,240) (90,110,230) (130,70,255); colours do not shift
 #
@@ -57,8 +57,7 @@
 #     the beam is the library's light theme - the highlight and the inset shadow dark instead of white (S:1736 light,
 #     S:99), saturate 1.5 - with the stroke and the glow at .6 and .7: the library's .12 and .26 are for a card that
 #     is the only thing on its page, and an amber glow that faint is lost on a white document.
-#   - The pulse form is the library's pulse-outside reduced to its breathe: its blobs do not drift, and each quarter
-#     is one of our four strips (top, right, bottom, left).
+#   - The paused form is the library's pulse-outside held still: its blobs do not drift and it does not breathe.
 #   - Where Windows is set to show no animations (SPI_GETCLIENTAREAANIMATION off): one still frame, the whole ring.
 #
 # Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik
@@ -75,7 +74,6 @@
 #
 # stdin, from the parent:
 #   TARGET <hwnd> <pid>   the window to outline (the pid is for the macOS drawer; ignored here)
-#   TARGET MONITOR        the agent works with no window (the desktop): outline the monitor the pointer is on
 #   TARGET                draw nothing
 #   HIDE <ms>             step aside for a screen capture (only sent after OUTLINE_CAPTURABLE)
 # The beam is shown while that window is the one in front and not minimized, and follows it as it moves or resizes
@@ -100,7 +98,7 @@
 
 param(
     [string]$Color = '',   # accepted for the caller's sake (the Linux drawer takes the colour); the beam has its own
-    [switch]$Paused        # the paused form: the pulse (no turn, a slow breathe, blue tones)
+    [switch]$Paused        # the paused form: the whole ring, still, in blue tones
 )
 
 $ErrorActionPreference = 'Stop'
@@ -119,7 +117,6 @@ using System.Windows.Forms;
 // One side of the beam: a layered window whose pixels are set with UpdateLayeredWindow.
 public class BeamStrip : Form {
     [StructLayout(LayoutKind.Sequential)] struct PT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] struct BLEND { public byte Op, Flags, Alpha, Format; }
     [StructLayout(LayoutKind.Sequential)] struct BMI {
         public int Size, Width, Height; public short Planes, BitCount; public int Compression, SizeImage, XPpm, YPpm, ClrUsed, ClrImportant;
     }
@@ -129,7 +126,6 @@ public class BeamStrip : Form {
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
     [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    [DllImport("user32.dll")] static extern bool UpdateLayeredWindow(IntPtr hWnd, IntPtr dst, IntPtr at, IntPtr size, IntPtr src, IntPtr from, int key, ref BLEND blend, int flags);
     [DllImport("user32.dll")] static extern bool UpdateLayeredWindowIndirect(IntPtr hWnd, ref ULWINFO info);
     [DllImport("gdi32.dll")] static extern IntPtr CreateCompatibleDC(IntPtr dc);
     [DllImport("gdi32.dll")] static extern IntPtr CreateDIBSection(IntPtr dc, ref BMI info, uint usage, out IntPtr bits, IntPtr section, uint offset);
@@ -142,6 +138,7 @@ public class BeamStrip : Form {
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         StartPosition = FormStartPosition.Manual;
+        Text = "clawdcursor beam";   // the pill (banner.ps1) looks for this name above itself and goes back over it
     }
     protected override bool ShowWithoutActivation { get { return true; } }
     protected override CreateParams CreateParams {
@@ -231,13 +228,6 @@ public class BeamStrip : Form {
         UpdateLayeredWindowIndirect(Handle, ref info);
         SetThreadDpiAwarenessContext(aware);
     }
-
-    // The same pixels at another opacity (the pulse's breathe): nothing is drawn again.
-    public void Fade(byte alpha) {
-        if (bits == IntPtr.Zero) return;
-        BLEND blend = new BLEND(); blend.Alpha = alpha; blend.Format = 1;
-        UpdateLayeredWindow(Handle, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, 0, ref blend, 2);
-    }
 }
 
 public class WindowOutline {
@@ -299,8 +289,6 @@ public class WindowOutline {
                                            55, 100, 85, 26,  93.9, 0, 74, 32,  100, 27.1, 26, 42,  100, 27.1, 52, 48 };
     static readonly int[] Amber = { 255, 170, 30,  255, 200, 60,  245, 130, 10,  255, 215, 90,  245, 158, 11,  255, 190, 50,  250, 120, 20,  255, 205, 70,  235, 140, 5 };
     static readonly int[] Ocean = { 100, 80, 220,  60, 120, 255,  80, 100, 200,  50, 140, 220,  120, 80, 255,  70, 130, 255,  140, 100, 240,  90, 110, 230,  130, 70, 255 };
-    // The pulse: each quarter's opacity, low and high, its period and its delay (s). Top, right, bottom, left.
-    static readonly double[] Breathe = { .54, 1, 2.3, 0,  .54, 1, 3.036, .644,  .54, 1, 3.634, 1.909,  .54, 1, 1.932, 1.265 };
 
     const int Q = 4096;   // steps in a turn
     // The three conic gradients, a value (0..256) for each step of the turn from where the beam is.
@@ -321,7 +309,6 @@ public class WindowOutline {
     }
 
     volatile IntPtr target = IntPtr.Zero;   // written by the stdin thread, read by the timer
-    volatile bool monitor;                  // TARGET MONITOR
     long hideUntil;                         // DateTime ticks (UTC); written by the stdin thread
     RECT last;
     bool shown;
@@ -360,7 +347,7 @@ public class WindowOutline {
                     long n = 0;
                     if (p.Length > 1) long.TryParse(p[1], out n);
                     // EndsWith: a parent that puts a byte-order mark in front of its first line must not lose it.
-                    if (p[0].EndsWith("TARGET")) { monitor = p.Length > 1 && p[1] == "MONITOR"; target = new IntPtr(n); }
+                    if (p[0].EndsWith("TARGET")) target = new IntPtr(n);
                     else if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
                     else continue;
                     // At once, not on the next poll: the parent waits only 90 ms after HIDE before it captures.
@@ -378,7 +365,7 @@ public class WindowOutline {
         // Only while the beam is on screen and moving (Layout sets how often).
         frame = new System.Windows.Forms.Timer();
         frame.Interval = 45;
-        frame.Tick += (s, e) => { if (shown && !still) Paint(false); };
+        frame.Tick += (s, e) => { if (shown && !still && !paused) Paint(false); };   // the paused ring is still
         frame.Start();
     }
 
@@ -408,8 +395,8 @@ public class WindowOutline {
         RECT r = new RECT();
         IntPtr screen = IntPtr.Zero;
         bool on = DateTime.UtcNow.Ticks >= Interlocked.Read(ref hideUntil);
-        // No window, or the desktop in front: the monitor the pointer is on, where the agent's last click went.
-        bool desk = on && (monitor || (t != IntPtr.Zero && GetForegroundWindow() == t && IsDesktop(t)));
+        // The desktop in front: the monitor the pointer is on, where the agent's last click went.
+        bool desk = on && t != IntPtr.Zero && GetForegroundWindow() == t && IsDesktop(t);
         if (desk) {
             POINT at;
             MONITORINFO info = new MONITORINFO();
@@ -655,15 +642,6 @@ public class WindowOutline {
     void Paint(bool all) {
         double now = clock.Elapsed.TotalSeconds;
         turning = !still && !paused;
-        if (!turning && !all) {
-            // The pulse: no pixel changes. Each strip breathes on its own clock (cosine, there and back).
-            for (int k = 0; k < 4; k++) {
-                double phase = (now - Breathe[4 * k + 3]) / Breathe[4 * k + 2];
-                double v = Breathe[4 * k] + (Breathe[4 * k + 1] - Breathe[4 * k]) * (1 - Math.Cos(2 * Math.PI * phase)) / 2;
-                strips[k].Fade((byte)(255 * v));
-            }
-            return;
-        }
         // Where the beam is, and the colour filter now.
         beam = turning ? (int)(now / TurnSeconds % 1 * Q) : 0;
         double swing = (1 - Math.Cos(2 * Math.PI * now / HueSeconds)) / 2;
@@ -673,7 +651,7 @@ public class WindowOutline {
         spark = light ? 0x01000000 : 0x01010101;
         // Coming up: from clear to full over .6 s.
         double risen = Clamp01((now - shownAt) / FadeInSeconds);
-        byte opacity = (byte)(255 * (still ? 1 : risen * risen * (3 - 2 * risen)));
+        byte opacity = (byte)(255 * (turning ? risen * risen * (3 - 2 * risen) : 1));   // a still ring is drawn once: no fade
         bool rising = risen < 1;
         // The white highlight on the ring (the bright part, which the eye follows) is lit on every frame. The rest - the
         // glow and the ring where the beam window opens and closes - only for a small window: otherwise the side
@@ -851,7 +829,7 @@ public class WindowOutline {
             s.Base[i] = (a << 24) | (((r2 * a * 257 + 32768) >> 16) << 16) | (((g2 * a * 257 + 32768) >> 16) << 8) | ((b2 * a * 257 + 32768) >> 16);
             if (act == 3) { s.Pixels[i] = 0; return; }
         }
-        if (!turning) { s.Pixels[i] = s.Base[i]; return; }   // the still frame and the pulse: the whole ring, no highlight
+        if (!turning) { s.Pixels[i] = s.Base[i]; return; }   // the still frame and the paused form: the whole ring, no highlight
         Lit(s, i);
     }
 

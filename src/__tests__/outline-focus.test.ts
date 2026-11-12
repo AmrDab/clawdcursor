@@ -92,11 +92,11 @@ describe('the outline follows the agent\'s own focus and launches', () => {
     await d.keyPress('a');
     await d.openApp('Calculator');
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
-    // Another app in front after the launch is not the one the agent opened: no window, so the monitor (#392).
+    // Another app in front after the launch is not the one the agent opened: no window, so no outline.
     fg = EDGE;
     await fakeDesktop().openApp('Calculator');
     expect(workingWindow()).toBeUndefined();
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400', 'TARGET MONITOR']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400', 'TARGET']);
   });
 
   it('a read after a switch does not move it, whatever is in front by then', async () => {

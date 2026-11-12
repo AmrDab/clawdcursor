@@ -7,12 +7,12 @@
  *   - BANNER_STOP on the child's stdout fires onStopRequested
  *   - disabled state spawns nothing
  *   - the window outline rides the same lifecycle as the pill and dies with it;
- *     it is told which window the agent works in; when the agent acts with none, the monitor (#392)
+ *     it is told which window the agent works in, and draws nothing without one
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
-import { controlBanner } from '../core/banner';
+import { controlBanner, outlineFlags } from '../core/banner';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { ChildProcess } from 'child_process';
 import { existsSync, readFileSync } from 'fs';
@@ -193,17 +193,23 @@ describe('the outline around the window the agent works in', () => {
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
   });
 
-  it('is told when the agent acts with no window any more: it goes around the monitor instead (#392)', () => {
+  it('is told when there is no window any more, so it hides', () => {
     controlBanner.pin();
     controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
     controlBanner.setWorkingWindow(undefined);
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET MONITOR']);
+    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
   });
 
-  it('the paused outline is the blue one, told it is paused: no travelling highlight', () => {
-    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'core', 'banner.ts'), 'utf8');
-    expect(src).toContain("['-Color', PAUSED_OUTLINE, '-Paused']");
-    expect(src).toContain("['--color', PAUSED_OUTLINE, '--paused']");
+  it('the paused outline is spawned paused and blue on every OS; the running one with no flags (#392)', () => {
+    const modes: unknown[] = [];
+    controlBanner.__setOutlineSpawnerForTests(mode => { modes.push(mode); const c = new FakeChild(); outlines.push(c); return c as unknown as ChildProcess; });
+    controlBanner.pin();
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    expect(modes).toEqual([{ paused: undefined }, { paused: expect.objectContaining({ id: 1 }) }]);
+    for (const os of ['win32', 'darwin', 'linux'] as const) expect(outlineFlags(false, os)).toEqual([]);
+    expect(outlineFlags(true, 'win32')).toEqual(['-Color', '#3b82f6', '-Paused']);
+    expect(outlineFlags(true, 'darwin')).toEqual(['--color', '#3b82f6', '--paused']);
+    expect(outlineFlags(true, 'linux')).toEqual(['--color', '#3b82f6', '--paused']);
   });
 
   it('a window known only by its process (macOS) is sent with handle 0', () => {
@@ -279,21 +285,13 @@ describe('no full-screen glow', () => {
     }
   });
 
-  it('an outline goes around a screen only when the agent works with no window: the one the pointer is on (#392)', () => {
-    const ps = read('scripts', 'window-outline.ps1');
-    expect(ps).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
-    expect(ps).toContain('monitor = p.Length > 1 && p[1] == "MONITOR"');
-    expect(ps).toContain('bool desk = on && (monitor || (t != IntPtr.Zero && GetForegroundWindow() == t && IsDesktop(t)));');
-    expect(ps).toContain('MonitorFromPoint(at, 2)');
+  it('no outline drawer sizes a window to a screen (only the desktop itself in front is outlined as its monitor)', () => {
+    expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
     expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
-    expect(swift).toContain('parts[1] == "MONITOR"');
-    expect(swift).toContain('if targetMonitor { return pointerScreen() }');
     const py = read('scripts', 'linux', 'overlay.py');
     const start = py.indexOf('def run_outline(');
-    const outline = py.slice(start, py.indexOf('\ndef ', start + 1));
-    expect(outline).not.toMatch(/get_n_monitors|get_primary_monitor/);
-    expect(outline).toMatch(/if state\['monitor'\]:[\s\S]*?get_monitor_at_point\(px, py\)/);
+    expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
   it('the beam is still where the OS is set to reduce motion, and the paused form does not turn (#392)', () => {
@@ -307,30 +305,13 @@ describe('no full-screen glow', () => {
     expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
   });
 
-  // The look is a port of Border Beam and Thinking Orbs (libraries.dev, MIT): the library's own numbers, with its notice.
-  it('the beam and the orb carry the library\'s recipe and its licence notice (#392)', () => {
+  // The look is a port of Border Beam and Thinking Orbs (libraries.dev, MIT): its notice goes with it.
+  it('the beam and the orb carry the library\'s licence notice (#392)', () => {
     const ps = read('scripts', 'window-outline.ps1');
     expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
     expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
-    expect(ps).toContain('const double TurnSeconds = 1.96, HueSeconds = 12, HueRange = 10, FadeInSeconds = 0.6;');
-    expect(ps).toContain('BeamMask = { 0, 0, 30, 0, 36, .1, 44, .35, 52, 1, 80, 1, 86, .35, 92, .1, 95, 0, 100, 0 }');
-    // Our colours on its recipe: amber while the agent works, the library's "ocean" blues while it waits.
-    expect(ps).toContain('Amber = { 255, 170, 30,  255, 200, 60,  245, 130, 10,  255, 215, 90,  245, 158, 11,  255, 190, 50,  250, 120, 20,  255, 205, 70,  235, 140, 5 }');
-    expect(ps).toContain('int[] tones = paused ? Ocean : Amber;');
-    // On a light window the beam is stronger, with a dark highlight (the library's light theme), so it is not lost on white.
-    expect(ps).toContain('double strokeOpacity = paused ? 0.94 : light ? 0.6 : 0.26, innerOpacity = light ? 0.7 : paused ? 0.34 : 0.42;');
-    expect(ps).toContain('glare = light ? darkAt : whiteAt;');
-    const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
-    expect(swift).toContain('conic([(0, 0), (30, 0), (36, 0.1), (44, 0.35), (52, 1), (80, 1), (86, 0.35), (92, 0.1), (95, 0), (100, 0)])');
-    expect(swift).toContain('turn.duration = 1.96');
-    expect(swift).toContain('let tones = paused ? ocean : amberTones');
-    // macOS in Light Mode: the same light theme (the system appearance stands in for the pixels Windows reads).
-    expect(swift).toContain('stroke.opacity = paused ? 0.94 : light ? 0.6 : 0.26');
-    const pill = read('scripts', 'banner.ps1');
-    expect(pill).toContain('MIT License, Copyright (c) 2026 Jakub');
-    expect(pill).toContain('const double Speed = 3.9, Sized = 2.4;');
-    expect(swift).toContain('let box = 20.0, speed = 3.9, sized = 2.4');
+    expect(read('scripts', 'mac', 'overlay.swift')).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
+    expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {

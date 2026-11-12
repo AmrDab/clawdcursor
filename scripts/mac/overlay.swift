@@ -28,11 +28,10 @@
 //                  straight through it. stdin: "TARGET <handle> <pid>" names the
 //                  process (a bare "TARGET": none). The border is drawn around the
 //                  process's frontmost window while that app is in front, and follows it.
-//                  "TARGET MONITOR": the agent works with no window (the desktop):
-//                  the border goes around the screen the pointer is on, as it does
-//                  when the target app is in front with no window of its own.
+//                  When the target app is in front with no window of its own (Finder's
+//                  desktop), the border goes around the screen the pointer is on.
 //                  The look is a port of Border Beam (below); --paused: its pulse,
-//                  in blue tones. With Reduce Motion on: one still frame.
+//                  held still, in blue tones. With Reduce Motion on: one still frame.
 //
 // The beam and the pill's orb are ports of Border Beam and Thinking Orbs by Jakub Antalik (libraries.dev,
 // github.com/Jakubantalik/Libraries.dev, packages/border-beam and packages/thinking-orbs), MIT License,
@@ -360,8 +359,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line == "TARGET" || line.hasPrefix("TARGET ") {
                     let parts = line.split(separator: " ")
                     let pid = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
-                    let monitor = parts.count > 1 && parts[1] == "MONITOR"
-                    DispatchQueue.main.async { self?.targetPid = pid; self?.targetMonitor = monitor }
+                    DispatchQueue.main.async { self?.targetPid = pid }
                 }
             }
         }
@@ -643,8 +641,6 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
     var targetPid = 0
-    /// "TARGET MONITOR": the agent works with no window, so the screen the pointer is on gets the outline.
-    var targetMonitor = false
 
     /// The screen the pointer is on (where the agent's last click went), in AppKit coordinates: the part of it below
     /// the menu bar and beside the Dock, which are above the outline and would hide a side of it.
@@ -656,10 +652,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     /// What the outline goes around, in AppKit coordinates, and whether that is a whole screen: the target process's
     /// frontmost ordinary window while that app is in front (the windows are listed only then; the list is front to
-    /// back), or the pointer's screen when the agent works with no window (TARGET MONITOR, or an app in front that has
-    /// no window of its own: Finder's desktop).
+    /// back), or the pointer's screen when that app is in front with no window of its own (Finder's desktop).
     func targetFrame() -> (frame: NSRect, screen: Bool)? {
-        if targetMonitor { return pointerScreen() }
         guard targetPid != 0,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
               let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
@@ -684,8 +678,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     ///     highlight (peak .75 at 66%), which turns with the beam window.
     /// The blobs keep their place and reach along their edge in proportion to the frame, and their reach across it in
     /// points, as on Windows. The colours go through the library's brightness(1.3) saturate(1.2) once.
-    /// --paused: the pulse - the whole ring in the "ocean" blues (stroke .94, glow .34, brightness 1.9), its opacity
-    /// swinging .54..1 over 2.3 s. With Reduce Motion on: the whole ring, still.
+    /// --paused: the pulse held still (#392: "blue and steady") - the whole ring in the "ocean" blues (stroke .94,
+    /// glow .34, brightness 1.9). With Reduce Motion on: the whole ring, still.
     /// In Light Mode: the library's light theme as on a light window on Windows - the highlight and the inset shadow
     /// dark instead of white, saturate 1.5, the stroke and the glow at .6 and .7 - so the beam is not lost on white.
     /// Windows reads the pixels under the frame; here that needs Screen Recording, so the system appearance stands in.
@@ -820,16 +814,6 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 turn.repeatCount = .infinity
                 layer.add(turn, forKey: "turn")
             }
-        } else if paused && !still {
-            // The pulse: .54 to 1 and back, 2.3 s a round.
-            let breathe = CABasicAnimation(keyPath: "opacity")
-            breathe.fromValue = 0.54
-            breathe.toValue = 1
-            breathe.duration = 1.15
-            breathe.autoreverses = true
-            breathe.repeatCount = .infinity
-            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-            lit.add(breathe, forKey: "breathe")
         }
 
         // The layers for a frame of this size. A whole screen has square corners; a window's are rounded like its own,
@@ -895,8 +879,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             }
             if !win.isVisible {
                 win.orderFrontRegardless()
-                if !still {
-                    // Coming up: from clear to full over .6 s.
+                if turning {
+                    // Coming up: from clear to full over .6 s (a still ring, as on Windows, just appears).
                     let rise = CABasicAnimation(keyPath: "opacity")
                     rise.fromValue = 0
                     rise.toValue = 1

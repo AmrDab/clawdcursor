@@ -41,6 +41,7 @@ Add-Type -AssemblyName System.Drawing
 Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 
 public class NoActivateBannerForm : Form {
@@ -50,10 +51,21 @@ public class NoActivateBannerForm : Form {
     [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
     [DllImport("user32.dll")] static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint affinity);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    // Back to the top of the always-on-top windows, without taking focus: the beam around a maximized window or a
-    // monitor reaches under the pill, and is raised over it whenever it is placed (window-outline.ps1).
-    // HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
-    public void Raise() { if (Visible) SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013); }
+    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int max);
+    // Back over the beam, without taking focus: the beam around a maximized window or a monitor reaches under the pill,
+    // and is raised over it whenever it is placed (window-outline.ps1 names its strips "clawdcursor beam"). Only when a
+    // strip is above the pill, so a menu, a tooltip or another clawdcursor's pill above it keeps its place.
+    // GW_HWNDPREV 3 walks up the z-order; HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10.
+    public void Raise() {
+        if (!Visible) return;
+        StringBuilder name = new StringBuilder(20);
+        IntPtr h = GetWindow(Handle, 3);
+        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) {
+            GetWindowText(h, name, 20);
+            if (name.ToString() == "clawdcursor beam") { SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0013); return; }
+        }
+    }
     // The pill is for the person at the screen, never part of what the agent sees: WDA_EXCLUDEFROMCAPTURE (0x11) leaves
     // it out of every screenshot and OCR capture (Windows 10 2004+; older Windows ignores it). It sat over the app's own
     // toolbar in captures and hid it.

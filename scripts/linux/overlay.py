@@ -31,10 +31,8 @@ by src/core/banner.ts:
                      nothing else: no fill, nothing on the rest of the screen;
                      clicks pass straight through it. stdin: "TARGET <xid> <pid>"
                      names the window (a bare "TARGET": none); the border is drawn
-                     while that is the active window, and follows it. "TARGET
-                     MONITOR": the agent works with no window (the desktop), so
-                     the border goes around the monitor the pointer is on.
-                     "HIDE <ms>" steps aside for a screen capture.
+                     while that is the active window, and follows it. "HIDE <ms>"
+                     steps aside for a screen capture.
                      The border is steady here: the travelling highlight of the
                      Windows and macOS drawers (#392) waits until it can be
                      checked on a live Linux desktop.
@@ -517,7 +515,7 @@ def run_outline(color, thickness):
     r, g, b = hex_rgb(color)
     screen = Gdk.Screen.get_default()
     win, _composited = popup(1, 1)
-    state = {'xid': 0, 'monitor': False, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0)}
+    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0)}
 
     def shadow(xid, scale):
         # A client-decorated GTK window draws its shadow inside its own X window and says how wide it is in
@@ -542,18 +540,7 @@ def run_outline(color, thickness):
 
     def frame():
         """The target's visible frame (decorations included, a GTK shadow not) while it is the active window."""
-        if time.monotonic() < state['hidden_until']:
-            return None
-        if state['monitor']:
-            # No window (the desktop): the monitor the pointer is on, where the agent's last click went.
-            try:
-                display = screen.get_display()
-                _screen, px, py = display.get_default_seat().get_pointer().get_position()
-                g = display.get_monitor_at_point(px, py).get_geometry()
-                return (g.x, g.y, g.width, g.height)
-            except Exception:
-                return None
-        if not state['xid']:
+        if not state['xid'] or time.monotonic() < state['hidden_until']:
             return None
         active = screen.get_active_window()
         if active is None or active.get_xid() != state['xid']:
@@ -594,8 +581,7 @@ def run_outline(color, thickness):
             return
         try:
             if parts[0] == 'TARGET':
-                state['monitor'] = len(parts) > 1 and parts[1] == 'MONITOR'
-                state['xid'] = int(parts[1]) if len(parts) > 1 and not state['monitor'] else 0
+                state['xid'] = int(parts[1]) if len(parts) > 1 else 0
             elif parts[0] == 'HIDE' and len(parts) > 1:
                 state['hidden_until'] = time.monotonic() + max(50, min(int(parts[1]), 10000)) / 1000
         except ValueError:

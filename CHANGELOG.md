@@ -8,17 +8,16 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
   now the Border Beam of [libraries.dev](https://libraries.dev/beam), in clawdcursor's colours: an **amber** beam that
   goes round the window's edge every two seconds while the agent works, with a thin bright stroke and a soft glow just
-  inside it; and while the agent waits for you, the library's "pulse" in **blue**: the whole edge, breathing. The
+  inside it; and while the agent waits for you, the library's "pulse" in **blue**: the whole edge, held steady. The
   running pill shows the "working" Thinking Orb (particles on tilted orbits, in amber) in place of the blinking dot.
   - On a light window (a white document) the beam is stronger, with a dark highlight, so it is not lost (Windows).
-  - When the agent acts with no window (a click on the desktop), the beam goes around the monitor the pointer is on.
-    Nothing is drawn when the agent is idle, as before.
+  - When the agent's window is the desktop itself (a click on the desktop), the beam goes around the monitor the
+    pointer is on (Windows and macOS). Nothing is drawn when the agent is idle or has no window, as before.
   - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the beam is one
     still frame and the orb does not move.
   - Still click-through, never focused, and out of the agent's screenshots. The glow reaches about 28 px into the
     window's edge.
-  - Windows and macOS. On Linux the border stays a plain steady one for now (it also goes around the monitor for
-    desktop acts).
+  - Windows and macOS. On Linux the border stays a plain steady one for now.
   - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
     ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
     and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default
