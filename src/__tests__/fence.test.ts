@@ -718,7 +718,7 @@ describe('typing', () => {
   });
 
   it('keys go only to a fenced window in front', async () => {
-    await expect(fenceInput(fixture, fenced)).resolves.toBeUndefined();
+    expect(await fenceInput(fixture, fenced)).toBe(101);          // the fenced process the allow rested on
     await expect(fenceInput(owners, fenced)).rejects.toThrow(/^FENCED: input/);
     await expect(fenceInput(null, fenced)).rejects.toThrow(FENCED);
     process.env[FENCE_ENV] = '100';

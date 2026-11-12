@@ -44,15 +44,19 @@ export class Watchdog {
    * in the fixture, or the run stops:
    *   - the log names its app: the name must be the fixture's (or the shared host of every Store app, which names none),
  *     and the process the act went to, recorded with the act (`appPid`: for a Store app the app its frame hosts), must
- *     be one the benchmark started. A shared-host act with no such record stops. Only a log that records no process
- *     at all falls back to where the focus is now;
+ *     be one the benchmark started. A shared-host act with no such record stops, and so does any step of a batch: each
+ *     step is judged by the process IT recorded, never by the batch line's. Only a direct call from a build that
+ *     records no process at all, under a fixture's own name, falls back to where the focus is now;
    *   - no app, `browser` tool (the 2.0 log names no app for a CDP act): the only reachable browser must be the fixture's own;
    *   - no app, input or an act by name (the log leaves the app out when it went to a background process): stop;
    *   - no app, anything else (window focus, open_app, ...): the focus must belong to a process the benchmark started.
    * An app name alone never passes, and a probe that cannot answer counts as "not ours".
    */
   async privacy(c: LogCall): Promise<Verdict | null> {
-    const units = c.steps?.length ? c.steps.map(s => ({ ...s, app: s.app ?? c.app })) : [c];
+    // A batch is judged step by step, each step by what IT recorded: the batch line's app and process are those of
+    // its last act, and say nothing about the steps before it.
+    type Unit = { tool: string; action?: string; cls: LogCall['cls']; outcome?: string; app?: string; appPid?: number; step: boolean };
+    const units: Unit[] = c.steps?.length ? c.steps.map(s => ({ ...s, step: true })) : [{ ...c, step: false }];
     // One probe per log line, and only when a unit needs it.
     let focus: Promise<boolean> | undefined;
     const ownsFocus = () => focus ??= Promise.resolve(this.proof.ownsFocus()).catch(() => false);
@@ -61,26 +65,27 @@ export class Watchdog {
     // A call a guard refused never ran.
     const ran = (u: { outcome?: string }) => u.outcome !== 'refused' && u.outcome !== 'consent_required';
     for (const u of units.filter(x => ran(x) && (opaque(x) || hasTarget(x)))) {
-      const what = `${u.tool} ${u.action ?? ''}`.trim();
+      const what = `${u.step ? 'batch step ' : ''}${u.tool} ${u.action ?? ''}`.trim();
       const stop = (why: string): Verdict => ({ rule: 'privacy', detail: `${what} ${why}` });
-      if (u.app) {
-        // The same identity as the fence: the PROCESS the act went to (for a Store app: the app its frame hosts), as
-        // clawdcursor read it when it sent the act (`appPid`). Where the focus is by the time this line is read proves
-        // nothing about where the act went, so it decides only for a log that carries no such evidence.
-        const shared = isSharedHostName(u.app);   // the host of every Store app: a name that names none of them
-        if (!shared && !this.allowed.has(appKey(u.app))) return stop(`acted in "${u.app}", which is not a fixture app`);
-        const pid = c.appPid;
-        if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
-          if (!await Promise.resolve(this.proof.ownsPid(pid)).catch(() => false)) return stop(`acted in "${u.app}" (process ${pid}), which the benchmark did not start`);
-        } else if (shared) {
-          return stop(`acted in "${u.app}" with no record of which app that was`);
-        } else if (!await ownsFocus()) {
-          return stop(`acted in "${u.app}", but the focus is not in a process the benchmark started`);
-        }
+      const named = u.app ? `"${u.app}"` : 'an app the log does not name';
+      // The same identity as the fence: the PROCESS the act went to (for a Store app: the app its frame hosts), verified
+      // by clawdcursor when it sent the act and written on this very line or step (`appPid`).
+      const pid = u.appPid;
+      if (typeof pid === 'number' && Number.isInteger(pid) && pid > 0) {
+        // A name that is the shared host of every Store app names none of them: only the process decides for it.
+        if (u.app && !isSharedHostName(u.app) && !this.allowed.has(appKey(u.app))) return stop(`acted in ${named}, which is not a fixture app`);
+        if (!await Promise.resolve(this.proof.ownsPid(pid)).catch(() => false)) return stop(`acted in ${named} (process ${pid}), which the benchmark did not start`);
       } else if (u.tool === 'browser') {
         if (!await Promise.resolve(this.proof.cdpIsFixture()).catch(() => false)) return stop('acted through CDP, and the browser it reached is not proven to be the fixture\'s own');
       } else if (opaque(u) || isInput(u)) {
-        return stop('acted with no app recorded (a background process, or an unknown target)');
+        // Input, or an act by name, with no verified process of its own. Unproven: the run stops. The one exception
+        // is a direct call from a build that records no process at all, under a fixture's own name: the focus decides.
+        const legacy = !u.step && !!u.app && !isSharedHostName(u.app) && this.allowed.has(appKey(u.app));
+        if (!legacy) {
+          return stop(u.app && !isSharedHostName(u.app) && !this.allowed.has(appKey(u.app)) ? `acted in ${named}, which is not a fixture app`
+            : u.app ? `acted in ${named} with no verified record of which process that was` : 'acted with no app recorded (a background process, or an unknown target)');
+        }
+        if (!await ownsFocus()) return stop(`acted in ${named}, but the focus is not in a process the benchmark started`);
       } else if (!await ownsFocus()) {
         return stop('left the focus in a process the benchmark did not start');
       }

@@ -25,7 +25,8 @@ import { actTarget, SessionLog, readSession } from '../surface/session-log';
 import { buildSessionReport } from '../surface/report';
 import * as os from 'os';
 import { appLabel, activityLabel } from '../core/banner';
-import { actedIn, workingIn, __setForegroundReaderForTests } from '../core/control';
+import { __setFenceProcessTableForTests } from '../core/fence';
+import { actedIn, actRecord, workingIn, __setForegroundReaderForTests } from '../core/control';
 import { guardedInput, guardInputMethods } from '../platform/pointer-guard';
 
 const isGuardRefusalLike = (m: unknown) => typeof m === 'string' && m.startsWith('foreground changed: ');
@@ -183,6 +184,16 @@ describe('the input lease is on the app, not on the window\'s process', () => {
     expect(sent).toEqual(['1', '2']);
   });
 
+  it('the SAME frame window (same handle, same host process) now hosting ANOTHER app is a foreground change', async () => {
+    let front = { ...calcWindow };
+    __setForegroundReaderForTests(async () => front);
+    await type('1');
+    // The frame is reused: same handle 7003, same ApplicationFrameHost pid, but it hosts Settings now.
+    front = { ...calcWindow, appName: 'Settings', title: 'Settings', hostedProcessId: 7100 };
+    await expect(type('into settings')).rejects.toThrow(/^foreground changed: you were working in "Calculator" \(pid 6768\), but "Settings" \(pid 7100\)/);
+    expect(sent).toEqual(['1']);
+  });
+
   it('the same window whose app was not resolved yet at the first call is not a switch', async () => {
     let front: typeof calcWindow | Omit<typeof calcWindow, 'hostedProcessId'> = { processId: 38636, processName: 'ApplicationFrameHost', appName: 'Application Frame Host', title: 'Calculator', handle: 7003 };
     __setForegroundReaderForTests(async () => front);
@@ -213,12 +224,86 @@ describe('the input lease is on the app, not on the window\'s process', () => {
 });
 
 describe('the act line of the session log says who the act went to, as numbers', () => {
-  it('the app\'s process (for a Store app, the hosted one) and the window handle', () => {
-    expect(actTarget({ processId: 38636, hostedProcessId: 6768, handle: 18814450 })).toEqual({ appPid: 6768, appHandle: 18814450 });
-    expect(actTarget({ processId: 42, handle: 55 })).toEqual({ appPid: 42, appHandle: 55 });
-    expect(actTarget({ processId: 42, handle: 'AXWindow-3' })).toEqual({ appPid: 42 });   // a handle that is not a number is left out
-    expect(actTarget({ processId: 0 })).toEqual({});
+  it('two positive integers, or nothing', () => {
+    expect(actTarget({ appPid: 6768, appHandle: 18814450 })).toEqual({ appPid: 6768, appHandle: 18814450 });
+    expect(actTarget({ appPid: 42, appHandle: 'AXWindow-3' })).toEqual({ appPid: 42 });   // a handle that is not a number is left out
+    expect(actTarget({ appPid: 0, appHandle: -1 })).toEqual({});
+    expect(actTarget({ appPid: '6768' })).toEqual({});
     expect(actTarget(undefined)).toEqual({});
+  });
+
+  describe('the process recorded is VERIFIED when the act is sent, not what the display cache says', () => {
+    // The foreground read (through the display path) still says frame 7003 hosts Calculator (6768).
+    const stale = { processId: 38636, processName: 'ApplicationFrameHost', appName: 'Calculator', title: 'Calculator', handle: 7003, hostedProcessId: 6768 };
+    const press = async () => { const before = actedIn(); await guardedInput('keyPress', ['4'], async () => 'sent'); return actRecord(before); };
+
+    it('no fence: a fresh read at act time says the frame hosts ANOTHER app now: that is what is recorded', async () => {
+      __setForegroundReaderForTests(async () => ({ ...stale }));
+      __setFrameHostReaderForTests(async () => new Map([['7003', SETTINGS]]));
+      expect(await press()).toEqual({ app: 'Calculator', appPid: 7100, appHandle: 7003 });   // the name is display; the pid is the truth
+    });
+
+    it('no fence: the fresh read agrees: the hosted process is recorded', async () => {
+      __setForegroundReaderForTests(async () => ({ ...stale }));
+      expect(await press()).toEqual({ app: 'Calculator', appPid: 6768, appHandle: 7003 });
+    });
+
+    it('no fence: the fresh read fails, or the frame hosts nothing now: NO process is recorded (unverified is no evidence)', async () => {
+      __setForegroundReaderForTests(async () => ({ ...stale }));
+      __setFrameHostReaderForTests(async () => { throw new Error('bridge down'); });
+      expect(await press()).toEqual({ app: 'Calculator', appHandle: 7003 });
+      __setFrameHostReaderForTests(async () => new Map());
+      expect(await press()).toEqual({ app: 'Calculator', appHandle: 7003 });
+    });
+
+    it('an ordinary window is its own process: the foreground read is the fresh one, and nothing else is asked', async () => {
+      __setForegroundReaderForTests(async () => ({ processId: 42, processName: 'notepad', appName: 'Notepad', handle: 55 }));
+      expect(await press()).toEqual({ app: 'Notepad', appPid: 42, appHandle: 55 });
+      expect(reads).toBe(0);
+    });
+
+    it('under the fence: the process the fence DECIDED on is recorded', async () => {
+      process.env.CLAWD_FENCE_PIDS = '6768';
+      // The fence asks whether a process descends from a fenced one: a table from here, not from the real machine.
+      __setFenceProcessTableForTests(async () => new Map([[6768, 1], [7100, 1], [38636, 1]]));
+      try {
+        __setForegroundReaderForTests(async () => ({ ...stale }));
+        expect(await press()).toEqual({ app: 'Calculator', appPid: 6768, appHandle: 7003 });
+        // The frame now hosts another app: the fence refuses, nothing is sent and nothing is recorded.
+        __setFrameHostReaderForTests(async () => new Map([['7003', SETTINGS]]));
+        const before = actedIn();
+        await expect(guardedInput('keyPress', ['4'], async () => 'sent')).rejects.toThrow(/^FENCED: /);
+        expect(actRecord(before)).toEqual({});
+      } finally { delete process.env.CLAWD_FENCE_PIDS; __setFenceProcessTableForTests(null); }
+    });
+
+    it('a call that did not act on a window records nothing', () => {
+      expect(actRecord(actedIn())).toEqual({});
+    });
+  });
+
+  it('each step of a batch records its OWN target, verified when that step ran', async () => {
+    // The user (or the app) changes what is in front between two steps of one batch.
+    let front: object = { processId: 42, processName: 'notepad', appName: 'Notepad', handle: 55 };
+    __setForegroundReaderForTests(async () => front);
+    const platform = guardInputMethods({
+      typeText: async (_t: string) => { front = { processId: 43, processName: 'winword', appName: 'Word', handle: 56 }; },
+      keyPress: async (_k: string) => {},
+      getActiveWindow: async () => null, listWindows: async () => [],
+    });
+    const { executeBatch } = await import('../tools/batch');
+    const ctx = { ensureInitialized: async () => {}, platform, desktop: platform, a11y: {}, getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1 } as never;
+    const result = await executeBatch([
+      { name: 'computer', arguments: { action: 'type', text: 'hello' } },
+      { name: 'computer', arguments: { action: 'wait', seconds: 0.01 } },
+      { name: 'computer', arguments: { action: 'key', combo: 'enter' } },
+    ], ctx);
+    const targets = result.steps.map(st => ({ status: st.status, app: st.app, appPid: st.appPid }));
+    // The first step went to Notepad. The third found Word in front: refused as a foreground change, and it recorded no target.
+    expect(targets[0]).toEqual({ status: 'ok', app: 'Notepad', appPid: 42 });
+    expect(targets[1]).toEqual({ status: 'ok', app: undefined, appPid: undefined });
+    expect(targets[2].status).not.toBe('ok');
+    expect(targets[2].appPid).toBeUndefined();
   });
 
   it('is written to the session file, and only numbers', () => {

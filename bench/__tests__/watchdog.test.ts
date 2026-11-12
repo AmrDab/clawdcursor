@@ -120,7 +120,7 @@ describe('the watchdog rules', () => {
     it('with NO process recorded it stops the run: where the focus is now does not decide', async () => {
       const v = await calcDog(true).judge(invoke('Application Frame Host'));
       expect(v).toMatchObject({ rule: 'privacy' });
-      expect(v!.detail).toMatch(/no record of which app/);
+      expect(v!.detail).toMatch(/no verified record of which process/);
       for (const bad of [0, -1, 1.5, NaN]) {
         expect(await calcDog(true).judge({ ...invoke('Application Frame Host'), appPid: bad }), String(bad)).toMatchObject({ rule: 'privacy' });
       }
@@ -136,11 +136,44 @@ describe('the watchdog rules', () => {
       expect(asked).toBe(0);
     });
 
-    it('every step of a batch is judged by the line\'s recorded process', async () => {
-      const steps = [{ tool: 'accessibility', action: 'invoke', cls: 'act-name' as const, ok: true, outcome: 'ok' }, { tool: 'computer', action: 'type', cls: 'act-other' as const, ok: true, outcome: 'ok' }];
-      expect(await calcDog(false).judge(call('batch', '', 'act-other', { app: 'Application Frame Host', appPid: CALC, steps }))).toBeNull();
-      expect(await calcDog(true).judge(call('batch', '', 'act-other', { app: 'Application Frame Host', appPid: SETTINGS, steps }))).toMatchObject({ rule: 'privacy' });
-      expect(await calcDog(true).judge(call('batch', '', 'act-other', { app: 'Application Frame Host', steps }))).toMatchObject({ rule: 'privacy' });
+    describe('a batch: every step is judged by the process THAT STEP recorded', () => {
+      const s = (tool: string, action: string, cls: LogCall['cls'], app?: string, appPid?: number) =>
+        ({ tool, action, cls, ok: true, outcome: 'ok', ...(app ? { app } : {}), ...(appPid ? { appPid, appHandle: 18814450 } : {}) });
+      const batch = (steps: ReturnType<typeof s>[], line: Partial<LogCall> = {}) => call('batch', '', 'act-other', { steps, ...line });
+
+      it('every step in the Calculator the benchmark started: passes', async () => {
+        const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other', 'Application Frame Host', CALC), s('computer', 'wait', 'act-other')];
+        expect(await calcDog(false).judge(batch(steps, { app: 'Calculator', appPid: CALC }))).toBeNull();
+      });
+
+      it('one step in the middle went to Settings, the last one back to Calculator: the run stops', async () => {
+        // The batch LINE carries its last act (Calculator). Judged by the line, this batch would pass.
+        const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other', 'Application Frame Host', SETTINGS),
+          s('accessibility', 'invoke', 'act-name', 'Calculator', CALC)];
+        const v = await calcDog(true).judge(batch(steps, { app: 'Calculator', appPid: CALC }));
+        expect(v).toMatchObject({ rule: 'privacy' });
+        expect(v!.detail).toMatch(/^batch step computer type .*process 7100/);
+      });
+
+      it('a step with no process of its own is unproven, whatever the batch line says: the run stops', async () => {
+        const steps = [s('accessibility', 'invoke', 'act-name', 'Calculator', CALC), s('computer', 'type', 'act-other')];
+        expect(await calcDog(true).judge(batch(steps, { app: 'Calculator', appPid: CALC }))).toMatchObject({ rule: 'privacy' });
+        const named = [s('computer', 'type', 'act-other', 'Calculator')];   // a name, but no verified process
+        expect(await calcDog(true).judge(batch(named, { app: 'Calculator', appPid: CALC }))).toMatchObject({ rule: 'privacy' });
+        const shared = [s('computer', 'type', 'act-other', 'Application Frame Host')];
+        expect(await calcDog(true).judge(batch(shared, { app: 'Application Frame Host', appPid: CALC }))).toMatchObject({ rule: 'privacy' });
+      });
+
+      it('a step that touches no window needs nothing, and a refused step never ran', async () => {
+        const steps = [s('computer', 'wait', 'act-other'), s('accessibility', 'read_tree', 'blind'), { ...s('computer', 'type', 'act-other'), ok: false, outcome: 'refused' }];
+        expect(await calcDog(false).judge(batch(steps))).toBeNull();
+      });
+    });
+
+    it('a pid the log marks as anything but a positive integer is no evidence', async () => {
+      for (const bad of ['6768', true, null, {}, [6768]]) {
+        expect(await calcDog(true).judge({ ...invoke('Application Frame Host'), appPid: bad as never }), JSON.stringify(bad)).toMatchObject({ rule: 'privacy' });
+      }
     });
 
     it('a proof that fails or throws counts as "not ours"', async () => {
@@ -207,16 +240,20 @@ describe('the watchdog rules', () => {
       expect(await dog({}, none).judge(call('system', 'clipboard_write', 'act-other'))).toMatchObject({ rule: 'privacy' });
     });
 
-    it('checks every step of a batch, with the batch line\'s app', async () => {
-      const steps = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords'), step('accessibility', 'set_value', 'act-name')];
-      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Word', steps }))).toMatchObject({ rule: 'privacy' });
-      expect(await dog().judge(call('batch', '', 'act-other', { steps }))).toMatchObject({ rule: 'privacy' });   // no app at all
-      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toBeNull();
-      expect(await dog({}, { ownsFocus: () => false }).judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toMatchObject({ rule: 'privacy' });
+    it('checks every step of a batch by what the step itself recorded, never by the batch line', async () => {
+      const bare = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords'), step('accessibility', 'set_value', 'act-name')];
+      // Steps that recorded nothing are unproven, with a fixture's name on the line or not.
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Word', steps: bare }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { steps: bare }))).toMatchObject({ rule: 'privacy' });
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', appPid: 500, steps: bare }))).toMatchObject({ rule: 'privacy' });
+      // Steps with their own app and process, all the fixture's: allowed.
+      const own = [step('accessibility', 'read_tree', 'blind'), step('computer', 'click', 'act-coords', { app: 'Edge', appPid: 500 }), step('accessibility', 'set_value', 'act-name', { app: 'Edge', appPid: 500 })];
+      expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', appPid: 500, steps: own }))).toBeNull();
+      expect(await dog({}, { ownsPid: () => false }).judge(call('batch', '', 'act-other', { app: 'Edge', appPid: 500, steps: own }))).toMatchObject({ rule: 'privacy' });
     });
 
     it('a step that names its own app is judged by it', async () => {
-      const steps = [step('computer', 'click', 'act-coords', { app: 'Edge' }), step('computer', 'click', 'act-coords', { app: 'Outlook' })];
+      const steps = [step('computer', 'click', 'act-coords', { app: 'Edge', appPid: 500 }), step('computer', 'click', 'act-coords', { app: 'Outlook', appPid: 500 })];
       expect(await dog().judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toMatchObject({ rule: 'privacy' });
     });
 
@@ -249,7 +286,8 @@ describe('the watchdog rules', () => {
     it('asks for the focus proof once per log line', async () => {
       let asked = 0;
       const d = dog({}, { ownsFocus: () => { asked++; return true; } });
-      const steps = [step('computer', 'click', 'act-coords'), step('computer', 'type', 'act-other'), step('window', 'focus', 'act-other')];
+      // Two window steps (no process is ever recorded for those: the focus decides) and an input step with its own process.
+      const steps = [step('window', 'focus', 'act-other'), step('computer', 'type', 'act-other', { app: 'Edge', appPid: 500 }), step('window', 'maximize', 'act-other')];
       expect(await d.judge(call('batch', '', 'act-other', { app: 'Edge', steps }))).toBeNull();
       expect(asked).toBe(1);
     });

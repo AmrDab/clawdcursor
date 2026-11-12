@@ -54,22 +54,25 @@ export function classifyCall(tool: string, action?: string): CallClass {
  *  one-time consent prompt stopped it before it ran. */
 export type Outcome = 'ok' | 'empty' | 'partial' | 'timeout' | 'error' | 'refused' | 'consent_required';
 /** One step of a batch, classified like a call of its own. */
-export interface StepCall { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome }
+export interface StepCall { tool: string; action?: string; cls: CallClass; ok: boolean; outcome: Outcome;
+  /** What THIS step went to, read when it was sent: each step of a batch has its own target, not the batch's last one. */
+  app?: string; appPid?: number; appHandle?: number }
 export interface SessionCall { t: string; tool: string; action?: string; cls: CallClass; ok: boolean; ms: number; outcome?: Outcome; space?: string; app?: string;
   /** Who the act went to, read when it was sent: the app's process id (for a Store app, the app its frame hosts) and the window's handle. Numbers only. */
   appPid?: number; appHandle?: number; code?: string; steps?: StepCall[] }
 
 /**
- * The target of an act as two numbers, from the foreground read made when the act was sent (control.ts): the process the
- * app is (a Store app's own process, not ApplicationFrameHost, which hosts them all) and the window's handle. No name,
- * no title. A harness that fences a run to processes (bench/) checks an act against these, not against where the focus
- * is by the time it reads the log. They stay in the local session file: `clawdcursor report` sends neither.
+ * The target of an act as two numbers: the process the app is (a Store app's own process, not ApplicationFrameHost, which
+ * hosts them all) and the window's handle. No name, no title. They come from control.ts's `actRecord`, where the
+ * process was VERIFIED when the act was sent; anything that is not a positive integer is not written. A harness that
+ * fences a run to processes (bench/) checks an act against these, not against where the focus is by the time it reads
+ * the log. They stay in the local session file: `clawdcursor report` sends neither.
  */
-export function actTarget(w: { processId?: number; hostedProcessId?: number; handle?: number | string } | undefined): { appPid?: number; appHandle?: number } {
+export function actTarget(w: { appPid?: unknown; appHandle?: unknown } | undefined): { appPid?: number; appHandle?: number } {
   if (!w) return {};
   const id = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : undefined);
-  const appPid = id(w.hostedProcessId) ?? id(w.processId);
-  const appHandle = id(w.handle);
+  const appPid = id(w.appPid);
+  const appHandle = id(w.appHandle);
   return { ...(appPid ? { appPid } : {}), ...(appHandle ? { appHandle } : {}) };
 }
 
@@ -173,7 +176,7 @@ export class SessionLog {
       app?: string;
       /** Who the act went to, as numbers (actTarget). Written to the session file only. */
       appPid?: number; appHandle?: number;
-      steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome; cls?: CallClass }>;
+      steps?: Array<{ tool: string; action?: string; ok: boolean; outcome?: Outcome; cls?: CallClass; app?: string; appPid?: number; appHandle?: number }>;
       /** What the call turned out to be, when its name does not say: a read that had to press keys is an action. */
       cls?: CallClass;
       /** Where the call's time went (steps.ts): name → count + total ms. Day log only, and only for a slow call. */
@@ -182,7 +185,8 @@ export class SessionLog {
     const outcome = extra?.outcome ?? (ok ? 'ok' : 'error');
     this.current = null;
     const steps: StepCall[] | undefined = extra?.steps?.map(s => ({ tool: s.tool, ...(s.action ? { action: s.action } : {}),
-      cls: s.cls ?? classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error') }));
+      cls: s.cls ?? classifyCall(s.tool, s.action), ok: s.ok, outcome: s.outcome ?? (s.ok ? 'ok' : 'error'),
+      ...(s.app ? { app: s.app } : {}), ...actTarget(s) }));
     this.tally.calls++;
     if (outcome === 'refused' || outcome === 'consent_required') this.tally.refused++;
     else if (!ok) this.tally.errors++;
@@ -204,7 +208,7 @@ export class SessionLog {
         this.writeHeader(client);
         const line: SessionCall = { t: new Date().toISOString(), tool, ...(action ? { action } : {}), cls, ok, ms: Math.round(ms),
           outcome, ...(extra?.space ? { space: extra.space } : {}), ...(extra?.app ? { app: extra.app } : {}),
-          ...actTarget({ processId: extra?.appPid, handle: extra?.appHandle }), ...(code ? { code } : {}), ...(steps ? { steps } : {}) };
+          ...actTarget(extra), ...(code ? { code } : {}), ...(steps ? { steps } : {}) };
         fs.appendFileSync(this.file, JSON.stringify(line) + '\n');
       } catch { /* never break a tool call over logging */ }
     }

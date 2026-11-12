@@ -151,8 +151,14 @@ const pinsByHandle = (w: FenceWindow) => handlePlatform === 'win32' && typeof w.
  * frame can come to host another app; an allow must not rest on what the frame hosted a few seconds ago.
  */
 async function windowInFence(w: FenceWindow, env: NodeJS.ProcessEnv): Promise<boolean> {
-  if (await inFence(w.processId, env)) return true;
-  return inFence((await freshHostedAppOf(w).catch(() => undefined))?.processId, env);
+  return (await fencedPidOf(w, env)) !== undefined;
+}
+
+/** The fenced process this window counts by (its own, or the app its frame hosts, read fresh), or undefined when it is outside. */
+async function fencedPidOf(w: FenceWindow, env: NodeJS.ProcessEnv): Promise<number | undefined> {
+  if (await inFence(w.processId, env)) return w.processId;
+  const hosted = (await freshHostedAppOf(w).catch(() => undefined))?.processId;
+  return hosted !== undefined && await inFence(hosted, env) ? hosted : undefined;
 }
 
 interface Desktop {
@@ -245,10 +251,17 @@ export async function fenceCheck(what: string, target: { pid: number | undefined
   return front;
 }
 
-/** Keys and text are about to go to the window in front (`front`, read by the input guard): it must be fenced. A no-op with no fence. */
-export async function fenceInput(front: FenceWindow | null, env: NodeJS.ProcessEnv = process.env): Promise<void> {
-  if (!fenceActive(env)) return;
-  if (!front || !await windowInFence(front, env)) throw new Error(refusal('input: the window in front'));
+/**
+ * Keys and text are about to go to the window in front (`front`, read by the input guard): it must be fenced. Returns the
+ * fenced process it counted by. A no-op (undefined) with no fence.
+ */
+export async function fenceInput(front: FenceWindow | null, env: NodeJS.ProcessEnv = process.env): Promise<number | undefined> {
+  if (!fenceActive(env)) return undefined;
+  const pid = front ? await fencedPidOf(front, env) : undefined;
+  if (pid === undefined) throw new Error(refusal('input: the window in front'));
+  // The process this allow rested on: the session log records it as the act's target, so a harness reads the fence's
+  // own decision and not a later or remembered answer.
+  return pid;
 }
 
 // ── the pointer ─────────────────────────────────────────────────────────────

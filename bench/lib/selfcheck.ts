@@ -324,6 +324,16 @@ export async function selfcheckFixtures(buildDir: string | undefined, log: (line
           let verdict: { rule: string; detail: string } | null = null;
           for (const c of calls) verdict ??= await dog.judge(c);
           ok = check(verdict === null, `Calculator: the watchdog agrees with the fence: no privacy stop${verdict ? ` (${verdict.rule}: ${verdict.detail})` : ''}`) && ok;
+          // A batch: each step carries its OWN verified target, and the watchdog judges each step by it.
+          const two = await call('batch', { steps: [{ name: 'accessibility', arguments: { action: 'invoke', name: 'Zero' } }, { name: 'accessibility', arguments: { action: 'invoke', name: 'Zero' } }] });
+          const batchLine = readSessionCalls(path.join(root, 'sessions-2')).filter(c => c.tool === 'batch').pop();
+          const stepPids = (batchLine?.steps ?? []).map(st => st.appPid);
+          ok = check(allowed(two) && stepPids.length === 2 && stepPids.every(p => !!p && roots.includes(p)),
+            `Calculator: each step of a batch records its own target process (${stepPids.join(', ')})`) && ok;
+          const batchVerdict = batchLine ? await dog.judge(batchLine) : { rule: 'missing', detail: 'no batch line' };
+          ok = check(batchVerdict === null, `Calculator: the watchdog passes the batch step by step${batchVerdict ? ` (${batchVerdict.rule}: ${batchVerdict.detail})` : ''}`) && ok;
+          const stripped = batchLine ? await dog.judge({ ...batchLine, steps: batchLine.steps!.map(st => ({ ...st, appPid: undefined })) }) : null;
+          ok = check(stripped?.rule === 'privacy', 'Calculator: the same batch with no process on its steps is stopped, though the batch line has one') && ok;
           // The same act under the shared host's name: inside by the process recorded with it; with no such record, stopped.
           const asHost = await dog.judge({ ...acted[0], app: 'Application Frame Host' });
           ok = check(asHost === null, 'Calculator: an act logged under the shared host name passes by the process recorded with it') && ok;

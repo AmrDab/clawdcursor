@@ -35,7 +35,9 @@ export interface ToolResult {
   /** Whether this result represents an error */
   isError?: boolean;
   /** batch only: each step that ran (or was stopped), for the session log — never shown to the model. */
-  steps?: Array<{ tool: string; action?: string; status: string; text: string; pressedKeys?: boolean }>;
+  steps?: Array<{ tool: string; action?: string; status: string; text: string; pressedKeys?: boolean;
+    /** What this step acted on, verified when it was sent (control.ts actRecord). */
+    app?: string; appPid?: number; appHandle?: number }>;
   /** A read that had to send keystrokes to the app (copy_all_text's last resort): the session log records it as an action. */
   pressedKeys?: boolean;
 }
