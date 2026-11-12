@@ -50,6 +50,8 @@ export interface AgentToolContext {
    *  process.platform in production). Lets coordinate-scaling tests pin the
    *  OS branch deterministically instead of depending on the CI runner's OS. */
   _platform?: string;
+  /** Image → mouse factor of the latest screenshot, when known (the MCP surface): imageScale() uses it as is. */
+  imageToMouse?: number;
   /** Default coordinate space for raw click/drag/scroll when the call omits
    *  `space`. The loop sets this to 'image' on VISION turns (the model is
    *  reading coords off the screenshot), else 'screen'. Undefined → 'screen'. */

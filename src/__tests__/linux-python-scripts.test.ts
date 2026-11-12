@@ -85,6 +85,11 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.seven.enabled).toBe(true);
   });
 
+  // #359: the AT-SPI description is the tooltip; it is sent only when it says more than the name.
+  it('the accessible description comes back as help, unless it repeats the name or is empty', () => {
+    expect(out.help).toEqual(['Make text bold', null, null]);
+  });
+
   it('all-zero SCREEN extents fall back to WINDOW extents and say so', () => {
     expect(out.rel.bounds).toEqual({ x: 5, y: 6, width: 7, height: 8 });
     expect(out.rel.coordType).toBe('window');

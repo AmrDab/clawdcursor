@@ -305,6 +305,8 @@ function ConvertTo-UINode {
         value        = $nodeValue
         children     = @()
     }
+    # What the app shows on hover (UIA HelpText), when it says more than the name.
+    try { $help = $cur.HelpText; if ($help -and $help -ne $cur.Name) { $node.help = $help } } catch {}
     Add-StateFields $node $Element $typeName
 
     if ($Depth -lt $MaxDepth) {
@@ -1140,6 +1142,7 @@ function Cmd-FindElement {
                 className=$c.ClassName; processId=$c.ProcessId; isEnabled=$c.IsEnabled; bounds=$bounds
                 value=(Get-ShownValue $el $c $c.ControlType.ProgrammaticName)
             }
+            if ($c.HelpText -and $c.HelpText -ne $c.Name) { $r.help = $c.HelpText }
             Add-StateFields $r $el $c.ControlType.ProgrammaticName
             if ($onMonitor) { $results += $r } else { $offMonitor += $r }
         } catch {}

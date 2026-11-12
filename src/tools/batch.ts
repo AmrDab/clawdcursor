@@ -77,6 +77,9 @@ export interface BatchResult {
   stoppedAt?: number;
   stopReason?: string;
   steps: StepOutcome[];
+  /** The image of the last step that returned one (a screenshot, a zoom), and that step's index. */
+  image?: NonNullable<ToolResult['image']>;
+  imageStep?: number;
 }
 
 const DEFAULT_MAX_STEPS = 12;
@@ -132,9 +135,11 @@ export async function executeBatch(
   const cap = opts.maxSteps ?? DEFAULT_MAX_STEPS;
   const outcomes: StepOutcome[] = [];
   let completed = 0;
+  // "Act N times, then look once" in one call: the last image a step returned goes back with the trace.
+  let shot: Pick<BatchResult, 'image' | 'imageStep'> = {};
 
   const halt = (i: number, reason: string): BatchResult =>
-    ({ total: steps.length, completed, allDone: false, stoppedAt: i, stopReason: reason, steps: outcomes });
+    ({ total: steps.length, completed, allDone: false, stoppedAt: i, stopReason: reason, steps: outcomes, ...shot });
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -209,18 +214,29 @@ export async function executeBatch(
     // A screenshot step names its id first, so it survives the step text's truncation.
     const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
     outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys, ...target });
+    if (res.image) shot = { image: res.image, imageStep: i };
     completed++;
   }
 
-  return { total: steps.length, completed, allDone: completed === steps.length, steps: outcomes };
+  return { total: steps.length, completed, allDone: completed === steps.length, steps: outcomes, ...shot };
 }
 
 function renderResult(r: BatchResult): string {
-  const lines = r.steps.map(s => `  ${s.i}. [${s.status}] ${s.label} — ${s.text}`);
+  // A run of the same successful step (17 pen clicks) is one line: "3-19. [ok] computer.click x17 — <the last one's text>".
+  const lines: string[] = [];
+  for (let j = 0; j < r.steps.length;) {
+    const s = r.steps[j];
+    let k = j;
+    while (s.status === 'ok' && r.steps[k + 1]?.status === 'ok' && r.steps[k + 1].label === s.label) k++;
+    const last = r.steps[k];
+    lines.push(k > j ? `  ${s.i}-${last.i}. [ok] ${s.label} x${k - j + 1} — ${last.text}` : `  ${s.i}. [${s.status}] ${s.label} — ${s.text}`);
+    j = k + 1;
+  }
   const head = r.allDone
     ? `batch: all ${r.total} steps completed.`
     : `batch: ${r.completed}/${r.total} completed, halted at step ${r.stoppedAt} — ${r.stopReason}`;
-  return `${head}\n${lines.join('\n')}`;
+  const image = r.imageStep !== undefined ? ` The image attached is step ${r.imageStep}'s.` : '';
+  return `${head}${image}\n${lines.join('\n')}`;
 }
 
 export function getBatchTools(): ToolDefinition[] {
@@ -289,6 +305,7 @@ export function getBatchTools(): ToolDefinition[] {
         return {
           text: renderResult(result) + (effect ? `\n${effect}` : ''),
           isError: !result.allDone,
+          ...(result.image ? { image: result.image } : {}),
           steps: result.steps.map(s => {
             const a = stepArgs(steps[s.i]).action;
             return { tool: steps[s.i].name, ...(typeof a === 'string' ? { action: a } : {}), status: s.status, text: s.text, pressedKeys: s.pressedKeys,

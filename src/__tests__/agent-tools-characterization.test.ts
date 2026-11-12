@@ -134,11 +134,12 @@ describe('1. buildUnifiedTools() — flat catalog composition', () => {
     expect(names).toContain('give_up');
   });
 
-  it('inputSchema.required on click is ["x","y"]', () => {
+  // x,y or `path` (#355): neither is required by the schema, the tool refuses a call with neither.
+  it('click takes x,y or a path of points', () => {
     const tools = buildUnifiedTools();
     const click = findTool(tools, 'click');
-    expect(click.inputSchema.required).toContain('x');
-    expect(click.inputSchema.required).toContain('y');
+    expect(click.inputSchema.required).toBeUndefined();
+    expect(Object.keys(click.inputSchema.properties as object)).toEqual(expect.arrayContaining(['x', 'y', 'path', 'interval_ms']));
   });
 
   it('inputSchema.required on done is ["evidence"]', () => {

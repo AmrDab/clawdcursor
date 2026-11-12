@@ -9,7 +9,7 @@
 import { fenceImage } from '../core/fence';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage, screenToPhysical } from './types';
-import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH, imageCost } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
 import { MOD } from '../platform/keys';
@@ -82,6 +82,14 @@ export const SPACE_PARAM = {
 };
 
 
+const MAX_EDGE_PARAM = {
+  type: 'number' as const, required: false,
+  description: `Longest edge of the returned image in px (64–${LLM_TARGET_WIDTH}, default ${LLM_TARGET_WIDTH}). Smaller costs fewer image tokens; small text may become unreadable.`,
+};
+/** The `max_edge` a caller asked for, clamped to what a capture can use; the default size otherwise. */
+const maxEdgeOf = (v: unknown): number =>
+  typeof v === 'number' && Number.isFinite(v) ? Math.min(LLM_TARGET_WIDTH, Math.max(64, Math.round(v))) : LLM_TARGET_WIDTH;
+
 /**
  * Best-effort active-window label for a tool's result text.
  *
@@ -111,15 +119,17 @@ export function getDesktopTools(): ToolDefinition[] {
 
     {
       name: 'desktop_screenshot',
-      description: 'LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge (the reply states its size and scale).',
+      description: 'LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge, or max_edge (the reply states its size, cost and scale; clicks use its coordinates).',
       parameters: {
         display: { type: 'number', description: 'Monitor to capture (index from window list_displays). Default: the monitor clawdcursor last worked on, else the primary.', required: false },
+        max_edge: MAX_EDGE_PARAM,
       },
       category: 'perception',
       compactGroup: 'computer',
       safetyTier: 0,
-      handler: async ({ display }, ctx) => {
+      handler: async ({ display, max_edge }, ctx) => {
         await ctx.ensureInitialized();
+        const edge = maxEdgeOf(max_edge);
         const explicit = typeof display === 'number' ? display : undefined;
         const displays = ctx.platform ? await ctx.platform.listDisplays().catch(() => []) : [];
         const target = pickDisplay(displays, explicit);
@@ -132,21 +142,21 @@ export function getDesktopTools(): ToolDefinition[] {
         const otherMonitor = target && !target.primary && ctx.platform
           && (process.platform === 'win32' || (process.platform === 'linux' && explicit !== undefined));
         if (otherMonitor) {
-          const shot = await ctx.platform!.screenshot({ maxWidth: LLM_TARGET_WIDTH, displayIndex: target!.index });
+          const shot = await ctx.platform!.screenshot({ maxWidth: edge, displayIndex: target!.index });
           const o = shot.origin ?? { x: target!.bounds.x, y: target!.bounds.y };
           setLastFrame({ originX: o.x, originY: o.y, scale: shot.scaleFactor, display: target!.index });
           return {
-            text: `Screenshot: ${shot.width}x${shot.height}px of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}${LABEL_TAIL}`,
+            text: `Screenshot: ${imageCost(shot.width, shot.height)} of display #${target!.index} (real: ${target!.bounds.width}x${target!.bounds.height} at (${target!.bounds.x},${target!.bounds.y}), scale: ${shot.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${displayNote(displays, target!)}${LABEL_TAIL}`,
             // Under the test fence only the fenced window is shown: the rest is blacked out (core/fence.ts).
             image: await fenceImage(shot.buffer, 'image/png', { originX: o.x, originY: o.y, scale: shot.scaleFactor, boundsScale: fenceBoundsScale(ctx) }),
           };
         }
-        const frame = await ctx.desktop.captureForLLM();
+        const frame = await ctx.desktop.captureForLLM(edge);
         setLastFrame(null);
         const image = await fenceImage(frame.buffer, 'image/jpeg', { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale: fenceBoundsScale(ctx) });
         const note = target && (process.platform === 'win32' || explicit !== undefined) ? displayNote(displays, target) : '';
         return {
-          text: `Screenshot: ${frame.llmWidth}x${frame.llmHeight}px (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}${uncheckedNote()}${LABEL_TAIL}`,
+          text: `Screenshot: ${imageCost(frame.llmWidth, frame.llmHeight)} (real: ${frame.width}x${frame.height}, scale: ${frame.scaleFactor.toFixed(2)}x). Mouse tools accept these image-space coordinates.${note}${uncheckedNote()}${LABEL_TAIL}`,
           image,
         };
       },
@@ -154,7 +164,7 @@ export function getDesktopTools(): ToolDefinition[] {
 
     {
       name: 'desktop_screenshot_region',
-      description: 'Take a zoomed screenshot of a specific screen region for detailed inspection. Coordinates are in image-space (from desktop_screenshot).',
+      description: 'Take a zoomed screenshot of a specific screen region for detailed inspection, or to check only what changed (pass max_edge to pay less). Coordinates are in image-space (from desktop_screenshot).',
       parameters: {
         x: { type: 'number', description: 'Left edge X in image-space coordinates', required: true },
         y: { type: 'number', description: 'Top edge Y in image-space coordinates', required: true },
@@ -162,11 +172,12 @@ export function getDesktopTools(): ToolDefinition[] {
         height: { type: 'number', description: 'Height in image-space pixels', required: true },
         space: SPACE_PARAM,
         display: { type: 'number', description: 'Monitor whose screenshot the image-space region was read off (index from window list_displays). Default: the monitor of the latest screenshot.', required: false },
+        max_edge: MAX_EDGE_PARAM,
       },
       category: 'perception',
       compactGroup: 'computer',
       safetyTier: 0,
-      handler: async ({ x, y, width, height, space, display }, ctx) => {
+      handler: async ({ x, y, width, height, space, display, max_edge }, ctx) => {
         await ctx.ensureInitialized();
         // Region in physical screen px: through the last frame (any monitor)
         // for image coords; by screenToPhysical for screen coords (points on
@@ -189,19 +200,19 @@ export function getDesktopTools(): ToolDefinition[] {
         if (process.platform === 'win32' && ctx.platform) {
           // Windows: the bridge captures any rectangle on any monitor; if it is
           // down, fall back to the primary-display capture below.
-          const shot = await ctx.platform.screenshot({ maxWidth: LLM_TARGET_WIDTH, region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
+          const shot = await ctx.platform.screenshot({ maxWidth: maxEdgeOf(max_edge), region: { x: p0.x, y: p0.y, width: w, height: h } }).catch(() => null);
           if (shot) {
             return {
-              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${shot.width}x${shot.height}px.${zoomNote({ x, y, width, height, space, display }, shot.width, shot.height)}`,
+              text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${imageCost(shot.width, shot.height)}.${zoomNote({ x, y, width, height, space, display }, shot.width, shot.height)}`,
               // The captured rectangle is (p0, w x h) on screen: the same capture path as a full screenshot (core/fence.ts).
               image: await fenceImage(shot.buffer, 'image/png', { originX: p0.x, originY: p0.y, screenWidth: w, boundsScale: fenceBoundsScale(ctx) }),
             };
           }
         }
-        const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h);
+        const frame = await ctx.desktop.captureRegionForLLM(p0.x, p0.y, w, h, maxEdgeOf(max_edge));
         const image = await fenceImage(frame.buffer, 'image/jpeg', { originX: p0.x, originY: p0.y, screenWidth: w, boundsScale: fenceBoundsScale(ctx) });
         return {
-          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${frame.llmWidth}x${frame.llmHeight}px.${zoomNote({ x, y, width, height, space, display }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
+          text: `Region: (${x},${y}) ${width}x${height} ${space === 'screen' ? 'screen-space' : 'image-space'} → zoomed to ${imageCost(frame.llmWidth, frame.llmHeight)}.${zoomNote({ x, y, width, height, space, display }, frame.llmWidth, frame.llmHeight)}${uncheckedNote()}`,
           image,
         };
       },

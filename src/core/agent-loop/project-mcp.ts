@@ -150,10 +150,13 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
   // Derive screen dimensions. System B tools use ctx.screen for coordinate math.
   // ToolContext exposes getScreenSize() on ctx.desktop (NativeDesktop).
   let screen: AgentToolContext['screen'];
+  // The scale the System A tools click with: the latest screenshot's, whatever its max_edge.
+  let imageToMouse: number | undefined;
   try {
     const size = ctx.desktop.getScreenSize() as { width: number; height: number };
     const msf = ctx.getMouseScaleFactor();   // image → logical (mouse) scale
     const ssf = ctx.getScreenshotScaleFactor(); // image → physical pixel scale
+    imageToMouse = msf;
     // msf ≈ physicalWidth / imageWidth (typically 1 on standard, 2 on HiDPI).
     // We reconstruct logical and physical from physical size + ratio.
     const physicalWidth = size.width;
@@ -173,6 +176,7 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
     platform,
     task: '',           // No task context available in the MCP surface layer.
     screen,
+    imageToMouse,
     screenshotsCaptured: { n: 0 },
     mcpSurface: true,
     cdp: ctx.cdp ?? null,

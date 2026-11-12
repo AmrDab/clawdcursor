@@ -561,7 +561,7 @@
     },
     {
       "name": "desktop_screenshot",
-      "description": "LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge (the reply states its size and scale).",
+      "description": "LAST RESORT — take a screenshot only when the accessibility tree and OCR are both insufficient (custom canvas, icon-only UI, pixel-level verification). Prefer read_screen first, then ocr_read_screen; escalate to screenshot only when those fail. Returns the image downscaled to fit 1280px on its long edge, or max_edge (the reply states its size, cost and scale; clicks use its coordinates).",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -569,6 +569,10 @@
           "display": {
             "type": "number",
             "description": "Monitor to capture (index from window list_displays). Default: the monitor clawdcursor last worked on, else the primary."
+          },
+          "max_edge": {
+            "type": "number",
+            "description": "Longest edge of the returned image in px (64–1280, default 1280). Smaller costs fewer image tokens; small text may become unreadable."
           }
         }
       },
@@ -576,7 +580,7 @@
     },
     {
       "name": "desktop_screenshot_region",
-      "description": "Take a zoomed screenshot of a specific screen region for detailed inspection. Coordinates are in image-space (from desktop_screenshot).",
+      "description": "Take a zoomed screenshot of a specific screen region for detailed inspection, or to check only what changed (pass max_edge to pay less). Coordinates are in image-space (from desktop_screenshot).",
       "category": "perception",
       "parameters": {
         "type": "object",
@@ -608,6 +612,10 @@
           "display": {
             "type": "number",
             "description": "Monitor whose screenshot the image-space region was read off (index from window list_displays). Default: the monitor of the latest screenshot."
+          },
+          "max_edge": {
+            "type": "number",
+            "description": "Longest edge of the returned image in px (64–1280, default 1280). Smaller costs fewer image tokens; small text may become unreadable."
           }
         },
         "required": [
@@ -1101,7 +1109,7 @@
     },
     {
       "name": "mouse_click",
-      "description": "Click at (x,y). Pass space:\"screen\" for a11y/@x,y map coords, space:\"image\" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.",
+      "description": "Click at (x,y), or at each point of `path` in turn (pen points, several cells: one call). Pass space:\"screen\" for a11y/@x,y map coords, space:\"image\" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.",
       "category": "mouse",
       "parameters": {
         "type": "object",
@@ -1113,6 +1121,29 @@
           "y": {
             "type": "number",
             "description": "Y coordinate in image-space"
+          },
+          "path": {
+            "type": "array",
+            "description": "Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "x": {
+                  "type": "number"
+                },
+                "y": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "x",
+                "y"
+              ]
+            }
+          },
+          "interval_ms": {
+            "type": "number",
+            "description": "With path: milliseconds between clicks (default 100, max 5000)."
           },
           "button": {
             "type": "string",
@@ -1160,11 +1191,7 @@
               ]
             }
           }
-        },
-        "required": [
-          "x",
-          "y"
-        ]
+        }
       },
       "costClass": "act"
     },

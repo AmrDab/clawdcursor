@@ -54,6 +54,12 @@ export function llmSize(w: number, h: number, maxEdge = LLM_TARGET_WIDTH): { sca
   return { scale, width: Math.max(1, Math.round(w / scale)), height: Math.max(1, Math.round(h / scale)) };
 }
 
+/** "1175x979px, about 1.5k image tokens": what an image costs the model (Anthropic counts w×h/750; other providers are close). */
+export function imageCost(w: number, h: number): string {
+  const t = (w * h) / 750;
+  return `${w}x${h}px, about ${t >= 1000 ? `${(t / 1000).toFixed(1)}k` : Math.max(10, Math.round(t / 10) * 10)} image tokens`;
+}
+
 /**
  * Factor to convert IMAGE-space (screenshot) coords to the OS mouse driver's
  * coordinate space.
@@ -70,7 +76,11 @@ export function llmSize(w: number, h: number, maxEdge = LLM_TARGET_WIDTH): { sca
 export function imageScale(ctx: {
   screen?: { physicalWidth?: number; physicalHeight?: number; logicalWidth?: number; logicalHeight?: number };
   _platform?: string; // injectable for tests; defaults to process.platform
+  /** The latest screenshot's own image → mouse factor, when the caller knows it (the MCP surface): a screenshot taken with
+   *  max_edge is smaller than the default, and recomputing the default here would click off its coordinates. */
+  imageToMouse?: number;
 }): number {
+  if (ctx.imageToMouse && ctx.imageToMouse > 0) return ctx.imageToMouse;
   const platform = ctx._platform ?? process.platform;
   const s = ctx.screen ?? {};
   const pw = s.physicalWidth || 0;

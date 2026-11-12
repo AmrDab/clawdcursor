@@ -929,6 +929,7 @@ export class LinuxAdapter implements PlatformAdapter {
       busy: raw?.busy,
       offscreen,
       automationId: raw?.automationId ?? undefined,
+      ...(typeof raw?.help === 'string' && raw.help ? { help: raw.help } : {}),
       processId: typeof raw?.processId === 'number' ? raw.processId : undefined,
       ...(raw?.inDocument === true ? { inDocument: true } : {}),
     };

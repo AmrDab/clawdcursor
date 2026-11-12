@@ -185,8 +185,9 @@ class Selection:
 class Acc:
     def __init__(self, name, role, states=(StateType.ENABLED, StateType.SENSITIVE, StateType.VISIBLE, StateType.SHOWING),
                  screen=(10, 20, 30, 40), window=(0, 0, 0, 0), actions=None, children=(), pid=4242,
-                 text=None, editable=False, value=None, selection=False, lag=None):
+                 text=None, editable=False, value=None, selection=False, lag=None, description=''):
         self.name, self.role, self.states = name, role, set(states)
+        self.description = description
         self.lag = lag
         self.screen, self.window = screen, window
         self.action = Action(self, actions) if actions is not None else None
@@ -200,6 +201,7 @@ class Acc:
         self.component = Component(self)
 
     def get_name(self): return self.name
+    def get_description(self): return self.description
     def get_role_name(self): return self.role
     def get_state_set(self): return StateSet(self.states)
     def get_component_iface(self): return self.component
@@ -291,6 +293,7 @@ OUT['empty_state'] = bridge.node_to_dict(empty_state)
 OUT['sensitive_only'] = bridge.node_to_dict(sensitive_only)
 OUT['rel'] = bridge.node_to_dict(rel)
 OUT['seven'] = bridge.node_to_dict(seven)
+OUT['help'] = [bridge.node_to_dict(Acc('Bold', 'push button', description=d)).get('help') for d in ('Make text bold', 'Bold', '')]
 
 OUT['click'] = bridge.cmd_invoke('7', None, 4242, 'click', None)
 OUT['click_done'] = seven.action.done

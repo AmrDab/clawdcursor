@@ -21,7 +21,7 @@ import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } f
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, waylandScreenSize, grimGrab } from './wayland-screen';
-import { llmScale, llmSize } from '../core/agent-loop/coord-scale';
+import { llmScale, llmSize, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo } from './mac-screen';
@@ -401,7 +401,7 @@ export class NativeDesktop extends EventEmitter {
    * - Much smaller payload = fewer tokens = faster API calls
    * - Returns scaleFactor so coordinates in AI response can be mapped back
    */
-  async captureForLLM(): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number }> {
+  async captureForLLM(maxEdge = LLM_TARGET_WIDTH): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number }> {
     if (!this.connected) {
       throw new Error('Not connected to native desktop');
     }
@@ -411,7 +411,7 @@ export class NativeDesktop extends EventEmitter {
         const frame = await this.captureScreen();
         this.screenWidth = frame.width;
         this.screenHeight = frame.height;
-        const { scale, width: llmWidth, height: llmHeight } = llmSize(this.screenWidth, this.screenHeight);
+        const { scale, width: llmWidth, height: llmHeight } = llmSize(this.screenWidth, this.screenHeight, maxEdge);
         this.scaleFactor = scale;
         const pipeline = sharp(frame.buffer).resize(llmWidth, llmHeight);
         const processed = this.config.capture.format === 'jpeg'
@@ -440,7 +440,7 @@ export class NativeDesktop extends EventEmitter {
     this.screenHeight = img.height;
 
     // Recalculate scale factor in case resolution changed (long edge AND area capped)
-    const { scale, width: llmWidth, height: llmHeight } = llmSize(this.screenWidth, this.screenHeight);
+    const { scale, width: llmWidth, height: llmHeight } = llmSize(this.screenWidth, this.screenHeight, maxEdge);
     this.scaleFactor = scale;
 
     const processed = await this.processFrame(img, llmWidth, llmHeight);
@@ -466,7 +466,7 @@ export class NativeDesktop extends EventEmitter {
    * @future — not yet used; intended for focused region analysis
    */
   async captureRegionForLLM(
-    x: number, y: number, w: number, h: number
+    x: number, y: number, w: number, h: number, maxEdge = LLM_TARGET_WIDTH,
   ): Promise<ScreenFrame & { scaleFactor: number; llmWidth: number; llmHeight: number; regionX: number; regionY: number }> {
     if (!this.connected) throw new Error('Not connected');
 
@@ -476,7 +476,7 @@ export class NativeDesktop extends EventEmitter {
       const ry = Math.max(0, Math.min(y, full.height - 1));
       const rw = Math.min(w, full.width - rx);
       const rh = Math.min(h, full.height - ry);
-      const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh);
+      const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh, maxEdge);
       const { format, quality } = this.config.capture;
       let pipeline = sharp(full.buffer).extract({ left: rx, top: ry, width: rw, height: rh });
       if (llmWidth < rw) {
@@ -495,7 +495,7 @@ export class NativeDesktop extends EventEmitter {
     const rh = Math.min(h, img.height - ry);
 
     // Scale crop to LLM-sized output (long edge and area capped)
-    const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh);
+    const { scale: cropScale, width: llmWidth, height: llmHeight } = llmSize(rw, rh, maxEdge);
 
     const { format, quality } = this.config.capture;
 

@@ -659,6 +659,7 @@ export function getCompactTools(): ToolDefinition[] {
           y: 'Y position. From a screenshot: as read off the image. From accessibility or ocr: pass space:"screen".',
           button: 'Mouse button: "left" (default), "right" or "middle".',
           key: 'Alias for combo: the key or chord to press.',
+          path: 'Array of {"x":n,"y":n} points (same space as x,y). click: clicks each point in turn (pen points: one call), interval_ms apart. drag_path: drags through them, min 2.',
         }),
         shot: { type: 'string', required: false, description: 'Optional, image-space pointer actions: the id of the screenshot the coordinates were read off (each screenshot reply names it, e.g. "s3"). Refused when it is not the latest screenshot.' },
       },

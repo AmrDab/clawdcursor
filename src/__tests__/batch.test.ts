@@ -255,3 +255,31 @@ describe('batch tool — parsing', () => {
     expect(r.text).toMatch(/\neffect: another app is in front: "Notepad" "Untitled"$/);
   });
 });
+
+// #355: "do N actions, then check once" is one call — the last image comes back, and a run of the same step is one line.
+describe('batch tool — the final image and repeated steps', () => {
+  it('returns the image of the last step that made one, and folds a run of identical successful steps', async () => {
+    let n = 0;
+    tools.computer = tool('computer', vi.fn(async (a: any) => a.action === 'screenshot_region'
+      ? { text: 'zoomed', image: { data: `img${++n}`, mimeType: 'image/png' } }
+      : { text: `clicked ${a.x}` }));
+    const steps = [
+      { name: 'computer', arguments: { action: 'screenshot_region' } },
+      ...[1, 2, 3].map(x => ({ name: 'computer', arguments: { action: 'click', x, y: 1, space: 'screen' } })),
+      { name: 'computer', arguments: { action: 'screenshot_region' } },
+    ];
+    const r = await getBatchTools()[0].handler({ steps }, ctx);
+    expect(r.image).toEqual({ data: 'img2', mimeType: 'image/png' });
+    expect(r.text).toContain("all 5 steps completed. The image attached is step 4's.");
+    expect(r.text).toContain('  1-3. [ok] computer.click x3 — clicked 3');
+    expect(r.text).toContain('  0. [ok] computer.screenshot_region — zoomed');
+    expect(r.steps).toHaveLength(5);   // the session log still gets every step
+  });
+
+  it('with no image, says nothing about one', async () => {
+    tools.key_press = okTool('key_press');
+    const r = await getBatchTools()[0].handler({ steps: [{ name: 'key_press' }] }, ctx);
+    expect(r.image).toBeUndefined();
+    expect(r.text).not.toMatch(/image attached/);
+  });
+});

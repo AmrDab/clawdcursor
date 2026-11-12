@@ -32,6 +32,54 @@ export function shownValue(v: string | undefined, onCut?: () => void): string {
   return ` value=${head}… (+${v.length - VALUE_SHOWN} chars not shown)`;
 }
 
+/**
+ * The text an app shows on hover (UIA HelpText, AXHelp, AT-SPI description), on read_tree and find lines alike: only when
+ * it says more than the name, quoted and kept to one line like a value, so an agent reads what a button does without hovering.
+ */
+export function shownHelp(el: { name?: string; help?: string }): string {
+  const h = (el.help ?? '').trim();
+  if (!h || h === (el.name ?? '').trim()) return '';
+  return ` help=${JSON.stringify(h.length > 80 ? h.slice(0, 80) : h)}${h.length > 80 ? '…' : ''}`;
+}
+
+/** Share of the window a nameless area must cover before read_tree reports it. */
+const OPAQUE_SHARE = 0.25;
+/** Text roles on UIA / AX (role prefix stripped) / AT-SPI. */
+const TEXT_ROLE = /^(?:Text|StaticText|label|static|paragraph)$/i;
+
+/**
+ * A large part of the window in which nothing has a name or a value: a drawing canvas, a whiteboard, a CAD viewport, a page
+ * drawn in a <canvas>. The window is the largest element read; the area is the largest element covering at least a quarter
+ * of it with no named element's centre inside. Null when there is none. Geometry only, so the same on every OS.
+ */
+export function opaqueArea(tree: ReadonlyArray<UiElement>): { bounds: UiElement['bounds']; share: number } | null {
+  const area = (el: UiElement) => (el.offscreen || el.bounds.width <= 0 || el.bounds.height <= 0 ? 0 : el.bounds.width * el.bounds.height);
+  const windowArea = Math.max(0, ...tree.map(area));
+  if (!windowArea) return null;
+  const readable = tree.filter(el => area(el) > 0 && (named(el) || !!el.value));
+  // Smaller and centred in it: the window around the area is centred in it too.
+  const inside = (c: UiElement, el: UiElement) => {
+    if (area(el) >= area(c)) return false;
+    const cx = el.bounds.x + el.bounds.width / 2, cy = el.bounds.y + el.bounds.height / 2;
+    return cx >= c.bounds.x && cx <= c.bounds.x + c.bounds.width && cy >= c.bounds.y && cy <= c.bounds.y + c.bounds.height;
+  };
+  // A text element's name IS its content (a long paragraph is one big Text): readable, not opaque.
+  const best = tree
+    .filter(c => area(c) >= OPAQUE_SHARE * windowArea && !c.value && !TEXT_ROLE.test(c.controlType ?? '')
+      && !readable.some(el => el !== c && inside(c, el)))
+    .sort((a, b) => area(b) - area(a))[0];
+  return best ? { bounds: best.bounds, share: area(best) / windowArea } : null;
+}
+
+/** read_tree's line for an opaque area. No tool names but batch, so it reads the same on every surface. The MCP server
+ *  matches its start to know the agent is on a canvas (mcp-server.ts). */
+export const OPAQUE_MARK = '→ Opaque area @';
+export function opaqueAreaLine(o: { bounds: UiElement['bounds']; share: number }): string {
+  const b = o.bounds;
+  return `${OPAQUE_MARK}${b.x},${b.y} ${b.width}×${b.height} (${Math.round(o.share * 100)}% of the window): nothing inside has a name — ` +
+    'a canvas, board or drawn view. Work in it from one screenshot: send all the strokes in ONE batch, then look again only at the area that changed.';
+}
+
 /** read_tree cut a long value: how to read it whole (outside the screen-content block, so it is rewritten per surface).
  *  A role-only get_value works on Linux but not on Windows, so an unnamed editor goes to copy_all_text. */
 export const CUT_VALUE_NEXT_STEP =

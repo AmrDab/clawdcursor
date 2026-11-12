@@ -29,7 +29,7 @@ import type { InvokeAction, UiElement } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption, selectedResult } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, shownValue, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions } from '../../platform/browser-config';
@@ -201,12 +201,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         let cut = false;
         const shown = (v?: string) => shownValue(v, () => { cut = true; });
         const lines = page.map(el => isOff(el)
-          ? `[${el.controlType || 'Element'}] "${el.name || ''}"${shown(el.value)} (offscreen — scroll to see)`
-          : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${shown(el.value)}${el.focused ? ' [FOCUSED]' : ''}`,
+          ? `[${el.controlType || 'Element'}] "${el.name || ''}"${shown(el.value)}${shownHelp(el)} (offscreen — scroll to see)`
+          : `[${el.controlType || 'Element'}] "${el.name || ''}" @${el.bounds.x},${el.bounds.y} ${el.bounds.width}×${el.bounds.height}${shown(el.value)}${shownHelp(el)}${el.focused ? ' [FOCUSED]' : ''}`,
         );
         const rest = ordered.length - (offset + page.length) - (fold ? content.length : 0);
         const more = rest > 0 ? `\n… +${rest} more — read_screen again with offset:${offset + page.length} to see them` : '';
-        const hint = (isSparseTree(tree, activeIsBrowser) ? `\n${nextStep}` : '') +
+        const sparse = isSparseTree(tree, activeIsBrowser);
+        // A browser page that exposes nothing may be asleep rather than drawn: the sparse advice covers it, not "canvas".
+        const opaque = activeIsBrowser && sparse ? null : opaqueArea(tree);
+        const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (sparse ? `\n${nextStep}` : '') +
           (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         const folded = fold ? `\n+ an embedded document or web view of ${content.length} elements — read_screen with offset:${own.length} lists them; copy_all_text reads its text` : '';
@@ -685,22 +688,28 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
     // ─── INPUT (mouse) ──────────────────────────────────────────
     {
       name: 'click',
-      description: 'Click at (x,y). Pass space:"screen" for a11y/@x,y map coords, space:"image" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.',
+      description: 'Click at (x,y), or at each point of `path` in turn (pen points, several cells: one call). Pass space:"screen" for a11y/@x,y map coords, space:"image" for coords read off the screenshot. Prefer invoke_element when the target has an a11y name.',
       inputSchema: {
         type: 'object',
         properties: {
           x: { type: 'number' },
           y: { type: 'number' },
+          path: {
+            type: 'array',
+            description: 'Instead of x,y: an array of {x,y} points (same space) clicked one after another, e.g. the points of a pen path. Each click is checked against the Stop button.',
+            items: { type: 'object', properties: { x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] },
+          },
+          interval_ms: { type: 'number', description: 'With path: milliseconds between clicks (default 100, max 5000).' },
           button: { type: 'string', enum: ['left', 'right'] },
           count: { type: 'number', description: '1=single, 2=double' },
           space: COORD_SPACE_SCHEMA,
           expect: EXPECT_SCHEMA,
         },
-        required: ['x', 'y'],
         additionalProperties: false,
       },
       changesScreen: true,
       async execute(args, ctx) {
+        if (args.path !== undefined && args.path !== null) return clickPath(args, ctx);
         const { x: ix, y: iy, warning } = coerceCoord(args.x, args.y);
         if (!Number.isFinite(ix) || !Number.isFinite(iy)) {
           return { success: false, isError: true, text: `click: x/y must be finite numbers, got x=${JSON.stringify(args.x)} y=${JSON.stringify(args.y)}` };
@@ -2364,6 +2373,42 @@ function coordBreadcrumb(
 function focusBreadcrumb(before: WindowRead, after: WindowRead): string {
   const line = effectLine(before, after);
   return line ? `\n${line}` : '';
+}
+
+/**
+ * click with `path`: one click per point, in order, `interval_ms` apart. Each mouseClick goes through the input guard, so
+ * the user's Stop (and a window change) refuses the next point; the reply then says how many landed first.
+ */
+async function clickPath(args: Record<string, unknown>, ctx: AgentToolContext) {
+  let pts: unknown = args.path;
+  if (typeof pts === 'string') { try { pts = JSON.parse(pts); } catch { pts = null; } }
+  if (!Array.isArray(pts) || pts.length === 0 || !pts.every(p => p && Number.isFinite(Number(p.x)) && Number.isFinite(Number(p.y)))) {
+    return { success: false, isError: true, text: 'click: `path` must be a non-empty array of {x,y} points with finite coords' };
+  }
+  const points = pts as Array<{ x: unknown; y: unknown }>;
+  const button = args.button === 'right' ? 'right' : 'left';
+  const count = args.count === 2 ? 2 : 1;
+  const interval = typeof args.interval_ms === 'number' && args.interval_ms >= 0 ? Math.min(5000, args.interval_ms) : 100;
+  const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
+  const scale = space === 'image' ? imageScale(ctx) : 1;
+  const scaled = points.map(p => space === 'image'
+    ? mapImagePoint(Number(p.x), Number(p.y), scale)
+    : { x: scaleCoord(Number(p.x), 1), y: scaleCoord(Number(p.y), 1) });
+  const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
+  const raised = await ensureTargetForeground(ctx, fg0);
+  const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
+  for (let i = 0; i < scaled.length; i++) {
+    if (i > 0 && await sleepUnlessStopped(interval)) throw new Error(`${STOPPED_TEXT} (${i} of ${scaled.length} points were clicked first)`);
+    try { await ctx.platform.mouseClick(scaled[i].x, scaled[i].y, { button, count }); }
+    catch (e) {
+      if (i === 0) throw e;
+      throw new Error(`${e instanceof Error ? e.message : String(e)} (${i} of ${scaled.length} points were clicked first)`, { cause: e });
+    }
+  }
+  await sleep(150);
+  const after = await ctx.platform.getActiveWindow().catch(() => null);
+  const last = scaled[scaled.length - 1];
+  return { success: true, text: `Clicked ${button} x${count} at ${scaled.length} ${space} points → screen (${scaled[0].x},${scaled[0].y})…(${last.x},${last.y}) [×${scale}]${raised}${focusBreadcrumb(before, after)}` };
 }
 
 /** Roles that take typed text, across UIA / AX / AT-SPI names. A number box is a Spinner (AT-SPI "spin button", AXIncrementor). */
