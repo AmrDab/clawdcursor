@@ -121,6 +121,12 @@ const RULES: Rule[] = [
   // A set that did nothing: the field can be read, and it is still empty.
   { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field still shows nothing, not the value asked for/i,
     hint: 'the field can be read and is still empty: the set did not reach it, and the same call will not either; click the field, then type', next: REREAD },
+  // Typed into a field that can be read, and it is still empty: the text went elsewhere, or a paste came too late.
+  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /the field reads back empty after typing/i,
+    hint: 'the field can be read and is still empty: the text did not arrive; click into the field, then type again', next: REREAD },
+  // A select whose control shows another option afterwards.
+  { code: 'READBACK_MISMATCH', outcome: 'failed', test: /Tried to select .* but it now shows /i,
+    hint: 'the control shows another option than the one asked for: the pick did not take; read its options, then pick again', next: REREAD },
   { code: 'REPEATED', outcome: 'failed', test: /repeat guard/i,
     hint: 'the same call kept repeating without progress; change the approach' },
   { code: 'INVALID_ARGS', outcome: 'failed',

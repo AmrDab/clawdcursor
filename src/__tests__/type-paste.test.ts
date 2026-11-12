@@ -93,3 +93,25 @@ describe('type tool — clipboard paste for long text', () => {
     expect(platform.typeText).toHaveBeenCalledWith(LONG);
   });
 });
+
+// #377: a field that can be read and still reads empty after typing got none of the text.
+describe('type tool — a readable field that reads back empty', () => {
+  const field = (value: string, readable?: boolean) => ({ name: 'Name', controlType: 'Edit', bounds: { x: 0, y: 0, width: 100, height: 20 }, value, ...(readable ? { readable } : {}) });
+  const platform = (focused: any) => ({ keyPress: vi.fn(async () => {}), typeText: vi.fn(async () => {}), getFocusedElement: vi.fn(async () => focused) });
+
+  it('fails with READBACK_MISMATCH, and does not press Return', async () => {
+    const { classifyResult } = await import('../core/result-codes');
+    const p = platform(field('', true));
+    const r = await typeTool().execute({ text: 'hello\n' }, ctxWith(p));
+    expect(r.success).toBe(false);
+    expect(r.text).toMatch(/reads back empty after typing/);
+    expect(p.keyPress).not.toHaveBeenCalledWith('Return');
+    expect(classifyResult(r.text, true, true)?.code).toBe('READBACK_MISMATCH');
+  });
+
+  it('an empty read from a field that cannot be read is no verdict: success, unverified', async () => {
+    const r = await typeTool().execute({ text: 'hello' }, ctxWith(platform(field(''))));
+    expect(r.success).toBe(true);
+    expect(r.text).not.toMatch(/read back/);
+  });
+});

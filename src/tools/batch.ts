@@ -30,6 +30,7 @@ import { logger } from '../core/observability/logger';
 import { clipScreenText } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
 import { actedIn, actRecord } from '../core/control';
+import { effectLine } from '../core/effect';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
@@ -278,11 +279,15 @@ export function getBatchTools(): ToolDefinition[] {
           }
         }
 
+        // Once per batch: what the window in front did across all its steps (#357), by identity, never by title.
+        const window = () => ctx.platform?.getActiveWindow().catch(() => null) ?? Promise.resolve(null);
+        const w0 = await window();
         const result = await executeBatch(steps, ctx, {
           maxSteps: typeof params.maxSteps === 'number' ? params.maxSteps : undefined,
         });
+        const effect = effectLine(w0, await window());
         return {
-          text: renderResult(result),
+          text: renderResult(result) + (effect ? `\n${effect}` : ''),
           isError: !result.allDone,
           steps: result.steps.map(s => {
             const a = stepArgs(steps[s.i]).action;

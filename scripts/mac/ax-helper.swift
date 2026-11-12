@@ -1333,6 +1333,8 @@ func cmdFocused() -> Never {
         "processId": Int(app.processIdentifier),
     ]
     if secure { d["secure"] = true } else if let v = str(a["AXValue"]), !v.isEmpty { d["value"] = String(v.prefix(500)) }
+    // readable: the value is a string that was read, so "" is an empty field (not an element with no value).
+    d["readable"] = !secure && str(a["AXValue"]) != nil
     if bool(a["AXEnabled"]) == false { d["enabled"] = false }
     emit(["ok": true, "focused": d, "elapsedMs": elapsedMs()])
 }

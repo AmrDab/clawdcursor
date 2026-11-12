@@ -92,6 +92,8 @@ export interface UiElement {
   bounds: { x: number; y: number; width: number; height: number };
   /** Optional structured value (e.g. text field contents). */
   value?: string;
+  /** The focused-element read only: `value` was read from the element itself, so an empty one is an empty field. */
+  readable?: boolean;
   /** Whether the element is enabled and interactable. */
   enabled?: boolean;
   /** Whether the element currently has keyboard focus. */

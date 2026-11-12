@@ -9,6 +9,8 @@ import type { ToolDefinition } from './types';
 import { quoteScreenText } from '../core/result-codes';
 import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 import { DEFAULT_CDP_PORT } from '../platform/browser-config';
+import { readBackTyped, setVerdict } from './paste-guard';
+import { shownResult } from '../platform/select-option';
 
 export function getCdpTools(): ToolDefinition[] {
   return [
@@ -105,10 +107,10 @@ export function getCdpTools(): ToolDefinition[] {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
         if (!selector && !label) return { text: 'Provide either selector or label parameter.', isError: true };
         const result = label ? await ctx.cdp.typeByLabel(label, text) : await ctx.cdp.typeInField(selector!, text);
-        return {
-          text: result.success ? `Typed "${(text as string).substring(0, 60)}" into ${selector || `label="${label}"`}` : `Type failed: ${result.error}`,
-          isError: !result.success,
-        };
+        if (!result.success) return { text: `Type failed: ${result.error}`, isError: true };
+        // The fill replaced the field's text: read it back, as every set is (#399).
+        const v = setVerdict(await readBackTyped(async () => result.read?.() ?? null, String(text), { whole: true }), String(text), selector || label, ' (browser)');
+        return { text: v.text, isError: !v.success };
       },
     },
 
@@ -125,7 +127,9 @@ export function getCdpTools(): ToolDefinition[] {
       handler: async ({ selector, value }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
         const result = await ctx.cdp.selectOption(selector, value);
-        return { text: result.success ? `Selected "${value}" in ${selector}` : `Select failed: ${result.error}`, isError: !result.success };
+        if (!result.success) return { text: `Select failed: ${result.error}`, isError: true };
+        const v = shownResult(await result.read?.(), String(value), String(selector));   // the chosen option, read back (#399)
+        return { text: v.text, isError: !v.success };
       },
     },
 

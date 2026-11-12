@@ -915,6 +915,7 @@ export class LinuxAdapter implements PlatformAdapter {
       secure: rawRole === 'password text' ? true : undefined,
       bounds,
       value: typeof raw?.value === 'string' ? raw.value : undefined,
+      ...(raw?.readable === true ? { readable: true } : {}),
       enabled,
       focused: raw?.focused,
       selected: raw?.selected,

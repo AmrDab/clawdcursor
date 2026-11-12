@@ -246,4 +246,12 @@ describe('batch tool — parsing', () => {
     expect((await batchTool().handler({ steps: [] }, ctx)).isError).toBe(true);
     expect((await batchTool().handler({ steps: 'not json' }, ctx)).isError).toBe(true);
   });
+
+  it('ends with one effect line for the whole batch: the window in front, by identity (#357)', async () => {
+    tools.open_app = okTool('open_app');
+    let n = 0;
+    const getActiveWindow = vi.fn(async () => (n++ === 0 ? { processId: 1, processName: 'explorer', title: 'Desktop' } : { processId: 2, processName: 'notepad', appName: 'Notepad', title: 'Untitled' }));
+    const r = await batchTool().handler({ steps: [{ name: 'open_app', arguments: { name: 'notepad' } }] }, { platform: { getActiveWindow } } as any);
+    expect(r.text).toMatch(/\neffect: another app is in front: "Notepad" "Untitled"$/);
+  });
 });

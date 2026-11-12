@@ -17,7 +17,7 @@ import { OcrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
 import { windowOcrRegion } from './ocr';
-import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys } from './paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING } from './paste-guard';
 import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
 import { ensureVisible } from '../core/sense/ui-map-visible';
@@ -1014,9 +1014,12 @@ export function getSmartTools(): ToolDefinition[] {
         const how = `${viaKeys ? 'keys' : 'paste'}${rb.result === 'match' ? ', read back ✓' : ''}`;
         const fieldShows = rb.value !== undefined
           ? ` It shows: ${wrapUntrustedScreenContent(rb.value.length > 80 ? `${rb.value.slice(0, 79)}…` : rb.value)}` : '';
-        // A replace that left other text in the field (not the text with a suggestion after it) did not do what was asked.
-        const failed = replace && rb.result === 'mismatch';
-        const readBack = failed
+        // A field that can be read and is still empty got none of it (#377). A replace that left other text in the field (not
+        // the text with a suggestion after it) did not do what was asked.
+        const empty = rb.result === 'mismatch' && rb.value === '';
+        const failed = empty || (replace && rb.result === 'mismatch');
+        const readBack = empty ? ` ⚠ ${EMPTY_AFTER_TYPING}`
+          : failed
           ? ` ⚠ read back: the field shows different text, not the text asked for (its old text was not replaced, or the field rewrote it).${fieldShows}`
           : rb.result === 'suffix' || rb.result === 'mismatch'
             ? ` ⚠ read back: the field shows different text (an autocomplete suggestion, or the field reformatted it); check it before going on.${fieldShows}`

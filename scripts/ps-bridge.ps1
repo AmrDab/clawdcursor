@@ -1843,15 +1843,19 @@ function Cmd-GetFocusedElement {
         $isPassword = $false
         try { $isPassword = [bool]$cur.IsPassword } catch { }
         # Try to read current value if it's an editable element
+        # readable: the value itself was read, so "" is an empty field (not an element that exposes no text).
         $value = ""
+        $readable = $false
         if (-not $isPassword) {
             try {
                 $vp = $focused.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
                 $value = $vp.Current.Value
+                $readable = $true
             } catch {
                 try {
                     $tp = $focused.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
                     $value = $tp.DocumentRange.GetText(1000)
+                    $readable = $true
                 } catch {}
             }
         }
@@ -1865,6 +1869,7 @@ function Cmd-GetFocusedElement {
             isEnabled    = $cur.IsEnabled
             bounds       = $bounds
             value        = $value
+            readable     = $readable
             secure       = $isPassword
         }
         Add-StateFields $out $focused $typeName

@@ -258,6 +258,7 @@ export function toUiElement(raw: any, depth?: number, processId?: number): UiEle
     automationId: automationId || undefined,
     description: raw.description || undefined,
     processId: raw.processId ?? processId,
+    ...(raw.readable === true && !secure ? { readable: true } : {}),
     depth,
   };
 }

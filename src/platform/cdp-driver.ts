@@ -43,7 +43,7 @@
  *   const results = await cdp.querySelectorAll('button');
  */
 
-import { chromium, type Browser, type Page } from 'playwright';
+import { chromium, type Browser, type Page, type Locator } from 'playwright';
 import { spawn } from 'child_process';
 import * as os from 'os';
 import * as path from 'path';
@@ -95,6 +95,27 @@ export interface CDPInteractionResult {
   error?: string;
   /** Number of elements matched (for queries) */
   matchCount?: number;
+  /** Reads the element the act went to, as it shows now (#399): what the caller checks the act against. */
+  read?: () => Promise<FieldShown | null>;
+}
+
+/** What a form element shows: `value` its text (a <select>: the chosen option's label, `option` its value). */
+export interface FieldShown { value?: string; option?: string; readable?: boolean; secure?: boolean }
+
+/**
+ * Read a form element in the page: an input's / textarea's value, a <select>'s chosen option(s), an editable element's text.
+ * A password input is withheld. Null when it cannot be read (gone, not a form element). Never throws.
+ */
+function readerOf(locator: Locator): () => Promise<FieldShown | null> {
+  return () => locator.evaluate((el: any) => {
+    if (el.type === 'password') return { secure: true };
+    if (el.tagName === 'SELECT') {
+      const o: any[] = Array.from(el.selectedOptions);
+      return { value: o.map(x => x.label).join(', '), option: o.map(x => x.value).join(', '), readable: true };
+    }
+    if (typeof el.value === 'string') return { value: el.value, readable: true };
+    return el.isContentEditable ? { value: String(el.innerText ?? ''), readable: true } : null;
+  }, undefined, { timeout: 1000 }).catch(() => null);
 }
 
 /**
@@ -212,7 +233,8 @@ export class CDPDriver {
    */
   constructor(cdpPort = DEFAULT_CDP_PORT) {
     this.cdpPort = cdpPort;
-    guardInputMethods(this);  // page actions: refused once the user stops clawdcursor (pointer-guard.ts)
+    // Page actions: refused once the user stops clawdcursor, and recorded as acts in the browser's process (pointer-guard.ts).
+    guardInputMethods(this, () => this.getBrowserPid());
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -892,14 +914,14 @@ export class CDPDriver {
       await this.moveCursorToSelector(selector);
       // Try fill() first — works for inputs, textareas, and [contenteditable]
       await pg.fill(selector, text, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.fill' };
+      return { success: true, method: 'playwright.fill', read: readerOf(pg.locator(selector).first()) };
     } catch {
       // Fall back to click + clear + type for stubborn elements
       try {
         await pg.click(selector, { timeout: 3000, force: true });
         await pg.keyboard.press('Control+a');
         await pg.keyboard.type(text, { delay: 20 });
-        return { success: true, method: 'playwright.type' };
+        return { success: true, method: 'playwright.type', read: readerOf(pg.locator(selector).first()) };
       } catch (err) {
         return {
           success: false,
@@ -933,7 +955,7 @@ export class CDPDriver {
       }
 
       await locator.first().fill(text, { timeout: 5000, force: true });
-      return { success: true, method: 'playwright.getByLabel' };
+      return { success: true, method: 'playwright.getByLabel', read: readerOf(locator.first()) };
     } catch (err) {
       return {
         success: false,
@@ -1005,7 +1027,7 @@ export class CDPDriver {
         // Try by label
         await pg.selectOption(selector, { label: valueOrLabel }, { timeout: 3000 });
       }
-      return { success: true, method: 'playwright.selectOption', value: valueOrLabel };
+      return { success: true, method: 'playwright.selectOption', value: valueOrLabel, read: readerOf(pg.locator(selector).first()) };
     } catch (err) {
       return {
         success: false,

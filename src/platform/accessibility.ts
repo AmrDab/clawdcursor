@@ -116,6 +116,8 @@ export interface FocusedElementInfo {
   value: string;
   /** A password field: its value is withheld (callers must not echo or compare it). */
   secure?: boolean;
+  /** `value` was read from the element itself, so an empty one is an empty field (UiElement.readable). */
+  readable?: boolean;
 }
 
 export interface WindowInfo {
@@ -546,6 +548,7 @@ export class AccessibilityBridge {
           bounds: result.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
           value: result.value ?? '',
           ...(result.secure === true ? { secure: true } : {}),
+          ...(result.readable === true ? { readable: true } : {}),
         };
       } catch {
         return null;
@@ -565,6 +568,7 @@ export class AccessibilityBridge {
           bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
           value: el.value ?? '',
           ...(el.secure ? { secure: true } : {}),
+          ...(el.readable ? { readable: true } : {}),
         };
       } catch {
         return null;
@@ -583,6 +587,7 @@ export class AccessibilityBridge {
         bounds: el.bounds ?? { x: 0, y: 0, width: 0, height: 0 },
         value: el.value ?? '',
         ...(el.secure ? { secure: true } : {}),
+        ...(el.readable ? { readable: true } : {}),
       };
     } catch {
       return null;

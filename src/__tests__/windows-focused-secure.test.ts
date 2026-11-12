@@ -19,6 +19,8 @@ describe('ps-bridge get-focused-element — password fields', () => {
     expect(fn).toMatch(/\$isPassword = \[bool\]\$cur\.IsPassword/);
     expect(fn).toMatch(/if \(-not \$isPassword\) \{[\s\S]*ValuePattern/);
     expect(fn).toMatch(/secure\s+= \$isPassword/);
+    // #377: whether the value itself was read, so an empty one is an empty field
+    expect(fn).toMatch(/readable\s+= \$readable/);
   });
 
   it.runIf(process.platform === 'win32')('the real bridge reports secure (false for an ordinary focused element)', () => {
@@ -37,5 +39,12 @@ describe('WindowsAdapter maps secure through', () => {
     const a = new WindowsAdapter() as unknown as { normalizeElement: (raw: unknown) => { secure?: boolean } };
     expect(a.normalizeElement({ name: 'Password', controlType: 'ControlType.Edit', value: '', secure: true }).secure).toBe(true);
     expect(a.normalizeElement({ name: 'Search', controlType: 'ControlType.Edit', value: 'x', secure: false }).secure).toBeUndefined();
+  });
+
+  it('readable comes through, so an empty readable field reads as empty (#377)', async () => {
+    const { WindowsAdapter } = await import('../platform/windows');
+    const a = new WindowsAdapter() as unknown as { normalizeElement: (raw: unknown) => { readable?: boolean } };
+    expect(a.normalizeElement({ name: 'Name', controlType: 'ControlType.Edit', value: '', readable: true }).readable).toBe(true);
+    expect(a.normalizeElement({ name: 'Canvas', controlType: 'ControlType.Pane', value: '', readable: false }).readable).toBeUndefined();
   });
 });

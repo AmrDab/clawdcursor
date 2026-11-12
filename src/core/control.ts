@@ -129,10 +129,20 @@ const platformForeground = async (): Promise<Foreground | null> => {
 };
 // Off under the test runner unless a test sets a reader: a unit test must not start the real platform to ask.
 let readForeground: () => Promise<Foreground | null> = process.env.VITEST ? async () => null : platformForeground;
+type ListedWindow = { processId: number; processName: string; appName?: string; hostedProcessId?: number; hostedProcessName?: string; hostedAppName?: string };
+let readWindows: () => Promise<ListedWindow[]> = process.env.VITEST ? async () => [] : async () => {
+  const { getPlatform } = await import('../platform');
+  return (await getPlatform()).listWindows();
+};
 
 export function __setForegroundReaderForTests(f: (() => Promise<Foreground | null>) | null, reset = true): void {
   if (f) readForeground = f;
   if (reset) resetBinding();
+}
+
+export function __setWindowsReaderForTests(f: () => Promise<ListedWindow[]>): void {
+  readWindows = f;
+  pidNames.clear();
 }
 
 // A process name is the app's to choose (macOS localizedName, a Linux WM_CLASS): quoted like any other screen text.
@@ -256,12 +266,40 @@ async function byName(processId?: number): Promise<void> {
   if (processId !== undefined) { await fenceCheck('act by name', { pid: processId }); if (fenceActive()) decided = processId; }
   else decided = await fenceInput(now);
   // A target in another process is the agent's own choice. (An element of a Store app may be named by the app's process or by its frame's.)
-  if (!now || (processId !== undefined && processId !== now.processId && processId !== now.hostedProcessId)) return;
+  // The session log names that process's app, not the one in front (#365).
+  if (!now || (processId !== undefined && processId !== now.processId && processId !== now.hostedProcessId)) {
+    if (processId !== undefined) await byProcess(processId);
+    return;
+  }
   const explicit = (!!pending && matches(pending, now)) || openedBy(now) || (leaseExplicit && !!lease && sameTarget(lease, now));
   await refuseAiHost(now, explicit);
   const at: Foreground = { ...now, actPid: await verifiedPid(now, decided) };
   acted = at;
   working = at;
+}
+
+/** App names by process id: a process keeps its name, so the window list is read once per process. */
+// shortcut: a pid the OS reuses for another app keeps the old name; key by pid + start time if that ever shows up in a log.
+const pidNames = new Map<number, { processName: string; appName?: string }>();
+
+/**
+ * An act that went to a process, not to the window in front — a by-name act on a background window, a page act over CDP
+ * (#365): the session log names that process's app (as on the pill), never the app that happens to be in front. A Store
+ * app is named as the app its frame hosts. Nothing else changes: the window input is bound to stays where it is.
+ */
+async function byProcess(pid: number | null | undefined): Promise<void> {
+  if (!pid) return;
+  let n = pidNames.get(pid);
+  if (!n) {
+    const w = (await readWindows().catch(() => [])).find(w => w.processId === pid || w.hostedProcessId === pid);
+    if (w) {
+      n = w.hostedProcessId === pid
+        ? { processName: w.hostedProcessName || w.processName, appName: w.hostedAppName || w.appName }
+        : { processName: w.processName, appName: w.appName };
+      pidNames.set(pid, n);
+    }
+  }
+  acted = { processId: pid, processName: n?.processName || `pid ${pid}`, appName: n?.appName, actPid: pid };
 }
 
 /**
@@ -335,7 +373,7 @@ function settle(): void {
   movedAt = 0;
 }
 
-setInputGuard({ stopCheck, before, done, focused, launched, byName });
+setInputGuard({ stopCheck, before, done, focused, launched, byName, byProcess });
 
 /**
  * What an act that just ran went to, for the session log: the app's name as on the pill, the VERIFIED process (`actPid`)

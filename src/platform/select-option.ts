@@ -59,6 +59,20 @@ export function selectedResult(res: { success: boolean; data?: Record<string, un
   return { success: true, verified: false, text: `Selected ${quoteScreenText(name)} — its selected state could not be read back: NOT verified. Read it to check.` };
 }
 
+/**
+ * How a select whose control the caller reads itself ends (a browser <select> over CDP, #399): `shown` is the chosen
+ * option's text and `option` its value; either one EXACTLY as asked confirms it. null: it could not be read.
+ */
+export function shownResult(shown: { value?: string; option?: string } | null | undefined, value: string, name: string): SelectOptionResult {
+  if (typeof shown?.value !== 'string') {
+    return { success: true, verified: false, text: `Selected ${quoteScreenText(value)} in ${quoteScreenText(name)} — the selection could not be read back: NOT verified. Read it to check.` };
+  }
+  if (showsValue(shown.value, value) || (shown.option !== undefined && showsValue(shown.option, value))) {
+    return { success: true, verified: true, text: `Selected (read back ✓) ${quoteScreenText(value)} in ${quoteScreenText(name)}.` };
+  }
+  return { success: false, verified: true, text: `Tried to select ${quoteScreenText(value)} in ${quoteScreenText(name)}, but it now shows ${quoteScreenText(shown.value)}.` };
+}
+
 type KeysPlatform = Pick<PlatformAdapter, 'invokeElement' | 'findElements'>
   & Partial<Pick<PlatformAdapter, 'getActiveWindow' | 'focusWindow' | 'getFocusedElement' | 'typeText'>>;
 

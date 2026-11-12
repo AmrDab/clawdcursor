@@ -40,11 +40,12 @@ import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-cont
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, fieldRead, typesAsKeys, type Retyped } from '../../tools/paste-guard';
+import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, type Retyped } from '../../tools/paste-guard';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement } from '../../platform/prefer-control';
 import { quoteScreenText } from '../result-codes';
+import { effectLine, windowChange, type WindowRead } from '../effect';
 import { missText, untrusted } from '../miss-text';
 
 /** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
@@ -407,18 +408,16 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           return { success: false, text: `Set ${quoteScreenText(name)} refused — ${untrusted(why)}.`, targetLabel: name };
         }
         // No settable value (a Chrome field on Linux exposes neither EditableText
-        // nor Value; Win11 XAML composites): type into the INPUT — never its
-        // same-named label, never into whatever happens to have focus.
-        const target = await editableTarget(ctx, name, controlType, processId);
-        if (!target) {
-          return { success: false, text: `Set ${quoteScreenText(name)} failed: no settable value and no editable field named ${quoteScreenText(name)} to type into.`, targetLabel: name };
+        // nor Value; Win11 XAML composites; an empty value on Windows): type into
+        // the INPUT — never its same-named label, never into whatever happens to
+        // have focus. The same guarded path as the retry: window in front, focus
+        // on the field before any key (#363). Typing is the only way here, so a
+        // password field is typed into too.
+        const typed = await typeIntoField(ctx, value, name, controlType, processId, true);
+        if (typed !== 'typed') {
+          const why = typed === 'unfocused' ? 'the field was clicked, but the keyboard focus did not go to it, so nothing was typed' : typed.skipped;
+          return { success: false, text: `Set ${quoteScreenText(name)} failed: no settable value, and ${why}.`, targetLabel: name };
         }
-        // A coordinate click hits whatever is on top: raise the field's window first (as clickBoundsFallback does).
-        if (processId !== undefined) await ctx.platform.focusWindow({ processId }).catch(() => false);
-        await ctx.platform.mouseClick(target.x, target.y);
-        await ctx.platform.keyPress('mod+a');
-        await ctx.platform.typeText(value);
-        await sleep(150);
         return setResult(ctx.platform, value, name, ' (keyboard fallback: no settable value)');
       },
     },
@@ -707,7 +706,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const after = await ctx.platform.getActiveWindow().catch(() => null);
         const note = warning ? ` (${warning})` : '';
         const focusWarn = focusTheftWarning(activation, before, after);
-        return { success: true, text: `Clicked ${button} x${count} at ${coordBreadcrumb(ix, iy, x, y, space, scale, ctx)}${raised}${focusBreadcrumb(before, after)}${note}${focusWarn}` };
+        return { success: true, text: `Clicked ${button} x${count} at ${coordBreadcrumb(ix, iy, x, y, space, scale, ctx)}${raised}${note}${focusWarn}${focusBreadcrumb(before, after)}` };
       },
     },
 
@@ -923,6 +922,10 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const shown = 'secure' in rb && rb.secure ? `${head} into a password field (not echoed)` : `${head}: "${truncate(text, 60)}"`;
         // What the field shows, as data, short: the evidence the caller needs.
         const fieldShows = rb.value !== undefined ? ` It shows: ${wrapUntrustedScreenContent(truncate(rb.value, 80))}` : '';
+        // The focused field can be read and is still empty: the text did not arrive (#377). Nothing to submit.
+        if (rb.result === 'mismatch' && rb.value === '') {
+          return { success: false, text: `${shown}, but ${EMPTY_AFTER_TYPING}${submit ? ' Return not pressed.' : ''}${inputWarningNote(ctx)}` };
+        }
         if ((rb.result === 'suffix' || rb.result === 'mismatch') && submit) {
           // Return would submit what the field shows, not what was typed (live: an address bar's suggestion swapped the
           // whole URL). Not pressed; the caller sees what the field shows and decides.
@@ -1846,7 +1849,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         getAgentOcr().invalidateCache();
         const after = await ctx.platform.getActiveWindow().catch(() => null);
         const focusWarn = focusTheftWarning(activation, before, after);
-        return { success: true, text: `smart_click: clicked ${quoteScreenText(hit.label)} (score ${hit.score.toFixed(2)}) at (${hit.x},${hit.y})${raised}${focusWarn}`, targetLabel: hit.label };
+        return { success: true, text: `smart_click: clicked ${quoteScreenText(hit.label)} (score ${hit.score.toFixed(2)}) at (${hit.x},${hit.y})${raised}${focusWarn}${focusBreadcrumb(before, after)}`, targetLabel: hit.label };
       },
     },
 
@@ -1966,7 +1969,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const label = typeof args.label === 'string' ? args.label.trim() : '';
         if (!selector && !label) return { success: false, isError: true, text: 'browser_type: provide selector or label.' };
         const r = label ? await ctx.cdp.typeByLabel(label, text) : await ctx.cdp.typeInField(selector, text);
-        return r.success ? { success: true, text: `browser_type: typed into ${selector || `label "${label}"`}` } : { success: false, text: `browser_type failed: ${r.error}` };
+        if (!r.success) return { success: false, text: `browser_type failed: ${r.error}` };
+        // The fill replaced the field's text: read it back, as every set is (#399).
+        return setVerdict(await readBackTyped(async () => r.read?.() ?? null, text, { whole: true }), text, selector || label, ' (browser)');
       },
     },
 
@@ -2339,16 +2344,10 @@ function coordBreadcrumb(
   return `${space} (${ix},${iy})${scaled} [×${scale}, screen ${ctx.screen.physicalWidth}×${ctx.screen.physicalHeight}]`;
 }
 
-/** Foreground-window before→after, so focus theft (clicks landing on the wrong
- *  window) is visible in the result text. Empty when focus didn't change. */
-function focusBreadcrumb(
-  before: { title?: string } | null,
-  after: { title?: string } | null,
-): string {
-  const b = before?.title ?? '?';
-  const a = after?.title ?? '?';
-  if (b === a) return '';
-  return ` · focus ${quoteScreenText(truncateTitle(b))}→${quoteScreenText(truncateTitle(a))}`;
+/** What the window in front did across the act, by identity (core/effect.ts), as its own line. Empty when it cannot be told. */
+function focusBreadcrumb(before: WindowRead, after: WindowRead): string {
+  const line = effectLine(before, after);
+  return line ? `\n${line}` : '';
 }
 
 /** Roles that take typed text, across UIA / AX / AT-SPI names. A number box is a Spinner (AT-SPI "spin button", AXIncrementor). */
@@ -2380,11 +2379,18 @@ async function valueBefore(ctx: AgentToolContext, field: { name: string; control
   return res ? fieldRead(res)?.value : undefined;
 }
 
-/** Is the focused element `field` itself: something that takes text, in the same place (or of the same name, overlapping it)? */
-function focusIsField(focused: UiElement | null, field: UiElement): boolean {
+/**
+ * Is the focused element `field`: something that takes text, in the same place (or of the same name, overlapping it), or
+ * an editable INSIDE it — the unnamed inner Edit of a composite field (Win11 XAML, #363). A password field only when
+ * `secureOk` (the field itself is one).
+ */
+function focusIsField(focused: UiElement | null, field: UiElement, secureOk = false): boolean {
   const role = String(focused?.controlType ?? '');
-  if (!focused?.bounds || focused.secure || !EDITABLE_ROLE.test(role) || /^text$|password/i.test(role)) return false;
-  return sameElement(focused, field);
+  if (!focused?.bounds || !EDITABLE_ROLE.test(role) || /^text$/i.test(role)) return false;
+  if (!secureOk && (focused.secure || /password/i.test(role))) return false;
+  const f = focused.bounds, b = field.bounds;
+  const inside = !!b && f.width > 0 && f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
+  return inside || sameElement(focused, field);
 }
 
 /**
@@ -2394,30 +2400,32 @@ function focusIsField(focused: UiElement | null, field: UiElement): boolean {
  * A direct set works on a window that is behind another; a click does not — it hits whatever is on top, and select-all +
  * typing would then replace THAT control's contents (a whole document, in an editor). So: the field's window is brought
  * to the front first, and after the click the keyboard focus must be on the field itself before any key is sent.
- * 'skipped': nothing was done — no such field in view, a password field (never typed into on a guess), a clear
- * (select-all + no text clears nothing), or its window would not come to the front. 'unfocused': the field was clicked
- * but the focus is not on it; nothing was typed.
+ * An empty value clears the field: select-all + Delete (#363).
+ * `{skipped}`: nothing was done, and why — no such field in view, a password field (never typed into on a guess, unless
+ * `secureOk`: typing is the only way to set it), or its window would not come to the front. 'unfocused': the field was
+ * clicked but the focus is not on it; nothing was typed.
  */
 async function typeIntoField(
   ctx: AgentToolContext, value: string, name: string, controlType: string | undefined, processId: number | undefined,
+  secureOk = false,
 ): Promise<Retyped> {
-  if (!value) return 'skipped';
-  const target = await editableTarget(ctx, name, controlType, processId, true);
-  if (!target) return 'skipped';
+  const target = await editableTarget(ctx, name, controlType, processId, !secureOk);
+  if (!target) return { skipped: `no editable field named ${quoteScreenText(name)} is on screen${secureOk ? '' : ' (a password field is never typed into on a guess)'}` };
   const pid = processId ?? target.el.processId;
   if (pid !== undefined) {
     const inFront = async () => (await ctx.platform.getActiveWindow().catch(() => null))?.processId === pid;
     if (!await inFront()) {
       await ctx.platform.focusWindow({ processId: pid }).catch(() => false);
       await sleep(150);
-      if (!await inFront()) return 'skipped';
+      if (!await inFront()) return { skipped: 'its window would not come to the front' };
     }
   }
   await ctx.platform.mouseClick(target.x, target.y);
   await sleep(100);
-  if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el)) return 'unfocused';
+  if (!focusIsField(await ctx.platform.getFocusedElement().catch(() => null), target.el, secureOk)) return 'unfocused';
   await ctx.platform.keyPress('mod+a');
-  await ctx.platform.typeText(value);
+  if (value) await ctx.platform.typeText(value);
+  else await ctx.platform.keyPress('Delete');
   await sleep(150);
   return 'typed';
 }
@@ -2436,18 +2444,19 @@ function truncateTitle(s: string): string {
  * Warn when a coordinate click could not be confirmed to land on the intended
  * window — the cause of a keystroke leak where an OTP typed after a missed
  * click went into the wrong window (session 2026-06-11). Two signals:
- *   (a) the platform reported activation FAILED (Windows foreground-lock kept a
- *       different window in front), or
- *   (b) the foreground window CHANGED across the click (before ≠ after), which
- *       for a click meant to interact with the already-focused window means the
- *       click hit something else.
+ *   (a) the platform reported activation FAILED (the OS kept a different window
+ *       in front), or
+ *   (b) ANOTHER APP is in front after the click — by process, never by title
+ *       (core/effect.ts). A new title (a tab switch) or another window of the
+ *       same app (a dialog opening, or closing back to its owner) is the click
+ *       working, not focus theft (#379).
  * Returns a loud, actionable suffix telling the agent to verify focus before
  * typing; empty string when the click looks clean.
  */
-function focusTheftWarning(
+export function focusTheftWarning(
   activation: { activated: boolean; title?: string; processName?: string; reason?: string; action?: string } | void,
-  before: { title?: string } | null,
-  after: { title?: string } | null,
+  before: WindowRead,
+  after: WindowRead,
 ): string {
   // The bridge deliberately refused to raise a self/host window (agent hub,
   // clawdcursor's own console) sitting over the click point — focus was NOT
@@ -2462,11 +2471,10 @@ function focusTheftWarning(
       + ` over this coordinate, or resize/move the covering window out of the way.`;
   }
   const activationFailed = activation && activation.activated === false;
-  const foregroundChanged = !!before?.title && !!after?.title && before.title !== after.title;
-  if (!activationFailed && !foregroundChanged) return '';
+  if (!activationFailed && windowChange(before, after) !== 'other-app') return '';
   const landed = after?.title ? quoteScreenText(truncateTitle(after.title)) : 'an unknown window';
   return ` ⚠ FOCUS NOT CONFIRMED — the click may have landed on ${landed} instead of your target`
-    + ` (Windows foreground-lock or coords over a different window). DO NOT type next:`
+    + ` (the OS kept another window in front, or the point is over a different window). DO NOT type next:`
     + ` re-focus the intended window first (focus_window / window.focus by processId),`
     + ` or act on an a11y/el_NN target instead of coordinates.`;
 }
