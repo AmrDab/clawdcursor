@@ -183,18 +183,20 @@ describe('confirm mode (#373)', () => {
     expect(sent).toEqual(['text Sent']);
   });
 
-  it('typed text with a key held is a press with it: key_down ctrl, then type "w" or a newline, is held', async () => {
+  it('typed text with a key held is a press with it: key_down ctrl (cmd on macOS), then type "w" or a newline, is held', async () => {
     process.env.CLAWD_CONFIRM = '1';
     const { d, sent } = fakeDesktop();
-    await d.keyDown('ctrl');
+    // The OS's mod key: on macOS ctrl+w closes nothing, cmd+w does.
+    const mod = process.platform === 'darwin' ? 'cmd' : 'ctrl';
+    await d.keyDown(mod);
     for (const t of ['w', 'ok\n']) {
       const act = d.typeText(t);
       await flush();
-      expect(pauseGate.current()?.message).toMatch(/the agent wants to type ".+" with "ctrl" held/);
+      expect(pauseGate.current()?.message).toMatch(new RegExp(`the agent wants to type ".+" with "${mod}" held`));
       pauseGate.answer('end');
       await expect(act).rejects.toThrow(/^not confirmed/);
     }
-    expect(sent).toEqual(['down ctrl']);
+    expect(sent).toEqual([`down ${mod}`]);
   });
 
   it("an agent's resume_task, `clawdcursor resume` / POST /resume, End task or a typed reply never lets it through", async () => {
