@@ -31,7 +31,7 @@ import { isGuardRefusal } from '../core/control';
 const REFUSAL = 'the window in front is Claude, an AI assistant — nothing was sent. Focus your target window first: window {"action":"focus","title":"…"}. If this assistant\'s window IS your target, focus it with window focus and retry.';
 const tool = (n: string) => getSmartTools().find(t => t.name === n)!;
 
-function ctx(over: { invoke?: () => Promise<unknown>; click?: () => Promise<unknown>; type?: () => Promise<unknown> }) {
+function ctx(over: { invoke?: () => Promise<unknown>; click?: () => Promise<unknown>; type?: () => Promise<unknown>; cdp?: unknown }) {
   const a11y = {
     getActiveWindow: vi.fn(async () => null),
     getWindows: vi.fn(async () => []),
@@ -42,7 +42,7 @@ function ctx(over: { invoke?: () => Promise<unknown>; click?: () => Promise<unkn
     writeClipboard: vi.fn(async () => {}),
   };
   return { ensureInitialized: async () => {}, a11y, desktop: { getDpiRatio: () => 1, mouseClick: vi.fn(over.click ?? (async () => {})), typeText: vi.fn(over.type ?? (async () => {})), keyPress: vi.fn(async () => {}) },
-    cdp: { isConnected: vi.fn(async () => false) }, platform: { getActiveWindow: async () => null }, uiMaps: undefined } as never;
+    cdp: over.cdp ?? { isConnected: vi.fn(async () => false) }, platform: { getActiveWindow: async () => null }, uiMaps: undefined } as never;
 }
 
 describe('smart_click', () => {
@@ -54,6 +54,22 @@ describe('smart_click', () => {
 
   it('a refused OCR click is the call\'s result, unchanged', async () => {
     const r = await tool('smart_click').handler({ target: 'Send', timeout: 1500 }, ctx({ click: async () => { throw new Error(REFUSAL); } }));
+    expect(r.isError).toBe(true);
+    expect(r.text).toBe(REFUSAL);
+  });
+
+  it('a target only the browser has is clicked through CDP, iframes included, and the result names the iframe', async () => {
+    const clickByText = vi.fn(async () => ({ success: true, method: 'js.clickByText', frame: 'https://editor.example/frame' }));
+    const r = await tool('smart_click').handler({ target: 'Generate', timeout: 3000 }, ctx({ cdp: { isConnected: async () => true, clickByText } }));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toContain('Clicked "Generate" via CDP (js.clickByText) in iframe');
+    expect(r.text).toContain('https://editor.example/frame');
+    expect(clickByText).toHaveBeenCalledWith('Generate', expect.any(Number));   // bounded by the call's own deadline
+  });
+
+  it('a refused CDP click is the call\'s result, unchanged', async () => {
+    const cdp = { isConnected: async () => true, clickByText: async () => { throw new Error(REFUSAL); } };
+    const r = await tool('smart_click').handler({ target: 'Generate', timeout: 3000 }, ctx({ cdp }));
     expect(r.isError).toBe(true);
     expect(r.text).toBe(REFUSAL);
   });

@@ -791,7 +791,7 @@ export function getSmartTools(): ToolDefinition[] {
             const connected = await ctx.cdp.isConnected();
             if (connected) {
               // The browser tool's own click by text: every frame of the page, iframes included (#398).
-              const r = await ctx.cdp.clickByText(target);
+              const r = await ctx.cdp.clickByText(target, deadline);   // stops in time for the outer wall-clock (#101)
               if (r.success) {
                 ctx.a11y.invalidateCache();
                 return { text: `Clicked "${target}" via CDP (${r.method})${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}` };
