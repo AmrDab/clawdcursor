@@ -11,7 +11,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { browserAppNames, openBrowser, type BrowserExe } from './browser';
 import type { FixtureServer } from './fixture-server';
-import { POWERSHELL, hasWindow, killTree, pidsByCommandLine, startVisible, system32, tryRun, waitFor } from './proc';
+import { POWERSHELL, hasWindow, killTree, pidsByCommandLine, sleep, startVisible, system32, tryRun, waitFor } from './proc';
 import type { FixtureState, TaskSpec } from './types';
 
 const NATIVE_DIR = path.join(__dirname, '..', 'fixtures', 'native');
@@ -194,7 +194,14 @@ export async function openApp(app: 'calculator' | 'textedit' | 'designcenter', c
       const out = await tryRun(POWERSHELL, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', path.join(APPS_DIR, 'calculator-probe.ps1')]);
       return out === null ? null : parseCalcProbe(out);
     };
-    await waitFor(probe, 30_000, 'Calculator to open');
+    // A cold Store app can take well over 30 s. If it still has not come up, the launch may yet land: no Calculator ran
+    // before this task (appUnavailable), so close every one that appears for a while, or it opens late in front of the
+    // next task's fixture (2026-11-12: the next task's window was then not in front, and the run stopped).
+    await waitFor(probe, 60_000, 'Calculator to open').catch(async (e: Error) => {
+      const until = Date.now() + 30_000;
+      while (Date.now() < until) { for (const pid of imagePids('CalculatorApp.exe')) killTree(pid); await sleep(1000); }
+      throw e;
+    });
     return {
       // No Calculator ran before this task (appUnavailable), so these are the processes this task started. Its window
       // belongs to ApplicationFrameHost: that frame counts only with this exact title and one of these processes inside.
