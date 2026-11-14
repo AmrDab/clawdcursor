@@ -68,11 +68,21 @@ function parseArgs() {
             result.role = CONTROL_TYPE_MAP[next] || ('AX' + next);
         } else if ((arg === '-processId' || arg === '-ProcessId') && next) {
             result.processId = parseInt(next, 10);
+        } else if (arg === '-ArgsStdin') {
+            var text = readStdinJson();
+            if (typeof text.name === 'string') result.name = text.name;
         }
         // -AutomationId has no macOS equivalent; silently ignore
     }
 
     return result;
+}
+
+// -ArgsStdin: the caller's text arrives as one JSON object on stdin, not argv (argv is readable by every process on the Mac).
+function readStdinJson() {
+    var data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+    var s = ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding));
+    return s ? JSON.parse(s) : {};
 }
 
 function safeGet(obj, prop, def) {

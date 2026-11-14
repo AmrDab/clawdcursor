@@ -11,6 +11,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const calls = vi.hoisted(() => [] as string[][]);
+/** What each call wrote to the tool's stdin, by call. */
+const stdins = vi.hoisted(() => new Map<string[], string>());
+/** The options (env) each call was run with, by call. */
+const opts = vi.hoisted(() => new Map<string[], { env?: Record<string, string | undefined> }>());
 const state = vi.hoisted(() => ({ help: '', helpFails: false }));
 
 const LEGACY_HELP = 'Usage: ydotool <cmd> <args>\nAvailable commands:\n  click\n  key\n  mousemove\n  recorder\n  type\n';
@@ -29,7 +33,13 @@ vi.mock('child_process', async () => {
   };
   const execFile: any = (...a: unknown[]) => {
     const cb = a[a.length - 1] as (e: Error | null, out?: string, err?: string) => void;
-    try { const r = run(a[0] as string, a[1] as string[]); cb(null, r.stdout, r.stderr); } catch (e) { cb(e as Error); }
+    let r: { stdout: string; stderr: string } | null = null;
+    let err: Error | null = null;
+    try { r = run(a[0] as string, a[1] as string[]); } catch (e) { err = e as Error; }
+    const call = calls[calls.length - 1];
+    if (typeof a[2] === 'object' && a[2]) opts.set(call, a[2] as { env?: Record<string, string | undefined> });
+    setImmediate(() => (err ? cb(err) : cb(null, r!.stdout, r!.stderr)));
+    return { stdin: { on: () => {}, end: (d?: string) => { if (d !== undefined) stdins.set(call, d); } } };
   };
   execFile[promisify.custom] = async (cmd: string, args: string[]) => run(cmd, args);
   return { execFile, execFileSync: vi.fn(), exec: vi.fn(), spawn: vi.fn() };
@@ -42,8 +52,16 @@ const ydotoolCalls = () => calls.filter(c => c[0] === 'ydotool' && c[1] !== 'hel
 
 beforeEach(() => {
   calls.length = 0;
+  stdins.clear();
+  opts.clear();
   state.helpFails = false;
 });
+
+/** The text typed by the last call of `tool`: it must be on stdin, never in argv (readable by every process). */
+function typedVia(tool: string): { args: string[]; stdin: string | undefined } {
+  const call = calls.filter(c => c[0] === tool).at(-1)!;
+  return { args: call.slice(1), stdin: stdins.get(call) };
+}
 
 describe('ydotool 0.1.8 (Ubuntu/Debian)', () => {
   beforeEach(() => { state.help = LEGACY_HELP; });
@@ -103,10 +121,19 @@ describe('ydotool 0.1.8 (Ubuntu/Debian)', () => {
     expect(ydotoolCalls()).toEqual([]);
   });
 
-  it('types text with the 0.1.x per-key delay flag', async () => {
+  it('types text with the 0.1.x per-key delay flag, the text on stdin', async () => {
     const be = await WaylandBackend.detect(hasYdotool);
-    await be.typeText('hi');
-    expect(ydotoolCalls()).toEqual([['type', '--key-delay', '10', '--', 'hi']]);
+    await be.typeText('hunter2');
+    expect(typedVia('ydotool')).toEqual({ args: ['type', '--key-delay', '10', '--file', '-'], stdin: 'hunter2' });
+  });
+
+  it('an unknown modifier is refused before anything is pressed; opt is alt', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    await expect(be.keyPress('hyper+x')).rejects.toThrow(/Unknown modifier: "hyper"/);
+    expect(ydotoolCalls()).toEqual([]);
+    await be.keyPress('opt+x');
+    await be.keyPress('win+e');
+    expect(ydotoolCalls()).toEqual([['key', 'ALT+x'], ['key', 'SUPER+e']]);
   });
 });
 
@@ -166,6 +193,25 @@ describe('ydotool 1.x (ydotoold)', () => {
     ]);
   });
 
+  it('types text on stdin, never in argv', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    await be.typeText('hunter2');
+    // 1.x has no --delay (only --key-delay / --key-hold); --key-hold is 1.x only: 0.1.8 rejects unknown options.
+    expect(typedVia('ydotool')).toEqual({ args: ['type', '--key-delay', '10', '--key-hold', '5', '--file', '-'], stdin: 'hunter2' });
+  });
+
+  it('an unknown modifier is refused before any key goes down; opt / option are alt', async () => {
+    const be = await WaylandBackend.detect(hasYdotool);
+    await expect(be.keyPress('hyper+x')).rejects.toThrow(/Unknown modifier: "hyper"/);
+    await expect(be.keyPress('ctrl+fn+x')).rejects.toThrow(/Unknown modifier: "fn"/);
+    expect(ydotoolCalls()).toEqual([]);
+    await be.keyPress('opt+x');
+    expect(ydotoolCalls()).toEqual([['key', '56:1'], ['key', '45:1', '45:0'], ['key', '56:0']]);
+    calls.length = 0;
+    await be.keyDown('opt');
+    expect(ydotoolCalls()).toEqual([['key', '56:1']]);
+  });
+
   it('scrolls with the wheel flag (REL_WHEEL), never `scroll` or digit keycodes', async () => {
     const be = await WaylandBackend.detect(hasYdotool);
     await be.mouseScroll('down', 3);
@@ -198,5 +244,35 @@ describe('wtype (keyboard only)', () => {
     expect(calls.filter(c => c[0] === 'wtype')).toEqual([]);
     await be.keyPress('ctrl+s');
     expect(calls.filter(c => c[0] === 'wtype')).toEqual([['wtype', '-M', 'ctrl', 's']]);
+  });
+
+  it('an unknown modifier is refused, never dropped (opt+x is alt+x, not a plain x)', async () => {
+    const be = new WaylandBackend('wtype-keyboard-only');
+    await expect(be.keyPress('hyper+x')).rejects.toThrow(/Unknown modifier: "hyper"/);
+    expect(calls.filter(c => c[0] === 'wtype')).toEqual([]);
+    await be.keyPress('opt+x');
+    await be.keyPress('win+e');
+    expect(calls.filter(c => c[0] === 'wtype')).toEqual([['wtype', '-M', 'alt', 'x'], ['wtype', '-M', 'logo', 'e']]);
+  });
+
+  it('key_down / key_up say they cannot hold a key (wtype only taps), so nothing is recorded as held', async () => {
+    const be = new WaylandBackend('wtype-keyboard-only');
+    await expect(be.keyDown('shift')).rejects.toThrow(/needs ydotool/);
+    await expect(be.keyUp('shift')).rejects.toThrow(/needs ydotool/);
+    expect(calls.filter(c => c[0] === 'wtype')).toEqual([]);
+  });
+
+  it('types text on stdin (`wtype -`), never in argv', async () => {
+    const be = new WaylandBackend('wtype-keyboard-only');
+    await be.typeText('hunter2');
+    expect(typedVia('wtype')).toEqual({ args: ['-'], stdin: 'hunter2' });
+  });
+
+  it('runs wtype under a UTF-8 locale, so non-ASCII is not dropped under C / POSIX', async () => {
+    const be = new WaylandBackend('wtype-keyboard-only');
+    await be.typeText('café 日本');
+    const call = calls.filter(c => c[0] === 'wtype').at(-1)!;
+    expect(stdins.get(call)).toBe('café 日本');
+    expect(opts.get(call)?.env?.LC_ALL).toBe('C.UTF-8');
   });
 });

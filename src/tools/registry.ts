@@ -254,10 +254,10 @@ function projectedMouseTools(): ToolDefinition[] {
 // invoke_element: System A had automationId + action params absent in System B.
 //   → Both have been added to the System B tool (tools.ts) so the MCP schema
 //     is backward-compatible. No behavior is silently dropped.
-//   → automationId note: PlatformAdapter.invokeElement does not expose
-//     automationId in its query type. When only automationId is supplied,
-//     it is used as the name for the search (functional fallback). Document
-//     in CHANGELOG that automationId-only matching is name-based in v2.
+//   → automationId note: the System B tool passes an automationId-only call
+//     as the name for the search (functional fallback). PlatformAdapter's
+//     findElements / invokeElement take automationId themselves (macOS and
+//     Windows match it exactly; Linux has no separate id).
 //
 // set_field_value: System A (a11y_depth.ts) had controlType param absent in
 //   the System B version.

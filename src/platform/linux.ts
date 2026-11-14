@@ -31,7 +31,7 @@ import {
   Key,
 } from '@nut-tree-fork/nut-js';
 import { WaylandBackend } from './wayland-backend';
-import { sharpFromGrab, type GrabImage } from './grab-image';
+import { clampRegion, sharpFromGrab, type GrabImage } from './grab-image';
 import { detectLinuxEnvironment, waylandScreenSize, grimGrab } from './wayland-screen';
 import type {
   PlatformAdapter,
@@ -53,8 +53,12 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
+import { wellFormed } from './mac-ax';
 
 const execFileAsync = promisify(execFile);
+
+/** Caller text for atspi-bridge.py: sent on its stdin, never argv (see LinuxAdapter.runAtspi). */
+type AtspiText = { name?: string; value?: string; within?: string; window_title?: string };
 
 // Tunables
 const TOOL_TIMEOUT_MS = 3_000;
@@ -339,17 +343,25 @@ export class LinuxAdapter implements PlatformAdapter {
     }
   }
 
-  async screenshot(opts?: { maxWidth?: number; displayIndex?: number }): Promise<ScreenshotResult> {
+  async screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult> {
     const img = await this.grabScreen();
     let pipeline = sharpFromGrab(img);
 
     let width = img.width;
     let height = img.height;
     let scaleFactor = 1;
+    let origin: { x: number; y: number } | undefined;
 
-    // Display index → crop to that display's bounds (xrandr geometry).
-    // Any index, 0 included: xrandr may list a non-primary output first.
-    if (opts?.displayIndex !== undefined) {
+    if (opts?.region) {
+      // A region (screen px) is cut out of the grab, as on Windows: ignored, the caller got the whole screen.
+      const r = clampRegion(opts.region, img.width, img.height);
+      pipeline = pipeline.extract(r);
+      width = r.width;
+      height = r.height;
+      origin = { x: r.left, y: r.top };
+    } else if (opts?.displayIndex !== undefined) {
+      // Display index → crop to that display's bounds (xrandr geometry).
+      // Any index, 0 included: xrandr may list a non-primary output first.
       const displays = await this.listDisplays();
       const target = displays[opts.displayIndex];
       if (target) {
@@ -376,7 +388,7 @@ export class LinuxAdapter implements PlatformAdapter {
     const buffer = await pipeline.png().toBuffer();
     // Release raw RGBA buffer now that sharp has consumed it.
     (img as any).data = null;
-    return { buffer, width, height, scaleFactor };
+    return { buffer, width, height, scaleFactor, ...(origin ? { origin } : {}) };
   }
 
   async screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult> {
@@ -650,10 +662,8 @@ export class LinuxAdapter implements PlatformAdapter {
       // Default to the active window when the caller omits a pid, so an
       // unscoped read_screen targets the focused app (parity with the Windows
       // adapter) instead of walking the whole desktop tree.
-      const args = ['--cmd', 'get-tree', ...await this.a11yScopeArgs(processId)];
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
-        timeout: A11Y_TIMEOUT_MS,
-      });
+      const scope = await this.a11yScope(processId);
+      const { stdout } = await this.runAtspi(['--cmd', 'get-tree', ...scope.args], scope.text, { timeout: A11Y_TIMEOUT_MS });
       const data = JSON.parse(stdout) as { elements?: any[]; truncated?: boolean };
       this.lastTreeTruncated = data.truncated === true;
       const raw = Array.isArray(data.elements) ? data.elements : [];
@@ -669,15 +679,13 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!this.atspiAvailable) return [];
     try {
       const args = ['--cmd', 'find'];
-      // `--name=…`: a name starting with '-' ("--Select--") would otherwise be read by argparse as an option.
-      if (query.name) args.push(`--name=${query.name}`);
       // A role-only find searches in the bridge too (its search budget and its partial report), not an unfiltered walk.
       if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
       // Without a pid the bridge guesses the app (focused-descendant
       // heuristic, else the first app on the bus) and searched the wrong
       // one. Scope to the foreground window like Windows / macOS do.
-      args.push(...await this.a11yScopeArgs(query.processId));
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
+      const scope = await this.a11yScope(query.processId);
+      const { stdout } = await this.runAtspi([...args, ...scope.args], { ...scope.text, name: query.name || undefined }, {
         timeout: A11Y_TIMEOUT_MS,
       });
       const data = JSON.parse(stdout) as { elements?: any[]; partial?: boolean; reason?: string };
@@ -713,17 +721,37 @@ export class LinuxAdapter implements PlatformAdapter {
    * for a window that sets no _NET_WM_PID (wmctrl reports pid 0) — its
    * title. Left unscoped, the bridge guessed and read a different app.
    */
-  private async a11yScopeArgs(processId?: number): Promise<string[]> {
-    if (typeof processId === 'number') return ['--process-id', String(processId)];
+  private async a11yScope(processId?: number): Promise<{ args: string[]; text: AtspiText }> {
+    if (typeof processId === 'number') return { args: ['--process-id', String(processId)], text: {} };
     const fg = await this.getActiveWindow().catch(() => null);
-    if (fg?.processId) return ['--process-id', String(fg.processId)];
-    if (!fg?.title) return [];
+    if (fg?.processId) return { args: ['--process-id', String(fg.processId)], text: {} };
+    if (!fg?.title) return { args: [], text: {} };
     // Another app's window with the same title (xcalc and GNOME Calculator
     // are both "Calculator") must not be taken for this one: exclude it.
     const others = (await this.listWindows().catch(() => [] as WindowInfo[]))
       .filter(w => w.processId && w.title === fg.title && w.handle !== fg.handle)
       .map(w => w.processId);
-    return [`--window-title=${fg.title}`, ...(others.length ? ['--exclude-pids', [...new Set(others)].join(',')] : [])];
+    return {
+      args: others.length ? ['--exclude-pids', [...new Set(others)].join(',')] : [],
+      text: { window_title: fg.title },
+    };
+  }
+
+  /**
+   * Run atspi-bridge.py. Caller text (an element name, the value set_value writes — a password entry's too — `within`,
+   * the window title) goes to it as one JSON object on STDIN (`--args-stdin`), never argv: argv is readable by every
+   * process on the machine (`ps`, /proc/<pid>/cmdline) while the bridge runs. On stdin, a name starting with '-'
+   * ("--Select--") cannot be read by argparse as an option either.
+   */
+  private runAtspi(args: string[], text: AtspiText, opts: { timeout: number; maxBuffer?: number }): Promise<{ stdout: string }> {
+    const fields = Object.entries(text).filter(([, v]) => v !== undefined);
+    const argv = [this.atspiScript, ...args, ...(fields.length ? ['--args-stdin'] : [])];
+    return new Promise((resolve, reject) => {
+      const child = execFile('python3', argv, opts, (err, stdout) => (err ? reject(err) : resolve({ stdout: String(stdout ?? '') })));
+      // The bridge may exit (or be killed at the timeout) before it has read everything: a closed pipe is not our error.
+      child.stdin?.on('error', () => { /* reported by the exit callback */ });
+      child.stdin?.end(fields.length ? JSON.stringify(Object.fromEntries(fields.map(([k, v]) => [k, wellFormed(v!)]))) : '');
+    });
   }
 
   /**
@@ -757,10 +785,8 @@ export class LinuxAdapter implements PlatformAdapter {
       // Scoped to the foreground app: toolkits keep FOCUSED on the last
       // widget of inactive apps, so an unscoped search answered with another
       // app's element.
-      const scope = await this.a11yScopeArgs();
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'focused', ...scope], {
-        timeout: A11Y_TIMEOUT_MS,
-      });
+      const scope = await this.a11yScope();
+      const { stdout } = await this.runAtspi(['--cmd', 'focused', ...scope.args], scope.text, { timeout: A11Y_TIMEOUT_MS });
       const data = JSON.parse(stdout) as { element?: any; partial?: boolean; reason?: string };
       if (!data.element) {
         // The bridge ran out of its search budget before finding the focus: not "nothing is focused".
@@ -781,8 +807,8 @@ export class LinuxAdapter implements PlatformAdapter {
   async getPageText(): Promise<{ text: string; name?: string } | null> {
     if (!this.atspiAvailable) return null;
     try {
-      const scope = await this.a11yScopeArgs();
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, '--cmd', 'page-text', ...scope], {
+      const scope = await this.a11yScope();
+      const { stdout } = await this.runAtspi(['--cmd', 'page-text', ...scope.args], scope.text, {
         timeout: A11Y_TIMEOUT_MS, maxBuffer: 64 * 1024 * 1024,
       });
       const data = JSON.parse(stdout) as { text?: unknown; name?: unknown };
@@ -809,15 +835,14 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!this.atspiAvailable) return { success: false };
     try {
       const args = ['--cmd', 'invoke', '--action', query.action ?? 'click'];
-      if (query.within) args.push(`--within=${query.within}`);
-      // `--opt=…` form: a name or value starting with '-' must not be read as an option.
-      if (query.name) args.push(`--name=${query.name}`);
       if (query.controlType) args.push(`--role=${atspiRoleQuery(query.controlType)}`);
-      args.push(...await this.a11yScopeArgs(query.processId));
-      if (query.value !== undefined) args.push(`--value=${query.value}`);
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], {
-        timeout: A11Y_TIMEOUT_MS,
-      });
+      const scope = await this.a11yScope(query.processId);
+      const { stdout } = await this.runAtspi([...args, ...scope.args], {
+        ...scope.text,
+        name: query.name || undefined,
+        within: query.within || undefined,
+        value: query.value,   // '' is a value: it clears the field
+      }, { timeout: A11Y_TIMEOUT_MS });
       const result = JSON.parse(stdout);
       const bounds = result?.bounds && typeof result.bounds.x === 'number' && !isIntMin(result.bounds.x)
         ? result.bounds : undefined;
@@ -853,7 +878,7 @@ export class LinuxAdapter implements PlatformAdapter {
     if (!this.atspiAvailable) return { success: false, error: 'AT-SPI is not available' };
     if (!query.name?.trim()) return { success: false, error: 'scrolling needs the element\'s name on this platform' };
     try {
-      const args = ['--cmd', 'scroll-into-view', `--name=${query.name}`];
+      const args = ['--cmd', 'scroll-into-view'];
       // Where the element was last seen picks the nearest of several of the same name; the active window's origin puts
       // window-relative extents in the same (screen) space.
       if (query.bounds) args.push('--bounds', [query.bounds.x, query.bounds.y, query.bounds.width, query.bounds.height].map(Math.round).join(','));
@@ -865,8 +890,8 @@ export class LinuxAdapter implements PlatformAdapter {
         }
         args.push('--origin', `${Math.round(fg.bounds.x)},${Math.round(fg.bounds.y)}`);
       }
-      args.push(...await this.a11yScopeArgs(query.processId));
-      const { stdout } = await execFileAsync('python3', [this.atspiScript, ...args], { timeout: A11Y_TIMEOUT_MS });
+      const scope = await this.a11yScope(query.processId);
+      const { stdout } = await this.runAtspi([...args, ...scope.args], { ...scope.text, name: query.name }, { timeout: A11Y_TIMEOUT_MS });
       const result = JSON.parse(stdout);
       const b = result?.bounds;
       return {

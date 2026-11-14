@@ -105,6 +105,45 @@ describe('typed text never reaches argv', () => {
   });
 });
 
+// Audit 2026-11-13: an unknown modifier was dropped (`opt+x` typed a plain x) and an unknown key name was typed as text.
+describe('modifiers are mapped or refused, never dropped', () => {
+  it.each([
+    ['opt+x', 'tell application "System Events" to keystroke "x" using {option down}'],
+    ['option+x', 'tell application "System Events" to keystroke "x" using {option down}'],
+    ['meta+c', 'tell application "System Events" to keystroke "c" using {command down}'],
+    ['ctrl+shift+tab', 'tell application "System Events" to key code 48 using {control down, shift down}'],
+  ])('%s presses its modifiers', async (combo, program) => {
+    await desktop().keyPress(combo);
+    expect(programs()).toEqual([program]);
+  });
+
+  it('an unknown modifier is refused before anything is sent', async () => {
+    await expect(desktop().keyPress('hyper+x')).rejects.toThrow(/Unknown modifier: "hyper"/);
+    expect(spawned).toHaveLength(0);
+  });
+
+  it('win+q is refused, not sent as Cmd+Q (which quits the front app); cmd+q is Cmd+Q', async () => {
+    for (const combo of ['win+q', 'windows+q']) {
+      await expect(desktop().keyPress(combo)).rejects.toThrow(/Unknown modifier/);
+    }
+    expect(spawned).toHaveLength(0);
+    await desktop().keyPress('cmd+q');
+    expect(programs()).toEqual(['tell application "System Events" to keystroke "q" using {command down}']);
+  });
+
+  it.each([
+    ['shift', 56], ['cmd', 55], ['ctrl', 59], ['alt', 58], ['opt', 58],
+  ])('a bare %s is tapped as that key (key code %i), not refused', async (combo, code) => {
+    await desktop().keyPress(combo);
+    expect(programs()).toEqual([`tell application "System Events" to key code ${code}`]);
+  });
+
+  it('an unknown key name is an error, not typed as text', async () => {
+    await expect(desktop().keyPress('cmd+nosuchkey')).rejects.toThrow(/Unknown key: "nosuchkey"/);
+    expect(spawned).toHaveLength(0);
+  });
+});
+
 describe('the keyboard guard covers the MCP route too', () => {
   it('typeText is refused while a system dialog owns the keyboard — nothing is typed, and the CGEvent helper fallback is not used', async () => {
     fake.frontmost.mockResolvedValue(ALERT);

@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { normalizeKey } from '../platform/keys';
+import { modifierOf, normalizeKey } from '../platform/keys';
 
 describe('normalizeKey', () => {
   describe('valid inputs', () => {
@@ -65,5 +65,37 @@ describe('normalizeKey', () => {
       expect(() => normalizeKey({} as any)).toThrow(/expected non-empty string/);
       expect(() => normalizeKey([] as any)).toThrow(/expected non-empty string/);
     });
+  });
+});
+
+describe('modifierOf — one alias table for every executor', () => {
+  it.each([
+    ['opt', 'alt'], ['option', 'alt'], ['alt', 'alt'], ['ctrl', 'ctrl'], ['Control', 'ctrl'], ['shift', 'shift'],
+    ['super', 'super'], [' Super ', 'super'],
+  ])('%s is %s on every OS', (token, mod) => {
+    for (const os of ['darwin', 'linux', 'win32'] as const) expect(modifierOf(token, os)).toBe(mod);
+  });
+
+  it('win / windows / super_l / command_l are Super off the Mac, and no modifier on it (win+q must not be Cmd+Q)', () => {
+    for (const t of ['win', 'windows', 'super_l', 'command_l']) {
+      expect(modifierOf(t, 'linux')).toBe('super');
+      expect(modifierOf(t, 'win32')).toBe('super');
+      expect(modifierOf(t, 'darwin')).toBeNull();
+    }
+  });
+
+  it('mod is this OS\'s shortcut modifier; cmd / command / meta are Ctrl on Windows only', () => {
+    expect(modifierOf('mod', 'darwin')).toBe('super');
+    expect(modifierOf('mod', 'linux')).toBe('ctrl');
+    expect(modifierOf('mod', 'win32')).toBe('ctrl');
+    for (const t of ['cmd', 'command', 'meta']) {
+      expect(modifierOf(t, 'darwin')).toBe('super');
+      expect(modifierOf(t, 'linux')).toBe('super');
+      expect(modifierOf(t, 'win32')).toBe('ctrl');
+    }
+  });
+
+  it('anything else is no modifier (the executor refuses it rather than dropping it)', () => {
+    for (const t of ['hyper', 'fn', 'x', 'enter', '']) expect(modifierOf(t, 'linux')).toBeNull();
   });
 });

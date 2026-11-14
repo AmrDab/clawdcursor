@@ -57,7 +57,18 @@ describe('WindowsAdapter — values reach PowerShell as data', () => {
     await adapter.setWindowState('maximize', { title: EVIL, processId: 42 });
     const ps = calls.find(isPs)!;
     expect(ps.args.join(' ')).not.toContain('calc');
-    expect(ps.opts.env?.CLAWD_PS_TITLE).toBe(EVIL);
+    expect(ps.opts.env?.CLAWD_PS_TITLE).toBe(EVIL.toLowerCase());
+  });
+
+  // Edge's title carries U+200B / NBSP: compared raw, "Microsoft Edge" never matched it. Both sides are normalized the
+  // way window-text.ts (and the bridge's ConvertTo-TitleKey) does.
+  it('a title is matched as every other window lookup matches it (format chars dropped, spaces folded, lower case)', async () => {
+    await adapter.setWindowState('minimize', { title: '  Microsoft\u200B\u00A0Edge ', processId: 42 });
+    const ps = calls.find(isPs)!;
+    expect(ps.opts.env?.CLAWD_PS_TITLE).toBe('microsoft edge');
+    const script = ps.args[ps.args.length - 1];
+    expect(script).toContain("[regex]::Replace([regex]::Replace([string]$w.Current.Name, '\\p{Cf}', ''), '\\s+', ' ')).Trim().ToLower()");
+    expect(script).not.toContain('$title.ToLower()');
   });
 
   it('a pid that is not an integer is refused before any PowerShell runs', async () => {

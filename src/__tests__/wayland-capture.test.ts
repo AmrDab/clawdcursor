@@ -133,6 +133,17 @@ describe('LinuxAdapter on Wayland', () => {
     expect(await pixels(shot.buffer)).toEqual([51, 102, 204, 255]);
   });
 
+  // Audit 2026-11-13: screenshot({region}) returned the whole screen on Linux (only Windows cut the region out).
+  it('screenshot({region}) crops to the region, clamped to the screen, and says where it starts', async () => {
+    const { LinuxAdapter } = await import('../platform/linux');
+    const shot = await new LinuxAdapter().screenshot({ region: { x: 1, y: 0, width: 2, height: 2 } });
+    expect([shot.width, shot.height, shot.origin]).toEqual([2, 2, { x: 1, y: 0 }]);
+    expect((await sharp(shot.buffer).metadata()).width).toBe(2);
+    const edge = await new LinuxAdapter().screenshot({ region: { x: 3, y: 1, width: 50, height: 50 } });
+    expect([edge.width, edge.height, edge.origin]).toEqual([1, 1, { x: 3, y: 1 }]);
+    expect(await pixels(edge.buffer)).toEqual([51, 102, 204, 255]);
+  });
+
   it('reports an honest error instead of touching nut-js when grim is missing', async () => {
     state.grim = false;
     const { LinuxAdapter } = await import('../platform/linux');

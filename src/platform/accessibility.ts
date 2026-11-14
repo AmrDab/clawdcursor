@@ -24,6 +24,7 @@ import type { PlatformAdapter, UiElement } from './types';
 import { isOwnUiPid, guardInputMethods } from './pointer-guard';
 import { windowTextIncludes } from '../tools/window-text';
 import { psOpts, powershellExe } from './ps-spawn';
+import { normalizeControlType, unknownControlType } from './uia-control-type';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -312,11 +313,15 @@ export class AccessibilityBridge {
       } catch { /* tolerate failure — fall through to original behaviour */ }
     }
     if (IS_WIN) {
+      // The bridge's vocabulary ("ControlType.Button" → "Button"), as WindowsAdapter sends it: passed raw, the bridge
+      // dropped the role filter and fuzzy-matched names. One it cannot honor finds nothing rather than anything.
+      const ct = normalizeControlType(opts.controlType || undefined);
+      if (ct === null) return [];
       const result = await this.winCmd({
         cmd: 'find-element',
         ...(opts.name        && { name:        opts.name }),
         ...(opts.automationId && { automationId: opts.automationId }),
-        ...(opts.controlType  && { controlType:  opts.controlType }),
+        ...(ct               && { controlType:  ct }),
         ...(processId         && { processId }),
       }) as any;
       return Array.isArray(result) ? result : [];
@@ -386,13 +391,17 @@ export class AccessibilityBridge {
     }
 
     if (IS_WIN) {
+      // Same control-type vocabulary as findElement: a raw "ControlType.Button" dropped the role filter, so invoke could
+      // act on a same-named element of another type.
+      const ct = normalizeControlType(opts.controlType || undefined);
+      if (ct === null) return { success: false, error: unknownControlType(opts.controlType) };
       const result = await this.winCmd({
         cmd: 'invoke-element',
         processId,
         action: opts.action,
         ...(opts.name        && { name:         opts.name }),
         ...(opts.automationId && { automationId: opts.automationId }),
-        ...(opts.controlType  && { controlType:  opts.controlType }),
+        ...(ct               && { controlType:  ct }),
         ...(opts.value        && { value:        opts.value }),
         ...(opts.within       && { within:       opts.within }),
       }) as any;

@@ -545,7 +545,10 @@ describe('find', () => {
       const hits = await ax.find({ processId: 77, name: 'OK', controlType: 'Button' });
       const a = calls[0].args;
       expect(a.slice(0, 3)).toEqual(['-l', 'JavaScript', path.join('/fake/scripts/mac', 'find-element.jxa')]);
-      expect(a).toEqual(expect.arrayContaining(['-ProcessId', '77', '-Name', 'OK', '-ControlType', 'Button']));
+      expect(a).toEqual(expect.arrayContaining(['-ProcessId', '77', '-ControlType', 'Button', '-ArgsStdin']));
+      // The name travels on stdin, not argv (readable by every process on the Mac).
+      expect(a).not.toContain('OK');
+      expect(JSON.parse(calls[0].input!)).toEqual({ name: 'OK' });
       expect(a).not.toContain('-FocusedProcessId');
       // the script reports the AX role as `role`, not `controlType`
       expect(hits[0]).toMatchObject({ name: 'OK', controlType: 'Button', processId: 77 });
@@ -711,6 +714,14 @@ describe('stdin payload — always well-formed', () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, elements: [] }) });
     await ax.find({ processId: 7, name: 'x\ude00y' });
     expect(JSON.parse(calls[0].input!).name).toBe('x\ufffdy');
+  });
+
+  it('the osascript fallback (viaJxa) sends well-formed text too', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    await ax.invoke({ processId: 7, name: 'Notes', action: 'set-value', value: 'ok \ud83d tail' });
+    const jxa = calls.find(c => c.file === 'osascript')!;
+    expect(jxa.input).not.toMatch(/\\ud[89ab][0-9a-f]{2}/i);
+    expect(JSON.parse(jxa.input!).value).toBe('ok � tail');
   });
 
   it('a proper surrogate pair (an emoji) is left alone', async () => {
@@ -891,8 +902,20 @@ describe('invoke', () => {
       await ax.invoke({ processId: 9, name: 'Send', controlType: 'Button', action: 'click', value: 'v' });
       const a = calls[0].args;
       expect(a[2]).toBe(path.join('/fake/scripts/mac', 'invoke-element.jxa'));
-      expect(a).toEqual(expect.arrayContaining(['-ProcessId', '9', '-Name', 'Send', '-ControlType', 'Button', '-Action', 'click', '-Value', 'v']));
+      expect(a).toEqual(expect.arrayContaining(['-ProcessId', '9', '-ControlType', 'Button', '-Action', 'click', '-ArgsStdin']));
+      expect(JSON.parse(calls[0].input!)).toEqual({ name: 'Send', value: 'v' });
       expect(a).not.toContain('-FocusedProcessId');
+    });
+
+    it("a set_value value (a password field's too) and the name never travel in argv", async () => {
+      const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true, action: 'set-value' }) });
+      await ax.invoke({ processId: 9, name: 'Password', action: 'set-value', value: 'hunter2' });
+      expect(calls[0].args.join(' ')).not.toMatch(/hunter2|Password/);
+      expect(calls[0].args).not.toContain('-Value');
+      expect(JSON.parse(calls[0].input!)).toEqual({ name: 'Password', value: 'hunter2' });
+      // '' is a value (it clears the field): sent, not dropped.
+      await ax.invoke({ processId: 9, name: 'Password', action: 'set-value', value: '' });
+      expect(JSON.parse(calls[1].input!)).toEqual({ name: 'Password', value: '' });
     });
 
     it('a script failure is a miss with the script\'s reason', async () => {

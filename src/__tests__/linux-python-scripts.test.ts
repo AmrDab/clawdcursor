@@ -378,4 +378,11 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
     expect(out.gtk4.bounds).toEqual({ x: 16, y: 349, width: 64, height: 44 });
     expect(out.gtk4.coordType).toBe('window');
   });
+
+  // The value set_value writes (a password included) used to ride on argv, readable in /proc/<pid>/cmdline.
+  it('--args-stdin: name / value / within / window title come from stdin and reach the command', () => {
+    expect(out.args_stdin).toEqual({
+      name: '--Password--', action: 'set-value', value: 'hunter2 é', within: 'Log in', window_title: 'Sign in',
+    });
+  });
 });

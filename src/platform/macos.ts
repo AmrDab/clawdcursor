@@ -35,6 +35,7 @@ import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
 import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
+import { clampRegion } from './grab-image';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
 import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
@@ -253,7 +254,7 @@ export class MacOSAdapter implements PlatformAdapter {
     }
   }
 
-  async screenshot(opts?: { maxWidth?: number; displayIndex?: number }): Promise<ScreenshotResult> {
+  async screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult> {
     if (!this.screenshotHelperPath) {
       // Build a human-readable list of the candidate paths that were searched
       // so the user knows exactly where the binary was expected.
@@ -288,8 +289,16 @@ export class MacOSAdapter implements PlatformAdapter {
       let width = meta.width || 0;
       let height = meta.height || 0;
       let scaleFactor = 1;
+      let origin: { x: number; y: number } | undefined;
 
-      if (opts?.displayIndex !== undefined && opts.displayIndex > 0) {
+      if (opts?.region) {
+        // A region (capture px: physical, Retina) is cut out of the capture, as on Windows: ignored, the caller got the whole screen.
+        const r = clampRegion(opts.region, width, height);
+        buffer = await sharp(buffer).extract(r).png().toBuffer();
+        width = r.width;
+        height = r.height;
+        origin = { x: r.left, y: r.top };
+      } else if (opts?.displayIndex !== undefined && opts.displayIndex > 0) {
         const displays = await this.listDisplays();
         const target = displays[opts.displayIndex];
         if (target) {
@@ -314,7 +323,7 @@ export class MacOSAdapter implements PlatformAdapter {
         height = fit.height;
       }
 
-      return { buffer, width, height, scaleFactor };
+      return { buffer, width, height, scaleFactor, ...(origin ? { origin } : {}) };
     } catch (err) {
       try { fs.unlinkSync(tmp); } catch { /* */ }
       throw err;

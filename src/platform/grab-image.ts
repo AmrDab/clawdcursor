@@ -55,3 +55,25 @@ export function sharpFromGrab(img: GrabImage): ReturnType<typeof sharp> {
   const raw = normalizeGrab(img);
   return sharp(raw.data, { raw: { width: raw.width, height: raw.height, channels: raw.channels } });
 }
+
+/**
+ * `screenshot({region})` on a whole-screen grab (macOS, Linux): the part of the region inside the `width` x `height` image,
+ * in sharp's extract() shape — the intersection, never shifted (a region hanging off the left edge keeps its right edge).
+ * Throws when the region and the screen do not overlap.
+ */
+export function clampRegion(
+  region: { x: number; y: number; width: number; height: number }, width: number, height: number,
+): { left: number; top: number; width: number; height: number } {
+  const x0 = Math.round(region.x);
+  const y0 = Math.round(region.y);
+  const left = Math.max(0, x0);
+  const top = Math.max(0, y0);
+  const right = Math.min(width, x0 + Math.round(region.width));
+  const bottom = Math.min(height, y0 + Math.round(region.height));
+  if (right <= left || bottom <= top) {
+    throw new Error(
+      `Region (${region.x},${region.y}) ${region.width}x${region.height} is outside the ${width}x${height} screen: nothing to capture`,
+    );
+  }
+  return { left, top, width: right - left, height: bottom - top };
+}

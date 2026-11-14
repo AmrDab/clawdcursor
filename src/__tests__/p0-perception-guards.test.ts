@@ -66,16 +66,16 @@ describe('P0-1 — getUiTree defaults to the active-window pid on every platform
   it('linux getUiTree resolves getActiveWindow() when pid is omitted', () => {
     // 1.5.12: the foreground-pid lookup moved into a helper so that
     // findElements / invokeElement get the same default (L7 — find without a
-    // pid searched the wrong app); it is now a11yScopeArgs, which also scopes
+    // pid searched the wrong app); it is now a11yScope, which also scopes
     // a pid-less window by title and covers getFocusedElement. Follow it.
     const linux = read('platform', 'linux.ts');
     const body = methodBody(linux, 'async getUiTree(processId?: number)');
-    expect(body).toContain('a11yScopeArgs');
-    const helper = methodBody(linux, 'private async a11yScopeArgs(processId?: number)');
+    expect(body).toContain('a11yScope(');
+    const helper = methodBody(linux, 'private async a11yScope(processId?: number)');
     expect(helper).toContain('getActiveWindow');
     expect(helper).toContain("'--process-id'");
     for (const m of ['async findElements(query', 'async invokeElement(query', 'async getFocusedElement()']) {
-      expect(methodBody(linux, m), m).toContain('a11yScopeArgs');
+      expect(methodBody(linux, m), m).toContain('a11yScope(');
     }
   });
 });

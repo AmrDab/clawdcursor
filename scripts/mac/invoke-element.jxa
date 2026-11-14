@@ -169,6 +169,14 @@ function run(argv) {
                 params.processId = parseInt(argv[++i], 10);
             } else if ((a === '-value' || a === '-Value') && hasNext) {
                 params.value = argv[++i];
+            } else if (a === '-ArgsStdin') {
+                // The name and the value to set arrive as one JSON object on stdin, not argv: argv is readable by every
+                // process on the Mac, and the value can be a password.
+                var data = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
+                var s = ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding));
+                var text = s ? JSON.parse(s) : {};
+                if (typeof text.name === 'string') params.name = text.name;
+                if (typeof text.value === 'string') params.value = text.value;
             }
             // -AutomationId and -Restore have no macOS equivalent; silently ignore
         }

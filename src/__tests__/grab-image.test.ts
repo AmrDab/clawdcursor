@@ -8,7 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import sharp from 'sharp';
-import { normalizeGrab, sharpFromGrab } from '../platform/grab-image';
+import { clampRegion, normalizeGrab, sharpFromGrab } from '../platform/grab-image';
 
 async function decode(png: Buffer): Promise<number[]> {
   const { data } = await sharp(png).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
@@ -63,5 +63,25 @@ describe('sharpFromGrab', () => {
     const img = { data: Buffer.from([51, 102, 204, 255]), width: 1, height: 1, channels: 4, colorMode: 1 };
     const png = await sharpFromGrab(img).png().toBuffer();
     expect(await decode(png)).toEqual([51, 102, 204, 255]);
+  });
+});
+
+describe('clampRegion — the region intersected with the screen, never shifted', () => {
+  it('a region inside the screen is unchanged', () => {
+    expect(clampRegion({ x: 10, y: 20, width: 100, height: 50 }, 1920, 1080)).toEqual({ left: 10, top: 20, width: 100, height: 50 });
+  });
+
+  it('off the left / top edge: the overlap only, its right / bottom edge kept', () => {
+    expect(clampRegion({ x: -50, y: -30, width: 100, height: 80 }, 1920, 1080)).toEqual({ left: 0, top: 0, width: 50, height: 50 });
+  });
+
+  it('off the right / bottom edge: cut at the screen edge', () => {
+    expect(clampRegion({ x: 1900, y: 1060, width: 100, height: 100 }, 1920, 1080)).toEqual({ left: 1900, top: 1060, width: 20, height: 20 });
+  });
+
+  it('no overlap at all is an error, not a 1x1 corner', () => {
+    expect(() => clampRegion({ x: 2000, y: 10, width: 100, height: 100 }, 1920, 1080)).toThrow(/outside the 1920x1080 screen/);
+    expect(() => clampRegion({ x: -200, y: 10, width: 100, height: 100 }, 1920, 1080)).toThrow(/outside/);
+    expect(() => clampRegion({ x: 10, y: 1080, width: 100, height: 100 }, 1920, 1080)).toThrow(/outside/);
   });
 });

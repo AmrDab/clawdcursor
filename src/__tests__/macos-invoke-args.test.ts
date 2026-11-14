@@ -22,13 +22,20 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 const execFileCalls: Array<{ cmd: string; args: string[] }> = [];
 let nextStdout = '{}';
-vi.mock('child_process', () => ({
-  execFile: (cmd: string, args: string[], _opts: unknown, cb: (e: unknown, r: unknown) => void) => {
+vi.mock('child_process', async () => {
+  const { promisify } = await import('util');
+  const execFile: any = (cmd: string, args: string[], _opts: unknown, cb: (e: unknown, out?: string, err?: string) => void) => {
     execFileCalls.push({ cmd, args });
-    cb(null, { stdout: nextStdout, stderr: '' });
-  },
-  spawn: vi.fn(),
-}));
+    cb(null, nextStdout, '');
+    return { stdin: { on: () => {}, end: () => {} } };
+  };
+  // As node's: promisify(execFile) resolves { stdout, stderr } and carries the child (its stdin takes the caller's text).
+  execFile[promisify.custom] = (cmd: string, args: string[]) => {
+    execFileCalls.push({ cmd, args });
+    return Object.assign(Promise.resolve({ stdout: nextStdout, stderr: '' }), { child: { stdin: { on: () => {}, end: () => {} } } });
+  };
+  return { execFile, spawn: vi.fn() };
+});
 
 import { MacOSAdapter } from '../platform/macos';
 

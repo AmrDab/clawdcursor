@@ -24,7 +24,8 @@
  *              "truncated":bool}                           // = skipped is not empty
  *
  * Text the caller typed or searches for (name / id / value) goes to the helper as one JSON object on STDIN
- * (`--args-stdin 1`), not argv: argv is readable by every process on the Mac while the helper runs.
+ * (`--args-stdin 1`), not argv: argv is readable by every process on the Mac while the helper runs. The osascript
+ * fallback scripts take their name / value the same way (`-ArgsStdin`).
  */
 import * as path from 'path';
 import { execFile } from 'child_process';
@@ -176,7 +177,8 @@ function viaStdin(fields: Record<string, string | undefined>): { args: string[];
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-const wellFormed = (s: string): string => s.replace(LONE_SURROGATE, '\uFFFD');
+/** Lone surrogates become U+FFFD, so text sent as JSON on a helper's / script's stdin parses there as argv would have carried it. */
+export const wellFormed = (s: string): string => s.replace(LONE_SURROGATE, '\uFFFD');
 
 /** A name or identifier counts only if it says something: "   " would substring-match the first control with a space in its label. */
 const given = (s: string | undefined): string | undefined => (s !== undefined && s.trim() !== '' ? s : undefined);
@@ -675,10 +677,13 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     return reply;
   }
 
-  /** Run one of the original JXA scripts and parse its JSON. */
+  /**
+   * Run one of the original JXA scripts and parse its JSON. `text` (a name, the value set_value writes) goes to the script
+   * as one JSON object on stdin with `-ArgsStdin`, never argv — the same rule as the helper's `--args-stdin`.
+   */
   async function viaJxa(
     script: string, args: string[], timeoutMs: number, what: string,
-    opts: { errorJsonIsData?: boolean } = {},
+    opts: { errorJsonIsData?: boolean; text?: Record<string, string | undefined> } = {},
   ): Promise<any> {
     if (deps.screenLocked) {
       try {
@@ -690,8 +695,11 @@ export function createMacAx(deps: MacAxDeps): MacAx {
     }
     let stdout: string;
     try {
+      const text = Object.entries(opts.text ?? {}).filter(([, v]) => v !== undefined);
+      const flags = text.length ? [...args, '-ArgsStdin'] : args;
       // The '--' keeps osascript from reading the script's own -Flags as its options.
-      ({ stdout } = await deps.exec('osascript', ['-l', 'JavaScript', path.join(deps.scriptsDir, script), ...(args.length ? ['--', ...args] : [])], { timeoutMs }));
+      const argv = ['-l', 'JavaScript', path.join(deps.scriptsDir, script), ...(flags.length ? ['--', ...flags] : [])];
+      ({ stdout } = await deps.exec('osascript', argv, text.length ? { timeoutMs, input: JSON.stringify(Object.fromEntries(text.map(([k, v]) => [k, wellFormed(v!)]))) } : { timeoutMs }));
     } catch (err) {
       if (isTimeout(err)) throw withHint(timeoutError(what, timeoutMs));
       throw withHint(new MacAxError('failed', `${what} failed: ${msg(err)}`));
@@ -890,12 +898,12 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       const out = await viaJxa(
         'find-element.jxa',
         [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
-          ...(q.name ? ['-Name', q.name] : []),
           ...(q.controlType ? ['-ControlType', q.controlType] : []),
           // find-element.jxa has no AutomationId concept yet and ignores it; passed so a script that learns it just works.
           ...(q.automationId ? ['-AutomationId', q.automationId] : [])],
         JXA_FIND_TIMEOUT_MS,
         what,
+        { text: { name: q.name || undefined } },
       );
       return Array.isArray(out) ? out.map((el: any) => toUiElement(el, undefined, q.processId)) : [];
     },
@@ -959,13 +967,11 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       const out = await viaJxa(
         'invoke-element.jxa',
         [...(q.processId !== undefined ? ['-ProcessId', String(q.processId)] : []),
-          '-Name', name,
           ...(q.controlType ? ['-ControlType', q.controlType] : []),
-          '-Action', q.action,
-          ...(q.value !== undefined ? ['-Value', q.value] : [])],
+          '-Action', q.action],
         JXA_INVOKE_TIMEOUT_MS,
         what,
-        { errorJsonIsData: true },
+        { errorJsonIsData: true, text: { name, value: q.value } },
       );
       return toInvokeResult(out);
     },
