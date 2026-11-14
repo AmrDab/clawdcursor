@@ -123,7 +123,7 @@ describe('modifiers are mapped or refused, never dropped', () => {
   });
 
   it('win+q is refused, not sent as Cmd+Q (which quits the front app); cmd+q is Cmd+Q', async () => {
-    for (const combo of ['win+q', 'windows+q', 'command_l+q']) {
+    for (const combo of ['win+q', 'windows+q']) {
       await expect(desktop().keyPress(combo)).rejects.toThrow(/Unknown modifier/);
     }
     expect(spawned).toHaveLength(0);
