@@ -255,9 +255,10 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const tools = compact ? getCompactSurface() : getAllTools();
   // Bug telemetry sends a tool or action name only when it is one of these (telemetry.ts), and the host only by an allowlist.
   allowNames(tools.flatMap(t => [t.name, ...(t.parameters.action?.enum ?? [])]));
-  // When this session started: when its agent connected (initialized), else when the server was made. `expect` /
-  // `verify` file_changed_since_start measures from here.
-  let sessionStartedAt = Date.now();
+  // When this session started: when its agent connected (initialized). `expect` / `verify` file_changed_since_start
+  // measures from here. A call with no session (the daemon's one-shot pool: dashboard, curl) measures from its own start,
+  // not from when the daemon came up days ago.
+  let sessionStartedAt: number | undefined;
   const lowLevel = (server as unknown as { server?: { oninitialized?: () => void } }).server;
   if (lowLevel) lowLevel.oninitialized = () => { sessionStartedAt = Date.now(); setHost(clientInfo()?.name); };
 
@@ -395,7 +396,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         const acted = () => actRecord(wasIn);
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
         sessionLog.running(tool.name, action, clientInfo());
-        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt, () => tool.handler(params, ctx)));  // where the call's time went
+        const run = await withSteps(tool.name, action, () => inMcpSession(sessionStartedAt ?? started, () => tool.handler(params, ctx)));  // where the call's time went
         releasePill();
         if (!run.ok) {
           // A handler throw (e.g. projected tools' toolContextToAgent when the
