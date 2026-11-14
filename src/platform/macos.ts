@@ -44,7 +44,7 @@ import {
   defaultMacAx, MacAxError,
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
-import { windowTextIncludes } from '../tools/window-text';
+import { windowTextIncludes } from './window-text';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');

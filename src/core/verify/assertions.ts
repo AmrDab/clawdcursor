@@ -34,7 +34,7 @@ import { quoteScreenText } from '../untrusted-screen-content';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
 import { isOwnUiPid } from '../../platform/pointer-guard';
-import { windowTextIncludes } from '../../tools/window-text';
+import { windowTextIncludes } from '../../platform/window-text';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

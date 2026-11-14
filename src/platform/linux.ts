@@ -50,7 +50,7 @@ import type {
 import { waitForLaunchedWindow, buildAppPredicate, type AppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
 import { llmSize } from './coord-scale';
-import { windowTextIncludes } from '../tools/window-text';
+import { windowTextIncludes } from './window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { wellFormed } from './mac-ax';
 import { modifierOf, type Modifier } from './keys';

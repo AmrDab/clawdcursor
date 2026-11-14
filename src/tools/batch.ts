@@ -22,7 +22,7 @@
  * none of the sandbox's hard problems (see the architecture review).
  */
 import { getTool, getCompactTools } from './registry';
-import { windowTextIncludes } from './window-text';
+import { windowTextIncludes } from '../platform/window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { refusalBefore, afterCall, guardedCall, type GuardedCall, type Refusal } from './call-guards';
 import { logger } from '../core/observability/logger';

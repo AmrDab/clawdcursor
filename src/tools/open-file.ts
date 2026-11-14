@@ -7,7 +7,7 @@
  */
 import { promises as fsp } from 'node:fs';
 import type { PlatformAdapter } from '../platform/types';
-import { windowTextIncludes } from './window-text';
+import { windowTextIncludes } from '../platform/window-text';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { resolveAlias, startedNoWindowText } from '../core/router/aliases';
 

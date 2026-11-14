@@ -21,7 +21,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { runActivationLadder, canClickAtBounds, expandNote } from '../tools/projected/tools';
-import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
+import { normalizeWindowText, windowTextIncludes } from '../platform/window-text';
 import { checkAssertions } from '../core/verify/assertions';
 import { narrowedScopeNote } from '../tools/scope-note';
 import { classifyResult } from '../core/result-codes';

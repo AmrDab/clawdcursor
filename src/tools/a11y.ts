@@ -8,7 +8,7 @@
 import type { ToolDefinition, ToolContext } from './types';
 import type { UiElement } from '../platform/types';
 import { isBrowserProcess } from '../platform/browser-config';
-import { windowTextIncludes } from './window-text';
+import { windowTextIncludes } from '../platform/window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
 import { copyAllText, pageTextPart, PAGE_TEXT_CAP } from '../platform/copy-all-text';

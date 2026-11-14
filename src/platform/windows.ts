@@ -54,7 +54,7 @@ import { appIdentity, ownsWindow, type AppIdentity } from './app-identity';
 import { llmSize } from './coord-scale';
 import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
-import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
+import { normalizeWindowText, windowTextIncludes } from './window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
 import * as os from 'os';

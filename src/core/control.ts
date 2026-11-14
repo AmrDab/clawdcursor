@@ -25,7 +25,7 @@ import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';
 import { setInputGuard, isOwnUiPid, type WindowQuery } from '../platform/pointer-guard';
-import { windowTextIncludes } from '../tools/window-text';
+import { windowTextIncludes } from '../platform/window-text';
 import { aiHostKind, sameApp } from './ai-hosts';
 
 // Off under the test runner unless a test points it somewhere: tests must not write into the user's real data dir.
