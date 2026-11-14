@@ -26,7 +26,7 @@ Useful scripts:
 | `npm run lint` | ESLint over `src/` |
 | `npm run test` | `vitest` watch mode |
 | `npm run test:ci` | `vitest run` — 759/760 baseline, one intentional skip |
-| `npm run test:mcp-schema-snapshot` | Diffs the granular tool catalog against `schema.snapshot.json`. Fails if the schema changed. Commit the new snapshot (`:update`) when the change is intentional. |
+| `npm run test:mcp-schema-snapshot` | Diffs what agents receive against `schema.snapshot.json`: the real server's `initialize` (instructions, per OS) and `tools/list` (names, descriptions with the cost prefix, input schemas, annotations), for the compact and the granular surface. Fails on any change. Commit the new snapshot (`:update`) when the change is intentional. |
 
 CI runs typecheck + lint + tests + schema snapshot on every PR across Windows, macOS, and Linux on Node 20 and 22. Match that locally before pushing where possible.
 
