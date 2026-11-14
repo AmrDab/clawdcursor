@@ -146,7 +146,7 @@ program
   .command('agent')
   .description('Start the clawdcursor daemon (MCP over HTTP; your own agent drives the tools)')
   .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
-  .option('--debug', 'Save screenshots to debug/ folder (off by default)')
+  .option('--debug', 'No effect (kept so existing scripts keep working)')
   .option('--accept', 'Accept desktop control consent non-interactively and start')
   .option('--no-vision', 'High-security mode: no screenshot goes to any model — MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'No effect (kept so existing scripts keep working): the daemon never runs a model')
@@ -161,14 +161,14 @@ program
   .command('start')
   .description('[deprecated — use `clawdcursor agent`] Start the Clawd Cursor agent')
   .option('--port <port>', 'API server port (default: server.port in config, else 3847)')
-  .option('--debug', 'Save screenshots to debug/ folder (off by default)')
+  .option('--debug', 'No effect (kept so existing scripts keep working)')
   .option('--accept', 'Accept desktop control consent non-interactively and start')
   .option('--no-vision', 'High-security mode: no screenshot goes to any model — MCP clients work blind (also CLAWD_DISABLE_VISION=1)')
   .option('--no-llm', 'No effect (kept so existing scripts keep working): the daemon never runs a model')
   .option('--compact', 'Expose the 6-compound MCP surface over HTTP /mcp (also CLAWD_MCP_COMPACT=1)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
-    console.warn(`${e('⚠', '[WARN]')} \`clawdcursor start\` is deprecated; use \`clawdcursor agent\`. Removed in v0.10.`);
+    console.warn(`${e('⚠', '[WARN]')} \`clawdcursor start\` is deprecated; use \`clawdcursor agent\`.`);
     await runAgentMode(opts);
   });
 
@@ -373,7 +373,7 @@ program
   .option('--port <port>', 'HTTP server port (default: server.port in config, else 3847)')
   .option('--skip-consent', 'Skip consent prompt (requires NODE_ENV=development)')
   .action(async (opts) => {
-    console.warn(`${e('⚠', '[WARN]')} \`clawdcursor serve\` is deprecated; use \`clawdcursor agent\`. Removed in v0.10.`);
+    console.warn(`${e('⚠', '[WARN]')} \`clawdcursor serve\` is deprecated; use \`clawdcursor agent\`.`);
     await runAgentMode(opts);
   });
 
