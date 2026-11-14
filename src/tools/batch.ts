@@ -24,8 +24,7 @@
 import { getTool, getCompactTools } from './registry';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
-import { refusalBefore, afterCall, type GuardedCall, type Refusal } from './call-guards';
-import { isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { refusalBefore, afterCall, guardedCall, type GuardedCall, type Refusal } from './call-guards';
 import { logger } from '../core/observability/logger';
 import { clipScreenText } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
@@ -168,12 +167,8 @@ export async function executeBatch(
     const guard = step.precheck ?? step.expect;
     const args = stepArgs(step);
     const stepAction = typeof args.action === 'string' ? args.action : undefined;
-    // Refused as the same call made directly would be (call-guards.ts), before the precondition, which reads the screen;
-    // a step with one is never pause- or stop-safe.
-    const call: GuardedCall = {
-      tool: tool.name, action: stepAction, args,
-      pauseSafe: !guard && isPauseSafeCall(tool.name, stepAction), stopSafe: !guard && isStopSafeCall(tool.name, stepAction),
-    };
+    // Refused as the same call made directly would be (call-guards.ts), before the precondition, which reads the screen.
+    const call = guardedCall(tool.name, stepAction, args, !!guard);
     const refused = await refusalBefore(call, ctx);
     if (refused) return block(i, label, call, refused);
 

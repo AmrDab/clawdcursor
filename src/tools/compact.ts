@@ -330,6 +330,20 @@ export const COMPOUND_ROUTE_INDEX: Record<string, ActionRoute[]> = {
   browser: BROWSER_ACTIONS,
 };
 
+/**
+ * A call in compact names: a compound call as it is, a granular tool as its route (the first, for a tool two compounds
+ * route to), a granular tool with no route as itself with no action. Facts about a call (acting, pause-safe, an
+ * image-space pointer call…) are written once, in these names, and a granular call has the facts of its route.
+ */
+export function compactCall(tool: string, action?: string): { tool: string; action?: string } {
+  if (tool in COMPOUND_ROUTE_INDEX) return { tool, action };
+  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
+    const route = routes.find(r => r.delegate === tool);
+    if (route) return { tool: compound, action: route.action };
+  }
+  return { tool };
+}
+
 /** Names a model reaches for on `accessibility` that are spelled differently there (invoke_element's own verbs). */
 const BY_NAME: Record<string, string> = { click: 'invoke', 'set-value': 'set_value', 'get-value': 'get_value' };
 

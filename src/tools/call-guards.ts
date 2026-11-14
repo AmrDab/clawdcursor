@@ -8,7 +8,8 @@
  */
 import type { ToolContext, ToolResult } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
-import { ownUiRefusal } from '../core/own-ui-guard';
+import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { compactCall } from './compact';
 import { isStopped, STOPPED_TEXT } from '../core/control';
 
 export interface Refusal { guard: 'stopped' | 'screen_binding' | 'own_ui' | 'no_vision'; why: string }
@@ -20,6 +21,18 @@ export interface GuardedCall {
   /** Allowed while a pause waits / while the user has stopped clawdcursor (own-ui-guard.ts). */
   pauseSafe: boolean;
   stopSafe: boolean;
+}
+
+/**
+ * A call as the guards see it. Allowed while paused / stopped by its compact name; never a batch step with a
+ * precondition, which reads the screen.
+ */
+export function guardedCall(tool: string, action: string | undefined, args: Record<string, unknown>, precondition = false): GuardedCall {
+  const c = compactCall(tool, action);
+  return {
+    tool, action, args,
+    pauseSafe: !precondition && isPauseSafeCall(c.tool, c.action), stopSafe: !precondition && isStopSafeCall(c.tool, c.action),
+  };
 }
 
 /** Why the call may not run, or null. `passedStop` runs once the call is known not to be stopped (the MCP server shows the pill there). */

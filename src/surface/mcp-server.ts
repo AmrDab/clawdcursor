@@ -27,10 +27,9 @@ import { getAllTools, getCompactSurface } from '../tools/registry';
 import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
-import { isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { actedIn, actRecord } from '../core/control';
 import { logger } from '../core/observability/logger';
-import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
@@ -39,7 +38,7 @@ import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
-import { refusalBefore, afterCall, type GuardedCall } from '../tools/call-guards';
+import { refusalBefore, afterCall, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -118,12 +117,8 @@ export interface McpServerHandle {
  */
 /** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
 function isActingCall(toolName: string, action: string | undefined, test: typeof isActingAction = isActingAction): boolean {
-  if (toolName in COMPOUND_ROUTE_INDEX) return test(toolName, action);
-  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
-    const route = routes.find(r => r.delegate === toolName);
-    if (route) return test(compound, route.action);
-  }
-  return false;
+  const c = compactCall(toolName, action);
+  return test(c.tool, c.action);
 }
 
 /** Does any step of a batch (compact or granular tool names) change something? */
@@ -362,9 +357,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
           return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
         };
-        const call: GuardedCall = {
-          tool: tool.name, action, args: params ?? {}, pauseSafe: isPauseSafeCall(tool.name, action), stopSafe: isStopSafeCall(tool.name, action),
-        };
+        const call = guardedCall(tool.name, action, params ?? {});
         // Once the call is known not to be stopped, a consequential one (tier 1+) pokes the pill: it shows on the first
         // poke and hides after ~30 s without one. Compound tools decide per action in dispatchCompound. A batch that acts
         // at any step shows it from its start: its first step may be a 30 s wait, and a pill that is not there cannot be
