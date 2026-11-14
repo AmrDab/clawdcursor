@@ -6,27 +6,31 @@ All notable changes to Clawd Cursor will be documented in this file.
 
 ### Added
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
-  now the Border Beam of [libraries.dev](https://libraries.dev/beam), in clawdcursor's colours: an **amber** beam that
-  goes round the window's edge every two seconds while the agent works, with a thin bright stroke and a soft glow just
-  inside it; and while the agent waits for you, the library's "pulse" in **blue**: the whole edge, held steady. The
-  running pill shows the "working" Thinking Orb (particles on tilted orbits, in amber) in place of the blinking dot.
-  - On a light window (a white document) the beam is stronger, with a dark highlight, so it is not lost (Windows).
-  - When the agent's window is the desktop itself (a click on the desktop), the beam goes around the monitor the
-    pointer is on (Windows and macOS). Nothing is drawn when the agent is idle or has no window, as before.
-  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion), the beam is one
-    still frame and the orb does not move.
-  - Still click-through, never focused, and out of the agent's screenshots. The glow reaches about 28 px into the
-    window's edge.
-  - Windows and macOS. On Linux the border stays a plain steady one for now.
-  - On macOS the beam is drawn for power (#414): a thin amber ring with a brighter run going round it, in plain Core
-    Animation layers along the edge, so its GPU cost follows the edge and not the window's area; paused, a still blue
-    ring. The orb moves about 10 times a second on both systems.
-  - **Credit:** the look is a port of **Border Beam** and **Thinking Orbs** by Jakub Antalik
+  now the Border Beam of [libraries.dev](https://libraries.dev/beam) with `size="pulse-outside"`,
+  `colorVariant="sunset"`, `borderRadius={30}` and its default 1.96 s duration: while the agent works, a warm glow just
+  **outside** the window's edge - a soft bloom, a tighter inner glow and patches of a thin ring - whose blobs breathe in
+  size, place and brightness, with a slow hue drift; while the agent waits for you, the same glow in the library's
+  "ocean" **blues**, held still. The running pill shows the "working" Thinking Orb (particles on tilted orbits, in
+  amber) in place of the blinking dot.
+  - The glow reaches about 40 px out from the window and draws nothing over it but the 1 px ring. The ring's corners
+    have the library's radius 30, rounder than a window's own (8 px on Windows 11), so at each corner the ring cuts
+    across the window's corner.
+  - When the agent's window is the desktop itself (a click on the desktop), or a maximized or full-screen window, there
+    is no room outside it: the same glow is drawn inward from the monitor's edge (Windows and macOS; on Linux, a
+    window as wide as the screen).
+  - Where the system is set to reduce motion (Windows "Animation effects" off, macOS Reduce Motion, GTK animations off),
+    the beam is one still frame and the orb does not move.
+  - Still click-through, never focused, and out of the agent's screenshots. Nothing is drawn when the agent is idle or
+    has no window, as before.
+  - Drawn for power: on Windows eight small layered windows round the edge, 12.5 frames a second, about 1-2% of
+    a core for a 4K window; on macOS small Core Animation gradient layers along the edge (no masks, blurs or window-sized
+    layers, #414), at most 15 frames a second, no code running per frame; on Linux cairo gradients over the edge band,
+    10 frames a second. Paused, nothing moves and nothing is redrawn.
+  - **Credit:** the look follows **Border Beam** and **Thinking Orbs** by Jakub Antalik
     ([github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev), `packages/border-beam`
-    and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's default
-    preset (its layers, gradient stops, opacities and timings) with an amber colour variant of ours and its "ocean"
-    blues, redrawn natively: layered windows on Windows, Core Animation on macOS. The MIT notice is in
-    `scripts/window-outline.ps1`.
+    and `packages/thinking-orbs`), MIT License, Copyright (c) 2026 Jakub Antalik. The beam uses the library's
+    pulse-outside values (its blobs, palettes, opacities, oscillators and timings), redrawn natively: layered windows on
+    Windows, Core Animation on macOS, cairo on Linux. The MIT notice is in `scripts/window-outline.ps1`.
 
 ### Fixed
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now

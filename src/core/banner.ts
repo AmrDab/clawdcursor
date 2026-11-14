@@ -6,10 +6,12 @@
  *   - the outline: a click-through beam along the edge of the window the agent
  *     is working in (control.ts workingWindow), and nothing else: no fill,
  *     nothing on the rest of the screen, nothing at all while that window is not
- *     in front. It is the "border beam" of libraries.dev (#392): an amber beam
- *     going round the edge (the paused form is a steady blue ring; still where
- *     the OS reduces motion), with a soft glow reaching a little into the window.
- *     When the window is the desktop itself, it goes around the monitor. Spawned/
+ *     in front. It is the "border beam" of libraries.dev (#392), size
+ *     pulse-outside in its "sunset" colours: a warm glow just outside the
+ *     window's edge that breathes (the paused form is the same glow in blue,
+ *     still; still too where the OS reduces motion). When the window is the
+ *     desktop itself (or fills its screen), it is drawn inward from the
+ *     monitor's edge. Spawned/
  *     killed in lockstep with the pill; `TARGET <handle> <pid>` on its stdin
  *     names the window, a bare `TARGET` none.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
@@ -29,7 +31,7 @@
  * Paused mode (pause-gate.ts): when an agent hands the desktop to the user at a
  * roadblock, both overlays are respawned in their paused form — a BLUE outline and
  * a pill that says what to do, with Resume / End task. The pill prints
- * BANNER_RESUME / BANNER_END; showRunning() swaps back to the amber form. The card can add choice buttons
+ * BANNER_RESUME / BANNER_END; showRunning() swaps back to the running (sunset) form. The card can add choice buttons
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
  * (CLAWD_BANNER_INPUT, JSON {placeholder?, multiline?}; sent as BANNER_REPLY like "Something else").
  *
@@ -58,7 +60,7 @@ const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
 const DODGE_MS = 1_500;
 const DODGE_SETTLE_MS = 90;
-const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
+const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn" (the drawers have their own blues; Linux's plain fallback line uses it)
 
 /**
  * Which form of the overlay to draw: running (default) or paused for the user. `activity` is what the running pill says

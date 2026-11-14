@@ -314,6 +314,71 @@ describe('no full-screen glow', () => {
     expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
   });
 
+  // The owner's pick (#392): Border Beam with size="pulse-outside", colorVariant="sunset", borderRadius 30, duration
+  // 1.96 s. The three drawers carry the library's numbers; these keep them the same everywhere.
+  it('every drawer draws pulse-outside in sunset (paused: ocean), radius 30, 1.96 s, with the same numbers', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const py = read('scripts', 'linux', 'overlay.py');
+    const numbers = (src: string, from: string) => {
+      const start = src.indexOf(from);
+      expect(start).toBeGreaterThan(-1);
+      const ends = [src.indexOf(';', start), src.indexOf('\n\n', start)].filter(i => i > -1);
+      const body = src.slice(start + from.length, Math.min(...ends));
+      return (body.match(/-?\d+(\.\d+)?/g) ?? []).map(Number);
+    };
+    const sunset = [255, 80, 50, 255, 160, 40, 255, 120, 60, 255, 200, 50, 255, 100, 80, 255, 180, 60, 255, 60, 60, 255, 140, 50, 255, 90, 70];
+    const ocean = [100, 80, 220, 60, 120, 255, 80, 100, 200, 50, 140, 220, 120, 80, 255, 70, 130, 255, 140, 100, 240, 90, 110, 230, 130, 70, 255];
+    expect(numbers(ps, 'Sunset = {')).toEqual(sunset);
+    expect(numbers(ps, 'Ocean = {')).toEqual(ocean);
+    expect(numbers(swift, 'let sunset: [[Double]] = ').slice(0, 27)).toEqual(sunset);
+    expect(numbers(swift, 'let ocean: [[Double]] = ').slice(0, 27)).toEqual(ocean);
+    expect(numbers(py, 'BEAM_SUNSET = ').slice(0, 27)).toEqual(sunset);
+    expect(numbers(py, 'BEAM_OCEAN = ').slice(0, 27)).toEqual(ocean);
+    // The blobs (ring and inner glow; bloom), in the same order everywhere.
+    const edge = [0, 1, 0, 80, 19, 27, 0, 6, 2, 1, 74, 11, 73, -1, 7, 3, 1, 15, 44, 100, 33, 8, 1, 3, 19, 38, 101, 72,
+      4, 2, 3, 84, 13, 67, 100, 1, 3, 2, 60, 21, 24, 101, 2, 1, 2, 17, 40, 0, 60, 3, 2, 0, 13, 32, -1, 28];
+    const bloom = [0, 110, 30, 27, 3, 6, 100, 20, 73, 1, 7, 26, 62, 100, 33, 8, 30, 56, 101, 72, 4, 120, 22, 67, 99, 1, 88, 32, 24, 99, 2, 28, 58, 0, 60];
+    expect(numbers(ps, 'static readonly double[] Edge = {')).toEqual(edge);
+    expect(numbers(ps, 'static readonly double[] Bloom = {')).toEqual(bloom);
+    expect(numbers(swift, 'let edgeBlobs: [[Double]] = ').slice(0, edge.length)).toEqual(edge);
+    expect(numbers(swift, 'let bloomBlobs: [[Double]] = ').slice(0, bloom.length)).toEqual(bloom);
+    expect(numbers(py, 'BEAM_EDGE = ').slice(0, edge.length)).toEqual(edge);
+    expect(numbers(py, 'BEAM_BLOOM = ').slice(0, bloom.length)).toEqual(bloom);
+    // Duration and radius; the paused form uses the blues.
+    expect(ps).toContain('public const double Duration = 1.96, Radius = 30,');
+    expect(swift).toContain('let duration = 1.96,');
+    expect(swift).toContain('let palette = paused ? ocean : sunset');
+    expect(py).toContain('BEAM_DURATION = 1.96');
+    expect(py).toContain('palette = BEAM_OCEAN if paused else BEAM_SUNSET');
+    expect(py).toContain("run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#ff7a45', '--paused' in argv)");
+  });
+
+  it('the Windows glow lies outside the window (inward only where there is no outside), at a capped rate', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    // The strips start a margin out from the frame; the glow is not drawn inside it.
+    expect(ps).toContain('new int[] { -m, -m, m + c, m + c,');
+    expect(ps).toContain('} else if (x < 0 || y < 0 || x > w || y > h) {');
+    // The desktop, and a maximized or full-screen window, get the inward form.
+    expect(ps).toContain('bool inward = desk;');
+    expect(ps).toMatch(/if \(on && GetMonitorInfo\(screen, ref info\) && \(IsZoomed\(t\)/);
+    // 12.5 frames a second while it breathes; the paused and still forms are drawn once.
+    expect(ps).toContain('frame.Interval = 80;');
+    expect(ps).toContain('frame.Tick += (s, e) => { if (shown && turning) Paint(false); };');
+  });
+
+  it('the macOS beam keeps its GPU work to the edge band (#414): small gradient layers, no masks, filters or shadows', () => {
+    const swift = read('scripts', 'mac', 'overlay.swift');
+    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    expect(outline).not.toMatch(/\.mask\s*=|CIFilter|\.filters\s*=|backgroundFilters|compositingFilter|shadowOpacity|shadowRadius|shadowPath/);
+    expect(outline).toContain('layer.type = .radial');
+    expect(outline).toContain('layer.contentsScale = scale');
+    expect(outline).toContain('a.autoreverses = true');
+    expect(outline).toContain('a.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12)');
+    // The window is the target and the glow's margin, or the screen itself (drawn inward).
+    expect(outline).toContain('let frame = target.screen ? target.frame : target.frame.insetBy(dx: -margin, dy: -margin)');
+  });
+
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
