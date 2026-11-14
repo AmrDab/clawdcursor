@@ -115,6 +115,37 @@ export function cdpBrowserNextStep(mode: 'dedicated' | 'attached'): string {
       : '');
 }
 
+/** The parts of the CDP driver the hints read. Optional: test contexts give a partial driver, or none. */
+type CdpHintSource = {
+  isConnected?: () => Promise<boolean>;
+  getBrowserPid?: () => Promise<number | null>;
+  getConnectionMode?: () => string;
+} | null | undefined;
+
+/** Pid of the browser clawdcursor is attached to over CDP, or null. Never throws. */
+export async function cdpBrowserPid(cdp: CdpHintSource): Promise<number | null> {
+  try {
+    if (!(await cdp?.isConnected?.())) return null;
+    const pid = await cdp?.getBrowserPid?.();
+    return typeof pid === 'number' ? pid : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The browser-tools hint (cdpBrowserNextStep) when `pid` is the browser clawdcursor is attached to over CDP, else ''.
+ * `pid` may be a lookup (the active window's), made only when a CDP browser is attached.
+ */
+export async function cdpStepFor(cdp: CdpHintSource, pid: number | undefined | (() => Promise<number | undefined>)): Promise<string> {
+  const cdpPid = await cdpBrowserPid(cdp);
+  if (cdpPid === null) return '';
+  if ((typeof pid === 'function' ? await pid() : pid) !== cdpPid) return '';
+  let mode: string | undefined;
+  try { mode = cdp?.getConnectionMode?.(); } catch { /* unknown */ }
+  return cdpBrowserNextStep(mode === 'dedicated' ? 'dedicated' : 'attached');
+}
+
 /** A window with at least this many named elements is not "thin": a miss there is a wrong name, not a blind app. */
 const STRUCTURED_MIN = 5;
 

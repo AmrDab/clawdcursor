@@ -15,7 +15,7 @@ import { untrusted } from '../core/miss-text';
 import { copyAllText, pageTextPart, PAGE_TEXT_CAP } from '../platform/copy-all-text';
 import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
 import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserNextStep, isSparseTree, nameMissHint, shownValue, shownHelp } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, isSparseTree, nameMissHint, shownValue, shownHelp } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
 
@@ -46,7 +46,7 @@ async function queryCdpDom(
   // Scoped to a process (#235): answer from the CDP page when that process IS
   // the CDP browser — whatever window is in front — and never for another one.
   if (typeof query.processId === 'number') {
-    const cdpPid = await cdpBrowserPid(ctx);
+    const cdpPid = await cdpBrowserPid(ctx.cdp);
     if (cdpPid !== null && query.processId !== cdpPid) return null;
     if (cdpPid === null && !(await activeWindowIsCdpPage(ctx, query.processId))) return null;
   } else if (!(await activeWindowIsCdpPage(ctx))) {
@@ -108,32 +108,9 @@ async function queryCdpDom(
   }
 }
 
-/** Pid of the browser clawdcursor is attached to over CDP, or null. Never throws. */
-async function cdpBrowserPid(ctx: ToolContext): Promise<number | null> {
-  try {
-    if (!(await ctx.cdp?.isConnected?.())) return null;
-    const pid = await ctx.cdp.getBrowserPid?.();
-    return typeof pid === 'number' ? pid : null;
-  } catch {
-    return null;
-  }
-}
-
-/** The browser-tools hint when `pid` is the browser clawdcursor is attached to over CDP, else ''. Useful on a read that is not thin. */
-async function cdpStepFor(ctx: ToolContext, pid: number | undefined): Promise<string> {
-  const cdpPid = await cdpBrowserPid(ctx);
-  if (pid === undefined || cdpPid === null || cdpPid !== pid) return '';
-  return nextStepFor(ctx, pid);
-}
-
 /** The blind hint for a thin read of `pid`: the browser tools when it is the CDP browser. */
 async function nextStepFor(ctx: ToolContext, pid: number | undefined): Promise<string> {
-  if (pid === undefined) return SPARSE_NEXT_STEP;
-  const cdpPid = await cdpBrowserPid(ctx);
-  if (cdpPid === null || cdpPid !== pid) return SPARSE_NEXT_STEP;
-  let mode: string | undefined;
-  try { mode = ctx.cdp.getConnectionMode?.(); } catch { /* unknown */ }
-  return cdpBrowserNextStep(mode === 'dedicated' ? 'dedicated' : 'attached');
+  return (await cdpStepFor(ctx.cdp, pid)) || SPARSE_NEXT_STEP;
 }
 
 /**
@@ -255,7 +232,7 @@ export function getA11yTools(): ToolDefinition[] {
           const partial = (ctx.platform.lastTreeTruncated
             ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '')
             + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
-          const nextStep = isSparseTree(tree, isBrowser) ? await nextStepFor(ctx, active) : isBrowser ? await cdpStepFor(ctx, active) : '';
+          const nextStep = isSparseTree(tree, isBrowser) ? await nextStepFor(ctx, active) : isBrowser ? await cdpStepFor(ctx.cdp, active) : '';
           baseText = [
             'WINDOWS',
             windows.length
@@ -626,7 +603,7 @@ export function getA11yTools(): ToolDefinition[] {
           // A browser's window always has its own chrome (tabs, Back, Reload) while the PAGE may expose nothing: there the
           // browser advice (read the page over CDP / turn on renderer accessibility) still applies, after the names.
           const searchedProc = scopes.find(s => s.processId === searchedPid)?.processName;
-          const browser = isBrowserProcess(searchedProc) || (searchedPid !== undefined && (await cdpBrowserPid(ctx)) === searchedPid);
+          const browser = isBrowserProcess(searchedProc) || (searchedPid !== undefined && (await cdpBrowserPid(ctx.cdp)) === searchedPid);
           if (miss) return { text: `(no elements found)${where}\n${miss}${browser ? `\n${await nextStepFor(ctx, searchedPid)}` : ''}` };
         }
         return { text: `(no elements found)${where}\n${await nextStepFor(ctx, searchedPid)}` };

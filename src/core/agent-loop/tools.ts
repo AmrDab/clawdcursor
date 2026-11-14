@@ -29,7 +29,7 @@ import type { InvokeAction, UiElement } from '../../platform/types';
 import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { selectOption, selectedResult } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL, cdpStepFor } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
@@ -185,8 +185,10 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // Never a dead end: a thin tree (or a browser, whose page content UIA
         // often omits) says what to do next, in the caller's own tool names.
         const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
+        // The browser clawdcursor is attached to over CDP (#235): its page is read and acted on through the browser tools.
         if (tree.length === 0) {
-          return { success: true, text: `(empty a11y tree — app may be custom-canvas)\n${nextStep}` };
+          const cdpStep = await cdpStepFor(ctx.cdp, async () => pid ?? (await ctx.platform.getActiveWindow().catch(() => null))?.processId);
+          return { success: true, text: `(empty a11y tree — app may be custom-canvas)\n${cdpStep || nextStep}` };
         }
         const active = pid === undefined ? await ctx.platform.getActiveWindow().catch(() => null) : null;
         const activeIsBrowser = !!active && isBrowserProcess(active.processName);
@@ -220,7 +222,9 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         // A browser page that exposes nothing may be asleep rather than drawn: the sparse advice covers it, not "canvas".
         // A cut walk returns panes late in tree order without their children: empty there is not drawn.
         const opaque = partial || (activeIsBrowser && sparse) ? null : opaqueArea(tree);
-        const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (sparse ? `\n${nextStep}` : '') +
+        const cdpStep = sparse || browser ? await cdpStepFor(ctx.cdp, pid ?? active?.processId) : '';
+        const step = sparse ? cdpStep || nextStep : cdpStep;
+        const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (step ? `\n${step}` : '') +
           (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         const folded = fold ? `\n+ an embedded document or web view of ${content.length} elements — read_screen with offset:${own.length} lists them; copy_all_text reads its text` : '';

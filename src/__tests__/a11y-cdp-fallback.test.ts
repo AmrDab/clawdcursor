@@ -33,6 +33,7 @@ vi.mock('sharp', () => ({
 }));
 
 import { getA11yTools } from '../tools/a11y';
+import { getTool } from '../tools/registry';
 import type { ToolContext } from '../tools/types';
 
 const findElement = getA11yTools().find(t => t.name === 'find_element')!;
@@ -342,5 +343,43 @@ describe('blind hint for the CDP browser (#235)', () => {
     const { text } = await readScreen.handler({}, ctx);
     expect(text).toMatch(/→ .*browser \{"action":"page_context"\}/);
     expect(text).not.toMatch(/Restarting it/);
+  });
+});
+
+// The live read_screen (the projected one agents call) had only the generic hint: #235's went into a copy that never ran.
+describe('read_screen (the projected tool) — blind hint for the CDP browser (#235)', () => {
+  const readTree = () => getTool('read_screen')!;
+  const bar = [{ name: 'Address and search bar', controlType: 'Edit', bounds: { x: 0, y: 0, width: 800, height: 30 } }];
+  const page = Array.from({ length: 8 }, (_, i) => ({ name: `Link ${i}`, controlType: 'Hyperlink', bounds: { x: 0, y: 40 + i * 30, width: 200, height: 20 } }));
+
+  it('a thin read of the CDP browser leads with the browser tools', async () => {
+    const ctx = makeCtx({
+      processName: 'Google Chrome', platformUiTree: bar, cdpConnected: true, cdpBrowserPid: 1234, cdpMode: 'dedicated',
+    });
+    const { text } = await readTree().handler({}, ctx);
+    expect(text).toMatch(/→ .*browser \{"action":"page_context"\}/);
+    expect(text).toMatch(/own browser/);
+    expect(text).not.toMatch(/Little or no accessibility structure/);
+  });
+
+  it('an empty read of the CDP browser, scoped by processId, too', async () => {
+    const ctx = makeCtx({ processName: 'Terminal', platformUiTree: [], cdpConnected: true, cdpBrowserPid: 4321, cdpMode: 'attached' });
+    const { text } = await readTree().handler({ processId: 4321 }, ctx);
+    expect(text).toMatch(/^\(empty a11y tree[^\n]*\n→ .*browser \{"action":"page_context"\}/);
+    expect(text).not.toMatch(/own browser/);
+  });
+
+  it('a full read of the CDP browser still names the browser tools', async () => {
+    const ctx = makeCtx({ processName: 'msedge', platformUiTree: [...bar, ...page], cdpConnected: true, cdpBrowserPid: 1234 });
+    const { text } = await readTree().handler({}, ctx);
+    expect(text).toMatch(/→ .*browser \{"action":"page_context"\}/);
+  });
+
+  it('another app, or a browser not attached over CDP, keeps the generic advice', async () => {
+    const other = await readTree().handler({}, makeCtx({ processName: 'Slack', platformUiTree: [{ name: '', controlType: 'Pane', bounds: { x: 0, y: 0, width: 800, height: 600 } }], cdpConnected: true, cdpBrowserPid: 4321 }));
+    expect(other.text).not.toContain('page_context');
+    expect(other.text).toMatch(/Little or no accessibility structure/);
+    const unattached = await readTree().handler({}, makeCtx({ processName: 'msedge', platformUiTree: [...bar, ...page], cdpConnected: false }));
+    expect(unattached.text).not.toContain('page_context');
   });
 });

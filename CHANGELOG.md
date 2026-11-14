@@ -38,6 +38,9 @@ All notable changes to Clawd Cursor will be documented in this file.
   says; any other lock (stale, reused pid, old bare-number format) is deleted and nothing is signalled. A daemon that
   does not answer `/stop` is no longer killed by whoever holds its port unless its lock proves it is clawdcursor. A
   daemon stopped from the dashboard or `POST /stop` now removes its lock file, like Ctrl+C does.
+- **`accessibility read_tree` on the browser clawdcursor drives over CDP points at the browser tools** (#235). The
+  hint after a thin read (and after a full read of that browser) now leads with `browser page_context` / `read_text` /
+  `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
 
 ### Changed
 - README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and
