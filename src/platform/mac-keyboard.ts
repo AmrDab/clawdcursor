@@ -1,7 +1,7 @@
 /**
  * What every macOS keystroke path shares: who owns the keyboard right now, and how a keystroke program reaches osascript.
  *
- * There are two macOS keyboards in clawdcursor — `MacOSAdapter` (the platform adapter the built-in agent and a few tools use)
+ * There are two macOS keyboards in clawdcursor — `MacOSAdapter` (the platform adapter a few tools use)
  * and `NativeDesktop` (`ctx.desktop`, which the MCP tools `type_text` / `key_press` / `smart_type` use). The "does a system
  * dialog own the keyboard?" guard (B11) was written into the first only, so the route Claude Code actually takes never asked.
  * Both now ask this one class.

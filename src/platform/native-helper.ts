@@ -73,7 +73,6 @@ export class NativeHelper {
   }
 }
 
-// Singleton instance
 let instance: NativeHelper | null = null;
 
 export function getNativeHelper(): NativeHelper {
@@ -118,7 +117,6 @@ async function probeAccessibility(): Promise<boolean> {
 // doctor and status answer for the identity a capture runs as — never the
 // host app's own entry, which captures do not use.
 export async function checkPermissionsQuick(): Promise<PermissionStatus> {
-  // On non-macOS platforms, permissions aren't needed in the same way
   if (!IS_MACOS) {
     return {
       accessibility: true,  // Not applicable on Windows/Linux
@@ -177,7 +175,6 @@ export async function checkPermissionsQuick(): Promise<PermissionStatus> {
 }
 
 // Request permissions with system popups (triggers macOS permission dialogs)
-// Spawns permission-check with --prompt (Accessibility) and --request-screen-recording flags
 export async function requestPermissions(): Promise<PermissionStatus> {
   if (!IS_MACOS) {
     return {
@@ -406,8 +403,6 @@ export async function assertScreenRecordingGranted(): Promise<void> {
  * Capture the screen using the standalone screenshot-helper binary.
  * This avoids the ReplayKit CPU spin bug (19% idle CPU after capture in-process)
  * by running capture in an isolated subprocess that exits immediately.
- *
- * Returns { path, width, height } on success.
  */
 export async function captureScreenViaHelper(outputPath?: string): Promise<{ path: string; width: number; height: number }> {
   if (!IS_MACOS) {
@@ -459,9 +454,6 @@ export async function captureScreenViaHelper(outputPath?: string): Promise<{ pat
   });
 }
 
-/**
- * Check if we're running on macOS
- */
 export function isMacOS(): boolean {
   return IS_MACOS;
 }

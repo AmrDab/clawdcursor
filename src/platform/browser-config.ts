@@ -24,7 +24,6 @@ export const AGENT_CDP_PORT = Number(process.env.CLAWD_AGENT_CDP_PORT ?? '') || 
 
 const DEFAULT_BROWSER_PROCESSES = ['msedge', 'chrome', 'chromium', 'firefox', 'brave', 'opera', 'arc', 'safari'];
 
-/** Get list of browser process names to match against */
 export function getBrowserProcessNames(): string[] {
   return DEFAULT_BROWSER_PROCESSES;
 }
@@ -44,7 +43,6 @@ export function isBrowserProcess(name: string | undefined | null): boolean {
 
 const PLATFORM = process.platform;
 
-/** Get default Chrome executable paths for the current platform */
 export function getChromePaths(): string[] {
   if (PLATFORM === 'darwin') return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
   if (PLATFORM === 'linux') return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
@@ -54,7 +52,6 @@ export function getChromePaths(): string[] {
   ];
 }
 
-/** Get default Edge executable paths for the current platform */
 export function getEdgePaths(): string[] {
   if (PLATFORM === 'darwin') return ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'];
   if (PLATFORM === 'linux') return ['/usr/bin/microsoft-edge'];

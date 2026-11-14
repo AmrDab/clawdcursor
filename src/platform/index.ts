@@ -10,7 +10,6 @@ import { guardInputMethods } from './pointer-guard';
 
 let cached: PlatformAdapter | null = null;
 
-/** Get (and lazily construct) the PlatformAdapter for the current OS. */
 export async function getPlatform(): Promise<PlatformAdapter> {
   if (cached) return cached;
 

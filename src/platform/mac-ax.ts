@@ -521,8 +521,8 @@ export interface MacAx {
    * a role and/or an exact AXIdentifier, best match first. A timeout throws.
    */
   find(query: ElementQuery): Promise<UiElement[]>;
-  /** Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws. */
   /**
+   * Act on the best match. A miss is `{success:false, error}`; a timeout / locked screen throws.
    * `allowKey`: the key an expand / collapse may finish with. The helper never presses a key on its own: it answers
    * `data.needsKey`, the caller runs the input guard, then calls again with the key allowed (macos.ts invokeElement).
    */

@@ -94,7 +94,6 @@ export function sameElement(focused: Placed, target: Placed): boolean {
 }
 
 type Box = { x: number; y: number; width: number; height: number };
-/** Is box `f` inside box `b`? */
 export const inside = (f: Box, b: Box): boolean =>
   f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
 

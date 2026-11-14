@@ -177,12 +177,10 @@ export async function selectOption(
     }
     if (!option.controlType) break;
   }
-  // Still the old value after the last attempt: give the control time to show the new one before calling this a failure.
   if (picked && after !== null && !showsValue(after, value) && settleMs > 0) after = (await readUntil(readValue, value, settleMs)) ?? after;
   if (after !== null) {
     let ok = showsValue(after, value);
     if (!ok && opened) await platform.invokeElement({ name, controlType, processId, action: 'collapse' }).catch(() => null);
-    // The pattern route left another value: the keyboard, once, and the same read-back.
     const keyed = ok ? 'skipped' : await pickByKeys(platform, { name, controlType, processId }, value);
     if (keyed === 'typed') {
       after = (await readUntil(readValue, value, Math.max(settleMs, 450))) ?? after;

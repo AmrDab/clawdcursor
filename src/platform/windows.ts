@@ -6,7 +6,7 @@
  *   - Screenshot: nut-js screen.grab() — no special helper binary
  *   - Screen size + DPI: System.Windows.Forms.Screen via PowerShell for logical px,
  *                        compared with nut-js physical px to derive dpiRatio
- *   - Windows + A11y: persistent PSRunner (../../ps-runner.ts) driving UI Automation
+ *   - Windows + A11y: persistent PSRunner (./ps-runner.ts) driving UI Automation
  *   - Clipboard: Get-Clipboard / Set-Clipboard via PowerShell
  *   - App launch: Start-Process via PowerShell
  *
@@ -62,7 +62,6 @@ import { normalizeControlType } from './uia-control-type';
 
 const execFileAsync = promisify(execFile);
 
-// Tunables
 const PS_TIMEOUT_MS = 8_000;
 const CLIPBOARD_TIMEOUT_MS = 3_000;
 
@@ -78,15 +77,15 @@ export class WindowsAdapter implements PlatformAdapter {
   lastFindError: PlatformAdapter['lastFindError'] = null;
   lastTreeTruncated = false;
 
-  // Cached physical/logical ratio, populated by getScreenSize(). nut-js mouse
-  // input and the (DPI-unaware) WindowFromPoint bridge both live in LOGICAL
-  // space on Windows, but callers hand us PHYSICAL coords (a11y/OCR/screenshot).
-  // Every mouse entry point divides by this before touching nut-js. See #170.
+  // Cached physical/logical ratio, populated by getScreenSize(). Callers hand
+  // us PHYSICAL coords (a11y/OCR/screenshot); the one-shot DPI-unaware
+  // PowerShell that setWindowBounds runs takes LOGICAL px. See #170.
   private dpiRatio = 1;
   // physical / nut-js mouse px, measured IN THIS PROCESS. Equals dpiRatio in a
   // DPI-unaware node; 1 in a DPI-aware host (Claude Desktop's Electron utility
-  // process), where nut-js already drives physical px. The PowerShell bridge is
-  // always DPI-unaware, so WindowFromPoint keeps using dpiRatio.
+  // process), where nut-js already drives physical px. Only the nut-js pointer
+  // fallback uses it: the bridge runs per-monitor-v2 (ps-bridge.ps1 Main) and
+  // takes physical px.
   private mouseRatio = 1;
 
   async init(): Promise<void> {
@@ -201,8 +200,8 @@ export class WindowsAdapter implements PlatformAdapter {
     const fromBridge = await this.bridgeDisplays();
     if (fromBridge.length) return fromBridge;
     // System.Windows.Forms.Screen.AllScreens enumerates every connected
-    // display with bounds + primary flag. We call it via the PS UIA path
-    // we already have warmed up.
+    // display with bounds + primary flag, in a separate DPI-unaware
+    // PowerShell: the bounds are LOGICAL px.
     try {
       const { stdout } = await execFileAsync(
         powershellExe(),
@@ -360,7 +359,7 @@ export class WindowsAdapter implements PlatformAdapter {
         };
       }
 
-      // Older bridge / no bounds: find the same window in the full list.
+      // No bounds (UIA could not read the window): find the same window in the full list.
       const all = await this.listWindows();
       const match = all.find(w => w.processId === fg.processId);
       if (match) return { ...match, ...extra };
@@ -390,8 +389,6 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   async focusWindow(query: { processName?: string; processId?: number; title?: string; handle?: number }): Promise<boolean> {
-    // The PSRunner focus-window command takes title and/or processId. Look up by
-    // processName first so callers can pass just that.
     this.focusFailure = null;
     // An exact window handle names the window by itself: nothing else is passed on, so nothing else can match.
     const byHandle = query.handle !== undefined;
@@ -457,8 +454,7 @@ export class WindowsAdapter implements PlatformAdapter {
     state: WindowState,
     query?: { processName?: string; processId?: number; title?: string; handle?: number },
   ): Promise<boolean> {
-    // Resolve the target: either the caller-supplied window or the
-    // foreground one. We drive the transition through a single PowerShell
+    // We drive the transition through a single PowerShell
     // call that wraps Win32 ShowWindow / PostMessage so we don't depend
     // on focus timing of a key-press chord.
     let pid: number | undefined;
@@ -595,7 +591,7 @@ export class WindowsAdapter implements PlatformAdapter {
     bounds: { x?: number; y?: number; width?: number; height?: number },
     query?: { processName?: string; processId?: number; title?: string; handle?: number },
   ): Promise<boolean> {
-    // SetWindowPos takes hwnd + x/y/w/h. Use SWP_NOZORDER to keep z-order.
+    // Use SWP_NOZORDER to keep z-order.
     let hwnd: number | undefined;
     if (query?.handle !== undefined) {
       if (!Number.isInteger(query.handle) || query.handle <= 0) return false;
@@ -620,7 +616,7 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       // Callers pass SCREEN px — physical, the same units listWindows and the
       // a11y bounds report. SetWindowPos runs in the DPI-unaware PowerShell,
-      // which takes logical px, so divide by the bridge ratio. (Passing
+      // which takes logical px, so divide by dpiRatio. (Passing
       // physical straight through made 1700x1060 fill a 225% screen.)
       await this.getScreenSize();
       const r = this.dpiRatio > 1 ? this.dpiRatio : 1;
@@ -629,7 +625,6 @@ export class WindowsAdapter implements PlatformAdapter {
       const y = toLogical(bounds.y);
       const w = toLogical(bounds.width);
       const h = toLogical(bounds.height);
-      // When a dim is -1, we read the current rect and preserve it.
       const ps =
         // Single-quoted -MemberDefinition (not a here-string) — a here-string header
         // is illegal in a single-line `-Command` and fails to parse (see #153).
@@ -661,10 +656,6 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
-  /**
-   * Internal helper — resolve a focusWindow-style query to a single
-   * WindowInfo. Same precedence the public `focusWindow` uses.
-   */
   private async resolveWindow(query: { processName?: string; processId?: number; title?: string }): Promise<WindowInfo | null> {
     const windows = await this.listWindows();
     return windows.find(w => {
@@ -682,8 +673,7 @@ export class WindowsAdapter implements PlatformAdapter {
     // as findElements does below. Without this, get-screen-context is called
     // with focusedPid=0 and the bridge returns NO tree (Cmd-GetScreenContext
     // only walks a window when focusedPid>0), so read_screen over MCP came back
-    // "(empty a11y tree)" for EVERY app — a regression once the pid-resolving
-    // System-A read_screen was projected away in favor of this path.
+    // "(empty a11y tree)" for EVERY app.
     let pid = processId;
     if (pid === undefined) {
       const fg = await this.getActiveWindow().catch(() => null);
@@ -820,7 +810,7 @@ export class WindowsAdapter implements PlatformAdapter {
     // The underlying PS bridge requires a processId for invoke-element.
     // Resolution order when caller omits processId:
     //   1. Foreground window (the agent's usual implicit scope).
-    //   2. Fall back to find-element scan if the foreground window has no match.
+    //   2. No foreground window: the pid of the first find-element hit.
     // Without this, find-element ran from the desktop root and could miss
     // deeply-nested targets due to the PSBridge 20-result cap.
     // Same controlType contract as findElements: bare name for the bridge,
@@ -958,28 +948,11 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   // ─── INPUT (mouse) ────────────────────────────────────────────────
-  // All coords are LOGICAL pixels — nut-js mouse API lives in that space on Win.
+  // All coords are PHYSICAL virtual-desktop pixels (a11y/OCR/screenshot space).
 
   /** Cursor cache for mouseMoveRelative — last known target. */
   private lastCursor: { x: number; y: number } | null = null;
 
-  /**
-   * Ensure the window at (x, y) is the foreground window before clicking.
-   *
-   * Problem: On Windows, nut-js sends mouse input via SendInput which
-   * delivers to whatever window is topmost at those coordinates — not
-   * necessarily the foreground window. When a Save As dialog sits over a
-   * File Explorer window (or any background window), a click intended for
-   * the dialog's filename field can land on the Explorer window if the
-   * dialog's owning process lost foreground between the screenshot and the
-   * click (race) or if the click coords are slightly outside the dialog rect
-   * due to DPI-related rounding.
-   *
-   * Fix: use Win32 WindowFromPoint (via the warm psRunner bridge) to
-   * identify the window at the target coords. If it is not the current
-   * foreground window, call SetForegroundWindow to bring it forward before
-   * the click lands. Non-fatal — if the PS call fails we proceed anyway.
-   */
   /**
    * Put the pointer at a PHYSICAL virtual-desktop point — any monitor, any
    * position (negative origins included), any per-monitor scaling. The bridge
@@ -998,9 +971,26 @@ export class WindowsAdapter implements PlatformAdapter {
     setWorkingPoint(px, py);
   }
 
+  /**
+   * Ensure the window at (x, y) is the foreground window before clicking.
+   *
+   * Problem: On Windows, nut-js sends mouse input via SendInput which
+   * delivers to whatever window is topmost at those coordinates — not
+   * necessarily the foreground window. When a Save As dialog sits over a
+   * File Explorer window (or any background window), a click intended for
+   * the dialog's filename field can land on the Explorer window if the
+   * dialog's owning process lost foreground between the screenshot and the
+   * click (race) or if the click coords are slightly outside the dialog rect
+   * due to DPI-related rounding.
+   *
+   * Fix: use Win32 WindowFromPoint (via the warm psRunner bridge) to
+   * identify the window at the target coords. If it is not the current
+   * foreground window, call SetForegroundWindow to bring it forward before
+   * the click lands. Non-fatal — if the PS call fails we proceed anyway.
+   */
   private async ensureForegroundAtPoint(x: number, y: number): Promise<FocusActivation | undefined> {
     try {
-      // physical: the point is a physical virtual-desktop pixel (any monitor).
+      // The point is a physical virtual-desktop pixel (any monitor); the bridge does not read `physical`.
       const r = await psRunner.run({ cmd: 'activate-at-point', x: Math.round(x), y: Math.round(y), physical: true }) as {
         activated?: boolean; reason?: string; title?: string; processName?: string; action?: string;
       };
@@ -1022,12 +1012,11 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   /**
-   * Convert PHYSICAL pixel coords (a11y/OCR/screenshot space) to the LOGICAL
-   * coords nut-js and WindowFromPoint expect on Windows. This process is
-   * DPI-unaware, so the OS virtualises both the mouse driver and the bridge's
-   * WindowFromPoint to logical (96-DPI) space; feeding physical coords lands
-   * clicks dpiRatio× off AND makes activate-at-point resolve the wrong window
-   * (foreground theft). No-op at ratio ≤ 1 (100% scale / detection fallback).
+   * Convert PHYSICAL pixel coords (a11y/OCR/screenshot space) to the coords
+   * nut-js's mouse driver uses in THIS process, for the nut-js fallback when
+   * the bridge is unavailable. In a DPI-unaware node the OS virtualises the
+   * mouse driver to logical (96-DPI) space, so physical coords landed clicks
+   * ratio× off. No-op at ratio ≤ 1 (100% scale / DPI-aware host / detection fallback).
    */
   private physicalToLogical(x: number, y: number, ratio = this.mouseRatio): { x: number; y: number } {
     if (ratio <= 1) return { x, y };
@@ -1036,16 +1025,14 @@ export class WindowsAdapter implements PlatformAdapter {
 
   async mouseClick(x: number, y: number, opts?: { button?: MouseButton; count?: number }): Promise<FocusActivation | void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
-    // Convert ONCE per space from the same physical point — the foreground
-    // check (DPI-unaware bridge) and the cursor move (nut-js) must agree or
-    // activate-at-point promotes a different window than the click lands on.
     // Bring the window at the target to the foreground before sending any
     // button events. Without this, a click intended for a Save As dialog
     // can land on a background Explorer window when the dialog lost focus
     // between the screenshot and the click (z-order / activation race).
     // The activation verdict flows back to the caller so a FAILED raise
     // (foreground-lock) is visible instead of a silent wrong-window click.
-    // Both the foreground check and the move use the same PHYSICAL point.
+    // Both the foreground check and the move use the same PHYSICAL point: if
+    // they disagree, activate-at-point promotes a different window than the click lands on.
     const activation = await this.ensureForegroundAtPoint(x, y);
     await this.placeCursor(x, y);
     await this.delay(40);
@@ -1076,8 +1063,6 @@ export class WindowsAdapter implements PlatformAdapter {
     // image deltas by the mouse factor), but getPosition()/setPosition() live
     // in the driver's space — divide by the same ratio as absolute moves, or a
     // 100-px move overshoots to 225 px on a 225% display.
-    // Physical path first (any monitor): read the cursor in physical px, add
-    // the physical deltas, place it.
     try {
       const cur = await psRunner.run({ cmd: 'get-cursor' }) as { success?: boolean; x: number; y: number };
       if (cur?.success) { await this.placeCursor(cur.x + rawDx, cur.y + rawDy); return; }
@@ -1129,7 +1114,6 @@ export class WindowsAdapter implements PlatformAdapter {
     if (direction === 'down') await mouse.scrollDown(amount * wheelUnitsPerNotch());
     else if (direction === 'up') await mouse.scrollUp(amount * wheelUnitsPerNotch());
     else {
-      // Horizontal: hold Shift, scroll vertically.
       await keyboard.pressKey(Key.LeftShift);
       try {
         if (direction === 'left') await mouse.scrollUp(amount * wheelUnitsPerNotch());
@@ -1174,7 +1158,6 @@ export class WindowsAdapter implements PlatformAdapter {
     // like '*', '+', '.' that have no direct enum entry.
     const mapped: Array<Key | 'TYPE_CHAR'> = normalized.map(p => this.mapKey(p));
 
-    // Single-key: either type it as a character or press+release the mapped key.
     if (mapped.length === 1) {
       if (mapped[0] === 'TYPE_CHAR') {
         await keyboard.type(normalized[0]);
@@ -1186,7 +1169,6 @@ export class WindowsAdapter implements PlatformAdapter {
       return;
     }
 
-    // Combo: press each modifier (or type the printable char), then release in reverse.
     for (let i = 0; i < mapped.length; i++) {
       const k = mapped[i];
       if (k === 'TYPE_CHAR') {
@@ -1297,7 +1279,7 @@ export class WindowsAdapter implements PlatformAdapter {
     const snapshot = await within(this.launchWindows(), LAUNCH_SNAPSHOT_MS);
     const windowsBefore: readonly WindowInfo[] = snapshot === TIMED_OUT || snapshot === null ? [] : snapshot;
 
-    // v0.8.3 — idempotency: if the app is already running AND caller didn't
+    // Idempotency: if the app is already running AND caller didn't
     // ask for a fresh instance, FOCUS the existing window instead of spawning
     // another. This closes the "Outlook keeps opening" bug: a retry loop that
     // launches Outlook every iteration used to spawn a new instance each time
@@ -1372,8 +1354,7 @@ export class WindowsAdapter implements PlatformAdapter {
         // Non-fatal — continue and look for the window anyway.
       }
       // Shorter primary budget so we have headroom for the Start-Menu
-      // fallback if shell:AppsFolder didn't surface a window — matches
-      // the router's strategy ladder.
+      // fallback if shell:AppsFolder didn't surface a window.
       const uwpResult = await this.findLaunchedWindow(app, windowsBefore, 4_000, { since: launchedAt });
       // Its process is up and the window is not (a slow starter): started. Searching the Start menu would launch it twice.
       if (uwpResult.title || uwpResult.pid) return this.foregroundLaunched(uwpResult);
@@ -1421,10 +1402,7 @@ export class WindowsAdapter implements PlatformAdapter {
     if (opts?.noStartMenuFallback || opts?.viaLauncher) return direct; // {} — caller verifies (open_file)
 
     // Route 3: Start Menu search fallback — universal for any app indexed by
-    // Windows. Press the Win key, type the app name, press Enter. This is
-    // the same pattern the router's zero-LLM fast path uses; ported here so
-    // every caller of launchApp (agent's open_app, MCP, REST) gets the
-    // reliability without duplicating router logic.
+    // Windows.
     return this.foregroundLaunched(await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore, app));
   }
 
@@ -1450,8 +1428,6 @@ export class WindowsAdapter implements PlatformAdapter {
    * UWP without a known AppsFolder ID, third-party Win32 binaries with an
    * App Paths entry). The keyboard primitives we use here go through the
    * adapter directly — this is internal platform logic, not an agent action.
-   *
-   * Tuned to the same cadence as the router's startMenuSearch helper.
    */
   private async launchViaStartMenuSearch(
     name: string,
@@ -1635,7 +1611,6 @@ export class WindowsAdapter implements PlatformAdapter {
       ...(raw?.readable === true ? { readable: true } : {}),
       enabled,
       focused: raw?.focused,
-      // Tranche 1A: richer state fields from ps-bridge.
       selected: raw?.selected ?? raw?.isSelected,
       disabled: enabled === false ? true : undefined,
       busy: raw?.busy ?? raw?.isBusy,
@@ -1686,7 +1661,6 @@ export class WindowsAdapter implements PlatformAdapter {
     if (name.length === 1) {
       const ch = name;
       const upper = ch.toUpperCase();
-      // A-Z
       if (upper >= 'A' && upper <= 'Z') {
         const k = (Key as any)[upper];
         if (k !== undefined) return k as Key;

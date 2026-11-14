@@ -5,7 +5,7 @@
  *   - Keystrokes: osascript + System Events (CGEvent from helper is blocked by TCC)
  *   - Mouse: nut-js (nut-js mouse events ARE delivered)
  *   - Screenshot: screenshot-helper Swift binary (avoids ReplayKit CPU spin)
- *   - Accessibility: osascript JXA for tree queries + permission-check binary for TCC
+ *   - Accessibility: mac-ax.ts (the ax-helper Swift binary, osascript JXA as the fallback)
  */
 
 import { beforePointerPress, guardedInput } from './pointer-guard';
@@ -100,14 +100,12 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    // Find the helper binaries shipped with the app bundle.
     this.screenshotHelperPath = this.findHelper('screenshot-helper');
 
     // Build the accessibility helper in the background now, so the first window
     // list / tree read already has it (until then the osascript scripts answer).
     this.ax.prepare();
 
-    // Pre-warm screen size so first capture is fast.
     await this.getScreenSize().catch(() => null);
   }
 
@@ -237,8 +235,6 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult> {
     if (!this.screenshotHelperPath) {
-      // Build a human-readable list of the candidate paths that were searched
-      // so the user knows exactly where the binary was expected.
       const root = getPackageRoot();
       const searched = [
         path.join(root, 'native', 'ClawdCursor.app', 'Contents', 'MacOS', 'screenshot-helper'),
@@ -273,7 +269,7 @@ export class MacOSAdapter implements PlatformAdapter {
       let origin: { x: number; y: number } | undefined;
 
       if (opts?.region) {
-        // A region (capture px: physical, Retina) is cut out of the capture, as on Windows: ignored, the caller got the whole screen.
+        // A region (capture px: physical, Retina) is cut out of the capture, as on Windows.
         const r = clampRegion(opts.region, width, height);
         buffer = await sharp(buffer).extract(r).png().toBuffer();
         width = r.width;
@@ -404,7 +400,7 @@ export class MacOSAdapter implements PlatformAdapter {
       if (query.processName) {
         this.focusFailure = notRunning || !lookupNote ? `No window or running app matches "${query.processName}".` : lookupNote;
       }
-      return false; // nothing to match on
+      return false;
     }
 
     if (processId !== undefined) {
@@ -467,8 +463,6 @@ export class MacOSAdapter implements PlatformAdapter {
     state: WindowState,
     query?: { processName?: string; processId?: number; title?: string },
   ): Promise<boolean> {
-    // Resolve target window. When query is omitted, we target the frontmost
-    // app's frontmost window via System Events.
     const targetClause = this.buildMacWindowTargetClause(await this.resolveWindowQuery(query));
     try {
       let script: string;
@@ -497,7 +491,6 @@ export class MacOSAdapter implements PlatformAdapter {
   ): Promise<boolean> {
     const targetClause = this.buildMacWindowTargetClause(await this.resolveWindowQuery(query));
     try {
-      // Read current bounds for fields not supplied, then assign AXPosition + AXSize.
       const readScript =
         `tell application "System Events" to tell ${targetClause}\n` +
         `  set p to position\n` +
@@ -649,7 +642,7 @@ export class MacOSAdapter implements PlatformAdapter {
     if (!res.success && (action === 'expand' || action === 'collapse') && (key === 'Return' || key === 'Escape')) {
       res = await this.finishWithKey({ ...query, action }, key);
     }
-    // The agent loop reads the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
+    // The projected tools read the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
     // so a refusal's explanation — "matches 2 elements: …" — used to read as "element not found or not actionable".
     return !res.success && res.error ? { ...res, data: { ...res.data, error: res.error } } : res;
   }
@@ -753,7 +746,6 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseMoveRelative(dx: number, dy: number): Promise<void> {
-    // nut-js getPosition() works reliably on macOS.
     try {
       const pos = await mouse.getPosition();
       const nx = Math.round(pos.x + dx);
@@ -897,9 +889,6 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async keyDown(key: PortableKeyCombo): Promise<void> {
-    // macOS key down/up via System Events. Supports named modifiers
-    // (shift/option/control/command) and arbitrary key codes. Non-modifier
-    // single chars fall back to a brief keystroke.
     const lower = key.trim().toLowerCase();
     const mod = modifierOf(lower, 'darwin');
     if (mod) {
@@ -1011,11 +1000,11 @@ export class MacOSAdapter implements PlatformAdapter {
     let windowsBefore: readonly WindowInfo[] = [];
     if (before === undefined) windowsBefore = await this.listWindows().catch(() => [] as WindowInfo[]);
 
-    // v0.8.3 — idempotency. On macOS `open -a AppName` is generally smart
+    // Idempotency. On macOS `open -a AppName` is generally smart
     // about not spawning duplicates (it activates the existing app), but
     // we want a stable cross-OS contract: check first, focus-if-running,
     // launch only when needed. Prevents the "Outlook keeps opening" class
-    // of bug from any retry loop in the pipeline.
+    // of bug when a launch is retried.
     // Without the helper the process is known (lsappinfo) but its windows are not: ask the window list for them.
     let beforeWindows = before?.windows ?? [];
     if (before && !before.windowsKnown) {
@@ -1066,9 +1055,7 @@ export class MacOSAdapter implements PlatformAdapter {
     if (opts?.nameOnly) return {};
 
     // Spotlight fallback — universal launcher for anything macOS can find.
-    // Mirrors the pattern Windows uses with the Start Menu and the same
-    // shape the router's zero-LLM fast path already proves. Keyboard goes
-    // through the platform's internal primitives.
+    // Mirrors the pattern Windows uses with the Start Menu.
     const viaSpotlight = await this.launchViaSpotlight(name, opts?.searchTerm, before, windowsBefore, opts);
     if (viaSpotlight) return viaSpotlight;
 
@@ -1122,11 +1109,6 @@ export class MacOSAdapter implements PlatformAdapter {
     return running ? { pid: running.processId } : null;
   }
 
-  /**
-   * Spotlight-driven launch fallback. Cmd+Space, type, Return, then poll.
-   * The platform calls its own keyboard primitives here to fulfill its
-   * own `launchApp` contract.
-   */
   private async launchViaSpotlight(
     name: string,
     searchTermHint: string | undefined,
@@ -1136,7 +1118,9 @@ export class MacOSAdapter implements PlatformAdapter {
   ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     // Prefer the alias's curated `searchTerm` (or `macOSAppName`); fall back
     // to the stripped bundle name. Keeps the launcher app-agnostic — adding
-    // apps still means a row in `aliases.ts`, not platform code.
+    // apps still means a row in `aliases.ts`, not platform code. Without the
+    // trailing `.app` Spotlight ranks the bundle correctly — typing
+    // `Calculator.app` matches a Finder hit, `Calculator` the app itself.
     const searchText = (searchTermHint && searchTermHint.trim())
       ? searchTermHint.trim()
       : name.replace(/\.app$/i, '');
@@ -1149,9 +1133,6 @@ export class MacOSAdapter implements PlatformAdapter {
       await this.delay(120);
       await this.keyPress('cmd+Space');
       await this.delay(300);
-      // Strip a trailing `.app` so Spotlight ranks the bundle correctly —
-      // typing `Calculator.app` matches a Finder hit, `Calculator` matches
-      // the app itself. Already handled in `searchText` above.
       await this.typeText(searchText);
       await this.delay(500);
       await this.keyPress('Return');

@@ -32,11 +32,9 @@ export function osKeysGuide(platform: NodeJS.Platform = process.platform): strin
 }
 /** Canonical key name map — input (case-insensitive) → normalized name */
 const KEY_ALIASES: Record<string, string> = {
-  // Enter / Return
   'return': 'Return',
   'enter': 'Return',
 
-  // Whitespace & navigation
   'space': 'Space',
   'spacebar': 'Space',
   'tab': 'Tab',
@@ -45,13 +43,11 @@ const KEY_ALIASES: Record<string, string> = {
   'backspace': 'Backspace',
   'delete': 'Delete',
 
-  // Arrow keys
   'up': 'Up',
   'down': 'Down',
   'left': 'Left',
   'right': 'Right',
 
-  // Page navigation
   'home': 'Home',
   'end': 'End',
   'pageup': 'PageUp',
@@ -59,7 +55,6 @@ const KEY_ALIASES: Record<string, string> = {
   'pagedown': 'PageDown',
   'page_down': 'PageDown',
 
-  // Modifiers
   'shift': 'Shift',
   'control': 'Control',
   'ctrl': 'Control',
@@ -73,7 +68,6 @@ const KEY_ALIASES: Record<string, string> = {
   'command_l': 'Super',
   // mod / cmd / command / meta are a different key per OS: normalizeKey asks modifierOf.
 
-  // Function keys
   'f1': 'F1', 'f2': 'F2', 'f3': 'F3', 'f4': 'F4',
   'f5': 'F5', 'f6': 'F6', 'f7': 'F7', 'f8': 'F8',
   'f9': 'F9', 'f10': 'F10', 'f11': 'F11', 'f12': 'F12',
@@ -144,7 +138,7 @@ const MODIFIER_KEY: Record<Modifier, string> = { ctrl: 'Control', shift: 'Shift'
 export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
 
 /**
- * The modifier names macOS accepts — exactly MacOSAdapter.normalizeMod's, so both Mac executors agree. win / windows /
+ * The modifier names macOS accepts — both Mac executors (MacOSAdapter, NativeDesktop) ask modifierOf, so they agree. win / windows /
  * super_l / command_l are not among them: there `super` is Cmd, and win+q pressed Cmd+Q (quitting the front app).
  */
 const MAC_MODIFIER_NAMES = new Set(['mod', 'cmd', 'command', 'super', 'meta', 'shift', 'alt', 'option', 'opt', 'ctrl', 'control']);

@@ -196,7 +196,6 @@ export class OcrEngine {
   async recognizeScreen(): Promise<OcrResult> {
     if (!this.isAvailable()) return { ...EMPTY_RESULT };
 
-    // Return cached if fresh
     const now = Date.now();
     if (this.cachedResult && (now - this.cacheTimestamp) < CACHE_TTL_MS) {
       return this.cachedResult;
@@ -218,7 +217,6 @@ export class OcrEngine {
           console.log(`[OCR] Screenshot captured: ${img.width}x${img.height}px`);
         }
         pngBuffer = await sharpFromGrab(img).png().toBuffer();
-        // Release the raw RGBA buffer immediately after processing
         (img as any).data = null;
       }
       // The result is the screen at this moment: its age counts from here, not from when the OCR finished.
@@ -300,7 +298,6 @@ export class OcrEngine {
         .extract({ left: rx, top: ry, width: rw, height: rh })
         .png()
         .toBuffer(), { x: rx, y: ry });
-      // Release the raw RGBA buffer immediately after processing
       (img as any).data = null;
 
       const tmpPath = path.join(os.tmpdir(), `clawdcursor-ocr-region-${process.pid}-${crypto.randomUUID().slice(0, 8)}.png`);
@@ -310,7 +307,6 @@ export class OcrEngine {
         const result = await this.runOcr(tmpPath);
         result.durationMs = Date.now() - start;
 
-        // Offset coordinates back to full-screen space
         for (const el of result.elements) {
           el.x += rx;
           el.y += ry;
@@ -333,9 +329,6 @@ export class OcrEngine {
     return rawScreenGrab();
   }
 
-  /**
-   * Dispatch to the platform-specific OCR implementation.
-   */
   private async runOcr(imagePath: string): Promise<OcrResult> {
     if (process.platform === 'win32') {
       return this.runWindowsOcr(imagePath);

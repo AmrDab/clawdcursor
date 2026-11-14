@@ -99,7 +99,6 @@ export function imageScale(ctx: {
   return llmScale(pw, ph);
 }
 
-/** Round a coordinate after scaling. */
 export function scaleCoord(v: number, scale: number): number {
   return Math.round(v * scale);
 }

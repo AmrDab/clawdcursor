@@ -22,14 +22,14 @@ export async function beforePointerPress(): Promise<void> {
   try { await hook(); } catch { /* cosmetic */ }
 }
 
+/** A window the agent asked for by process, name or title. */
+export interface WindowQuery { processId?: number; processName?: string; title?: string }
 /**
  * Runs around every synthetic key, type, click, drag and scroll, in both input layers (the platform adapter and
  * NativeDesktop): core/control.ts refuses input while the user has stopped clawdcursor, or when the window in front is not
  * the one the agent was working in (#294). Unlike the hooks above it throws — a refusal sends nothing. Releases (mouseUp,
  * keyUp) are never refused: a button or key the agent holds must always be let go.
  */
-/** A window the agent asked for by process, name or title. */
-export interface WindowQuery { processId?: number; processName?: string; title?: string }
 interface InputGuard {
   /** Throws while the user has stopped clawdcursor. */
   stopCheck(): void;
@@ -237,7 +237,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
  * followed by a bare press cannot reach another window. With no fence nothing is wrapped.
  */
 function fencePointerMethods(target: object): void {
-  if (!fenceActive()) return;   // no fence: the methods stay exactly as they are
+  if (!fenceActive()) return;
   const t = target as Record<string, unknown>;
   for (const m of pointerMethods(target)) {
     const f = t[m];
@@ -315,7 +315,7 @@ function movesFocus(method: string, args: unknown[]): boolean {
       || /^(super|win|meta)(\+|$)/.test(k)
       || /^(cmd|command|mod|super)\+space$/.test(k);
   }
-  return true;  // clicks, drags, a held button, the composite execute* actions
+  return true;  // clicks, drags, a held button
 }
 
 /**

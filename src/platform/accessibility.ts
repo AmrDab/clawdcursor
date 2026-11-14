@@ -3,10 +3,7 @@
  *
  * Windows: uses PSRunner (persistent powershell process via ps-bridge.ps1).
  *          One-time assembly load cost ~800ms, then each call is <50ms.
- * macOS:   spawns osascript per call (unchanged).
- *
- * v4: PSRunner replaces per-call powershell.exe spawning on Windows.
- *     MaxDepth raised to 4 so nested elements are visible to the LLM.
+ * macOS:   the AX client (mac-ax.ts); osascript for the permission probe and focusWindow.
  */
 
 import { fenceWindowList } from '../core/fence';
@@ -36,7 +33,7 @@ const MAC_SCRIPTS_DIR = path.join(SCRIPTS_DIR, 'mac');
 // macOS JXA can be slow on first call; 30s gives headroom.
 const MAC_SCRIPT_TIMEOUT = 30000;
 
-const MAX_DEPTH = 8; // raised to 8 — Electron/WebView2 apps (Outlook olk) nest deeply: Window > Pane > Pane > Pane > Button
+const MAX_DEPTH = 8; // Electron/WebView2 apps (Outlook olk) nest deeply: Window > Pane > Pane > Pane > Button
 
 /** Cached shell availability (macOS only — Windows uses psRunner) */
 let macShellAvailable: boolean | null = null;
@@ -270,7 +267,6 @@ export class AccessibilityBridge {
       const result = await this.winCmd({ cmd: 'get-screen-context', maxDepth: 0 }) as any;
       // clawdcursor's own overlay is never a candidate (pointer-guard.ts) — the pill runs as powershell here.
       windows = (result.windows ?? []).filter((w: WindowInfo) => !isOwnUiPid(w.processId));
-      // Update screen context cache timestamp so we don't double-fetch
       this.windowCache = { windows, timestamp: Date.now() };
     } else if (IS_MAC) {
       // Same source as MacOSAdapter.listWindows: the AX client (fast helper, honest errors).
@@ -294,7 +290,7 @@ export class AccessibilityBridge {
     controlType?: string;
     processId?: number;
   }): Promise<UIElement[]> {
-    // v0.9.0 a11y scope fix: when the caller omits processId, default to the
+    // When the caller omits processId, default to the
     // foreground window. The PSBridge / mac native script enforce a results
     // cap during a descendant scan; without a window scope, the cap can be
     // hit before the real target is reached if other windows have matching
@@ -353,7 +349,7 @@ export class AccessibilityBridge {
   }): Promise<{ success: boolean; value?: string; error?: string; clickPoint?: { x: number; y: number }; target?: unknown } & Record<string, unknown>> {
     let processId = opts.processId;
 
-    // v0.9.0 a11y scope fix: prefer foreground window when caller omits
+    // Prefer foreground window when caller omits
     // processId. findElement() now also defaults to foreground, so this
     // path mostly handles the rare case where the foreground lookup fails.
     if (!processId) {
@@ -609,7 +605,6 @@ export class AccessibilityBridge {
         return stdout?.trim() ?? '';
       }
       if (IS_LINUX) {
-        // Linux clipboard: tries wl-paste (Wayland), xclip, xsel (X11) in order
         const { stdout } = await execFileAsync('sh', ['-lc', 'if command -v wl-paste >/dev/null 2>&1; then wl-paste --no-newline; elif command -v xclip >/dev/null 2>&1; then xclip -selection clipboard -o; elif command -v xsel >/dev/null 2>&1; then xsel --clipboard --output; fi'], { timeout: 2000 });
         return stdout?.trim() ?? '';
       }
@@ -628,7 +623,6 @@ export class AccessibilityBridge {
       if (IS_WIN) {
         await setWindowsClipboard(text, 2000);
       } else if (IS_MAC) {
-        // macOS: pipe to pbcopy via shell
         await new Promise<void>((resolve, reject) => {
           const proc = execFile('pbcopy', [], { timeout: 2000, env: utf8ClipboardEnv() }, (err) => {
             if (err) reject(err); else resolve();
@@ -637,7 +631,6 @@ export class AccessibilityBridge {
           proc.stdin?.end();
         });
       } else if (IS_LINUX) {
-        // Linux clipboard: tries wl-copy (Wayland), xclip, xsel (X11) in order
         await new Promise<void>((resolve, reject) => {
           const proc = execFile('sh', ['-lc', 'if command -v wl-copy >/dev/null 2>&1; then wl-copy; elif command -v xclip >/dev/null 2>&1; then xclip -selection clipboard; elif command -v xsel >/dev/null 2>&1; then xsel --clipboard --input; else exit 1; fi'], { timeout: 2000 }, (err) => {
             if (err) reject(err); else resolve();
@@ -653,7 +646,7 @@ export class AccessibilityBridge {
 
   /**
    * Get a text summary of the UI for the LLM.
-   * Always reads fresh on Windows (PSRunner is cheap); respects 2s cache otherwise.
+   * Cached for 2s on every platform (SCREEN_CONTEXT_CACHE_TTL).
    * `withWindowList: false` leaves out the list of every open window: a read of one window names no other app.
    */
   async getScreenContext(focusedProcessId?: number, withWindowList = true): Promise<string> {
@@ -695,7 +688,6 @@ export class AccessibilityBridge {
           );
         }
       } else if (IS_MAC) {
-        // macOS — separate script calls
         const windows = await this.getWindows();
         windowList += 'WINDOWS:\n';
         for (const w of windows) {
@@ -775,7 +767,7 @@ export class AccessibilityBridge {
     'ControlType.Text',
   ]);
 
-  private static readonly MAX_CONTEXT_CHARS = 12000; // raised for deep Electron/WebView2/Office trees — LLM needs full field visibility
+  private static readonly MAX_CONTEXT_CHARS = 12000; // deep Electron/WebView2/Office trees — LLM needs full field visibility
 
   private formatTree(elements: UIElement[], indent: string): string {
     let result = '';
