@@ -1,24 +1,11 @@
 /**
- * Tranche 2 — accessibility-depth MCP tools.
- *
- * These wrap the widened InvokeAction set (`expand`/`collapse`/`toggle`/
- * `select`) and the richer UiElement state fields added in Tranche 1A.
- * The adapter-level support is already in place for all three OSes:
- *   - Windows: ps-bridge.ps1 (UIA ExpandCollapse,
- *     Selection, Toggle patterns)
- *   - macOS: invoke-element.jxa (AXExpanded / AXValue / AXSelected
- *     attributes + AXPress / AXShowMenu action fallbacks)
- *   - Linux: atspi-bridge.py (AT-SPI Action / EditableText / Value /
- *     Selection interfaces). Without AT-SPI the adapter answers
- *     {success:false} and the tools report a structured failure.
+ * Accessibility-depth MCP tools: one element by name, and the
+ * children of a named element.
  */
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
-import { selectOption, selectedResult } from '../platform/select-option';
-import { preferControl, notSelectableReason, failReason } from '../platform/prefer-control';
 import type { UiElement } from '../platform/types';
-import { quoteScreenText } from '../core/result-codes';
-import { screenJson } from '../core/untrusted-screen-content';
+import { screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 
 function needPlatform(tool: string): ToolResult {
   return {
@@ -49,137 +36,6 @@ async function resolveProcessId(
 
 export function getA11yDepthTools(): ToolDefinition[] {
   return [
-    // ── ExpandCollapse pattern (tree views, combo boxes, disclosures) ──
-
-    {
-      name: 'a11y_expand',
-      description:
-        'Expand a tree node, combo box, or disclosure element by accessibility name. ' +
-        'Uses UIA ExpandCollapsePattern on Windows and AXExpanded attribute on macOS. ' +
-        'More reliable than click-to-toggle when the element is already in a mixed state.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name to match', required: true },
-        controlType: { type: 'string', description: 'Optional role filter', required: false },
-        processId:   { type: 'number', description: 'Scope to a process', required: false },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async ({ name, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('a11y_expand');
-        const pid = await resolveProcessId(ctx, processId);
-        const res = await ctx.platform.invokeElement({
-          name: String(name), controlType, processId: pid, action: 'expand',
-        });
-        return {
-          text: res.success ? `Expanded ${quoteScreenText(name)}.` : `a11y_expand failed for ${quoteScreenText(name)}${failReason(res)}.`,
-          isError: !res.success,
-        };
-      },
-    },
-
-    {
-      name: 'a11y_collapse',
-      description:
-        'Collapse a tree node, combo box, or disclosure element by accessibility name. ' +
-        'Counterpart of a11y_expand.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name', required: true },
-        controlType: { type: 'string', description: 'Optional role filter', required: false },
-        processId:   { type: 'number', required: false, description: 'Scope to a process' },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async ({ name, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('a11y_collapse');
-        const pid = await resolveProcessId(ctx, processId);
-        const res = await ctx.platform.invokeElement({
-          name: String(name), controlType, processId: pid, action: 'collapse',
-        });
-        return {
-          text: res.success ? `Collapsed ${quoteScreenText(name)}.` : `a11y_collapse failed for ${quoteScreenText(name)}${failReason(res)}.`,
-          isError: !res.success,
-        };
-      },
-    },
-
-    // ── Toggle pattern (checkboxes, switches, toggle buttons) ──
-
-    {
-      name: 'a11y_toggle',
-      description:
-        'Toggle a checkbox, switch, or toggle-button by accessibility name. ' +
-        'Uses UIA TogglePattern on Windows and AXValue flip on macOS. ' +
-        'Returns the NEW toggle state (On/Off/Indeterminate) in the result.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name', required: true },
-        controlType: { type: 'string', description: 'Optional role filter', required: false },
-        processId:   { type: 'number', required: false, description: 'Scope to a process' },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async ({ name, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('a11y_toggle');
-        const pid = await resolveProcessId(ctx, processId);
-        controlType = await preferControl(ctx.platform, 'toggle', { name: String(name), controlType, processId: pid });
-        const res = await ctx.platform.invokeElement({
-          name: String(name), controlType, processId: pid, action: 'toggle',
-        });
-        if (!res.success) return { text: `a11y_toggle failed for ${quoteScreenText(name)}${failReason(res)}.`, isError: true };
-        const state = res.data?.toggleState ?? 'unknown';
-        // The bridges read the state back until it changes; if it never did, the new state was not seen and the old one
-        // must not be reported as the result.
-        if (res.data?.toggleChanged === false) {
-          return { text: `Toggled ${quoteScreenText(name)} but the change was not confirmed: it still reads ${state}. Check the screen before relying on it.` };
-        }
-        // The marker comes before the (screen-derived) name and only when the new state was read back: see classifyResult.
-        return { text: res.data?.toggleChanged === true ? `Toggled (read back ✓) ${quoteScreenText(name)} → ${state}.` : `Toggled ${quoteScreenText(name)} → ${state}.` };
-      },
-    },
-
-    // ── SelectionItem pattern (list items, tabs, radios) ──
-
-    {
-      name: 'a11y_select',
-      description:
-        'Select a list item, tab, or radio button by accessibility name. ' +
-        'Uses UIA SelectionItemPattern on Windows; sets AXSelected on macOS. ' +
-        'More reliable than clicking when an item is scrolled out of view. ' +
-        'With `value`, `name` is a dropdown / list and `value` the option to choose ' +
-        '(e.g. name:"Plan" value:"Pro"). Either way the result is read back: a select that did not take is a failure.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name (with `value`: the dropdown / list)', required: true },
-        value:       { type: 'string', description: 'Option to choose inside the named dropdown / list (exact option name)', required: false },
-        controlType: { type: 'string', description: 'Optional role filter', required: false },
-        processId:   { type: 'number', required: false, description: 'Scope to a process' },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async ({ name, value, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('a11y_select');
-        const pid = await resolveProcessId(ctx, processId);
-        if (value !== undefined && value !== '') {
-          const r = await selectOption(ctx.platform, { name: String(name), value: String(value), controlType, processId: pid });
-          return { text: r.text, isError: !r.success };
-        }
-        const res = await ctx.platform.invokeElement({
-          name: String(name), controlType, processId: pid, action: 'select',
-        });
-        if (res.success) { const r = selectedResult(res, String(name)); return { text: r.text, ...(r.success ? {} : { isError: true }) }; }
-        const notItem = await notSelectableReason(ctx.platform, { name: String(name), controlType, processId: pid });
-        return { text: `a11y_select failed for ${quoteScreenText(name)}${failReason(res)}${notItem ? ` — ${notItem}` : ''}.`, isError: true };
-      },
-    },
-
-    // ── Read-only queries ──
-
     {
       name: 'a11y_get_element',
       description:
@@ -193,7 +49,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
         processId:   { type: 'number', required: false, description: 'Scope to a process' },
       },
       category: 'perception',
-      compactGroup: 'accessibility',
       safetyTier: 0,
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
@@ -209,78 +64,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
       },
     },
 
-    {
-      name: 'a11y_get_value',
-      description:
-        'Read the current value of a named text field, slider, or editable element ' +
-        '(UIA ValuePattern / AX AXValue). Use this to verify what a form field contains ' +
-        'before deciding whether to type into it.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name', required: true },
-        controlType: { type: 'string', description: 'Optional role filter', required: false },
-        processId:   { type: 'number', required: false, description: 'Scope to a process' },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 0,
-      handler: async ({ name, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('a11y_get_value');
-        const pid = await resolveProcessId(ctx, processId);
-        const res = await ctx.platform.invokeElement({
-          name: String(name), controlType, processId: pid, action: 'get-value',
-        });
-        if (!res.success) {
-          return { text: `a11y_get_value: ${quoteScreenText(name)} exposes no ValuePattern or AXValue.`, isError: true };
-        }
-        const value = res.data?.value ?? '';
-        // readable false: not a value — a password field, or an element with no value, answered with its own name.
-        if (res.data?.readable === false) return { text: screenJson({ name, readable: false, ...(value ? { elementName: value } : {}) }) };
-        return { text: screenJson({ name, value }) };
-      },
-    },
-
-    {
-      name: 'get_element_state',
-      description:
-        'Return only the state flags of a named element (focused, enabled/disabled, ' +
-        'selected, busy, offscreen, expandable, expanded). Use for quick state checks ' +
-        'without pulling the entire element record.',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name', required: true },
-        controlType: { type: 'string', description: 'Optional role filter', required: false },
-        processId:   { type: 'number', required: false, description: 'Scope to a process' },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 0,
-      handler: async ({ name, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('get_element_state');
-        const pid = await resolveProcessId(ctx, processId);
-        const hits = await ctx.platform.findElements({
-          name: String(name), controlType, processId: pid,
-        });
-        if (hits.length === 0) {
-          return { text: `get_element_state: no element named ${quoteScreenText(name)}.`, isError: true };
-        }
-        const el = hits[0];
-        const state = {
-          name: el.name,
-          controlType: el.controlType,
-          focused: el.focused ?? false,
-          enabled: el.enabled ?? true,
-          disabled: el.disabled ?? false,
-          selected: el.selected ?? false,
-          busy: el.busy ?? false,
-          offscreen: el.offscreen ?? false,
-          expandable: el.expandable ?? false,
-          expanded: el.expanded ?? false,
-        };
-        return { text: screenJson(state) };
-      },
-    },
-
     // ── Structural: list children by geometric containment ──
     //
     // The PlatformAdapter's getUiTree returns a FLAT list without parent
@@ -289,10 +72,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
     // containment inside the parent's bounds. Pragmatic — works for most
     // container→child cases (dialog children, menu items, list items) —
     // without requiring adapter-script changes.
-    //
-    // When the parent element has zero bounds or is not found, returns
-    // an empty list. The agent can always fall back to find_element for
-    // free-form searching.
 
     {
       name: 'a11y_list_children',
@@ -309,7 +88,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
         maxChildren: { type: 'number', required: false, default: 50, description: 'Cap on children returned' },
       },
       category: 'perception',
-      compactGroup: 'accessibility',
       safetyTier: 0,
       handler: async ({ parentName, controlType, processId, maxChildren }, ctx) => {
         await ctx.ensureInitialized();
@@ -326,8 +104,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         // position, so [0] is often NOT the element the caller named (live
         // 2026-06-07: list_children("Choose your background color") resolved to
         // the "Back" button at [0] → zero children). Prefer an exact name match,
-        // then the largest-area match (a container, the likely parent), before
-        // falling back to [0]. OS-agnostic — operates on the returned elements.
+        // then the largest-area match (a container, the likely parent).
         const wantName = String(parentName).trim().toLowerCase();
         const area = (e: typeof parents[number]) => e.bounds.width * e.bounds.height;
         const parent =
@@ -378,16 +155,13 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const parentArea = parent.bounds.width * parent.bounds.height;
 
         const children = tree.filter(el => {
-          // Skip the parent itself.
           if (el.name === parent.name && el.bounds.x === px && el.bounds.y === py) return false;
           if (el.bounds.width <= 0 || el.bounds.height <= 0) return false;
-          // Geometric containment.
           const ex = el.bounds.x;
           const ey = el.bounds.y;
           const er = ex + el.bounds.width;
           const eb = ey + el.bounds.height;
           if (ex < px || ey < py || er > pr || eb > pb) return false;
-          // Skip obvious ancestors (element larger than parent).
           if (el.bounds.width * el.bounds.height >= parentArea) return false;
           return true;
         });

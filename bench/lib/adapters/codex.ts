@@ -111,7 +111,6 @@ export function codexServerFailure(text: string, stream: 'stdout' | 'stderr'): s
 export function codexAppBinary(env: NodeJS.ProcessEnv = process.env): string | null {
   const bin = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'OpenAI', 'Codex', 'bin') : null;
   if (!bin) return null;
-  // One stat per candidate: the newest codex.exe that is there.
   let dirs: string[] = [];
   try { dirs = fs.readdirSync(bin); } catch { return null; }
   const found = dirs.flatMap(d => {

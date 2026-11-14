@@ -38,10 +38,50 @@ All notable changes to Clawd Cursor will be documented in this file.
   says; any other lock (stale, reused pid, old bare-number format) is deleted and nothing is signalled. A daemon that
   does not answer `/stop` is no longer killed by whoever holds its port unless its lock proves it is clawdcursor. A
   daemon stopped from the dashboard or `POST /stop` now removes its lock file, like Ctrl+C does.
+- **`accessibility read_tree` / `read_screen` on the browser clawdcursor drives over CDP points at the browser tools**
+  (#235). The hint after a thin read (and after a full read of that browser) now leads with `browser page_context` /
+  `read_text` / `click`, as `find` already did; the 1.x fix had gone into a copy of `read_tree` that no longer ran.
+- **`logs_recent` works over stdio.** It returned an empty list there; it now returns the log of the clawdcursor server
+  it is called on, stdio or HTTP, and its description says so.
+- **`open_file` and `open_uri` errors name a real tool.** "Verify with list_windows" named a tool on neither surface;
+  they now say `get_windows` (`window {"action":"list"}` on the compact surface).
+- **A batch step with a precondition is checked again after it.** The screen-binding, Stop and own-UI checks ran before
+  the precondition, which can take seconds; a dialog that opened meanwhile went unseen, so an image-space click could
+  land on a screen that had changed. The checks now run again once the precondition passes, and can refuse the step.
+- **OCR never returns the screen from before an act.** The shared OCR cache is emptied by every call that acts, also
+  when it sends no input (`open_url` / `open_file` / `open_uri`, `open_app`'s fallbacks, `relaunch_with_cdp`,
+  `navigate`), when the act failed, and on `browser connect`; a read that was in flight when an act landed no longer
+  caches its result.
+- **The dashboard reads its log panel from a new `GET /logs`** (token, localhost only) instead of calling the
+  `logs_recent` tool. Its polling no longer creates sessions or `tool.done` lines (an open dashboard had become the
+  newest session `clawdcursor report` picked), and the panel works on a `--compact` daemon.
+- **The daemon reports servers that died without a clean exit**, as a later `clawdcursor mcp` start already did.
+- **`clawdcursor uninstall` stops the daemon on the port it recorded** (not a fixed 3847), **and removes the skill
+  registrations from every host it wrote them to** (`~/.claude/skills`, `~/.cursor/skills`, ...), only what it wrote:
+  a link to a clawdcursor package, or a folder holding just the copied SKILL.md. A user's own folder is left.
+- **Linux X11: `super_l`, `command_l` and `windows` are Super**, as on Wayland; `super_l` and `command_l` were
+  "Unknown key", and `windows` worked only as a key on its own, not in a combo.
+- **`session_report` is allowed while a pause waits and while the user has stopped clawdcursor**, as `system report`
+  already was; the granular name was refused.
+- **`--debug` help says "No effect"** (like `--no-llm`): nothing reads it, and it said it saved screenshots. The
+  `start` / `serve` deprecation warnings no longer say "Removed in v0.10"; both still work as aliases of `agent`.
 
 ### Changed
 - README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and
   the 2.1 roadmap. Five obsolete docs about removed features are deleted, and descriptions no longer say "safe".
+- **The HTTP daemon answers only to `Host: 127.0.0.1:<port>` or `localhost:<port>`**; any other Host header gets 403.
+  A page whose DNS name was rebound to 127.0.0.1 could load the dashboard and read the pause message. An SSH tunnel to
+  the daemon must use the daemon's own port on the local end (`ssh -L 3847:127.0.0.1:3847 ...`).
+
+### Internal
+- **The code is untangled** (no change to the tools agents see: `initialize` and `tools/list` are byte-identical on
+  Windows, macOS and Linux, apart from the `logs_recent` description above). src/ without tests is 34,116 lines, down
+  from 39,559 (-14 %). Each list that had copies is written once: result codes (also read by the telemetry Worker),
+  key and modifier names, the OCR engine (one per process, was 8 with their own caches), the expect check, the guard
+  chain the MCP server and batch steps run, the projected tools' names, the HTTP routes and auth, the daemon lock, the
+  sleep helper and the points-to-pixels rule. The compact route table is its own file, and a test ties the acting
+  calls to it. Import graph: static cycles 4 (11 files) -> 1 (3 files); imports against the layer order
+  (platform < core < tools < surface) 47 -> 23; core -> tools 14 -> 1 (a type). 3,724 tests, none failing.
 
 ## [2.0.0] - 2026-11-11
 

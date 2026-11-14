@@ -1493,12 +1493,6 @@ func cmdInvoke() -> Never {
     emit(out)
 }
 
-// MARK: - type
-
-/// Types `text` into whatever has the keyboard, one character per key event, with the character itself attached to the event
-/// (CGEventKeyboardSetUnicodeString). System Events' `keystroke` maps each character to a key of the current layout and
-/// types key code 0 ("a") for any it cannot find, so "café 日本語" came out as "cafa aaa" (#242). Newline and tab are sent as
-/// the Return and Tab keys, which is what a text field expects.
 /// Bring one window of ONE process to the front, by pid. System Events names an app's windows by process NAME, so with two
 /// processes of one app (the user's Chrome and the agent's own) focus-window.jxa read the first one's windows: it raised the
 /// wrong window while saying "focused", and found no window for a title the other process had. This talks to the process it
@@ -1574,6 +1568,12 @@ func cmdFocus() -> Never {
     emit(d)
 }
 
+// MARK: - type
+
+/// Types `text` into whatever has the keyboard, one character per key event, with the character itself attached to the event
+/// (CGEventKeyboardSetUnicodeString). System Events' `keystroke` maps each character to a key of the current layout and
+/// types key code 0 ("a") for any it cannot find, so "café 日本語" came out as "cafa aaa" (#242). Newline and tab are sent as
+/// the Return and Tab keys, which is what a text field expects.
 func cmdType() -> Never {
     requireUsableSession()
     guard let text = opts["text"], !text.isEmpty else { fail("failed", "type: no text given") }

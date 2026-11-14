@@ -7,8 +7,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
 
@@ -34,10 +34,7 @@ function mockCdp(overrides: Partial<Record<string, any>> = {}) {
 function ctx(cdp: any): AgentToolContext {
   return {
     platform: { platform: 'win32' } as any,
-    task: 'open youtube and play a song',
-    mode: 'blind',
     screen: { logicalWidth: 2560, logicalHeight: 1440, physicalWidth: 2560, physicalHeight: 1440, dpiRatio: 1 },
-    screenshotsCaptured: { n: 0 },
     cdp,
   };
 }
@@ -77,21 +74,14 @@ describe('browser_connect', () => {
   });
 });
 
-describe('browser_navigate / read / click / type', () => {
-  it('navigate loads the url when connected', async () => {
-    const cdp = mockCdp();
-    const r = await tool('browser_navigate').execute({ url: 'https://www.youtube.com' }, ctx(cdp));
-    expect(r.success).toBe(true);
-    expect(cdp.navigate).toHaveBeenCalledWith('https://www.youtube.com');
-  });
-
+describe('browser_read / click / type', () => {
   it('every browser_* action refuses (no throw) when not connected → tells model to connect', async () => {
     const cdp = mockCdp({ isConnected: vi.fn(async () => false) });
-    for (const name of ['browser_navigate', 'browser_read', 'browser_click', 'browser_type']) {
-      const args = name === 'browser_navigate' ? { url: 'x' } : name === 'browser_type' ? { text: 'x', selector: '#a' } : name === 'browser_click' ? { text: 'x' } : {};
+    for (const name of ['browser_read', 'browser_click', 'browser_type']) {
+      const args = name === 'browser_type' ? { text: 'x', selector: '#a' } : name === 'browser_click' ? { text: 'x' } : {};
       const r = await tool(name).execute(args, ctx(cdp));
       expect(r.success).toBe(false);
-      expect(r.text).toMatch(/browser_connect/);
+      expect(r.text).toMatch(/cdp_connect/);
     }
   });
 
@@ -104,7 +94,7 @@ describe('browser_navigate / read / click / type', () => {
     expect(cdp.getPageContext).toHaveBeenCalled();
   });
 
-  it('click by visible text uses clickByText; failure nudges to browser_read', async () => {
+  it('click by visible text uses clickByText; failure nudges to cdp_page_context', async () => {
     const ok = mockCdp();
     expect((await tool('browser_click').execute({ text: 'Search' }, ctx(ok))).success).toBe(true);
     expect(ok.clickByText).toHaveBeenCalledWith('Search', Infinity, undefined);
@@ -112,7 +102,7 @@ describe('browser_navigate / read / click / type', () => {
     const bad = mockCdp({ clickByText: vi.fn(async () => ({ success: false, error: 'not found' })) });
     const r = await tool('browser_click').execute({ text: 'Nope' }, ctx(bad));
     expect(r.success).toBe(false);
-    expect(r.text).toMatch(/browser_read/);
+    expect(r.text).toMatch(/cdp_page_context/);
   });
 
   it('type requires a selector or label', async () => {

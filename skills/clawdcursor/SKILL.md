@@ -433,7 +433,7 @@ Rules for autonomous use:
 
 ## Security
 
-- **Network isolation:** Binds to `127.0.0.1` only. Verify with `netstat -an | grep 3847` on macOS/Linux, or `netstat -an | findstr 3847` on Windows PowerShell - should show `127.0.0.1:3847`, never `0.0.0.0:3847`. There is no setting that opens it to the network; to drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side.
+- **Network isolation:** Binds to `127.0.0.1` only. Verify with `netstat -an | grep 3847` on macOS/Linux, or `netstat -an | findstr 3847` on Windows PowerShell - should show `127.0.0.1:3847`, never `0.0.0.0:3847`. There is no setting that opens it to the network; to drive it from another machine, tunnel the port over SSH: `ssh -L 3847:127.0.0.1:3847 user@host`, then use `http://127.0.0.1:3847/mcp` on your side. Keep the same port on both ends: the server refuses (403) a Host other than `127.0.0.1:<its port>` or `localhost:<its port>`.
 - **No model calls:** clawdcursor never calls a model. Screenshots and text go
   only to the MCP client that asked for them.
 - **No-vision mode:** `clawdcursor agent --no-vision` (or `CLAWD_DISABLE_VISION=1`, also for stdio `clawdcursor mcp`) sends no screenshot to any model; a call that would return one is refused with `VISION_DISABLED`, so read the screen with the accessibility tree or OCR.

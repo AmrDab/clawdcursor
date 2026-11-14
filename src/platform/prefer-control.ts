@@ -9,7 +9,7 @@
  */
 import type { PlatformAdapter } from './types';
 import { missText, untrusted } from '../core/miss-text';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 
 export type ByNameAction = 'focus' | 'set-value' | 'toggle' | 'select';
 
@@ -34,7 +34,6 @@ export function failReason(res: { error?: unknown; data?: Record<string, unknown
   return typeof e === 'string' && e.trim() ? `: ${untrusted(e.trim().replace(/[.\s]+$/, ''))}` : '';
 }
 
-export const holdsOptions = (r?: string) => HOLDS_OPTIONS.test(role(r));
 /** A list box or a dropdown list: where typing an option's text moves the selection to it. Not a tab strip, a radio group or a menu: there a letter is a shortcut. */
 export const typeAheadSelects = (r?: string) => /^(list|listbox|combobox|popupbutton)$/.test(role(r));
 /** An item of such a list. */
@@ -95,7 +94,6 @@ export function sameElement(focused: Placed, target: Placed): boolean {
 }
 
 type Box = { x: number; y: number; width: number; height: number };
-/** Is box `f` inside box `b`? */
 export const inside = (f: Box, b: Box): boolean =>
   f.x >= b.x && f.y >= b.y && f.x + f.width <= b.x + b.width && f.y + f.height <= b.y + b.height;
 

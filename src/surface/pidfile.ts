@@ -24,8 +24,8 @@
  * Fix (2) is two-layered and deterministic — stdin-EOF alone is NOT reliable
  * when the host is a GUI app (quitting the Claude desktop app on Windows does
  * not deliver stdin EOF to the child):
- *   - the lock holder runs a parent-PID watchdog (see the `mcp` command in
- *     cli.ts) and self-exits when its host process dies; and
+ *   - the lock holder runs a parent-PID watchdog (serve.ts) and self-exits
+ *     when its host process dies; and
  *   - this module records the holder's parent PID (`ppid`) so a later claimant
  *     can detect a holder whose parent is dead — a confirmed orphan — and reap
  *     it instead of refusing to start (see claimPidFile).
@@ -44,6 +44,11 @@ import { DEFAULT_CONFIG } from '../types';
 import { powershellExe, psOpts } from '../platform/ps-spawn';
 
 export type LockMode = 'start' | 'mcp' | 'serve';
+
+/** The daemon's lock (`clawdcursor agent`). Named `start` so every `stop` since 0.8 finds it. */
+export const DAEMON_LOCK: LockMode = 'start';
+/** Every lock a clawdcursor ever wrote: `mcp` and `serve` only by older versions, which a sweep still stops. */
+const ALL_LOCKS: readonly LockMode[] = ['start', 'mcp', 'serve'];
 
 const PID_DIR = path.join(os.homedir(), '.clawdcursor');
 
@@ -66,8 +71,8 @@ interface LockData {
    *  died — and reap it instead of refusing to start. Optional for back-compat
    *  with locks written before this field existed. */
   ppid?: number;
-  /** The port the daemon actually bound (`start` lock only, set once it listens). Client commands (`stop`, `resume`,
-   *  `task`) read it here — never from a config file, which a repo in the cwd could plant to point the bearer token at
+  /** The port the daemon actually bound (`start` lock only, set once it listens). Client commands (`stop`, `resume`)
+   *  read it here — never from a config file, which a repo in the cwd could plant to point the bearer token at
    *  another local port. The lock lives in the user's own data dir, like the token file: mode 0600 on POSIX; on
    *  Windows the mode is ignored and the file inherits the user profile's ACL. */
   port?: number;
@@ -202,7 +207,6 @@ export function claimPidFile(mode: LockMode): number | null {
         // conservative and treat it as a live duplicate.)
         if (existing.ppid && existing.ppid > 1 && !isProcessAlive(existing.ppid)) {
           try { process.kill(existing.pid); } catch { /* already gone */ }
-          // Fall through to overwrite — we are taking the lock.
         } else {
           return existing.pid;
         }
@@ -248,7 +252,7 @@ export function recordLockPort(mode: LockMode, port: number): void {
  */
 export function daemonPortForClient(flag?: number): number {
   if (flag !== undefined) return flag;
-  const lock = readLockFile('start');
+  const lock = readLockFile(DAEMON_LOCK);
   if (lock && typeof lock.port === 'number' && isProcessAlive(lock.pid)) return lock.port;
   return DEFAULT_CONFIG.server.port;
 }
@@ -320,4 +324,20 @@ export async function stopLockHolder(mode: LockMode, timeoutMs?: number): Promis
   }
   unlink();
   return { outcome: 'stopped', pid };
+}
+
+export type SweptLock = { mode: LockMode } & Exclude<StopLockResult, { outcome: 'none' }>;
+
+/**
+ * Stop the clawdcursor holding each lock and remove the locks (stopLockHolder: only a holder its lock proves is
+ * signalled; a stale, recycled or bare-integer lock is deleted untouched). Used by `stop` and `uninstall`. Modes with no
+ * lock file are left out.
+ */
+export async function sweepAllLocks(timeoutMs?: number): Promise<SweptLock[]> {
+  const swept: SweptLock[] = [];
+  for (const mode of ALL_LOCKS) {
+    const r = await stopLockHolder(mode, timeoutMs).catch((): StopLockResult => ({ outcome: 'none' }));
+    if (r.outcome !== 'none') swept.push({ mode, ...r });
+  }
+  return swept;
 }

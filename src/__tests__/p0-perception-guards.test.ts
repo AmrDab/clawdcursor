@@ -25,21 +25,7 @@ function methodBody(src: string, header: string): string {
   return next === -1 ? after : after.slice(0, next);
 }
 
-describe('P0-2 — ps-bridge must not pipe arrays into ConvertTo-Json (20s-stall guard)', () => {
-  const bridge = read('..', 'scripts', 'ps-bridge.ps1');
-
-  it('serializes the dispatch result with -InputObject (empty/single arrays survive)', () => {
-    // `@() | ConvertTo-Json` emits NOTHING (the array unrolls to zero objects),
-    // so the bridge never answers and PSRunner stalls 20s on every miss; a
-    // single-element array unwraps to a bare object and TS drops it. -InputObject
-    // fixes both: @() -> "[]", @(x) -> "[x]".
-    expect(bridge).toContain('ConvertTo-Json -InputObject $result');
-  });
-
-  it('does NOT contain the piped form `$result | ConvertTo-Json`', () => {
-    expect(/\$result\s*\|\s*ConvertTo-Json/.test(bridge)).toBe(false);
-  });
-});
+// P0-2 (the bridge's replies to an empty / one-element result) is run for real in p0-perception-guards.system.test.ts.
 
 describe('P0-1 — getUiTree defaults to the active-window pid on every platform', () => {
   // Without a pid the bridge/script returns no tree, so read_screen came back

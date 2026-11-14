@@ -690,7 +690,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         win.isOpaque = false
         win.backgroundColor = .clear   // only the beam is drawn: nothing over the middle of the window
         win.hasShadow = false
-        win.ignoresMouseEvents = true // click-through
+        win.ignoresMouseEvents = true
         win.level = .floating   // above ordinary windows, below the pill and the menu bar
         win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         win.sharingType = .none  // the outline is not captured either

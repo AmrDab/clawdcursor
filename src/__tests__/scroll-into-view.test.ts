@@ -7,8 +7,8 @@
  * element is off the active window"; smart_type said "Could not find element". The field was only below the fold.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
 import { ensureVisible } from '../core/sense/ui-map-visible';
@@ -94,7 +94,6 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
     const { platform, ctx } = setup({ listWindows: vi.fn(async () => [WIN, other]) });
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
     expect(res.success).toBe(false);
-    expect(res.isError).toBe(true);
     expect(res.text).toMatch(/another window of this app \(<untrusted-screen-content>\nOther - Edge\n<\/untrusted-screen-content>\)/);
     expect(platform.scrollIntoView).not.toHaveBeenCalled();
     expect(platform.mouseClick).not.toHaveBeenCalled();
@@ -103,7 +102,7 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
   it('still refuses when the active window is another app (window changed since compile)', async () => {
     const { platform, ctx } = setup({}, { processId: 77, processName: 'calc', title: 'Calculator' });
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
-    expect(res.isError).toBe(true);
+    expect(res.success).toBe(false);
     expect(res.text).toMatch(/window changed/);
     expect(platform.scrollIntoView).not.toHaveBeenCalled();
     expect(platform.mouseClick).not.toHaveBeenCalled();
@@ -112,7 +111,7 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
   it('a failed scroll gives an honest error and acts on nothing', async () => {
     const { platform, ctx } = setup({ scrollIntoView: vi.fn(async () => ({ success: false, error: 'element not found in pid 9' })) });
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
-    expect(res.isError).toBe(true);
+    expect(res.success).toBe(false);
     expect(res.text).toMatch(/could not be scrolled into view \(<untrusted-screen-content>\nelement not found in pid 9\n<\/untrusted-screen-content>\)/);
     expect(res.text).not.toMatch(/off the active window/);
     expect(platform.mouseClick).not.toHaveBeenCalled();
@@ -122,7 +121,7 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
   it('a scroll that leaves it out of view says "scrolled but still not visible"', async () => {
     const { platform, ctx } = setup({ scrollIntoView: vi.fn(async () => ({ success: true, method: 'SetFocus', bounds: { x: 10, y: 1300, width: 300, height: 80 } })) });
     const res = await tool('invoke_element').execute(ref, ctx);
-    expect(res.isError).toBe(true);
+    expect(res.success).toBe(false);
     expect(res.text).toMatch(/scrolled but still not visible/);
     expect(platform.mouseClick).not.toHaveBeenCalled();
   });
@@ -130,7 +129,7 @@ describe('set_field_value / invoke_element on a ref below the fold', () => {
   it('a platform that cannot scroll says so instead of guessing', async () => {
     const { platform, ctx } = setup({ scrollIntoView: undefined });
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
-    expect(res.isError).toBe(true);
+    expect(res.success).toBe(false);
     expect(res.text).toMatch(/cannot scroll it into view/);
     expect(platform.mouseClick).not.toHaveBeenCalled();
   });
@@ -242,7 +241,7 @@ describe('a scroll invalidates the snapshot — every other ref in it points at 
     expect(platform.scrollIntoView).toHaveBeenCalledOnce();
     platform.mouseClick.mockClear();
     const second = await tool('invoke_element').execute({ element_id: 'el_72', snapshot_id: 'obs_2' }, ctx);
-    expect(second.isError).toBe(true);
+    expect(second.success).toBe(false);
     expect(second.text).toMatch(/stale snapshot/);
     expect(platform.mouseClick).not.toHaveBeenCalled();
   });
@@ -278,7 +277,7 @@ describe('another window of the app is told apart by handle, not only by title',
     const other = { processId: 9, processName: 'msedge', title: WIN.title, handle: 555, isMinimized: false, bounds: { x: 0, y: 1400, width: 1280, height: 600 } };
     const { platform, ctx } = setup({ listWindows: vi.fn(async () => [WIN, other]) });
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
-    expect(res.isError).toBe(true);
+    expect(res.success).toBe(false);
     expect(res.text).toMatch(/another window of this app/);
     expect(platform.scrollIntoView).not.toHaveBeenCalled();
   });
@@ -290,7 +289,7 @@ describe('a window change after the scroll, through the tools', () => {
     const { platform, ctx } = setup();
     platform.getActiveWindow.mockImplementation(async () => (++calls <= 1 ? WIN : { ...WIN, title: 'Another - Edge' }) as never);
     const res = await tool('set_field_value').execute({ ...ref, value: 'x' }, ctx);
-    expect(res.isError).toBe(true);
+    expect(res.success).toBe(false);
     expect(res.text).toMatch(/active window changed while scrolling/);
     expect(platform.mouseClick).not.toHaveBeenCalled();
     expect(platform.typeText).not.toHaveBeenCalled();

@@ -11,8 +11,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import type { PlatformAdapter, UiElement } from '../platform/types';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext, UnifiedTool } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext, UnifiedTool } from '../tools/projected/types';
 import { captureSnapshot } from '../core/sense/snapshot';
 import { compileUIMap } from '../core/sense/ui-map';
 import { renderUIMap } from '../core/sense/ui-map-render';

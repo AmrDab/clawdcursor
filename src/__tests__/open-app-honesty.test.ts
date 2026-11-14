@@ -6,11 +6,9 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { getOrchestrationTools } from '../tools/orchestration';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
 import type { ToolContext } from '../tools/types';
 
 const mcpOpenApp = getOrchestrationTools().find(t => t.name === 'open_app')!;
-const agentOpenApp = buildUnifiedTools().find(t => t.name === 'open_app')!;
 
 function mcpCtx(launchApp: (...a: unknown[]) => unknown): ToolContext {
   return {
@@ -18,9 +16,6 @@ function mcpCtx(launchApp: (...a: unknown[]) => unknown): ToolContext {
     platform: { platform: 'linux', launchApp: vi.fn(launchApp) },
     a11y: { invalidateCache: () => {} },
   } as unknown as ToolContext;
-}
-function agentCtx(launchApp: (...a: unknown[]) => unknown) {
-  return { platform: { platform: 'linux', launchApp: vi.fn(launchApp) } } as any;
 }
 
 describe('MCP open_app', () => {
@@ -50,43 +45,15 @@ describe('MCP open_app', () => {
   });
 });
 
-describe('agent-loop open_app', () => {
-  it('fails (success:false) when no process and no window appeared', async () => {
-    const r = await agentOpenApp.execute({ name: 'calculator' }, agentCtx(async () => ({})));
-    expect(r.success).toBe(false);
-    expect(r.text).toMatch(/no window appeared/i);
-  });
-
-  it('a running process with no window yet succeeds with "do not launch it again"', async () => {
-    const r = await agentOpenApp.execute({ name: 'outlook' }, agentCtx(async () => ({ pid: 9 })));
-    expect(r.success).toBe(true);
-    expect(r.text).toMatch(/Do not launch it again/);
-  });
-
-  it('fails cleanly when the launch throws', async () => {
-    const r = await agentOpenApp.execute({ name: 'nosuchapp' }, agentCtx(async () => { throw new Error('no executable or desktop entry named "nosuchapp"'); }));
-    expect(r.success).toBe(false);
-    expect(r.text).toMatch(/desktop entry/);
-  });
-
-  it('succeeds when a window surfaced', async () => {
-    const r = await agentOpenApp.execute({ name: 'calculator' }, agentCtx(async () => ({ pid: 7, title: 'Calculator' })));
-    expect(r.success).toBe(true);
-  });
-});
-
 describe('open_app tells the adapter which processes are the app (a window is the app\'s by identity, not by title)', () => {
   it.each([
     ['Calculator', ['CalculatorApp', 'Calculator', 'calc']],
     ['Outlook', ['OUTLOOK', 'olk']],
     ['edge', ['msedge']],
-  ])('%s → %j, on both surfaces', async (name, processNames) => {
+  ])('%s → %j', async (name, processNames) => {
     const mcp = mcpCtx(async () => ({ pid: 7, title: 'x' }));
     await mcpOpenApp.handler({ name }, mcp);
     expect((mcp.platform as any).launchApp).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ processNames }));
-    const agent = agentCtx(async () => ({ pid: 7, title: 'x' }));
-    await agentOpenApp.execute({ name }, agent);
-    expect(agent.platform.launchApp).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ processNames }));
   });
 });
 
@@ -99,13 +66,6 @@ describe('open_app — started, window not up yet (a slow starter: Designcenter 
     expect(r.text).toMatch(/Started "Designcenter" \(ugraf(\.exe)?, pid=5150\) but its window isn't up yet/);
     expect(r.text).toContain('window {"action":"focus","processName":"ugraf"}');
     expect(r.text).toMatch(/Do not launch it again/);
-    expect(r.text).not.toMatch(/list_windows/);
-  });
-
-  it('agent loop: the same, with its own tool name', async () => {
-    const r = await agentOpenApp.execute({ name: 'Designcenter' }, agentCtx(slow));
-    expect(r.success).toBe(true);
-    expect(r.text).toContain('focus_window {"processName":"ugraf"}');
     expect(r.text).not.toMatch(/list_windows/);
   });
 

@@ -4,33 +4,22 @@
  * Claude Code, Cursor, Windsurf) and the streamable-HTTP transport
  * (the long-running `clawdcursor agent` daemon).
  *
- * Why this module exists
- * ----------------------
- * Up to v0.8.x clawdcursor had two transports:
- *   - REST API in src/server.ts   (the daemon's /task /favorites /etc)
- *   - MCP stdio    in src/index.ts (the `mcp` subcommand, inline-built)
- *
- * v0.9 PR7 collapses those into a single MCP server with two transport
- * flavors. createMcpServer() is the registry-to-MCP adapter; the
- * transports are independent and either or both can be active.
- *
- * The HTTP transport is mounted on the existing Express app at /mcp,
- * with the same Bearer-token requireAuth middleware the REST routes used.
- * That keeps localhost-only auth invariants identical across transports.
+ * The HTTP transport is the daemon's /mcp route, gated like its other
+ * routes (http-utility.ts ROUTES, auth.ts).
  */
 
 import type express from 'express';
 import type { ZodTypeAny } from 'zod';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
+import type { ParameterDef } from '../tools/types';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
-import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
-import { isStopped, STOPPED_TEXT, actedIn, actRecord } from '../core/control';
+import { actedIn, actRecord } from '../core/control';
 import { logger } from '../core/observability/logger';
-import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';
@@ -39,7 +28,7 @@ import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
-import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
+import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -76,8 +65,6 @@ export interface McpServerLike {
     handler: (params: Record<string, unknown>) => Promise<McpToolResult>,
   ): void;
   connect(transport: McpTransportLike): Promise<void>;
-  /** Called once when the client session this server was made for closes. */
-  onSessionEnd?: (reason: string) => void;
 }
 
 /** The slice of an SDK transport that clawdcursor drives. */
@@ -90,7 +77,6 @@ export interface McpTransportLike {
   ) => Promise<void>;
 }
 
-/** Options for createMcpServer. */
 export interface CreateMcpServerOptions {
   /** When true, expose the 6-compound surface instead of granular. */
   compact?: boolean;
@@ -98,7 +84,6 @@ export interface CreateMcpServerOptions {
   ctx: ToolContext;
 }
 
-/** A constructed MCP server with its registered tool count. */
 export interface McpServerHandle {
   /** The configured McpServer instance — connect a transport via .connect(). */
   server: McpServerLike;
@@ -106,24 +91,19 @@ export interface McpServerHandle {
   toolCount: number;
   /** Snapshot of the tools that were registered (in registration order). */
   tools: ToolDefinition[];
-  /** This server's session record: the stdio entry closes it with the exit reason. */
+  /** This server's session record: closed with the exit reason (stdio), or when its HTTP session closes. */
   sessionLog: SessionLog;
 }
 
-/**
- * Build a configured McpServer with all clawdcursor tools registered.
- *
- * The caller is responsible for connecting a transport via `server.connect(...)`.
- * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
- */
+/** The tools a server serves: the 6 compounds, or the granular surface where every action is its own tool. */
+export function servedTools(compact: boolean | undefined): ToolDefinition[] {
+  return compact ? getCompactSurface() : getAllTools();
+}
+
 /** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
 function isActingCall(toolName: string, action: string | undefined, test: typeof isActingAction = isActingAction): boolean {
-  if (toolName in COMPOUND_ROUTE_INDEX) return test(toolName, action);
-  for (const [compound, routes] of Object.entries(COMPOUND_ROUTE_INDEX)) {
-    const route = routes.find(r => r.delegate === toolName);
-    if (route) return test(compound, route.action);
-  }
-  return false;
+  const c = compactCall(toolName, action);
+  return test(c.tool, c.action);
 }
 
 /** Does any step of a batch (compact or granular tool names) change something? */
@@ -136,6 +116,12 @@ function batchActs(steps: unknown): boolean {
   });
 }
 
+/**
+ * Build a configured McpServer with all clawdcursor tools registered.
+ *
+ * The caller is responsible for connecting a transport via `server.connect(...)`.
+ * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
+ */
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
   const { compact, ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
@@ -196,11 +182,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
 
   const server = new McpServer({ name: 'clawdcursor', version: VERSION }, { instructions });
 
-  // First tool call without consent: ask the USER in the host's own UI (MCP
-  // elicitation) instead of telling them to go run a terminal command. The
-  // model cannot answer an elicitation — the host shows it to the person.
-  // Asked at most once per server: concurrent calls share the one prompt, and
-  // a decline is not re-asked on every call (the text prompt takes over).
   // Local record of this session (tool / action / blind-vs-vision / ok — no
   // content). Feeds `clawdcursor report` and the vision-streak nudge below.
   const sessionLog = new SessionLog({ version: VERSION, surface: compact ? 'compact' : 'granular' });
@@ -217,6 +198,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
     .server?.getClientVersion?.();
 
+  // First tool call without consent: ask the USER in the host's own UI (MCP
+  // elicitation) instead of telling them to go run a terminal command. The
+  // model cannot answer an elicitation — the host shows it to the person.
+  // Asked at most once per server: concurrent calls share the one prompt, and
+  // a decline is not re-asked on every call (the text prompt takes over).
   let consentPrompt: Promise<boolean> | null = null;
   const askConsentInHost = (): Promise<boolean> => {
     consentPrompt ??= (async () => {
@@ -252,7 +238,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     })();
     return consentPrompt;
   };
-  const tools = compact ? getCompactSurface() : getAllTools();
+  const tools = servedTools(compact);
   // Bug telemetry sends a tool or action name only when it is one of these (telemetry.ts), and the host only by an allowlist.
   allowNames(tools.flatMap(t => [t.name, ...(t.parameters.action?.enum ?? [])]));
   // When this session started: when its agent connected (initialized). `expect` / `verify` file_changed_since_start
@@ -266,52 +252,12 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     // Convert parameter defs to a Zod schema map. The MCP SDK uses zod
     // shape objects (Record<string, ZodType>) — not full ZodObjects.
     const zodParams: Record<string, ZodTypeAny> = {};
-    for (const [key, def] of Object.entries(tool.parameters)) {
-      let schema: ZodTypeAny;
-      if (def.type === 'number') schema = z.number();
-      else if (def.type === 'boolean') schema = z.boolean();
-      // 'array' params accept a real array (preferred) OR a JSON-encoded string,
-      // matching dual-accept handlers (e.g. batch.steps). Without this branch the
-      // default below coerced arrays to z.string() and rejected the array form
-      // the README/inputSchema advertise ("Expected string, received array").
-      //
-      // Published as a PLAIN `{type:"array", items:<real schema>}`, not as the
-      // `z.union` it used to be. The union serialized to
-      // `anyOf:[{type:"array",items:{}},{type:"string"}]`, which hits two
-      // documented provider rejections that stop a host registering the server:
-      //   - Gemini (verbatim-relay hosts): `anyOf` with a sibling `description`
-      //     is a 400 — "schema specified other fields alongside any_of".
-      //   - OpenAI `strict: true`: `items: {}` has no `type` — "schema must
-      //     have a 'type' key".
-      // Runtime acceptance is unchanged: z.any() + refine still takes a real
-      // array OR a JSON-encoded string, so dual-accept handlers see the same
-      // inputs, and anything else is still rejected as before.
-      else if (def.type === 'array') {
-        schema = z.any()
-          .refine(v => v === null || Array.isArray(v) || typeof v === 'string', {   // null: some hosts send it for "not given"
-            message: 'Expected an array (or a JSON-encoded array string).',
-          })
-          .meta({ type: 'array', items: def.items ?? { type: 'object' } });
-      }
-      // 'object' params: a real object (or its JSON text, like arrays); the handler validates the fields.
-      else if (def.type === 'object') {
-        schema = z.any()
-          .refine(v => v === null || (typeof v === 'object' && !Array.isArray(v)) || typeof v === 'string', {
-            message: 'Expected an object (or a JSON-encoded object string).',
-          })
-          .meta({ type: 'object', properties: def.properties ?? {} });
-      }
-      else schema = z.string();
-      if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
-      schema = schema.describe(def.description);
-      if (def.required === false) schema = schema.optional();
-      zodParams[key] = schema;
-    }
+    for (const [key, def] of Object.entries(tool.parameters)) zodParams[key] = paramSchema(z, def);
 
     // MCP SDK 1.29 arg parsing breaks if schema is undefined (shifts callback
     // position). Always pass a schema — use empty object for parameterless tools.
     const hasParams = Object.keys(zodParams).length > 0;
-    // Phase A: surface the token-cost class to the tool-picking LLM. The
+    // Surface the token-cost class to the tool-picking LLM. The
     // high-level SDK `server.tool()` API has no slot for a vendor metadata
     // field, so a `[costClass]` description prefix is the reliable
     // LLM-readable channel in tools/list. `costClass` in source stays the
@@ -354,24 +300,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             isError: true,
           };
         }
-        // The user's stop comes right after consent and before every other refusal (screen binding, own UI):
-        // an agent told "no screenshot taken" never learns the user took control back (control.ts).
-        if (isStopped() && !isStopSafeCall(tool.name, callAction)) {
-          const label = callAction ? `${tool.name} {action:"${callAction}"}` : tool.name;
-          logger.warn('safety.refused', { tool: tool.name, action: callAction, guard: 'stopped', reason: STOPPED_TEXT });
-          sessionLog.record(tool.name, callAction, false, 0, STOPPED_TEXT, clientInfo(), { outcome: 'refused' });
-          return { content: [{ type: 'text', text: withOutcome(`${label}: ${STOPPED_TEXT}`, true) }], isError: true };
-        }
-        // Transparency: any consequential (mutating) tool call from an
-        // EXTERNAL agent pokes the on-screen control banner — it shows on the
-        // first poke and auto-hides after ~30s of inactivity. Read-only
-        // perception (tier 0) stays silent.
-        // Compound tools (compact surface) decide per action in dispatchCompound.
-        if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
-        // A batch that acts at any step shows the pill from its start: its first step may be a 30 s wait, and a pill that
-        // is not there cannot be double-clicked (#294).
-        if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
-        const action = typeof params?.action === 'string' ? params.action : undefined;
+        const action = callAction;
         // A guard that refuses logs its own verdict.
         const refuse = (guard: string, why: string): McpToolResult => {
           const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
@@ -379,19 +308,18 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
           return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
         };
-        // Screenshot-bound pointer actions: image coordinates from a screenshot of a screen that has since changed
-        // point at something else (screen-binding.ts).
-        if (isImagePointerCall(tool.name, action, params ?? {})) {
-          const why = await imagePointerRefusal(ctx, params ?? {});
-          if (why) return refuse('screen_binding', why);
-        }
-        // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
-        // Last before the handler: a pause that came up during the checks above still stops it.
-        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action), isStopSafeCall(tool.name, action));
-        if (ownUi) return refuse('own_ui', ownUi);
+        const call = guardedCall(tool.name, action, params ?? {});
+        // Once the call is known not to be stopped, a consequential one (tier 1+) pokes the pill: it shows on the first
+        // poke and hides after ~30 s without one. Compound tools decide per action in dispatchCompound. A batch that acts
+        // at any step shows it from its start: its first step may be a 30 s wait, and a pill that is not there cannot be
+        // double-clicked (#294).
+        const refused = await refusalBefore(call, ctx, () => {
+          if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
+          if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
+        });
+        if (refused) return refuse(refused.guard, refused.why);
         const started = Date.now();
         const wasIn = actedIn();
-        // The app this call acted in, labelled as on the pill: each act keeps its own foreground read, so the same one means it did not.
         // What this call acted on, as the input guard verified it when it sent the act (control.ts actRecord).
         const acted = () => actRecord(wasIn);
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
@@ -403,20 +331,16 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           // platform adapter failed to init) must NOT propagate to the MCP SDK
           // — in stdio mode an unhandled rejection can corrupt the JSON-RPC
           // stream. Convert to a clean isError result.
+          forgetScreenIfActed(call);   // a throw skips afterCall
           const err = run.error;
           const msg = err instanceof Error ? err.message : String(err);
           sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg), ...acted(), timing: run.steps });
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
         }
         let result = run.result;
-        // High-security mode: no image reaches the model, whichever tool produced it. The capture stays in memory and
-        // is dropped here, before the screenshot is recorded as one the model has seen.
-        if (ctx.disableVision && result.image) {
-          return refuse('no_vision', VISION_DISABLED_REFUSAL);
-        }
-        if (!result.isError && isFullScreenshotCall(tool.name, action)) {
-          result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };
-        }
+        const after = await afterCall(call, result, ctx);
+        if ('guard' in after) return refuse(after.guard, after.why);
+        if (after.screenshotNote) result = { ...result, text: `${result.text}\n${after.screenshotNote}` };
         // A batch: one row per step class, not one act-other row. Steps the cap skipped never ran.
         const steps = result.steps?.filter(s => s.status !== 'skipped').map(s => ({
           tool: s.tool, action: s.action, ok: s.status === 'ok',
@@ -469,6 +393,59 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   return { server, toolCount: tools.length, tools, sessionLog };
 }
 
+/** The zod schema a tool parameter is published and validated with (zod is passed in: it is loaded lazily). */
+export function paramSchema(z: typeof import('zod').z, def: ParameterDef): ZodTypeAny {
+  let schema: ZodTypeAny;
+  if (def.type === 'number') schema = z.number();
+  else if (def.type === 'boolean') schema = z.boolean();
+  // 'array' params accept a real array (preferred) OR a JSON-encoded string,
+  // matching dual-accept handlers (e.g. batch.steps). Without this branch the
+  // default below coerced arrays to z.string() and rejected the array form
+  // the README/inputSchema advertise ("Expected string, received array").
+  //
+  // Published as a PLAIN `{type:"array", items:<real schema>}`, not as the
+  // `z.union` it used to be. The union serialized to
+  // `anyOf:[{type:"array",items:{}},{type:"string"}]`, which hits two
+  // documented provider rejections that stop a host registering the server:
+  //   - Gemini (verbatim-relay hosts): `anyOf` with a sibling `description`
+  //     is a 400 — "schema specified other fields alongside any_of".
+  //   - OpenAI `strict: true`: `items: {}` has no `type` — "schema must
+  //     have a 'type' key".
+  // Runtime acceptance is unchanged: z.any() + refine still takes a real
+  // array OR a JSON-encoded string, so dual-accept handlers see the same
+  // inputs, and anything else is still rejected as before.
+  else if (def.type === 'array') {
+    schema = z.any()
+      .refine(v => v === null || Array.isArray(v) || typeof v === 'string', {   // null: some hosts send it for "not given"
+        message: 'Expected an array (or a JSON-encoded array string).',
+      })
+      .meta({ type: 'array', items: def.items ?? { type: 'object' } });
+  }
+  // 'object' params: a real object (or its JSON text, like arrays); the handler validates the fields.
+  else if (def.type === 'object') {
+    schema = z.any()
+      .refine(v => v === null || (typeof v === 'object' && !Array.isArray(v)) || typeof v === 'string', {
+        message: 'Expected an object (or a JSON-encoded object string).',
+      })
+      .meta({ type: 'object', properties: def.properties ?? {} });
+  }
+  else schema = z.string();
+  if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
+  schema = schema.describe(def.description);
+  if (def.required === false) schema = schema.optional();
+  return schema;
+}
+
+/**
+ * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool carries destructiveHint only when
+ * it declares `destructive: true` (closing a window, overwriting the clipboard, opening a file or URI, page script).
+ * The values are the ones 1.5.27 published: hosts build their own approval UI on them, so they change only on purpose.
+ */
+export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier' | 'destructive'>): NonNullable<ToolDefinition['annotations']> {
+  if (tool.annotations) return tool.annotations;
+  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive === true };
+}
+
 /**
  * Drop the root `$schema` keyword from every tool's inputSchema in tools/list.
  *
@@ -487,16 +464,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
  * and nothing crashes. A wire-level test asserts `$schema` is absent, so such
  * an upgrade is caught by CI rather than silently re-breaking Gemini.
  */
-/**
- * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool carries destructiveHint only when
- * it declares `destructive: true` (closing a window, overwriting the clipboard, opening a file or URI, page script).
- * The values are the ones 1.5.27 published: hosts build their own approval UI on them, so they change only on purpose.
- */
-export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier' | 'destructive'>): NonNullable<ToolDefinition['annotations']> {
-  if (tool.annotations) return tool.annotations;
-  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive === true };
-}
-
 function stripRootSchemaDialect(server: McpServerLike): void {
   const handlers = (server as unknown as {
     server?: { _requestHandlers?: Map<string, (req: unknown, extra: unknown) => Promise<unknown>> };
@@ -528,17 +495,17 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
 }
 
 /**
- * Mount the streamable HTTP MCP transport on an Express app at /mcp.
+ * The streamable HTTP MCP transport, as one request handler for POST / GET / DELETE on the daemon's /mcp route.
  *
  * Two kinds of caller share the endpoint:
  *   - MCP SDK clients (editor hosts, agents) send `initialize`, then reuse the
  *     Mcp-Session-Id they get back and open a long-lived GET stream. Each such
- *     session gets its OWN server (from `createServer`) and a stateful
- *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern.
- *   - One-shot JSON-RPC posts with no initialize and no session (the
- *     dashboard, curl) get a fresh stateless transport on
- *     an idle server: `server` when it is free, another from `createServer`
- *     while it is busy (a long tool call must not block a status poll).
+ *     session gets its OWN server (from `createHandle`) and a stateful
+ *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern. When the
+ *     session closes, its session log is closed with it.
+ *   - One-shot JSON-RPC posts with no initialize and no session (curl) get a
+ *     fresh stateless transport on an idle server from a pool (a long tool call
+ *     must not block another post).
  *
  * Previously ONE server was connected to a fresh transport per request. An SDK
  * client's GET stream (or any in-flight call) kept that server connected, so
@@ -546,17 +513,17 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
  * Ubuntu VM 2026-10-15).
  *
  * `enableJsonResponse: true` keeps POST replies as one plain JSON-RPC body
- * instead of SSE (`event: message\ndata: …`), which single-JSON clients
+ * instead of SSE (`event: message
+data: …`), which single-JSON clients
  * (Claude Code's among them) need.
  *
- * Auth — the caller must apply Bearer-token middleware before this route.
+ * Auth — the caller gates the route (the daemon's route table, http-utility.ts).
  */
+export type McpHttpHandle = Pick<McpServerHandle, 'server'> & { sessionLog: Pick<SessionLog, 'end'> };
+
 export async function startMcpHttp(
-  server: McpServerLike,
-  app: express.Express,
-  mountPath: string = '/mcp',
-  createServer?: () => Promise<McpServerLike>,
-): Promise<{ close: () => Promise<void> }> {
+  createHandle: () => Promise<McpHttpHandle>,
+): Promise<{ handle: (req: express.Request, res: express.Response) => void; close: () => Promise<void> }> {
   type HttpTransport = Omit<McpTransportLike, 'close'> & { sessionId?: string; onclose?: () => void; close: () => Promise<void> };
   const { StreamableHTTPServerTransport } = await import(
     '@modelcontextprotocol/sdk/server/streamableHttp.js' as string
@@ -577,17 +544,16 @@ export async function startMcpHttp(
   };
 
   // ── One-shot posts: stateless transport on an idle server ──
-  const idleServers: McpServerLike[] = [server];
+  const idle: McpServerLike[] = [];
   const oneShot = async (req: express.Request, res: express.Response, body: unknown) => {
-    const srv = idleServers.pop() ?? (createServer ? await createServer() : undefined);
-    if (!srv) { jsonError(res, 503, -32000, 'MCP server busy — retry'); return; }
+    const srv = idle.pop() ?? (await createHandle()).server;
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     let released = false;
     const release = async () => {
       if (released) return;
       released = true;
       try { await transport.close(); } catch { /* already closed */ }
-      idleServers.push(srv);
+      idle.push(srv);
     };
     res.on('close', () => { void release(); });
     try {
@@ -620,12 +586,13 @@ export async function startMcpHttp(
       enableJsonResponse: true,
       onsessioninitialized: id => { sessions.set(id, { transport, open: 0, lastActive: Date.now() }); },
     });
-    transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
-    const srv = await createServer!();
+    const h = await createHandle();
     // A session's server is not reused: when its client goes away its session log is closed (the daemon's `live` set stays small).
-    const closed = transport.onclose;
-    transport.onclose = () => { closed?.(); srv.onSessionEnd?.('the client session closed'); };
-    await srv.connect(transport);
+    transport.onclose = () => {
+      if (transport.sessionId) sessions.delete(transport.sessionId);
+      h.sessionLog.end('the client session closed', 'session');
+    };
+    await h.server.connect(transport);
     await transport.handleRequest?.(req, res, body);
   };
 
@@ -638,40 +605,30 @@ export async function startMcpHttp(
     return s ?? null;
   };
 
-  // POST /mcp — JSON-RPC requests. Express has already parsed the body.
-  app.post(mountPath, (req, res) => {
+  // POST — JSON-RPC requests (Express has already parsed the body). GET — a session's server-to-client SSE stream
+  // (stateless has none). DELETE — end a session.
+  const handle = (req: express.Request, res: express.Response) => {
     void (async () => {
       try {
         const s = sessionOf(req, res);
         if (s === null) return;
+        if (req.method !== 'POST') {
+          if (!s) { res.status(405).set('Allow', 'POST').send('Method Not Allowed'); return; }
+          track(s, res);
+          await s.transport.handleRequest?.(req, res);
+          return;
+        }
         if (s) { track(s, res); await s.transport.handleRequest?.(req, res, req.body); return; }
-        if (createServer && isInitializeRequest(req.body)) { await openSession(req, res, req.body); return; }
+        if (isInitializeRequest(req.body)) { await openSession(req, res, req.body); return; }
         await oneShot(req, res, req.body);
       } catch (err) {
         jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
       }
     })();
-  });
-
-  // GET /mcp — a session's server-to-client SSE stream. Stateless has none.
-  // DELETE /mcp — end a session.
-  const sessionOnly = (req: express.Request, res: express.Response) => {
-    void (async () => {
-      try {
-        const s = sessionOf(req, res);
-        if (s === null) return;
-        if (!s) { res.status(405).set('Allow', 'POST').send('Method Not Allowed'); return; }
-        track(s, res);
-        await s.transport.handleRequest?.(req, res);
-      } catch (err) {
-        jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
-      }
-    })();
   };
-  app.get(mountPath, sessionOnly);
-  app.delete(mountPath, sessionOnly);
 
   return {
+    handle,
     close: async () => {
       clearInterval(sweep);
       await Promise.all([...sessions.values()].map(s => s.transport.close().catch(() => { /* gone */ })));

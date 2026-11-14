@@ -7,8 +7,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const reads = vi.hoisted(() => ({ screen: 0, regions: [] as number[][], fail: null as string | null }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     async recognizeScreen() {
       reads.screen++;
@@ -19,10 +19,12 @@ vi.mock('../platform/ocr-engine', () => ({
       if (reads.fail) throw new Error(reads.fail);
       return { elements: [{ text: 'Save', x: x + 10, y: y + 20, width: 120, height: 40, confidence: 1, line: 0 }], fullText: 'Save', durationMs: 2 };
     }
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
-import { getOcrTools, windowOcrRegion } from '../tools/ocr';
+import { getOcrTools } from '../tools/ocr';
+import { windowOcrRegion } from '../platform/coord-scale';
 
 const REAL_PLATFORM = process.platform;
 const setPlatform = (p: string) => Object.defineProperty(process, 'platform', { value: p, configurable: true });

@@ -1,14 +1,7 @@
 /**
  * PlatformAdapter — single contract for all platform-specific operations.
  *
- * Replaces scattered `if (IS_MAC) ... else ...` branching across 34 files.
  * Each platform implements this interface; business logic stays platform-free.
- *
- * Tranche 1A (v0.8.1-alpha): adds the primitives needed to unblock the
- * Tranche 1B / 2 MCP tools (mouseDown/mouseUp, keyDown/keyUp, middle click,
- * horizontal scroll, window-state / bounds control, display enumeration,
- * waitForElement, widened invokeElement actions, UI-element state flags).
- * Every change is ADDITIVE — existing signatures kept so no caller breaks.
  */
 
 export interface ScreenSize {
@@ -32,7 +25,6 @@ export interface Display {
   index: number;
   /** Human label (e.g. "Display 1", "Built-in Retina Display"). */
   label: string;
-  /** Whether this is the primary / main display. */
   primary: boolean;
   /** Logical bounds — mouse-coordinate space. Can be negative for left-of-primary. */
   bounds: { x: number; y: number; width: number; height: number };
@@ -95,7 +87,6 @@ export interface UiElement {
   value?: string;
   /** The focused-element read only: `value` was read from the element itself, so an empty one is an empty field. */
   readable?: boolean;
-  /** Whether the element is enabled and interactable. */
   enabled?: boolean;
   /** Whether the element currently has keyboard focus. */
   focused?: boolean;
@@ -105,7 +96,6 @@ export interface UiElement {
   disabled?: boolean;
   /** Element is marked busy (e.g. progress in-flight). */
   busy?: boolean;
-  /** Element is off-screen / scrolled out of view. */
   offscreen?: boolean;
   /** Element supports expand/collapse (has an ExpandCollapse a11y pattern). */
   expandable?: boolean;
@@ -125,8 +115,6 @@ export interface UiElement {
    * the agent. Consumers should fall back through `name → description →
    * value → controlType` when rendering. Adapters populate when available;
    * undefined is acceptable (back-compat).
-   *
-   * Added 0.9.4 for issue #101 bug 5.
    */
   description?: string;
   /** What the app shows on hover, when the platform exposes it: UIA HelpText, AXHelp, the AT-SPI description. Set only when
@@ -156,7 +144,6 @@ export interface PermissionStatus {
   screenRecording: boolean;
 }
 
-/** Pointer button — extended in Tranche 1A to include middle click. */
 export type MouseButton = 'left' | 'right' | 'middle';
 
 /**
@@ -179,8 +166,7 @@ export interface FocusActivation {
 }
 
 /**
- * Scroll direction — extended in Tranche 1A to include horizontal. Windows
- * and macOS native wheel APIs support both axes; Linux X11 uses xdotool
+ * Windows and macOS native wheel APIs support both axes; Linux X11 uses xdotool
  * buttons 6/7 or nut-js's `scrollLeft/scrollRight`; Wayland is iffy on
  * horizontal and degrades gracefully.
  */
@@ -195,11 +181,9 @@ export type ScrollDirection = 'up' | 'down' | 'left' | 'right';
 export type WindowState = 'maximize' | 'minimize' | 'normal' | 'close';
 
 /**
- * Invoke-element action union. Expanded in Tranche 1A to cover the UIA
- * ExpandCollapse / Toggle / Selection patterns that `ps-bridge.ps1`
- * already implements on Windows and that `invoke-element.jxa` now
- * implements on macOS. Linux returns `{success:false}` until the
- * AT-SPI bridge lands.
+ * Invoke-element action union: the UIA ExpandCollapse / Toggle / Selection
+ * patterns of `ps-bridge.ps1` on Windows, and the same actions in the macOS
+ * bridges (ax-helper.swift, invoke-element.jxa) and the Linux AT-SPI bridge.
  */
 export type InvokeAction =
   | 'click'
@@ -228,43 +212,25 @@ export interface PlatformAdapter {
   /** OS family this adapter handles. */
   readonly platform: 'darwin' | 'win32' | 'linux';
 
-  /**
-   * Optional environment hint — Linux sets this to 'wayland' or 'x11' so
-   * callers can surface graceful "not supported on Wayland" errors for
-   * known-broken primitives (cursor queries, some global hotkeys).
-   * Undefined on Windows and macOS.
-   */
-  readonly environment?: 'wayland' | 'x11';
-
   /** One-time setup (warm caches, start helpers). */
   init(): Promise<void>;
 
-  /** Cleanup on shutdown. */
-  shutdown(): Promise<void>;
-
   // ─── PERMISSIONS ────────────────────────────────────────────────
   checkPermissions(): Promise<PermissionStatus>;
-  requestPermissions(): Promise<PermissionStatus>;
 
   // ─── DISPLAY ────────────────────────────────────────────────────
   /** Get the primary display geometry. */
   getScreenSize(): Promise<ScreenSize>;
-  /**
-   * List ALL connected displays. Tranche 1A primitive — unblocks
-   * multi-monitor-aware screenshot and mouse targeting. Primary display
-   * is always at index 0.
-   */
+  /** List ALL connected displays. Primary display is always at index 0. */
   listDisplays(): Promise<Display[]>;
   /**
    * Capture the full screen as PNG. Optionally resize to maxWidth.
-   * `displayIndex` (Tranche 1A) selects a specific display — 0 (default)
+   * `displayIndex` selects a specific display — 0 (default)
    * is primary. Passing an out-of-range index falls back to primary.
+   * `region` captures that rectangle, in capture (physical) pixels — on macOS the Retina capture's pixels, not logical
+   * points, as the caller (tools/desktop.ts) passes them.
    */
-  /** `region` captures that rectangle, in capture (physical) pixels — on macOS the Retina capture's pixels, not logical
-   *  points, as the caller (tools/desktop.ts) passes them; `displayIndex` one monitor. */
   screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult>;
-  /** Capture a region of the screen. */
-  screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult>;
 
   // ─── WINDOWS ────────────────────────────────────────────────────
   listWindows(): Promise<WindowInfo[]>;
@@ -278,13 +244,7 @@ export interface PlatformAdapter {
   takeFocusFailure?(): string | null;
 
   /**
-   * Legacy shim — preserved for back-compat. New code should call
-   * `setWindowState('maximize')`. Default behavior unchanged.
-   */
-  maximizeWindow(): Promise<void>;
-
-  /**
-   * Canonical window-state control. Semantics (Tranche 1A):
+   * Canonical window-state control. Semantics:
    *   - 'maximize' — full-working-area size
    *   - 'minimize' — hide to taskbar/Dock
    *   - 'normal'   — restore from minimized/maximized to previous bounds
@@ -350,9 +310,8 @@ export interface PlatformAdapter {
    */
   getPageText?(): Promise<{ text: string; name?: string } | null>;
   /**
-   * Invoke an accessibility action on a named element. Action union
-   * widened in Tranche 1A. Platforms that don't support a given action
-   * return `{ success:false }` — no throw.
+   * Invoke an accessibility action on a named element. Platforms that
+   * don't support a given action return `{ success:false }` — no throw.
    */
   invokeElement(query: {
     name?: string;
@@ -400,13 +359,12 @@ export interface PlatformAdapter {
   /**
    * Poll for an element to appear. Returns the first matching element or
    * null when `timeoutMs` elapses. Useful for waiting out transient UI
-   * (dialogs, spinners). Tranche 1A primitive — lifted from
-   * `action-router.ts`'s internal `waitForElement` helper.
+   * (dialogs, spinners).
    */
   waitForElement(query: WaitForElementQuery, timeoutMs: number): Promise<UiElement | null>;
 
   // ─── INPUT (mouse) ──────────────────────────────────────────────
-  /** All coords are in LOGICAL pixels (mouse coordinate space).
+  /** Coords are in the OS mouse space: LOGICAL points on macOS, PHYSICAL pixels on Windows / Linux (coord-scale.ts).
    *  Returns a FocusActivation describing the window brought to the foreground
    *  at the click point (when the platform verifies it) so callers can WARN on
    *  a failed/ wrong-window activation; void/undefined when not verifiable. */
@@ -456,15 +414,6 @@ export interface PlatformAdapter {
   writeClipboard(text: string): Promise<void>;
 
   // ─── APPS ───────────────────────────────────────────────────────
-  /**
-   * Convenience wrapper around `launchApp`. Platform adapters keep this
-   * alias-data-agnostic — they DO NOT consult `APP_ALIASES`. Cross-OS
-   * name mapping (e.g. Windows "Notepad" → mac "TextEdit") and UWP /
-   * executable / searchTerm hints belong in the caller (the agent's
-   * `open_app` tool, the router's `handleOpenApp`), which resolves the
-   * alias and forwards the data through `launchApp` opts.
-   */
-  openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }>;
   launchApp(name: string, opts?: {
     /**
      * `name` is an app name an agent typed, not one from the alias table: start it only if it resolves to an APP the OS

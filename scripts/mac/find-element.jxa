@@ -8,14 +8,14 @@
  * Accepts both macOS/JXA arg names and Windows PS1 arg names so the same
  * TypeScript call site works on both platforms:
  *
- *   macOS args  ΓåÆ  Windows aliases
+ *   macOS args  →  Windows aliases
  *   -name           -Name
- *   -role           -ControlType  (with ControlTypeΓåÆrole mapping below)
+ *   -role           -ControlType  (with ControlType→role mapping below)
  *   -processId      -ProcessId
  *
  * Returns JSON array of matches with:
  *   - name: Element name/label
- *   - role: macOS accessibility role (AXButton, AXTextField, ΓÇª)
+ *   - role: macOS accessibility role (AXButton, AXTextField, …)
  *   - bounds: {x, y, width, height}
  *   - processId: Owning process PID
  *   - value: Current value (if applicable)
@@ -26,7 +26,7 @@
 
 ObjC.import('stdlib');
 
-// Map Windows UI Automation ControlType names ΓåÆ macOS AX role substrings
+// Map Windows UI Automation ControlType names → macOS AX role substrings
 var CONTROL_TYPE_MAP = {
     'Button':      'AXButton',
     'Edit':        'AXTextField',
@@ -50,7 +50,7 @@ var CONTROL_TYPE_MAP = {
     'Group':       'AXGroup',
 };
 
-// Parse command line arguments ΓÇö accept both macOS and Windows PS1 naming
+// Parse command line arguments — accept both macOS and Windows PS1 naming
 function parseArgs() {
     var args = ObjC.unwrap($.NSProcessInfo.processInfo.arguments);
     var result = { name: null, role: null, processId: null };
@@ -64,7 +64,6 @@ function parseArgs() {
         } else if (arg === '-role' && next) {
             result.role = next;
         } else if (arg === '-ControlType' && next) {
-            // Translate Windows ControlType to macOS AX role
             result.role = CONTROL_TYPE_MAP[next] || ('AX' + next);
         } else if ((arg === '-processId' || arg === '-ProcessId') && next) {
             result.processId = parseInt(next, 10);
@@ -183,7 +182,6 @@ try {
     if (!params.processId && !params.name) {
         output = JSON.stringify([]);
     } else {
-        // Get target process(es)
         var targetProcesses;
         if (params.processId) {
             targetProcesses = SystemEvents.processes.where({ unixId: params.processId });
@@ -195,7 +193,6 @@ try {
             targetProcesses = SystemEvents.processes.where({ backgroundOnly: false });
         }
 
-        // Search each process
         for (var p = 0; p < targetProcesses.length && results.length < maxResults; p++) {
             try {
                 var proc = targetProcesses[p];
@@ -209,7 +206,6 @@ try {
                     } catch (e) {}
                 }
 
-                // Stamp the processId on any newly-added results
                 for (var r = beforeCount; r < results.length; r++) {
                     results[r].processId = procId;
                 }

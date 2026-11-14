@@ -9,7 +9,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getPackageRoot } from '../paths';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import { compareVersions, describeCopies, findInstalledCopies, globalPrefixOf } from './installed-copies';
 
 export type InstallMethod = 'npm-global' | 'npx' | 'desktop-extension' | 'source' | 'other';

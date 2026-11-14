@@ -22,19 +22,20 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public l: number, public t: number, public w: number, public h: number) {} },
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 import { parseAssertions, validateExpect } from '../core/verify/assertions';
-import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { projectToToolDefinition } from '../tools/projected/project-mcp';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { ToolContext } from '../tools/types';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const NOTEPAD = { processId: 9, processName: 'notepad', title: 'Untitled - Notepad', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
 

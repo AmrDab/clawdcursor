@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { resolveRef, REF_MIN_CONFIDENCE } from '../core/sense/ui-map-resolve';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const el = (over: Partial<UIElement> & Pick<UIElement, 'id'>): UIElement => ({
   role: 'button', text: 'Send', normalized_text: 'send', bounds: [10, 20, 40, 12],

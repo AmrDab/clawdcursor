@@ -1,44 +1,61 @@
 /**
- * The web dashboard called granular tools directly, so against a `--compact`
- * daemon those calls failed. It now asks tools/list once and maps each call
- * onto what the daemon serves.
+ * The dashboard reads its log panel from GET /logs. It used to call the logs_recent MCP tool every 2 s: each poll was a
+ * recorded session call (so `clawdcursor report` picked the dashboard as the latest session), polls were refused and
+ * logged while stopped, and on a --compact daemon the panel was simply unavailable.
  */
-import { describe, it, expect } from 'vitest';
-import { dashboardToolCall } from '../surface/dashboard-tools';
-import { mountDashboard } from '../surface/dashboard';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import request from 'supertest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { dashboardPage } from '../surface/dashboard';
+import { createUtilityServer } from '../surface/http-utility';
+import { initServerToken } from '../surface/auth';
+import { captureConsole } from '../surface/log-buffer';
+import { listSessions } from '../surface/session-log';
+import { stopControl, resumeControl, __setControlDirForTests } from '../core/control';
 
-const GRANULAR = ['read_screen', 'resume_task', 'logs_recent'];
-const COMPACT = ['computer', 'accessibility', 'window', 'system', 'browser', 'batch'];
+describe('GET /logs', () => {
+  let token: string;
+  beforeAll(() => { token = initServerToken(); captureConsole(); });
+  afterAll(() => { resumeControl('test'); __setControlDirForTests(null); });
+  const app = () => createUtilityServer({ host: '127.0.0.1', onStop: () => {} });
 
-describe('dashboardToolCall', () => {
-  it('granular daemon: the granular tools, unchanged', () => {
-    expect(dashboardToolCall(GRANULAR, 'logs_recent', {})).toEqual({ name: 'logs_recent', arguments: {} });
+  it('with the token: the captured console lines', async () => {
+    console.log('dashboard-surface: a line for the panel');
+    const res = await request(app()).get('/logs').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.map((l: { message: string }) => l.message)).toContain('dashboard-surface: a line for the panel');
+    expect(res.body[0]).toEqual(expect.objectContaining({ timestamp: expect.any(Number), level: expect.any(String) }));
   });
 
-  it('compact daemon: a tool with no compact equivalent is unavailable (null), not a wrong call', () => {
-    expect(dashboardToolCall(COMPACT, 'logs_recent', {})).toBeNull();
+  it('without the token: 401', async () => {
+    expect((await request(app()).get('/logs')).status).toBe(401);
   });
 
-  it('unknown surface (tools/list failed): the granular names, as before', () => {
-    expect(dashboardToolCall([], 'logs_recent', {})).toEqual({ name: 'logs_recent', arguments: {} });
+  it('works while stopped and records no session call', async () => {
+    __setControlDirForTests(fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-dash-ctl-')));
+    stopControl('test');
+    const before = listSessions().length;
+    const res = await request(app()).get('/logs').set('Cookie', `clawdcursor_token=${token}`);
+    expect(res.status).toBe(200);
+    expect(listSessions().length).toBe(before);
   });
 });
 
 describe('dashboard page', () => {
   function page(): string {
     let html = '';
-    const app = { get: (_p: string, h: (req: unknown, res: unknown) => void) => h({}, { cookie() {}, type() { return { send: (s: string) => { html = s; } }; } }) };
-    mountDashboard(app as never);
+    const res = { cookie() {}, type() { return { send: (s: string) => { html = s; } }; } };
+    dashboardPage()({} as never, res as never, () => {});
     return html;
   }
 
-  it('embeds the mapping and routes every tool call through it', () => {
+  it('reads its logs from GET /logs and calls no MCP tool', () => {
     const html = page();
-    expect(html).toContain('function dashboardToolCall');
-    expect(html).toContain("'tools/list'");
-    // No direct granular calls left: every mcpCall goes through toolCall().
-    expect(html.match(/mcpCall\('/g) ?? []).toEqual([]);
-    expect(html).not.toContain("toolCall('agent_status'");
+    expect(html).toMatch(/fetch\('\/logs', \{ headers: authHeaders\(\) \}\)/);
+    expect(html).not.toContain('/mcp');
+    expect(html).not.toContain('tools/');
     // The pause banner still answers through POST /resume.
     expect(html).toContain("fetch('/resume'");
   });

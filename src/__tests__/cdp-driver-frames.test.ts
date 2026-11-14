@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import { CDPDriver } from '../platform/cdp-driver';
 import { classifyResult } from '../core/result-codes';
 import { getCdpTools } from '../tools/cdp';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 
 type Has = {
   texts?: string[]; plain?: string[]; selectors?: Record<string, string>; labels?: string[]; options?: string[];

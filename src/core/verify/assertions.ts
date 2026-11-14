@@ -3,9 +3,7 @@
  *
  * THE PROBLEM THIS SOLVES
  * -----------------------
- * Task verification used to be model-claimed: `done(evidence)` took a prose
- * string and the guards only checked it for length/hedging — nothing
- * re-checked reality. In the 2026-06-06 live Outlook run the model looked at
+ * A model's own claim of success is not proof. In the 2026-06-06 live Outlook run the model looked at
  * a real screenshot, "verified" a recipient that was never committed, and the
  * task died 12 turns later at send time.
  *
@@ -23,18 +21,18 @@
  * LAYERING
  * --------
  * This module is pure core: it depends on PlatformAdapter (reads only) and
- * node:fs — never on tools, the agent loop, or the MCP surface. It is mounted
- * twice: by the System B `verify` tool (which projects to the MCP surface for
- * external agents) and by the `done(assertions)` completion gate.
+ * node:fs — never on tools or the MCP surface. Callers: the projected `verify`
+ * tool, every tool's `expect` (sense/reactive-check.ts), and pause_for_user's
+ * `done_when` (tools/agent.ts).
  */
 
 import { promises as fs } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { quoteScreenText } from '../result-codes';
+import { quoteScreenText } from '../untrusted-screen-content';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
 import { isOwnUiPid } from '../../platform/pointer-guard';
-import { windowTextIncludes, normalizeWindowText } from '../../tools/window-text';
+import { windowTextIncludes } from '../../platform/window-text';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,9 +53,6 @@ export interface AssertionDeps {
    *  check). Left unwired in contexts without an OCR engine; the assertion
    *  then fails with an explanatory detail instead of throwing. */
   ocrText?: () => Promise<string>;
-  /** Epoch-ms timestamp of task start, for `file_changed_since_start` (the proof that a mutating task actually wrote
-   *  the file it claims to). Unset: the start of the MCP session the call runs in (`inMcpSession`). */
-  taskStartedAt?: number;
 }
 
 /** When the MCP session a tool call runs in started (its agent connected): the start `file_changed_since_start` means. */
@@ -253,7 +248,7 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
       // wallpaper task 'verified' via the clock while the wallpaper file went
       // untouched). Discriminating by construction: at task start nothing has
       // been modified-since-start yet.
-      const start = deps.taskStartedAt ?? mcpSessionStart.getStore();
+      const start = mcpSessionStart.getStore();
       if (start === undefined) {
         return { ok: false, detail: 'no start time in this context — file_changed_since_start works inside an MCP session' };
       }
@@ -307,87 +302,18 @@ export function renderReport(report: VerifyReport): string {
     .join('\n');
 }
 
-// ─── Discriminating-assertion gate (false-success defense) ────────────────────
-//
-// A passing assertion only PROVES the task did something if it was NOT already
-// true before the task ran. A "change the wallpaper" task that 'verifies' via
-// ocr_contains("8:41 PM") — a clock that's on screen regardless — proves
-// nothing. We capture a cheap baseline at task start and, for the assertion
-// types we can judge cheaply, reject a completion whose evidence was ALL true
-// at baseline. Types we can't judge from the baseline (element_*, file_exists,
-// file_contains) return null and are TRUSTED — never the source of a false
-// rejection. This is the non-LLM ~80% gate; full task-intent↔assertion
-// semantic relevance (e.g. a clock that genuinely ticked is "discriminating"
-// yet irrelevant) stays a deliberate, documented gap.
-
-export interface TaskBaseline {
-  startedAt: number;
-  /** Lower-cased OCR text of the screen at task start. */
-  ocrText: string;
-  /** Lower-cased window titles present at task start. */
-  windowTitles: string[];
-  /** Lower-cased process names with a window at task start. */
-  processNames: string[];
-  /** Lower-cased clipboard contents at task start. */
-  clipboard: string;
-}
-
-/** Capture the cheap baseline artifacts at task start. Best-effort: any source
- *  that fails contributes an empty value rather than throwing. */
-export async function captureTaskBaseline(
-  adapter: PlatformAdapter,
-  ocrText?: () => Promise<string>,
-): Promise<TaskBaseline> {
-  const startedAt = Date.now();
-  let windowTitles: string[] = [];
-  let processNames: string[] = [];
-  try {
-    const wins = await adapter.listWindows();
-    windowTitles = wins.map(w => normalizeWindowText(w.title));
-    processNames = wins.map(w => (w.processName ?? '').toLowerCase());
-  } catch { /* empty */ }
-  let clipboard = '';
-  try { clipboard = ((await adapter.readClipboard()) ?? '').toLowerCase(); } catch { /* empty */ }
-  let ocr = '';
-  try { ocr = ocrText ? (await ocrText()).toLowerCase() : ''; } catch { /* empty */ }
-  return { startedAt, ocrText: ocr, windowTitles, processNames, clipboard };
-}
-
-/**
- * Was this assertion ALREADY satisfied at task start?
- *   true  — provably true at baseline (non-discriminating: proves nothing changed)
- *   false — provably NOT true at baseline (discriminating: the task made it true)
- *   null  — undeterminable from the cheap baseline (element/file checks) → trusted
- */
-export function wasTrueAtBaseline(a: Assertion, b: TaskBaseline): boolean | null {
-  const has = (h: string, n: string) => h.includes(n.toLowerCase());
-  switch (a.type) {
-    case 'ocr_contains':             return has(b.ocrText, a.value);
-    case 'clipboard_contains':       return has(b.clipboard, a.value);
-    case 'window_title_contains':    return b.windowTitles.some(t => has(t, normalizeWindowText(a.value)));
-    case 'app_running':              return b.processNames.some(p => has(p, a.name));
-    case 'file_changed_since_start': return false; // by construction: nothing is changed-since-start at start
-    default:                         return null;  // element_*, file_exists, file_contains — trust
-  }
-}
-
-/**
- * Given a PASSING report, is at least one passing assertion discriminating
- * (not provably true at baseline)? Returns true when the evidence genuinely
- * reflects a change, false when EVERY passing proof was already true before
- * the task acted.
- */
-export function hasDiscriminatingEvidence(
-  assertions: Assertion[],
-  report: VerifyReport,
-  baseline: TaskBaseline,
-): boolean {
-  return assertions.some((a, i) =>
-    report.outcomes[i]?.ok === true && wasTrueAtBaseline(a, baseline) !== true,
-  );
-}
-
 /** What the `expect` parameter says in a tool's schema: short enough to read from the description alone, with one example. */
 export const EXPECT_DESCRIPTION =
   'Checks run after the action; a failed check returns DEVIATION. Example: [{"type":"window_title_contains","value":"Inbox"}]. ' +
   'Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.';
+
+/** The `expect` parameter every acting tool publishes: a list of assertions, one of the types above each. */
+export const EXPECT_SCHEMA = {
+  type: 'array',
+  description: EXPECT_DESCRIPTION,
+  items: {
+    type: 'object',
+    properties: { type: { type: 'string', enum: Object.keys(FIELDS_BY_TYPE) } },
+    required: ['type'],
+  },
+} as const;

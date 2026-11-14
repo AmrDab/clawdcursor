@@ -50,7 +50,7 @@ catch {
 console.log(`macOS ${env.macos} ${env.arch} · node ${env.node} · ${env.swiftc ?? 'NO swiftc (xcode-select --install)'}`);
 console.log(`permissions for this terminal: Accessibility=${env.accessibility} · Screen Recording=${env.screenRecording}\n`);
 
-const { compileMacOcrBinary, resetMacOcrBinaryState } = require(dist('platform/mac-ocr-binary.js'));
+const { compileMacOcrBinary, resetMacOcrBinaryState } = require(dist('platform/mac-swift-binary.js'));
 const { OcrEngine } = require(dist('platform/ocr-engine.js'));
 const { getUiTreeWithWake, wakeAccessibility, resetWakeState } = require(dist('platform/a11y-wake.js'));
 const { MacOSAdapter } = require(dist('platform/macos.js'));
@@ -189,7 +189,7 @@ try {
 // ── 7b. the accessibility helper: window list, active window, tree, system dialogs ──
 // The osascript scripts it replaces took 9–10 s for the window list and 12–25 s for a tree,
 // past the old 8 s / 12 s timeouts whose errors were reported as "0 windows" / "empty tree".
-const { macAxBinary } = require(dist('platform/mac-ocr-binary.js'));
+const { macAxBinary } = require(dist('platform/mac-swift-binary.js'));
 const AX_HELPER = path.join(ROOT, 'scripts', 'mac', 'ax-helper.swift');
 {
   const t0 = Date.now();
@@ -239,12 +239,12 @@ const AX_HELPER = path.join(ROOT, 'scripts', 'mac', 'ax-helper.swift');
 
 // ── 8. the macOS-only unit tests ──────────────────────────────────────────────
 try {
-  const out = sh('npx', ['vitest', 'run', 'src/__tests__/mac-ocr-binary.test.ts', 'src/__tests__/a11y-wake.test.ts', 'src/__tests__/mac-screen.test.ts', 'src/__tests__/mac-screen-displays.test.ts', 'src/__tests__/mac-ax-live.test.ts'], { cwd: ROOT, timeout: 600_000 });
+  const out = sh('npx', ['vitest', 'run', 'src/__tests__/mac-swift-binary.test.ts', 'src/__tests__/a11y-wake.test.ts', 'src/__tests__/mac-screen.test.ts', 'src/__tests__/mac-screen-displays.test.ts', 'src/__tests__/mac-ax-live.test.ts'], { cwd: ROOT, timeout: 600_000 });
   const m = /Tests\s+(.*)/.exec(out); line('PASS', 'macOS-only unit tests', m ? m[1].replace(/\x1b\[[0-9;]*m/g, '') : 'passed');
 } catch (err) { const o = String(err.stdout || err.message); line('FAIL', 'macOS-only unit tests', (o.match(/FAIL.*|×.*/g) || [o.slice(-300)]).slice(0, 3).join(' | ').replace(/\x1b\[[0-9;]*m/g, '')); }
 
 // ── 9. the on-screen overlay (outline + pill) and the pause prompt — interactive ─
-const { macOverlayBinary } = require(dist('platform/mac-ocr-binary.js'));
+const { macOverlayBinary } = require(dist('platform/mac-swift-binary.js'));
 const { spawn } = await import('node:child_process');
 const OVERLAY = path.join(ROOT, 'scripts', 'mac', 'overlay.swift');
 // NSWorkspace, not System Events: System Events keeps naming the old app while

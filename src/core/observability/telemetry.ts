@@ -16,7 +16,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { DATA_DIR, getPackageRoot } from '../../paths';
-import { VERSION } from '../../surface/version';
+import { VERSION } from '../../version';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { WEBVIEW2_APPS_PATTERN } from '../app-categories';
 import { HOSTS, OUTCOMES, FAILED, ERROR_CLASSES, HELPERS, PS_BRIDGE_STEP, WAIT_STEP, EXIT_REASONS, ARCHS } from './telemetry-lists';

@@ -9,38 +9,28 @@
  * Vision is never called from here — that's the caller's last resort.
  *
  * Key design: NO coordinate conversion needed by the caller.
- * OCR coords and a11y coords both match nut-js mouseClick coords directly.
  */
 
 import type { ToolDefinition } from './types';
-import { OcrEngine } from '../platform/ocr-engine';
+import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
-import { windowOcrRegion } from './ocr';
+import { ocrPointToClickPoint, windowOcrRegion } from '../platform/coord-scale';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING } from './paste-guard';
-import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
-import { quoteScreenText } from '../core/result-codes';
+import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 import { ensureVisible } from '../core/sense/ui-map-visible';
 import { locateFieldByLabel } from '../core/sense/ui-map-field';
 import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
 import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
-// Shared OCR engine singleton — avoids re-initialization per call
-let sharedOcr: OcrEngine | null = null;
-function getOcr(): OcrEngine {
-  if (!sharedOcr) sharedOcr = new OcrEngine();
-  return sharedOcr;
-}
 
-// ── Known apps with empty accessibility trees ──
-// These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
-/** Spoken names of calculator keys (Windows names, macOS AX identifiers). */
 /** What to do after a smart_click that found no target: read the text on screen, retry with the exact label. In granular names;
  *  the compact surface renames them (compact.ts renameJsonAdvice: a JSON result skips the result line and the prose rewrite). */
 export const SMART_MISS_NEXT =
   'ocr_read_screen lists the text on screen with positions; retry smart_click with the exact label. desktop_screenshot only if the target has no text.';
 
+/** Spoken names of calculator keys (Windows names, macOS AX identifiers). */
 const KEY_NAME_ALIASES: Record<string, string[]> = {
   '0': ['Zero'], '1': ['One'], '2': ['Two'], '3': ['Three'], '4': ['Four'],
   '5': ['Five'], '6': ['Six'], '7': ['Seven'], '8': ['Eight'], '9': ['Nine'],
@@ -54,32 +44,13 @@ const KEY_NAME_ALIASES: Record<string, string[]> = {
 /** Control types that take typed text, across UIA / AX / AT-SPI names. */
 const EDITABLE_TYPE = /edit|entry|textfield|textarea|text field|text area|combo|password|document/i;
 
+// ── Known apps with empty accessibility trees ──
+// These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
 const EMPTY_A11Y_APPS = new Set([
   'windowsterminal', 'terminal', 'wt', 'alacritty', 'wezterm',
   'hyper', 'mintty', 'conhost',
 ]);
 
-
-/**
- * Convert an OCR hit (PHYSICAL pixels, on every OS) into the coordinate space
- * NativeDesktop.mouseClick expects — which differs by OS (see physicalToMouse):
- *
- *   Windows / Linux — mouseClick takes PHYSICAL and divides by dpiRatio itself.
- *     Dividing here too double-converted: on a 2.25x display an OCR click
- *     landed at ~1/5 of the target.
- *   macOS — mouseClick takes LOGICAL; physicalToMouse is a no-op there. This
- *     division is the ONLY one, mapping Retina-physical OCR coords to logical
- *     points. Removing it re-introduces #154 (every click ~2x off on Retina).
- *
- * Exported so the per-OS rule is pinned by a test: a plausible-looking fix
- * ("just remove the division") fixes Windows and silently breaks every Mac.
- */
-export function ocrPointToClickPoint(
-  x: number, y: number, dpiRatio: number, platform: NodeJS.Platform,
-): { x: number; y: number } {
-  const div = platform === 'darwin' ? (dpiRatio || 1) : 1;
-  return { x: Math.round(x / div), y: Math.round(y / div) };
-}
 
 export function getSmartTools(): ToolDefinition[] {
   return [
@@ -156,15 +127,13 @@ export function getSmartTools(): ToolDefinition[] {
         const appName = activeWin?.processName?.toLowerCase() || '';
         const hasA11y = !EMPTY_A11Y_APPS.has(appName);
 
-        // Launch both in parallel
         const ocrPromise = (async () => {
           try {
-            const engine = getOcr();
+            const engine = ocrEngine();
             if (!engine.isAvailable()) return null;
             const result = await engine.recognizeScreen();
             if (result.elements.length === 0) return null;
 
-            // Group by line for readability
             const lines = new Map<number, typeof result.elements>();
             for (const el of result.elements) {
               const lineEls = lines.get(el.line) ?? [];
@@ -191,7 +160,6 @@ export function getSmartTools(): ToolDefinition[] {
 
         const [ocrResult, a11yResult] = await Promise.all([ocrPromise, a11yPromise]);
 
-        // OCR succeeded — return OCR text, attach a11y tree if available
         if (ocrResult) {
           const a11ySuffix = a11yResult
             ? `\n\n=== A11Y TREE (supplement) ===\n${wrapUntrustedScreenContent(a11yResult)}`
@@ -201,7 +169,6 @@ export function getSmartTools(): ToolDefinition[] {
           };
         }
 
-        // OCR failed but a11y succeeded — return a11y alone
         if (a11yResult) {
           return { text: `[via UI Automation active window]\n${wrapUntrustedScreenContent(a11yResult)}` };
         }
@@ -272,7 +239,7 @@ export function getSmartTools(): ToolDefinition[] {
         if (lockedMsg) return { text: JSON.stringify({ error: 'screen_locked', reason: lockedMsg, target, tried: [] }), isError: true };
         const processId = params.processId as number | undefined;
         const within = typeof params.within === 'string' && params.within.trim() ? params.within.trim() : undefined;
-        const timeoutMs = (params.timeout as number) || 10000; // default 10s, was 5s
+        const timeoutMs = (params.timeout as number) || 10000;
         const attempted: string[] = [];
 
         // Deadline-aware budget. Each fallback checks `remaining()` BEFORE
@@ -315,7 +282,6 @@ export function getSmartTools(): ToolDefinition[] {
           return { text: screenJson(payload), isError: true };
         };
 
-        // Detect active window and check traits
         const activeWin = await ctx.a11y.getActiveWindow().catch(() => null);
         const appName = activeWin?.processName?.toLowerCase() || '';
         const isBrowser = getBrowserProcessNames().includes(appName);
@@ -336,9 +302,8 @@ export function getSmartTools(): ToolDefinition[] {
         let ocrRefused = false;
 
         // ── Step 1: OCR + a11y in parallel ──
-        // OCR finds text coordinates, a11y tries invoke — whoever succeeds first wins.
+        // OCR finds text coordinates, a11y tries invoke — a successful invoke wins over an OCR match.
 
-        // Start OCR scan
         type OcrHit = { x: number; y: number; text: string; warning?: string; bounds: { x: number; y: number; w: number; h: number }; confidence: number | null; sentence?: string };
         // Why OCR gave no target, for the failure report: "no match" alone hid
         // whether OCR failed, read nothing, or read text that didn't match.
@@ -347,7 +312,7 @@ export function getSmartTools(): ToolDefinition[] {
           // OCR reads text, not windows: it cannot honour `within`.
           if (within) { ocrDiag = 'ocr: not tried (within names a window or dialog, which OCR cannot tell apart)'; return null; }
           try {
-            const engine = getOcr();
+            const engine = ocrEngine();
             if (!engine.isAvailable()) { ocrDiag = 'ocr: engine unavailable'; return null; }
             const result = await engine.recognizeScreen();
             const wordsRead = result.elements?.length ?? 0;
@@ -369,7 +334,6 @@ export function getSmartTools(): ToolDefinition[] {
             const wholeTokenOnly = targetNorm.length <= 2 || /^[\d ]+$/.test(targetNorm);
 
             const pickBest = (cands: typeof result.elements) => {
-              // Group by OCR line index; sort each line left-to-right
               const lineMap = new Map<number, typeof cands>();
               for (const el of cands) {
                 if (!el.text) continue;
@@ -464,7 +428,6 @@ export function getSmartTools(): ToolDefinition[] {
                 for (let i = 0; i < sorted.length; i++) {
                   for (let n = 1; n <= MAX_N && i + n <= sorted.length; n++) {
                     const span = sorted.slice(i, i + n);
-                    // Reject spans with a big horizontal gap (different visual chunks)
                     let contiguous = true;
                     for (let k = 1; k < span.length; k++) {
                       if (!joined(span[k - 1], span[k])) { contiguous = false; break; }
@@ -555,7 +518,6 @@ export function getSmartTools(): ToolDefinition[] {
           }
         })();
 
-        // Start a11y invoke in parallel
         type A11yHit =
           | { method: 'invoke'; pending?: boolean; lateInvokeError?: string; target?: unknown }
           | { method: 'bounds'; clickPoint: { x: number; y: number }; bounds?: { x: number; y: number; w: number; h: number }; text?: string };
@@ -648,7 +610,6 @@ export function getSmartTools(): ToolDefinition[] {
           }, remaining());
           ocrPromise.then(r => { parallelResult.ocr = r; }, () => {}).finally(() => { ocrDone = true; parallelResult.ocrDone = true; check(); });
           a11yPromise.then(r => { parallelResult.a11y = r; }, () => {}).finally(() => { a11yDone = true; check(); });
-          // Cancel the deadline timer once both settle so we don't keep the event loop alive
           Promise.allSettled([ocrPromise, a11yPromise]).then(() => clearTimeout(timer));
         });
         if (guardRefusal && !parallelResult.a11y) return { text: guardRefusal as string, isError: true };
@@ -661,7 +622,6 @@ export function getSmartTools(): ToolDefinition[] {
         // the a11y search (always awaited) ran past the deadline.
         const ocrCutOff = parallelTimedOut && !parallelResult.ocrDone;
 
-        // a11y invoke succeeded — best outcome (OS-level click, most reliable)
         if (a11yResult && (a11yResult as any).method === 'invoke') {
           ctx.a11y.invalidateCache();
           const stillRunning = (a11yResult as { pending?: boolean }).pending
@@ -674,13 +634,8 @@ export function getSmartTools(): ToolDefinition[] {
         }
 
         // OCR found the element — coordinate click. OCR returns PHYSICAL
-        // pixels (it's running against `screen.grab()` output). On Windows
-        // with DPI scaling > 100%, nut-js mouseClick expects LOGICAL pixels,
-        // so a physical (1800, 900) on a 2x display would land at logical
-        // (1800, 900) — which is far past the actual element. Apply the
-        // physical→logical DPI correction. On 100% DPI dpiRatio === 1 and
-        // this is a no-op, so the fix is safe across every Windows config
-        // and on macOS / Linux (where dpiRatio always returns 1).
+        // pixels on every OS; mouseClick's space differs by OS (see
+        // ocrPointToClickPoint in coord-scale.ts).
         if (ocrMatch) {
           const m = ocrMatch as NonNullable<typeof ocrMatch>;
           // Record the OCR hit as a candidate even on the happy path —
@@ -712,7 +667,7 @@ export function getSmartTools(): ToolDefinition[] {
             await new Promise(r => setTimeout(r, 400));
             let changed: boolean | null = null;
             try {
-              const eng = getOcr();
+              const eng = ocrEngine();
               eng.invalidateCache();
               const after = await eng.recognizeScreen();
               const awAfter = await ctx.a11y.getActiveWindow().catch(() => null);
@@ -740,7 +695,6 @@ export function getSmartTools(): ToolDefinition[] {
           return { text: `Clicked "${target}" via OCR (matched ${quoteScreenText(m.text)} at ${cx},${cy}${(cx !== m.x || cy !== m.y) ? ` — DPI-corrected from physical ${m.x},${m.y}` : ''})${warningSuffix}` };
         }
 
-        // a11y had bounds but couldn't invoke — coordinate fallback
         if (a11yResult && (a11yResult as any).method === 'bounds') {
           const a = a11yResult as Extract<NonNullable<typeof a11yResult>, { method: 'bounds' }>;
           if (a.bounds) {
@@ -762,7 +716,6 @@ export function getSmartTools(): ToolDefinition[] {
           return { text: `Clicked "${target}" via a11y bounds (coordinate fallback at ${a.clickPoint.x},${a.clickPoint.y})` };
         }
 
-        // Track what was attempted for diagnostics
         if (ocrCutOff) {
           attempted.push('deadline_exceeded_during_ocr_a11y_parallel');
         } else if (parallelTimedOut) {
@@ -867,13 +820,11 @@ export function getSmartTools(): ToolDefinition[] {
         // name in a Save panel, so pasting there gave "name.txt.txt".
         const replace = params.mode === 'replace' || (params.mode !== 'append' && !!target);
 
-        // If target specified, find and focus it first
         if (target) {
           let focused = false;
           // Why the field was found but not reached (could not scroll to it, ...): said in the error instead of "could not find".
           let whyNot: string | undefined;
 
-          // Try UIA focus
           try {
             const activeWin = await ctx.a11y.getActiveWindow().catch(() => null);
             const appName = activeWin?.processName?.toLowerCase() || '';
@@ -893,7 +844,6 @@ export function getSmartTools(): ToolDefinition[] {
               if (result.success) {
                 focused = true;
               } else if (result.clickPoint) {
-                // Focus failed but we have bounds — click to focus
                 // a11y coords match nut-js mouse coords directly
                 await ctx.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
                 await new Promise(r => setTimeout(r, 100));
@@ -957,9 +907,6 @@ export function getSmartTools(): ToolDefinition[] {
           }
         }
 
-        // Type via clipboard paste. `mod+v` resolves to Cmd+V on macOS and
-        // Ctrl+V everywhere else — the platform-portable key combo handles
-        // the OS difference without raw `process.platform` branching here.
         ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         // Short text: real keystrokes, the user's clipboard never touched. Longer text is pasted (below).
         const privateTyping = ctx.platform?.typingIsPrivate?.() !== false;
@@ -1020,112 +967,6 @@ export function getSmartTools(): ToolDefinition[] {
           text: `Typed ${[...text].length} chars (${how})${target ? ` into "${target}"` : ''}${replace && !failed ? ' (replaced its content)' : ''} in ${activeInfo}${readBack}${warn ? ` ⚠ ${warn}` : ''}`,
           ...(failed ? { isError: true } : {}),
         };
-      },
-    },
-
-    // ─── invoke_element ──────────────────────────────────────────────────
-    {
-      name: 'invoke_element',
-      description:
-        'PREFERRED way to act on a named element: invoke its accessibility action (click, set-value, ' +
-        'get-value, focus, expand, collapse) — no coordinates, unaffected by DPI or layout. Replies ' +
-        '"Invoked …", or says it fell back to a coordinate click, or fails with the reason. ' +
-        'If the tree does not name the target, use smart_click (adds OCR).',
-      parameters: {
-        name: {
-          type: 'string',
-          description: 'Element name to find',
-          required: false,
-        },
-        automationId: {
-          type: 'string',
-          description: 'Element automation ID (more precise than name)',
-          required: false,
-        },
-        controlType: {
-          type: 'string',
-          description: 'Filter by control type (e.g., "ControlType.Button")',
-          required: false,
-        },
-        processId: {
-          type: 'number',
-          description: 'Target process ID',
-          required: false,
-        },
-        action: {
-          type: 'string',
-          description: 'Action to perform',
-          required: false,
-          enum: ['click', 'set-value', 'get-value', 'focus', 'expand', 'collapse'],
-        },
-        value: {
-          type: 'string',
-          description: 'Value for set-value action',
-          required: false,
-        },
-      },
-      category: 'window',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async (params, ctx) => {
-        await ctx.ensureInitialized();
-
-        if (!params.name && !params.automationId) {
-          return { text: 'Either "name" or "automationId" is required', isError: true };
-        }
-
-        try {
-          const result = await ctx.a11y.invokeElement({
-            name: params.name,
-            automationId: params.automationId,
-            controlType: params.controlType,
-            processId: params.processId,
-            action: params.action || 'click',
-            value: params.value,
-          });
-
-          if (result.success) {
-            ctx.a11y.invalidateCache();
-            const valueInfo = result.value ? ` → value: "${result.value}"` : '';
-            return { text: `Invoked "${params.name || params.automationId}" (${params.action || 'click'})${valueInfo}` };
-          }
-
-          // Coordinate fallback for click actions
-          // a11y coords match nut-js mouse coords directly
-          if (result.clickPoint && (params.action === 'click' || !params.action)) {
-            await ctx.desktop.mouseClick(result.clickPoint.x, result.clickPoint.y);
-            ctx.a11y.invalidateCache();
-            return { text: `Invoked "${params.name || params.automationId}" via coordinate fallback (${result.clickPoint.x},${result.clickPoint.y})` };
-          }
-
-          return {
-            text: `invoke_element failed: ${result.error ? untrusted(result.error) : 'element not found or action not supported'}`,
-            isError: true,
-          };
-        } catch (err: any) {
-          // On any invocation error (e.g. RPC_E_SERVERFAULT on UWP apps, AXError on macOS),
-          // try a coordinate fallback for click actions by finding the element's bounds.
-          if (params.action === 'click' || !params.action) {
-            try {
-              const elements = await ctx.a11y.findElement({
-                name: params.name,
-                automationId: params.automationId,
-                processId: params.processId,
-              });
-              if (elements?.length) {
-                const el = elements[0];
-                if (el.bounds?.width > 0) {
-                  const cx = el.bounds.x + Math.floor(el.bounds.width / 2);
-                  const cy = el.bounds.y + Math.floor(el.bounds.height / 2);
-                  await ctx.desktop.mouseClick(cx, cy);
-                  ctx.a11y.invalidateCache();
-                  return { text: `Invoked "${params.name || params.automationId}" via coordinate fallback after error (${cx},${cy})` };
-                }
-              }
-            } catch { /* give up */ }
-          }
-          return { text: `invoke_element error: ${err.message}`, isError: true };
-        }
       },
     },
   ];

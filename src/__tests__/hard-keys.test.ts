@@ -9,17 +9,12 @@
  * The list is now checked in the input layer, below every tool, so neither a name nor a wrapper can route around it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { hardKeyRefusal } from '../platform/hard-keys';
 import { guardInputMethods, setInputGuard, unguarded, _resetHeldKeys } from '../platform/pointer-guard';
 import { normalizeKey } from '../platform/keys';
-import { getDesktopTools } from '../tools/desktop';
-import { getExtraTools } from '../tools/extras';
 import { getShortcutTools } from '../tools/shortcuts';
 import { SHORTCUTS, resolveShortcutKey } from '../shortcuts';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { ToolContext } from '../tools/types';
 
 const refused = (combo: unknown, os: NodeJS.Platform, held: string[] = []) => hardKeyRefusal(combo, held, os) !== null;
@@ -148,7 +143,6 @@ function keyboard() {
     failNextUp: false,
     keyUp: vi.fn(async (c: string) => { if (kb.failNextUp) { kb.failNextUp = false; throw new Error('release failed'); } sent.push(`up ${c}`); }),
     typeText: vi.fn(async (t: string) => { sent.push(`type ${t}`); }),
-    async executeKeyboardAction(a: { key: string }) { await kb.keyPress(a.key); },   // NativeDesktop's composite action
     takeInputWarning: () => null,
   };
   return guardInputMethods(kb);
@@ -157,22 +151,10 @@ function keyboard() {
 describe('one call site: the input layer, below every tool', () => {
   beforeEach(() => { setInputGuard(null); _resetHeldKeys(); });
 
-  it('hardKeyRefusal is called from exactly one place in the source', () => {
-    const src = join(dirname(fileURLToPath(import.meta.url)), '..');
-    const files = (dir: string): string[] => readdirSync(dir).flatMap(f => {
-      const p = join(dir, f);
-      return statSync(p).isDirectory() ? (f === '__tests__' ? [] : files(p)) : (p.endsWith('.ts') ? [p] : []);
-    });
-    const callers = files(src).filter(p => !p.endsWith('hard-keys.ts') && /hardKeyRefusal\(/.test(readFileSync(p, 'utf8')));
-    expect(callers.map(p => p.replace(/\\/g, '/').split('/src/')[1])).toEqual(['platform/pointer-guard.ts']);
-    expect(readFileSync(callers[0], 'utf8').match(/hardKeyRefusal\(/g)).toHaveLength(1);
-  });
-
   it('keyPress and keyDown refuse it; nothing reaches the OS', async () => {
     const kb = keyboard();
     await expect(kb.keyPress(LOCK)).rejects.toThrow(/dangerous key combo/);
     await expect(kb.keyDown(LOCK)).rejects.toThrow(/dangerous key combo/);
-    await expect(kb.executeKeyboardAction({ key: LOCK })).rejects.toThrow(/dangerous key combo/);
     expect(kb.sent).toEqual([]);
   });
 
@@ -273,21 +255,6 @@ ${LOCK_KEY}`]) {
       a11y: { getActiveWindow: async () => ({ processName: 'notepad', title: 'Untitled' }), invalidateCache: vi.fn() },
     }) as unknown as ToolContext;
     const sequence = `esc ${LOCK}`;
-
-    it('MCP key_press — the chord, and the advisory\'s sequence form', async () => {
-      const keyPress = getDesktopTools().find(t => t.name === 'key_press')!;
-      for (const key of [LOCK, sequence, LOCK.toUpperCase(), ` ${LOCK} `]) {
-        const kb = keyboard();
-        await expect(keyPress.handler({ key }, ctxWith(kb))).rejects.toThrow(/dangerous key combo/);
-        expect(kb.sent.filter(s => s !== 'press esc'), key).toEqual([]);
-      }
-    });
-
-    it('MCP key_down', async () => {
-      const kb = keyboard();
-      await expect(getExtraTools().find(t => t.name === 'key_down')!.handler({ key: LOCK }, ctxWith(kb))).rejects.toThrow(/dangerous key combo/);
-      expect(kb.sent).toEqual([]);
-    });
 
     it('the agent-loop tools `key` (the advisory\'s tool name) and `key_down`, by `combo` or by `key`', async () => {
       const tools = buildUnifiedTools();

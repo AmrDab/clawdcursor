@@ -11,7 +11,6 @@
  *     process names from /proc/<pid>.
  *   - A11y: AT-SPI via scripts/linux/atspi-bridge.py (read + invoke).
  *   - Clipboard: xclip -selection clipboard (X11 assumption).
- *   - openApp: spawn by name, falling back to xdg-open.
  *
  * All tool invocations tolerate missing binaries — if wmctrl/xclip/xdotool
  * are not installed the adapter still loads and methods return empty defaults.
@@ -50,10 +49,11 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate, type AppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
-import { llmSize } from '../core/agent-loop/coord-scale';
-import { windowTextIncludes } from '../tools/window-text';
+import { llmSize } from './coord-scale';
+import { windowTextIncludes } from './window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { wellFormed } from './mac-ax';
+import { modifierOf, type Modifier } from './keys';
 
 const execFileAsync = promisify(execFile);
 
@@ -90,49 +90,45 @@ export class LinuxAdapter implements PlatformAdapter {
   private lastCursor: { x: number; y: number } | null = null;
   /**
    * Wayland input backend. On X11 this stays `kind:'none'` and all input
-   * flows through nut-js as before. On Wayland, ydotool takes over mouse +
+   * flows through nut-js. On Wayland, ydotool takes over mouse +
    * keyboard (if present); wtype is a keyboard-only fallback. Without
    * either, we fall through to nut-js (which silently fails) and the
    * adapter's permission probe reports input=false.
    */
   private wayland: WaylandBackend = new WaylandBackend('none');
   /**
-   * AT-SPI D-Bus a11y bridge state (Tranche 4b). The bridge is a
+   * AT-SPI D-Bus a11y bridge state. The bridge is a
    * self-contained Python script (scripts/linux/atspi-bridge.py) that
    * wraps gi.repository.Atspi. We probe its availability at init —
    * requires python3 + python3-gi + gir1.2-atspi-2.0. When unavailable
-   * every a11y method returns its pre-existing safe empty response so
-   * nothing regresses on boxes without AT-SPI.
+   * every a11y method returns a safe empty response.
    */
   private atspiAvailable = false;
   private atspiScript = '';
 
   async init(): Promise<void> {
-    // Tighten nut-js defaults (mirrors Windows path in legacy code).
     mouse.config.mouseSpeed = 2000;
     mouse.config.autoDelayMs = 0;
     keyboard.config.autoDelayMs = 0;
 
-    // Warm binary presence cache (non-fatal if none present).
     await Promise.all([
       this.hasBinary('wmctrl'),
       this.hasBinary('xdotool'),
       this.hasBinary('xclip'),
       this.hasBinary('xrandr'),
       this.hasBinary('xdg-open'),
-      // Wayland-era replacements — detected here so Tranche 4a's routing
+      // Wayland-era replacements — detected here so the routing
       // decisions at init time are fast.
       this.hasBinary('ydotool'),
       this.hasBinary('wtype'),
       this.hasBinary('wl-copy'),
     ]);
 
-    // If we're on Wayland, initialize the backend. No-op on X11.
     if (this.environment === 'wayland') {
       this.wayland = await WaylandBackend.detect(name => this.hasBinary(name));
     }
 
-    // Probe the AT-SPI bridge (Tranche 4b). Two conditions must be met:
+    // Probe the AT-SPI bridge. Two conditions must be met:
     // python3 must be on PATH, AND `from gi.repository import Atspi` must
     // succeed (requires python3-gi + gir1.2-atspi-2.0). We run the probe
     // with a short timeout so boots stay snappy when neither is installed.
@@ -151,12 +147,7 @@ export class LinuxAdapter implements PlatformAdapter {
       }
     }
 
-    // Pre-warm screen size so first capture is fast.
     await this.getScreenSize().catch(() => null);
-  }
-
-  async shutdown(): Promise<void> {
-    // No long-lived processes to clean up.
   }
 
   // ─── PERMISSIONS ──────────────────────────────────────────────────
@@ -165,7 +156,7 @@ export class LinuxAdapter implements PlatformAdapter {
     // X11: implicit user-level input access. Wayland: synthetic-input APIs
     // are blocked by compositors unless the user runs ydotool (kernel
     // uinput daemon).
-    // Accessibility: now reflects whether the AT-SPI bridge (Tranche 4b)
+    // Accessibility: whether the AT-SPI bridge
     // is available — true when python3 + python3-gi + gir1.2-atspi-2.0
     // are installed and the probe at init() succeeded.
     if (this.environment === 'wayland') {
@@ -173,10 +164,6 @@ export class LinuxAdapter implements PlatformAdapter {
       return { input: canInject, accessibility: this.atspiAvailable, screenRecording: true };
     }
     return { input: true, accessibility: this.atspiAvailable, screenRecording: true };
-  }
-
-  async requestPermissions(): Promise<PermissionStatus> {
-    return this.checkPermissions();
   }
 
   // ─── DISPLAY ──────────────────────────────────────────────────────
@@ -231,7 +218,6 @@ export class LinuxAdapter implements PlatformAdapter {
       }
     }
 
-    // If xrandr gave us nothing, assume physical == logical.
     if (!logicalWidth) logicalWidth = physicalWidth;
     if (!logicalHeight) logicalHeight = physicalHeight;
 
@@ -353,7 +339,7 @@ export class LinuxAdapter implements PlatformAdapter {
     let origin: { x: number; y: number } | undefined;
 
     if (opts?.region) {
-      // A region (screen px) is cut out of the grab, as on Windows: ignored, the caller got the whole screen.
+      // A region (screen px) is cut out of the grab, as on Windows.
       const r = clampRegion(opts.region, img.width, img.height);
       pipeline = pipeline.extract(r);
       width = r.width;
@@ -389,24 +375,6 @@ export class LinuxAdapter implements PlatformAdapter {
     // Release raw RGBA buffer now that sharp has consumed it.
     (img as any).data = null;
     return { buffer, width, height, scaleFactor, ...(origin ? { origin } : {}) };
-  }
-
-  async screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult> {
-    const img = await this.grabScreen();
-    try {
-      // Clamp to image bounds so sharp doesn't throw.
-      const left = Math.max(0, Math.min(x, img.width - 1));
-      const top = Math.max(0, Math.min(y, img.height - 1));
-      const width = Math.max(1, Math.min(w, img.width - left));
-      const height = Math.max(1, Math.min(h, img.height - top));
-      const buffer = await sharpFromGrab(img)
-        .extract({ left, top, width, height })
-        .png()
-        .toBuffer();
-      return { buffer, width, height, scaleFactor: 1 };
-    } finally {
-      (img as any).data = null;
-    }
   }
 
   private async grabScreen(): Promise<GrabImage> {
@@ -465,7 +433,7 @@ export class LinuxAdapter implements PlatformAdapter {
 
   async getActiveWindow(): Promise<WindowInfo | null> {
     // xdotool gives us the active window id directly; we cross-reference wmctrl
-    // for title/pid/bounds. Missing xdotool → fall back to first non-minimized.
+    // for title/pid/bounds.
     const all = await this.listWindows();
     if (!all.length) return null;
 
@@ -521,7 +489,6 @@ export class LinuxAdapter implements PlatformAdapter {
         return true;
       }
 
-      // Fallback: wmctrl -a <title substring>
       if (query.title) {
         await execFileAsync('wmctrl', ['-a', query.title], { timeout: TOOL_TIMEOUT_MS });
         return true;
@@ -531,19 +498,6 @@ export class LinuxAdapter implements PlatformAdapter {
     } catch (err) {
       this.focusFailure = err instanceof Error ? err.message : String(err);
       return false;
-    }
-  }
-
-  async maximizeWindow(): Promise<void> {
-    if (!(await this.hasBinary('wmctrl'))) return;
-    try {
-      await execFileAsync(
-        'wmctrl',
-        ['-r', ':ACTIVE:', '-b', 'add,maximized_vert,maximized_horz'],
-        { timeout: TOOL_TIMEOUT_MS },
-      );
-    } catch {
-      /* non-fatal */
     }
   }
 
@@ -601,7 +555,6 @@ export class LinuxAdapter implements PlatformAdapter {
       // a maximize → restore cycle left MAXIMIZED_HORZ set). An explicit
       // resize means "this size", so drop the maximized state first.
       await execFileAsync('wmctrl', ['-i', '-r', target, '-b', 'remove,maximized_vert,maximized_horz'], { timeout: TOOL_TIMEOUT_MS }).catch(() => undefined);
-      // Read current bounds for fields not supplied.
       const windows = await this.listWindows();
       const current = windows.find(w => typeof w.handle === 'number' && '0x' + w.handle.toString(16) === target);
       const cur = current?.bounds ?? { x: 0, y: 0, width: 0, height: 0 };
@@ -619,7 +572,6 @@ export class LinuxAdapter implements PlatformAdapter {
 
   private async resolveWindowHandle(query?: { processName?: string; processId?: number; title?: string }): Promise<string | null> {
     if (!query) {
-      // Active window handle via xdotool.
       if (await this.hasBinary('xdotool')) {
         try {
           const { stdout } = await execFileAsync('xdotool', ['getactivewindow'], {
@@ -652,8 +604,7 @@ export class LinuxAdapter implements PlatformAdapter {
   // getFocusedElement / waitForElement / invokeElement. The script emits
   // JSON with the same UiElement shape used on Windows / macOS; raw AT-SPI
   // role names are normalized here (see ATSPI_ROLE_MAP). When the bridge
-  // isn't available, every method falls back to the same safe empty
-  // responses as before — zero regression on boxes without AT-SPI.
+  // isn't available, every method returns a safe empty response.
 
   async getUiTree(processId?: number): Promise<UiElement[]> {
     this.lastTreeTruncated = false;
@@ -1042,7 +993,6 @@ export class LinuxAdapter implements PlatformAdapter {
   async mouseDrag(x1: number, y1: number, x2: number, y2: number): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (this.wayland.canMouse()) {
-      // Wayland: absolute move to start, down, interpolated moves, up.
       await this.wayland.mouseMoveAbsolute(x1, y1);
       this.lastCursor = { x: x1, y: y1 };
       await this.delay(50);
@@ -1060,7 +1010,7 @@ export class LinuxAdapter implements PlatformAdapter {
       await this.wayland.mouseUp('left');
       return;
     }
-    // X11 path — unchanged nut-js.
+    // X11 path: nut-js.
     await mouse.setPosition(new Point(x1, y1));
     this.lastCursor = { x: x1, y: y1 };
     await this.delay(50);
@@ -1263,39 +1213,33 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   private resolveModifier(name: string): Key | null {
-    const m = name.toLowerCase();
-    // "mod" on Linux → Control (brief §9).
-    if (m === 'mod' || m === 'ctrl' || m === 'control') return Key.LeftControl;
-    if (m === 'shift') return Key.LeftShift;
-    if (m === 'alt' || m === 'option' || m === 'opt') return Key.LeftAlt;
-    if (m === 'super' || m === 'cmd' || m === 'command' || m === 'meta' || m === 'win') return Key.LeftSuper;
-    return null;
+    const m = modifierOf(name, 'linux');
+    return m ? NUT_MODIFIER[m] : null;
   }
 
   private resolveKey(name: string): Key | null {
     if (!name) return null;
     const lower = name.toLowerCase();
 
-    // Special / named keys.
+    // A modifier pressed on its own ("super" opens the launcher on most DEs).
+    const mod = this.resolveModifier(lower);
+    if (mod !== null) return mod;
     const named = LINUX_SPECIAL_KEYS[lower];
     if (named !== undefined) return named;
 
     // Single printable char: letters a-z, digits 0-9, a few punctuation.
     if (name.length === 1) {
       const code = name.toUpperCase().charCodeAt(0);
-      // Letters A-Z → Key.A .. Key.Z
       if (code >= 65 && code <= 90) {
         const keyName = name.toUpperCase() as keyof typeof Key;
         const k = Key[keyName];
         if (typeof k === 'number') return k as Key;
       }
-      // Digits 0-9 → Key.Num0 .. Key.Num9
       if (code >= 0x30 && code <= 0x39) {
         const keyName = `Num${name}` as keyof typeof Key;
         const k = Key[keyName];
         if (typeof k === 'number') return k as Key;
       }
-      // Common punctuation
       const punct = PUNCTUATION_KEYS[name];
       if (punct !== undefined) return punct;
     }
@@ -1364,16 +1308,6 @@ export class LinuxAdapter implements PlatformAdapter {
 
   // ─── APPS ─────────────────────────────────────────────────────────
 
-  /**
-   * Thin shim — delegates straight to `launchApp` with no alias resolution.
-   * The platform layer is alias-data-agnostic; cross-OS name mapping (e.g.
-   * Windows-style "Notepad" → Linux "gedit") happens in the caller above
-   * (the agent's `open_app` tool, the router's `handleOpenApp`).
-   */
-  async openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }> {
-    return this.launchApp(name, opts);
-  }
-
   async launchApp(
     name: string,
     opts?: {
@@ -1408,7 +1342,7 @@ export class LinuxAdapter implements PlatformAdapter {
       // Non-fatal — empty before-set is a safe default.
     }
 
-    // v0.8.3 — idempotency. Check for an existing window before spawning.
+    // Idempotency: check for an existing window before spawning.
     // Linux doesn't have macOS's "open -a" activation semantics, so a
     // second spawn of the same binary would normally create a second
     // instance. Focus the existing one and return its pid instead.
@@ -1477,9 +1411,8 @@ export class LinuxAdapter implements PlatformAdapter {
 
   /**
    * After a launch, wait for the new window to surface using diff-and-poll.
-   * Replaces the previous fixed-delay-then-single-scan, which lost slow-
-   * starting apps (Electron-based apps, Java apps, Wine apps) and made the
-   * agent fall back to keyboard shortcuts.
+   * A fixed delay then a single scan lost slow-starting apps (Electron-based
+   * apps, Java apps, Wine apps).
    *
    * Linux's `spawn(name, …)` directly produces the target app's PID (unlike
    * Windows / macOS where the spawn target is a launcher), so when `pid` is
@@ -1574,7 +1507,6 @@ export class LinuxAdapter implements PlatformAdapter {
       this.binaryCache.set(name, true);
       return true;
     } catch {
-      // Fallback: try `which`.
       try {
         await execFileAsync('which', [name], { timeout: 1_500 });
         this.binaryCache.set(name, true);
@@ -1786,16 +1718,16 @@ function normalizeAtspiRole(rawRole: string): string {
   return lower.split(/\s+/).map(w => w[0].toUpperCase() + w.slice(1)).join('');
 }
 
-/**
- * Inverse for the bridge's raw-role substring filter: a normalized name the
- * caller passes ("Button", "ControlType.Edit") → a raw AT-SPI substring.
- * Unknown names pass through lowercased.
- */
 /** Why the bridge cut a search, for the note: 'depth limit' | 'element budget' | 'time limit' | 'result limit'. */
 function cutReason(reason: unknown): string {
   return reason === 'depth limit' || reason === 'time limit' || reason === 'element budget' || reason === 'result limit' ? reason : 'element budget';
 }
 
+/**
+ * Inverse for the bridge's raw-role substring filter: a normalized name the
+ * caller passes ("Button", "ControlType.Edit") → raw AT-SPI roles ("a|b").
+ * Unknown names pass through lowercased.
+ */
 function atspiRoleQuery(controlType: string): string {
   const want = controlType.replace(/^ControlType\./, '').toLowerCase();
   // EVERY raw role that maps here, as "a|b|c" alternatives: Edit is "text"
@@ -1808,6 +1740,8 @@ function atspiRoleQuery(controlType: string): string {
   return raws.length ? raws.join('|') : want;
 }
 
+const NUT_MODIFIER: Record<Modifier, Key> = { ctrl: Key.LeftControl, shift: Key.LeftShift, alt: Key.LeftAlt, super: Key.LeftSuper };
+
 // Named-key table — lowercase lookup, maps to nut-js Key enum.
 const LINUX_SPECIAL_KEYS: Record<string, Key> = {
   'return': Key.Return, 'enter': Key.Enter,
@@ -1815,12 +1749,6 @@ const LINUX_SPECIAL_KEYS: Record<string, Key> = {
   'space': Key.Space, 'spacebar': Key.Space,
   'backspace': Key.Backspace,
   'delete': Key.Delete, 'forwarddelete': Key.Delete,
-  // Modifiers pressed on their own ("super" opens the launcher on most DEs).
-  'super': Key.LeftSuper, 'meta': Key.LeftSuper, 'win': Key.LeftSuper, 'windows': Key.LeftSuper,
-  'cmd': Key.LeftSuper, 'command': Key.LeftSuper,
-  'ctrl': Key.LeftControl, 'control': Key.LeftControl, 'mod': Key.LeftControl,
-  'shift': Key.LeftShift,
-  'alt': Key.LeftAlt, 'option': Key.LeftAlt, 'opt': Key.LeftAlt,
   'escape': Key.Escape, 'esc': Key.Escape,
   'left': Key.Left, 'right': Key.Right, 'up': Key.Up, 'down': Key.Down,
   'home': Key.Home, 'end': Key.End,

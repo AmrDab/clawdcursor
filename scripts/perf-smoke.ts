@@ -38,7 +38,7 @@ async function main(): Promise<void> {
   });
 
   await time('agent loop: buildUnifiedTools() x10', async () => {
-    const { buildUnifiedTools } = await import('../src/core/agent-loop/tools');
+    const { buildUnifiedTools } = await import('../src/tools/projected/tools');
     for (let i = 0; i < 10; i++) buildUnifiedTools();
   });
 

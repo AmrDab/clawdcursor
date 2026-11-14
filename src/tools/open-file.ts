@@ -1,5 +1,5 @@
 /**
- * open_file — the ONE implementation, for the MCP tool (extras.ts) and the agent loop's tool alike.
+ * open_file — the implementation of the MCP tool (extras.ts).
  *
  * The path goes to the OS opener as data: `open` (macOS) and `xdg-open` (Linux) get it as one argv element, Windows
  * Explorer through launchApp's $env: channel. No launcher search (Start menu, Spotlight) is ever typed into, and no
@@ -7,14 +7,13 @@
  */
 import { promises as fsp } from 'node:fs';
 import type { PlatformAdapter } from '../platform/types';
-import { windowTextIncludes } from './window-text';
-import { quoteScreenText } from '../core/result-codes';
-import { resolveAlias, startedNoWindowText } from '../core/router/aliases';
+import { windowTextIncludes } from '../platform/window-text';
+import { quoteScreenText } from '../core/untrusted-screen-content';
+import { resolveAlias, startedNoWindowText } from '../platform/app-aliases';
 
 export async function openFilePath(
   platform: PlatformAdapter,
   filePath: string,
-  surface: 'mcp' | 'agent' = 'mcp',
 ): Promise<{ text: string; isError?: boolean }> {
   const p = String(filePath);
   // Leaf segment — for a directory this is the Explorer window title.
@@ -40,9 +39,9 @@ export async function openFilePath(
       });
       if (res?.title) return { text: `Opened: ${p} (window: ${quoteScreenText(res.title)})` };
       if (!exe) return { text: `Opened: ${p}` };
-      if (res?.pid) return { text: `Opened: ${p} — ${startedNoWindowText(leaf, res, surface)}` };
+      if (res?.pid) return { text: `Opened: ${p} — ${startedNoWindowText(leaf, res)}` };
       const by = `"processName":${JSON.stringify(exe)}`;
-      const focus = surface === 'mcp' ? `window {"action":"focus",${by}}` : `focus_window {${by}}`;
+      const focus = `window {"action":"focus",${by}}`;
       return { text: `Opened: ${p} — handed to Windows, but neither a window nor a process of ${leaf} was found: it may not have started. Wait, then ${focus} before acting on it.` };
     }
     // Windows: open the path in Explorer. For a DIRECTORY, VERIFY the
@@ -55,7 +54,7 @@ export async function openFilePath(
     const title = res?.title ?? '';
     if (!leaf || !windowTextIncludes(title, leaf)) {
       return {
-        text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
+        text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with get_windows.`,
         isError: true,
       };
     }

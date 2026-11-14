@@ -1,7 +1,5 @@
 /**
- * Readiness — single source of truth for Clawd Cursor operational status.
- * 
- * Consolidates:
+ * Readiness — what `clawdcursor status` checks:
  * - Consent status
  * - macOS permissions (Accessibility, Screen Recording)
  * - Overall readiness for desktop control
@@ -14,7 +12,6 @@ import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, isMacOS } from '../platform/native-helper';
 
 export interface ReadinessStatus {
-  // Core requirements
   consent: {
     granted: boolean;
     file: string;
@@ -26,7 +23,6 @@ export interface ReadinessStatus {
     screenRecording: boolean | null;   // null: could not check
   } | null;
   
-  // Overall status
   readyForDesktopControl: boolean;
   
   // Human-readable summary
@@ -34,17 +30,12 @@ export interface ReadinessStatus {
   nextSteps: string[];
 }
 
-/**
- * Get full readiness status — the single source of truth.
- */
 export async function getReadinessStatus(): Promise<ReadinessStatus> {
   const consentDir = path.join(os.homedir(), '.clawdcursor');
   const consentFile = path.join(consentDir, 'consent');
   
-  // Check consent
   const consentGranted = hasConsent();
   
-  // Check macOS permissions (only on macOS)
   let macPermissions: ReadinessStatus['macPermissions'] = null;
   if (isMacOS()) {
     try {
@@ -54,7 +45,7 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
         screenRecording: perms.screenRecording,
       };
     } catch {
-      // If native helper isn't built yet, assume unknown
+      // Native helper not built yet: both reported as not granted.
       macPermissions = {
         accessibility: false,
         screenRecording: false,
@@ -62,7 +53,6 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
     }
   }
   
-  // Determine issues and next steps
   const issues: string[] = [];
   const nextSteps: string[] = [];
   
@@ -82,7 +72,6 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
     }
   }
   
-  // Determine overall readiness
   const hasRequiredPermissions = !isMacOS() || (macPermissions?.accessibility ?? false);
   const readyForDesktopControl = consentGranted && hasRequiredPermissions;
   
@@ -98,9 +87,6 @@ export async function getReadinessStatus(): Promise<ReadinessStatus> {
   };
 }
 
-/**
- * Print a formatted status report to console.
- */
 export async function printStatusReport(): Promise<void> {
   const status = await getReadinessStatus();
 
@@ -110,10 +96,8 @@ export async function printStatusReport(): Promise<void> {
   console.log(`\n${pc.bold('🐾 Clawd Cursor Status')}\n`);
   console.log(pc.gray('─'.repeat(50)));
 
-  // Consent
   console.log(`${check(status.consent.granted)} Consent: ${status.consent.granted ? 'Granted' : 'Not granted'}`);
 
-  // macOS Permissions
   if (status.macPermissions) {
     console.log(`${check(status.macPermissions.accessibility)} Accessibility: ${status.macPermissions.accessibility ? 'Granted' : 'Not granted'}`);
     const sr = status.macPermissions.screenRecording;
@@ -124,40 +108,17 @@ export async function printStatusReport(): Promise<void> {
 
   console.log(pc.gray('─'.repeat(50)));
 
-  // Overall Status
   if (status.readyForDesktopControl) {
     console.log(`\n${pc.green(pc.bold('✓ Ready for desktop control'))}\n`);
   } else {
     console.log(`\n${pc.red(pc.bold('✗ Not ready for desktop control'))}\n`);
   }
 
-  // Next Steps
   if (status.nextSteps.length > 0) {
     console.log(pc.bold('Next steps:'));
     status.nextSteps.forEach((step, i) => {
       console.log(`  ${i + 1}. ${step}`);
     });
     console.log('');
-  }
-}
-
-/**
- * Quick check if basic requirements are met (for gating commands).
- */
-export async function isReadyForDesktopControl(): Promise<boolean> {
-  const status = await getReadinessStatus();
-  return status.readyForDesktopControl;
-}
-
-/**
- * Get a one-line summary suitable for doctor output.
- */
-export async function getReadinessSummary(): Promise<string> {
-  const status = await getReadinessStatus();
-  
-  if (status.readyForDesktopControl) {
-    return '✓ All systems ready';
-  } else {
-    return `✗ ${status.issues.length} issue(s): ${status.issues.slice(0, 2).join(', ')}`;
   }
 }

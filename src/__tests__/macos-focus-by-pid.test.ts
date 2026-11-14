@@ -28,7 +28,7 @@ vi.mock('child_process', () => ({
 
 import { MacOSAdapter } from '../platform/macos';
 import { MacAxError, type MacAx, type FrontmostInfo } from '../platform/mac-ax';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { WindowInfo } from '../platform/types';
 
 const RECT = { x: 0, y: 0, width: 600, height: 400 };

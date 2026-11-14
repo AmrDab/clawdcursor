@@ -5,7 +5,6 @@
  * Detects capable terminals and provides ASCII fallbacks.
  */
 
-/** Whether the current terminal can render emoji safely */
 export const canEmoji = (() => {
   if (process.env.NO_COLOR) return false;
   if (process.platform !== 'win32') return true;

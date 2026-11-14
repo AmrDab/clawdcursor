@@ -5,9 +5,8 @@
  *   shortcuts_list    — query available shortcuts by category/context
  *   shortcuts_execute — run a shortcut by intent (fuzzy-matched)
  *
- * This bridges the gap between the pipeline router (`src/core/router/router.ts`)
- * — which knows all shortcuts — and external agents calling MCP tools
- * that previously had to independently know keyboard combos.
+ * The shortcuts database is src/shortcuts.ts; these tools let MCP clients use it
+ * instead of knowing keyboard combos themselves.
  */
 
 import * as os from 'os';
@@ -59,23 +58,19 @@ export function getShortcutTools(): ToolDefinition[] {
         },
       },
       category: 'keyboard',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async ({ category, context }) => {
         const platform = os.platform();
         let filtered = shortcutsFor(platform);   // this OS's shortcuts only
 
-        // Filter by category
         if (category) {
           filtered = filtered.filter(s => s.category === category);
         }
 
-        // Filter by context — include shortcuts with no context hints (universal)
-        // plus those whose contextHints match the given context
         if (context) {
           const ctx = context.toLowerCase();
           filtered = filtered.filter(s => {
-            if (!s.contextHints?.length) return true; // universal shortcut
+            if (!s.contextHints?.length) return true;
             return s.contextHints.some(h => h.toLowerCase().includes(ctx) || ctx.includes(h.toLowerCase()));
           });
         } else {
@@ -132,12 +127,10 @@ export function getShortcutTools(): ToolDefinition[] {
         },
       },
       category: 'keyboard',
-      compactGroup: 'system',
       safetyTier: 1,
       handler: async ({ intent, context }, ctx) => {
         await ctx.ensureInitialized();
 
-        // Build context hint — use provided context or detect from active window
         let contextHint = context ?? '';
         if (!contextHint) {
           try {
@@ -154,7 +147,6 @@ export function getShortcutTools(): ToolDefinition[] {
         });
 
         if (!match) {
-          // Return helpful error with similar shortcuts
           const suggestions = shortcutsFor(os.platform())
             .filter(s => !s.contextHints?.length || (contextHint && s.contextHints.some(h => contextHint.toLowerCase().includes(h.toLowerCase()))))
             .slice(0, 10)
@@ -166,7 +158,6 @@ export function getShortcutTools(): ToolDefinition[] {
           };
         }
 
-        // Execute the matched shortcut
         const active = await ctx.a11y.getActiveWindow().catch(() => null);
         const activeInfo = active ? `[${active.processName}] "${active.title}"` : '(unknown)';
 

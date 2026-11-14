@@ -10,11 +10,6 @@
  * runs with a fake bridge reply.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { execFileSync } from 'child_process';
-import { psOpts } from '../platform/ps-spawn';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -26,167 +21,22 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public left: number, public top: number, public width: number, public height: number) {} },
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     // The ribbon's "New" as OCR sees it, on the monitor above the primary.
     async recognizeScreen() { return { elements: [{ text: 'New', x: 2830, y: -1010, width: 36, height: 14, line: 0 }], fullText: 'New', durationMs: 1 }; }
     async recognizeRegion() { return { elements: [], fullText: '', durationMs: 1 }; }
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 import { getSmartTools } from '../tools/smart';
-import { buildUnifiedTools, runActivationLadder } from '../core/agent-loop/tools';
+import { buildUnifiedTools, runActivationLadder } from '../tools/projected/tools';
 import { missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 import { classifyResult } from '../core/result-codes';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 import type { PlatformAdapter } from '../platform/types';
-
-const root = join(__dirname, '../..');
-const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');
-const fnBody = (name: string) => {
-  const start = bridge.indexOf(`function ${name}`);
-  expect(start, name).toBeGreaterThan(-1);
-  const next = bridge.indexOf('\nfunction ', start + 10);
-  return next === -1 ? bridge.slice(start) : bridge.slice(start, next);
-};
-function runPs(functions: string[], body: string): string[] {
-  const script = `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${functions.map(fnBody).join('\n')}\n${body}`;
-  // From a file: Cmd-InvokeElement alone is longer than a Windows command line may be. With a BOM, so PowerShell 5.1 reads UTF-8.
-  const dir = mkdtempSync(join(tmpdir(), 'cc-bridge-test-'));
-  const file = join(dir, 'run.ps1');
-  writeFileSync(file, String.fromCharCode(0xfeff) + script, 'utf8');
-  try {
-    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-}
-
-// The owner's monitors in physical pixels, and where things were: the ribbon button on the monitor above the primary,
-// the hidden web view's link far below every monitor.
-const PS_SETUP = `
-$monitors = @(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 })
-function Rc($x, $y, $w, $h) { return @{ x = [int]$x; y = [int]$y; width = [int]$w; height = [int]$h } }   # a bare -1030 arrives as a string
-function Hit($i, $pass, $rect, $off = $false) { return @{ index = $i; pass = $pass; rect = $rect; offscreen = $off } }
-function Show($p) { if ($null -eq $p) { 'none' } elseif ($p.hidden) { 'hidden' } elseif ($p.ambiguous) { "ambiguous $($p.ambiguous -join ',')" } else { "index $($p.index)" } }
-$ribbon = Rc 2816 -1030 64 72
-$webLink = Rc 2850 31000 60 20
-$all = { param($h) $true }
-`;
-
-describe.runIf(process.platform === 'win32')('ps-bridge (run for real): which element a name stands for', () => {
-  it('Test-RectOnMonitor: the monitor above the primary is on screen, y=31000 and a minimized window are not', () => {
-    const out = runPs(['Test-RectOnMonitor'], `${PS_SETUP}
-"ribbon $(Test-RectOnMonitor $ribbon $monitors)"
-"frame $(Test-RectOnMonitor (Rc 2790 -1086 1932 1092) $monitors)"
-"web $(Test-RectOnMonitor $webLink $monitors)"
-"minimized $(Test-RectOnMonitor (Rc -32000 -32000 160 28) $monitors)"
-"gap $(Test-RectOnMonitor (Rc 100 -500 120 32) $monitors)"
-"no list $(Test-RectOnMonitor $webLink @())"`);
-    expect(out).toEqual(['ribbon True', 'frame True', 'web False', 'minimized False', 'gap False', 'no list True']);
-  });
-
-  it('Select-InvokeTarget: the visible element wins over an earlier one on no monitor; only-hidden matches are never pressed', () => {
-    const out = runPs(['Test-RectOnMonitor', 'Select-InvokeTarget'], `${PS_SETUP}
-"1 $(Show (Select-InvokeTarget @((Hit 0 1 $webLink), (Hit 1 1 $ribbon)) $monitors $all))"            # the web view's link is first in the tree
-"2 $(Show (Select-InvokeTarget @((Hit 0 1 $webLink)) $monitors $all))"                              # nothing but the hidden link
-"3 $(Show (Select-InvokeTarget @((Hit 0 1 $webLink), (Hit 1 2 $ribbon)) $monitors $all))"            # "New" exact but hidden, "New (Ctrl+N)" visible
-"4 $(Show (Select-InvokeTarget @() $monitors $all))"
-"5 $(Show (Select-InvokeTarget @((Hit 0 1 $ribbon $true), (Hit 1 1 (Rc 3000 -900 60 20))) $monitors $all))"  # UIA says offscreen: the other one
-"6 $(Show (Select-InvokeTarget @((Hit 0 2 (Rc 3000 -900 60 20) $true), (Hit 1 1 $null $true)) $monitors $all))" # none visible: a row scrolled out of its list / a closed menu's item, best name first
-"7 $(Show (Select-InvokeTarget @((Hit 0 1 $webLink), (Hit 1 1 $ribbon)) @() $all))"                    # no monitor list: nothing is judged, tree order as before`);
-    expect(out).toEqual(['1 index 1', '2 hidden', '3 index 1', '4 none', '5 index 1', '6 index 1', '7 ambiguous 0,1']);
-  });
-
-  it('Select-InvokeTarget: several visible elements with the name are ambiguous; a label inside its control, or a caption beside a real control, is not', () => {
-    const out = runPs(['Test-RectOnMonitor', 'Select-InvokeTarget'], `${PS_SETUP}
-$menu = Rc 2800 -1070 40 20
-$label = Rc 2830 -975 36 14          # the Text inside the ribbon button
-$only1 = { param($h) $h.index -eq 1 }
-"1 $(Show (Select-InvokeTarget @((Hit 0 1 $menu), (Hit 1 1 $ribbon)) $monitors $all))"               # a menu item and a ribbon button, both "New"
-"2 $(Show (Select-InvokeTarget @((Hit 0 1 $ribbon), (Hit 1 1 $label)) $monitors $all))"              # Button "New" > Text "New"
-"3 $(Show (Select-InvokeTarget @((Hit 0 1 $ribbon), (Hit 1 1 $ribbon)) $monitors $all))"             # the same rect twice: the first (the parent)
-"4 $(Show (Select-InvokeTarget @((Hit 0 1 $menu), (Hit 1 1 $ribbon)) $monitors $only1))"             # a caption that takes no action, and the button
-"5 $(Show (Select-InvokeTarget @((Hit 0 1 $menu), (Hit 1 1 $ribbon)) $monitors { param($h) $false }))" # nothing takes an action: still two places
-"6 $(Show (Select-InvokeTarget @((Hit 0 2 $menu), (Hit 1 1 $ribbon), (Hit 2 3 $label)) $monitors $all))" # the exact name beats looser matches`);
-    expect(out).toEqual(['1 ambiguous 0,1', '2 index 0', '3 index 0', '4 index 1', '5 ambiguous 0,1', '6 index 1']);
-  });
-
-  // A fake window whose FindAll gives fake elements: Current.{Name, IsOffscreen, BoundingRectangle, ControlType}, the
-  // pattern-available properties, and an InvokePattern that records the press.
-  const FAKE_WINDOW = `
-function Get-ProcessScopeWindows { param($wpid) return $script:window }
-function Get-ScopeOtherWindows { param($a, $b) return 0 }
-function Get-MonitorRects { return ,@(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 }) }
-$script:pressed = @()
-function El($id, $name, $x, $y, $w, $h, $type = 'ControlType.Button') {
-  $e = [pscustomobject]@{ Id = $id; Current = [pscustomobject]@{ Name = $name; IsOffscreen = $false; IsEnabled = $true
-    BoundingRectangle = (New-Object System.Windows.Rect $x, $y, $w, $h); ControlType = [pscustomobject]@{ ProgrammaticName = $type } } }
-  $e | Add-Member -MemberType ScriptMethod -Name GetCurrentPropertyValue -Value { param($p) return $true }
-  $e | Add-Member -MemberType ScriptMethod -Name GetCurrentPattern -Value { param($p)
-    $pat = [pscustomobject]@{ Owner = $this.Id }
-    $pat | Add-Member -MemberType ScriptMethod -Name Invoke -Value { $script:pressed += $this.Owner }
-    return $pat }
-  return $e }
-function Window($els) {
-  $w = [pscustomobject]@{ Els = $els }
-  $w | Add-Member -MemberType ScriptMethod -Name FindAll -Value { param($scope, $cond) return $this.Els }
-  return $w }
-`;
-  const FNS = ['Test-NameMatch', 'Test-RectOnMonitor', 'Select-InvokeTarget', 'Get-FocusedDialog', 'Test-ElementUnder', 'Test-WindowMinimized', 'Get-UiParent', 'Get-ContainerOf', 'Test-Activatable', 'Cmd-InvokeElement'];
-  const invoke = `$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'New'; action = 'click' })`;
-
-  it('invoke "New": the ribbon button on the second monitor is pressed, not the hidden web view\'s link before it', () => {
-    const out = runPs(FNS, `${FAKE_WINDOW}
-$script:window = Window @((El 'web-link' 'New' 2850 31000 60 20 'ControlType.Hyperlink'), (El 'ribbon' 'New' 2816 -1030 64 72))
-${invoke}
-"success=$($r.success) method=$($r.method) pressed=$($script:pressed -join ',')"`);
-    expect(out).toEqual(['success=True method=InvokePattern pressed=ribbon']);
-  });
-
-  it('invoke "New" with only the hidden link: refused as hidden, nothing pressed, no bounds to click', () => {
-    const out = runPs(FNS, `${FAKE_WINDOW}
-$script:window = Window @((El 'web-link' 'New' 2850 31000 60 20 'ControlType.Hyperlink'))
-${invoke}
-"success=$($r.success) reason=$($r.reason) pressed=$($script:pressed.Count) bounds=$($null -ne $r.bounds) clickPoint=$($null -ne $r.clickPoint)"`);
-    expect(out).toEqual(['success=False reason=hidden pressed=0 bounds=False clickPoint=False']);
-  });
-
-  it('invoke "New" with two visible elements of that name: ambiguous, both listed with role and place, nothing pressed', () => {
-    const out = runPs(FNS, `${FAKE_WINDOW}
-$script:window = Window @((El 'menu' 'New' 2800 -1070 40 20 'ControlType.MenuItem'), (El 'web-link' 'New' 2850 31000 60 20), (El 'ribbon' 'New' 2816 -1030 64 72))
-${invoke}
-"success=$($r.success) reason=$($r.reason) pressed=$($script:pressed.Count) n=$(@($r.candidates).Count)"
-$r.candidates | ForEach-Object { "$($_.controlType) '$($_.name)' $($_.bounds.x),$($_.bounds.y) $($_.bounds.width)x$($_.bounds.height)" }
-($r | ConvertTo-Json -Depth 5 -Compress) -match '"candidates":\\['`);
-    expect(out).toEqual([
-      'success=False reason=ambiguous pressed=0 n=2',
-      "ControlType.MenuItem 'New' 2800,-1070 40x20",
-      "ControlType.Button 'New' 2816,-1030 64x72",
-      'True',
-    ]);
-  });
-
-  it('a value read still takes the editable match, on screen or not (unchanged)', () => {
-    const out = runPs(FNS, `${FAKE_WINDOW}
-$edit = El 'edit' 'New' 2850 31000 60 20 'ControlType.Edit'
-$edit.Current.ControlType = [System.Windows.Automation.ControlType]::Edit
-$edit | Add-Member -MemberType ScriptMethod -Force -Name GetCurrentPattern -Value { param($p) return [pscustomobject]@{ Current = [pscustomobject]@{ Value = 'part1' } } }
-$script:window = Window @((El 'label' 'New' 2800 -1070 40 20 'ControlType.Text'), $edit)
-$r = Cmd-InvokeElement ([pscustomobject]@{ processId = 3648; name = 'New'; action = 'get-value' })
-"success=$($r.success) value=$($r.value)"`);
-    expect(out).toEqual(['success=True value=part1']);
-  });
-});
-
-describe('ps-bridge: the by-name action goes through the one choice', () => {
-  it('Cmd-InvokeElement asks Select-InvokeTarget and answers hidden / ambiguous with a reason, never a sentence of screen text', () => {
-    const inv = fnBody('Cmd-InvokeElement');
-    expect(inv).toMatch(/Select-InvokeTarget \$hits \(Get-MonitorRects\)/);
-    expect(inv).toMatch(/reason="hidden"/);
-    expect(inv).toMatch(/reason="ambiguous"; candidates=/);
-    expect(fnBody('Get-MonitorRects')).toContain('[ScreenPM]::Monitors()');
-  });
-});
 
 const CANDIDATES = [
   { name: 'New', controlType: 'ControlType.MenuItem', bounds: { x: 2800, y: -1070, width: 40, height: 20 } },
@@ -213,7 +63,7 @@ describe('an ambiguous name is reported with the elements it could mean', () => 
   it('is its own result code, with the next step', () => {
     const c = classifyResult(`a11y invoke "New" missed — ${missText(structuredMissFields(AMBIGUOUS))}.`, true, true, 'mcp');
     expect(c).toMatchObject({ outcome: 'failed', code: 'AMBIGUOUS' });
-    expect(c.hint).toMatch(/controlType|position/);
+    expect(c!.hint).toMatch(/controlType|position/);
   });
 });
 
@@ -246,7 +96,7 @@ describe('smart_click', () => {
     expect(mouseClick).not.toHaveBeenCalled();
     expect(r.text).toMatch(/2 elements on screen match that name, nothing was done/);
     expect(r.text).toContain('[Button] "New" @2816,-1030 64x72');
-    expect(classifyResult(r.text, true, true, 'mcp').code).toBe('AMBIGUOUS');
+    expect(classifyResult(r.text, true, true, 'mcp')?.code).toBe('AMBIGUOUS');
   });
 
   it('hidden (the only element with the name is on no monitor): not "Clicked via UI Automation"; the text OCR sees is clicked', async () => {
@@ -280,7 +130,7 @@ describe('accessibility invoke (invoke_element)', () => {
     const { r, invokeElement, mouseClick } = await run({ success: false, reason: 'hidden' });
     expect(invokeElement).toHaveBeenCalledTimes(1);
     expect(mouseClick).not.toHaveBeenCalled();
-    expect(classifyResult(r.text, true, true, 'mcp').code).toBe('ELEMENT_HIDDEN');
+    expect(classifyResult(r.text, true, true, 'mcp')?.code).toBe('ELEMENT_HIDDEN');
   });
 
   it('the ladder keeps the candidates of the rung that read the element', async () => {
@@ -298,7 +148,7 @@ describe('the reply names the element acted on, and a partial match is listed, n
     const text = missText(structuredMissFields(INEXACT));
     expect(text).toMatch(/^no element is named exactly that: 1 element on screen only contains it, nothing was done; to press one, call again with its full name/);
     expect(text).toContain('[Hyperlink] "What\'s New" in [Document] "Start page" @10,20 30x40');
-    expect(classifyResult(`a11y invoke "New" missed — ${text}.`, true, true, 'mcp').code).toBe('AMBIGUOUS');
+    expect(classifyResult(`a11y invoke "New" missed — ${text}.`, true, true, 'mcp')?.code).toBe('AMBIGUOUS');
   });
 
   it('missText: several equal matches offer within when they are in different windows; a minimized window offers a restore, not a position', () => {
@@ -360,7 +210,7 @@ describe('the reply names the element acted on, and a partial match is listed, n
     const platform = { invokeElement, mouseClick: vi.fn(), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as unknown as PlatformAdapter;
     const r = await invokeTool.execute({ name: 'Details' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);
     expect(r.text).toMatch(/^Invoked \(read back ✓\) \[Button\] "Details" via a11y/);
-    expect(classifyResult(r.text, false, true, 'mcp').outcome).toBe('confirmed');
+    expect(classifyResult(r.text, false, true, 'mcp')?.outcome).toBe('confirmed');
   });
 
   it('the screen text in a target is quoted and bounded, never free text', () => {

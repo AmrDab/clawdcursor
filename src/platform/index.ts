@@ -10,7 +10,6 @@ import { guardInputMethods } from './pointer-guard';
 
 let cached: PlatformAdapter | null = null;
 
-/** Get (and lazily construct) the PlatformAdapter for the current OS. */
 export async function getPlatform(): Promise<PlatformAdapter> {
   if (cached) return cached;
 
@@ -29,12 +28,7 @@ export async function getPlatform(): Promise<PlatformAdapter> {
   await adapter.init();
   // The test fence (core/fence.ts): the window list holds fenced windows only. Unset, the adapter is untouched.
   cached = fencePlatform(guardInputMethods(adapter));
-  return adapter;
-}
-
-/** For tests: reset the cache so a fresh adapter can be created. */
-export function _resetPlatformCache(): void {
-  cached = null;
+  return cached;
 }
 
 export type {

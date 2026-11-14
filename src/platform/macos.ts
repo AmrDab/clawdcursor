@@ -5,7 +5,7 @@
  *   - Keystrokes: osascript + System Events (CGEvent from helper is blocked by TCC)
  *   - Mouse: nut-js (nut-js mouse events ARE delivered)
  *   - Screenshot: screenshot-helper Swift binary (avoids ReplayKit CPU spin)
- *   - Accessibility: osascript JXA for tree queries + permission-check binary for TCC
+ *   - Accessibility: mac-ax.ts (the ax-helper Swift binary, osascript JXA as the fallback)
  */
 
 import { beforePointerPress, guardedInput } from './pointer-guard';
@@ -34,23 +34,24 @@ import type {
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
 import { getPackageRoot } from '../paths';
-import { llmSize } from '../core/agent-loop/coord-scale';
+import { llmSize } from './coord-scale';
 import { clampRegion } from './grab-image';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
-import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
+import { MAC_MODIFIER, MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
+import { modifierOf } from './keys';
 import {
   defaultMacAx, MacAxError,
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
-import { windowTextIncludes } from '../tools/window-text';
+import { windowTextIncludes } from './window-text';
+import { sleep } from '../sleep';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
 
 // Tunables (kept here, not magic numbers)
 const OSASCRIPT_TIMEOUT_MS = 8_000;
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const SCREENSHOT_TIMEOUT_MS = 10_000;
 /** How long open_app waits for a launched app to show a window before calling it "still loading". */
 const LAUNCH_CONFIRM_MS = 4_000;
@@ -79,9 +80,6 @@ export class MacOSAdapter implements PlatformAdapter {
 
   private screenSize: ScreenSize | null = null;
   private screenshotHelperPath: string | null = null;
-  private permissionCheckPath: string | null = null;
-  private inputPermissionTested = false;
-  private inputPermissionCached = false;
   private readonly ax: MacAx;
   private readonly keyboard: MacKeyboardGuard;
   private inputWarning: string | null = null;
@@ -102,20 +100,13 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async init(): Promise<void> {
-    // Find the helper binaries shipped with the app bundle.
     this.screenshotHelperPath = this.findHelper('screenshot-helper');
-    this.permissionCheckPath = this.findHelper('permission-check');
 
     // Build the accessibility helper in the background now, so the first window
     // list / tree read already has it (until then the osascript scripts answer).
     this.ax.prepare();
 
-    // Pre-warm screen size so first capture is fast.
     await this.getScreenSize().catch(() => null);
-  }
-
-  async shutdown(): Promise<void> {
-    // No long-lived processes to clean up — osascript and nut-js are stateless.
   }
 
   // ─── PERMISSIONS ──────────────────────────────────────────────────
@@ -127,18 +118,6 @@ export class MacOSAdapter implements PlatformAdapter {
       this.probeScreenRecording(),
     ]);
     return { input: accessibility, accessibility, screenRecording };
-  }
-
-  async requestPermissions(): Promise<PermissionStatus> {
-    // Spawn permission-check with prompt flags to trigger the native dialogs.
-    if (this.permissionCheckPath && fs.existsSync(this.permissionCheckPath)) {
-      try {
-        await execFileAsync(this.permissionCheckPath, ['--prompt', '--request-screen-recording'], { timeout: 30_000 });
-      } catch {
-        // The binary may exit non-zero if perms denied — that's fine, dialogs were shown.
-      }
-    }
-    return this.checkPermissions();
   }
 
   private async probeAccessibility(): Promise<boolean> {
@@ -256,8 +235,6 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult> {
     if (!this.screenshotHelperPath) {
-      // Build a human-readable list of the candidate paths that were searched
-      // so the user knows exactly where the binary was expected.
       const root = getPackageRoot();
       const searched = [
         path.join(root, 'native', 'ClawdCursor.app', 'Contents', 'MacOS', 'screenshot-helper'),
@@ -292,7 +269,7 @@ export class MacOSAdapter implements PlatformAdapter {
       let origin: { x: number; y: number } | undefined;
 
       if (opts?.region) {
-        // A region (capture px: physical, Retina) is cut out of the capture, as on Windows: ignored, the caller got the whole screen.
+        // A region (capture px: physical, Retina) is cut out of the capture, as on Windows.
         const r = clampRegion(opts.region, width, height);
         buffer = await sharp(buffer).extract(r).png().toBuffer();
         width = r.width;
@@ -328,12 +305,6 @@ export class MacOSAdapter implements PlatformAdapter {
       try { fs.unlinkSync(tmp); } catch { /* */ }
       throw err;
     }
-  }
-
-  async screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult> {
-    const full = await this.screenshot();
-    const buffer = await sharp(full.buffer).extract({ left: x, top: y, width: w, height: h }).png().toBuffer();
-    return { buffer, width: w, height: h, scaleFactor: 1 };
   }
 
   // ─── WINDOWS ──────────────────────────────────────────────────────
@@ -429,7 +400,7 @@ export class MacOSAdapter implements PlatformAdapter {
       if (query.processName) {
         this.focusFailure = notRunning || !lookupNote ? `No window or running app matches "${query.processName}".` : lookupNote;
       }
-      return false; // nothing to match on
+      return false;
     }
 
     if (processId !== undefined) {
@@ -488,17 +459,10 @@ export class MacOSAdapter implements PlatformAdapter {
     return `${secureInputMessage(state.holder)} (${detail.replace(/\.$/, '')})`;
   }
 
-  async maximizeWindow(): Promise<void> {
-    // macOS native fullscreen toggle.
-    await this.keyPress('ctrl+mod+f').catch(() => { /* non-fatal */ });
-  }
-
   async setWindowState(
     state: WindowState,
     query?: { processName?: string; processId?: number; title?: string },
   ): Promise<boolean> {
-    // Resolve target window. When query is omitted, we target the frontmost
-    // app's frontmost window via System Events.
     const targetClause = this.buildMacWindowTargetClause(await this.resolveWindowQuery(query));
     try {
       let script: string;
@@ -527,7 +491,6 @@ export class MacOSAdapter implements PlatformAdapter {
   ): Promise<boolean> {
     const targetClause = this.buildMacWindowTargetClause(await this.resolveWindowQuery(query));
     try {
-      // Read current bounds for fields not supplied, then assign AXPosition + AXSize.
       const readScript =
         `tell application "System Events" to tell ${targetClause}\n` +
         `  set p to position\n` +
@@ -679,7 +642,7 @@ export class MacOSAdapter implements PlatformAdapter {
     if (!res.success && (action === 'expand' || action === 'collapse') && (key === 'Return' || key === 'Escape')) {
       res = await this.finishWithKey({ ...query, action }, key);
     }
-    // The agent loop reads the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
+    // The projected tools read the reason from `data.error` (the Linux adapter puts it there); the client reports it top-level,
     // so a refusal's explanation — "matches 2 elements: …" — used to read as "element not found or not actionable".
     return !res.success && res.error ? { ...res, data: { ...res.data, error: res.error } } : res;
   }
@@ -783,7 +746,6 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   async mouseMoveRelative(dx: number, dy: number): Promise<void> {
-    // nut-js getPosition() works reliably on macOS.
     try {
       const pos = await mouse.getPosition();
       const nx = Math.round(pos.x + dx);
@@ -897,16 +859,16 @@ export class MacOSAdapter implements PlatformAdapter {
     // rather than spliced in raw — a raw token can close the string literal
     // and run arbitrary AppleScript, including `do shell script`.
     const mods = parts.slice(0, -1).map(m => {
-      const n = this.normalizeMod(m);
-      if (!['command', 'shift', 'option', 'control'].includes(n)) throw new Error(`Unknown modifier: "${m}"`);
-      return n;
+      const mod = modifierOf(m, 'darwin');
+      if (!mod) throw new Error(`Unknown modifier: "${m}"`);
+      return MAC_MODIFIER[mod].name;
     });
 
     const usingClause = mods.length ? ` using {${mods.map(m => `${m} down`).join(', ')}}` : '';
 
     // Special keys → key code; printable single chars → keystroke. A modifier on its own ("shift") is that modifier key, tapped.
-    const bareModifier = mods.length === 0 ? MAC_MODIFIER_KEY_CODES[this.normalizeMod(key)] : undefined;
-    const keyCode = bareModifier ?? MAC_KEY_CODES[key.toLowerCase()];
+    const bareModifier = mods.length === 0 ? modifierOf(key, 'darwin') : null;
+    const keyCode = bareModifier ? MAC_MODIFIER[bareModifier].code : MAC_KEY_CODES[key.toLowerCase()];
     // One character outside ASCII ("é", "日", an emoji): typed as itself, never as `keystroke` — that presses "a" (#242).
     if (keyCode === undefined && hasNonAscii(key) && [...key].length === 1) {
       refuseNonAsciiChord(key, mods.length > 0);
@@ -926,23 +888,11 @@ export class MacOSAdapter implements PlatformAdapter {
     await runAppleScript(script, 6_000);
   }
 
-  private normalizeMod(mod: string): string {
-    const m = mod.toLowerCase();
-    if (m === 'mod' || m === 'cmd' || m === 'command' || m === 'super' || m === 'meta') return 'command';
-    if (m === 'shift') return 'shift';
-    if (m === 'alt' || m === 'option' || m === 'opt') return 'option';
-    if (m === 'ctrl' || m === 'control') return 'control';
-    return m;
-  }
-
   async keyDown(key: PortableKeyCombo): Promise<void> {
-    // macOS key down/up via System Events. Supports named modifiers
-    // (shift/option/control/command) and arbitrary key codes. Non-modifier
-    // single chars fall back to a brief keystroke.
     const lower = key.trim().toLowerCase();
-    const asMod = this.modToAppleScript(lower);
-    if (asMod) {
-      const script = `tell application "System Events" to key down ${asMod}`;
+    const mod = modifierOf(lower, 'darwin');
+    if (mod) {
+      const script = `tell application "System Events" to key down ${MAC_MODIFIER[mod].name}`;
       await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
@@ -962,9 +912,9 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async keyUp(key: PortableKeyCombo): Promise<void> {
     const lower = key.trim().toLowerCase();
-    const asMod = this.modToAppleScript(lower);
-    if (asMod) {
-      const script = `tell application "System Events" to key up ${asMod}`;
+    const mod = modifierOf(lower, 'darwin');
+    if (mod) {
+      const script = `tell application "System Events" to key up ${MAC_MODIFIER[mod].name}`;
       await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
@@ -977,14 +927,6 @@ export class MacOSAdapter implements PlatformAdapter {
     // Printable single char: no-op — keystroke doesn't hold. Anything else (a chord, an unknown name) is an error: the
     // caller must not believe a key was released (pointer-guard.ts held keys).
     if ([...key.trim()].length !== 1) throw new Error(`Unknown key: "${key}"`);
-  }
-
-  private modToAppleScript(name: string): string | null {
-    if (name === 'mod' || name === 'cmd' || name === 'command' || name === 'meta' || name === 'super') return 'command';
-    if (name === 'shift') return 'shift';
-    if (name === 'alt' || name === 'option' || name === 'opt') return 'option';
-    if (name === 'ctrl' || name === 'control') return 'control';
-    return null;
   }
 
   // ─── CLIPBOARD ────────────────────────────────────────────────────
@@ -1013,17 +955,6 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   // ─── APPS ─────────────────────────────────────────────────────────
-
-  /**
-   * Thin shim — delegates straight to `launchApp` with no alias resolution.
-   * The platform layer is alias-data-agnostic; cross-OS name mapping (e.g.
-   * Windows "Notepad" → mac "TextEdit") happens in the caller above (the
-   * agent's `open_app` tool, the router's `handleOpenApp`). Callers that
-   * want bundle-name / searchTerm hints must pass them via `launchApp`.
-   */
-  async openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }> {
-    return this.launchApp(name, opts);
-  }
 
   async launchApp(
     name: string,
@@ -1069,11 +1000,11 @@ export class MacOSAdapter implements PlatformAdapter {
     let windowsBefore: readonly WindowInfo[] = [];
     if (before === undefined) windowsBefore = await this.listWindows().catch(() => [] as WindowInfo[]);
 
-    // v0.8.3 — idempotency. On macOS `open -a AppName` is generally smart
+    // Idempotency. On macOS `open -a AppName` is generally smart
     // about not spawning duplicates (it activates the existing app), but
     // we want a stable cross-OS contract: check first, focus-if-running,
     // launch only when needed. Prevents the "Outlook keeps opening" class
-    // of bug from any retry loop in the pipeline.
+    // of bug when a launch is retried.
     // Without the helper the process is known (lsappinfo) but its windows are not: ask the window list for them.
     let beforeWindows = before?.windows ?? [];
     if (before && !before.windowsKnown) {
@@ -1124,9 +1055,7 @@ export class MacOSAdapter implements PlatformAdapter {
     if (opts?.nameOnly) return {};
 
     // Spotlight fallback — universal launcher for anything macOS can find.
-    // Mirrors the pattern Windows uses with the Start Menu and the same
-    // shape the router's zero-LLM fast path already proves. Keyboard goes
-    // through the platform's internal primitives.
+    // Mirrors the pattern Windows uses with the Start Menu.
     const viaSpotlight = await this.launchViaSpotlight(name, opts?.searchTerm, before, windowsBefore, opts);
     if (viaSpotlight) return viaSpotlight;
 
@@ -1180,11 +1109,6 @@ export class MacOSAdapter implements PlatformAdapter {
     return running ? { pid: running.processId } : null;
   }
 
-  /**
-   * Spotlight-driven launch fallback. Cmd+Space, type, Return, then poll.
-   * The platform calls its own keyboard primitives here to fulfill its
-   * own `launchApp` contract.
-   */
   private async launchViaSpotlight(
     name: string,
     searchTermHint: string | undefined,
@@ -1194,7 +1118,9 @@ export class MacOSAdapter implements PlatformAdapter {
   ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     // Prefer the alias's curated `searchTerm` (or `macOSAppName`); fall back
     // to the stripped bundle name. Keeps the launcher app-agnostic — adding
-    // apps still means a row in `aliases.ts`, not platform code.
+    // apps still means a row in `app-aliases.ts`, not platform code. Without the
+    // trailing `.app` Spotlight ranks the bundle correctly — typing
+    // `Calculator.app` matches a Finder hit, `Calculator` the app itself.
     const searchText = (searchTermHint && searchTermHint.trim())
       ? searchTermHint.trim()
       : name.replace(/\.app$/i, '');
@@ -1207,9 +1133,6 @@ export class MacOSAdapter implements PlatformAdapter {
       await this.delay(120);
       await this.keyPress('cmd+Space');
       await this.delay(300);
-      // Strip a trailing `.app` so Spotlight ranks the bundle correctly —
-      // typing `Calculator.app` matches a Finder hit, `Calculator` matches
-      // the app itself. Already handled in `searchText` above.
       await this.typeText(searchText);
       await this.delay(500);
       await this.keyPress('Return');
@@ -1239,9 +1162,6 @@ export class MacOSAdapter implements PlatformAdapter {
 }
 
 // macOS virtual keycodes for special keys (US ANSI keyboard).
-/** The left-hand modifier keys, for a modifier pressed on its own. */
-const MAC_MODIFIER_KEY_CODES: Record<string, number> = { shift: 56, command: 55, option: 58, control: 59 };
-
 const MAC_KEY_CODES: Record<string, number> = {
   'return': 36, 'enter': 36,
   'tab': 48,

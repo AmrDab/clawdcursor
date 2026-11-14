@@ -44,7 +44,7 @@ vi.mock('sharp', () => ({
 }));
 
 // ── The key mock: control hasConsent() return value per test ─────────────────
-const mockHasConsent = vi.fn<[], boolean>();
+const mockHasConsent = vi.fn<() => boolean>();
 vi.mock('../surface/onboarding', () => ({
   hasConsent: () => mockHasConsent(),
   writeConsentFile: vi.fn(),
@@ -87,7 +87,7 @@ type HandlerFn = (params: Record<string, unknown>) => Promise<McpToolResult>;
 const capturedHandlers = new Map<string, HandlerFn>();
 // The host's side of MCP elicitation (the low-level server under McpServer).
 // Default: a host without elicitation support, so older tests are unaffected.
-const mockClientCaps = vi.fn<[], Record<string, unknown> | undefined>(() => undefined);
+const mockClientCaps = vi.fn<() => Record<string, unknown> | undefined>(() => undefined);
 const mockElicitInput = vi.fn();
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {
@@ -182,15 +182,11 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
 
       const handler = await buildAndGetHandler();
       // Allow any tool-level errors; we only inspect the consent-error shape.
-      const result = await handler({}).catch((): null => null);
-
-      if (result !== null) {
-        const text = result.content.find(b => b.type === 'text') as { type: 'text'; text: string } | undefined;
-        const isConsentError = text?.text.includes('clawdcursor consent --accept');
-        expect(isConsentError).toBe(false);
-      }
-      // If the promise rejected that's also fine — it means a tool threw, which
-      // is past the consent gate.
+      // A rejection is fine too: a tool threw, which is past the consent gate. Either way it is not the consent error.
+      const result = await handler({}).catch((e: unknown) => e);
+      const text = result instanceof Error ? result.message
+        : (result as McpToolResult).content.find(b => b.type === 'text')?.text;
+      expect(text ?? '').not.toContain('clawdcursor consent --accept');
     });
 
     it('passes through to the handler (the call takes the pill)', async () => {
@@ -238,12 +234,12 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
   });
 
   // ── 4. cli.ts mcp command no longer exits on missing consent ────────────────
-  describe('cli.ts — mcp command is non-fatal on missing consent', () => {
+  describe('serve.ts — the stdio server is non-fatal on missing consent', () => {
     it('does NOT contain process.exit(1) in the mcp consent branch', () => {
       const { readFileSync } = require('node:fs');
       const { join } = require('node:path');
       const cliSrc = readFileSync(
-        join(__dirname, '..', 'surface', 'cli.ts'),
+        join(__dirname, '..', 'surface', 'serve.ts'),
         'utf8',
       ) as string;
 

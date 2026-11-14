@@ -12,7 +12,7 @@
 
 - [ ] `npm run typecheck` clean
 - [ ] `npm run test:ci` passing (759/760 baseline; note any new skips)
-- [ ] `npm run test:mcp-schema-snapshot` &mdash; if you touched `src/tools/`, the snapshot diff is intentional and committed
+- [ ] `npm run test:mcp-schema-snapshot` &mdash; if you touched `src/tools/` or the MCP server, the snapshot diff is intentional and committed
 - [ ] Manual smoke on at least one OS (specify which: macOS / Windows / Linux)
 - [ ] If touching the MCP surface: verified the tool call you changed works end-to-end through stdio AND HTTP
 

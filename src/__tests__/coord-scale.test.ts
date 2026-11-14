@@ -16,9 +16,9 @@
  * behavior end-to-end with a mock adapter (OS-agnostic).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { imageScale, scaleCoord, screenCenter, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { imageScale, scaleCoord, screenCenter, LLM_TARGET_WIDTH } from '../platform/coord-scale';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 
 describe('imageScale / scaleCoord', () => {
   it('scales by physicalWidth/1280 when the screen is wider than the screenshot', () => {
@@ -120,10 +120,7 @@ function makeCtx(clicks: Array<{ x: number; y: number }>): AgentToolContext {
       mouseClick: vi.fn((x: number, y: number) => { clicks.push({ x, y }); return Promise.resolve(); }),
       getActiveWindow: vi.fn(() => Promise.resolve({ title: 'Edge', processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })),
     } as any,
-    task: 't',
-    mode: 'hybrid',
     screen: { logicalWidth: 2560, logicalHeight: 1440, physicalWidth: 2560, physicalHeight: 1440, dpiRatio: 1 },
-    screenshotsCaptured: { n: 0 },
   };
 }
 
@@ -139,9 +136,9 @@ describe('click tool coordinate space', () => {
     expect(r.text).toMatch(/×2/);
   });
 
-  it('default (screen) passes a11y coords through unchanged', async () => {
+  it('space:"screen" passes a11y coords through unchanged', async () => {
     const clicks: Array<{ x: number; y: number }> = [];
-    await click.execute({ x: 1107, y: 423 }, makeCtx(clicks));
+    await click.execute({ x: 1107, y: 423, space: 'screen' }, makeCtx(clicks));
     expect(clicks[0]).toEqual({ x: 1107, y: 423 });
   });
 

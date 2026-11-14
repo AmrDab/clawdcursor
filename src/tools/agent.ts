@@ -5,20 +5,17 @@
 
 import { fenceImage } from '../core/fence';
 import type { ToolDefinition } from './types';
-import { setLastFrame } from '../core/agent-loop/coord-scale';
+import { setLastFrame, pixelsPerPoint } from '../platform/coord-scale';
 import { pauseGate, parsePauseCard } from '../core/pause-gate';
 import { timeWait } from '../core/observability/steps';
 import { promptSatisfies } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { foreignOverlayState } from '../core/overlay-state';
-import { OcrEngine } from '../platform/ocr-engine';
+import { ocrEngine } from '../platform/ocr-engine';
 
 const PAUSE_WAIT_DEFAULT_MS = 45_000; // under common 60s MCP client timeouts
 const normMessage = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
-/** OCR for done_when's ocr_contains — created on first use only. */
-let pauseOcr: OcrEngine | null = null;
-const getPauseOcr = (): OcrEngine => (pauseOcr ??= new OcrEngine());
 
 export function getAgentTools(): ToolDefinition[] {
   return [
@@ -62,7 +59,6 @@ export function getAgentTools(): ToolDefinition[] {
         timeout: { type: 'number', description: 'Max seconds to wait for the answer before returning {status:"waiting"} (default 45, clamped 1–50). The prompt stays up.', required: false },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async ({ message, timeout, done_when, choices, input }, ctx) => {
         const text = String(message ?? '').trim();
@@ -112,7 +108,7 @@ export function getAgentTools(): ToolDefinition[] {
           }
           const platform = ctx?.platform;
           if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };
-          const deps = { adapter: platform, ocrText: async () => (await getPauseOcr().recognizeScreen()).fullText ?? '' };
+          const deps = { adapter: platform, ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '' };
           const now = await checkAssertions(parsed.assertions, deps);
           if (now.ok) {
             return {
@@ -225,22 +221,17 @@ export function getAgentTools(): ToolDefinition[] {
         'Useful for the dashboard\'s /screenshot REST replacement.',
       parameters: {},
       category: 'perception',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         try {
           await ctx.ensureInitialized();
           const frame = await ctx.desktop.captureForLLM();
           setLastFrame(null);   // image coords now refer to this primary capture
-          // captureForLLM returns { buffer, scaleFactor, llmWidth, llmHeight,
-          // format }. Format is configured per-capture (`'jpeg'` by default,
-          // sometimes `'png'`); use it to set the correct mimeType instead
-          // of the previous hardcoded 'image/png' which lied for the JPEG path.
           const mimeType = frame.format === 'png' ? 'image/png' : 'image/jpeg';
           // The one capture path (core/fence.ts): under the test fence only the fenced window is shown.
-          const ratio = Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio);
+          const boundsScale = pixelsPerPoint(Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio), process.platform);
           const image = await fenceImage(Buffer.isBuffer(frame.buffer) ? frame.buffer : Buffer.from(frame.buffer), mimeType,
-            { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale: process.platform === 'darwin' && ratio > 0 ? ratio : 1 });
+            { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale });
           return {
             text: JSON.stringify({
               scaleFactor: frame.scaleFactor,

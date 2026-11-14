@@ -22,14 +22,14 @@ export async function beforePointerPress(): Promise<void> {
   try { await hook(); } catch { /* cosmetic */ }
 }
 
+/** A window the agent asked for by process, name or title. */
+export interface WindowQuery { processId?: number; processName?: string; title?: string }
 /**
  * Runs around every synthetic key, type, click, drag and scroll, in both input layers (the platform adapter and
  * NativeDesktop): core/control.ts refuses input while the user has stopped clawdcursor, or when the window in front is not
  * the one the agent was working in (#294). Unlike the hooks above it throws — a refusal sends nothing. Releases (mouseUp,
  * keyUp) are never refused: a button or key the agent holds must always be let go.
  */
-/** A window the agent asked for by process, name or title. */
-export interface WindowQuery { processId?: number; processName?: string; title?: string }
 interface InputGuard {
   /** Throws while the user has stopped clawdcursor. */
   stopCheck(): void;
@@ -59,7 +59,15 @@ let onAgentInput: ((method: string) => void) | null = null;
 export function setOnAgentInput(f: ((method: string) => void) | null): void {
   onAgentInput = f;
 }
-const announce = (m: string) => { try { onAgentInput?.(m); } catch { /* cosmetic */ } };
+/** Told before every agent act, as the pill is: what was read from the screen before it is stale (ocr-engine.ts). */
+const actListeners: Array<() => void> = [];
+export function onAgentAct(f: () => void): void {
+  actListeners.push(f);
+}
+const announce = (m: string) => {
+  for (const f of actListeners) f();
+  try { onAgentInput?.(m); } catch { /* cosmetic */ }
+};
 
 /** For clawdcursor's own housekeeping on the user's behalf (giving the keyboard back after a pause): not agent input. */
 export function unguarded<R>(fn: () => R): R {
@@ -81,30 +89,42 @@ export async function guardedInput<R>(method: string, args: unknown[], send: () 
   return r;
 }
 
-/** Synthetic keyboard and mouse input: refused while stopped, and when the agent's window is no longer in front. */
-const INPUT_METHODS = [
-  'mouseClick', 'mouseDoubleClick', 'mouseRightClick', 'mouseDrag', 'mouseScroll', 'mouseDown',
-  'typeText', 'keyPress', 'keyDown', 'executeMouseAction', 'executeKeyboardAction',
-];
 /**
- * Acts that do not go through the window in front — by element (accessibility), on a window by handle, or in a page
- * (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
- * writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every other pointer method
- * (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than by name, so a new one is
- * not left moving after a Stop. Putting the user's own clipboard back after a paste is not agent input: those restores
- * run unguarded().
+ * Every guarded method of the input layers, by name, with what the running pill says while it runs (banner.ts).
+ *  - `input`: synthetic keyboard and mouse input, refused while stopped and when the agent's window is no longer in
+ *    front; the pill names that window's app.
+ *  - `stop`: acts that do not go through the window in front — by element (accessibility), on a window by handle, or in
+ *    a page (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
+ *    writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every other pointer
+ *    method (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than by name, so a
+ *    new one is not left moving after a Stop. Putting the user's own clipboard back after a paste is not agent input:
+ *    those restores run unguarded().
+ *  - `launch`: launchApp, wrapped on its own below (it rebinds the window the agent works in).
  */
-const STOP_METHODS = [
-  'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
-  'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'fillFormByLabels', 'focus', 'selectOption', 'pressKey',
-  'writeClipboard', 'evaluate', 'switchTab',
-];
+export const GUARDED_METHODS: Readonly<Record<string, { kind: 'input' | 'stop' | 'launch'; activity?: string }>> = {
+  mouseClick: { kind: 'input', activity: 'Clicking' }, mouseDoubleClick: { kind: 'input', activity: 'Clicking' },
+  mouseRightClick: { kind: 'input', activity: 'Clicking' }, mouseDown: { kind: 'input', activity: 'Clicking' },
+  mouseDrag: { kind: 'input', activity: 'Dragging' }, mouseScroll: { kind: 'input', activity: 'Scrolling' },
+  typeText: { kind: 'input', activity: 'Typing' }, keyPress: { kind: 'input', activity: 'Pressing keys' },
+  keyDown: { kind: 'input', activity: 'Pressing keys' },
+  invokeElement: { kind: 'stop', activity: 'Clicking' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
+  setWindowState: { kind: 'stop', activity: 'Arranging windows' }, setWindowBounds: { kind: 'stop', activity: 'Arranging windows' },
+  navigate: { kind: 'stop', activity: 'Opening a page' }, click: { kind: 'stop', activity: 'Clicking' },
+  clickByText: { kind: 'stop', activity: 'Clicking' }, typeInField: { kind: 'stop', activity: 'Typing' },
+  typeByLabel: { kind: 'stop', activity: 'Typing' }, focus: { kind: 'stop', activity: 'Clicking' },
+  selectOption: { kind: 'stop', activity: 'Choosing an option' }, pressKey: { kind: 'stop', activity: 'Pressing keys' },
+  writeClipboard: { kind: 'stop' }, evaluate: { kind: 'stop' }, switchTab: { kind: 'stop' },
+  launchApp: { kind: 'launch', activity: 'Opening an app' },
+};
+const methodsOf = (kind: 'input' | 'stop') => Object.keys(GUARDED_METHODS).filter(m => GUARDED_METHODS[m].kind === kind);
+const INPUT_METHODS = methodsOf('input');
+const STOP_METHODS = methodsOf('stop');
 
 /** Every pointer method of the object (a move, press, release, click, drag, scroll), its prototypes' included. */
 function pointerMethods(target: object): string[] {
   const names = new Set<string>();
   for (let o: object | null = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
-    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k) || k === 'executeMouseAction') names.add(k);
+    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k)) names.add(k);
   }
   return [...names];
 }
@@ -199,15 +219,13 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     return r;
   });
   // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
-  for (const m of ['openApp', 'launchApp']) {
-    wrap(m, async (g, f, args, nested) => {
-      if (!nested) { g.stopCheck(); announce(m); }
-      const r = await f(...args) as { pid?: number; title?: string } | undefined;
-      await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
-      announce(m);  // again, now that the launched window is known: the outline goes to it
-      return r;
-    });
-  }
+  wrap('launchApp', async (g, f, args, nested) => {
+    if (!nested) { g.stopCheck(); announce('launchApp'); }
+    const r = await f(...args) as { pid?: number; title?: string } | undefined;
+    await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
+    announce('launchApp');  // again, now that the launched window is known: the outline goes to it
+    return r;
+  });
   guardHardKeys(target);
   fencePointerMethods(target);
   return target;
@@ -219,7 +237,7 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
  * followed by a bare press cannot reach another window. With no fence nothing is wrapped.
  */
 function fencePointerMethods(target: object): void {
-  if (!fenceActive()) return;   // no fence: the methods stay exactly as they are
+  if (!fenceActive()) return;
   const t = target as Record<string, unknown>;
   for (const m of pointerMethods(target)) {
     const f = t[m];
@@ -297,7 +315,7 @@ function movesFocus(method: string, args: unknown[]): boolean {
       || /^(super|win|meta)(\+|$)/.test(k)
       || /^(cmd|command|mod|super)\+space$/.test(k);
   }
-  return true;  // clicks, drags, a held button, the composite execute* actions
+  return true;  // clicks, drags, a held button
 }
 
 /**

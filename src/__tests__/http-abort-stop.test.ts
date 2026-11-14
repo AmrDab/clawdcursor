@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { createUtilityServer, initServerToken } from '../surface/http-utility';
+import { createUtilityServer } from '../surface/http-utility';
+import { initServerToken } from '../surface/auth';
 
 describe('POST /stop — graceful shutdown', () => {
   afterEach(() => {

@@ -11,10 +11,10 @@ import type { UIMap, MaxCost } from './ui-map-types';
  * event-driven (`invalidate()` after every screen-changing action) plus the
  * resolve-time window guard (pid/title must still match) — the TTL only
  * catches background drift no agent action caused. It must therefore be
- * sized to SURVIVE an LLM round-trip: refs are advertised at the end of
- * turn N and consumed on turn N+1, after prompt assembly + a full model
- * call (45s timeout, backoff retries). The original 5s expired virtually
- * every cross-turn ref (audit 2026-06-10, finding A2).
+ * sized to SURVIVE a model round-trip: refs come back from one tool call
+ * and are used on the next, after a full model turn in the host. The
+ * original 5s expired virtually every cross-turn ref (audit 2026-06-10,
+ * finding A2).
  */
 export const TTL_MS = 60_000;
 
@@ -63,23 +63,13 @@ export class UIMapHolder {
     const current = this.held[this.held.length - 1];
     if (!current) return null;
     if (this.resolve(current.map.snapshot_id, now).ok !== true) return null;
-    if (current.maxCost === undefined) return null;              // unknown cost → don't reuse
+    if (current.maxCost === undefined) return null;
     return COST_RANK[current.maxCost] >= COST_RANK[requested] ? current.map : null;
   }
 
   /** Mark all held maps invalid — called after any screen-changing action. */
   invalidate(): void {
     this.invalidated = true;
-  }
-
-  /** Re-stamp the current map's compiledAt — called when the loop re-ADVERTISES
-   *  an existing map to the model (§6b reuse branch), so the TTL clock runs
-   *  from the last advertisement, not the original compile. No-op unless the
-   *  id is the current, non-invalidated map (never resurrects stale maps). */
-  touch(snapshotId: string, now: number): void {
-    const current = this.held[this.held.length - 1];
-    if (!current || current.map.snapshot_id !== snapshotId || this.invalidated) return;
-    current.compiledAt = now;
   }
 
   currentId(): string | undefined {

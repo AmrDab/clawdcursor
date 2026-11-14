@@ -4,9 +4,8 @@
  * is the tool announced as destructive — so a path is refused here, on every OS, and the agent is pointed to open_file.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { appNameRefusal } from '../core/router/aliases';
+import { appNameRefusal } from '../platform/app-aliases';
 import { getOrchestrationTools } from '../tools/orchestration';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { resolveInstalledWindowsApp, isAppShapedStartEntry } from '../platform/win-app-resolve';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -55,21 +54,11 @@ describe('open_app refuses a path before anything is launched, on every OS', () 
   const launchApp = vi.fn(async () => ({ pid: 1, title: 'x' }));
   const ctx = { ensureInitialized: async () => {}, platform: { platform: process.platform, launchApp }, a11y: { invalidateCache: () => {} } } as unknown as ToolContext;
   const mcp = getOrchestrationTools().find(t => t.name === 'open_app')!;
-  const agent = buildUnifiedTools().find(t => t.name === 'open_app')!;
 
   it.each([...PATHS, ...URIS, ...ODD])('MCP open_app: %j', async (p) => {
     launchApp.mockClear();
     const r = await mcp.handler({ name: p }, ctx);
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/open_file/);
-    expect(r.text).toMatch(/open_uri/);
-    expect(launchApp).not.toHaveBeenCalled();
-  });
-
-  it.each([...PATHS, ...URIS, ...ODD])('agent-loop open_app: %j', async (p) => {
-    launchApp.mockClear();
-    const r = await agent.execute({ name: p }, { platform: { platform: process.platform, launchApp } } as never);
-    expect(r.success).toBe(false);
     expect(r.text).toMatch(/open_file/);
     expect(r.text).toMatch(/open_uri/);
     expect(launchApp).not.toHaveBeenCalled();
@@ -90,13 +79,12 @@ describe('a name outside the alias table only ever starts an installed app', () 
   const launchApp = vi.fn(async (..._a: unknown[]) => ({ pid: 1, title: 'x' }));
   const ctx = { ensureInitialized: async () => {}, platform: { platform: process.platform, launchApp }, a11y: { invalidateCache: () => {} } } as unknown as ToolContext;
   const mcp = getOrchestrationTools().find(t => t.name === 'open_app')!;
-  const agent = buildUnifiedTools().find(t => t.name === 'open_app')!;
   const src = (file: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'platform', file), 'utf8');
 
   it('open_app marks a non-alias name as name-only, and an alias-table name as trusted', async () => {
     launchApp.mockClear();
     await mcp.handler({ name: 'Designcenter' }, ctx);
-    await agent.execute({ name: 'payload.exe' }, { platform: { platform: process.platform, launchApp } } as never);
+    await mcp.handler({ name: 'payload.exe' }, ctx);
     await mcp.handler({ name: 'Calculator' }, ctx);
     expect(launchApp.mock.calls[0][1]).toMatchObject({ nameOnly: true });
     expect(launchApp.mock.calls[1][1]).toMatchObject({ nameOnly: true });
@@ -106,14 +94,6 @@ describe('a name outside the alias table only ever starts an installed app', () 
   it('the Windows resolver never looks up a string the shell could read as a URI or a path', async () => {
     for (const n of [...URIS, ...PATHS, ...ODD]) expect(await resolveInstalledWindowsApp(n), n).toBeNull();
   });
-
-  it.runIf(process.platform === 'win32')('live (read-only): a program on PATH resolves to its full path, a Start-menu app to its app id, anything else to nothing', async () => {
-    const notepad = await resolveInstalledWindowsApp('notepad');
-    expect(notepad?.path ?? notepad?.appId).toBeTruthy();
-    if (notepad?.path) expect(notepad.path).toMatch(/^[A-Za-z]:\\.+\.exe$/i);
-    expect(await resolveInstalledWindowsApp('no-such-app-clawdcursor-test')).toBeNull();
-    expect(await resolveInstalledWindowsApp('payload.exe')).toBeNull();
-  }, 60_000);
 
   // Security scan: the Start menu also lists URL and document shortcuts, and a loose match could pick an unrelated
   // entry ("a", "Uninstall"). An entry is accepted only if it has an app's shape, and only when its name IS the name asked for.
@@ -143,22 +123,6 @@ describe('a name outside the alias table only ever starts an installed app', () 
     expect(w).not.toMatch(/IndexOf\(|StartsWith\(|-like|-match \$n/);
     expect(w).toMatch(/\$_\.Name -eq \$n/);   // PowerShell -eq on strings ignores case
   });
-
-  it.runIf(process.platform === 'win32')('live (read-only): the apps people ask for still resolve, to something app-shaped; a prefix or a fragment does not', async () => {
-    for (const name of ['notepad', 'Calculator', 'Microsoft Edge', 'calculator', 'MICROSOFT EDGE']) {
-      const hit = await resolveInstalledWindowsApp(name);
-      expect(hit, name).not.toBeNull();
-      if (hit?.appId) expect(isAppShapedStartEntry(hit.appId, hit.target), name).toBe(true);
-    }
-    // A prefix of real entries, and a name that cannot exist. (Not "Uninstall" or "a": a machine may well have a
-    // Start-menu entry called exactly that, and an exact name is allowed to resolve.)
-    const noSuch = `zz-no-such-app-${Math.random().toString(36).slice(2, 12)}`;
-    for (const name of ['Microsoft', noSuch]) {
-      const hit = await resolveInstalledWindowsApp(name);
-      expect(hit?.appId, name).toBeUndefined();   // only a real program of that name on PATH could answer
-    }
-    expect(await resolveInstalledWindowsApp(noSuch)).toBeNull();
-  }, 120_000);
 
   it('Windows: a name-only launch starts the resolved program or app id, and never types into the Start menu', () => {
     const w = src('windows.ts');

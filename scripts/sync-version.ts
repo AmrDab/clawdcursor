@@ -136,8 +136,8 @@ const TARGETS: SyncTarget[] = [
   },
 
   // Installer scripts — header comments that document the example pin.
-  // The runtime VERSION="${VERSION:-main}" default below is intentionally
-  // dynamic (defaults to main branch) and is NOT touched.
+  // Their runtime VERSION default ("latest") is intentionally dynamic and
+  // is NOT touched.
   {
     file: 'docs/install.sh',
     pattern: /(# Specify version: VERSION=v)\d+\.\d+\.\d+/,
@@ -177,9 +177,8 @@ for (const t of TARGETS) {
   const before = fs.readFileSync(fp, 'utf-8');
   const after = before.replace(t.pattern, t.replacement);
   if (before === after) {
-    // Either already at the right version, or the pattern didn't match — both
-    // are non-fatal but the second case is interesting. We can't distinguish
-    // cleanly without re-scanning, so just print a quiet status line.
+    // Either already at the right version, or the pattern didn't match: only
+    // the second is an error (unless the target is optional).
     if (!t.pattern.test(after) && !t.optional) {
       errors.push(`✗ ${t.desc} pattern did not match in ${t.file}`);
     }

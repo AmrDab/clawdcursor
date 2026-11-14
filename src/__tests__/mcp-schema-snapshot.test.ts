@@ -1,30 +1,22 @@
 /**
  * MCP schema-snapshot gate.
  *
- * Protects the public tool catalog (name, description, category, parameter
- * shape) from accidental drift. Any PR that changes the MCP surface will fail
- * this test until the snapshot is updated intentionally with:
- *   npx tsx scripts/build-mcp-schema.ts --write
- *
- * The user-visible contract v0.8.1 promises to freeze through v0.8.2.
+ * Protects what an agent receives from the real server — initialize (instructions, capabilities) and tools/list
+ * (names, descriptions with their cost prefix, input schemas, annotations) for the compact and the granular surface —
+ * from accidental drift. Any PR that changes it fails this test until the snapshot is updated intentionally with:
+ *   npm run test:mcp-schema-snapshot:update
  */
 
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import { currentSnapshot, readStoredSnapshot, snapshotPath } from '../schema/snapshot';
+import { currentSnapshot, readStoredSnapshot } from '../schema/snapshot';
 
 describe('MCP schema snapshot', () => {
-  it('matches the committed schema.snapshot.json', () => {
+  it('matches the committed schema.snapshot.json', async () => {
     const stored = readStoredSnapshot();
     expect(
       stored,
-      'schema.snapshot.json missing. Generate with: npx tsx scripts/build-mcp-schema.ts --write',
+      'schema.snapshot.json missing. Generate with: npm run test:mcp-schema-snapshot:update',
     ).not.toBeNull();
-    const current = currentSnapshot();
-    expect(current).toEqual(stored);
-  });
-
-  it('snapshot file exists at repo root', () => {
-    expect(fs.existsSync(snapshotPath()), 'schema.snapshot.json should be committed at repo root').toBe(true);
-  });
+    expect(await currentSnapshot()).toEqual(stored);
+  }, 60_000);
 });

@@ -53,12 +53,11 @@ describe('ownUiRefusal', () => {
 });
 
 describe('isPauseSafeCall — deny by default', () => {
+  // In compact names; a granular tool has its route's (call-facts-table.test.ts).
   it('waiting on, ending or reporting the pause is allowed', () => {
-    for (const [tool, action] of [['system', 'pause_for_user'],
-      ['pause_for_user', undefined], ['resume_task', undefined],
-      ['ask_user', undefined], ['done', undefined], ['give_up', undefined],
+    for (const [tool, action] of [['system', 'pause_for_user'], ['resume_task', undefined],
       // waiting touches nothing
-      ['computer', 'wait'], ['wait', undefined], ['system', 'report']] as const) {
+      ['computer', 'wait'], ['system', 'report']] as const) {
       expect(isPauseSafeCall(tool, action), `${tool} ${action ?? ''}`).toBe(true);
     }
   });

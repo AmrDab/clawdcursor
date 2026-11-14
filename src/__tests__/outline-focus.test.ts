@@ -37,7 +37,7 @@ function fakeDesktop(o: { onFocus?: () => boolean; onOpen?: () => { pid?: number
     async invokeElement(q: { name: string; action?: string; processId?: number }) { sent.push(`${q.action ?? 'click'} ${q.name}`); return { success: true }; },
     async getUiTree() { return []; },
     async focusWindow(_q: { title?: string; processName?: string; processId?: number }) { return o.onFocus ? o.onFocus() : true; },
-    async openApp(_name: string) { return o.onOpen ? o.onOpen() : {}; },
+    async launchApp(_name: string) { return o.onOpen ? o.onOpen() : {}; },
   });
 }
 
@@ -81,7 +81,7 @@ describe('the outline follows the agent\'s own focus and launches', () => {
   it('open_app: the outline goes to the launched window, by its pid or title', async () => {
     const d = fakeDesktop({ onOpen: () => { fg = CALC; return { pid: 400, title: 'Calculator' }; } });
     await d.keyPress('a');
-    await d.openApp('Calculator');
+    await d.launchApp('Calculator');
     expect(workingWindow()).toEqual({ processId: 400, handle: 0x9c4 });
     expect(workingIn()?.processName).toBe('Calculator');
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
@@ -90,11 +90,11 @@ describe('the outline follows the agent\'s own focus and launches', () => {
   it('open_app that reports no window: the outline goes to a window of the app it launched, and to no other', async () => {
     const d = fakeDesktop({ onOpen: () => { fg = CALC; return {}; } });
     await d.keyPress('a');
-    await d.openApp('Calculator');
+    await d.launchApp('Calculator');
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400']);
     // Another app in front after the launch is not the one the agent opened: no window, so no outline.
     fg = EDGE;
-    await fakeDesktop().openApp('Calculator');
+    await fakeDesktop().launchApp('Calculator');
     expect(workingWindow()).toBeUndefined();
     expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 2500 400', 'TARGET']);
   });

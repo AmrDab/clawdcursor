@@ -3,11 +3,11 @@
  */
 
 import { execFile } from 'child_process';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
-import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../core/router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../platform/app-aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 import { timeWait } from '../core/observability/steps';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
@@ -33,7 +33,6 @@ export function getOrchestrationTools(): ToolDefinition[] {
         name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       handler: async ({ name }, ctx) => {
         await ctx.ensureInitialized();
@@ -45,16 +44,11 @@ export function getOrchestrationTools(): ToolDefinition[] {
         if (notAName) return { text: `open_app: ${notAName}`, isError: true };
 
         // Resolve through the canonical alias table so "Notepad" / "notepad" /
-        // "Calculator" / "calc" all map to the right launch hints. The MCP
-        // open_app used to call `Start-Process <name>` directly, which fails
-        // for UWP apps (Calculator, Win11 Notepad) and is case-sensitive on
-        // PowerShell's Start-Process arg. The alias table + platform adapter
-        // is the same path the autonomous agent-loop uses.
+        // "Calculator" / "calc" all map to the right launch hints. `Start-Process
+        // <name>` alone fails for UWP apps (Calculator, Win11 Notepad) and is
+        // case-sensitive on PowerShell's Start-Process arg.
         const alias = resolveAlias(rawName);
 
-        // If we have a PlatformAdapter (we always do post-v0.9 init), use it.
-        // Falls back to the old execFile path only when the adapter isn't
-        // available (shouldn't happen in normal operation).
         if (ctx.platform && typeof ctx.platform.launchApp === 'function') {
           let launchName = rawName;
           if (alias) {
@@ -89,7 +83,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           }
         }
 
-        // Fallback: pre-adapter path (kept for safety, should be unreachable).
+        // No PlatformAdapter (should be unreachable): start the app directly.
         try {
           if (process.platform === 'win32') {
             const exe = alias?.executable ?? rawName;
@@ -129,7 +123,6 @@ export function getOrchestrationTools(): ToolDefinition[] {
         url: { type: 'string', description: 'URL to navigate to', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       destructive: true,
       handler: async ({ url }, ctx) => {
@@ -161,7 +154,6 @@ export function getOrchestrationTools(): ToolDefinition[] {
         seconds: { type: 'number', description: 'Duration to wait (0.1 to 30)', required: true, minimum: 0.1, maximum: 30 },
       },
       category: 'orchestration',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async ({ seconds }) => {
         // Ends early when the user stops clawdcursor: a wait is exactly when they step in (#294).

@@ -1,11 +1,10 @@
 /**
  * Under the test fence a window call reaches the platform as an exact window HANDLE (core/fence.ts pins it), never as a
  * title to search for: the bridge's focus-window takes "the first title that CONTAINS the text", and a Store app's host
- * process owns the windows of every Store app. This file follows the handle from the tool to the bridge.
+ * process owns the windows of every Store app. This file follows the handle from the tool to the bridge's
+ * input; the bridge itself is run in windows-focus-window.system.test.ts.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -27,26 +26,6 @@ const run = vi.mocked(psRunner.run);
 const sent = () => run.mock.calls.map(c => c[0] as Record<string, unknown>);
 
 beforeEach(() => { run.mockReset(); });
-
-describe('the bridge: focus-window with a handle', () => {
-  const bridge = fs.readFileSync(path.join(__dirname, '../../scripts/ps-bridge.ps1'), 'utf8');
-  const start = bridge.indexOf('function Cmd-FocusWindow');
-  const fn = bridge.slice(start, bridge.indexOf('\nfunction ', start + 10));
-  const handleBranch = fn.slice(fn.indexOf('if ($handle -ne 0)'), fn.indexOf('elseif ($wpid -gt 0 -and $title -ne "")'));
-
-  it('matches the window whose native handle EQUALS it, before any pid or title matching', () => {
-    expect(fn).toContain('$handle = if ($cmd.handle) { [int64]$cmd.handle } else { 0 }');
-    expect(handleBranch).toContain('[int64]$w.Current.NativeWindowHandle -eq $handle');
-    expect(fn.indexOf('if ($handle -ne 0)')).toBeLessThan(fn.indexOf('.Contains($tl)'));
-    // The pid and title branches are an elseif of it: with a handle they do not run.
-    expect(fn).toMatch(/\}\s*(#[^\n]*\n\s*)*elseif \(\$wpid -gt 0 -and \$title -ne ""\)/);
-  });
-
-  it('has no title search and no fallback to the process: a handle that is not there is "not found"', () => {
-    expect(handleBranch).not.toMatch(/Contains|ConvertTo-TitleKey|ProcessId/);
-    expect(handleBranch).toContain('return @{ success=$false; error="Window not found: handle=$handle" }');
-  });
-});
 
 describe('the Windows adapter', () => {
   const adapter = () => new WindowsAdapter();

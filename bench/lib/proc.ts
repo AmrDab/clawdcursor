@@ -89,7 +89,6 @@ export async function pidsByCommandLine(marker: string, image: string): Promise<
   return out.split(/\s+/).map(Number).filter(n => Number.isInteger(n) && n > 0 && n !== process.pid);
 }
 
-/** Stop those processes. */
 export async function killByCommandLine(marker: string, image: string): Promise<void> {
   for (const pid of await pidsByCommandLine(marker, image)) {
     try {

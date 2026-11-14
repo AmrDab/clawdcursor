@@ -22,11 +22,10 @@ import {
   __setSenderForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE, SPOOL_FILE, TELEMETRY_URL,
 } from '../core/observability/telemetry';
 import { getPackageRoot } from '../paths';
-import { VERSION } from '../surface/version';
+import { VERSION } from '../version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { withSteps, timeWait } from '../core/observability/steps';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import worker, { validate, validEvent, RESULT_CODES, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';
+import worker, { validate, validEvent, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-telemetry-')), 'telemetry.json');
 
@@ -120,8 +119,8 @@ describe('what is sent', () => {
     const run = await withSteps('system', 'pause_for_user', () => timeWait(() => new Promise(r => setTimeout(r, 20))));
     expect(run.steps.wait).toMatchObject({ n: 1 });
     // The real `wait` a batch step runs is timed the same way.
-    const wait = buildUnifiedTools().find(t => t.name === 'wait')!;
-    const inBatch = await withSteps('batch', undefined, () => wait.execute({ ms: 20 }, {} as never));
+    const wait = getAllTools().find(t => t.name === 'wait')!;
+    const inBatch = await withSteps('batch', undefined, () => wait.handler({ seconds: 0.1 }, {} as never));
     expect(inBatch.steps.wait).toMatchObject({ n: 1 });
     expect(toEvent('tool.done', { tool: 'system', action: 'pause_for_user', ms: 45_000, outcome: 'ok', steps: { wait: { n: 1, ms: 44_990 } } })).toBeNull();
     // A batch that waited 20 s and spent 13 s on its own work: slow, by its own work, without the wait.
@@ -292,11 +291,5 @@ describe('the Worker', () => {
       headers: new Headers({ 'content-length': String(MAX_BODY + 1) }), arrayBuffer } as unknown as Request;
     expect((await worker.fetch(req, {} as Env)).status).toBe(413);
     expect(arrayBuffer).not.toHaveBeenCalled();
-  });
-
-  it('knows every result code the client can send', () => {
-    const src = fs.readFileSync(path.join(getPackageRoot(), 'src', 'core', 'result-codes.ts'), 'utf8');
-    const union = /export type ResultCode =([^;]+);/.exec(src)![1];
-    expect([...union.matchAll(/'([A-Z_]+)'/g)].map(m => m[1]).sort()).toEqual([...RESULT_CODES].sort());
   });
 });

@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { getAllTools, getCompactSurface } from '../tools/registry';
-import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
 
 describe('compact schema ↔ delegate contract', () => {
   it('no parameter is declared with two different types by the delegates of one compound', () => {

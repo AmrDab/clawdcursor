@@ -38,8 +38,6 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
   if (process.platform !== 'win32') return null;
   const s = scheme.toLowerCase();
 
-  // Step 1: HKCU\SOFTWARE\Microsoft\Windows\Shell\Associations\UrlAssociations\<scheme>\UserChoice
-  //   -> ProgId
   const userChoicePath = `HKCU\\SOFTWARE\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\${s}\\UserChoice`;
   let progId: string | null = null;
   try {
@@ -50,7 +48,6 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
     // No UserChoice — fall through.
   }
 
-  // Step 2: HKCR\<ProgId>\Shell\open\command -> (default)
   if (progId) {
     const cmdPath = `HKCR\\${progId}\\Shell\\open\\command`;
     try {
@@ -67,7 +64,6 @@ export async function resolveSchemeHandlerExecutable(scheme: string): Promise<st
     }
   }
 
-  // Step 3: known-handler fallbacks. Add new entries here as needed.
   return resolveKnownHandlerForScheme(s);
 }
 
@@ -87,7 +83,6 @@ function extractExecutableFromCommand(cmd: string): string | null {
     const spaceIdx = trimmed.indexOf(' ');
     exe = spaceIdx < 0 ? trimmed : trimmed.slice(0, spaceIdx);
   }
-  // Expand %VAR% references.
   exe = exe.replace(/%([^%]+)%/g, (_, v) => process.env[v] ?? `%${v}%`);
   return exe || null;
 }
@@ -246,8 +241,6 @@ export async function launchHandlerAndVerify(
   opts: { waitMs?: number } = {},
 ): Promise<{ success: boolean; windowOpened: boolean; hwndLabel?: string; error?: string }> {
   const waitMs = opts.waitMs ?? 5000;
-  // Derive the process name (lowercased, no extension) so we can diff
-  // its visible windows before vs after.
   const exeBaseLower = exePath.split(/[\\/]/).pop()!.replace(/\.exe$/i, '').toLowerCase();
 
   const before = await snapshotProcessWindows(exeBaseLower);

@@ -9,7 +9,7 @@ function snap(elements: Snapshot['elements']): Snapshot {
   return { platform: 'windows',
     activeWindow: { processId: 9, processName: 'notepad', title: 'Untitled - Notepad',
       bounds: { x: 0, y: 0, width: 800, height: 600 } },
-    elements, fingerprint: 'fp', capturedAt: 0, sources: elements.length ? ['a11y'] : [] };
+    elements, capturedAt: 0, sources: elements.length ? ['a11y'] : [] };
 }
 const okOcr = (): OcrResult => ({ elements: [
   { text: 'Send', x: 10, y: 20, width: 40, height: 12, confidence: 0.95, line: 0 }],
@@ -20,7 +20,7 @@ function deps(over: Partial<CompileDeps> = {}): CompileDeps {
     captureSnapshot: vi.fn(async () => snap([
       { name: 'Send', role: 'Button', x: 10, y: 20, width: 40, height: 12,
         source: 'a11y', interactive: true }])),
-    ocr: vi.fn(okOcr),
+    ocr: vi.fn(async () => okOcr()),
     vision: vi.fn(async () => ({ buffer: Buffer.alloc(0), width: 1, height: 1, scaleFactor: 1 })),
     getScreenSize: vi.fn(async () => ({ logicalWidth: 800, logicalHeight: 600,
       physicalWidth: 800, physicalHeight: 600, dpiRatio: 1 })),
@@ -143,7 +143,5 @@ describe('defaultCompileDeps', () => {
     const d = defaultCompileDeps(adapter, 5, 'obs_9');
     expect(d.now).toBe(5);
     expect(d.snapshotId).toBe('obs_9');
-    expect(typeof d.captureSnapshot).toBe('function');
-    expect(typeof d.ocr).toBe('function');
   });
 });

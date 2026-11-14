@@ -5,7 +5,7 @@
  *
  * Everything here runs on any OS: the process runner and the helper lookup are
  * injected, so no test touches a real Mac. The live contract of the helper itself
- * is covered by mac-ax-live.test.ts (macOS only).
+ * is covered by mac-ax-live.system.test.ts (macOS only).
  *
  * Live finding that drives most of these (2026-10-15, blind test on a real Mac):
  * the window list took 9.4 s against an 8 s timeout whose error was swallowed into
@@ -931,7 +931,6 @@ describe('invoke', () => {
   });
 });
 
-
 describe('frontmost (NSWorkspace — what System Events cannot see)', () => {
   const FRONT = (over: Record<string, unknown> = {}) => ({
     ok: true, locked: false,
@@ -1224,42 +1223,6 @@ describe('appState (B2 — is the launched app running, and does it have a windo
   });
 });
 
-describe('defaultExec — the real process runner', () => {
-  it('returns output far larger than node\'s 1 MB default buffer (a big window\'s tree is megabytes of JSON)', async () => {
-    const { defaultExec } = await import('../platform/mac-ax');
-    const { stdout } = await defaultExec(process.execPath, ['-e', 'process.stdout.write("x".repeat(3_000_000))'], { timeoutMs: 20_000 });
-    expect(stdout.length).toBe(3_000_000);
-  });
-
-  it('kills a stuck process at the timeout and rejects the way execFile does (killed)', async () => {
-    const { defaultExec } = await import('../platform/mac-ax');
-    const err = await defaultExec(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { timeoutMs: 300 }).then(() => null, e => e);
-    expect(err).toBeTruthy();
-    expect(err.killed).toBe(true);
-  });
-
-  // Review finding 9: the helper reads what the caller typed from stdin.
-  it('writes `input` to the process\'s stdin and closes it (a reader that waits for EOF is not left hanging)', async () => {
-    const { defaultExec } = await import('../platform/mac-ax');
-    const { stdout } = await defaultExec(process.execPath, ['-e', 'let d="";process.stdin.on("data",c=>d+=c).on("end",()=>process.stdout.write(d))'],
-      { timeoutMs: 10_000, input: '{"value":"héllo — wörld 🙂"}' });
-    expect(stdout).toBe('{"value":"héllo — wörld 🙂"}');
-  });
-
-  it('a process that exits without reading its stdin is not an error of ours (EPIPE is swallowed)', async () => {
-    const { defaultExec } = await import('../platform/mac-ax');
-    const { stdout } = await defaultExec(process.execPath, ['-e', 'process.stdout.write("done")'], { timeoutMs: 10_000, input: 'x'.repeat(8_000_000) });
-    expect(stdout).toBe('done');
-  });
-
-  it('without `input` nothing is written', async () => {
-    const { defaultExec } = await import('../platform/mac-ax');
-    const { stdout } = await defaultExec(process.execPath, ['-e', 'process.stdout.write("ok")'], { timeoutMs: 10_000 });
-    expect(stdout).toBe('ok');
-  });
-});
-
-
 describe('prepare (build the helper before it is first needed)', () => {
   it('starts the one-time background compile when the helper is not built', () => {
     const { ax, ensureHelper } = harness({ helper: null });
@@ -1280,7 +1243,6 @@ describe('prepare (build the helper before it is first needed)', () => {
     expect(ensureHelper).not.toHaveBeenCalled();
   });
 });
-
 
 describe('first call while the helper is still being built', () => {
   afterEach(() => { vi.useRealTimers(); });
@@ -1337,16 +1299,12 @@ describe('first call while the helper is still being built', () => {
     expect(exec.mock.calls.every(c => c[0] === 'lsappinfo')).toBe(true);
   });
 
-  it('concurrent first calls share one build', async () => {
-    let builds = 0;
-    const { ax, calls } = building(async () => { builds++; return '/fake/ax-helper'; });
-    // each call asks ensureHelper while helper() is still null; the real compile() memoises, this fake counts asks
+  it('concurrent first calls both run on the helper once it is built (one build: mac-swift-binary.test.ts)', async () => {
+    const { ax, calls } = building(async () => '/fake/ax-helper');
     await Promise.all([ax.listWindows(), ax.activeWindow()]);
     expect(calls.every(c => c.file === '/fake/ax-helper')).toBe(true);
-    expect(builds).toBeGreaterThanOrEqual(1);
   });
 });
-
 
 describe('makeHelperBuilder — never trigger the "install developer tools" dialog', () => {
   // Running `swiftc` on a Mac without the Command Line Tools pops a system dialog.
@@ -1368,7 +1326,6 @@ describe('makeHelperBuilder — never trigger the "install developer tools" dial
     await expect(build()).resolves.toBeNull();
   });
 });
-
 
 describe('focusedElement (the first read smart_type makes)', () => {
   const FOCUSED = (over: Record<string, unknown> = {}) => ({
@@ -1431,7 +1388,6 @@ describe('focusedElement (the first read smart_type makes)', () => {
   });
 });
 
-
 describe('osascript fallback behind the lock screen', () => {
   // System Events does not fail when the screen is locked: it answers with empty shells (0 windows, null focus,
   // zero bounds) — the "empty answer instead of an error" the helper's lock check exists to prevent.
@@ -1475,7 +1431,6 @@ describe('osascript fallback behind the lock screen', () => {
     expect(calls).toEqual(['osascript']);
   });
 });
-
 
 describe('a Mac without the Command Line Tools (no swiftc → the osascript path)', () => {
   const HINT = 'The fast accessibility helper needs the Xcode Command Line Tools — run `xcode-select --install`.';

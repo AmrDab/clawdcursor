@@ -6,8 +6,6 @@
  * instead of hardcoding values.
  */
 
-import type { ClawdConfig } from '../types';
-
 export const DEFAULT_CDP_PORT = 9223;
 
 /**
@@ -26,16 +24,7 @@ export const AGENT_CDP_PORT = Number(process.env.CLAWD_AGENT_CDP_PORT ?? '') || 
 
 const DEFAULT_BROWSER_PROCESSES = ['msedge', 'chrome', 'chromium', 'firefox', 'brave', 'opera', 'arc', 'safari'];
 
-/** Get configured browser executable path, or null for auto-detection */
-export function getBrowserExePath(config?: ClawdConfig): string | null {
-  return config?.browser?.executablePath || null;
-}
-
-/** Get list of browser process names to match against */
-export function getBrowserProcessNames(config?: ClawdConfig): string[] {
-  if (config?.browser?.processName) {
-    return [config.browser.processName, ...DEFAULT_BROWSER_PROCESSES];
-  }
+export function getBrowserProcessNames(): string[] {
   return DEFAULT_BROWSER_PROCESSES;
 }
 
@@ -44,28 +33,16 @@ export function getBrowserProcessNames(config?: ClawdConfig): string[] {
  * "msedge.exe") and macOS's app display names ("Google Chrome", "Microsoft
  * Edge", "Brave Browser"), which an exact match against the list missed.
  */
-export function isBrowserProcess(name: string | undefined | null, config?: ClawdConfig): boolean {
+export function isBrowserProcess(name: string | undefined | null): boolean {
   const n = String(name ?? '').toLowerCase().replace(/\.exe$/, '').trim();
   if (!n) return false;
-  const names = getBrowserProcessNames(config).map(s => s.toLowerCase());
+  const names = getBrowserProcessNames().map(s => s.toLowerCase());
   if (names.includes(n)) return true;
   return n.split(/\s+/).some(w => names.includes(w) || w === 'edge');
 }
 
-/** Get CDP debugging port */
-export function getCDPPort(config?: ClawdConfig): number {
-  return config?.browser?.cdpPort || DEFAULT_CDP_PORT;
-}
-
-/** Build a regex matching browser process names */
-export function getBrowserProcessRegex(config?: ClawdConfig): RegExp {
-  const names = getBrowserProcessNames(config);
-  return new RegExp(names.join('|'), 'i');
-}
-
 const PLATFORM = process.platform;
 
-/** Get default Chrome executable paths for the current platform */
 export function getChromePaths(): string[] {
   if (PLATFORM === 'darwin') return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
   if (PLATFORM === 'linux') return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
@@ -75,7 +52,6 @@ export function getChromePaths(): string[] {
   ];
 }
 
-/** Get default Edge executable paths for the current platform */
 export function getEdgePaths(): string[] {
   if (PLATFORM === 'darwin') return ['/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'];
   if (PLATFORM === 'linux') return ['/usr/bin/microsoft-edge'];
@@ -94,11 +70,4 @@ export function getEdgePaths(): string[] {
 export function agentBrowserConnectOptions(): { launch: boolean; exePaths: string[] } {
   const launch = !/^(1|true)$/i.test(process.env.CLAWD_AGENT_CDP_OFF ?? '');
   return { launch, exePaths: [...getEdgePaths(), ...getChromePaths()] };
-}
-
-/** Get browser executable paths, respecting config overrides. Tries custom path first, then defaults. */
-export function getBrowserPaths(browser: 'chrome' | 'edge', config?: ClawdConfig): string[] {
-  const customExe = getBrowserExePath(config);
-  if (customExe) return [customExe];
-  return browser === 'chrome' ? getChromePaths() : getEdgePaths();
 }

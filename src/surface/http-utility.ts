@@ -1,249 +1,66 @@
 /**
- * HTTP utility surface — the small set of plain-HTTP routes that survived
- * the v0.9 PR7 cutover when REST endpoints were collapsed into MCP tools.
- *
- * Surviving routes (they're operational endpoints, not tools):
- *   GET  /health   — readiness probe (no auth, returns JSON status)
- *   POST /stop     — graceful shutdown (Bearer auth, localhost only)
- *   GET  /resume   — the pending pause for the user, if any (Bearer auth, localhost only)
- *   POST /resume   — answer that pause (Bearer auth, localhost only)
- *   GET  /         — single-page dashboard (mountDashboard wires this)
- *
- * Everything else moved to MCP tools and is exposed via the streamable
- * HTTP transport at /mcp. See src/mcp-server.ts.
- *
- * Auth — the daemon generates a 32-byte Bearer token on startup, persists
- * it to ~/.clawdcursor/token, and the same requireAuth() middleware here
- * gates /stop and /mcp. /health and / (dashboard) are public; the
- * dashboard's inline JS reads the token from a server-injected placeholder
- * and uses it for /mcp calls.
+ * The daemon's HTTP surface. Every route is in ROUTES below: its gates, what it is for, and (through it) the startup
+ * print and the JSON 404's list. Everything an agent does goes through MCP at /mcp (mcp-server.ts); the other routes are
+ * operational. Auth and the localhost checks live in auth.ts.
  */
 
 import express from 'express';
-import { readFileSync, existsSync, mkdirSync, writeFileSync, statSync } from 'fs';
-import { join } from 'path';
-import { randomBytes } from 'crypto';
-import { mountDashboard } from './dashboard';
-import { VERSION } from './version';
-import { DATA_DIR } from '../paths';
+import { dashboardPage } from './dashboard';
+import { VERSION } from '../version';
 import { e } from './format';
 import { pauseGate, type PauseAnswer } from '../core/pause-gate';
 import { stopControl } from '../core/control';
+import { isLoopbackHost, localOnly, requireLocalHostHeader, requireToken, serverToken } from './auth';
+import { getLogBuffer } from './log-buffer';
 
-const TOKEN_PATH = join(DATA_DIR, 'token');
+type Method = 'GET' | 'POST' | 'DELETE';
+type RouteKey = `${Method} ${string}`;
 
-/**
- * True when `host` resolves to the local loopback interface. The MCP surface
- * controls the desktop, so the daemon binds 127.0.0.1 only (#113, #293 — the
- * bearer token must not be the ONLY thing between the LAN and full desktop
- * control). createUtilityServer uses this as a second line for the dashboard.
- */
-export function isLoopbackHost(host: string): boolean {
-  const h = (host ?? '').trim().toLowerCase();
-  if (h === 'localhost' || h === '::1' || h === '0:0:0:0:0:0:0:1') return true;
-  if (/^127(\.\d{1,3}){3}$/.test(h)) return true;       // whole 127/8 block
-  if (h === '::ffff:127.0.0.1') return true;            // IPv4-mapped loopback
-  return false;
+interface Route {
+  method: Method;
+  path: string;
+  /** 'token': the daemon's bearer token (header or the dashboard's cookie); 'token-or-disk': or the one on disk (auth.ts). */
+  auth: 'none' | 'token' | 'token-or-disk';
+  /** Refused off this machine, naming the route as here. */
+  localOnly?: string;
+  summary: string;
 }
 
-// ── Bearer token state ──────────────────────────────────────────────────
-//
-// The token is generated lazily — only when the daemon binds its port
-// (see initServerToken). This prevents CLI commands like `stop`, `task`,
-// or `consent` from overwriting the running server's token file when they
-// import this module.
-//
-// v0.8.2 silent-401 fix: requireAuth accepts EITHER the in-memory
-// SERVER_TOKEN or whatever's currently on disk. A second clawdcursor
-// process that rotates the file won't silently 401 clients that read the
-// new token from disk.
+/** Every route the daemon serves. Each also checks the Host header (auth.ts requireLocalHostHeader). */
+export const ROUTES: readonly Route[] = [
+  { method: 'GET', path: '/', auth: 'none', summary: 'Dashboard' },
+  { method: 'GET', path: '/health', auth: 'none', summary: 'Readiness probe' },
+  // The dashboard's log panel. Not through MCP: a poll there was a recorded call every 2 s, refused while stopped.
+  { method: 'GET', path: '/logs', auth: 'token', localOnly: 'Logs', summary: 'Recent console lines' },
+  // The pause message is agent-written text about what the user is doing: never on the public /health.
+  { method: 'GET', path: '/resume', auth: 'token', localOnly: 'Resume', summary: 'The pause waiting for the user, if any' },
+  { method: 'POST', path: '/resume', auth: 'token', localOnly: 'Resume', summary: 'Answer that pause: {answer: "resume" | "end" | "reply"}' },
+  { method: 'POST', path: '/stop', auth: 'token-or-disk', localOnly: 'Stop', summary: 'Graceful shutdown' },
+  { method: 'POST', path: '/mcp', auth: 'token', summary: 'MCP JSON-RPC: tools/list, tools/call' },
+  { method: 'GET', path: '/mcp', auth: 'token', summary: 'MCP session SSE stream' },
+  { method: 'DELETE', path: '/mcp', auth: 'token', summary: 'End an MCP session' },
+];
 
-export let SERVER_TOKEN = '';
-
-function generateToken(): string {
-  const token = randomBytes(32).toString('hex');
-  try {
-    if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-    writeFileSync(TOKEN_PATH, token, { encoding: 'utf-8', mode: 0o600 });
-  } catch (tokenErr) {
-    console.warn(`${e('⚠', '[WARN]')} Could not write auth token file:`, (tokenErr as Error).message);
-  }
-  return token;
+/** One line per route for the daemon's startup print. */
+export function describeRoutes(): string[] {
+  return ROUTES.map(r => {
+    const gates = r.auth === 'none' ? 'no auth' : `auth${r.localOnly ? ', localhost only' : ''}`;
+    return `${r.method.padEnd(6)} ${r.path.padEnd(7)} — ${r.summary} (${gates})`;
+  });
 }
-
-/** Initialize the auth token. Called once from the daemon's listen callback. */
-export function initServerToken(): string {
-  SERVER_TOKEN = generateToken();
-  diskTokenCache = { token: SERVER_TOKEN, mtimeMs: Date.now(), nextCheckMs: 0 };
-  return SERVER_TOKEN;
-}
-
-let diskTokenCache: { token: string; mtimeMs: number; nextCheckMs: number } | null = null;
-const DISK_TOKEN_TTL_MS = 500;
-
-function currentDiskToken(): string {
-  const now = Date.now();
-  try {
-    if (diskTokenCache && now < diskTokenCache.nextCheckMs) {
-      return diskTokenCache.token;
-    }
-    const stat = statSync(TOKEN_PATH);
-    const mtimeMs = stat.mtimeMs;
-    if (diskTokenCache && diskTokenCache.mtimeMs === mtimeMs) {
-      diskTokenCache.nextCheckMs = now + DISK_TOKEN_TTL_MS;
-      return diskTokenCache.token;
-    }
-    const token = readFileSync(TOKEN_PATH, 'utf-8').trim();
-    diskTokenCache = { token, mtimeMs, nextCheckMs: now + DISK_TOKEN_TTL_MS };
-    return token;
-  } catch {
-    return '';
-  }
-}
-
-/** Constant-time token compare — no byte-level timing leak on localhost. */
-function timingSafeTokenEqual(received: string, expected: string): boolean {
-  if (!received || !expected) return false;
-  const a = Buffer.from(received, 'utf8');
-  const b = Buffer.from(expected, 'utf8');
-  if (a.length !== b.length) {
-
-    require('crypto').timingSafeEqual(a, a);
-    return false;
-  }
-
-  return require('crypto').timingSafeEqual(a, b);
-}
-
-let loggedTokenDrift = false;
-function readCookieToken(req: express.Request): string {
-  const raw = req.headers.cookie;
-  if (!raw) return '';
-  for (const part of raw.split(';')) {
-    const [k, ...rest] = part.trim().split('=');
-    if (k === 'clawdcursor_token') return decodeURIComponent(rest.join('='));
-  }
-  return '';
-}
-export function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction): void {
-  const authHeader = req.headers['authorization'] || '';
-  const headerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
-  const cookieToken = readCookieToken(req);
-  const received = headerToken || cookieToken;
-
-  const memoryOk = timingSafeTokenEqual(received, SERVER_TOKEN);
-  let diskOk = false;
-  // /stop is a localhost-only SHUTDOWN control: accept the current
-  // on-disk token for it even without CLAWD_ALLOW_DISK_TOKEN_DRIFT. The token
-  // file is owner-only (0600) and this endpoint only stops the daemon (no data
-  // or tool access), so tolerating a drifted disk token here makes
-  // `clawdcursor stop` reliable across daemon restarts/churn WITHOUT weakening
-  // the powerful /mcp tool surface, which stays strict (in-memory token only).
-  const isShutdownEndpoint = req.path === '/stop';
-  if (!memoryOk && (isShutdownEndpoint || process.env.CLAWD_ALLOW_DISK_TOKEN_DRIFT === '1')) {
-    const diskToken = currentDiskToken();
-    if (diskToken && diskToken !== SERVER_TOKEN) {
-      if (!loggedTokenDrift && process.env.CLAWD_ALLOW_DISK_TOKEN_DRIFT === '1') {
-        loggedTokenDrift = true;
-        console.warn(
-          `${e('⚠', '[WARN]')} Auth token file was rewritten by another process. ` +
-          `Accepting either the original or the new token to avoid silent 401s. ` +
-          `Run \`clawdcursor stop\` once and restart if you want a single canonical token.`,
-        );
-      }
-      diskOk = timingSafeTokenEqual(received, diskToken);
-    }
-  }
-
-  if (!memoryOk && !diskOk) {
-    res.status(401).json({ error: 'Unauthorized — include Authorization: Bearer <token> header. Token is at ~/.clawdcursor/token' });
-    return;
-  }
-  next();
-}
-
-// ── Log buffer (server-side console capture for the dashboard) ─────────
-
-interface LogEntry {
-  timestamp: number;
-  level: 'info' | 'success' | 'warn' | 'error';
-  message: string;
-}
-
-const MAX_LOGS = 200;
-const logBuffer: LogEntry[] = [];
-const MAX_LOG_MSG_LEN = 500;
-
-function addLog(level: LogEntry['level'], message: string): void {
-  const truncated = message.length > MAX_LOG_MSG_LEN
-    ? message.slice(0, MAX_LOG_MSG_LEN) + '…'
-    : message;
-  logBuffer.push({ timestamp: Date.now(), level, message: truncated });
-  if (logBuffer.length > MAX_LOGS) {
-    logBuffer.splice(0, logBuffer.length - MAX_LOGS);
-  }
-}
-
-let consoleHooked = false;
-function hookConsole(): void {
-  if (consoleHooked) return;
-  consoleHooked = true;
-
-  const origLog = console.log;
-  const origError = console.error;
-  const origWarn = console.warn;
-
-  console.log = (...args: unknown[]) => {
-    origLog.apply(console, args);
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-    const lower = msg.toLowerCase();
-    if (lower.includes('error') || lower.includes('failed') || lower.includes('❌')) {
-      addLog('error', msg);
-    } else if (lower.includes('✅') || lower.includes('success') || lower.includes('completed')) {
-      addLog('success', msg);
-    } else if (lower.includes('⚠') || lower.includes('warn')) {
-      addLog('warn', msg);
-    } else {
-      addLog('info', msg);
-    }
-  };
-
-  console.error = (...args: unknown[]) => {
-    origError.apply(console, args);
-    const msg = args.map(a => typeof a === 'string' ? a : (a instanceof Error ? a.message : JSON.stringify(a))).join(' ');
-    addLog('error', msg);
-  };
-
-  console.warn = (...args: unknown[]) => {
-    origWarn.apply(console, args);
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-    addLog('warn', msg);
-  };
-}
-
-/** Read-only snapshot accessor for the captured log buffer. */
-export function getServerLogBuffer(): LogEntry[] {
-  return logBuffer.slice();
-}
-
-// ── Express app factory ─────────────────────────────────────────────────
 
 export interface UtilityServerOptions {
   /** Called when /stop is invoked, before the process exits (graceful shutdown). */
   onStop?: () => void | Promise<void>;
   /** Bind host. A non-loopback host disables the dashboard, which embeds the control token. */
   host?: string;
+  /** The MCP transport's handler for POST / GET / DELETE /mcp (startMcpHttp). Without it /mcp is a 404. */
+  mcp?: express.RequestHandler;
 }
 
-/**
- * Build the surviving plain-HTTP surface: /, /health, /stop. The MCP
- * transport at /mcp must be mounted by the caller (it shares the auth
- * gate exported above).
- */
 export function createUtilityServer(options: UtilityServerOptions): express.Express {
-  hookConsole();
-
   const app = express();
+  app.use(requireLocalHostHeader);
   app.use(express.json());
 
   // ── CORS ──
@@ -272,103 +89,82 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
     next();
   });
 
-  // Handle malformed JSON gracefully.
-  app.use((err: any, _req: any, res: any, next: any) => {
+  // A malformed JSON body is a 400, not Express's HTML error page.
+  app.use((err: { type?: string }, _req: express.Request, res: express.Response, next: express.NextFunction) => {
     if (err.type === 'entity.parse.failed') {
-      return res.status(400).json({ error: 'Invalid JSON in request body' });
+      res.status(400).json({ error: 'Invalid JSON in request body' });
+      return;
     }
     next(err);
   });
 
-  // Mount the dashboard at GET /. SECURITY: the bearer token is injected into
-  // the page's JS, and that token is full desktop control. On a non-loopback
-  // bind this used to log a warning and then serve it ANYWAY — so anyone who
-  // could reach the port and load `/` got the token. The daemon now binds
-  // loopback only (#293); this stays as a second line for any other caller.
-  // The dashboard is simply not mounted off-loopback.
-  if (options.host && !isLoopbackHost(options.host)) {
+  // SECURITY: the dashboard hands the bearer token (full desktop control) to the page. On a non-loopback bind it used
+  // to log a warning and serve it ANYWAY. The daemon binds loopback only (#293); this stays as a second line for any
+  // other caller: the dashboard is simply not served off-loopback.
+  const offLoopback = options.host !== undefined && !isLoopbackHost(options.host);
+  if (offLoopback) {
     console.warn(`${e('⚠️', '[WARN]')} Dashboard disabled: bound to ${options.host}, and the dashboard embeds the control token. It is only served on localhost.`);
-  } else {
-    mountDashboard(app, () => SERVER_TOKEN);
   }
 
-  // GET /health — public readiness probe.
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok', version: VERSION });
-  });
+  const handlers: Partial<Record<RouteKey, express.RequestHandler>> = {
+    'GET /': offLoopback ? undefined : dashboardPage(serverToken),
+    'GET /health': (_req, res) => { res.json({ status: 'ok', version: VERSION }); },
+    'GET /logs': (_req, res) => { res.json(getLogBuffer()); },
+    'GET /resume': (_req, res) => {
+      const pause = pauseGate.current();
+      res.json({ waiting: pause !== null, pause });
+    },
+    // Used by `clawdcursor resume` and the dashboard buttons (pause-gate.ts).
+    'POST /resume': (req, res) => {
+      const reply = typeof req.body?.reply === 'string' ? req.body.reply : undefined;
+      const answer = (req.body?.answer ?? (reply !== undefined ? 'reply' : 'resume')) as string;
+      if (!['resume', 'end', 'reply'].includes(answer)) {
+        res.status(400).json({ error: 'answer must be "resume", "end" or "reply" (with a "reply" text)' });
+        return;
+      }
+      const pause = pauseGate.current();
+      const r = pauseGate.answer(answer as PauseAnswer, 'user', reply);
+      if (!r.ok) { res.status(409).json({ error: r.error, pause }); return; }
+      console.log(`\n${e('▶', '>')} Pause answered: ${r.outcome}`);
+      res.json({ ok: true, outcome: r.outcome, was: pause?.message });
+    },
+    'POST /stop': (_req, res) => {
+      // Like the pill and `clawdcursor stop`: the stop holds for every clawdcursor process until the user gives control back.
+      stopControl('http');
+      const body = JSON.stringify({ stopped: true, message: 'Clawd Cursor stopped' });
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
+      res.end(body, () => {
+        console.log(`\n${e('👋', '--')} Shutting down (stop command received)...`);
+        // Give onStop a bounded grace window before exiting.
+        const grace = Promise.resolve().then(() => options.onStop?.()).catch(() => {});
+        const cap = new Promise<void>(resolve => setTimeout(resolve, 2500));
+        void Promise.race([grace, cap]).then(() => process.exit(0));
+      });
+      setTimeout(() => process.exit(1), 6000); // hard-kill safety net
+    },
+    'POST /mcp': options.mcp,
+    'GET /mcp': options.mcp,
+    'DELETE /mcp': options.mcp,
+  };
 
-  // GET /resume — Bearer-gated, localhost-only: is a pause for the user waiting,
-  // and what does it say. Feeds the dashboard banner. Kept off the public /health
-  // because the message is agent-written text about what the user is doing.
-  app.get('/resume', requireAuth, (req, res) => {
-    const ip = req.ip || req.socket.remoteAddress || '';
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    if (!isLocal) {
-      return res.status(403).json({ error: 'Resume is only allowed from localhost' });
-    }
-    const pause = pauseGate.current();
-    res.json({ waiting: pause !== null, pause });
-  });
+  for (const route of ROUTES) {
+    const handler = handlers[`${route.method} ${route.path}`];
+    if (!handler) continue;
+    const gates: express.RequestHandler[] = [];
+    if (route.auth !== 'none') gates.push(requireToken({ diskTokenOk: route.auth === 'token-or-disk' }));
+    if (route.localOnly) gates.push(localOnly(route.localOnly));
+    const verb = route.method === 'GET' ? 'get' : route.method === 'POST' ? 'post' : 'delete';
+    app[verb](route.path, ...gates, handler);
+  }
 
-  // POST /resume — Bearer-gated, localhost-only: answer a pause for the user
-  // (pause-gate.ts). Body {answer: "resume" | "end"}.
-  // Used by `clawdcursor resume` and the dashboard buttons.
-  app.post('/resume', requireAuth, (req, res) => {
-    const ip = req.ip || req.socket.remoteAddress || '';
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    if (!isLocal) {
-      return res.status(403).json({ error: 'Resume is only allowed from localhost' });
-    }
-    const reply = typeof req.body?.reply === 'string' ? req.body.reply : undefined;
-    const answer = (req.body?.answer ?? (reply !== undefined ? 'reply' : 'resume')) as string;
-    if (!['resume', 'end', 'reply'].includes(answer)) {
-      return res.status(400).json({ error: 'answer must be "resume", "end" or "reply" (with a "reply" text)' });
-    }
-    const pause = pauseGate.current();
-    const r = pauseGate.answer(answer as PauseAnswer, 'user', reply);
-    if (!r.ok) return res.status(409).json({ error: r.error, pause });
-    console.log(`\n${e('▶', '>')} Pause answered: ${r.outcome}`);
-    res.json({ ok: true, outcome: r.outcome, was: pause?.message });
-  });
-
-  // POST /stop — Bearer-gated, localhost-only graceful shutdown.
-  app.post('/stop', requireAuth, (req, res) => {
-    const ip = req.ip || req.socket.remoteAddress || '';
-    const isLocal = ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
-    if (!isLocal) {
-      return res.status(403).json({ error: 'Stop is only allowed from localhost' });
-    }
-
-    // Like the pill and `clawdcursor stop`: the stop holds for every clawdcursor process until the user gives control back.
-    stopControl('http');
-    const body = JSON.stringify({ stopped: true, message: 'Clawd Cursor stopped' });
-    res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) });
-    res.end(body, () => {
-      console.log(`\n${e('👋', '--')} Shutting down (stop command received)...`);
-      // Give onStop a bounded grace window before exiting.
-      const grace = Promise.resolve().then(() => options.onStop?.()).catch(() => {});
-      const cap = new Promise<void>(resolve => setTimeout(resolve, 2500));
-      void Promise.race([grace, cap]).then(() => process.exit(0));
-    });
-    setTimeout(() => process.exit(1), 6000); // hard-kill safety net
-  });
-
-  return app;
-}
-
-/**
- * JSON 404 fallthrough — every consumer of this surface is a program;
- * Express's default HTML error page is noise to them (endpoint smoke
- * 2026-06-12). MUST be mounted LAST, after every real route — the daemon
- * registers /mcp on the app AFTER createUtilityServer returns, so this
- * cannot live inside it (middleware runs in registration order and would
- * swallow /mcp).
- */
-export function mountJson404(app: express.Express): void {
+  // Every consumer of this surface is a program: Express's default HTML 404 page is noise to them (endpoint smoke
+  // 2026-06-12).
   app.use((req, res) => {
     res.status(404).json({
       error: `No such endpoint: ${req.method} ${req.path}`,
-      endpoints: ['GET /', 'GET /health', 'POST /mcp', 'GET /mcp', 'GET /resume', 'POST /resume', 'POST /stop'],
+      endpoints: ROUTES.map(r => `${r.method} ${r.path}`),
     });
   });
+
+  return app;
 }

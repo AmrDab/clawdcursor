@@ -12,17 +12,16 @@
  */
 
 import { fenceActive } from './fence';
-import { defuseScreenDelimiters } from './untrusted-screen-content';
+import { quoteScreenText } from './untrusted-screen-content';
+import type { ResultCode } from './result-code-list';
+
+export type { ResultCode };
 
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
-export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'NOT_CONFIRMED' | 'DANGEROUS_KEY'
-  | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED' | 'CROSS_ORIGIN_FRAME'
-  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
-/** Tool names as the caller sees them: the compact MCP surface, or the built-in agent's own tools. */
-export type Surface = 'mcp' | 'agent';
+/** Tool names as the caller sees them: the compact MCP surface. */
+export type Surface = 'mcp';
 
 export interface ResultClass {
   outcome: ResultOutcome;
@@ -49,9 +48,8 @@ interface Rule {
 
 const PAUSE = (msg: string): Record<Surface, string> => ({
   mcp: `system {"action":"pause_for_user","message":"${msg}"}`,
-  agent: `ask_user {"message":"${msg}"}`,
 });
-const REREAD: Record<Surface, string> = { mcp: 'accessibility {"action":"compile_ui"}', agent: 'compile_ui {}' };
+const REREAD: Record<Surface, string> = { mcp: 'accessibility {"action":"compile_ui"}' };
 
 /**
  * `template` with NAME replaced, as a JSON string, by the name to click: the closest name a find miss listed ("did you
@@ -98,10 +96,10 @@ const RULES: Rule[] = [
     next: PAUSE('<what you want to do next>') },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /an AI assistant — nothing was sent|the app this agent runs in \(.*\) — nothing was sent/i,
     hint: 'the window in front is an AI assistant, not your target; focus your target window first',
-    next: { mcp: 'window {"action":"list"}', agent: 'list_windows {}' } },
+    next: { mcp: 'window {"action":"list"}' } },
   { code: 'FOREGROUND_CHANGED', outcome: 'refused', test: /foreground changed: /i,
     hint: 'the window in front is not the one you were working in; nothing was sent',
-    next: { mcp: 'window {"action":"focus","processName":"<your app>"}', agent: 'focus_window {"processName":"<your app>"}' } },
+    next: { mcp: 'window {"action":"focus","processName":"<your app>"}' } },
   { code: 'DANGEROUS_KEY', outcome: 'refused', test: /dangerous key combo/i,
     hint: 'it locks the screen or ends the session, so it is never sent; every other shortcut is allowed', next: PAUSE('Please <do this step> yourself') },
   // The browser tool's only match was in an iframe from another site (an ad, a widget): never acted in unless named (cdp-driver.ts).
@@ -114,9 +112,8 @@ const RULES: Rule[] = [
     hint: 'the screen changed since the screenshot these coordinates came from; nothing was clicked',
     hintFor: {
       mcp: 'the screen changed since the screenshot these coordinates came from; nothing was clicked; if the target has a label, use accessibility smart_click instead of a new screenshot',
-      agent: 'the screen changed since the screenshot these coordinates came from; nothing was clicked; if the target has a label, use smart_click instead of a new screenshot',
     },
-    next: { mcp: 'computer {"action":"screenshot"}', agent: 'screenshot {}' } },
+    next: { mcp: 'computer {"action":"screenshot"}' } },
   { code: 'STALE_REF', outcome: 'failed', test: /ref rejected|unknown snapshot|snapshot .*(?:expired|stale)|call compile_ui first/i,
     hint: 'the screen changed since that snapshot; take a fresh one', next: REREAD },
   { code: 'READBACK_MISMATCH', outcome: 'failed', test: /but the field shows .* — Return not pressed/i,
@@ -137,16 +134,16 @@ const RULES: Rule[] = [
     hint: 'fix the arguments; nothing ran' },
   { code: 'TIMEOUT', outcome: 'failed', test: /timed out|PSRunner timeout|ETIMEDOUT/i,
     hint: 'the app may be busy; read the screen again, then retry once', next: REREAD },
-  // MCP's navigate attaches by itself; the built-in agent's needs browser_connect first.
+  // MCP's navigate attaches by itself.
   { code: 'NOT_CONNECTED', outcome: 'failed', test: /not connected|no browser (?:is )?connected|ECONNREFUSED/i,
-    hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}', agent: 'browser_connect {}' } },
+    hint: 'no browser session', next: { mcp: 'browser {"action":"navigate","url":"<url>"}' } },
   // The element WAS found; this verb does not apply to it ("TogglePattern not supported", "element cannot expand or collapse").
   // Before NOT_FOUND: an invoke miss is worded "missed — <reason>", and the reason decides which of the two it is.
   // Found, but the element is switched off: no verb and no click at its bounds will do anything.
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
     test: /element is (?:not enabled|disabled)/i,
     hint: 'found it, but it is disabled; the app has to enable it first (a required field, a selection), read its state',
-    next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
+    next: { mcp: 'accessibility {"action":"state","name":"<name>"}' } },
   // Found, and the invoke itself threw: it may have acted before it threw, so do not repeat it or click the same spot.
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
     test: /Invoke failed:/i,
@@ -157,26 +154,26 @@ const RULES: Rule[] = [
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
     test: /no (?:invoke|click)\/\w+(?:\/\w+)* pattern|does not support (?:AXPress|click\(\))|exposes no Action interface/i,
     hint: 'found it, but no activation (invoke / toggle / select / expand) takes on it; it is on screen, so click it at its bounds',
-    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (bounds: accessibility find)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (bounds: find_element)' } },
+    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (bounds: accessibility find)' } },
   // One verb that does not fit this element ("TogglePattern not supported", "cannot expand or collapse").
   { code: 'UNSUPPORTED_ACTION', outcome: 'failed',
     test: /Pattern not supported|element (?:cannot|can't|does not|doesn't) (?:expand|collapse|be (?:toggled|selected|set))|element does not support (?:expand|collapse|toggle|select|AXScrollToVisible)|exposes (?:no|neither) (?:EditableText|Value)|no Selection interface/i,
     hint: 'found it, but it cannot be done that way (toggled / selected / set / expanded); try invoke / expand / toggle / select, or read its state',
-    next: { mcp: 'accessibility {"action":"state","name":"<name>"}', agent: 'get_element_state {"name":"<name>"}' } },
+    next: { mcp: 'accessibility {"action":"state","name":"<name>"}' } },
   // Found, but not on screen / the action itself failed: not "the name may differ".
   { code: 'ELEMENT_HIDDEN', outcome: 'failed', test: /the element exists but is not visible on screen/i,
     hint: 'found, but not visible on screen — scroll it into view or open its container', next: REREAD },
   // Found more than once: which one is the caller's to say. The list is in the result.
   { code: 'AMBIGUOUS', outcome: 'failed', test: /elements on screen match that name, nothing was done|no element is named exactly that: .{0,60}nothing was done/i,
     hint: 'several elements have that name, or none has it exactly; name the one you mean in full, pass within (its window or dialog) or controlType, or click its position',
-    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)', agent: 'click {"x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)' } },
+    next: { mcp: 'computer {"action":"click","x":<x>,"y":<y>,"space":"screen"} (a position inside the one you mean)' } },
   { code: 'ACTION_FAILED', outcome: 'failed', test: /missed — the action failed/i,
     hint: 'found, but the action failed', next: REREAD },
   // A window that is not there: list the windows, then focus one.
   { code: 'NOT_FOUND', outcome: 'failed',
     test: /no (?:open )?window (?:matching|named)|no (?:open )?window (?:or running app )?(?:matches|belongs to)|no window has a title containing|no window for that process|window not found|no window found for process|no matching window|failed to focus: no matching/i,
     hint: 'no such window; list the windows to see what is open',
-    next: { mcp: 'window {"action":"list"}', agent: 'list_windows {}' } },
+    next: { mcp: 'window {"action":"list"}' } },
   // An invoke that found no element of that name: the label may be drawn (canvas, image, custom UI) rather than exposed, and
   // smart_click finds text by OCR. The name is the one the caller gave; without it there is nothing concrete to put in the call.
   { code: 'NOT_FOUND', outcome: 'failed',
@@ -184,7 +181,6 @@ const RULES: Rule[] = [
     hint: 'no element has that name; the label may be drawn, not exposed',
     next: {
       mcp: t => smartClickFor(t, 'accessibility {"action":"smart_click","target":NAME}') ?? REREAD.mcp,
-      agent: t => smartClickFor(t, 'smart_click {"target":NAME}') ?? REREAD.agent,
     } },
   // A find that matched nothing but listed close names: the first of them is the likely target.
   { code: 'NOT_FOUND', outcome: 'failed',
@@ -192,7 +188,6 @@ const RULES: Rule[] = [
     hint: 'no element has that name; a close name is listed, the label may also be drawn, not exposed',
     next: {
       mcp: t => smartClickFor(t, 'accessibility {"action":"smart_click","target":NAME}') ?? REREAD.mcp,
-      agent: t => smartClickFor(t, 'smart_click {"target":NAME}') ?? REREAD.agent,
     } },
   // Element / window vocabulary only: "helper not found", "model not found" are install problems, not a missing element.
   { code: 'NOT_FOUND', outcome: 'failed',
@@ -238,17 +233,6 @@ export function isUnverifiableAction(compound: string, action: string | undefine
 
 const HEAD = 400;
 
-/**
- * Text the screen controls (a window title, an element name) must not steer the classification: a window titled "the screen
- * is locked" would turn any miss into SCREEN_LOCKED. Producers quote such text with quoteScreenText (or put it in an
- * <untrusted-screen-content> block); the classifier reads the result with quoted spans, `key='value'` spans and untrusted
- * blocks blanked out, so only clawdcursor's own words are matched.
- */
-export function quoteScreenText(s: string): string {
-  // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
-  const defused = defuseScreenDelimiters(String(s ?? ''));
-  return `"${defused.replace(/["\r\n]+/g, "'")}"`;
-}
 function ownWords(text: string): string {
   return text
     .replace(/<untrusted-screen-content>[\s\S]*?<\/untrusted-screen-content>/g, ' ')

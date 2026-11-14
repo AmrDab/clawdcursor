@@ -10,7 +10,7 @@ import * as path from 'path';
 
 const h = vi.hoisted(() => ({ root: '' }));
 vi.mock('../paths', async (orig) => ({ ...(await orig<typeof import('../paths')>()), getPackageRoot: () => h.root }));
-vi.mock('../surface/version', () => ({ VERSION: '1.8.0' }));
+vi.mock('../version', () => ({ VERSION: '1.8.0' }));
 vi.mock('child_process', async (orig) => ({ ...(await orig<typeof import('child_process')>()), spawnSync: vi.fn() }));
 
 import { spawnSync } from 'child_process';

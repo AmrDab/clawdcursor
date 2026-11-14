@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { projectToToolDefinition } from '../tools/projected/project-mcp';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap } from '../core/sense/ui-map-types';
 import type { ToolContext } from '../tools/types';

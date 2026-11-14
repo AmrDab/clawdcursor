@@ -21,7 +21,7 @@ import { timeStep } from '../core/observability/steps';
 
 const BRIDGE_SCRIPT = path.join(getPackageRoot(), 'scripts', 'ps-bridge.ps1');
 const READY_TIMEOUT = 12000; // initial PS startup + assembly load
-const CALL_TIMEOUT  = 20000; // per command (reduced from 45s — PSRunner is fast enough)
+const CALL_TIMEOUT  = 20000; // per command
 const MAX_QUEUE_SIZE = 100;  // backpressure — reject if queue exceeds this
 
 interface PendingCall {
@@ -100,7 +100,6 @@ export class PSRunner {
           return;
         }
 
-        // Deliver to in-flight call
         const call = this.current;
         this.current = null;
         if (call) {
@@ -132,11 +131,7 @@ export class PSRunner {
         this.current = null;
         this.queue   = [];
         const err = new Error(`PSRunner exited (code ${code})`);
-        // Reject the startup promise if the bridge never signalled ready.
-        // Previously this was omitted: clearTimeout(readyTimer) disabled the
-        // 12-second safety net but no rejection was issued, leaving
-        // startPromise as an unsettled zombie.  Any awaiter (e.g.
-        // getActiveWindow inside key_press) would then hang forever.
+        // Reject the startup promise if the bridge never signalled ready (see startReject above).
         startReject(err);
         for (const c of pending) { clearTimeout(c.timer); c.reject(err); }
       });
@@ -149,7 +144,6 @@ export class PSRunner {
   }
 
   private async runUntimed(command: Record<string, unknown>): Promise<unknown> {
-    // Auto-start or auto-restart
     if (!this.startPromise || this.dead) {
       if (this.dead) console.log('[PSBridge] Restarting crashed bridge process...');
       this.dead = false;
@@ -225,5 +219,5 @@ export class PSRunner {
   }
 }
 
-// Singleton — shared across all AccessibilityBridge instances
+// One bridge process per clawdcursor process: WindowsAdapter, AccessibilityBridge, frame-host, ocr-engine and native-desktop share it.
 export const psRunner = new PSRunner();

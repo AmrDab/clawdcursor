@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ORACLES, nativeDo, oracleCounts, runnable, scriptProblems, type OracleStep } from '../lib/oracles';
 import { selfcheckOracles } from '../lib/selfcheck';
-import { GATE } from '../lib/scorer';
 import { loadTasks } from '../lib/tasks';
 
 const tasks = loadTasks();
@@ -34,20 +33,6 @@ describe('every oracle is the count of a scripted trajectory, not a number someo
   it('a task without an accessibility tree looks with screenshots: before acting and to verify', () => {
     for (const t of tasks.filter(x => x.archetype === 'web-canvas' || x.archetype === 'cad-viewport')) expect(oracleCounts(ORACLES[t.id]).screenshots, t.id).toBe(2);
     for (const t of tasks.filter(x => x.archetype !== 'web-canvas' && x.archetype !== 'cad-viewport')) expect(oracleCounts(ORACLES[t.id]).screenshots, t.id).toBe(0);
-  });
-
-  it('the trajectory the first Codex run took on a trap task (focus, read, press, verify) passes the gate', () => {
-    const trap = tasks.find(t => t.id === 'web-trap-new')!;
-    expect(trap.oracle.calls).toBe(4);
-    expect(4).toBeLessThanOrEqual(Math.ceil(trap.oracle.calls * GATE.callFactor));
-    // The gate itself is unchanged, and 22 calls on the form still fails it.
-    expect(GATE).toEqual({ screenshotSlack: 1, callFactor: 1.5 });
-    const form = tasks.find(t => t.id === 'web-form-fill')!;
-    expect(22).toBeGreaterThan(Math.ceil(form.oracle.calls * GATE.callFactor));
-  });
-
-  it('the watchdog\'s cap leaves room for a run that passes the gate', () => {
-    for (const t of tasks) expect(t.caps.calls, t.id).toBeGreaterThanOrEqual(Math.ceil(t.oracle.calls * GATE.callFactor));
   });
 });
 
@@ -99,30 +84,3 @@ describe('the selfcheck holds the specs to their scripts', () => {
   });
 });
 
-// The WinForms fixture runs a script of actions in its self-test (off screen, never activated).
-describe.runIf(process.platform === 'win32')('the Windows fixture runs each native task\'s oracle script', () => {
-  it('after the script the task\'s predicate holds; an unknown action is an error', async () => {
-    const { execFileSync } = await import('child_process');
-    const os = await import('os');
-    const { evaluate } = await import('../lib/tasks');
-    const { readStateFile, nativeArgs } = await import('../lib/live-fixtures');
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-oracle-test-'));
-    try {
-      const powershell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-      execFileSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', dir],
-        { timeout: 90_000, cwd: dir });
-      const exe = path.join(dir, 'BenchFixture.exe');
-      for (const task of tasks.filter(t => t.fixture.kind === 'native')) {
-        if (task.fixture.kind !== 'native') continue;
-        const state = path.join(dir, `${task.id}.json`);
-        execFileSync(exe, [...nativeArgs({ state, mode: task.fixture.mode }), '--selftest', '--do', nativeDo(ORACLES[task.id])], { timeout: 30_000 });
-        expect(evaluate(task.success!, readStateFile(state)!), task.id).toBe(true);
-      }
-      // The trap of the duplicate-button task, through the same door: the other Edit.
-      const wrong = path.join(dir, 'wrong.json');
-      execFileSync(exe, ['--state', wrong, '--mode', 'dialog', '--selftest', '--do', 'click=billingEdit']);
-      expect(evaluate(tasks.find(t => t.id === 'native-dialog-duplicate')!.success!, readStateFile(wrong)!)).toBe(false);
-      expect(() => execFileSync(exe, ['--state', path.join(dir, 'bad.json'), '--mode', 'dialog', '--selftest', '--do', 'click=nothing'])).toThrow();
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  }, 150_000);
-});

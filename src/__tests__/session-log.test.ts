@@ -286,7 +286,7 @@ describe('errorClass', () => {
 describe('unhandledRejection', () => {
   it('logs the code and stack frames, never the message', () => {
     const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
-    const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf('In server mode'));
+    const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf("import './quiet-warnings'"));
     expect(h).toMatch(/safeStack\(/);
     expect(h).toMatch(/errorClass\(/);
     expect(h).not.toMatch(/\.message/);
@@ -308,12 +308,13 @@ describe('the daemon ends its session logs', () => {
   });
 
   it('every daemon exit path calls it', () => {
-    const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
-    const daemon = src.slice(src.indexOf('async function runAgentMode'));
-    expect(daemon).toContain("sessionLog.end(reason, 'session')");  // an HTTP session closing is not the daemon exiting
-    expect(daemon).toMatch(/onStop: async \(\) => \{\s*endAllSessions\(/);
-    expect(daemon).toMatch(/process\.on\('SIGINT', \(\) => \{[\s\S]{0,150}?endAllSessions\(/);
-    expect(daemon).toMatch(/process\.on\('SIGTERM', \(\) => \{[\s\S]{0,150}?endAllSessions\(/);
+    const src = fs.readFileSync(path.join(__dirname, '../surface/serve.ts'), 'utf8');
+    const daemon = src.slice(src.indexOf('async function serveHttp'));
+    // POST /stop, SIGINT and SIGTERM all go through the one exit routine, which ends every session and releases the lock.
+    expect(daemon).toMatch(/onStop: \(\) => exit\(/);
+    expect(daemon).toMatch(/const exit = exitRoutine\(endAllSessions,/);
+    expect(daemon).toMatch(/process\.on\('SIGINT', \(\) => \{[\s\S]{0,150}?exit\(/);
+    expect(daemon).toMatch(/process\.on\('SIGTERM', \(\) => exit\(/);
   });
 
   const deadFile = () => {

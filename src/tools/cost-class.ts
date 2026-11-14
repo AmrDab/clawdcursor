@@ -1,19 +1,19 @@
 /**
- * Phase A — authoritative cost-class assignments for every granular tool.
+ * Authoritative cost-class assignments for every granular tool.
  *
- * Why a central table instead of inline `costClass:` on each of the 97
- * ToolDefinitions: one reviewable surface, one place to keep the taxonomy
- * consistent, and a single boot-validated source of truth. The values are
- * stamped onto the granular tools at registry-assembly time
+ * Why a central table instead of inline `costClass:` on each
+ * ToolDefinition: one reviewable surface, one place to keep the taxonomy
+ * consistent, and a single test-validated source of truth. The values are
+ * stamped onto the granular tools by getTools()
  * (`stampCostClasses`), so every consumer — the coverage test, the MCP
- * `tools/list` projection, future runtime hints — reads `tool.costClass`
+ * `tools/list` projection — reads `tool.costClass`
  * exactly as if it had been declared inline.
  *
  * Taxonomy (cheapest first): act < inspect < perceive-text < perceive-image.
  * See `ToolCostClass` in types.ts for the per-class token budgets.
  *
  * Compound dispatcher tools (`computer`, `accessibility`, `window`,
- * `system`, `browser`, `task`) are intentionally ABSENT — their cost
+ * `system`, `browser`) are intentionally ABSENT — their cost
  * depends on the delegated action, so they stay `undefined`.
  */
 
@@ -86,8 +86,8 @@ export const COST_CLASS_BY_TOOL: Readonly<Record<string, ToolCostClass>> = {
 
 /**
  * Stamp `costClass` onto each granular tool from the table. Mutates and
- * returns the same array (assembly happens once per `getTools()` call).
- * Tools missing from the table are left untouched (coverage test warns).
+ * returns the same array.
+ * Tools missing from the table are left untouched (the coverage test fails on them).
  */
 export function stampCostClasses(tools: ToolDefinition[]): ToolDefinition[] {
   for (const tool of tools) {

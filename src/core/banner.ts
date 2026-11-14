@@ -33,8 +33,8 @@
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
  * (CLAWD_BANNER_INPUT, JSON {placeholder?, multiline?}; sent as BANNER_REPLY like "Something else").
  *
- *   - pin()/unpin(): the autonomous task loop pins the banner for the whole
- *     task (agent.executeTask). A pinned banner ignores idle timers.
+ *   - pin()/unpin(): a pinned banner ignores idle timers. Nothing pins it in
+ *     production; a stop (surface/serve.ts) calls unpin() to hide it.
  *   - touch(): every consequential (safetyTier ≥ 1) MCP tool call pokes the
  *     banner; it shows on the first poke and auto-hides after IDLE_HIDE_MS of
  *     inactivity. This covers EXTERNAL agents (editor-hosted over stdio or
@@ -48,11 +48,12 @@ import * as path from 'path';
 import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
-import { macOverlayBinary } from '../platform/mac-ocr-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput } from '../platform/pointer-guard';
+import { macOverlayBinary } from '../platform/mac-swift-binary';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { isStopped, workingIn, workingWindow } from './control';
+import { appLabel } from './app-label';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -66,46 +67,16 @@ const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
  */
 export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
 
-// What the running pill says the agent is doing, per guarded input method (pointer-guard.ts). `true`: the method read
-// the window in front first, so the app is known; the others (accessibility, the browser driver) only say what they do.
-const ACTIVITY: Record<string, [string, boolean]> = {
-  mouseClick: ['Clicking', true], mouseDoubleClick: ['Clicking', true], mouseRightClick: ['Clicking', true],
-  mouseDown: ['Clicking', true], executeMouseAction: ['Clicking', true], mouseDrag: ['Dragging', true],
-  mouseScroll: ['Scrolling', true], typeText: ['Typing', true], keyPress: ['Pressing keys', true],
-  keyDown: ['Pressing keys', true], executeKeyboardAction: ['Pressing keys', true],
-  invokeElement: ['Clicking', false], click: ['Clicking', false], clickByText: ['Clicking', false], focus: ['Clicking', false],
-  scrollIntoView: ['Scrolling', false], typeInField: ['Typing', false], typeByLabel: ['Typing', false],
-  fillFormByLabels: ['Filling a form', false], selectOption: ['Choosing an option', false], pressKey: ['Pressing keys', false],
-  navigate: ['Opening a page', false], openApp: ['Opening an app', false], launchApp: ['Opening an app', false],
-  setWindowState: ['Arranging windows', false], setWindowBounds: ['Arranging windows', false],
-  maximizeWindow: ['Arranging windows', false], restoreWindow: ['Arranging windows', false],
-};
-// Where the OS gave no display name (Linux, an elevated process the bridge may not open): process names that say little.
-const APP_NAMES: Record<string, string> = {
-  msedge: 'Edge', chrome: 'Chrome', firefox: 'Firefox', explorer: 'File Explorer', code: 'VS Code',
-  winword: 'Word', excel: 'Excel', powerpnt: 'PowerPoint', outlook: 'Outlook',
-};
-const oneLine = (s: string | undefined) => (s ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
-
 /**
- * The app as a person knows it: its own display name when the OS gave one ("Designcenter NX" for ugraf.exe), as it is;
- * else from the process name: "msedge.exe" → "Edge", "notepad" → "Notepad". The one exception: explorer.exe calls itself
- * "Windows Explorer", and people know it as File Explorer.
+ * "Typing in Edge" — what the running pill shows for a guarded method (pointer-guard.ts GUARDED_METHODS); undefined for
+ * one it has no words for. Only window-checked input names the app: it read the window in front first. The others
+ * (accessibility, the browser driver) only say what they do.
  */
-export function appLabel(processName: string | undefined, appName?: string): string | undefined {
-  const base = oneLine((processName ?? '').replace(/\.(exe|app)$/i, ''));
-  const own = base.toLowerCase() === 'explorer' ? '' : oneLine(appName);
-  if (own) return own;
-  if (!base || /^pid \d+$/.test(base)) return undefined;
-  return APP_NAMES[base.toLowerCase()] ?? base.charAt(0).toUpperCase() + base.slice(1);
-}
-
-/** "Typing in Edge" — what the running pill shows for an input method; undefined for a method it has no words for. */
 export function activityLabel(method: string, processName?: string, appName?: string): string | undefined {
-  const a = ACTIVITY[method];
-  if (!a) return undefined;
-  const app = a[1] ? appLabel(processName, appName) : undefined;
-  return app ? `${a[0]} in ${app}` : a[0];
+  const g = GUARDED_METHODS[method];
+  if (!g?.activity) return undefined;
+  const app = g.kind === 'input' ? appLabel(processName, appName) : undefined;
+  return app ? `${g.activity} in ${app}` : g.activity;
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
 /** The window the outline goes around: Windows and Linux find it by handle, macOS by its process. */
@@ -355,7 +326,7 @@ class ControlBanner {
     else this.touch(); // external-agent session: running form, then the idle hide
   }
 
-  /** Show and keep shown until unpin() — the autonomous-task lifecycle. */
+  /** Show and keep shown until unpin(). */
   pin(): void {
     if (!this.enabled || isStopped()) return;
     this.pinned = true;
@@ -376,7 +347,7 @@ class ControlBanner {
   touch(idleMs: number = IDLE_HIDE_MS): void {
     if (!this.enabled || isStopped()) return; // after a stop, a refused call must not bring the pill back
     this.show();
-    if (this.pinned || this.paused) return; // task lifecycle / pending pause owns visibility
+    if (this.pinned || this.paused) return; // a pin / pending pause owns visibility
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;

@@ -115,7 +115,6 @@ function run(argv) {
         var SystemEvents = Application('System Events');
         SystemEvents.includeStandardAdditions = true;
 
-        // Get the frontmost process
         var frontProcesses = SystemEvents.processes.where({ frontmost: true });
 
         if (frontProcesses.length === 0) {
@@ -172,7 +171,7 @@ function run(argv) {
         // We use processId as a proxy identifier
         return JSON.stringify({
             success: true,
-            handle: processId,  // Using processId as handle equivalent
+            handle: processId,
             processId: processId,
             processName: processName,
             title: title,

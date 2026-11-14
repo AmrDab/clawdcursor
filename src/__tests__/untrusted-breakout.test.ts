@@ -8,13 +8,12 @@
  * text in plain quotes or outside any block.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { wrapUntrustedScreenContent, clipScreenText, screenJson, defuseScreenDelimiters } from '../core/untrusted-screen-content';
-import { quoteScreenText } from '../core/result-codes';
+import { wrapUntrustedScreenContent, clipScreenText, screenJson, defuseScreenDelimiters, quoteScreenText } from '../core/untrusted-screen-content';
 import { getA11yTools } from '../tools/a11y';
 import { getCdpTools } from '../tools/cdp';
 import { getSmartTools } from '../tools/smart';
 import { getOrchestrationTools } from '../tools/orchestration';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { copyAllText } from '../platform/copy-all-text';
 import { checkAssertions, renderReport } from '../core/verify/assertions';
 import type { ToolContext } from '../tools/types';
@@ -120,11 +119,6 @@ describe('tools that return page, document or clipboard text', () => {
   it('read_clipboard', async () => {
     const ctx = { ensureInitialized: async () => {}, platform: { readClipboard: async () => PAGE } } as unknown as ToolContext;
     expectContained((await tool(getA11yTools(), 'read_clipboard').handler({}, ctx)).text);
-  });
-
-  it('the agent-loop read_clipboard', async () => {
-    const r = await buildUnifiedTools().find(t => t.name === 'read_clipboard')!.execute({}, { platform: { readClipboard: async () => PAGE } } as never);
-    expectContained(r.text);
   });
 
   it('copy_all_text: the page text, and the window title beside it', async () => {

@@ -1,9 +1,9 @@
 /**
  * OCR click coordinates must be converted ONCE, and which side converts is
- * OS-dependent. See ocrPointToClickPoint in src/tools/smart.ts.
+ * OS-dependent. See ocrPointToClickPoint in src/platform/coord-scale.ts.
  */
 import { describe, it, expect } from 'vitest';
-import { ocrPointToClickPoint } from '../tools/smart';
+import { ocrPointToClickPoint } from '../platform/coord-scale';
 
 describe('ocrPointToClickPoint — single conversion per OS', () => {
   it('Windows HiDPI: passes PHYSICAL through (mouseClick divides once itself)', () => {

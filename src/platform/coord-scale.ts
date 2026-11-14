@@ -1,0 +1,208 @@
+/**
+ * Shared screenshot↔screen coordinate scaling.
+ *
+ * Two coordinate spaces exist and MUST NOT be mixed:
+ *   - SCREEN space — the coordinate system the OS mouse driver consumes.
+ *     Accessibility-snapshot coords are already in this space.
+ *   - IMAGE space — the downscaled screenshot the model sees, capped at
+ *     LLM_TARGET_WIDTH (1280). A target read off the screenshot is in this
+ *     space and must be multiplied by `imageScale` to reach screen space.
+ *
+ * The vision `mouse` compound tool always works in IMAGE space and scales. The
+ * granular click/drag/scroll tools default to SCREEN space (a11y coords pass
+ * through) but accept IMAGE-space coords when the agent had to read a target
+ * off the screenshot (e.g. an empty-a11y webview). Centralising the factor
+ * here keeps both paths identical — the earlier bug was the granular tools
+ * NOT scaling image coords, so a 1280-space click landed at half-position.
+ *
+ * PLATFORM NOTE — macOS Retina / HiDPI (#154):
+ *   nut-js on macOS drives the cursor in LOGICAL POINTS (Cocoa/CGEvent space),
+ *   not physical pixels. On a 2× Retina panel the physical width is double the
+ *   logical width (e.g. 4480 physical / 2240 logical), so if we scaled
+ *   image → physical the click would land twice as far right as intended.
+ *   The correct target for the mouse driver is LOGICAL coords:
+ *
+ *     mouseScale(macOS)  = logicalWidth  / LLM_TARGET_WIDTH
+ *     mouseScale(others) = physicalWidth / LLM_TARGET_WIDTH
+ *
+ *   The SCREENSHOT coordinate space is unchanged — screenshots are captured at
+ *   physical resolution and downscaled to LLM_TARGET_WIDTH regardless of OS.
+ *   Only the MOUSE INPUT mapping differs.
+ */
+
+/** Longest edge (px) of the screenshot the model sees. Width-only capping let
+ *  portrait / 4:3 screens send images the provider silently shrank again, so
+ *  every coordinate the model read back drifted. */
+export const LLM_TARGET_WIDTH = 1280;
+/** Area cap — under every major provider's resize threshold (Anthropic ≈1.15 MP). */
+export const LLM_MAX_PIXELS = 1_150_000;
+
+/**
+ * THE downscale factor (physical px per image px) for a w×h capture: the
+ * smallest ≥1 that fits the long edge in LLM_TARGET_WIDTH and the area in
+ * LLM_MAX_PIXELS. Every capture path must use this so the reported scale, the
+ * image and the mouse mapping agree on any screen shape.
+ */
+export function llmScale(w: number, h: number, maxEdge = LLM_TARGET_WIDTH): number {
+  if (!(w > 0) || !(h > 0)) return 1;
+  return Math.max(1, w / maxEdge, h / maxEdge, Math.sqrt((w * h) / LLM_MAX_PIXELS));
+}
+
+/** Image size + scale the model gets for a w×h capture. */
+export function llmSize(w: number, h: number, maxEdge = LLM_TARGET_WIDTH): { scale: number; width: number; height: number } {
+  const scale = llmScale(w, h, maxEdge);
+  return { scale, width: Math.max(1, Math.round(w / scale)), height: Math.max(1, Math.round(h / scale)) };
+}
+
+/** "1175x979px, about 1.5k image tokens": what an image costs the model (Anthropic counts w×h/750; other providers are close). */
+export function imageCost(w: number, h: number): string {
+  const t = (w * h) / 750;
+  return `${w}x${h}px, about ${t >= 1000 ? `${(t / 1000).toFixed(1)}k` : Math.max(10, Math.round(t / 10) * 10)} image tokens`;
+}
+
+/**
+ * Factor to convert IMAGE-space (screenshot) coords to the OS mouse driver's
+ * coordinate space.
+ *
+ * On macOS nut-js drives in LOGICAL POINTS, so we scale image → logical.
+ * On Windows / Linux nut-js drives in PHYSICAL PIXELS, so we scale image → physical.
+ * The image is always the physical capture downscaled by llmScale(), so the
+ * macOS factor is logicalWidth / imageWidth — which may be < 1 (a 2560-px
+ * panel shown at 1024 points gives a 1280-px image: factor 0.8).
+ *
+ * `ctx.screen.logicalWidth` is populated by MacOSAdapter.getScreenSize().
+ * `ctx.screen.physicalWidth/Height` are populated by all adapters.
+ */
+export function imageScale(ctx: {
+  screen?: { physicalWidth?: number; physicalHeight?: number; logicalWidth?: number; logicalHeight?: number };
+  _platform?: string; // injectable for tests; defaults to process.platform
+  /** The latest screenshot's own image → mouse factor, when the caller knows it (the MCP surface): a screenshot taken with
+   *  max_edge is smaller than the default, and recomputing the default here would click off its coordinates. */
+  imageToMouse?: number;
+}): number {
+  if (ctx.imageToMouse && ctx.imageToMouse > 0) return ctx.imageToMouse;
+  const platform = ctx._platform ?? process.platform;
+  const s = ctx.screen ?? {};
+  const pw = s.physicalWidth || 0;
+  // Height unknown → assume 16:10 so old callers keep width-based behaviour.
+  const ph = s.physicalHeight || Math.round(pw * 10 / 16);
+  if (platform === 'darwin') {
+    // macOS: nut-js mouse operates in logical points.
+    const lw = s.logicalWidth || 0;
+    if (lw > 0 && pw > 0) return lw / llmSize(pw, ph).width;
+    if (lw > 0) return llmScale(lw, s.logicalHeight || Math.round(lw * 10 / 16));
+    // logicalWidth unavailable: fall back to physical (best effort — will
+    // still be wrong on Retina but avoids a silent ×1 regress).
+    return llmScale(pw, ph);
+  }
+  // Windows / Linux: nut-js mouse operates in physical pixels.
+  return llmScale(pw, ph);
+}
+
+export function scaleCoord(v: number, scale: number): number {
+  return Math.round(v * scale);
+}
+
+/**
+ * Screen-center point in the coordinate space the OS mouse driver consumes —
+ * LOGICAL points on macOS, PHYSICAL pixels on Windows/Linux. Used by the
+ * no-coordinate scroll fallback ("scroll at the center of the screen"). Using
+ * physicalWidth/2 on a 2× Retina panel fed a logical-space driver a coord at
+ * the far edge (#154 double-count), so the wheel fired in the wrong region.
+ */
+export function screenCenter(ctx: {
+  screen?: { physicalWidth?: number; physicalHeight?: number; logicalWidth?: number; logicalHeight?: number };
+  _platform?: string;
+}): { x: number; y: number } {
+  const platform = ctx._platform ?? process.platform;
+  const s = ctx.screen ?? {};
+  if (platform === 'darwin') {
+    const w = s.logicalWidth || s.physicalWidth || 0;
+    const h = s.logicalHeight || s.physicalHeight || 0;
+    return { x: Math.floor(w / 2), y: Math.floor(h / 2) };
+  }
+  return { x: Math.floor((s.physicalWidth ?? 0) / 2), y: Math.floor((s.physicalHeight ?? 0) / 2) };
+}
+
+/**
+ * Convert an OCR hit (PHYSICAL pixels, on every OS) into the coordinate space
+ * NativeDesktop.mouseClick expects — which differs by OS (see physicalToMouse):
+ *
+ *   Windows / Linux — mouseClick takes PHYSICAL and divides by dpiRatio itself.
+ *     Dividing here too double-converted: on a 2.25x display an OCR click
+ *     landed at ~1/5 of the target.
+ *   macOS — mouseClick takes LOGICAL; physicalToMouse is a no-op there. This
+ *     division is the ONLY one, mapping Retina-physical OCR coords to logical
+ *     points. Removing it re-introduces #154 (every click ~2x off on Retina).
+ *
+ * Exported so the per-OS rule is pinned by a test: a plausible-looking fix
+ * ("just remove the division") fixes Windows and silently breaks every Mac.
+ */
+export function ocrPointToClickPoint(
+  x: number, y: number, dpiRatio: number, platform: NodeJS.Platform,
+): { x: number; y: number } {
+  const div = pixelsPerPoint(dpiRatio, platform);
+  return { x: Math.round(x / div), y: Math.round(y / div) };
+}
+
+/**
+ * Capture pixels per screen-coordinate unit. Screen coordinates (window bounds, mouse positions) are physical pixels on
+ * Windows and Linux, the same as a capture; macOS gives them in points, and a Retina capture has `dpiRatio` pixels per
+ * point. A missing or unusable ratio counts as 1.
+ */
+export function pixelsPerPoint(dpiRatio: number, platform: NodeJS.Platform): number {
+  return platform === 'darwin' && dpiRatio > 0 ? dpiRatio : 1;
+}
+
+/**
+ * Physical-pixel rectangle (what the OCR engine crops) for a window's bounds,
+ * or null when the window has no usable area. `bounds` are screen coordinates:
+ * physical pixels on Windows / Linux, logical points on macOS (physical = ×ratio).
+ */
+export function windowOcrRegion(
+  bounds: { x: number; y: number; width: number; height: number } | undefined,
+  dpiRatio: number,
+  platform: NodeJS.Platform,
+): { x: number; y: number; width: number; height: number } | null {
+  if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
+  const k = pixelsPerPoint(dpiRatio, platform);
+  return { x: Math.round(bounds.x * k), y: Math.round(bounds.y * k), width: Math.round(bounds.width * k), height: Math.round(bounds.height * k) };
+}
+
+// ── The frame the model is looking at ─────────────────────────────────────
+//
+// Screenshot coordinates only mean something relative to the image they were
+// read off. A capture of the primary display maps image px → mouse space by
+// the plain mouse scale (unchanged behaviour). A capture of ANY OTHER display
+// (multi-monitor: any position — negative origins included — and any DPI)
+// records its own origin and scale here, in mouse-space units, so the next
+// image-space click lands on that display. Region crops (zoom) never change
+// it: like computer-use, coordinates refer to the last full screenshot.
+
+export interface FrameMapping {
+  /** top-left of the captured display, in mouse-space units */
+  originX: number;
+  originY: number;
+  /** mouse-space units per image pixel */
+  scale: number;
+  /** which display the frame shows (index in listDisplays) */
+  display?: number;
+}
+
+let lastFrame: FrameMapping | null = null;
+
+/** Record the frame just sent to the model; null = the primary display (plain mouse scale). */
+export function setLastFrame(f: FrameMapping | null): void { lastFrame = f; }
+export function getLastFrame(): FrameMapping | null { return lastFrame; }
+
+/** Image-space point → mouse-space point for the last frame. `mouseScale` is the
+ *  primary display's image→mouse factor, used when the last frame was the primary. */
+export function mapImagePoint(x: number, y: number, mouseScale: number, f = lastFrame): { x: number; y: number } {
+  if (!f) return { x: Math.round(x * mouseScale), y: Math.round(y * mouseScale) };
+  return { x: Math.round(f.originX + x * f.scale), y: Math.round(f.originY + y * f.scale) };
+}
+
+/** Image-space length (width, distance) → mouse-space length for the last frame. */
+export function mapImageLength(v: number, mouseScale: number, f = lastFrame): number {
+  return Math.round(v * (f ? f.scale : mouseScale));
+}

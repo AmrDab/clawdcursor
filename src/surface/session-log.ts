@@ -291,11 +291,6 @@ export function readSession(file: string): { header: Record<string, unknown> | n
   return { header: header[0] ?? null, calls, tally: replay.summary };
 }
 
-/**
- * Servers that ended without saying why: killed (Task Manager, kill -9, the host force-closing it) or crashed. Their session
- * file has calls but no `end` line, and their process is gone. Logged once each (an `end` line is added), at the next start.
- * Files from before the header carried a pid are skipped: their ending was never recorded.
- */
 /** Any `end` line means it ended: a call that finished in /stop's grace window appends after the end line. */
 function hasEnd(lines: string[]): boolean {
   return lines.some(l => { try { return JSON.parse(l).type === 'end'; } catch { return false; } });
@@ -304,6 +299,11 @@ function hasEnd(lines: string[]): boolean {
 /** A lock older than this was left by a reporter that died holding it. */
 const STALE_LOCK_MS = 60_000;
 
+/**
+ * Servers that ended without saying why: killed (Task Manager, kill -9, the host force-closing it) or crashed. Their session
+ * file has calls but no `end` line, and their process is gone. Logged once each (an `end` line is added), at the next start.
+ * Files from before the header carried a pid are skipped: their ending was never recorded.
+ */
 export function reportUncleanExits(): void {
   for (const file of listSessions()) {
     try {

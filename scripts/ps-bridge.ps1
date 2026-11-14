@@ -65,7 +65,7 @@ try {
         //   GA_ROOT         = 2  (for GetAncestor)
     }
 "@
-} catch { } # May already be defined in a long-running session
+} catch { }
 
 # Register the managed UIA client-side proxies (Win32 Edit/Button/ComboBox/
 # ListView/... providers) from COMPILED code, before any UIA call. UIAutomation-
@@ -129,7 +129,6 @@ try {
 
 $ErrorActionPreference = 'Continue'
 
-# Control type map
 $ctMap = @{
     "Button"      = [System.Windows.Automation.ControlType]::Button
     "CheckBox"    = [System.Windows.Automation.ControlType]::CheckBox
@@ -282,7 +281,6 @@ function ConvertTo-UINode {
                 if ($null -ne $cn) { $childNodes += $cn }
             }
         } catch {}
-        # Skip unnamed leaves — but recurse into unnamed containers that have children
         if ($childNodes.Count -eq 0) {
             # A large unnamed leaf is a drawn surface (a canvas, a board): kept as a role-only node, so read_tree can say so (#356).
             $r = $cur.BoundingRectangle
@@ -569,19 +567,11 @@ function Test-ForegroundDenylisted($procName, $title) {
     return $false
 }
 
-# ── Command: activate-at-point ────────────────────────────────────────────────
-# Before a coordinate click, ensure the window at (x, y) is the foreground.
-# This prevents clicks from landing on a background window when a dialog sits
-# over another window and the foreground changed between screenshot and click.
-#
-# Uses the same AttachThreadInput + AllowSetForegroundWindow dance as
-# Cmd-FocusWindow so that the Windows foreground lock is properly overcome.
 # ── Multi-monitor: physical virtual-desktop coordinates on ANY monitor ─────────
-# The bridge process is DPI-unaware; each command below switches only ITS OWN
-# THREAD to per-monitor-v2 awareness (and restores it), so every coordinate is
-# a physical pixel on the whole virtual desktop — any monitor, any position
-# (negative origins included), any per-monitor scaling. nut-js cannot do this:
-# it normalises absolute moves to the PRIMARY display only.
+# Main makes the command thread per-monitor-v2 aware for good (ScreenPM.Aware), so
+# every coordinate is a physical pixel on the whole virtual desktop — any monitor,
+# any position (negative origins included), any per-monitor scaling. nut-js cannot
+# do this: it normalises absolute moves to the PRIMARY display only.
 if (-not ([System.Management.Automation.PSTypeName]'ScreenPM').Type) {
 Add-Type -TypeDefinition @"
 using System; using System.Runtime.InteropServices; using System.Collections.Generic;
@@ -698,6 +688,13 @@ function Cmd-CaptureRect {
     } finally { [ScreenPM]::Restore($prev) }
 }
 
+# ── Command: activate-at-point ────────────────────────────────────────────────
+# Before a coordinate click, ensure the window at (x, y) is the foreground.
+# This prevents clicks from landing on a background window when a dialog sits
+# over another window and the foreground changed between screenshot and click.
+#
+# Uses the same AttachThreadInput + AllowSetForegroundWindow dance as
+# Cmd-FocusWindow so that the Windows foreground lock is properly overcome.
 function Cmd-ActivateAtPoint {
     param($cmd)
     $x = [int]$cmd.x
@@ -1022,7 +1019,6 @@ function Cmd-FocusWindow {
     Start-Sleep -Milliseconds 10
     [Win32UIA]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 0, 0, 0, 0, $SWP_NOMOVE_SIZE) | Out-Null
 
-    # AttachThreadInput dance.
     $currentThread = [Win32UIA]::GetCurrentThreadId()
     $fg = [Win32UIA]::GetForegroundWindow()
     $pidTmp = 0
@@ -1102,7 +1098,7 @@ function Cmd-FindElement {
     $root = [System.Windows.Automation.AutomationElement]::RootElement
     $searchRoots = @($root)
     if ($wpid -gt 0) {
-        # The window the agent works in (the foreground one of the pid), else every window of the pid.
+        # The one window the agent works in (Get-ProcessScopeWindows), never the pid's other windows.
         $searchRoots = @(Get-ProcessScopeWindows $wpid)
         if ($searchRoots.Count -eq 0) { return ,(New-Object System.Object[] 0) }
     }
@@ -1417,8 +1413,7 @@ function Cmd-InvokeElement {
     $scopeWindows = @(Get-ProcessScopeWindows $wpid)
     if ($scopeWindows.Count -eq 0) { return @{ success=$false; reason="no_window"; error="No window for pid $wpid" } }
 
-    # Find element: prefer automationId (exact), then fuzzy name walk. The window the agent works in first (see
-    # Get-ProcessScopeWindows); the other windows of the pid only when none is in front.
+    # The one window the agent works in (Get-ProcessScopeWindows), never the pid's other windows.
     $element = $null
     $hiddenOnly = $false
     foreach ($window in $scopeWindows) {
@@ -1919,7 +1914,6 @@ function Cmd-GetFocusedElement {
         # A password field: say so, and never read its value (browsers expose it as bullets; callers must not echo it).
         $isPassword = $false
         try { $isPassword = [bool]$cur.IsPassword } catch { }
-        # Try to read current value if it's an editable element
         # readable: the value itself was read, so "" is an empty field (not an element that exposes no text).
         $value = ""
         $readable = $false

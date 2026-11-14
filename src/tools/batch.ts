@@ -1,12 +1,12 @@
 /**
  * Guarded action-sequence executor + the `batch` tool.
  *
- * Lets an AI driving clawdcursor (over MCP, or the autonomous loop) submit an
+ * Lets an AI driving clawdcursor over MCP submit an
  * ORDERED LIST of tool calls that run in one shot — collapsing N round-trips
  * into one — WITHOUT a code sandbox. It is DECLARATIVE on purpose:
  *
  *   - Each step is `{ name, arguments, expect? }` (`args` is accepted for
- *     `arguments`, matching the agent-loop batch) — a normal tool call plus an
+ *     `arguments`) — a normal tool call plus an
  *     optional precondition guard. No arbitrary code → no injection-as-control-
  *     flow, no element-handle staleness (every step re-queries by name), no
  *     opaque partial-execution blob.
@@ -15,26 +15,23 @@
  *     below every handler, the hard key list and the AI-host guard. A batch is not a way around any of them.
  *   - Between steps the executor RE-PERCEIVES to check each step's `expect`
  *     guard; on any guard miss / refusal / step error it HALTS and returns
- *     a structured trace so the caller re-plans from real state (the morph
- *     ladder's recovery, just coarser).
+ *     a structured trace so the caller re-plans from real state.
  *
  * This is the "batched planning" middle path: most of Code Mode's efficiency,
  * none of the sandbox's hard problems (see the architecture review).
  */
 import { getTool, getCompactTools } from './registry';
-import { windowTextIncludes } from './window-text';
+import { windowTextIncludes } from '../platform/window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
-import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
-import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall, type GuardedCall, type Refusal } from './call-guards';
 import { logger } from '../core/observability/logger';
-import { clipScreenText } from '../core/untrusted-screen-content';
-import { quoteScreenText } from '../core/result-codes';
+import { clipScreenText, quoteScreenText } from '../core/untrusted-screen-content';
 import { actedIn, actRecord } from '../core/control';
 import { effectLine } from '../core/effect';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
- *  — so a batch works whether the caller drives the 97-tool or 6-compound API. */
+ *  — so a batch works whether the caller drives the granular or 6-compound API. */
 function resolveAnyTool(name: string): ToolDefinition | undefined {
   return getTool(name) ?? getCompactTools().find(t => t.name === name);
 }
@@ -51,12 +48,12 @@ export interface BatchStep {
   /** Tool name — a compound (`computer`/`window`/…) with `arguments.action`, or a granular tool. */
   name: string;
   arguments?: Record<string, unknown>;
-  /** Alias of `arguments` — the agent-loop batch's spelling. A step written
+  /** Alias of `arguments`. A step written
    *  with `args` used to run with no arguments at all. */
   args?: Record<string, unknown>;
   /** Optional precondition; if it fails the batch halts here and reports back. */
   expect?: BatchGuard;
-  /** Canonical alias for `expect` (matches the agent-loop batch). An `expect`
+  /** Alias for `expect`, and wins over it. An `expect`
    *  ASSERTION ARRAY belongs inside `arguments` instead — the projected tool
    *  handlers verify it post-action. */
   precheck?: BatchGuard;
@@ -140,6 +137,12 @@ export async function executeBatch(
 
   const halt = (i: number, reason: string): BatchResult =>
     ({ total: steps.length, completed, allDone: false, stoppedAt: i, stopReason: reason, steps: outcomes, ...shot });
+  const block = (i: number, label: string, c: GuardedCall, r: Refusal): BatchResult => {
+    logger.warn('safety.refused', { tool: c.tool, action: c.action, guard: r.guard, reason: r.why, batchStep: i });
+    // The Stop and pause texts whole: they say what to do next.
+    outcomes.push({ i, label, status: 'blocked', text: r.guard === 'stopped' || r.guard === 'own_ui' ? r.why : r.why.slice(0, 200) });
+    return halt(i, `step ${i} (${label}): ${r.why}`);
+  };
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -156,20 +159,13 @@ export async function executeBatch(
       return halt(i, `unknown tool "${step.name}"`);
     }
 
-    // Precondition: re-perceive and verify the step's expectation.
-    // `precheck` is the canonical name (parity with the agent-loop batch);
-    // `expect` remains the documented MCP alias for back-compat.
     const guard = step.precheck ?? step.expect;
     const args = stepArgs(step);
     const stepAction = typeof args.action === 'string' ? args.action : undefined;
-    // The user's own controls are never a target, and nothing runs while a pause waits (own-ui-guard.ts) — checked before
-    // the precondition, which reads the screen; a step with one is never pause-safe.
-    const ownUi = ownUiRefusal(args, !guard && isPauseSafeCall(tool.name, stepAction), !guard && isStopSafeCall(tool.name, stepAction));
-    if (ownUi) {
-      logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'own_ui', reason: ownUi, batchStep: i });
-      outcomes.push({ i, label, status: 'blocked', text: ownUi });
-      return halt(i, `step ${i} (${label}): ${ownUi}`);
-    }
+    // Refused as the same call made directly would be (call-guards.ts), before the precondition, which reads the screen.
+    const call = guardedCall(tool.name, stepAction, args, !!guard);
+    const refused = await refusalBefore(call, ctx);
+    if (refused) return block(i, label, call, refused);
 
     if (guard) {
       const g = await checkGuard(guard, ctx);
@@ -177,19 +173,11 @@ export async function executeBatch(
         outcomes.push({ i, label, status: 'guard_failed', text: `precondition failed: ${g.detail}` });
         return halt(i, `precondition failed at step ${i} — re-plan from current state`);
       }
+      // The precondition takes time (find_element: seconds) and the screen can change meanwhile: check again.
+      const again = await refusalBefore(call, ctx);
+      if (again) return block(i, label, call, again);
     }
 
-    // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
-    if (isImagePointerCall(tool.name, stepAction, args)) {
-      const why = await imagePointerRefusal(ctx, args);
-      if (why) {
-        logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'screen_binding', reason: why, batchStep: i });
-        outcomes.push({ i, label, status: 'blocked', text: why.slice(0, 200) });
-        return halt(i, `step ${i} (${label}): ${why}`);
-      }
-    }
-
-    // Execute via the real handler.
     let res: ToolResult;
     const before = actedIn();
     try {
@@ -200,19 +188,15 @@ export async function executeBatch(
     // This step's own target (if it acted on a window at all), as the input guard verified it when the step ran.
     const target = actRecord(before);
     if (res.isError) {
+      forgetScreenIfActed(call);   // the halt skips afterCall
       outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys, ...target });
       return halt(i, `step ${i} (${label}) errored`);
     }
 
-    // High-security mode: refused as a direct call is, and never recorded as a screenshot the model has seen.
-    if (ctx.disableVision && res.image) {
-      logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'no_vision', reason: VISION_DISABLED_REFUSAL, batchStep: i });
-      outcomes.push({ i, label, status: 'blocked', text: VISION_DISABLED_REFUSAL.slice(0, 200) });
-      return halt(i, `step ${i} (${label}): ${VISION_DISABLED_REFUSAL}`);
-    }
-
+    const after = await afterCall(call, res, ctx);
+    if ('guard' in after) return block(i, label, call, after);
     // A screenshot step names its id first, so it survives the step text's truncation.
-    const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
+    const shotNote = after.screenshotNote ? `${after.screenshotNote.split(' — ')[0]} · ` : '';
     outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys, ...target });
     if (res.image) shot = { image: res.image, imageStep: i };
     completed++;
@@ -263,7 +247,6 @@ export function getBatchTools(): ToolDefinition[] {
         maxSteps: { type: 'number', description: `Hard cap on executed steps (default ${DEFAULT_MAX_STEPS}).`, required: false },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0, // the batch itself is inert; the pill shows when a STEP acts (batchActs).
       handler: async (params, ctx: ToolContext): Promise<ToolResult> => {
         // `steps` arrives as a JSON string (constrained schema) or, from clients
