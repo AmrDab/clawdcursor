@@ -5,35 +5,22 @@
  * Every tool here is OS-agnostic by construction: it calls through
  * `ctx.platform.*` and the adapter decides how to land the action on
  * the current OS (Windows PowerShell + UIA, macOS osascript + nut-js,
- * Linux wmctrl/xdotool/nut-js). When a primitive isn't supported on the
- * current OS, the adapter returns a falsy value and the tool reports it
- * as `not_supported_on_platform` rather than throwing.
+ * Linux wmctrl/xdotool/nut-js).
  *
  * Coordinate convention: all mouse tools here take IMAGE-SPACE coords
- * (matching desktop_screenshot), scaled through `getMouseScaleFactor()`
- * just like the existing `mouse_click`. Window / keyboard tools do not
- * carry coords.
+ * (matching desktop_screenshot), scaled through `getMouseScaleFactor()`.
  *
  * Every tool here is an input tool (safetyTier 1) unless it only reads; the ones that are destructive by
- * themselves (`close_window`, `open_file`, `open_uri`) say `destructive: true` (see ToolDefinition.destructive).
+ * themselves (`open_file`, `open_uri`) say `destructive: true` (see ToolDefinition.destructive).
  */
 
 import type { ToolDefinition } from './types';
 import { MOD } from '../platform/keys';
 import { screenJson } from '../core/untrusted-screen-content';
-import { toMouse, toMouseLength } from './types';
+import { toMouse } from './types';
 import { SPACE_PARAM } from './desktop';
-import { preferControl, failReason } from '../platform/prefer-control';
 import { quoteScreenText } from '../core/result-codes';
 import { openFilePath } from './open-file';
-import { timeWait } from '../core/observability/steps';
-
-function notSupported(tool: string): { text: string; isError: true } {
-  return {
-    text: `${tool}: not supported on this platform in the current version`,
-    isError: true,
-  };
-}
 
 function needPlatform(tool: string): { text: string; isError: true } {
   return {
@@ -90,27 +77,6 @@ export function getExtraTools(): ToolDefinition[] {
     },
 
     // ── MOUSE ──────────────────────────────────────────────────────
-
-    {
-      name: 'mouse_move_relative',
-      description:
-        'Move the cursor by a relative offset (dx, dy) in image-space pixels. ' +
-        'Useful for drawing on a canvas or adjusting a selection. On Wayland ' +
-        'where cursor-query APIs are blocked, uses the last known position.',
-      parameters: {
-        dx: { type: 'number', description: 'X offset in image-space pixels', required: true },
-        dy: { type: 'number', description: 'Y offset in image-space pixels', required: true },
-      },
-      category: 'mouse',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ dx, dy }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('mouse_move_relative');
-        await ctx.platform.mouseMoveRelative(toMouseLength(ctx, dx), toMouseLength(ctx, dy));
-        return { text: `Cursor moved by (${dx}, ${dy}) image-space` };
-      },
-    },
 
     {
       name: 'mouse_middle_click',
@@ -171,50 +137,6 @@ export function getExtraTools(): ToolDefinition[] {
           }
         } catch { /* best-effort — the triple-click itself already happened */ }
         return { text: `Triple-clicked at (${x}, ${y})${selectAll}` };
-      },
-    },
-
-    {
-      name: 'mouse_down',
-      description:
-        'Press a mouse button without releasing. Pair with mouse_up. ' +
-        'Useful for hold-and-drag gestures, modifier-click selections, or chord input.',
-      parameters: {
-        button: {
-          type: 'string', required: false, enum: ['left', 'right', 'middle'],
-          description: 'Which button (default: left)',
-        },
-      },
-      category: 'mouse',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ button }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('mouse_down');
-        const btn = (button as 'left' | 'right' | 'middle') ?? 'left';
-        await ctx.platform.mouseDown(btn);
-        return { text: `Mouse ${btn} button pressed (release with mouse_up)` };
-      },
-    },
-
-    {
-      name: 'mouse_up',
-      description: 'Release a mouse button previously pressed with mouse_down. No-op if nothing is held.',
-      parameters: {
-        button: {
-          type: 'string', required: false, enum: ['left', 'right', 'middle'],
-          description: 'Which button (default: left)',
-        },
-      },
-      category: 'mouse',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ button }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('mouse_up');
-        const btn = (button as 'left' | 'right' | 'middle') ?? 'left';
-        await ctx.platform.mouseUp(btn);
-        return { text: `Mouse ${btn} button released` };
       },
     },
 
@@ -292,274 +214,6 @@ export function getExtraTools(): ToolDefinition[] {
           await ctx.platform.mouseUp('left');
         }
         return { text: `Stepped-drag through ${points.length} points` };
-      },
-    },
-
-    // ── KEYBOARD ───────────────────────────────────────────────────
-
-    {
-      name: 'key_down',
-      description:
-        'Press a key (or modifier) without releasing. Pair with key_up. ' +
-        'Enables hold-modifier-while-click or chord-hold workflows. ' +
-        'Accepts the same tokens as key_press ("shift", "Return", "F5", etc.).',
-      parameters: {
-        key: { type: 'string', description: 'Key token (e.g. "shift", "ctrl", "a", "Return")', required: true },
-      },
-      category: 'keyboard',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ key }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('key_down');
-        await ctx.platform.keyDown(String(key));
-        return { text: `Key down: ${key} (release with key_up)` };
-      },
-    },
-
-    {
-      name: 'key_up',
-      description: 'Release a key previously pressed with key_down. No-op if not currently down.',
-      parameters: {
-        key: { type: 'string', description: 'Key token', required: true },
-      },
-      category: 'keyboard',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ key }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('key_up');
-        await ctx.platform.keyUp(String(key));
-        return { text: `Key up: ${key}` };
-      },
-    },
-
-    // ── WINDOWS ────────────────────────────────────────────────────
-
-    {
-      name: 'maximize_window',
-      description:
-        'Maximize the foreground window (or a specific window matched by processName/title). ' +
-        'Polite request — the OS window manager may snap to the full working area.',
-      parameters: {
-        processName: { type: 'string', description: 'Optional process name match', required: false },
-        processId:   { type: 'number', description: 'Optional process id match', required: false },
-        title:       { type: 'string', description: 'Optional title-substring match', required: false },
-      },
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 1,
-      handler: async ({ processName, processId, title }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('maximize_window');
-        const query = processName || processId !== undefined || title
-          ? { processName, processId, title }
-          : undefined;
-        const ok = await ctx.platform.setWindowState('maximize', query);
-        return { text: ok ? 'Window maximized.' : 'maximize request failed or ignored by WM.', isError: !ok };
-      },
-    },
-
-    {
-      name: 'minimize_window_to_taskbar',
-      description:
-        'Minimize a window (hide to taskbar/Dock). Counterpart to the existing `minimize_window` in a11y.ts ' +
-        'but routed through the OS-agnostic PlatformAdapter and accepts explicit target queries.',
-      parameters: {
-        processName: { type: 'string', description: 'Optional process name match', required: false },
-        processId:   { type: 'number', description: 'Optional process id match', required: false },
-        title:       { type: 'string', description: 'Optional title-substring match', required: false },
-      },
-      category: 'window',
-      compactGroup: 'window',
-      // Tier 1 (input): minimizing is reversible (restore_window). Was tier 2
-      // (confirm) by accident — see minimize_window in a11y.ts.
-      safetyTier: 1,
-      handler: async ({ processName, processId, title }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('minimize_window_to_taskbar');
-        const query = processName || processId !== undefined || title
-          ? { processName, processId, title }
-          : undefined;
-        const ok = await ctx.platform.setWindowState('minimize', query);
-        return { text: ok ? 'Window minimized.' : 'minimize request failed.', isError: !ok };
-      },
-    },
-
-    {
-      name: 'restore_window',
-      description:
-        'Restore a minimized or maximized window back to its previous bounds. ' +
-        'Use this to bring a hidden window back without toggling into fullscreen.',
-      parameters: {
-        processName: { type: 'string', description: 'Optional process name match', required: false },
-        processId:   { type: 'number', description: 'Optional process id match', required: false },
-        title:       { type: 'string', description: 'Optional title-substring match', required: false },
-      },
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 1,
-      handler: async ({ processName, processId, title }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('restore_window');
-        const query = processName || processId !== undefined || title
-          ? { processName, processId, title }
-          : undefined;
-        const ok = await ctx.platform.setWindowState('normal', query);
-        return { text: ok ? 'Window restored.' : 'restore request failed.', isError: !ok };
-      },
-    },
-
-    {
-      name: 'close_window',
-      description:
-        'Polite close request — the app receives WM_CLOSE / AXCloseAction / _NET_CLOSE_WINDOW ' +
-        'and may prompt ("Save changes?") or refuse. Returns when the request was posted, ' +
-        'NOT when the window actually closed. NOTE: this closes the WHOLE window — on a ' +
-        'tabbed app (modern Notepad, browsers, editors) that can discard MULTIPLE tabs/' +
-        'documents at once, including unsaved ones. To close just one tab, prefer the ' +
-        'in-app shortcut (Ctrl/Cmd+W) via the keyboard instead. Ask the user first (pause_for_user) unless they asked for the close.',
-      parameters: {
-        processName: { type: 'string', description: 'Optional process name match', required: false },
-        processId:   { type: 'number', description: 'Optional process id match', required: false },
-        title:       { type: 'string', description: 'Optional title-substring match', required: false },
-      },
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 1,
-      destructive: true,
-      handler: async ({ processName, processId, title }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('close_window');
-        const query = processName || processId !== undefined || title
-          ? { processName, processId, title }
-          : undefined;
-        const ok = await ctx.platform.setWindowState('close', query);
-        return { text: ok ? 'Close request posted (app may prompt or refuse).' : 'close request failed.', isError: !ok };
-      },
-    },
-
-    {
-      name: 'resize_window',
-      description:
-        'Set a window\'s bounds. Pass only the dimensions you want to change; omitted fields ' +
-        'preserve the current value. Units are SCREEN px — the same as `window list` and ' +
-        'accessibility coordinates (top-left origin). Pass space:"image" to give screenshot coordinates instead.',
-      parameters: {
-        x:      { type: 'number', description: 'New X (top-left origin)', required: false },
-        y:      { type: 'number', description: 'New Y (top-left origin)', required: false },
-        width:  { type: 'number', description: 'New width', required: false },
-        height: { type: 'number', description: 'New height', required: false },
-        space:  { type: 'string', description: '"screen" (default: window-list / a11y units) or "image" (screenshot pixels)', required: false, enum: ['screen', 'image'] },
-        processName: { type: 'string', description: 'Optional process name match', required: false },
-        processId:   { type: 'number', description: 'Optional process id match', required: false },
-        title:       { type: 'string', description: 'Optional title-substring match', required: false },
-      },
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 1,
-      handler: async ({ x, y, width, height, space, processName, processId, title }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('resize_window');
-        const query = processName || processId !== undefined || title
-          ? { processName, processId, title }
-          : undefined;
-        const img = space === 'image';
-        // Position = a point (frame origin + scale); size = a length (scale only).
-        const pos = typeof x === 'number' && typeof y === 'number'
-          ? (img ? toMouse(ctx, x, y) : { x: Math.round(x), y: Math.round(y) }) : null;
-        const len = (v: unknown) => (typeof v !== 'number' ? undefined : img ? toMouseLength(ctx, v) : Math.round(v));
-        const ok = await ctx.platform.setWindowBounds({
-          x: pos ? pos.x : (typeof x === 'number' ? (img ? toMouse(ctx, x, 0).x : Math.round(x)) : undefined),
-          y: pos ? pos.y : (typeof y === 'number' ? (img ? toMouse(ctx, 0, y).y : Math.round(y)) : undefined),
-          width: len(width), height: len(height),
-        }, query);
-        return {
-          text: ok
-            ? `Window bounds set: x=${x ?? '-'}, y=${y ?? '-'}, w=${width ?? '-'}, h=${height ?? '-'}`
-            : 'resize request failed (WM may have refused).',
-          isError: !ok,
-        };
-      },
-    },
-
-    {
-      name: 'list_displays',
-      description:
-        'Enumerate all connected displays with logical bounds, physical size, DPI ratio, and primary flag. ' +
-        'Use this before desktop_screenshot with displayIndex to target a specific monitor.',
-      parameters: {},
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 0,
-      handler: async (_params, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('list_displays');
-        const displays = await ctx.platform.listDisplays();
-        return { text: JSON.stringify(displays, null, 2) };
-      },
-    },
-
-    // ── ACCESSIBILITY ──────────────────────────────────────────────
-
-    {
-      name: 'focus_element',
-      description:
-        'Put keyboard focus on a UI element by accessibility name. Does NOT raise the window — ' +
-        'use focus_window first if you also need the window in the foreground. ' +
-        'Returns not_supported_on_platform on Linux (AT-SPI bridge pending).',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name of the element', required: true },
-        controlType: { type: 'string', description: 'Optional role filter (Button, Edit, etc.)', required: false },
-        processId:   { type: 'number', description: 'Optional process id to scope the search', required: false },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 1,
-      handler: async ({ name, controlType, processId }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('focus_element');
-        if (ctx.platform.platform === 'linux') return notSupported('focus_element');
-        controlType = await preferControl(ctx.platform, 'focus', { name: String(name), controlType, processId });
-        const result = await ctx.platform.invokeElement({
-          name: String(name), controlType, processId, action: 'focus',
-        });
-        return {
-          text: result.success ? `Focused ${quoteScreenText(name)} via accessibility.` : `Focus failed for ${quoteScreenText(name)}${failReason(result)}.`,
-          isError: !result.success,
-        };
-      },
-    },
-
-    {
-      name: 'wait_for_element',
-      description:
-        'Poll the accessibility tree until an element appears or timeout elapses. ' +
-        'Useful after an action that triggers a dialog or side panel. ' +
-        'Returns not_supported_on_platform on Linux (AT-SPI bridge pending).',
-      parameters: {
-        name:        { type: 'string', description: 'Accessibility name to match', required: false },
-        controlType: { type: 'string', description: 'Role filter (e.g. "Button")', required: false },
-        processId:   { type: 'number', description: 'Scope the search to a process', required: false },
-        timeoutMs:   { type: 'number', description: 'Max wait in milliseconds (default 5000)', required: false, default: 5000 },
-        intervalMs:  { type: 'number', description: 'Poll interval in ms (default 250)', required: false, default: 250 },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 0,
-      handler: async ({ name, controlType, processId, timeoutMs, intervalMs }, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('wait_for_element');
-        if (ctx.platform.platform === 'linux') return notSupported('wait_for_element');
-        const deadline = typeof timeoutMs === 'number' ? timeoutMs : 5000;
-        const element = await timeWait(() => ctx.platform!.waitForElement(
-          { name, controlType, processId, intervalMs: intervalMs ?? 250 },
-          deadline,
-        ));
-        if (!element) {
-          return { text: `wait_for_element: timed out after ${deadline}ms`, isError: true };
-        }
-        return { text: JSON.stringify(element) };
       },
     },
 
@@ -853,23 +507,6 @@ export function getExtraTools(): ToolDefinition[] {
         const combo = dir === 'next' ? 'ctrl+Tab' : 'ctrl+shift+Tab';
         await ctx.platform.keyPress(combo);
         return { text: `Cycled to ${dir} tab` };
-      },
-    },
-
-    // ── META ──────────────────────────────────────────────────────
-
-    {
-      name: 'undo_last',
-      description: 'Emit the OS-specific Undo shortcut (Ctrl+Z on Win/Linux, Cmd+Z on macOS) into the focused window.',
-      parameters: {},
-      category: 'keyboard',
-      compactGroup: 'system',
-      safetyTier: 1,
-      handler: async (_params, ctx) => {
-        await ctx.ensureInitialized();
-        if (!ctx.platform) return needPlatform('undo_last');
-        await ctx.platform.keyPress('mod+z');
-        return { text: 'Sent undo keystroke.' };
       },
     },
 

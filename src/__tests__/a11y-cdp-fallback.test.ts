@@ -1,14 +1,14 @@
 /**
- * CDP DOM fallback in find_element + read_screen.
+ * CDP DOM fallback in find_element, and the CDP-browser hint of find_element and read_screen.
  *
  * Edge/Chrome UIA trees stop at browser chrome — canvas-rendered content,
  * single-page apps, and any page that bypasses MSAA are invisible to a pure
  * UIA query. When the focused window IS a browser and clawdcursor's CDP
- * driver is attached, find_element and read_screen now consult the DOM.
+ * driver is attached, find_element consults the DOM.
  *
  * These tests pin the four routing decisions (UIA hit / browser+CDP fallback
- * hit / not-a-browser path / CDP not connected path) for find_element, plus
- * the read_screen append behavior. No real CDP or platform is needed.
+ * hit / not-a-browser path / CDP not connected path) for find_element. No real
+ * CDP or platform is needed.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -37,7 +37,6 @@ import { getTool } from '../tools/registry';
 import type { ToolContext } from '../tools/types';
 
 const findElement = getA11yTools().find(t => t.name === 'find_element')!;
-const readScreen = getA11yTools().find(t => t.name === 'read_screen')!;
 
 function makeCtx(opts: {
   processName?: string;
@@ -219,46 +218,6 @@ describe('find_element — CDP DOM fallback', () => {
   });
 });
 
-describe('read_screen — CDP DOM digest', () => {
-  it('appends BROWSER DOM section when focused window is a browser with CDP attached', async () => {
-    const cdpEvaluate = vi.fn().mockResolvedValue([
-      { name: 'Login', controlType: 'web.button', bounds: { x: 50, y: 80, width: 100, height: 40 } },
-      { name: 'Username', controlType: 'web.input', bounds: { x: 50, y: 30, width: 200, height: 25 } },
-    ]);
-    const ctx = makeCtx({
-      processName: 'msedge',
-      platformUiTree: [
-        { name: 'Address bar', controlType: 'Edit', bounds: { x: 0, y: 0, width: 800, height: 30 } },
-      ],
-      cdpConnected: true,
-      cdpPageEvaluate: cdpEvaluate,
-    });
-    const result = await readScreen.handler({}, ctx);
-    expect(result.text).toContain('FOCUSED WINDOW UI TREE');
-    expect(result.text).toContain('Address bar');
-    expect(result.text).toContain('BROWSER DOM (via CDP, viewport-relative coords)');
-    expect(result.text).toContain('Login');
-    expect(result.text).toContain('Username');
-    expect(cdpEvaluate).toHaveBeenCalledTimes(1);
-  });
-
-  it('omits BROWSER DOM section when focused window is not a browser', async () => {
-    const cdpEvaluate = vi.fn().mockResolvedValue([]);
-    const ctx = makeCtx({
-      processName: 'notepad',
-      platformUiTree: [
-        { name: 'Document', controlType: 'Document', bounds: { x: 0, y: 0, width: 800, height: 600 } },
-      ],
-      cdpConnected: true,
-      cdpPageEvaluate: cdpEvaluate,
-    });
-    const result = await readScreen.handler({}, ctx);
-    expect(result.text).toContain('Document');
-    expect(result.text).not.toContain('BROWSER DOM');
-    expect(cdpEvaluate).not.toHaveBeenCalled();
-  });
-});
-
 // #235: the fallback ignored processId and the hint ignored the CDP browser.
 describe('find_element — scoped to the CDP browser by processId (#235)', () => {
   const hit = [{ name: 'Upgrade', controlType: 'web.button', bounds: { x: 900, y: 20, width: 80, height: 30 } }];
@@ -332,17 +291,6 @@ describe('blind hint for the CDP browser (#235)', () => {
     const { text } = await findElement.handler({ name: 'Upgrade', processId: 1234 }, ctx);
     expect(text).not.toContain('page_context');
     expect(text).toMatch(/copy_all_text/);
-  });
-
-  it('read_screen of the CDP browser uses the browser hint', async () => {
-    const ctx = makeCtx({
-      processName: 'Google Chrome', activeWindowTitle: 'Miro - Google Chrome', cdpTitle: 'Miro',
-      platformUiTree: [{ name: 'Address and search bar', controlType: 'Edit', bounds: { x: 0, y: 0, width: 800, height: 30 } }],
-      cdpConnected: true, cdpPageEvaluate: empty(), cdpBrowserPid: 1234, cdpMode: 'dedicated',
-    });
-    const { text } = await readScreen.handler({}, ctx);
-    expect(text).toMatch(/→ .*browser \{"action":"page_context"\}/);
-    expect(text).not.toMatch(/Restarting it/);
   });
 });
 

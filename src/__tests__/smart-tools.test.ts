@@ -1,7 +1,7 @@
 /**
  * Smart tools tests.
  *
- * Tests the smart_click, smart_read, smart_type, and invoke_element MCP tools.
+ * Tests the smart_click, smart_read and smart_type MCP tools.
  * Verifies a11y → CDP → OCR fallback chain, coordinate handling, and error cases.
  */
 
@@ -142,7 +142,6 @@ describe('Smart Tools', () => {
   const smartClick = tools.find(t => t.name === 'smart_click')!;
   const smartRead = tools.find(t => t.name === 'smart_read')!;
   const smartType = tools.find(t => t.name === 'smart_type')!;
-  const invokeEl = tools.find(t => t.name === 'invoke_element')!;
 
   it('smart_click "1" falls back to the calculator key name "One" (live Windows Calculator)', async () => {
     mockInvokeElement.mockImplementation(async (q: any) => q.name === 'One' ? { success: true } : { success: false });
@@ -218,9 +217,9 @@ describe('Smart Tools', () => {
     } finally { setInputGuard(null); }
   });
 
-  it('registers all 4 smart tools', () => {
-    expect(tools).toHaveLength(4);
-    expect(tools.map(t => t.name)).toEqual(['smart_read', 'smart_click', 'smart_type', 'invoke_element']);
+  it('registers the 3 smart tools', () => {
+    expect(tools).toHaveLength(3);
+    expect(tools.map(t => t.name)).toEqual(['smart_read', 'smart_click', 'smart_type']);
   });
 
   // ── smart_click ──
@@ -911,83 +910,6 @@ describe('Smart Tools', () => {
       const result = await smartType.handler({ text: 'test', target: 'Nonexistent' }, ctx);
       expect(result.isError).toBe(true);
       expect(result.text).toContain('Could not find element');
-    });
-  });
-
-  // ── invoke_element ──
-
-  describe('invoke_element', () => {
-    it('invokes element by name', async () => {
-      mockInvokeElement.mockResolvedValue({ success: true });
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ name: 'Save', action: 'click' }, ctx);
-      expect(result.text).toContain('Invoked "Save"');
-      expect(result.text).toContain('click');
-    });
-
-    it('invokes element by automationId', async () => {
-      mockInvokeElement.mockResolvedValue({ success: true, value: 'Hello' });
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ automationId: 'txtSearch', action: 'get-value' }, ctx);
-      expect(result.text).toContain('txtSearch');
-      expect(result.text).toContain('Hello');
-    });
-
-    it('requires either name or automationId', async () => {
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ action: 'click' }, ctx);
-      expect(result.isError).toBe(true);
-      expect(result.text).toContain('required');
-    });
-
-    it('uses coordinate fallback for click when invoke fails', async () => {
-      mockInvokeElement.mockResolvedValue({ success: false, clickPoint: { x: 300, y: 150 } });
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ name: 'Button', action: 'click' }, ctx);
-      expect(result.text).toContain('coordinate fallback');
-      // Coordinates passed directly — no conversion
-      expect(mockMouseClick).toHaveBeenCalledWith(300, 150);
-    });
-
-    it('returns error when element not found and no coordinates', async () => {
-      mockInvokeElement.mockResolvedValue({ success: false, error: 'Element not found' });
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ name: 'Ghost', action: 'click' }, ctx);
-      expect(result.isError).toBe(true);
-      expect(result.text).toContain('Element not found');
-    });
-
-    it('defaults action to click when not specified', async () => {
-      mockInvokeElement.mockResolvedValue({ success: true });
-      const ctx = createCtx();
-      await invokeEl.handler({ name: 'Button' }, ctx);
-      expect(mockInvokeElement).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'click' })
-      );
-    });
-
-    it('falls back to coordinate click when invokeElement throws (RPC/UWP error)', async () => {
-      mockInvokeElement.mockRejectedValue(new Error('RPC_E_SERVERFAULT'));
-      mockFindElement.mockResolvedValue([{
-        name: 'Calculate',
-        controlType: 'ControlType.Button',
-        automationId: '',
-        bounds: { x: 200, y: 400, width: 60, height: 60 },
-      }]);
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ name: 'Calculate', action: 'click' }, ctx);
-      expect(result.text).toContain('coordinate fallback');
-      expect(mockMouseClick).toHaveBeenCalledWith(230, 430);
-      expect(result.isError).toBeUndefined();
-    });
-
-    it('returns error when invokeElement throws and no element bounds found', async () => {
-      mockInvokeElement.mockRejectedValue(new Error('AXError: element not available'));
-      mockFindElement.mockResolvedValue([]);
-      const ctx = createCtx();
-      const result = await invokeEl.handler({ name: 'Ghost', action: 'click' }, ctx);
-      expect(result.isError).toBe(true);
-      expect(result.text).toContain('invoke_element error');
     });
   });
 

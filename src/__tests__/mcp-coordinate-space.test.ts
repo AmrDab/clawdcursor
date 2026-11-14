@@ -34,20 +34,20 @@ vi.mock('sharp', () => ({
   })),
 }));
 
-import { getDesktopTools } from '../tools/desktop';
+import { getTool } from '../tools/registry';
 
 describe('mouse_click coordinate space (PR7 guard)', () => {
   it('passes coords through unchanged when scaleFactor=1', async () => {
-    const tools = getDesktopTools();
-    const click = tools.find(t => t.name === 'mouse_click')!;
+    const click = getTool('mouse_click')!;
     expect(click).toBeDefined();
 
     const captured: Array<{ x: number; y: number }> = [];
     const ctx = {
-      desktop: {
+      platform: {
         mouseClick: vi.fn(async (x: number, y: number) => { captured.push({ x, y }); }),
+        getActiveWindow: vi.fn(async () => null),
       },
-      a11y: { invalidateCache: vi.fn() },
+      desktop: { getScreenSize: () => ({ width: 2560, height: 1440 }) },
       cdp: {},
       // Agent mode sets scale factor to 1: image-coords ARE OS-coords.
       getMouseScaleFactor: () => 1,
@@ -66,14 +66,14 @@ describe('mouse_click coordinate space (PR7 guard)', () => {
     // The scale factor is a property of the ctx, not a hidden /1280
     // assumption. If the OS reports a 2.0 DPI ratio, mouse_click scales
     // accordingly — but this is opt-in, not silent.
-    const tools = getDesktopTools();
-    const click = tools.find(t => t.name === 'mouse_click')!;
+    const click = getTool('mouse_click')!;
     const captured: Array<{ x: number; y: number }> = [];
     const ctx = {
-      desktop: {
+      platform: {
         mouseClick: vi.fn(async (x: number, y: number) => { captured.push({ x, y }); }),
+        getActiveWindow: vi.fn(async () => null),
       },
-      a11y: { invalidateCache: vi.fn() },
+      desktop: { getScreenSize: () => ({ width: 2560, height: 1440 }) },
       cdp: {},
       getMouseScaleFactor: () => 2,
       getScreenshotScaleFactor: () => 2,

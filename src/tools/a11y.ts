@@ -6,16 +6,13 @@
  */
 
 import type { ToolDefinition, ToolContext } from './types';
-import { a11yToMouse } from './types';
-import type { UiElement, WindowInfo } from '../platform/types';
+import type { UiElement } from '../platform/types';
 import { isBrowserProcess } from '../platform/browser-config';
 import { windowTextIncludes } from './window-text';
 import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
 import { copyAllText, pageTextPart, PAGE_TEXT_CAP } from '../platform/copy-all-text';
-import { setWorkingPoint, onAnyDisplay } from '../platform/display-target';
-import { getUiTreeWithWake } from '../platform/a11y-wake';
-import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, isSparseTree, nameMissHint, shownValue, shownHelp } from './blind-hints';
+import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './blind-hints';
 import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
 
@@ -29,7 +26,7 @@ import { quoteScreenText } from '../core/result-codes';
  * array of UiElement-shaped results synthesized from DOM nodes. The caller
  * decides how to surface "(no elements found)" vs the legitimate empty case.
  *
- * Note: bounding rects come back in CSS pixels; the existing `formatElement`
+ * Note: bounding rects come back in CSS pixels; the existing `elementLine`
  * helper already expects unscaled coords, so no conversion is needed.
  */
 async function queryCdpDom(
@@ -147,11 +144,6 @@ async function activeWindowIsCdpPage(ctx: ToolContext, pid?: number): Promise<bo
   return true;
 }
 
-function formatWindow(w: WindowInfo): string {
-  return `${w.isMinimized ? '[MIN]' : '[OK]'} [${w.processName}] "${w.title}" pid:${w.processId}` +
-    (!w.isMinimized ? ` at (${w.bounds.x},${w.bounds.y}) ${w.bounds.width}x${w.bounds.height}` : ' (minimized)');
-}
-
 /**
  * Build a display label for an element. Falls back through
  * `name → description → value → ''` so that Xcode and other macOS apps
@@ -178,7 +170,6 @@ function elementLine(el: UiElement, value: string): string {
     (el.disabled || el.enabled === false ? ' DISABLED' : '') +
     (el.focused ? ' FOCUSED' : '');
 }
-const formatElement = (el: UiElement): string => elementLine(el, '');
 
 /** find's lines: each element with its value, as read_tree shows it; `cut` is the hint to add when a value was cut. */
 function foundLines(els: UiElement[]): { lines: string; cut: string } {
@@ -187,109 +178,8 @@ function foundLines(els: UiElement[]): { lines: string; cut: string } {
   return { lines, cut: cut ? `\n${CUT_VALUE_NEXT_STEP}` : '' };
 }
 
-async function getActivePid(ctx: ToolContext, processId?: number): Promise<number | undefined> {
-  if (typeof processId === 'number') return processId;
-  if (ctx.platform) return (await ctx.platform.getActiveWindow())?.processId;
-  return (await ctx.a11y.getActiveWindow())?.processId;
-}
-
 export function getA11yTools(): ToolDefinition[] {
   return [
-    {
-      name: 'read_screen',
-      description: 'START HERE — cheapest perception. Read the accessibility tree of the screen: returns WINDOWS, FOCUSED WINDOW UI TREE (buttons, inputs, text elements with coordinates), and FOCUSED ELEMENT. If the focused window is a browser with CDP attached, also appends a BROWSER DOM section for canvas/SPA content. Fast, structured, no image bytes — always prefer this over OCR or screenshots. Only escalate to ocr_read_screen when this tree is empty or sparse.',
-      parameters: {
-        processId: { type: 'number', description: 'Focus on a specific process ID (optional — reads foreground window by default)', required: false },
-      },
-      category: 'perception',
-      compactGroup: 'accessibility',
-      safetyTier: 0,
-      handler: async ({ processId }, ctx) => {
-        await ctx.ensureInitialized();
-        let baseText: string;
-        if (ctx.platform) {
-          // A failed list is not an empty desktop: say it failed (a timeout used to print "(no windows found)").
-          let windowListError: string | null = null;
-          const [windows, activeWindow, focused] = await Promise.all([
-            ctx.platform.listWindows().catch((err: unknown) => {
-              windowListError = err instanceof Error ? err.message : String(err);
-              return [];
-            }),
-            ctx.platform.getActiveWindow().catch(() => null),
-            ctx.platform.getFocusedElement().catch(() => null),
-          ]);
-          const active = processId ?? activeWindow?.processId;
-          const isBrowser = !!activeWindow && isBrowserProcess(activeWindow.processName);
-          // Wake a sleeping Chromium/Electron tree (the agent loop already did;
-          // MCP read_tree didn't). A failed read is reported, not fatal: one
-          // hung app must not lose the WINDOWS and FOCUSED ELEMENT sections.
-          let treeError: string | null = null;
-          const { tree, woke } = await getUiTreeWithWake(ctx.platform, active, { isBrowser: () => isBrowser })
-            .catch((err: unknown) => {
-              treeError = err instanceof Error ? err.message : String(err);
-              return { tree: [] as UiElement[], woke: false };
-            });
-          const partial = (ctx.platform.lastTreeTruncated
-            ? ' — PARTIAL (the walk stopped at its size or time limit on a very large window)' : '')
-            + (woke ? ' (accessibility was asleep: woke it; read again if this looks thin)' : '');
-          const nextStep = isSparseTree(tree, isBrowser) ? await nextStepFor(ctx, active) : isBrowser ? await cdpStepFor(ctx.cdp, active) : '';
-          baseText = [
-            'WINDOWS',
-            windows.length
-              ? [...windows.map(formatWindow), ...(ctx.platform.lastWindowListPartial ? [ctx.platform.lastWindowListPartial] : [])].join('\n')
-              : windowListError ? `(window list failed: ${windowListError})` : '(no windows found)',
-            '',
-            `FOCUSED WINDOW UI TREE ${SCREEN_COORDS_NOTE}${partial}`,
-            tree.length ? tree.slice(0, 200).map(formatElement).join('\n') : treeError ? `(tree read failed: ${treeError})` : '(no elements found)',
-            ...(nextStep ? [nextStep] : []),
-            '',
-            'FOCUSED ELEMENT',
-            focused ? formatElement(focused) : '(no focused element)',
-          ].join('\n');
-        } else {
-          const active = await getActivePid(ctx, processId);
-          baseText = await ctx.a11y.getScreenContext(active);
-        }
-        // For a browser window the UIA tree stops at chrome — append a CDP
-        // DOM digest so an agent can see actual page content (canvas apps,
-        // single-page apps that bypass MSAA, etc.) without escalating to a
-        // screenshot. Viewport-relative coords are flagged in the section
-        // header so callers don't accidentally treat them as screen-absolute.
-        const cdpHits = await queryCdpDom(ctx, { limit: 80, processId });
-        if (cdpHits) {
-          const cdpLines = cdpHits.length
-            ? cdpHits.map(formatElement).join('\n')
-            : '(no interactive DOM elements)';
-          return {
-            text: `${baseText}\n\nBROWSER DOM (via CDP, viewport-relative coords)\n${cdpLines}`,
-          };
-        }
-        return { text: baseText };
-      },
-    },
-
-    {
-      name: 'get_windows',
-      description: 'List all visible windows with their title, process name, PID, and bounds.',
-      parameters: {},
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 0,
-      handler: async (_params, ctx) => {
-        await ctx.ensureInitialized();
-        if (ctx.platform) {
-          const windows = await ctx.platform.listWindows();
-          const partial = ctx.platform.lastWindowListPartial;
-          if (!windows?.length) return { text: partial ? `(no windows found)\n${partial}` : '(no windows found)' };
-          return { text: windows.map(formatWindow).join('\n') + (partial ? `\n${partial}` : '') };
-        }
-        const windows = await ctx.a11y.getWindows(true);
-        if (!windows?.length) return { text: '(no windows found)' };
-        const lines = windows.map((w: any) => formatWindow(w));
-        return { text: lines.join('\n') };
-      },
-    },
-
     {
       name: 'get_active_window',
       description: 'Get the currently focused/foreground window.',
@@ -335,178 +225,6 @@ export function getA11yTools(): ToolDefinition[] {
         const el = await ctx.a11y.getFocusedElement();
         if (!el) return { text: '(no focused element)' };
         return { text: screenJson(el) };
-      },
-    },
-
-    {
-      name: 'focus_window',
-      description: 'Bring a window to the foreground. Matches by process name, PID, or title substring. Verifies focus after attempt.',
-      parameters: {
-        processName: { type: 'string', description: 'Process name to focus (e.g. "notepad", "msedge")', required: false },
-        processId: { type: 'number', description: 'Process ID to focus', required: false },
-        title: { type: 'string', description: 'Window title substring to match', required: false },
-      },
-      category: 'window',
-      compactGroup: 'window',
-      safetyTier: 1,
-      handler: async ({ processName, processId, title }, ctx) => {
-        await ctx.ensureInitialized();
-
-        // Multi-monitor: "on screen" means overlapping a real display. A monitor
-        // left of / above the primary has NEGATIVE coordinates, so the old
-        // x>=0 && y>=0 test called every window there off-screen.
-        // Not on macOS: its display frames are bottom-left-origin (Cocoa) while
-        // window bounds are top-left (AX), so they only agree on the primary.
-        const displays = ctx.platform && process.platform !== 'darwin' ? await ctx.platform.listDisplays().catch(() => []) : [];
-        const negativeSpace = displays.some(d => d.bounds.x < 0 || d.bounds.y < 0);
-        const onScreen = (b: { x: number; y: number; width: number; height: number }) => displays.length
-          ? onAnyDisplay(displays, b)
-          : (b.x >= 0 && b.y >= 0);
-
-        // Fix: minimize phantom off-screen full-screen windows that steal focus.
-        // Win11 maximized UWP apps report bounds (-14,-14) and block SetForegroundWindow.
-        // Skipped when a monitor sits left of / above the primary: there, a
-        // maximized window legitimately has negative coordinates.
-        // Not on macOS: Super+Down there is Cmd+Down (the caret jumps to the end of the document), and without display
-        // frames (above) a window on a monitor left of / above the primary would be taken for a phantom. Windows and
-        // Linux are unchanged.
-        if (!negativeSpace && process.platform !== 'darwin') try {
-          const allWins = await ctx.a11y.getWindows(true);
-          const phantoms = (allWins ?? []).filter((w: any) =>
-            w.bounds.x < 0 && w.bounds.y < 0 &&
-            w.bounds.width > 3000 && w.bounds.height > 2000 &&
-            !w.isMinimized &&
-            w.processId !== processId &&
-            !(processName && w.processName.toLowerCase() === processName.toLowerCase())
-          );
-          for (const p of phantoms) {
-            await ctx.a11y.focusWindow(undefined, p.processId).catch(() => {});
-            await ctx.desktop.keyPress('super+down');
-            await new Promise(r => setTimeout(r, 200));
-          }
-        } catch { /* non-fatal */ }
-
-        let targetBounds: any = null;
-        let targetPid = processId;
-
-        // Bug 3 fix: use getWindows(true) for visible-only, filter properly, prefer on-screen windows
-        if (processName && !targetPid) {
-          const windows = await ctx.a11y.getWindows(true);
-          let matches = (windows ?? []).filter((w: any) =>
-            w.processName.toLowerCase() === processName.toLowerCase() ||
-            w.processName.toLowerCase().includes(processName.toLowerCase())
-          );
-          // AND-match with title if provided
-          if (title) {
-            matches = matches.filter((w: any) => windowTextIncludes(w.title, title as string));
-          }
-          // Sort: prefer windows on a display, then non-minimized
-          matches.sort((a: any, b: any) => {
-            const aOnScreen = (onScreen(a.bounds) && !a.isMinimized) ? 1 : 0;
-            const bOnScreen = (onScreen(b.bounds) && !b.isMinimized) ? 1 : 0;
-            return bOnScreen - aOnScreen;
-          });
-          const win = matches[0];
-          if (win) { targetPid = win.processId; targetBounds = win.bounds; }
-          else return { text: `No window found for process "${processName}"`, isError: true };
-        }
-        if (!targetBounds && targetPid) {
-          const windows = await ctx.a11y.getWindows(true);
-          // Title-as-disambiguator: when caller passed BOTH pid AND title, the
-          // title takes precedence as the primary key. This matters on Win11
-          // Notepad where multiple windows share one pid (tab model) — without
-          // this, we'd silently focus whichever tab `find` returned first,
-          // which is non-deterministic across launches.
-          let win: any;
-          if (title) {
-            const t = (title as string).toLowerCase();
-            const candidates = (windows ?? []).filter((w: any) =>
-              w.processId === targetPid && windowTextIncludes(w.title, t)
-            );
-            // Prefer on-screen, non-minimized windows when multiple match.
-            candidates.sort((a: any, b: any) => {
-              const aOn = (onScreen(a.bounds) && !a.isMinimized) ? 1 : 0;
-              const bOn = (onScreen(b.bounds) && !b.isMinimized) ? 1 : 0;
-              return bOn - aOn;
-            });
-            win = candidates[0];
-            if (!win) {
-              // Fall back to pid-only match if no title match — caller may
-              // have passed a stale title.
-              win = windows?.find((w: any) => w.processId === targetPid);
-            }
-          } else {
-            win = windows?.find((w: any) => w.processId === targetPid);
-          }
-          if (win?.bounds) targetBounds = win.bounds;
-        }
-
-        const result = await ctx.a11y.focusWindow(title, targetPid);
-        ctx.a11y.invalidateCache();
-        if (!result.success) return { text: `Failed to focus: ${result.error ? untrusted(result.error) : 'no matching window'}`, isError: true };
-
-        // An owned window (Save as, a message box) is foreground once the bridge
-        // says so; the centre clicks below would press one of its controls.
-        if (result.owned) {
-          const active = await ctx.a11y.getActiveWindow();
-          return { text: `Focused: "${active?.title}" [${active?.processName}] pid:${active?.processId}` };
-        }
-
-        // Bug 4 fix: re-read bounds after focus (restore may have updated them)
-        if (targetPid) {
-          const freshWindows = await ctx.a11y.getWindows(true);
-          const freshWin = freshWindows?.find((w: any) => w.processId === targetPid);
-          if (freshWin?.bounds) targetBounds = freshWin.bounds;
-        }
-
-        // If window is still off-screen, snap-maximize (platform-aware)
-        if (targetBounds && !onScreen(targetBounds)) {
-          const snapKey = process.platform === 'darwin' ? 'ctrl+cmd+f' : 'super+up';
-          await ctx.desktop.keyPress(snapKey);
-          await new Promise(r => setTimeout(r, 300));
-          ctx.a11y.invalidateCache();
-          // Re-read bounds after snap
-          if (targetPid) {
-            const snapWindows = await ctx.a11y.getWindows(true);
-            const snapWin = snapWindows?.find((w: any) => w.processId === targetPid);
-            if (snapWin?.bounds) targetBounds = snapWin.bounds;
-          }
-        }
-
-        // Click window center to physically assert focus (only when window is on-screen)
-        if (targetBounds && onScreen(targetBounds) && targetBounds.width > 0) {
-          // The next default screenshot shows this window's monitor.
-          setWorkingPoint(targetBounds.x + targetBounds.width / 2, targetBounds.y + targetBounds.height / 2);
-          const centerX = a11yToMouse(targetBounds.x + Math.round(targetBounds.width / 2), ctx);
-          const centerY = a11yToMouse(targetBounds.y + Math.round(targetBounds.height / 4), ctx);
-          await ctx.desktop.mouseClick(centerX, centerY);
-          await new Promise(r => setTimeout(r, 200));
-        }
-
-        await new Promise(r => setTimeout(r, 200));
-        ctx.a11y.invalidateCache();
-        const active = await ctx.a11y.getActiveWindow();
-        const verified = active?.processId === targetPid ||
-          (processName && active?.processName.toLowerCase().includes(processName.toLowerCase())) ||
-          (title && windowTextIncludes(active?.title, title));
-
-        if (!verified && targetBounds && onScreen(targetBounds) && targetBounds.width > 0) {
-          const centerX = a11yToMouse(targetBounds.x + Math.round(targetBounds.width / 2), ctx);
-          const centerY = a11yToMouse(targetBounds.y + Math.round(targetBounds.height / 2), ctx);
-          await ctx.desktop.mouseClick(centerX, centerY);
-          await new Promise(r => setTimeout(r, 300));
-          ctx.a11y.invalidateCache();
-          const a2 = await ctx.a11y.getActiveWindow();
-          const v2 = a2?.processId === targetPid ||
-            (processName && a2?.processName.toLowerCase().includes(processName.toLowerCase())) ||
-            (title && windowTextIncludes(a2?.title, title));
-          return {
-            text: v2 ? `Focused (retry): "${a2?.title}" [${a2?.processName}] pid:${a2?.processId}`
-                     : `Focus FAILED. Foreground: "${a2?.title}" [${a2?.processName}]`,
-            isError: !v2,
-          };
-        }
-        return { text: `Focused: "${active?.title}" [${active?.processName}] pid:${active?.processId}` };
       },
     },
 

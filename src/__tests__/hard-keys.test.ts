@@ -15,8 +15,6 @@ import { fileURLToPath } from 'node:url';
 import { hardKeyRefusal } from '../platform/hard-keys';
 import { guardInputMethods, setInputGuard, unguarded, _resetHeldKeys } from '../platform/pointer-guard';
 import { normalizeKey } from '../platform/keys';
-import { getDesktopTools } from '../tools/desktop';
-import { getExtraTools } from '../tools/extras';
 import { getShortcutTools } from '../tools/shortcuts';
 import { SHORTCUTS, resolveShortcutKey } from '../shortcuts';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
@@ -273,21 +271,6 @@ ${LOCK_KEY}`]) {
       a11y: { getActiveWindow: async () => ({ processName: 'notepad', title: 'Untitled' }), invalidateCache: vi.fn() },
     }) as unknown as ToolContext;
     const sequence = `esc ${LOCK}`;
-
-    it('MCP key_press — the chord, and the advisory\'s sequence form', async () => {
-      const keyPress = getDesktopTools().find(t => t.name === 'key_press')!;
-      for (const key of [LOCK, sequence, LOCK.toUpperCase(), ` ${LOCK} `]) {
-        const kb = keyboard();
-        await expect(keyPress.handler({ key }, ctxWith(kb))).rejects.toThrow(/dangerous key combo/);
-        expect(kb.sent.filter(s => s !== 'press esc'), key).toEqual([]);
-      }
-    });
-
-    it('MCP key_down', async () => {
-      const kb = keyboard();
-      await expect(getExtraTools().find(t => t.name === 'key_down')!.handler({ key: LOCK }, ctxWith(kb))).rejects.toThrow(/dangerous key combo/);
-      expect(kb.sent).toEqual([]);
-    });
 
     it('the agent-loop tools `key` (the advisory\'s tool name) and `key_down`, by `combo` or by `key`', async () => {
       const tools = buildUnifiedTools();

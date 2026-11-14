@@ -9,10 +9,8 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { selectOption, selectedResult } from '../platform/select-option';
-import { getA11yDepthTools } from '../tools/a11y_depth';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { classifyResult } from '../core/result-codes';
-import type { ToolContext } from '../tools/types';
 
 describe('select on an item: the result is what the item reads afterwards', () => {
   it('read back selected: confirmed', () => {
@@ -35,15 +33,11 @@ describe('select on an item: the result is what the item reads afterwards', () =
   });
 
   it.each([[true, /^Selected \(read back ✓\) "High"\.$/, false], [undefined, /NOT verified/, false], [false, /failed: it still reads as not selected/, true]] as const)(
-    'both tool sets report it (selected: %s)', async (selected, text, isError) => {
+    'the tool reports it (selected: %s)', async (selected, text, isError) => {
       const platform = {
         invokeElement: vi.fn(async () => ({ success: true, ...(selected === undefined ? {} : { data: { selected } }) })),
         getActiveWindow: vi.fn(async () => null), findElements: vi.fn(async () => []),
       };
-      const mcp = await getA11yDepthTools().find(t => t.name === 'a11y_select')!
-        .handler({ name: 'High', processId: 1 }, { ensureInitialized: async () => {}, platform } as unknown as ToolContext);
-      expect(mcp.text).toMatch(text);
-      expect(!!mcp.isError).toBe(isError);
       const agent = await buildUnifiedTools().find(t => t.name === 'a11y_select')!.execute({ name: 'High', processId: 1 }, { platform } as any);
       expect(agent.text).toMatch(text);
       expect(agent.success).toBe(!isError);

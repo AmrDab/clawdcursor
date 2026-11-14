@@ -20,7 +20,8 @@ vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pausePending 
 import { executeBatch, getBatchTools } from '../tools/batch';
 import { stopControl, sleepUnlessStopped, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { getDesktopTools } from '../tools/desktop';
+import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
 
 const tool = (name: string, handler: any) => ({ name, parameters: {}, safetyTier: 1, handler });
 const okTool = (name: string) => tool(name, vi.fn(async () => ({ text: `${name} ok` })));
@@ -184,12 +185,12 @@ describe('a batch is not a way around the Stop or the hard key list (GHSA-3v3f-5
   afterEach(() => __setControlDirForTests(null));
   const batchTool = () => getBatchTools()[0];
   const LOCK = process.platform === 'darwin' ? 'ctrl+cmd+q' : 'win+l';
-  /** The real key_press tool over a guarded keyboard, as the MCP server wires it. */
+  /** The real key_press tool (projected from the agent-loop `key`) over a guarded keyboard, as the MCP server wires it. */
   function realKeyPress() {
     const sent: string[] = [];
-    const desktop = guardInputMethods({ keyPress: async (c: string) => { sent.push(c); }, takeInputWarning: () => null });
-    const keyCtx = { ensureInitialized: async () => {}, desktop, a11y: { getActiveWindow: async () => null, invalidateCache: () => {} } } as any;
-    tools.key_press = getDesktopTools().find(t => t.name === 'key_press')!;
+    const platform = guardInputMethods({ keyPress: async (c: string) => { sent.push(c); }, takeInputWarning: () => null, getActiveWindow: async () => null });
+    const keyCtx = { ensureInitialized: async () => {}, platform, desktop: {}, getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1 } as any;
+    tools.key_press = projectToToolDefinition(buildUnifiedTools().find(t => t.name === 'key')!);
     return { sent, keyCtx };
   }
 

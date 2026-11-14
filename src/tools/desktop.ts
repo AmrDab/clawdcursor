@@ -1,5 +1,5 @@
 /**
- * Desktop tools — screenshot, mouse, keyboard, screen info.
+ * Desktop tools — screenshot, mouse, screen info.
  *
  * Coordinate system: All mouse tools accept IMAGE-SPACE coordinates
  * (matching the downscaled screenshots from desktop_screenshot).
@@ -12,10 +12,7 @@ import { toMouse, toImage, screenToPhysical } from './types';
 import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH, imageCost } from '../core/agent-loop/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
-import { MOD } from '../platform/keys';
-import { waitForPaste, writeClipboardVerified } from './paste-guard';
 import { lastCaptureUnchecked } from '../platform/native-helper';
-import { unguarded } from '../platform/pointer-guard';
 
 /**
  * Window bounds are physical pixels on Windows and Linux, the same as a capture; macOS reports them in points, and a
@@ -89,29 +86,6 @@ const MAX_EDGE_PARAM = {
 /** The `max_edge` a caller asked for, clamped to what a capture can use; the default size otherwise. */
 const maxEdgeOf = (v: unknown): number =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(LLM_TARGET_WIDTH, Math.max(64, Math.round(v))) : LLM_TARGET_WIDTH;
-
-/**
- * Best-effort active-window label for a tool's result text.
- *
- * `getActiveWindow()` goes through the platform a11y bridge (the persistent
- * PowerShell/UIA process on Windows, AX on macOS, AT-SPI on Linux). That call
- * is only ever used here to ANNOTATE the result ("Key pressed: X in [app]") —
- * it is NOT load-bearing for the actual key/type action. So it must never be
- * able to block or hang the action: if the bridge is slow, recovering, or
- * wedged, we fall back to "(unknown)" after a short timeout and the keystroke
- * still goes through. OS-agnostic — applies to every platform's bridge.
- */
-async function activeWindowLabel(ctx: ToolContext): Promise<string> {
-  try {
-    const active = await Promise.race([
-      ctx.a11y.getActiveWindow(),
-      new Promise<null>(resolve => setTimeout(() => resolve(null), 1500)),
-    ]);
-    return active ? `[${active.processName}] "${active.title}"` : '(unknown)';
-  } catch {
-    return '(unknown)';
-  }
-}
 
 export function getDesktopTools(): ToolDefinition[] {
   return [
@@ -249,27 +223,6 @@ export function getDesktopTools(): ToolDefinition[] {
     // ── MOUSE ──
 
     {
-      name: 'mouse_click',
-      description: 'Click the left mouse button at the given image-space coordinates.',
-      parameters: {
-        x: { type: 'number', description: 'X coordinate in image-space', required: true },
-        y: { type: 'number', description: 'Y coordinate in image-space', required: true },
-        space: SPACE_PARAM,
-      },
-      category: 'mouse',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ x, y, space }, ctx) => {
-        await ctx.ensureInitialized();
-        const { x: rx, y: ry } = toMouse(ctx, x, y, space);
-        await ctx.desktop.mouseClick(rx, ry);
-        ctx.a11y.invalidateCache();
-        ctx.uiMaps?.invalidate();
-        return { text: `Clicked at (${x}, ${y}) → logical (${rx}, ${ry})` };
-      },
-    },
-
-    {
       name: 'mouse_double_click',
       description: 'Double-click the left mouse button at the given image-space coordinates.',
       parameters: {
@@ -346,160 +299,6 @@ export function getDesktopTools(): ToolDefinition[] {
         const pos = await ctx.desktop.getCursorPosition();
         const img = toImage(ctx, pos.x, pos.y);
         return { text: `Cursor at (${img.x}, ${img.y}) in image-space.` };
-      },
-    },
-
-    {
-      name: 'mouse_scroll',
-      description: 'Scroll the mouse wheel at the given image-space coordinates.',
-      parameters: {
-        x: { type: 'number', description: 'X coordinate in image-space', required: true },
-        y: { type: 'number', description: 'Y coordinate in image-space', required: true },
-        direction: { type: 'string', description: 'Scroll direction', required: true, enum: ['up', 'down'] },
-        amount: { type: 'number', description: 'Scroll amount in wheel ticks (default: 3)', required: false, default: 3 },
-      },
-      category: 'mouse',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ x, y, direction, amount }, ctx) => {
-        await ctx.ensureInitialized();
-        const p = toMouse(ctx, x, y);
-        const ticks = amount ?? 3;
-        const delta = direction === 'down' ? ticks : -ticks;
-        await ctx.desktop.mouseScroll(p.x, p.y, delta);
-        return { text: `Scrolled ${direction} ${ticks} ticks at (${x}, ${y})` };
-      },
-    },
-
-    {
-      name: 'mouse_drag',
-      description: 'Drag from one image-space coordinate to another (click-hold-move-release). Useful for selecting text, moving objects, or resizing.',
-      parameters: {
-        startX: { type: 'number', description: 'Start X in image-space', required: true },
-        startY: { type: 'number', description: 'Start Y in image-space', required: true },
-        endX: { type: 'number', description: 'End X in image-space', required: true },
-        endY: { type: 'number', description: 'End Y in image-space', required: true },
-        x1: { type: 'number', description: 'Alias for startX', required: false },
-        y1: { type: 'number', description: 'Alias for startY', required: false },
-        x2: { type: 'number', description: 'Alias for endX', required: false },
-        y2: { type: 'number', description: 'Alias for endY', required: false },
-      },
-      category: 'mouse',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ startX, startY, endX, endY, x1, y1, x2, y2 }, ctx) => {
-        await ctx.ensureInitialized();
-        const sx = startX ?? x1;
-        const sy = startY ?? y1;
-        const ex = endX ?? x2;
-        const ey = endY ?? y2;
-        const a = toMouse(ctx, sx, sy);
-        const b = toMouse(ctx, ex, ey);
-        await ctx.desktop.mouseDrag(a.x, a.y, b.x, b.y);
-        ctx.a11y.invalidateCache();
-        ctx.uiMaps?.invalidate();
-        return { text: `Dragged (${sx},${sy}) → (${ex},${ey})` };
-      },
-    },
-
-    // ── KEYBOARD ──
-
-    {
-      name: 'type_text',
-      description: 'Type text into the currently focused element. Internally uses clipboard paste for reliability (no dropped chars). The user clipboard is saved before and restored after, so calling type_text never clobbers any text the caller had previously placed on the clipboard.',
-      parameters: {
-        text: { type: 'string', description: 'The text to type', required: true },
-      },
-      category: 'keyboard',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ text }, ctx) => {
-        await ctx.ensureInitialized();
-        const activeInfo = await activeWindowLabel(ctx);
-
-        // Preserve the user's clipboard contents around the paste-as-type
-        // operation. Without this, callers who do
-        //   write_clipboard("important sentence")
-        //   type_text("\nheader\n")
-        //   key_press("ctrl+v")
-        // get the header text re-pasted instead of the sentence — type_text
-        // silently overwrote the clipboard. Save/restore makes type_text
-        // transparent to the clipboard.
-        let saved: string | null = null;
-        try { saved = await ctx.a11y.readClipboard(); } catch { /* clipboard unreadable — leave saved=null, restore becomes a no-op below */ }
-
-        // A trailing newline means "submit": a pasted \n is dropped by
-        // single-line fields (address bar, search boxes), so press Return.
-        const submit = /\r?\n$/.test(text);
-        const body = submit ? text.replace(/\r?\n$/, '') : text;
-        // A warning left by some earlier keystrokes is not this call's.
-        ctx.desktop.takeInputWarning?.();
-        let typedByKeys = false;
-        try {
-          if (body) {
-            // Paste only what is really on the clipboard: a write that failed silently would paste the USER'S clipboard.
-            if (await writeClipboardVerified(t => ctx.a11y.writeClipboard(t), () => ctx.a11y.readClipboard(), body)) {
-              await new Promise(r => setTimeout(r, 50));
-              await ctx.desktop.keyPress(`${MOD}+v`);   // this OS's paste (keys.ts)
-              // Before Return and before the clipboard is put back: a slow app would otherwise paste the restored one.
-              await waitForPaste(async () => (await ctx.a11y.getFocusedElement())?.value, body);
-            } else {
-              await ctx.desktop.typeText(body);
-              typedByKeys = true;
-            }
-          }
-          if (submit) await ctx.desktop.keyPress('Return');
-        } finally {
-          // Restore clipboard. Best-effort — if the read failed (no clipboard
-          // available) or the restore throws, we don't surface the error;
-          // type_text's contract is about typing, not clipboard ops.
-          // Also when the paste was refused (a system dialog owns the keyboard): what the user asked to type — a password,
-          // say — must not be left on their clipboard.
-          if (saved !== null) {
-            try { await unguarded(() => ctx.a11y.writeClipboard(saved!)); } catch { /* best-effort */ }
-          }
-        }
-
-        ctx.a11y.invalidateCache();
-        ctx.uiMaps?.invalidate();
-        // macOS: a modal dialog of another app may have had the keyboard — the agent should know where its text went.
-        const warn = ctx.desktop.takeInputWarning?.();
-        const how = typedByKeys ? ' (typed key by key — the clipboard could not be written)' : '';
-        return { text: `Typed ${text.length} chars into ${activeInfo}${how}${warn ? ` ⚠ ${warn}` : ''}` };
-      },
-    },
-
-    {
-      name: 'key_press',
-      description: 'Press a keyboard key or key combination. Use "+" for a chord (e.g. "mod+s", "shift+enter"); "mod" is this OS\'s shortcut modifier (cmd on macOS, ctrl on Windows and Linux). Separate multiple presses with SPACES to send them in sequence (e.g. "Down Down End", "mod+a Delete"). Single keys: "Return", "Tab", "Escape", "Backspace", "Delete", "F1"-"F12", "Left/Right/Up/Down".',
-      parameters: {
-        key: { type: 'string', description: 'Key/combo to press (e.g. "Return", "mod+a", "F5"). Space-separate combos for a sequence ("Down Down End").', required: true },
-      },
-      category: 'keyboard',
-      compactGroup: 'computer',
-      safetyTier: 1,
-      handler: async ({ key }, ctx) => {
-        await ctx.ensureInitialized();
-        // Defense-in-depth: a missing/mistyped arg used to reach `.toLowerCase()`
-        // on `undefined` and throw an opaque crash. Fail with an actionable
-        // message instead (the `computer` compound names this field `combo`,
-        // with `key` accepted as an alias).
-        if (typeof key !== 'string' || key.trim() === '') {
-          return { text: 'key_press: "key" is required — the key or combo to press, e.g. "Return" or "mod+a". (On the `computer` compound the field is `combo`; `key` is also accepted.)', isError: true };
-        }
-        // "+" joins a chord; whitespace separates combos pressed in sequence.
-        const combos = key.trim().split(/\s+/);
-        // The hard key list (lock / log out / secure attention) is refused in the input layer, for every caller:
-        // platform/hard-keys.ts, called from guardInputMethods.
-        const activeInfo = await activeWindowLabel(ctx);
-        ctx.desktop.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
-        for (const combo of combos) {
-          await ctx.desktop.keyPress(combo);
-        }
-        ctx.a11y.invalidateCache();
-        ctx.uiMaps?.invalidate();
-        const warn = ctx.desktop.takeInputWarning?.();
-        return { text: `Key pressed: ${key} in ${activeInfo}${warn ? ` ⚠ ${warn}` : ''}` };
       },
     },
   ];

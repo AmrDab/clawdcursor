@@ -5,10 +5,17 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { getCdpTools } from '../tools/cdp';
+import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
 import { classifyResult } from '../core/result-codes';
 
 const tool = (n: string) => getCdpTools().find(t => t.name === n)!;
-const ctxWith = (cdp: object) => ({ cdp: { isConnected: vi.fn(async () => true), ...cdp } }) as any;
+/** cdp_type, as agents get it: the agent-loop browser_type projected onto the MCP surface. */
+const cdpType = projectToToolDefinition(buildUnifiedTools().find(t => t.name === 'browser_type')!);
+const ctxWith = (cdp: object) => ({
+  cdp: { isConnected: vi.fn(async () => true), ...cdp },
+  platform: {}, desktop: {}, ensureInitialized: async () => {}, getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1,
+}) as any;
 const outcome = (r: { text: string; isError?: boolean }) => classifyResult(r.text, !!r.isError, true);
 
 describe('browser type reads the field back', () => {
@@ -18,26 +25,26 @@ describe('browser type reads the field back', () => {
   };
 
   it('the field holds the text: confirmed', async () => {
-    const r = await tool('cdp_type').handler({ label: 'Name', text: 'hello' }, typed({ value: 'hello', readable: true }));
+    const r = await cdpType.handler({ label: 'Name', text: 'hello' }, typed({ value: 'hello', readable: true }));
     expect(r.isError).toBe(false);
     expect(outcome(r)).toEqual({ outcome: 'confirmed' });
   });
 
   it('a page script rewrote it, or cleared it: failed, READBACK_MISMATCH, and it says what the field shows', async () => {
-    const rewrote = await tool('cdp_type').handler({ label: 'Name', text: 'hello' }, typed({ value: 'goodbye', readable: true }));
+    const rewrote = await cdpType.handler({ label: 'Name', text: 'hello' }, typed({ value: 'goodbye', readable: true }));
     expect(rewrote.isError).toBe(true);
     expect(rewrote.text).toContain('the field shows "goodbye"');
     expect(outcome(rewrote)?.code).toBe('READBACK_MISMATCH');
-    const cleared = await tool('cdp_type').handler({ label: 'Name', text: 'hello' }, typed({ value: '', readable: true }));
+    const cleared = await cdpType.handler({ label: 'Name', text: 'hello' }, typed({ value: '', readable: true }));
     expect(outcome(cleared)?.code).toBe('READBACK_MISMATCH');
   });
 
   it('a password input or an unreadable element: unverified, and the text is never echoed', async () => {
-    const r = await tool('cdp_type').handler({ label: 'Password', text: 'hunter2' }, typed({ secure: true }));
+    const r = await cdpType.handler({ label: 'Password', text: 'hunter2' }, typed({ secure: true }));
     expect(r.isError).toBe(false);
     expect(r.text).not.toContain('hunter2');
     expect(outcome(r)).toEqual({ outcome: 'unverified' });
-    expect(outcome(await tool('cdp_type').handler({ selector: '#x', text: 'a' }, typed(null)))).toEqual({ outcome: 'unverified' });
+    expect(outcome(await cdpType.handler({ selector: '#x', text: 'a' }, typed(null)))).toEqual({ outcome: 'unverified' });
   });
 });
 

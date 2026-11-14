@@ -27,7 +27,6 @@ import { narrowedScopeNote } from '../tools/scope-note';
 import { classifyResult } from '../core/result-codes';
 import { missText, untrusted, structuredMissFields } from '../core/miss-text';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { getA11yDepthTools } from '../tools/a11y_depth';
 
 const root = join(__dirname, '../..');
 const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');
@@ -345,14 +344,12 @@ describe('every echoed name and bridge string is quoted or untrusted', () => {
   const miss = { success: false, data: { reason: 'not_found', error: 'Element not found' } };
   const platform = { platform: 'win32', invokeElement: vi.fn(async () => miss), findElements: vi.fn(async () => []), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) };
 
-  it('toggle, select and focus (agent loop, MCP and extras) classify NOT_FOUND whatever the name holds', async () => {
+  it('toggle, select and focus classify NOT_FOUND whatever the name holds', async () => {
     for (const name of NAMES) {
       for (const tool of ['a11y_toggle', 'a11y_select', 'focus_element', 'a11y_expand', 'a11y_collapse']) {
         const r = await buildUnifiedTools().find(t => t.name === tool)!.execute({ name, processId: 1, value: 'v' }, { platform } as any);
         expect(classifyResult(r.text, true, true)?.code, `${tool} ${JSON.stringify(name)}`).not.toMatch(/SCREEN_LOCKED|TIMEOUT|CONSENT|SAFETY/);
       }
-      const t = await getA11yDepthTools().find(x => x.name === 'a11y_toggle')!.handler({ name, processId: 1 }, { ensureInitialized: async () => {}, platform } as any);
-      expect(classifyResult(t.text, true, true)?.code, name).toBe('NOT_FOUND');
     }
   });
 

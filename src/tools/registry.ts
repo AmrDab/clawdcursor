@@ -28,9 +28,7 @@ import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
 // ─── Step 3: Window-management re-projection ─────────────────────────────────
 //
 // These System A MCP names are now backed by System B (buildUnifiedTools)
-// implementations. The System A handler functions in a11y.ts / extras.ts are
-// intentionally NOT deleted yet (Step 8 handles that); only the registry
-// routing changes here.
+// implementations; the System A copies are deleted.
 //
 // Tools WITHOUT a System B equivalent are left on the System A path:
 //   • get_active_window  — no System B counterpart in buildUnifiedTools()

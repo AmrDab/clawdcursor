@@ -28,7 +28,6 @@ import { createMcpServer } from '../surface/mcp-server';
 import { osKeysGuide, primaryModifier } from '../platform/keys';
 import { SHORTCUTS, shortcutsFor, resolveShortcutKey, findShortcut } from '../shortcuts';
 import { getShortcutTools } from '../tools/shortcuts';
-import { getDesktopTools } from '../tools/desktop';
 import { getExtraTools } from '../tools/extras';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import type { ToolContext } from '../tools/types';
@@ -207,13 +206,16 @@ describe('clawdcursor\'s own combos use the platform modifier', () => {
     const keyPress = vi.fn(async (_c: string) => {});
     const ctx = {
       ensureInitialized: async () => {},
-      desktop: { keyPress, typeText: vi.fn(async () => {}), takeInputWarning: () => null },
-      a11y: {
+      desktop: {},
+      platform: {
+        keyPress, typeText: vi.fn(async () => {}), takeInputWarning: () => null, typingIsPrivate: () => true,
         writeClipboard: async (t: string) => { clip = t; }, readClipboard: async () => clip,
-        getActiveWindow: async () => ({ processName: 'TextEdit', title: 'Doc' }), getFocusedElement: async () => ({ value: clip }), invalidateCache: () => {},
+        getActiveWindow: async () => ({ processName: 'TextEdit', title: 'Doc' }), getFocusedElement: async () => ({ value: clip }),
       },
+      getMouseScaleFactor: () => 1, getScreenshotScaleFactor: () => 1,
     } as unknown as ToolContext;
-    await onPlatform(platform, () => getDesktopTools().find(t => t.name === 'type_text')!.handler({ text: 'hello world' }, ctx));
+    // Not plain ASCII, so it is pasted (short plain text is typed as keys).
+    await onPlatform(platform, () => getAllTools().find(t => t.name === 'type_text')!.handler({ text: 'héllo wörld' }, ctx));
     const combos = keyPress.mock.calls.map(c => c[0]);
     expect(combos).toContain('mod+v');
     expect(combos.join(' ')).not.toMatch(/ctrl|control/i);
