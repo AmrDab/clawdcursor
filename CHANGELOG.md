@@ -32,6 +32,12 @@ All notable changes to Clawd Cursor will be documented in this file.
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now
   returns no value or text in `read_tree`, `find`, the focused element and page text. A screenshot or OCR can still show
   whatever is visible on screen.
+- **`clawdcursor stop` and `uninstall` never signal a process they can't prove is clawdcursor.** They used to signal
+  whatever pid a lock file named, and lock files go stale while pids get reused (often on Windows), so an unrelated app
+  could be killed. Now a pid is signalled only when its lock is complete and the live process started when the lock
+  says; any other lock (stale, reused pid, old bare-number format) is deleted and nothing is signalled. A daemon that
+  does not answer `/stop` is no longer killed by whoever holds its port unless its lock proves it is clawdcursor. A
+  daemon stopped from the dashboard or `POST /stop` now removes its lock file, like Ctrl+C does.
 
 ### Changed
 - README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and

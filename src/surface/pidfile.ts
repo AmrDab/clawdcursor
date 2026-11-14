@@ -277,21 +277,47 @@ export function releasePidFile(mode: LockMode): void {
 }
 
 /**
- * Read just the PID from a lockfile, supporting both the new JSON format
- * and the legacy bare-int format. Used by `clawdcursor stop` to enumerate
- * running instances; callers do their own liveness check afterwards.
+ * The pid in `mode`'s lock, only if the lock parses fully and the live process under that pid started when the lock
+ * says, i.e. it is provably the clawdcursor that wrote the lock. Null for a missing, legacy bare-integer, malformed,
+ * dead or recycled lock. Lock files go stale (crashes, kills) and pids get reused (often on Windows), so a pid read from
+ * a lock is never signalled without passing this check.
  */
-export function readPidLoose(mode: LockMode): number | null {
+export function verifiedLockPid(mode: LockMode, timeoutMs?: number): number | null {
+  const lock = readLockFile(mode);
+  if (!lock || lock.mode !== mode || !Number.isInteger(lock.pid) || lock.pid <= 0 || !isProcessAlive(lock.pid)) return null;
+  const actualStart = getProcessStartTime(lock.pid, timeoutMs);
+  if (actualStart === null || Math.abs(actualStart - lock.startTime) > START_TIME_TOLERANCE_MS) return null;
+  return lock.pid;
+}
+
+export type StopLockResult =
+  | { outcome: 'none' }                       // no lock file
+  | { outcome: 'stale' }                      // lock removed; it did not prove a live clawdcursor, nothing signalled
+  | { outcome: 'stopped'; pid: number }       // verified holder signalled and gone, lock removed
+  | { outcome: 'failed'; pid: number };       // verified holder could not be stopped (e.g. another user's process)
+
+/**
+ * Stop the clawdcursor holding `mode`'s lock and remove the lock. The holder is signalled only when verifiedLockPid
+ * proves it; any other lock (stale, recycled pid, legacy bare integer, unreadable) is deleted without signalling anyone.
+ */
+export async function stopLockHolder(mode: LockMode, timeoutMs?: number): Promise<StopLockResult> {
+  const file = pidFilePath(mode);
+  if (!fs.existsSync(file)) return { outcome: 'none' };
+  const lock = readLockFile(mode);
+  const pid = verifiedLockPid(mode, timeoutMs);
+  const unlink = () => { try { fs.unlinkSync(file); } catch { /* already gone */ } };
+  if (pid === null || pid === process.pid) { unlink(); return { outcome: 'stale' }; }
   try {
-    const raw = fs.readFileSync(pidFilePath(mode), 'utf-8').trim();
-    if (!raw) return null;
-    if (/^\d+$/.test(raw)) {
-      const n = parseInt(raw, 10);
-      return Number.isFinite(n) ? n : null;
+    process.kill(pid, 'SIGTERM');
+    await new Promise(r => setTimeout(r, 500));
+    // Still up: re-prove identity before the hard kill, so a pid freed and reused in the wait is never hit.
+    if (isProcessAlive(pid)) {
+      const again = getProcessStartTime(pid, timeoutMs);
+      if (lock && again !== null && Math.abs(again - lock.startTime) <= START_TIME_TOLERANCE_MS) process.kill(pid, 'SIGKILL');
     }
-    const parsed = JSON.parse(raw) as Partial<LockData>;
-    return typeof parsed?.pid === 'number' ? parsed.pid : null;
-  } catch {
-    return null;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ESRCH') return { outcome: 'failed', pid };
   }
+  unlink();
+  return { outcome: 'stopped', pid };
 }

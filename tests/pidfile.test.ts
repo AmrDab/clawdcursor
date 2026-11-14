@@ -17,6 +17,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { spawn, type ChildProcess } from 'child_process';
 
 // pidfile.ts resolves PID_DIR at import time from os.homedir(), which
 // itself honors HOME (POSIX) and USERPROFILE (Windows). Setting both env
@@ -159,28 +160,81 @@ describe('releasePidFile', () => {
   });
 });
 
-describe('readPidLoose', () => {
-  it('reads the new JSON format', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    try {
-      mod.claimPidFile('mcp');
-      expect(mod.readPidLoose('mcp')).toBe(process.pid);
-    } finally { restore(); }
-  });
+// `stop` / `uninstall` signal the pid a lock names. Locks go stale and pids get reused, so only a lock that proves its
+// process (full JSON lock + matching OS start time) may be signalled; anything else is deleted untouched.
+describe('stopLockHolder', () => {
+  // A cold PowerShell + WMI start-time query can take seconds under a parallel run.
+  const LOOKUP_MS = 30_000;
 
-  it('reads the legacy bare-int format', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    try {
-      fs.mkdirSync(path.dirname(mod.pidFilePath('mcp')), { recursive: true });
-      fs.writeFileSync(mod.pidFilePath('mcp'), '54321');
-      expect(mod.readPidLoose('mcp')).toBe(54321);
-    } finally { restore(); }
-  });
+  function spawnIdleChild(): ChildProcess {
+    return spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
+  }
 
-  it('returns null for a missing lockfile', async () => {
+  function writeLock(mod: { pidFilePath: (m: 'start') => string }, body: string): string {
+    const file = mod.pidFilePath('start');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, body);
+    return file;
+  }
+
+  it('does not signal a live pid whose start time does not match, and removes the lock', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    const child = spawnIdleChild();
+    try {
+      const kill = vi.spyOn(process, 'kill');
+      // A reused pid: alive, but not the process that wrote the lock (start time far in the past).
+      const file = writeLock(mod, JSON.stringify({ v: 1, pid: child.pid, startTime: 1_000_000_000_000, mode: 'start' }));
+      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stale' });
+      expect(kill.mock.calls.filter(([, sig]) => sig !== 0)).toEqual([]);   // liveness probes only
+      expect(fs.existsSync(file)).toBe(false);
+      expect(mod.isProcessAlive(child.pid!)).toBe(true);
+    } finally { child.kill(); restore(); }
+  }, 60_000);
+
+  it('does not signal the parent process named by a wrong-start-time lock', async () => {
     const { mod, restore } = await loadPidfileWithHome(tmpHome);
     try {
-      expect(mod.readPidLoose('mcp')).toBeNull();
+      const kill = vi.spyOn(process, 'kill');
+      const file = writeLock(mod, JSON.stringify({ v: 1, pid: process.ppid, startTime: 1_000_000_000_000, mode: 'start' }));
+      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stale' });
+      expect(kill.mock.calls.filter(([, sig]) => sig !== 0)).toEqual([]);
+      expect(fs.existsSync(file)).toBe(false);
+    } finally { restore(); }
+  }, 60_000);
+
+  it('removes a legacy bare-integer lock without signalling anything', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    const child = spawnIdleChild();
+    try {
+      const kill = vi.spyOn(process, 'kill');
+      const file = writeLock(mod, String(child.pid));
+      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stale' });
+      expect(kill).not.toHaveBeenCalled();
+      expect(fs.existsSync(file)).toBe(false);
+      expect(mod.isProcessAlive(child.pid!)).toBe(true);
+    } finally { child.kill(); restore(); }
+  }, 60_000);
+
+  it('signals the holder when the lock proves it, and removes the lock', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    const child = spawnIdleChild();
+    try {
+      const startTime = mod.getProcessStartTime(child.pid!, LOOKUP_MS);
+      expect(startTime).not.toBeNull();
+      const file = writeLock(mod, JSON.stringify({ v: 1, pid: child.pid, startTime, mode: 'start' }));
+      const exited = new Promise(r => child.once('exit', r));
+      const kill = vi.spyOn(process, 'kill');
+      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stopped', pid: child.pid });
+      expect(kill).toHaveBeenCalledWith(child.pid, 'SIGTERM');
+      await exited;
+      expect(fs.existsSync(file)).toBe(false);
+    } finally { child.kill(); restore(); }
+  }, 60_000);
+
+  it('reports none when there is no lock', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    try {
+      await expect(mod.stopLockHolder('start')).resolves.toEqual({ outcome: 'none' });
     } finally { restore(); }
   });
 });
