@@ -1,7 +1,6 @@
 /**
- * Layer C — reactive step discipline. After a consequential action, verify the
- * agent-stated expected effect (hard) or a tolerant "did anything change" net
- * (soft), so the agent never blindly proceeds on an action that didn't take.
+ * Layer C — reactive step discipline. After an action, verify the agent-stated
+ * expected effect (`expect`), so the agent never blindly proceeds on an action that didn't take.
  * Pure over its inputs + PlatformAdapter reads (OS-agnostic, unit-testable).
  * See docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
  */
@@ -14,10 +13,6 @@ export interface ReactiveInput {
   /** The tool's own result text + success, to fold the note into. */
   toolText: string;
   toolSuccess: boolean;
-  /** Whether the tool is screen-changing (consequential). */
-  changesScreen: boolean;
-  /** Whether the loop observed a change after the action (fingerprint/pixel). */
-  observedChange: boolean;
   adapter: PlatformAdapter;
   /** Lazy OCR reader for ocr_contains assertions; omit when unavailable. */
   ocrText?: () => Promise<string>;
@@ -66,12 +61,6 @@ export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutco
       success: false,
       text: `${input.toolText}\nDEVIATION: ${report.failed}/${report.outcomes.length} expected check(s) failed (still failing after a ${Math.round(budget / 1000)}s settle window) — the action did not achieve its effect; adapt (re-find, retry, or a different approach) before continuing:\n${renderReport(report)}`,
     };
-  }
-
-  // No expect: tolerant soft net — only for a SUCCESSFUL consequential action
-  // that produced no observable change. Never fails the action.
-  if (input.changesScreen && input.toolSuccess && !input.observedChange) {
-    return { success: true, text: `${input.toolText}\n⚠ no observable change — verify it took (pass \`expect\`) or try another approach.` };
   }
 
   return null;

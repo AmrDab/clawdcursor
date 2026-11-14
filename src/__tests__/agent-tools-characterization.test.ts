@@ -9,15 +9,12 @@
  * refactor, that is a regression, not a test to be deleted.
  *
  * Pinned behaviors:
- *  1. buildUnifiedTools() tool sets per mode (blind / hybrid / vision)
+ *  1. buildUnifiedTools() catalog composition
  *  2. coerceCoord: smushed "x,y" string splits + warns
  *  3. coordBreadcrumb: click result text contains the "(x,y) → screen (x,y)" pattern
  *  4. Conditional coord scaling: space:'image' scales; space:'screen' does not
- *  5. ensureTargetForeground no-ops when ctx.targetWindow is undefined
  *  6. resolveAgentPid fallback: a11y tool with no processId uses active-window pid
  *  7. type tool paste-fast-path: result text says "(paste)"
- *  8. done HEDGING_PATTERN: speculative evidence is rejected; concrete evidence accepted
- *  9. Terminal actions (done/give_up/cannot_read) carry stop:true + correct terminalExit
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -73,8 +70,6 @@ import { makeMockPlatform } from './helpers/mock-platform';
 function makeCtx(overrides: Partial<AgentToolContext> = {}): AgentToolContext {
   return {
     platform: makeMockPlatform(),
-    task: 'test task',
-    mode: 'blind',
     // Pin a non-darwin platform so these GENERIC physical-scaling tests are
     // deterministic on every CI runner. imageScale() uses LOGICAL width on
     // darwin (#154) → scale 1.5 here, which broke these tests only on macOS.
@@ -87,7 +82,6 @@ function makeCtx(overrides: Partial<AgentToolContext> = {}): AgentToolContext {
       physicalHeight: 1440,
       dpiRatio: 2,
     },
-    screenshotsCaptured: { n: 0 },
     cdp: null,
     ...overrides,
   };
@@ -105,16 +99,6 @@ function findTool(tools: ReturnType<typeof buildUnifiedTools>, name: string) {
 
 describe('1. buildUnifiedTools() — flat catalog composition', () => {
 
-  it('includes screenshot (available for on-demand vision)', () => {
-    const tools = buildUnifiedTools();
-    expect(tools.map(t => t.name)).toContain('screenshot');
-  });
-
-  it('excludes cannot_read (no blind→vision escalation path in hybrid loop)', () => {
-    const tools = buildUnifiedTools();
-    expect(tools.map(t => t.name)).not.toContain('cannot_read');
-  });
-
   it('includes granular click tool', () => {
     const tools = buildUnifiedTools();
     expect(tools.map(t => t.name)).toContain('click');
@@ -127,13 +111,6 @@ describe('1. buildUnifiedTools() — flat catalog composition', () => {
     expect(names).not.toContain('keyboard');
   });
 
-  it('always has terminal tools (done, give_up)', () => {
-    const tools = buildUnifiedTools();
-    const names = tools.map(t => t.name);
-    expect(names).toContain('done');
-    expect(names).toContain('give_up');
-  });
-
   // x,y or `path` (#355): neither is required by the schema, the tool refuses a call with neither.
   it('click takes x,y or a path of points', () => {
     const tools = buildUnifiedTools();
@@ -142,18 +119,10 @@ describe('1. buildUnifiedTools() — flat catalog composition', () => {
     expect(Object.keys(click.inputSchema.properties as object)).toEqual(expect.arrayContaining(['x', 'y', 'path', 'interval_ms']));
   });
 
-  it('inputSchema.required on done is ["evidence"]', () => {
-    const tools = buildUnifiedTools();
-    const done = findTool(tools, 'done');
-    expect(done.inputSchema.required).toEqual(['evidence']);
-  });
-
-  it('includes perception tools (read_screen, read_text, smart_click)', () => {
+  it('includes the perception tool read_screen', () => {
     const tools = buildUnifiedTools();
     const names = tools.map(t => t.name);
     expect(names).toContain('read_screen');
-    expect(names).toContain('read_text');
-    expect(names).toContain('smart_click');
   });
 });
 
@@ -313,71 +282,6 @@ describe('4. Conditional coordinate scaling', () => {
     await clickTool.execute({ x: 100, y: 200 }, ctx);
     // No space arg → defaults to 'screen' → unscaled
     expect(ctx.platform.mouseClick).toHaveBeenCalledWith(100, 200, expect.any(Object));
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 5. ensureTargetForeground no-ops when ctx.targetWindow is undefined
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('5. ensureTargetForeground — no-op without targetWindow', () => {
-
-  it('click succeeds when ctx.targetWindow is undefined (no focus-guard call)', async () => {
-    const ctx = makeCtx({ targetWindow: undefined });
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    const result = await clickTool.execute({ x: 100, y: 200 }, ctx);
-    expect(result.success).toBe(true);
-    // focusWindow should NOT have been called by the guard
-    expect(ctx.platform.focusWindow).not.toHaveBeenCalled();
-  });
-
-  it('click result text does NOT contain "·raised" when no target window set', async () => {
-    const ctx = makeCtx({ targetWindow: undefined });
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    const result = await clickTool.execute({ x: 100, y: 200 }, ctx);
-    expect(result.text).not.toContain('raised');
-  });
-
-  it('click with targetWindow set but same foreground process: no raise', async () => {
-    const ctx = makeCtx({
-      targetWindow: { title: 'TestApp', processName: 'test.exe' },
-    });
-    // getActiveWindow returns processName: 'test.exe' (same as targetWindow)
-    (ctx.platform.getActiveWindow as any).mockResolvedValue({
-      title: 'TestApp',
-      processName: 'test.exe',
-      processId: 42,
-      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
-    });
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    const result = await clickTool.execute({ x: 100, y: 200 }, ctx);
-    expect(result.success).toBe(true);
-    // No raise needed — processes match; focusWindow should not be called for focus-guard
-    // (getActiveWindow is called, but focusWindow specifically for the guard should not be)
-    expect(ctx.platform.focusWindow).not.toHaveBeenCalled();
-  });
-
-  it('click with targetWindow set and DIFFERENT foreground: guard raises the target', async () => {
-    const ctx = makeCtx({
-      targetWindow: { title: 'TargetApp', processName: 'target.exe' },
-    });
-    // foreground is a DIFFERENT process
-    (ctx.platform.getActiveWindow as any).mockResolvedValue({
-      title: 'OtherApp',
-      processName: 'other.exe',
-      processId: 99,
-      bounds: { x: 0, y: 0, width: 800, height: 600 },
-    });
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    const result = await clickTool.execute({ x: 100, y: 200 }, ctx);
-    expect(result.success).toBe(true);
-    // The guard should have called focusWindow to raise the target
-    expect(ctx.platform.focusWindow).toHaveBeenCalledWith({ processName: 'target.exe' });
-    expect(result.text).toContain('raised');
   });
 });
 
@@ -617,151 +521,5 @@ describe('7. type tool — keys for short text, verified paste for long text, re
     (ctx.platform.typeText as any).mockRejectedValue(new Error('A system dialog owns the keyboard: "X"'));
     await expect(findTool(buildUnifiedTools(), 'type').execute({ text: 'secret' }, ctx)).rejects.toThrow(/system dialog/);
     expect(ctx.platform.writeClipboard).not.toHaveBeenCalled();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 8. done tool — HEDGING_PATTERN enforcement
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('8. done — HEDGING_PATTERN enforcement', () => {
-
-  async function callDone(evidence: string) {
-    const tools = buildUnifiedTools();
-    const doneTool = findTool(tools, 'done');
-    return doneTool.execute({ evidence }, makeCtx());
-  }
-
-  // Hedging phrases that must be rejected
-  const hedgingCases: [string, string][] = [
-    ['should have been sent', 'the email should have been sent'],
-    ['should be', 'the file should be saved'],
-    ['I think', 'I think the task is complete'],
-    ['I believe', 'I believe it worked correctly'],
-    ['might have', 'the dialog might have closed'],
-    ['probably', 'it probably submitted successfully'],
-    ['appears to', 'the app appears to be open'],
-    ['seems to', 'the form seems to be filled'],
-    ['I assume', 'I assume the export was done'],
-    ['assuming', 'assuming the button was clicked'],
-    ['may have', 'the email may have been sent'],
-    ['could have', 'it could have been deleted'],
-  ];
-
-  for (const [phrase, evidence] of hedgingCases) {
-    it(`rejects evidence containing "${phrase}"`, async () => {
-      const result = await callDone(evidence);
-      expect(result.success).toBe(false);
-      expect(result.text).toMatch(/hedging/i);
-      expect(result.stop).toBeUndefined();
-      expect(result.terminalExit).toBeUndefined();
-    });
-  }
-
-  // Concrete evidence that must be accepted
-  const concreteOkCases: [string, string][] = [
-    ['window title', 'Notepad window title shows "Untitled — Notepad" confirming it opened'],
-    ['visible text', 'The status bar reads "File saved" at 14:32:01'],
-    ['focused element', 'The "Send" button is focused and the recipient field shows "bob@example.com"'],
-    ['looks present', 'The document looks complete with 3 pages showing in the preview pane'],
-    ['shown on screen', 'The confirmation dialog shown on screen reads "Upload complete"'],
-    ['displayed in UI', 'The email is displayed in the Sent folder'],
-    ['confirmed in UI', 'The file "report.pdf" now appears in the Downloads folder'],
-  ];
-
-  for (const [label, evidence] of concreteOkCases) {
-    it(`accepts concrete evidence: ${label}`, async () => {
-      const result = await callDone(evidence);
-      expect(result.success).toBe(true);
-      expect(result.stop).toBe(true);
-      expect(result.terminalExit).toBe('done');
-      expect(result.text).toContain('done:');
-    });
-  }
-
-  it('rejects evidence shorter than 8 characters', async () => {
-    const result = await callDone('ok');
-    expect(result.success).toBe(false);
-    expect(result.text).toMatch(/too short|empty/i);
-  });
-
-  it('rejects empty evidence', async () => {
-    const result = await callDone('');
-    expect(result.success).toBe(false);
-  });
-
-  it('concrete done works (HEDGING_PATTERN is mode-agnostic)', async () => {
-    const result = await callDone('The YouTube video "Never Gonna Give You Up" is playing at 0:10');
-    expect(result.success).toBe(true);
-    expect(result.stop).toBe(true);
-    expect(result.terminalExit).toBe('done');
-  });
-
-  it('hedging done is rejected regardless of scenario', async () => {
-    const result = await callDone('the video should be playing');
-    expect(result.success).toBe(false);
-    expect(result.stop).toBeUndefined();
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 9. Terminal actions — stop:true and correct terminalExit
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('9. Terminal actions — stop and terminalExit', () => {
-
-  it('done (concrete): stop=true, terminalExit="done", success=true', async () => {
-    const tools = buildUnifiedTools();
-    const doneTool = findTool(tools, 'done');
-    const result = await doneTool.execute({ evidence: 'The "File saved" toast is visible in the bottom-right corner.' }, makeCtx());
-    expect(result.stop).toBe(true);
-    expect(result.terminalExit).toBe('done');
-    expect(result.success).toBe(true);
-  });
-
-  it('done (hedging): stop is absent (undefined), no terminalExit', async () => {
-    const tools = buildUnifiedTools();
-    const doneTool = findTool(tools, 'done');
-    const result = await doneTool.execute({ evidence: 'the email should have been sent' }, makeCtx());
-    expect(result.stop).toBeUndefined();
-    expect(result.terminalExit).toBeUndefined();
-    expect(result.success).toBe(false);
-  });
-
-  it('give_up: stop=true, terminalExit="give_up", success=false', async () => {
-    const tools = buildUnifiedTools();
-    const giveUpTool = findTool(tools, 'give_up');
-    const result = await giveUpTool.execute({ reason: 'captcha requires human' }, makeCtx());
-    expect(result.stop).toBe(true);
-    expect(result.terminalExit).toBe('give_up');
-    expect(result.success).toBe(false);
-    expect(result.text).toContain('give_up');
-    expect(result.text).toContain('captcha');
-  });
-
-  it('cannot_read is absent from the flat catalog (no escalation path)', () => {
-    const tools = buildUnifiedTools();
-    expect(tools.find(t => t.name === 'cannot_read')).toBeUndefined();
-  });
-
-  it('both terminals (done, give_up) have terminal:true flag', () => {
-    const tools = buildUnifiedTools();
-    expect(findTool(tools, 'done').terminal).toBe(true);
-    expect(findTool(tools, 'give_up').terminal).toBe(true);
-  });
-
-  it('non-terminal tools do NOT have terminal:true', () => {
-    const tools = buildUnifiedTools();
-    const click = findTool(tools, 'click');
-    expect(click.terminal).not.toBe(true);
-    const type = findTool(tools, 'type');
-    expect(type.terminal).not.toBe(true);
-  });
-
-  it('give_up: result text includes the reason', async () => {
-    const tools = buildUnifiedTools();
-    const giveUpTool = findTool(tools, 'give_up');
-    const result = await giveUpTool.execute({ reason: 'credentials missing' }, makeCtx());
-    expect(result.text).toContain('credentials missing');
   });
 });

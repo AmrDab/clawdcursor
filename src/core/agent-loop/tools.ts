@@ -1,16 +1,9 @@
 /**
- * Unified-agent tool catalog.
- *
- * ONE tool vocabulary across blind / hybrid / vision modes. The only
- * difference between modes: in `blind`, the `screenshot` tool is removed
- * from the catalog before the LLM sees it.
+ * The tools src/tools/registry.ts projects onto the MCP surface (project-mcp.ts), under the agent loop's names.
  *
  * Design rules:
  *   - Every mutation goes through PlatformAdapter (OS-agnostic).
- *   - NO ctx.platform call happens outside a tool's `execute()` — the agent
- *     loop never touches the adapter directly.
- *   - Terminal actions (`done` / `give_up` / `cannot_read`) just return
- *     `stop: true` with a terminalExit tag.
+ *   - NO ctx.platform call happens outside a tool's `execute()`.
  *   - a11y-first wording. `invoke_element` and `set_field_value` are the
  *     preferred targeting tools; coord clicks are the fallback.
  *
@@ -19,21 +12,15 @@
  */
 
 import type { UnifiedTool, AgentToolContext } from './types';
-import { buildBatchTool } from './batch-tool';
-import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
-import { ensureTargetForeground, sameProcess } from './focus-guard';
-import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../router/aliases';
-import { openFilePath } from '../../tools/open-file';
-import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
+import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } from './coord-scale';
 import type { InvokeAction, UiElement } from '../../platform/types';
-import { OcrEngine, type OcrElement } from '../../platform/ocr-engine';
-import { ocrPointToClickPoint } from '../../tools/smart';
+import { OcrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, SPARSE_NEXT_STEP_INTERNAL, isSparseTree, CUT_VALUE_NEXT_STEP, CUT_VALUE_NEXT_STEP_INTERNAL, cdpStepFor } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
-import { parseAssertions, checkAssertions, renderReport, hasDiscriminatingEvidence, EXPECT_DESCRIPTION } from '../verify/assertions';
+import { parseAssertions, checkAssertions, renderReport, EXPECT_DESCRIPTION } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-content';
@@ -60,66 +47,6 @@ function getAgentOcr(): OcrEngine {
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;
-
-/**
- * Hedging-language phrases that indicate the agent is GUESSING about
- * the task outcome instead of observing the actual screen state. Used
- * by the `done` tool to reject speculative evidence claims like
- * "the email should have been sent" — a real symptom from a Kimi run
- * where the agent typed in a stale window and never noticed.
- *
- * Patterns are word-boundary anchored where possible so we don't
- * false-positive on substrings (e.g., "shoulder" must not match
- * "should"). Multi-word phrases match contiguous whitespace.
- *
- * The list is short on purpose — only the unambiguous "I'm guessing"
- * phrases. Words like "looks", "shown", "displayed" are LEGITIMATE
- * concrete-observation language and stay allowed.
- */
-const HEDGING_PATTERN = new RegExp(
-  [
-    // Modal verbs of uncertainty
-    '\\bshould\\s+(?:have|be|now)\\b',
-    '\\bshould\\s+(?:have\\s+been|be|now)\\b',
-    '\\bshould\\b(?=\\s+\\w)',
-    '\\bmight\\s+(?:have|be)\\b',
-    '\\bmay\\s+have\\b',
-    '\\bcould\\s+have\\b',
-    '\\bprobably\\b',
-    '\\blikely\\s+(?:has|have|is|was)\\b',
-    // Speaker-uncertainty phrasings
-    '\\bI\\s+think\\b',
-    '\\bI\\s+believe\\b',
-    '\\bI\\s+assume\\b',
-    '\\bassuming\\b',
-    '\\bif\\s+(?:successful|it\\s+worked|the\\s+\\w+\\s+worked)\\b',
-    // Approximate observation
-    '\\bappears?\\s+to\\b',
-    '\\bseems?\\s+to\\b',
-    '\\bpresumably\\b',
-  ].join('|'),
-  'i',
-);
-
-/**
- * Build the unified tool catalog per mode + capability.
- *
- * Modes:
- *   - 'blind'  → text-LLM; no `screenshot` tool in catalog
- *   - 'hybrid' → text-LLM; `screenshot` tool available on demand
- *   - 'vision' → vision-LLM; COMPOUND TOOL FORM (mouse/keyboard/window
- *                as action-discriminated schemas à la Anthropic
- *                computer_20250124) + perception + a11y + terminals
- *
- * Capability (text modes only):
- *   - When supplied and non-'general', filter to the scoped palette
- *     defined in `palettes.ts`. Typical palette ≈ 6–10 tools.
- *   - 'general' / undefined → full text-agent catalog (back-compat).
- *
- * Terminal actions (`done`, `give_up`, `cannot_read`) are always
- * present regardless of mode/capability — the agent must always have
- * an exit door.
- */
 
 /** Reuse a cost-compatible current UIMap from the holder, or compile a fresh one.
  *  Date.now() is called at the tool-invocation boundary (correct: snapshot is fresh).
@@ -149,9 +76,7 @@ const FRAME_ARG = {
 };
 const frameArg = (args: Record<string, unknown>) => (typeof args.frame === 'string' && args.frame.trim()) || undefined;
 
-/** `disableVision` (--no-vision): the catalog has no `screenshot` tool. The agent loop and its batch both build from
- *  here, so neither can reach one the other dropped. */
-export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): UnifiedTool[] {
+export function buildUnifiedTools(): UnifiedTool[] {
   const tools: UnifiedTool[] = [
     // ─── PERCEPTION ─────────────────────────────────────────────
     {
@@ -184,7 +109,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const { tree, woke } = await getUiTreeWithWake(ctx.platform, pid, { isBrowser });
         // Never a dead end: a thin tree (or a browser, whose page content UIA
         // often omits) says what to do next, in the caller's own tool names.
-        const nextStep = ctx.mcpSurface ? SPARSE_NEXT_STEP : SPARSE_NEXT_STEP_INTERNAL;
+        const nextStep = SPARSE_NEXT_STEP;
         // The browser clawdcursor is attached to over CDP (#235): its page is read and acted on through the browser tools.
         if (tree.length === 0) {
           const cdpStep = await cdpStepFor(ctx.cdp, async () => pid ?? (await ctx.platform.getActiveWindow().catch(() => null))?.processId);
@@ -225,7 +150,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const cdpStep = sparse || browser ? await cdpStepFor(ctx.cdp, pid ?? active?.processId) : '';
         const step = sparse ? cdpStep || nextStep : cdpStep;
         const hint = (opaque ? `\n${opaqueAreaLine(opaque)}` : '') + (step ? `\n${step}` : '') +
-          (cut ? `\n${ctx.mcpSurface ? CUT_VALUE_NEXT_STEP : CUT_VALUE_NEXT_STEP_INTERNAL}` : '');
+          (cut ? `\n${CUT_VALUE_NEXT_STEP}` : '');
         const awoke = woke ? ' (accessibility was asleep: read again after waking the app)' : '';
         const folded = fold ? `\n+ an embedded document or web view of ${content.length} elements — read_screen with offset:${own.length} lists them; copy_all_text reads its text` : '';
         return { success: true, text: `Fresh a11y (${tree.length} els) ${SCREEN_COORDS_NOTE}${partial}${awoke}:\n${wrapUntrustedScreenContent(lines.join('\n'))}${folded}${more}${hint}` };
@@ -733,21 +658,18 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const count = args.count === 2 ? 2 : 1;
         // SCALE: 'image' coords (read off the 1280-wide screenshot) → physical;
         // 'screen'/default (a11y coords, already physical) → pass through.
-        // Explicit space wins; else use ctx.coordSpaceDefault (set to 'image' on
-        // vision turns by the agent loop); fall back to 'screen'.
-        const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
+        // Explicit space wins; else 'screen' (the MCP projection passes 'image' when the caller omits it: registry.ts).
+        const space = args.space === 'image' ? 'image' : 'screen';
         const scale = space === 'image' ? imageScale(ctx) : 1;
         // Image coords go through the last frame (any monitor); screen coords pass through.
         const { x, y } = space === 'image' ? mapImagePoint(ix, iy, scale) : { x: scaleCoord(ix, 1), y: scaleCoord(iy, 1) };
-        const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
-        const raised = await ensureTargetForeground(ctx, fg0);
-        const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
+        const before = await ctx.platform.getActiveWindow().catch(() => null);
         const activation = await ctx.platform.mouseClick(x, y, { button, count });
         await sleep(150);
         const after = await ctx.platform.getActiveWindow().catch(() => null);
         const note = warning ? ` (${warning})` : '';
         const focusWarn = focusTheftWarning(activation, before, after);
-        return { success: true, text: `Clicked ${button} x${count} at ${coordBreadcrumb(ix, iy, x, y, space, scale, ctx)}${raised}${note}${focusWarn}${focusBreadcrumb(before, after)}` };
+        return { success: true, text: `Clicked ${button} x${count} at ${coordBreadcrumb(ix, iy, x, y, space, scale, ctx)}${note}${focusWarn}${focusBreadcrumb(before, after)}` };
       },
     },
 
@@ -773,7 +695,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       },
       changesScreen: true,
       async execute(args, ctx) {
-        const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
+        const space = args.space === 'image' ? 'image' : 'screen';
         const scale = space === 'image' ? imageScale(ctx) : 1;
 
         // Stepped path variant: press at the first point, walk the rest,
@@ -789,9 +711,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           const scaled = pts.map(p => space === 'image'
             ? mapImagePoint(Number(p.x), Number(p.y), scale)
             : { x: scaleCoord(Number(p.x), 1), y: scaleCoord(Number(p.y), 1) });
-          const fg0p = await ctx.platform.getActiveWindow().catch(() => null);
-          const raisedP = await ensureTargetForeground(ctx, fg0p);
-          const beforeP = raisedP ? await ctx.platform.getActiveWindow().catch(() => null) : fg0p;
+          const beforeP = await ctx.platform.getActiveWindow().catch(() => null);
           await ctx.platform.mouseMove(scaled[0].x, scaled[0].y);
           await ctx.platform.mouseDown('left');
           try {
@@ -804,7 +724,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           }
           await sleep(200);
           const afterP = await ctx.platform.getActiveWindow().catch(() => null);
-          return { success: true, text: `Stepped-drag through ${pts.length} ${space} points → screen (${scaled[0].x},${scaled[0].y})…(${scaled[scaled.length - 1].x},${scaled[scaled.length - 1].y}) [×${scale}]${raisedP}${focusBreadcrumb(beforeP, afterP)}` };
+          return { success: true, text: `Stepped-drag through ${pts.length} ${space} points → screen (${scaled[0].x},${scaled[0].y})…(${scaled[scaled.length - 1].x},${scaled[scaled.length - 1].y}) [×${scale}]${focusBreadcrumb(beforeP, afterP)}` };
         }
 
         const start = coerceCoord(args.startX, args.startY);
@@ -815,40 +735,11 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const toDrv = (px: number, py: number) => space === 'image' ? mapImagePoint(px, py, scale) : { x: scaleCoord(px, 1), y: scaleCoord(py, 1) };
         const { x: sx, y: sy } = toDrv(start.x, start.y);
         const { x: ex, y: ey } = toDrv(end.x, end.y);
-        const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
-        const raised = await ensureTargetForeground(ctx, fg0);
-        const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
+        const before = await ctx.platform.getActiveWindow().catch(() => null);
         await ctx.platform.mouseDrag(sx, sy, ex, ey);
         await sleep(200);
         const after = await ctx.platform.getActiveWindow().catch(() => null);
-        return { success: true, text: `Dragged ${space} (${start.x},${start.y})→(${end.x},${end.y}) → screen (${sx},${sy})→(${ex},${ey}) [×${scale}]${raised}${focusBreadcrumb(before, after)}` };
-      },
-    },
-
-    {
-      name: 'move',
-      description: 'Move the cursor to (x,y) WITHOUT clicking — hover/dwell over a target (pair with wait(ms) for a required dwell time). The default coordinate space follows context; pass space:"image" for coords read off the screenshot.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          x: { type: 'number' },
-          y: { type: 'number' },
-          space: COORD_SPACE_SCHEMA,
-        },
-        required: ['x', 'y'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      async execute(args, ctx) {
-        const c = coerceCoord(args.x, args.y);
-        if (!Number.isFinite(c.x) || !Number.isFinite(c.y)) {
-          return { success: false, isError: true, text: `move: x/y must be finite numbers, got x=${JSON.stringify(args.x)} y=${JSON.stringify(args.y)}` };
-        }
-        const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
-        const scale = space === 'image' ? imageScale(ctx) : 1;
-        const { x, y } = space === 'image' ? mapImagePoint(c.x, c.y, scale) : { x: scaleCoord(c.x, 1), y: scaleCoord(c.y, 1) };
-        await ctx.platform.mouseMove(x, y);
-        return { success: true, text: `Cursor moved (hover) to ${space} (${c.x},${c.y}) → screen (${x},${y}) [×${scale}]` };
+        return { success: true, text: `Dragged ${space} (${start.x},${start.y})→(${end.x},${end.y}) → screen (${sx},${sy})→(${ex},${ey}) [×${scale}]${focusBreadcrumb(before, after)}` };
       },
     },
 
@@ -873,7 +764,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         const amount = typeof args.amount === 'number' ? args.amount : 3;
         // Default to screen-center when x/y missing; coerce strings via the helper.
         const hasXY = args.x !== undefined || args.y !== undefined;
-        const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
+        const space = args.space === 'image' ? 'image' : 'screen';
         const scale = space === 'image' ? imageScale(ctx) : 1;
         // No-coordinate default: center of the screen IN THE DRIVER'S SPACE
         // (logical points on macOS, physical px elsewhere) — physicalWidth/2
@@ -1044,73 +935,6 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     // ─── APPS & WINDOWS ─────────────────────────────────────────
     {
-      name: 'open_app',
-      description: 'Open an application by name (e.g. "Notepad", "TextEdit", "Safari").',
-      inputSchema: {
-        type: 'object',
-        properties: { name: { type: 'string' } },
-        required: ['name'],
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        const name = String(args.name ?? '');
-        const notAName = appNameRefusal(name);
-        if (notAName) return { success: false, isError: true, text: `open_app: ${notAName}` };
-        // Alias resolution lives at the agent-tool layer (PR1 of v0.9):
-        // the platform adapter is alias-data-agnostic, so we look up the
-        // canonical row here and forward the launch hints through
-        // `launchApp` opts. Cross-OS name mapping (Windows "Notepad" → mac
-        // "TextEdit") and UWP / executable / searchTerm details all flow
-        // through this single resolution point.
-        const alias = resolveAlias(name);
-        const platform = ctx.platform.platform;
-
-        // Pick the right name to hand to the platform launcher per OS.
-        // Falls back to the raw `name` when no alias matches.
-        let launchName = name;
-        if (alias) {
-          if (platform === 'darwin') {
-            launchName = alias.macOSAppName ?? name;
-          } else if (platform === 'win32') {
-            launchName = alias.executable ?? name;
-          } else {
-            // Linux: use the alias's executable but strip any `.exe`
-            // suffix that's there for the Windows path.
-            launchName = alias.executable?.replace(/\.exe$/i, '') ?? name;
-          }
-        }
-
-        let res: Awaited<ReturnType<typeof ctx.platform.launchApp>>;
-        try {
-          res = await ctx.platform.launchApp(launchName, {
-            nameOnly: !alias,   // a name we do not know: only an installed app is started (never a URI, a file or a search hit)
-            alwaysNewInstance: alias?.alwaysNewInstance,
-            uwpAppId: alias?.uwpAppId,
-            processNames: alias?.processNames,   // whose windows are this app's (identity, not title text)
-            // Pick the searchTerm that gives the OS native launcher (Start
-            // Menu / Spotlight) the best chance of resolving to the right
-            // app — alias.searchTerm wins when present, mac falls back to
-            // the bundle name.
-            searchTerm: alias?.searchTerm
-              ?? (platform === 'darwin' ? alias?.macOSAppName : undefined),
-          });
-        } catch (err) {
-          return { success: false, text: `Failed to launch ${quoteScreenText(name)}: ${err instanceof Error ? err.message : String(err)}` };
-        }
-        await sleep(800);
-        if (res.title) return { success: true, text: `Opened ${quoteScreenText(name)} (pid=${res.pid}, window="${res.title}")` };
-        // Running but no window yet: a slow app still loading. Not a failure —
-        // a failure invites a second launch.
-        if (res.pid) {
-          return { success: true, text: startedNoWindowText(quoteScreenText(name), res, 'agent') };
-        }
-        // No process and no window is not a launch: say so instead of "Launched".
-        return { success: false, text: notConfirmedText(quoteScreenText(name), name, 'agent') };
-      },
-    },
-
-    {
       name: 'focus_window',
       description: 'Bring a window to the foreground. Match by processName, pid, or title substring.',
       inputSchema: {
@@ -1253,34 +1077,6 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       },
     },
 
-    {
-      name: 'switch_tab_os',
-      description: 'Cycle next/previous browser tab (Ctrl+Tab / Ctrl+Shift+Tab on every OS) or jump to tab N (mod+1..9).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          index: { type: 'number', description: '1-9 for direct tab jump' },
-          direction: { type: 'string', enum: ['next', 'previous'] },
-        },
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        if (typeof args.index === 'number') {
-          const n = Math.max(1, Math.min(9, Math.floor(args.index)));
-          await ctx.platform.keyPress(`mod+${n}`);
-          return { success: true, text: `Switched to tab ${n}` };
-        }
-        const dir = args.direction === 'previous' ? 'previous' : 'next';
-        // ctrl, NOT mod: browsers bind tab cycling to Ctrl+Tab on every OS,
-        // Safari included. `mod` resolves to Cmd on macOS, and Cmd+Tab is the
-        // OS app switcher — the agent asked for the next tab and got a
-        // different application. (Jump-to-tab-N correctly stays on mod: Cmd+1..9.)
-        await ctx.platform.keyPress(dir === 'next' ? 'ctrl+Tab' : 'ctrl+shift+Tab');
-        return { success: true, text: `Cycled to ${dir} tab` };
-      },
-    },
-
     // ─── ACCESSIBILITY DEPTH (Tranche 1B) ───────────────────────
     {
       name: 'focus_element',
@@ -1339,233 +1135,6 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         ));
         if (!element) return { success: false, text: `wait_for_element: timed out after ${timeout}ms` };
         return { success: true, text: `Found element: ${quoteScreenText(String(element.name ?? ''))} [${element.controlType}] @${element.bounds.x},${element.bounds.y}` };
-      },
-    },
-
-    // ─── SYSTEM OPEN HELPERS (Tranche 1B) ───────────────────────
-    {
-      name: 'open_file',
-      description: 'Open a file or folder in the OS default app (explorer / open / xdg-open).',
-      inputSchema: {
-        type: 'object',
-        properties: { path: { type: 'string' } },
-        required: ['path'],
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        // One implementation with the MCP tool (tools/open-file.ts): this one used to call launchApp('explorer.exe')
-        // bare, so a file that showed no Explorer window sent it on to type "explorer" into the Start menu.
-        const r = await openFilePath(ctx.platform, String(args.path ?? ''), 'agent');
-        if (!r.isError) await sleep(500);
-        return { success: !r.isError, text: r.text };
-      },
-    },
-
-    {
-      name: 'open_url',
-      description: 'Open a URL in the default browser. Use instead of navigate_browser when you don\'t care which browser.',
-      inputSchema: {
-        type: 'object',
-        properties: { url: { type: 'string' } },
-        required: ['url'],
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        const u = String(args.url ?? '');
-        if (!/^https?:\/\//i.test(u)) return { success: false, text: 'open_url: URL must start with http(s)://' };
-        try {
-          if (ctx.platform.platform === 'darwin') {
-            await ctx.platform.launchApp('open', { url: u });
-          } else if (ctx.platform.platform === 'linux') {
-            await ctx.platform.launchApp('xdg-open', { url: u });
-          } else {
-            // Windows: launch the REGISTERED https handler directly (e.g.
-            // msedge.exe), not `explorer.exe <url>`. explorer drops the URL in a
-            // background tab and opens no explorer window, so launchApp's
-            // window-find misses and falls back to a Start-menu search that
-            // presses Win and types — spurious "searching" that derails the run.
-            // The resolved browser exe HAS a findable window, so launchApp
-            // foregrounds it cleanly with no fallback.
-            const { resolveSchemeHandlerExecutable } = await import('../../platform/uri-handler');
-            const exe = await resolveSchemeHandlerExecutable('https').catch(() => null);
-            await ctx.platform.launchApp(exe ?? 'explorer.exe', { url: u });
-          }
-          await sleep(800);
-          return { success: true, text: `Opened URL: ${u}` };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { success: false, text: `open_url failed: ${msg}` };
-        }
-      },
-    },
-
-    {
-      // open_uri — the general OS protocol-handler escape route.
-      //
-      // Every OS ships a protocol-handler registry. Windows uses
-      // HKCR\\<scheme>\\shell\\open\\command. macOS uses LaunchServices.
-      // Linux uses xdg-mime + .desktop files. The user's installed apps
-      // register themselves as handlers and the OS routes for us:
-      //   mailto:   → default mail client (Outlook, Mail.app, Thunderbird, Spark...)
-      //   tel:      → default phone app (Skype, FaceTime, dialer...)
-      //   sms:      → default messaging app
-      //   webcal:   → default calendar
-      //   slack:    → Slack
-      //   vscode:   → VS Code
-      //   obsidian: → Obsidian
-      //   spotify:  → Spotify
-      //   zoommtg:  → Zoom
-      //   discord:  → Discord
-      //   file:     → OS file-association dispatcher
-      //   http(s):  → default browser
-      //
-      // This is THE app-agnostic escape route. ONE tool, every app that
-      // registers a protocol handler. Zero vision, zero a11y, zero
-      // app-specific code. The agent picks the scheme; we just dispatch.
-      name: 'open_uri',
-      description: 'Open ANY registered URI scheme via the OS protocol-handler registry. ONE tool replaces dozens of app-specific shortcuts. Examples: mailto:bob@example.com?subject=hi&body=hello (mail), tel:+15551234 (phone), slack://channel?team=T123&id=C456 (Slack), vscode://file/path (VS Code), webcal://server/cal.ics (calendar), spotify:track:ID (Spotify), https://example.com (browser). Must be properly URL-encoded — pair with build_uri when you have semantic fields.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          uri: { type: 'string', description: 'A full URI with scheme (e.g. "mailto:bob@example.com?subject=hi&body=hello").' },
-        },
-        required: ['uri'],
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        const u = String(args.uri ?? '').trim();
-        if (!u) return { success: false, isError: true, text: 'open_uri: uri is required' };
-        const schemeMatch = u.match(/^([a-z][a-z0-9+.-]*):/i);
-        if (!schemeMatch) {
-          return { success: false, isError: true, text: 'open_uri: argument must be a URI with a scheme (e.g. mailto:, tel:, https:, slack:)' };
-        }
-        const scheme = schemeMatch[1].toLowerCase();
-        try {
-          if (ctx.platform.platform === 'darwin') {
-            await ctx.platform.launchApp('open', { url: u });
-            await sleep(1500);
-            return {
-              success: true,
-              text: `Dispatched ${scheme}: URI to the OS default handler. The configured app for ${scheme}: should now be focused. Verify with read_screen / list_windows. To complete (e.g. send a composed mail), use one more keystroke (cmd+enter on macOS).`,
-            };
-          }
-          if (ctx.platform.platform === 'linux') {
-            await ctx.platform.launchApp('xdg-open', { url: u });
-            await sleep(1500);
-            return {
-              success: true,
-              text: `Dispatched ${scheme}: URI to the OS default handler. The configured app for ${scheme}: should now be focused. Verify with read_screen / list_windows. To complete (e.g. send a composed mail), use one more keystroke (ctrl+enter on Linux).`,
-            };
-          }
-          // Windows: shell-routed dispatch (explorer.exe mailto:, rundll32
-          // url.dll, cmd /c start) silently fails for New Outlook and other
-          // UWP-packaged handlers — the handler returns without opening a
-          // new window. The reliable path is to resolve the registered
-          // handler executable and invoke IT directly with the URI, then
-          // VERIFY a new visible window appeared. Without verification
-          // open_uri returned "success" while nothing actually happened on
-          // screen, sending the agent into stagnation loops.
-          const exe = await resolveSchemeHandlerExecutable(scheme);
-          if (!exe) {
-            return {
-              success: false,
-              isError: true,
-              text: `open_uri: no registered Windows handler found for "${scheme}:". Try a different scheme or drive the app's UI directly.`,
-            };
-          }
-          const launchResult = await launchHandlerAndVerify(exe, u, { waitMs: 5000 });
-          if (!launchResult.success) {
-            return {
-              success: false,
-              isError: true,
-              text: `open_uri: failed to launch handler "${exe}" for ${scheme}: — ${launchResult.error ?? 'unknown error'}`,
-            };
-          }
-          if (!launchResult.windowOpened) {
-            return {
-              success: false,
-              isError: true,
-              text: `open_uri: handler "${exe}" was launched with ${scheme}: but no new window appeared within 5s. The handler probably routed the URI into an existing instance silently. Drive the app's UI directly (focus_window + click + type_text) instead of relying on the protocol dispatch.`,
-            };
-          }
-          return {
-            success: true,
-            text: `Opened ${scheme}: in the registered handler. New window appeared: "${launchResult.hwndLabel ?? '(handle unknown)'}". To complete (e.g. send a composed mail), use one more keystroke (ctrl+enter).`,
-          };
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          return { success: false, isError: true, text: `open_uri failed: ${msg}` };
-        }
-      },
-    },
-
-    {
-      // build_uri — pure helper that converts semantic fields to an
-      // encoded URI. No I/O. Pair with open_uri to dispatch.
-      name: 'build_uri',
-      description: 'Build a properly-encoded URI from a scheme + path + query JSON. Returns the URI text; pair with open_uri to dispatch. Examples: scheme="mailto" path="bob@example.com" query={"subject":"hi","body":"hello"} → "mailto:bob@example.com?subject=hi&body=hello".',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          scheme: { type: 'string', description: 'URI scheme without the colon (mailto, tel, sms, slack, ...).' },
-          path:   { type: 'string', description: 'Scheme-specific path. Encoded for you; @ and , are preserved for mailto, + for tel.' },
-          query:  { type: 'string', description: 'JSON object of query params, e.g. {"subject":"hi"}. Each value URL-encoded.' },
-        },
-        required: ['scheme'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      async execute(args) {
-        const s = String(args.scheme ?? '').trim().toLowerCase();
-        if (!s || !/^[a-z][a-z0-9+.-]*$/.test(s)) {
-          return { success: false, isError: true, text: 'build_uri: scheme must match /^[a-z][a-z0-9+.-]*$/' };
-        }
-        const safe = (v: string): string =>
-          encodeURIComponent(v).replace(/'/g, '%27').replace(/"/g, '%22');
-        const encodedPath = args.path
-          ? safe(String(args.path))
-              .replace(/%40/g, '@')
-              .replace(/%2C/g, ',')
-              .replace(/%2B/g, '+')
-              .replace(/%2F/g, '/')
-          : '';
-        let queryStr = '';
-        if (args.query) {
-          let obj: Record<string, unknown>;
-          try {
-            obj = typeof args.query === 'string' ? JSON.parse(String(args.query)) : (args.query as Record<string, unknown>);
-          } catch {
-            return { success: false, isError: true, text: 'build_uri: query must be valid JSON' };
-          }
-          const parts: string[] = [];
-          for (const [k, v] of Object.entries(obj)) {
-            if (v === undefined || v === null) continue;
-            parts.push(`${safe(k)}=${safe(String(v))}`);
-          }
-          if (parts.length) queryStr = '?' + parts.join('&');
-        }
-        return { success: true, text: `${s}:${encodedPath}${queryStr}` };
-      },
-    },
-
-    {
-      name: 'get_system_time',
-      description: 'Return current system time (ISO, epoch, timezone). Zero I/O.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      changesScreen: false,
-      async execute() {
-        const now = new Date();
-        return {
-          success: true,
-          text: JSON.stringify({
-            iso: now.toISOString(),
-            epochMs: now.getTime(),
-            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          }),
-        };
       },
     },
 
@@ -1661,113 +1230,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       },
     },
 
-    // ─── CLIPBOARD ─────────────────────────────────────────────
-    {
-      name: 'read_clipboard',
-      description: 'Read the OS clipboard.',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      changesScreen: false,
-      async execute(_args, ctx) {
-        const text = await ctx.platform.readClipboard();
-        return { success: true, text: `Clipboard (${text.length} chars):\n${wrapUntrustedScreenContent(truncate(text, 500))}` };
-      },
-    },
-
-    {
-      name: 'write_clipboard',
-      description: 'Write text to the OS clipboard.',
-      inputSchema: {
-        type: 'object',
-        properties: { text: { type: 'string' } },
-        required: ['text'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      async execute(args, ctx) {
-        const text = String(args.text ?? '');
-        await ctx.platform.writeClipboard(text);
-        return { success: true, text: `Wrote ${text.length} chars to clipboard.` };
-      },
-    },
-
-    // ─── FLOW CONTROL ───────────────────────────────────────────
-    {
-      name: 'wait',
-      description: 'Pause for N milliseconds (max 5000). Use after actions that trigger animations or page loads.',
-      inputSchema: {
-        type: 'object',
-        properties: { ms: { type: 'number', maximum: 5000 } },
-        required: ['ms'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      async execute(args) {
-        const ms = Math.min(5000, Math.max(0, Number(args.ms ?? 0)));
-        if (await timeWait(() => sleepUnlessStopped(ms))) return { success: false, text: `wait: ${STOPPED_TEXT}` };
-        return { success: true, text: `Waited ${ms}ms.` };
-      },
-    },
-
-    // ─── VISION (hybrid + vision modes only) ────────────────────
-    {
-      name: 'screenshot',
-      description: 'LAST RESORT — expensive: sends image bytes into LLM context. Escalation order: read_screen (a11y tree, free) → read_text (OCR, cheap) → screenshot (this, expensive). Only call this when both a11y and OCR failed to provide what you need (canvas-only app, icon-only UI, pixel-level verification).',
-      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-      changesScreen: false,
-      async execute(_args, ctx) {
-        const shot = await ctx.platform.screenshot({ maxWidth: 1280 });
-        setLastFrame(null); // primary display: plain mouse scale
-        ctx.screenshotsCaptured.n += 1;
-        return {
-          success: true,
-          text: `Captured ${shot.width}×${shot.height}.`,
-          screenshot: shot,
-        };
-      },
-    },
-
-    // ─── OCR PERCEPTION (webview / canvas, cheap — no vision model) ──────
-    // When the a11y tree is empty (browser page, Electron, canvas, game), OCR
-    // reads the visible TEXT so the TEXT model can keep driving — no screenshot
-    // bytes, no escalation to the vision model. This is the cheap path: it keeps
-    // haiku as the brain instead of handing the whole subtask to sonnet.
-    {
-      name: 'read_text',
-      description: 'OCR the screen and return visible text + positions. Use when the a11y snapshot is empty/sparse (webview, canvas, PDF, game) to READ on-screen content. Cheaper than a screenshot (no image bytes). May take 1–3s.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          filter: { type: 'string', description: 'Optional: keep only lines containing this text (case-insensitive).' },
-        },
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      async execute(args, ctx) {
-        const ocr = getAgentOcr();
-        if (!ocr.isAvailable()) return { success: false, text: 'read_text: OCR not available on this platform — fall back to screenshot/vision.' };
-        const raw = await ocr.recognizeScreen();
-        const result = { ...raw, elements: ocrToScreen(raw.elements, ctx) };
-        if (result.elements.length === 0) return { success: true, text: '(read_text: OCR found no text — screen may be blank, or OCR unavailable.)' };
-        const lineMap = new Map<number, OcrElement[]>();
-        for (const el of result.elements) {
-          const arr = lineMap.get(el.line) ?? [];
-          arr.push(el); lineMap.set(el.line, arr);
-        }
-        const filter = typeof args.filter === 'string' ? args.filter.toLowerCase() : null;
-        const lines: string[] = [];
-        for (const [, toks] of [...lineMap.entries()].sort((a, b) => a[0] - b[0])) {
-          const sorted = [...toks].sort((a, b) => a.x - b.x);
-          const lineText = sorted.map(t => t.text).join(' ');
-          if (filter && !lineText.toLowerCase().includes(filter)) continue;
-          const minX = Math.min(...sorted.map(t => t.x));
-          const minY = Math.min(...sorted.map(t => t.y));
-          lines.push(`@${minX},${minY} "${lineText}"`);
-        }
-        if (lines.length === 0) return { success: true, text: `(read_text: no lines match "${filter}")` };
-        return { success: true, text: `OCR (${result.elements.length} words, ${result.durationMs}ms):\n${wrapUntrustedScreenContent(lines.join('\n'))}` };
-      },
-    },
-
+    // ─── UI MAP ─────────────────────────────────────────────────
     {
       name: 'compile_ui',
       description: 'Compile the current screen into one fused UI map (a11y + OCR + lazy vision) of elements with stable ids, roles, confidence and sources. Returns a ranked element list with a snapshot id; act on a specific element via invoke_element/set_field_value with {element_id, snapshot_id}. a11y-first; pulls OCR only when a11y is sparse or target_text is missing; pass max_cost:\'cheap\' to forbid OCR, or \'vision_ok\' to allow screenshots.',
@@ -1831,68 +1294,6 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
       },
     },
 
-    {
-      name: 'smart_click',
-      description: 'OCR-locate visible text on screen and click its center. Use when the a11y tree is empty and invoke_element fails (webview/canvas). Pass the exact visible text (e.g. "Search", a video title, "Sign in").',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          target: { type: 'string', description: 'The visible text to click.' },
-          button: { type: 'string', enum: ['left', 'right'] },
-        },
-        required: ['target'],
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        const target = String(args.target ?? '').trim();
-        if (!target) return { success: false, isError: true, text: 'smart_click: target required.' };
-        const button = args.button === 'right' ? 'right' : 'left';
-        const ocr = getAgentOcr();
-        if (!ocr.isAvailable()) return { success: false, text: 'smart_click: OCR not available — escalate to vision.' };
-        const raw = await ocr.recognizeScreen();
-        if (raw.elements.length === 0) return { success: false, text: 'smart_click: OCR found no text — escalate to vision.' };
-        // Screen coordinates — what mouseClick takes (points on macOS) — same
-        // as the `click` tool does with a11y coords (no imageScale; that's image-space only).
-        const elements = ocrToScreen(raw.elements, ctx);
-        // A working window is set: only its text may be clicked (live macOS:
-        // the menu-bar clock was clicked instead of Calculator's key).
-        const anchor = ctx.targetWindow;
-        let hit: ReturnType<typeof locateByOcr>;
-        if (anchor) {
-          const wins = ((await ctx.platform.listWindows?.().catch(() => [])) ?? [])
-            .filter(w => sameProcess(w.processName, anchor.processName) && !w.isMinimized && w.bounds.width > 0 && w.bounds.height > 0)
-            .sort((a, b) => Number(b.title === anchor.title) - Number(a.title === anchor.title)
-              || b.bounds.width * b.bounds.height - a.bounds.width * a.bounds.height);
-          const wb = wins[0]?.bounds;
-          const inside = wb ? elements.filter(el => {
-            const cx = el.x + el.width / 2, cy = el.y + el.height / 2;
-            return cx >= wb.x && cx < wb.x + wb.width && cy >= wb.y && cy < wb.y + wb.height;
-          }) : [];
-          hit = locateByOcr(target, inside);
-          if (!hit) {
-            const outside = locateByOcr(target, elements);
-            if (outside) {
-              return { success: false, text: `smart_click: ${quoteScreenText(outside.label)} matched only outside the working window `
-                + `(${anchor.processName}${wb ? '' : ': window not found'}) — not clicked. Focus that window, or read_text to find the target in it.` };
-            }
-          }
-        } else {
-          hit = locateByOcr(target, elements);
-        }
-        if (!hit) return { success: false, text: `smart_click: no match for "${target}". Call read_text to see visible text, then retry with exact text.` };
-        const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
-        const raised = await ensureTargetForeground(ctx, fg0);
-        const before = await ctx.platform.getActiveWindow().catch(() => null);
-        const activation = await ctx.platform.mouseClick(hit.x, hit.y, { button, count: 1 });
-        await sleep(150);
-        getAgentOcr().invalidateCache();
-        const after = await ctx.platform.getActiveWindow().catch(() => null);
-        const focusWarn = focusTheftWarning(activation, before, after);
-        return { success: true, text: `smart_click: clicked ${quoteScreenText(hit.label)} (score ${hit.score.toFixed(2)}) at (${hit.x},${hit.y})${raised}${focusWarn}${focusBreadcrumb(before, after)}`, targetLabel: hit.label };
-      },
-    },
-
     // ─── BROWSER (CDP / DOM — reliable web automation, no pixels) ────────
     // For web pages, driving the DOM by selector/text is far more reliable
     // than OCR + coordinate clicks: no occlusion, no focus-stealing, no
@@ -1933,24 +1334,6 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
             ? ' (dedicated agent-owned instance — safe to drive freely). NOTE: this browser has its OWN profile — login state may DIFFER from the window you were driving. If a site demands login here but the on-screen window looked logged in, drive the on-screen window instead (keyboard/OCR) or use relaunch_with_cdp.'
             : '';
         return { success: true, text: `browser_connect: connected to ${quoteScreenText(title ?? '(blank)')} at ${quoteScreenText(url ?? 'about:blank')}.${provenance} Use browser_navigate to open a URL, browser_read to see the page, browser_click/browser_type to interact.` };
-      },
-    },
-    {
-      name: 'browser_navigate',
-      description: 'Navigate the agent-owned browser to a URL (waits for load). Requires browser_connect first.',
-      inputSchema: {
-        type: 'object',
-        properties: { url: { type: 'string', description: 'The URL to open (e.g. https://www.youtube.com).' } },
-        required: ['url'],
-        additionalProperties: false,
-      },
-      changesScreen: true,
-      async execute(args, ctx) {
-        if (!ctx.cdp || !(await ctx.cdp.isConnected())) return { success: false, text: 'browser_navigate: not connected — call browser_connect first.' };
-        const url = String(args.url ?? '').trim();
-        if (!url) return { success: false, isError: true, text: 'browser_navigate: url required.' };
-        const r = await ctx.cdp.navigate(url);
-        return r.success ? { success: true, text: `browser_navigate: loaded ${r.value ?? url}` } : { success: false, text: `browser_navigate failed: ${r.error}` };
       },
     },
     {
@@ -2025,189 +1408,8 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
         return setVerdict(await readBackTyped(async () => r.read?.() ?? null, text, { whole: true }), text, selector || label, ` (browser)${r.frame ? ` in iframe ${quoteScreenText(r.frame)}` : ''}`);
       },
     },
-
-    // ─── BATCHED PLANNING ───────────────────────────────────────
-    // Run several known next actions in one turn (saves LLM round-trips).
-    buildBatchTool(),
-
-    // ─── TERMINAL ACTIONS ──────────────────────────────────────
-    {
-      name: 'done',
-      description: 'Declare the task complete. Provide SPECIFIC screen evidence — a window title, a value visible in the document, a status bar message. Do NOT use hedging words ("should", "might", "probably", "I think", "I believe") — that means you are guessing. If the task CHANGED anything you MUST pass `assertions` (same types as the verify tool, plus `file_changed_since_start` for a file you wrote) that prove the RESULT — and the proof must reflect your change, not state that was already there (an ambient clock, an already-open window). The harness re-checks them against the live screen and rejects done if any fail or none is discriminating. If you can\'t see concrete evidence, take a screenshot or read_screen first.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          evidence: { type: 'string' },
-          assertions: {
-            type: 'array',
-            description: 'Optional machine-checkable proofs (verify-tool types). The harness executes them; done is rejected if any fail.',
-            items: { type: 'object' },
-          },
-        },
-        required: ['evidence'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      terminal: true,
-      async execute(args, ctx) {
-        const evidence = String(args.evidence ?? '').trim();
-
-        // Guard 1: evidence must be present and non-trivial. An empty string
-        // or "ok" / "done" gives the verifier nothing to work with.
-        if (evidence.length < 8) {
-          return {
-            success: false,
-            text: 'done rejected: evidence is empty or too short. Look at the screen and report a SPECIFIC concrete observation (window title, on-screen text, focused element) before declaring done.',
-            isError: true,
-          };
-        }
-
-        // Guard 2: hedging-language detection. Phrases like "should have
-        // been sent", "might be open", "I think it worked" are speculative
-        // — they signal the agent guessed instead of verifying. Force a
-        // re-check by rejecting the call. The agent's next turn will see
-        // this rejection and either take a screenshot/read_screen or
-        // rephrase with concrete observations.
-        //
-        // Pattern is intentionally narrow: words must appear as standalone
-        // tokens (or first-letter-of-token), not as part of larger words
-        // like "shoulder" or "mighty". Word-boundary anchored.
-        if (HEDGING_PATTERN.test(evidence)) {
-          return {
-            success: false,
-            text: `done rejected: evidence contains hedging language ("should", "might", "probably", "I think", "I believe", "appears to", "seems to", "if successful"…). That means you are GUESSING, not observing. Take a screenshot or call read_screen, then describe what you actually see — concrete strings, not predictions.`,
-            isError: true,
-          };
-        }
-
-        // Guard 3 (the strong one): harness-executed assertions. The model's
-        // prose is a CLAIM; these checks are PROOF — run against live ground
-        // truth (UIA values, window list, clipboard, fs, OCR). A model that
-        // hallucinates a result (live Outlook run 2026-06-06: "verified" a
-        // recipient that was never committed) gets caught HERE, at done-time,
-        // instead of the task silently failing after the run ends.
-        const mutated = ctx.mutatedScreen === true;
-
-        // NB (P1): hard-requiring `assertions` for EVERY mutating task (the
-        // strictest anti-false-success gate) is intentionally NOT enforced here.
-        // It would force every screen-changing task to carry a discriminating
-        // proof — but real apps are frequently already open (the only cheap
-        // proofs, window_title/app_running, are then non-discriminating), so it
-        // both over-constrains agents and can't be satisfied against a static
-        // app. Left as STRONG guidance in the `done` description; flagged for
-        // Fable review as the stricter option (needs the run-agent suite to
-        // model post-action state). The discriminating gate below + the
-        // file_changed_since_start proof are the deployable 80%.
-
-        if (args.assertions !== undefined) {
-          const parsed = parseAssertions(args.assertions);
-          if ('error' in parsed) {
-            return { success: false, text: `done rejected: ${parsed.error}`, isError: true };
-          }
-          const report = await checkAssertions(parsed.assertions, {
-            adapter: ctx.platform,
-            ocrText: async () => (await getAgentOcr().recognizeScreen()).fullText ?? '',
-            taskStartedAt: ctx.taskStartedAt,
-          });
-          if (!report.ok) {
-            return {
-              success: false,
-              isError: true,
-              text: `done rejected: ${report.failed} of ${report.outcomes.length} assertion(s) FAILED — the live screen does not back your claim:\n${renderReport(report)}\nFix the failing condition (the detail shows the actual state), or give_up with the reason.`,
-            };
-          }
-
-          // Guard 3b (P1): for a mutating task, at least one PASSING proof must
-          // be discriminating — not already true before the task acted.
-          // Otherwise the "proof" demonstrates nothing changed because of you
-          // (asserting an ambient clock / a window that was already open).
-          if (mutated && ctx.taskBaseline && !hasDiscriminatingEvidence(parsed.assertions, report, ctx.taskBaseline)) {
-            return {
-              success: false,
-              isError: true,
-              text: `done rejected: every proof you gave was ALREADY true before you acted — none of them shows your change:\n${renderReport(report)}\nAssert the NEW state your action produced (file_changed_since_start for a file you wrote, element_value_contains for text you typed, a window title that wasn't open before), or give_up.`,
-            };
-          }
-
-          return {
-            success: true,
-            text: `done: ${evidence}\nVERIFIED:\n${renderReport(report)}`,
-            stop: true,
-            terminalExit: 'done',
-          };
-        }
-
-        return { success: true, text: `done: ${evidence}`, stop: true, terminalExit: 'done' };
-      },
-    },
-
-    {
-      name: 'ask_user',
-      description: 'Pause and hand the desktop to the user for a step only they can do: sign in, a password or 2FA code, a CAPTCHA, a choice only they can make. Ask for that ONE step only and do everything before and after it yourself. For a sign-in, a code or a CAPTCHA, pass done_when (what shows on screen once they are done) so the run continues the moment they finish, with no Resume click. Never use done_when for a confirmation or a choice: a page can make it true by itself. The run waits, then continues where it left off.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          message: { type: 'string', description: 'The one thing only the user can do, short, e.g. "Sign in to GitHub".' },
-          done_when: { ...EXPECT_SCHEMA, description: 'Conditions that become true once the user has done their step (same types as expect). Checked every 1.5 s; when all hold, the run continues by itself. Must be false now.' },
-        },
-        required: ['message'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      // The loop handles ask_user itself when a human can be reached; this
-      // only runs when nobody can see the on-screen prompt.
-      async execute() {
-        return { success: false, text: 'ask_user: no human can be reached on this machine right now (no on-screen prompt). Use give_up with the reason instead.' };
-      },
-    },
-
-    {
-      name: 'give_up',
-      description: 'Abandon the task when it\'s impossible from here (stuck after retries). When a human is at the machine this pauses for them first; for sign-in, 2FA or CAPTCHA prefer ask_user.',
-      inputSchema: {
-        type: 'object',
-        properties: { reason: { type: 'string' } },
-        required: ['reason'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      terminal: true,
-      async execute(args) {
-        const reason = String(args.reason ?? 'unknown');
-        return { success: false, text: `give_up: ${reason}`, stop: true, terminalExit: 'give_up' };
-      },
-    },
-
-    {
-      name: 'cannot_read',
-      description: 'Escalate from blind mode to vision — the a11y snapshot doesn\'t contain what you need. Only available in blind mode.',
-      inputSchema: {
-        type: 'object',
-        properties: { reason: { type: 'string' } },
-        required: ['reason'],
-        additionalProperties: false,
-      },
-      changesScreen: false,
-      terminal: true,
-      async execute(args) {
-        const reason = String(args.reason ?? 'a11y snapshot insufficient');
-        return { success: false, text: `cannot_read: ${reason}`, stop: true, terminalExit: 'cannot_read' };
-      },
-    },
   ];
-
-  // A/B toggle: CLAWD_AGENT_NO_BATCH=1 removes the batch tool so the SAME task
-  // can be run per-call (one tool per turn) vs batched, for measurement.
-  if (/^(1|true)$/i.test(process.env.CLAWD_AGENT_NO_BATCH ?? '')) {
-    const bi = tools.findIndex(t => t.name === 'batch');
-    if (bi >= 0) tools.splice(bi, 1);
-  }
-
-  // Full flat catalog. `screenshot` is available so the agent can call it
-  // when a11y is insufficient. `cannot_read` is excluded — the model runs
-  // in hybrid mode with direct screenshot access; there is no blind→vision
-  // escalation path to trigger.
-  return tools.filter(t => t.name !== 'cannot_read' && !(opts.disableVision && t.name === 'screenshot'));
+  return tools;
 }
 
 /**
@@ -2421,14 +1623,12 @@ async function clickPath(args: Record<string, unknown>, ctx: AgentToolContext) {
   if (points.length > PATH_MAX_POINTS || points.length * interval > PATH_MAX_MS) {
     return { success: false, isError: true, text: `click: a path is at most ${PATH_MAX_POINTS} points and ${PATH_MAX_MS / 1000} s (points × interval_ms); got ${points.length} points × ${interval} ms. Split it into several calls.` };
   }
-  const space = args.space === 'image' ? 'image' : args.space === 'screen' ? 'screen' : (ctx.coordSpaceDefault ?? 'screen');
+  const space = args.space === 'image' ? 'image' : 'screen';
   const scale = space === 'image' ? imageScale(ctx) : 1;
   const scaled = points.map(p => space === 'image'
     ? mapImagePoint(Number(p.x), Number(p.y), scale)
     : { x: scaleCoord(Number(p.x), 1), y: scaleCoord(Number(p.y), 1) });
-  const fg0 = await ctx.platform.getActiveWindow().catch(() => null);
-  const raised = await ensureTargetForeground(ctx, fg0);
-  const before = raised ? await ctx.platform.getActiveWindow().catch(() => null) : fg0;
+  const before = await ctx.platform.getActiveWindow().catch(() => null);
   for (let i = 0; i < scaled.length; i++) {
     if (i > 0 && await timeWait(() => sleepUnlessStopped(interval))) throw new Error(`${STOPPED_TEXT} (${i} of ${scaled.length} points were clicked first)`);
     try { await ctx.platform.mouseClick(scaled[i].x, scaled[i].y, { button, count }); }
@@ -2440,7 +1640,7 @@ async function clickPath(args: Record<string, unknown>, ctx: AgentToolContext) {
   await sleep(150);
   const after = await ctx.platform.getActiveWindow().catch(() => null);
   const last = scaled[scaled.length - 1];
-  return { success: true, text: `Clicked ${button} x${count} at ${scaled.length} ${space} points → screen (${scaled[0].x},${scaled[0].y})…(${last.x},${last.y}) [×${scale}]${raised}${focusBreadcrumb(before, after)}` };
+  return { success: true, text: `Clicked ${button} x${count} at ${scaled.length} ${space} points → screen (${scaled[0].x},${scaled[0].y})…(${last.x},${last.y}) [×${scale}]${focusBreadcrumb(before, after)}` };
 }
 
 /** Roles that take typed text, across UIA / AX / AT-SPI names. A number box is a Spinner (AT-SPI "spin button", AXIncrementor). */
@@ -2561,88 +1761,6 @@ export function focusTheftWarning(
     + ` (the OS kept another window in front, or the point is over a different window). DO NOT type next:`
     + ` re-focus the intended window first (focus_window / window.focus by processId),`
     + ` or act on an a11y/el_NN target instead of coordinates.`;
-}
-
-/**
- * Locate a target string among OCR elements and return the click point (center
- * of the best-matching contiguous span) in SCREEN pixels. Ported from the
- * proven scoring in src/tools/smart.ts: exact > substring-ratio > token-overlap,
- * with a penalty for a single token matching a multi-word target (stops "begin"
- * in body text beating the "Begin Exam" button). Null when nothing scores ≥0.4.
- */
-function locateByOcr(
-  target: string,
-  elements: OcrElement[],
-): { x: number; y: number; label: string; score: number } | null {
-  const norm = (s: string) => s.toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
-  const targetNorm = norm(target);
-  const targetWords = targetNorm.split(' ').filter(Boolean);
-  const targetWordSet = new Set(targetWords);
-  // A short or numeric target ("1", "OK", "50") is a whole token or nothing:
-  // "1" inside the clock's "14" was clicked (live macOS 2026-10-15).
-  const wholeTokenOnly = targetNorm.length <= 2 || /^[\d ]+$/.test(targetNorm);
-  const lineMap = new Map<number, OcrElement[]>();
-  for (const el of elements) {
-    if (!el.text) continue;
-    const a = lineMap.get(el.line) ?? [];
-    a.push(el); lineMap.set(el.line, a);
-  }
-  let best: { x: number; y: number; label: string; score: number } | null = null;
-  let bestScore = 0;
-  const MAX_N = Math.min(8, targetWords.length + 2);
-  for (const toks of lineMap.values()) {
-    const sorted = [...toks].sort((a, b) => a.x - b.x);
-    for (let i = 0; i < sorted.length; i++) {
-      for (let n = 1; n <= MAX_N && i + n <= sorted.length; n++) {
-        const span = sorted.slice(i, i + n);
-        let contiguous = true;
-        for (let k = 1; k < span.length; k++) {
-          const gap = span[k].x - (span[k - 1].x + span[k - 1].width);
-          if (gap > Math.max(span[k - 1].height * 1.5, 30)) { contiguous = false; break; }
-        }
-        if (!contiguous) continue;
-        const phrase = norm(span.map(t => t.text).join(' '));
-        let score = 0;
-        if (phrase === targetNorm) score = 1.0;
-        else if (wholeTokenOnly) continue;
-        else if (phrase.includes(targetNorm) || targetNorm.includes(phrase)) {
-          score = Math.min(phrase.length, targetNorm.length) / Math.max(phrase.length, targetNorm.length) * 0.9;
-        } else {
-          const pw = phrase.split(' ').filter(Boolean);
-          const overlap = pw.filter(w => targetWordSet.has(w)).length;
-          const cov = overlap / Math.max(targetWords.length, 1);
-          if (cov >= 1) score = 0.85; else if (cov >= 0.5) score = 0.5 * cov;
-        }
-        if (targetWords.length > 1 && n === 1 && score < 0.95) score *= 0.55;
-        if (score > bestScore) {
-          bestScore = score;
-          const minX = Math.min(...span.map(t => t.x));
-          const minY = Math.min(...span.map(t => t.y));
-          const maxX = Math.max(...span.map(t => t.x + t.width));
-          const maxY = Math.max(...span.map(t => t.y + t.height));
-          best = {
-            x: Math.round((minX + maxX) / 2),
-            y: Math.round((minY + maxY) / 2),
-            label: span.map(t => t.text).join(' '),
-            score,
-          };
-        }
-      }
-    }
-  }
-  return best && bestScore >= 0.4 ? best : null;
-}
-
-/** OCR elements (physical pixels) in SCREEN coordinates — points on macOS —
- *  the same conversion the `ocr` tool and compile_ui apply. */
-function ocrToScreen(elements: OcrElement[], ctx: AgentToolContext): OcrElement[] {
-  const ratio = ctx.screen?.dpiRatio || 1;
-  const os = ctx.platform.platform;
-  return elements.map(el => {
-    const p = ocrPointToClickPoint(el.x, el.y, ratio, os);
-    const size = ocrPointToClickPoint(el.width, el.height, ratio, os);
-    return { ...el, x: p.x, y: p.y, width: size.x, height: size.y };
-  });
 }
 
 function sleep(ms: number): Promise<void> {

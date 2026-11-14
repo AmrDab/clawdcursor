@@ -11,17 +11,7 @@
  * that refactor: a PURE DATA table mapping every System B tool name to the
  * metadata fields a ToolDefinition carries.
  *
- * PURELY ADDITIVE — this file is not imported by any production path yet.
- * Wire-in happens in a later step.
- *
- * COVERAGE
- * --------
- * Terminal / loop-control actions (done, give_up, cannot_read, ask_user) and the vision compound tools
- * (mouse, keyboard, window — defined in compound.ts) are intentionally EXCLUDED:
- *   - Terminal actions do not appear on the MCP surface.
- *   - Vision compounds collapse many granular tools into 3 schemas; they have no
- *     1:1 counterpart in the granular MCP surface and their own tool-meta would
- *     belong in a separate projection layer.
+ * project-mcp.ts reads it when src/tools/registry.ts projects these tools onto the MCP surface.
  *
  * NAME DIFFERENCES (System B → System A)
  * ----------------------------------------
@@ -33,10 +23,9 @@
  *   scroll              → mouse_scroll
  *   type                → type_text
  *   key                 → key_press
- *   screenshot          → desktop_screenshot
- *   read_text           → ocr_read_screen
+ *   read_text           → ocr_read_screen     (in text only: TEXT_ONLY_RENAMES)
  *   browser_connect     → cdp_connect
- *   browser_navigate    → navigate_browser
+ *   browser_navigate    → navigate_browser    (in text only: TEXT_ONLY_RENAMES)
  *   browser_read        → cdp_page_context   (structured DOM listing path)
  *   browser_click       → cdp_click
  *   browser_type        → cdp_type
@@ -311,19 +300,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     },
   },
 
-  move: {
-    mcpName: 'mouse_hover',
-    category: 'mouse',
-    compactGroup: 'computer',
-    safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      x: 'X coordinate in image-space',
-      y: 'Y coordinate in image-space',
-      space: 'Coordinate space. Omit (default) or pass "image" for screenshot coords. Pass "screen" for a11y coords already in physical pixels.',
-    },
-  },
-
   scroll: {
     mcpName: 'mouse_scroll',
     category: 'mouse',
@@ -367,16 +343,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   },
 
   // ─── APPS & WINDOWS ────────────────────────────────────────────────────────
-
-  open_app: {
-    category: 'orchestration',
-    compactGroup: 'system',
-    safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      name: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")',
-    },
-  },
 
   focus_window: {
     category: 'window',
@@ -471,17 +437,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // list_displays has no parameters
   },
 
-  switch_tab_os: {
-    category: 'window',
-    compactGroup: 'window',
-    safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      index: 'Jump to tab N (1-based, 1-9). If omitted, direction must be provided.',
-      direction: 'Cycle "next" or "previous". Ignored when `index` is given.',
-    },
-  },
-
   // ─── ACCESSIBILITY DEPTH (Tranche 1B) ──────────────────────────────────────
 
   focus_element: {
@@ -508,60 +463,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
       timeoutMs: 'Max wait in milliseconds (default 5000)',
       intervalMs: 'Poll interval in ms (default 250)',
     },
-  },
-
-  // ─── SYSTEM OPEN HELPERS ───────────────────────────────────────────────────
-
-  open_file: {
-    category: 'orchestration',
-    compactGroup: 'window',
-    safetyTier: 1,
-    destructive: true,
-    costClass: 'act',
-    paramDescriptions: {
-      path: 'Absolute filesystem path',
-    },
-  },
-
-  open_url: {
-    category: 'orchestration',
-    compactGroup: 'window',
-    safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      url: 'https:// or http:// URL',
-    },
-  },
-
-  open_uri: {
-    category: 'orchestration',
-    compactGroup: 'window',
-    safetyTier: 1,
-    destructive: true,
-    costClass: 'act',
-    paramDescriptions: {
-      uri: 'A full URI like "mailto:bob@example.com?subject=hi&body=hello", "tel:+15551234", "slack://channel?team=T123&id=C456", "vscode://file/Users/me/code/x.ts", "https://example.com". Must be properly URL-encoded.',
-    },
-  },
-
-  build_uri: {
-    category: 'orchestration',
-    compactGroup: 'window',
-    safetyTier: 0,
-    costClass: 'inspect',
-    paramDescriptions: {
-      scheme: 'URI scheme without the colon: mailto, tel, sms, webcal, slack, vscode, obsidian, spotify, https, etc.',
-      path: 'Scheme-specific path (for mailto: the recipient address; for tel:/sms: the number; for https: the host+path). URL-encoded for you.',
-      query: 'JSON object of query parameters, e.g. {"subject":"hi","body":"hello"}. Each value will be URL-encoded.',
-    },
-  },
-
-  get_system_time: {
-    category: 'perception',
-    compactGroup: 'system',
-    safetyTier: 0,
-    costClass: 'inspect',
-    // get_system_time has no parameters
   },
 
   // ─── MOUSE + KEYBOARD EXTENDED ─────────────────────────────────────────────
@@ -625,77 +526,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // undo_last has no parameters
   },
 
-  // ─── CLIPBOARD ─────────────────────────────────────────────────────────────
-
-  read_clipboard: {
-    category: 'clipboard',
-    compactGroup: 'system',
-    safetyTier: 0,
-    costClass: 'inspect',
-    // read_clipboard has no parameters
-  },
-
-  write_clipboard: {
-    category: 'clipboard',
-    compactGroup: 'system',
-    safetyTier: 1,
-    destructive: true,
-    costClass: 'act',
-    paramDescriptions: {
-      text: 'Text to write to clipboard',
-    },
-  },
-
-  // ─── FLOW CONTROL ──────────────────────────────────────────────────────────
-
-  wait: {
-    category: 'orchestration',
-    compactGroup: 'system',
-    safetyTier: 0,
-    costClass: 'act',
-    paramDescriptions: {
-      // System B uses 'ms'; System A uses 'seconds'. The param names differ.
-      ms: 'Duration to wait in milliseconds (max 5000)',
-    },
-  },
-
-  // ─── VISION ────────────────────────────────────────────────────────────────
-
-  screenshot: {
-    mcpName: 'desktop_screenshot',
-    category: 'perception',
-    compactGroup: 'computer',
-    safetyTier: 0,
-    costClass: 'perceive-image',
-    cheaperAlternatives: ['read_screen', 'ocr_read_screen'],
-    // screenshot has no parameters
-  },
-
-  // ─── OCR PERCEPTION ────────────────────────────────────────────────────────
-
-  read_text: {
-    mcpName: 'ocr_read_screen',
-    category: 'perception',
-    compactGroup: 'system',
-    safetyTier: 0,
-    costClass: 'perceive-text',
-    cheaperAlternatives: ['read_screen', 'find_element'],
-    // System B 'filter' param has its own description; no System A counterpart
-  },
-
-  smart_click: {
-    category: 'mouse',
-    compactGroup: 'computer',
-    safetyTier: 1,
-    costClass: 'perceive-text',
-    cheaperAlternatives: ['invoke_element', 'mouse_click'],
-    paramDescriptions: {
-      target: 'Element name/text to click (e.g., "Send", "Submit", "New Email")',
-      processId: 'Limit search to a specific process',
-      timeout: 'Max time in ms (default 5000)',
-    },
-  },
-
   // ─── BROWSER (CDP / DOM) ───────────────────────────────────────────────────
 
   browser_connect: {
@@ -705,17 +535,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     safetyTier: 1,
     costClass: 'act',
     // browser_connect has no parameters
-  },
-
-  browser_navigate: {
-    mcpName: 'navigate_browser',
-    category: 'browser',
-    compactGroup: 'browser',
-    safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      url: 'URL to navigate to',
-    },
   },
 
   browser_read: {
@@ -759,14 +578,13 @@ export const TOOL_META: Record<string, ToolMeta> = {
       text: 'Text to type into the field',
     },
   },
+};
 
-  // ─── BATCHED PLANNING ──────────────────────────────────────────────────────
-
-  batch: {
-    category: 'orchestration',
-    compactGroup: 'system',
-    safetyTier: 1,
-    costClass: 'act',
-    // batch has its own complex schema; no direct System A counterpart
-  },
+/**
+ * Agent-loop names that the projected tools' text (descriptions, hints) still mentions though they are not projected
+ * tools themselves, and the MCP tool each means. toMcpNames (project-mcp.ts) rewrites them like the projected names.
+ */
+export const TEXT_ONLY_RENAMES: Record<string, string> = {
+  read_text: 'ocr_read_screen',
+  browser_navigate: 'navigate_browser',
 };

@@ -158,10 +158,10 @@ export function appNameRefusal(name: string): string | null {
  * suite, an IDE, Outlook). Started, not failed: a failure invites a second launch. It names what to do next in a
  * form every agent can follow — focus by process once the window is up — not "check list_windows".
  */
-export function startedNoWindowText(quotedName: string, res: { pid?: number; processName?: string; alreadyRunning?: boolean }, surface: 'mcp' | 'agent' = 'mcp'): string {
+export function startedNoWindowText(quotedName: string, res: { pid?: number; processName?: string; alreadyRunning?: boolean }): string {
   const proc = res.processName?.trim();
   const by = proc ? `"processName":${JSON.stringify(proc)}` : `"processId":${res.pid}`;
-  const focus = surface === 'mcp' ? `window {"action":"focus",${by}}` : `focus_window {${by}}`;
+  const focus = `window {"action":"focus",${by}}`;
   const exe = proc ? `${proc}${process.platform === 'win32' ? '.exe' : ''}, ` : '';
   // A process that was there before the launch was not started by it: the launch was handed to it.
   if (res.alreadyRunning) {
@@ -171,8 +171,8 @@ export function startedNoWindowText(quotedName: string, res: { pid?: number; pro
 }
 
 /** open_app's answer when neither a window nor a process of the app was found. */
-export function notConfirmedText(quotedName: string, rawName: string, surface: 'mcp' | 'agent' = 'mcp'): string {
+export function notConfirmedText(quotedName: string, rawName: string): string {
   const by = `"processName":${JSON.stringify(rawName)}`;
-  const focus = surface === 'mcp' ? `window {"action":"focus",${by}}` : `focus_window {${by}}`;
+  const focus = `window {"action":"focus",${by}}`;
   return `Could not confirm ${quotedName} opened — no window appeared and no process of it was found. If it is slow to start, wait, then ${focus}; do not act on it before that succeeds.`;
 }

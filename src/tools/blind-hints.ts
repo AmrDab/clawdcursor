@@ -92,14 +92,6 @@ export const CUT_VALUE_NEXT_STEP =
   '→ A value ending in "chars not shown" is cut. Read it whole: copy_all_text for a document or an unnamed editor · ' +
   'a11y_get_value {"name":"…"} for a named field.';
 
-export const CUT_VALUE_NEXT_STEP_INTERNAL =
-  '→ A value ending in "chars not shown" is cut. Read a named field whole with a11y_get_value {"name":"…"}.';
-
-/** The same advice for clawdcursor's internal agent loop, in its own tool names. */
-export const SPARSE_NEXT_STEP_INTERNAL =
-  '→ Little or no accessibility structure here (common for web pages and canvas apps). Next: ' +
-  'read_text (OCR) to read it · screenshot only if that is not enough.';
-
 /**
  * Next step when the thin read is of the browser clawdcursor is attached to
  * over CDP (#235): its page is readable through the browser tools right now,

@@ -562,8 +562,6 @@ async function dispatchCompound(
       expect: args.expect,
       toolText: result.text ?? '',
       toolSuccess: !result.isError,
-      changesScreen: true,
-      observedChange: true,
       adapter: ctx.platform!,
       ocrText: async () => (await (expectOcr ??= new OcrEngine()).recognizeScreen()).fullText ?? '',
     }).catch(() => null);

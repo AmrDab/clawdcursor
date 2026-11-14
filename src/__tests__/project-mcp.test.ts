@@ -14,8 +14,7 @@
  *   4. Handler integration: calling the projected handler with a mock ToolContext
  *      returns a valid ToolResult (text present, isError boolean) without throwing.
  *
- *   5. unifiedToToolResult: success→isError false, failure→isError true, screenshot
- *      with a buffer is base64-encoded into result.image.
+ *   5. unifiedToToolResult: success→isError false, failure→isError true.
  *
  *   6. toolContextToAgent: async construction from a mock ToolContext resolves
  *      to a well-shaped AgentToolContext.
@@ -64,6 +63,7 @@ import {
   toolContextToAgent,
   unifiedToToolResult,
   projectToToolDefinition,
+  toMcpNames,
 } from '../core/agent-loop/project-mcp';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { TOOL_META } from '../core/agent-loop/tool-meta';
@@ -267,40 +267,7 @@ describe('unifiedToToolResult', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('base64-encodes a screenshot buffer into result.image', () => {
-    const buf = Buffer.from('fake-image-bytes');
-    const r: UnifiedToolResult = {
-      success: true,
-      text: 'Captured',
-      screenshot: {
-        buffer: buf,
-        width: 1280,
-        height: 720,
-        scaleFactor: 1,
-      } as any,
-    };
-    const result = unifiedToToolResult(r);
-    expect(result.image).toBeDefined();
-    expect(result.image!.data).toBe(buf.toString('base64'));
-    expect(result.image!.mimeType).toBe('image/png');
-  });
-
-  it('sets mimeType to image/png (ScreenshotResult is always PNG)', () => {
-    const r: UnifiedToolResult = {
-      success: true,
-      text: 'Captured',
-      screenshot: {
-        buffer: Buffer.from('png'),
-        width: 100,
-        height: 100,
-        scaleFactor: 1,
-      } as any,
-    };
-    const result = unifiedToToolResult(r);
-    expect(result.image!.mimeType).toBe('image/png');
-  });
-
-  it('does not include image field when no screenshot', () => {
+  it('has no image field', () => {
     const r: UnifiedToolResult = { success: true, text: 'no pic' };
     const result = unifiedToToolResult(r);
     expect(result.image).toBeUndefined();
@@ -313,14 +280,10 @@ describe('toolContextToAgent', () => {
     const agentCtx = await toolContextToAgent(ctx);
 
     expect(agentCtx.platform).toBeDefined();
-    expect(agentCtx.task).toBe('');
     expect(agentCtx.screen).toMatchObject({
       physicalWidth: 1920,
       physicalHeight: 1080,
     });
-    expect(agentCtx.screenshotsCaptured).toEqual({ n: 0 });
-    expect(agentCtx.targetWindow).toBeUndefined();
-    expect(agentCtx.activeApp).toBeUndefined();
   });
 
   // The projected clicks scale by the latest screenshot's own factor (a max_edge screenshot): dropping it misplaces every click.
@@ -390,14 +353,6 @@ describe('projectToToolDefinition', () => {
     expect(def.name).toBe('mouse_click');
   });
 
-  it('applies the screenshot → desktop_screenshot MCP name mapping', () => {
-    const hybridTools = buildUnifiedTools();
-    const shot = hybridTools.find(t => t.name === 'screenshot');
-    expect(shot).toBeDefined();
-    const def = projectToToolDefinition(shot!);
-    expect(def.name).toBe('desktop_screenshot');
-  });
-
   it('applies the list_windows → get_windows MCP name mapping', () => {
     const lw = buildUnifiedTools().find(t => t.name === 'list_windows');
     expect(lw).toBeDefined();
@@ -456,10 +411,7 @@ describe('name mapping completeness', () => {
       { sysbName: 'scroll',          mcpName: 'mouse_scroll'     },
       { sysbName: 'type',            mcpName: 'type_text'        },
       { sysbName: 'key',             mcpName: 'key_press'        },
-      { sysbName: 'screenshot',      mcpName: 'desktop_screenshot' },
-      { sysbName: 'read_text',       mcpName: 'ocr_read_screen'  },
       { sysbName: 'browser_connect', mcpName: 'cdp_connect'      },
-      { sysbName: 'browser_navigate',mcpName: 'navigate_browser' },
       { sysbName: 'browser_read',    mcpName: 'cdp_page_context' },
       { sysbName: 'browser_click',   mcpName: 'cdp_click'        },
       { sysbName: 'browser_type',    mcpName: 'cdp_type'         },
@@ -468,6 +420,11 @@ describe('name mapping completeness', () => {
     for (const { sysbName, mcpName } of expectedRenames) {
       expect(TOOL_META[sysbName]?.mcpName).toBe(mcpName);
     }
+  });
+
+  // Names the projected tools' text mentions without being projected tools: rewritten all the same.
+  it('text-only names are rewritten too', () => {
+    expect(toMcpNames('escalate to read_text, or browser_navigate first')).toBe('escalate to ocr_read_screen, or navigate_browser first');
   });
 });
 

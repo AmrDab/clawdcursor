@@ -72,16 +72,6 @@ export class UIMapHolder {
     this.invalidated = true;
   }
 
-  /** Re-stamp the current map's compiledAt — called when the loop re-ADVERTISES
-   *  an existing map to the model (§6b reuse branch), so the TTL clock runs
-   *  from the last advertisement, not the original compile. No-op unless the
-   *  id is the current, non-invalidated map (never resurrects stale maps). */
-  touch(snapshotId: string, now: number): void {
-    const current = this.held[this.held.length - 1];
-    if (!current || current.map.snapshot_id !== snapshotId || this.invalidated) return;
-    current.compiledAt = now;
-  }
-
   currentId(): string | undefined {
     return this.held[this.held.length - 1]?.map.snapshot_id;
   }

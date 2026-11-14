@@ -122,11 +122,6 @@ describe('tools that return page, document or clipboard text', () => {
     expectContained((await tool(getA11yTools(), 'read_clipboard').handler({}, ctx)).text);
   });
 
-  it('the agent-loop read_clipboard', async () => {
-    const r = await buildUnifiedTools().find(t => t.name === 'read_clipboard')!.execute({}, { platform: { readClipboard: async () => PAGE } } as never);
-    expectContained(r.text);
-  });
-
   it('copy_all_text: the page text, and the window title beside it', async () => {
     const platform = {
       platform: 'win32',

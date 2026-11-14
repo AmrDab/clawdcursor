@@ -4,7 +4,7 @@
  * the pill's tree, the pause prompt's Resume button was findable and invokable by name — faking the user's answer — and
  * nothing stopped an agent from acting while a pause waited.
  *
- * One check, called before every tool runs (MCP wrapper, both batch executors, the agent loop):
+ * One check, called before every tool runs (MCP wrapper, batch executor):
  *  - while the user has stopped clawdcursor (control.ts), every call is refused except asking them for control back;
  *  - a call aimed at an overlay process (by pid, or by the overlay's process name) is refused;
  *  - while a pause is pending, EVERY call is refused except the few that wait on, end or report it. Deny by default: the
@@ -23,12 +23,11 @@ const NAME_ARGS = ['processName', 'process_name', 'app', 'appName'];
 /** The macOS overlay's process name (cached as clawd-overlay-<hash>). On Windows and Linux it runs under a shared interpreter. */
 const OVERLAY_NAME = /^clawd-overlay(-[0-9a-f]+)?$/i;
 
-/** Calls that wait on, end or report a pause (compact `tool:action`, or the granular / agent tool name). `resume` is recorded as
+/** Calls that wait on, end or report a pause (compact `tool:action`, or the granular tool name). `resume` is recorded as
  * unverified — it cannot pass for the user's answer. */
 const PAUSE_SAFE = new Set([
-  'system:pause_for_user', 'pause_for_user', 'ask_user',
+  'system:pause_for_user', 'pause_for_user',
   'resume_task',
-  'done', 'give_up',
   // Waiting and reporting touch nothing on screen.
   'computer:wait', 'wait', 'system:report',
   // Turning off error reports touches nothing on screen either.
@@ -41,8 +40,8 @@ export function isPauseSafeCall(toolName: string, action?: string): boolean {
 
 /** While the user has stopped clawdcursor: only asking them for control back, and reporting. Not even waiting or reading. */
 const STOP_SAFE = new Set([
-  'system:pause_for_user', 'pause_for_user', 'ask_user',
-  'done', 'give_up', 'system:report', 'system:telemetry_optout', 'telemetry_optout',
+  'system:pause_for_user', 'pause_for_user',
+  'system:report', 'system:telemetry_optout', 'telemetry_optout',
 ]);
 
 export function isStopSafeCall(toolName: string, action?: string): boolean {

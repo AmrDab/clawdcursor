@@ -52,11 +52,6 @@ export interface Snapshot {
   };
   /** All elements merged from a11y + OCR + CDP, de-duped by spatial overlap. */
   elements: SnapshotElement[];
-  /**
-   * Stable fingerprint of the snapshot — same UI produces same string, used by
-   * the agent loop to detect "nothing changed, stop retrying the same action".
-   */
-  fingerprint: string;
   /** Timestamp for staleness checks. */
   capturedAt: number;
   /** Which sources successfully contributed; empty sources fell back silently. */

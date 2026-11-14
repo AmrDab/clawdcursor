@@ -9,7 +9,7 @@ function snap(elements: Snapshot['elements']): Snapshot {
   return { platform: 'windows',
     activeWindow: { processId: 9, processName: 'notepad', title: 'Untitled - Notepad',
       bounds: { x: 0, y: 0, width: 800, height: 600 } },
-    elements, fingerprint: 'fp', capturedAt: 0, sources: elements.length ? ['a11y'] : [] };
+    elements, capturedAt: 0, sources: elements.length ? ['a11y'] : [] };
 }
 const okOcr = (): OcrResult => ({ elements: [
   { text: 'Send', x: 10, y: 20, width: 40, height: 12, confidence: 0.95, line: 0 }],

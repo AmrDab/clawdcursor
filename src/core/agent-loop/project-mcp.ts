@@ -2,10 +2,7 @@
  * project-mcp.ts — Project System B (agent-loop) UnifiedTools onto the
  * System A (MCP/REST) ToolDefinition surface.
  *
- * PURELY ADDITIVE. This module is not yet imported by any production path.
- * Wire-in happens in a later step (Step 3).
- *
- * The three public exports:
+ * src/tools/registry.ts projects the agent-loop tools through it. The public exports:
  *
  *   jsonSchemaToParamDefs(inputSchema)
  *     Convert a UnifiedTool.inputSchema (raw JSON Schema object) into the
@@ -17,7 +14,7 @@
  *
  *   unifiedToToolResult(r)
  *     Map a UnifiedToolResult back to the ToolResult shape the MCP surface
- *     expects, including base64-encoding any screenshot.
+ *     expects.
  *
  *   projectToToolDefinition(t)
  *     Assemble a complete ToolDefinition from a UnifiedTool + TOOL_META.
@@ -27,7 +24,7 @@
 
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../../tools/types';
-import { TOOL_META } from './tool-meta';
+import { TOOL_META, TEXT_ONLY_RENAMES } from './tool-meta';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
 import { OcrEngine } from '../../platform/ocr-engine';
@@ -49,10 +46,14 @@ function mcpOcr(): OcrEngine { return (_mcpOcr ??= new OcrEngine()); }
 let _renames: Array<[RegExp, string]> | null = null;
 export function toMcpNames(text: string): string {
   if (!_renames) {
-    _renames = Object.entries(TOOL_META)
-      .filter(([name, meta]) => meta.mcpName && meta.mcpName !== name && name.includes('_'))
+    const pairs: Array<[string, string]> = [
+      ...Object.entries(TOOL_META).flatMap(([name, meta]): Array<[string, string]> => (meta.mcpName ? [[name, meta.mcpName]] : [])),
+      ...Object.entries(TEXT_ONLY_RENAMES),
+    ];
+    _renames = pairs
+      .filter(([name, mcpName]) => mcpName !== name && name.includes('_'))
       .sort(([a], [b]) => b.length - a.length)
-      .map(([name, meta]) => [new RegExp(`\\b${name}\\b`, 'g'), meta.mcpName!]);
+      .map(([name, mcpName]) => [new RegExp(`\\b${name}\\b`, 'g'), mcpName]);
   }
   for (const [re, mcpName] of _renames) text = text.replace(re, mcpName);
   return text;
@@ -127,9 +128,6 @@ export function jsonSchemaToParamDefs(
  * ctx.ensureInitialized() first to guarantee subsystems are ready
  * before the System B tool execute() accesses ctx.platform.*.
  *
- * Fields that are absent from ToolContext (task, mode, screenshotsCaptured)
- * are given safe neutral defaults so the System B tools don't crash.
- *
  * @param ctx - The ToolContext injected by the MCP server / REST handler.
  * @returns A fully populated AgentToolContext ready for System B tool execute().
  */
@@ -174,14 +172,9 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
 
   return {
     platform,
-    task: '',           // No task context available in the MCP surface layer.
     screen,
     imageToMouse,
-    screenshotsCaptured: { n: 0 },
-    mcpSurface: true,
     cdp: ctx.cdp ?? null,
-    targetWindow: undefined,
-    activeApp: undefined,
     uiMaps: ctx.uiMaps,
   };
 }
@@ -190,32 +183,16 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
  * Convert a UnifiedToolResult to the ToolResult shape the MCP surface expects.
  *
  * - success=false maps to isError=true.
- * - screenshot (ScreenshotResult with a Buffer) is base64-encoded and returned
- *   as { data, mimeType } in the image field — mirroring how the agent loop
- *   and the existing MCP server serialize images.
- * - All other UnifiedToolResult fields (stop, terminalExit, targetLabel) are
- *   consumed internally and not forwarded — they are agent-loop concerns.
+ * - targetLabel is not forwarded.
  *
  * @param r - The UnifiedToolResult from a System B tool execute() call.
  * @returns A ToolResult ready for the MCP / REST transport.
  */
 export function unifiedToToolResult(r: UnifiedToolResult): ToolResult {
-  const result: ToolResult = {
+  return {
     text: r.text,
     isError: !r.success,
   };
-
-  if (r.screenshot) {
-    // ScreenshotResult.buffer is a Buffer containing raw image bytes (PNG per
-    // the platform/types.ts interface; the agent loop captures via screenshot()
-    // which returns PNG). The MCP image field expects base64-encoded string data.
-    result.image = {
-      data: r.screenshot.buffer.toString('base64'),
-      mimeType: 'image/png',
-    };
-  }
-
-  return result;
 }
 
 /**
@@ -263,16 +240,12 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     // Honor a caller-supplied `expect` assertion array. The projected schemas
     // advertise it (same as the agent loop), so an external agent passing
     // post-conditions over MCP must get them VERIFIED — they were silently
-    // dropped before (audit 2026-06-10, finding E). Hard check only: the
-    // loop-side soft "no observable change" net needs per-turn fingerprints
-    // the MCP route doesn't track.
+    // dropped before (audit 2026-06-10, finding E).
     if (params.expect !== undefined && params.expect !== null) {
       const reactive = await reactiveCheck({
         expect: params.expect,
         toolText: result.text,
         toolSuccess: result.success,
-        changesScreen: false,
-        observedChange: true,
         adapter: agentCtx.platform,
         ocrText: async () => (await mcpOcr().recognizeScreen()).fullText ?? '',
       }).catch(() => null);

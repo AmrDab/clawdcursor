@@ -6,7 +6,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { appNameRefusal } from '../core/router/aliases';
 import { getOrchestrationTools } from '../tools/orchestration';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { resolveInstalledWindowsApp, isAppShapedStartEntry } from '../platform/win-app-resolve';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -55,21 +54,11 @@ describe('open_app refuses a path before anything is launched, on every OS', () 
   const launchApp = vi.fn(async () => ({ pid: 1, title: 'x' }));
   const ctx = { ensureInitialized: async () => {}, platform: { platform: process.platform, launchApp }, a11y: { invalidateCache: () => {} } } as unknown as ToolContext;
   const mcp = getOrchestrationTools().find(t => t.name === 'open_app')!;
-  const agent = buildUnifiedTools().find(t => t.name === 'open_app')!;
 
   it.each([...PATHS, ...URIS, ...ODD])('MCP open_app: %j', async (p) => {
     launchApp.mockClear();
     const r = await mcp.handler({ name: p }, ctx);
     expect(r.isError).toBe(true);
-    expect(r.text).toMatch(/open_file/);
-    expect(r.text).toMatch(/open_uri/);
-    expect(launchApp).not.toHaveBeenCalled();
-  });
-
-  it.each([...PATHS, ...URIS, ...ODD])('agent-loop open_app: %j', async (p) => {
-    launchApp.mockClear();
-    const r = await agent.execute({ name: p }, { platform: { platform: process.platform, launchApp } } as never);
-    expect(r.success).toBe(false);
     expect(r.text).toMatch(/open_file/);
     expect(r.text).toMatch(/open_uri/);
     expect(launchApp).not.toHaveBeenCalled();
@@ -90,13 +79,12 @@ describe('a name outside the alias table only ever starts an installed app', () 
   const launchApp = vi.fn(async (..._a: unknown[]) => ({ pid: 1, title: 'x' }));
   const ctx = { ensureInitialized: async () => {}, platform: { platform: process.platform, launchApp }, a11y: { invalidateCache: () => {} } } as unknown as ToolContext;
   const mcp = getOrchestrationTools().find(t => t.name === 'open_app')!;
-  const agent = buildUnifiedTools().find(t => t.name === 'open_app')!;
   const src = (file: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'platform', file), 'utf8');
 
   it('open_app marks a non-alias name as name-only, and an alias-table name as trusted', async () => {
     launchApp.mockClear();
     await mcp.handler({ name: 'Designcenter' }, ctx);
-    await agent.execute({ name: 'payload.exe' }, { platform: { platform: process.platform, launchApp } } as never);
+    await mcp.handler({ name: 'payload.exe' }, ctx);
     await mcp.handler({ name: 'Calculator' }, ctx);
     expect(launchApp.mock.calls[0][1]).toMatchObject({ nameOnly: true });
     expect(launchApp.mock.calls[1][1]).toMatchObject({ nameOnly: true });

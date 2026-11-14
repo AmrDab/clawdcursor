@@ -211,7 +211,6 @@ describe('6. better next after misses', () => {
     expect(c?.code).toBe('NOT_FOUND');
     expect(c?.hint).toBe('no element has that name; the label may be drawn, not exposed');
     expect(c?.next).toBe('accessibility {"action":"smart_click","target":"Save as"}');
-    expect(classifyResult('a11y invoke "Save as" missed — Element not found', true, true, 'agent')?.next).toBe('smart_click {"target":"Save as"}');
   });
 
   it('a find miss that lists a close name sends smart_click to that name', () => {
@@ -219,7 +218,6 @@ describe('6. better next after misses', () => {
     const c = classifyResult(t, true, false);
     expect(c?.code).toBe('NOT_FOUND');
     expect(c?.next).toBe('accessibility {"action":"smart_click","target":"Save"}');
-    expect(classifyResult(t, true, false, 'agent')?.next).toBe('smart_click {"target":"Save"}');
   });
 
   it('a screen-supplied name goes into the trusted result line quoted and defused', () => {
@@ -253,13 +251,11 @@ describe('6. better next after misses', () => {
       expect(c?.code, t).toBe('NOT_FOUND');
       expect(c?.next, t).toBe('window {"action":"list"}');
     }
-    expect(classifyResult('no window matching "x"', true, true, 'agent')?.next).toBe('list_windows {}');
   });
 
-  it('a stale screenshot says to use smart_click for a labelled target, on each surface in its own names', () => {
+  it('a stale screenshot says to use smart_click for a labelled target', () => {
     const t = 'computer {"action":"click"}: these coordinates are from screenshot s1, an older screenshot; the latest is s2.';
     expect(classifyResult(t, true, true, 'mcp')?.hint).toMatch(/; if the target has a label, use accessibility smart_click instead of a new screenshot$/);
-    expect(classifyResult(t, true, true, 'agent')?.hint).toMatch(/; if the target has a label, use smart_click instead of a new screenshot$/);
   });
 });
 

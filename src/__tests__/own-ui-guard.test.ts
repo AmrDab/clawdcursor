@@ -56,7 +56,6 @@ describe('isPauseSafeCall — deny by default', () => {
   it('waiting on, ending or reporting the pause is allowed', () => {
     for (const [tool, action] of [['system', 'pause_for_user'],
       ['pause_for_user', undefined], ['resume_task', undefined],
-      ['ask_user', undefined], ['done', undefined], ['give_up', undefined],
       // waiting touches nothing
       ['computer', 'wait'], ['wait', undefined], ['system', 'report']] as const) {
       expect(isPauseSafeCall(tool, action), `${tool} ${action ?? ''}`).toBe(true);

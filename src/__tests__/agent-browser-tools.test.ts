@@ -77,18 +77,11 @@ describe('browser_connect', () => {
   });
 });
 
-describe('browser_navigate / read / click / type', () => {
-  it('navigate loads the url when connected', async () => {
-    const cdp = mockCdp();
-    const r = await tool('browser_navigate').execute({ url: 'https://www.youtube.com' }, ctx(cdp));
-    expect(r.success).toBe(true);
-    expect(cdp.navigate).toHaveBeenCalledWith('https://www.youtube.com');
-  });
-
+describe('browser_read / click / type', () => {
   it('every browser_* action refuses (no throw) when not connected → tells model to connect', async () => {
     const cdp = mockCdp({ isConnected: vi.fn(async () => false) });
-    for (const name of ['browser_navigate', 'browser_read', 'browser_click', 'browser_type']) {
-      const args = name === 'browser_navigate' ? { url: 'x' } : name === 'browser_type' ? { text: 'x', selector: '#a' } : name === 'browser_click' ? { text: 'x' } : {};
+    for (const name of ['browser_read', 'browser_click', 'browser_type']) {
+      const args = name === 'browser_type' ? { text: 'x', selector: '#a' } : name === 'browser_click' ? { text: 'x' } : {};
       const r = await tool(name).execute(args, ctx(cdp));
       expect(r.success).toBe(false);
       expect(r.text).toMatch(/browser_connect/);
