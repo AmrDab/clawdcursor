@@ -75,9 +75,6 @@ export interface ToolContext {
   ensureInitialized: () => Promise<void>;
 }
 
-/** The 6 compact compound tool names */
-export type CompactGroup = 'computer' | 'accessibility' | 'window' | 'system' | 'browser';
-
 /**
  * What kind of evidence a tool produces and how token-expensive its
  * response typically is for the calling LLM. Distinct from `safetyTier`
@@ -119,13 +116,6 @@ export interface ToolDefinition {
   /** Tool category for organization */
   category: 'perception' | 'mouse' | 'keyboard' | 'window' | 'clipboard' | 'browser' | 'orchestration';
   /**
-   * The compact compound this granular tool belongs to.
-   * Derived by reverse-engineering the ACTION_MAP in compact.ts.
-   * Undefined for granular tools that are not exposed via any compound
-   * (e.g. smart_read, smart_click, smart_type, minimize_window).
-   */
-  compactGroup?: CompactGroup;
-  /**
    * Does the tool only read (0), or does it send input / change something (1)? Not a permission: clawdcursor refuses
    * nothing by tier. It drives the pill's "touching your screen" state and the MCP readOnlyHint.
    */
@@ -159,14 +149,6 @@ export interface ToolDefinition {
    * and will flip to required in a future minor.
    */
   costClass?: ToolCostClass;
-  /**
-   * Other tools the caller should try BEFORE this one when they apply
-   * to the same job at a lower cost class. Names must reference real
-   * tools — validated at module load.
-   *
-   * Example: `read_screen.cheaperAlternatives = ['find_element']`.
-   */
-  cheaperAlternatives?: string[];
   /** The handler checks an `expect` argument (projected agent-loop tools do). Others would silently ignore one. */
   honorsExpect?: boolean;
   /** The handler function */

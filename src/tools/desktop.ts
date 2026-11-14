@@ -99,7 +99,6 @@ export function getDesktopTools(): ToolDefinition[] {
         max_edge: MAX_EDGE_PARAM,
       },
       category: 'perception',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async ({ display, max_edge }, ctx) => {
         await ctx.ensureInitialized();
@@ -149,7 +148,6 @@ export function getDesktopTools(): ToolDefinition[] {
         max_edge: MAX_EDGE_PARAM,
       },
       category: 'perception',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async ({ x, y, width, height, space, display, max_edge }, ctx) => {
         await ctx.ensureInitialized();
@@ -200,7 +198,6 @@ export function getDesktopTools(): ToolDefinition[] {
       description: 'Get the screen dimensions and scale factor.',
       parameters: {},
       category: 'perception',
-      compactGroup: 'window',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         await ctx.ensureInitialized();
@@ -231,7 +228,6 @@ export function getDesktopTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -252,7 +248,6 @@ export function getDesktopTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -273,7 +268,6 @@ export function getDesktopTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -288,7 +282,6 @@ export function getDesktopTools(): ToolDefinition[] {
       description: 'Read the current mouse cursor position in image-space coordinates (the same space the mouse_* tools accept — a cursor_position read round-trips with mouse_hover). Computer-use parity: pointer-state read, no side effects.',
       parameters: {},
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async (_args, ctx) => {
         await ctx.ensureInitialized();

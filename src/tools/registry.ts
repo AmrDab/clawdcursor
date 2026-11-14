@@ -18,7 +18,7 @@ import { getA11yDepthTools } from './a11y_depth';
 import { getElectronBridgeTools } from './electron_bridge';
 import { getCompactTools } from './compact';
 import { getAgentTools } from './agent';
-import type { ToolDefinition, ToolContext, ToolResult, CompactGroup } from './types';
+import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
 import { fenceTools } from '../core/fence';
@@ -267,19 +267,14 @@ function projectedMouseTools(): ToolDefinition[] {
 //   after a line that says which window was read. System B's read_text reads
 //   the whole screen only and gives a line's top-left corner, so it is not projected.
 //
-// TOOLS LEFT ON SYSTEM A (no System B buildUnifiedTools() equivalent, or
-// compact-surface invariant test requires no compactGroup):
+// TOOLS LEFT ON SYSTEM A (no System B buildUnifiedTools() equivalent):
 //   • find_element        — not in buildUnifiedTools()
 //   • get_focused_element — not in buildUnifiedTools()
 //   • a11y_get_element    — not in buildUnifiedTools()
 //   • a11y_list_children  — not in buildUnifiedTools()
 //   • smart_type          — not in buildUnifiedTools()
 //   • smart_read          — not in buildUnifiedTools()
-//   • smart_click         — System B has a smart_click but TOOL_META assigns
-//                           compactGroup:'computer', which breaks the compact-
-//                           surface invariant test (test section 10 requires
-//                           smart_click to have NO compactGroup). Left on
-//                           System A to preserve the invariant.
+//   • smart_click         — System B has a smart_click; System A's is the one served.
 
 /** System B names of the a11y / perception tools to re-project onto the MCP surface. */
 const A11Y_SYSB_NAMES = new Set([
@@ -485,31 +480,6 @@ export type { ToolDefinition, ToolContext, ToolResult };
 export { toJsonSchema };
 export { getCompactTools };
 
-/** Options for the unified getTools() accessor. */
-export interface GetToolsOptions {
-  /**
-   * Which surface to return.
-   *   'granular' — the full set of granular primitives (default)
-   *   'compact'  — the compound tools (same as getCompactSurface())
-   */
-  palette?: 'granular' | 'compact';
-  /**
-   * Filter granular tools by their compactGroup.
-   * Only meaningful when palette === 'granular' (or omitted).
-   */
-  compactGroup?: CompactGroup;
-}
-
-/**
- * Unified tool accessor. Replaces the ad-hoc getAllTools() /
- * getCompactSurface() pair — those remain as thin back-compat wrappers.
- *
- * Examples:
- *   getTools()                                  → all granular tools
- *   getTools({ palette: 'compact' })            → 6 compact compound tools
- *   getTools({ compactGroup: 'computer' })      → granular tools owned by computer
- *   getTools({ palette: 'granular', compactGroup: 'accessibility' })
- */
 // The granular tool definitions are static (built from module-level
 // get*Tools() functions, no runtime registration), so assemble the array
 // once and reuse it. Before this, every getTool()/getTools() call rebuilt
@@ -564,40 +534,24 @@ export function resetToolCaches(): void {
   _granularCache = null;
 }
 
-export function getTools(options?: GetToolsOptions): ToolDefinition[] {
-  const palette = options?.palette ?? 'granular';
-
-  if (palette === 'compact') {
-    return getCompactTools();
-  }
-
+/** Every granular tool (the full primitive surface), with its cost class stamped from cost-class.ts. A copy: callers can't mutate the cache. */
+export function getTools(): ToolDefinition[] {
   const all = granularTools();
-
-  // Phase A: stamp token-cost metadata from the central table so every
-  // consumer (tools/list, coverage test, runtime hints) sees `costClass`.
   stampCostClasses(all);
-
-  if (options?.compactGroup) {
-    return all.filter(t => t.compactGroup === options.compactGroup);
-  }
-
-  // Return a shallow copy so callers can't mutate the cached array.
   return all.slice();
 }
 
-/** Get all registered GRANULAR tools (the full primitive surface). Back-compat wrapper around getTools(). */
+/** The same as getTools(). */
 export function getAllTools(): ToolDefinition[] {
   return getTools();
 }
 
 /**
- * Get the COMPACT surface — compound tools covering every granular
- * primitive. Equivalent semantics; far fewer catalog tokens. Use via
- * `clawdcursor mcp --compact` or `GET /tools?mode=compact`.
- * Back-compat wrapper around getTools({ palette: 'compact' }).
+ * The COMPACT surface: compound tools covering the granular primitives, with far fewer catalog tokens
+ * (`clawdcursor mcp --compact`, `GET /tools?mode=compact`).
  */
 export function getCompactSurface(): ToolDefinition[] {
-  return getTools({ palette: 'compact' });
+  return getCompactTools();
 }
 
 /** Get a tool by name */

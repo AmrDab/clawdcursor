@@ -160,7 +160,6 @@ export function getElectronBridgeTools(): ToolDefinition[] {
         'unexpectedly empty tree on a "native" app.',
       parameters: {},
       category: 'perception',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async (_params, ctx: ToolContext): Promise<ToolResult> => {
         await ctx.ensureInitialized();
@@ -216,7 +215,6 @@ export function getElectronBridgeTools(): ToolDefinition[] {
         port:    { type: 'number', description: 'Port to open for CDP. Default 9222.', required: false, default: 9222 },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 1,
       destructive: true,
       handler: async ({ appName, port }, ctx: ToolContext): Promise<ToolResult> => {

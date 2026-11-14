@@ -185,7 +185,6 @@ export function getA11yTools(): ToolDefinition[] {
       description: 'Get the currently focused/foreground window.',
       parameters: {},
       category: 'window',
-      compactGroup: 'window',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         await ctx.ensureInitialized();
@@ -210,7 +209,6 @@ export function getA11yTools(): ToolDefinition[] {
       description: 'Get the currently focused UI element (keyboard focus). Returns name, control type, value, bounds, and process ID.',
       parameters: {},
       category: 'window',
-      compactGroup: 'accessibility',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         await ctx.ensureInitialized();
@@ -239,7 +237,6 @@ export function getA11yTools(): ToolDefinition[] {
         offset: { type: 'number', description: 'Skip this many matches: page past "... and N more" (default 0)', required: false },
       },
       category: 'window',
-      compactGroup: 'accessibility',
       safetyTier: 0,
       handler: async ({ name, controlType, automationId, processId, offset }, ctx) => {
         await ctx.ensureInitialized();
@@ -333,7 +330,6 @@ export function getA11yTools(): ToolDefinition[] {
       description: 'Read the current text content of the OS clipboard.',
       parameters: {},
       category: 'clipboard',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         await ctx.ensureInitialized();
@@ -378,7 +374,6 @@ export function getA11yTools(): ToolDefinition[] {
         },
       },
       category: 'clipboard',
-      compactGroup: 'system',
       safetyTier: 1,
       handler: async ({ scope, find, offset }, ctx) => {
         await ctx.ensureInitialized();
@@ -402,7 +397,6 @@ export function getA11yTools(): ToolDefinition[] {
         text: { type: 'string', description: 'Text to write to clipboard', required: true },
       },
       category: 'clipboard',
-      compactGroup: 'system',
       safetyTier: 1,
       destructive: true,
       handler: async ({ text }, ctx) => {

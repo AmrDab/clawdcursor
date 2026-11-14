@@ -40,8 +40,6 @@ import type {
 
 // Re-use the ToolDefinition category type rather than duplicating it.
 type ToolCategory = ToolDefinition['category'];
-// CompactGroup from types.ts
-import type { CompactGroup } from '../../tools/types';
 
 /**
  * MCP-surface metadata for a System B UnifiedTool.
@@ -58,19 +56,12 @@ export interface ToolMeta {
   mcpName?: string;
   /** Tool category for organization (matches ToolDefinition.category). */
   category: ToolCategory;
-  /** Compact compound group this granular tool belongs to. */
-  compactGroup?: CompactGroup;
   /** 0 = reads only, 1 = sends input / changes something (ToolDefinition.safetyTier). */
   safetyTier: 0 | 1;
   /** `true`: a tool that is destructive by itself (ToolDefinition.destructive). */
   destructive?: boolean;
   /** Token cost class. */
   costClass: ToolCostClass;
-  /**
-   * Cheaper alternatives the caller should try first.
-   * Names reference MCP (System A) granular tool names.
-   */
-  cheaperAlternatives?: string[];
   /**
    * Per-parameter descriptions harvested from the corresponding System A
    * ToolDefinition. Used by project-mcp.ts as a fallback when System B's
@@ -94,10 +85,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   read_screen: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 0,
     costClass: 'perceive-text',
-    cheaperAlternatives: ['find_element', 'get_focused_element'],
     paramDescriptions: {
       processId: 'Focus on a specific process ID (optional — reads foreground window by default)',
     },
@@ -106,7 +95,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   list_windows: {
     mcpName: 'get_windows',
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 0,
     costClass: 'inspect',
     // get_windows has no parameters in System A
@@ -118,10 +106,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // System A (smart.ts) invoke_element has category 'window'. The projected tool
     // preserves this to match the System A behavior — same category, no regression.
     category: 'window',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
-    cheaperAlternatives: ['focus_element'],
     paramDescriptions: {
       name: 'Element name to find',
       automationId: 'Element automation ID (more precise than name)',
@@ -137,10 +123,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // (category: 'perception'). 'window' was incorrect; this is an accessibility
     // write action, not a window-management action.
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
-    cheaperAlternatives: ['invoke_element'],
     paramDescriptions: {
       name: 'Accessibility name of the field',
       value: 'Value to write',
@@ -153,7 +137,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   a11y_expand: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -165,7 +148,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   a11y_collapse: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -177,7 +159,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   a11y_toggle: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -189,7 +170,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   a11y_select: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -201,10 +181,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   a11y_get_value: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 0,
     costClass: 'inspect',
-    cheaperAlternatives: ['get_element_state'],
     paramDescriptions: {
       name: 'Accessibility name',
       controlType: 'Optional role filter',
@@ -254,7 +232,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   get_element_state: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 0,
     costClass: 'inspect',
     paramDescriptions: {
@@ -269,10 +246,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   click: {
     mcpName: 'mouse_click',
     category: 'mouse',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
-    cheaperAlternatives: ['invoke_element'],
     paramDescriptions: {
       x: 'X coordinate in image-space',
       y: 'Y coordinate in image-space',
@@ -287,7 +262,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   drag: {
     mcpName: 'mouse_drag',
     category: 'mouse',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -303,7 +277,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   scroll: {
     mcpName: 'mouse_scroll',
     category: 'mouse',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -320,10 +293,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   type: {
     mcpName: 'type_text',
     category: 'keyboard',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
-    cheaperAlternatives: ['set_field_value'],
     paramDescriptions: {
       text: 'The text to type',
     },
@@ -332,7 +303,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   key: {
     mcpName: 'key_press',
     category: 'keyboard',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -346,7 +316,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   focus_window: {
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -358,7 +327,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   maximize_window: {
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -376,7 +344,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // extras.ts) is re-projected from this System B tool.
     mcpName: 'minimize_window_to_taskbar',
     category: 'window',
-    compactGroup: 'window',
     // Tier 1 (input): minimizing is reversible — the tier extras.ts and the
     // window compound already give it. This projected copy still said 2.
     safetyTier: 1,
@@ -390,7 +357,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   restore_window: {
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -402,7 +368,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   close_window: {
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 1,
     destructive: true,
     costClass: 'act',
@@ -415,7 +380,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   resize_window: {
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -431,7 +395,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   list_displays: {
     category: 'window',
-    compactGroup: 'window',
     safetyTier: 0,
     costClass: 'inspect',
     // list_displays has no parameters
@@ -441,7 +404,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   focus_element: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -453,7 +415,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   wait_for_element: {
     category: 'perception',
-    compactGroup: 'accessibility',
     safetyTier: 0,
     costClass: 'inspect',
     paramDescriptions: {
@@ -469,7 +430,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   mouse_move_relative: {
     category: 'mouse',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -480,7 +440,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   mouse_down: {
     category: 'mouse',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -490,7 +449,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   mouse_up: {
     category: 'mouse',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -500,7 +458,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   key_down: {
     category: 'keyboard',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -510,7 +467,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   key_up: {
     category: 'keyboard',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -520,7 +476,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
 
   undo_last: {
     category: 'keyboard',
-    compactGroup: 'computer',
     safetyTier: 1,
     costClass: 'act',
     // undo_last has no parameters
@@ -531,7 +486,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   browser_connect: {
     mcpName: 'cdp_connect',
     category: 'browser',
-    compactGroup: 'browser',
     safetyTier: 1,
     costClass: 'act',
     // browser_connect has no parameters
@@ -543,10 +497,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // is the more analogous default path. The projector uses this MCP name.
     mcpName: 'cdp_page_context',
     category: 'browser',
-    compactGroup: 'browser',
     safetyTier: 0,
     costClass: 'perceive-text',
-    cheaperAlternatives: ['read_screen'],
     paramDescriptions: {
       selector: 'Optional CSS selector to read text from (default: structured interactive-element list for the whole page).',
     },
@@ -555,10 +507,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   browser_click: {
     mcpName: 'cdp_click',
     category: 'browser',
-    compactGroup: 'browser',
     safetyTier: 1,
     costClass: 'act',
-    cheaperAlternatives: ['invoke_element'],
     paramDescriptions: {
       selector: 'CSS selector to click (e.g. "#submit", "button.primary")',
       text: 'Visible text of the element to click (alternative to selector)',
@@ -568,10 +518,8 @@ export const TOOL_META: Record<string, ToolMeta> = {
   browser_type: {
     mcpName: 'cdp_type',
     category: 'browser',
-    compactGroup: 'browser',
     safetyTier: 1,
     costClass: 'act',
-    cheaperAlternatives: ['set_field_value'],
     paramDescriptions: {
       selector: 'CSS selector for the input field',
       label: 'Label text associated with the input (alternative to selector)',

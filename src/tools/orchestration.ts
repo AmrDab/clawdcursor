@@ -33,7 +33,6 @@ export function getOrchestrationTools(): ToolDefinition[] {
         name: { type: 'string', description: 'Application name (e.g. "notepad", "calc", "mspaint", "Outlook", "Chrome")', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       handler: async ({ name }, ctx) => {
         await ctx.ensureInitialized();
@@ -129,7 +128,6 @@ export function getOrchestrationTools(): ToolDefinition[] {
         url: { type: 'string', description: 'URL to navigate to', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       destructive: true,
       handler: async ({ url }, ctx) => {
@@ -161,7 +159,6 @@ export function getOrchestrationTools(): ToolDefinition[] {
         seconds: { type: 'number', description: 'Duration to wait (0.1 to 30)', required: true, minimum: 0.1, maximum: 30 },
       },
       category: 'orchestration',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async ({ seconds }) => {
         // Ends early when the user stops clawdcursor: a wait is exactly when they step in (#294).

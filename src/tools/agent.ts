@@ -59,7 +59,6 @@ export function getAgentTools(): ToolDefinition[] {
         timeout: { type: 'number', description: 'Max seconds to wait for the answer before returning {status:"waiting"} (default 45, clamped 1–50). The prompt stays up.', required: false },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async ({ message, timeout, done_when, choices, input }, ctx) => {
         const text = String(message ?? '').trim();
@@ -222,7 +221,6 @@ export function getAgentTools(): ToolDefinition[] {
         'Useful for the dashboard\'s /screenshot REST replacement.',
       parameters: {},
       category: 'perception',
-      compactGroup: 'computer',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         try {

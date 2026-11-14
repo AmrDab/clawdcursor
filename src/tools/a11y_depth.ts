@@ -50,7 +50,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
         processId:   { type: 'number', required: false, description: 'Scope to a process' },
       },
       category: 'perception',
-      compactGroup: 'accessibility',
       safetyTier: 0,
       handler: async ({ name, controlType, processId }, ctx) => {
         await ctx.ensureInitialized();
@@ -94,7 +93,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
         maxChildren: { type: 'number', required: false, default: 50, description: 'Cap on children returned' },
       },
       category: 'perception',
-      compactGroup: 'accessibility',
       safetyTier: 0,
       handler: async ({ parentName, controlType, processId, maxChildren }, ctx) => {
         await ctx.ensureInitialized();

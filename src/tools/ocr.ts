@@ -74,7 +74,6 @@ export function getOcrTools(): ToolDefinition[] {
         },
       },
       category: 'perception',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async ({ scope }, ctx) => {
         await ctx.ensureInitialized();

@@ -8,8 +8,6 @@
  *      produces the same result as calling the granular tool directly.
  *   3. The 6 compound names are exactly the expected set.
  *   4. actionCatalog (as used in compact descriptions) lists every route action.
- *   6. getTools({ palette: 'compact' }) === getCompactSurface().
- *   7. getTools({ compactGroup: X }) returns only tools whose .compactGroup === X.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -46,7 +44,7 @@ vi.mock('../platform/ocr-engine', () => {
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
-import { getAllTools, getCompactSurface, getTools } from '../tools/registry';
+import { getAllTools, getTools } from '../tools/registry';
 import { getCompactTools, COMPOUND_ROUTE_INDEX } from '../tools/compact';
 import type { ToolContext } from '../tools/types';
 import { makeMockPlatform } from './helpers/mock-platform';
@@ -376,62 +374,6 @@ describe('compact-as-transform invariants', () => {
     const result = await accessibilityTool.handler({}, ctx);
     expect(result.isError).toBe(true);
     expect(result.text).toContain('"action" is required');
-  });
-
-  // ── 8. getTools({ palette: 'compact' }) === getCompactSurface() ─────────
-  it('8. getTools({ palette: "compact" }) returns the same set as getCompactSurface()', () => {
-    const viaGetTools = getTools({ palette: 'compact' }).map(t => t.name).sort();
-    const viaGetCompactSurface = getCompactSurface().map(t => t.name).sort();
-    expect(viaGetTools).toEqual(viaGetCompactSurface);
-  });
-
-  // ── 9. getTools({ compactGroup: X }) returns only tools with that group ──
-  it('9. getTools({ compactGroup: "computer" }) returns only computer-group tools', () => {
-    const tools = getTools({ compactGroup: 'computer' });
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool.compactGroup).toBe('computer');
-    }
-    // Spot-check: known computer tools
-    const names = tools.map(t => t.name);
-    expect(names).toContain('mouse_click');
-    expect(names).toContain('key_press');
-    expect(names).toContain('desktop_screenshot');
-    expect(names).toContain('type_text');
-  });
-
-  it('9b. getTools({ compactGroup: "accessibility" }) returns only accessibility-group tools', () => {
-    const tools = getTools({ compactGroup: 'accessibility' });
-    expect(tools.length).toBeGreaterThan(0);
-    for (const tool of tools) {
-      expect(tool.compactGroup).toBe('accessibility');
-    }
-    const names = tools.map(t => t.name);
-    expect(names).toContain('read_screen');
-    expect(names).toContain('find_element');
-    expect(names).toContain('invoke_element');
-  });
-
-  it('9c. getTools({ compactGroup: "system" }) contains system tools', () => {
-    const tools = getTools({ compactGroup: 'system' });
-    const names = tools.map(t => t.name);
-    expect(names).toContain('read_clipboard');
-    expect(names).toContain('write_clipboard');
-    expect(names).toContain('get_system_time');
-    expect(names).toContain('ocr_read_screen');
-    expect(names).toContain('detect_webview_apps');
-    expect(names).toContain('relaunch_with_cdp');
-  });
-
-  // ── 10. granular tools not in any compactGroup ──────────────────────────
-  it('10. smart_read, smart_click, smart_type, minimize_window have no compactGroup', () => {
-    const all = getAllTools();
-    const noGroup = ['smart_read', 'smart_click', 'smart_type', 'minimize_window'];
-    for (const name of noGroup) {
-      const tool = all.find(t => t.name === name);
-      expect(tool, `tool ${name} should exist in getAllTools()`).toBeDefined();
-      expect(tool!.compactGroup, `${name} should have no compactGroup`).toBeUndefined();
-    }
   });
 
   // ── 11. getAllTools() back-compat === getTools() ────────────────────────

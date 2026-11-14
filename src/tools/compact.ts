@@ -15,21 +15,17 @@
  *   ACTION (which specific operation?), then fills in the args.
  *   Decision trees shrink, accuracy rises.
  *
- * The compounds cover EXACTLY the granular tool set — no new
- * capability, no removed capability. Every compact action maps to
- * exactly one granular tool via the delegation table. The granular
- * surface stays available (same repo, same schemas); agents simply
- * pick which shape to consume.
+ * No new capability: every compact action maps to exactly one granular tool through the route table
+ * (COMPOUND_ROUTE_INDEX), the one record of which compound owns a tool. A few granular tools have no route
+ * (cursor_position, minimize_window, batch, logs_recent, submit_report, resume_task, screenshot_full, verify).
+ * The granular surface stays available; agents pick which shape to consume.
  *
  * Selection:
  *   `clawdcursor mcp`             → granular tools (back-compat)
  *   `clawdcursor mcp --compact`   → compound tools (this file)
  *   GET /tools?mode=compact      → REST gets the same compact schemas
  *
- * Extending:
- *   Add a new granular tool → map it in the `ACTION_MAP` below under
- *   its owning compound. No other wiring needed; dispatcher picks it
- *   up automatically.
+ * Extending: a new granular tool gets a route below under its compound (and a cost class, cost-class.ts).
  */
 
 import { getTool } from './registry';

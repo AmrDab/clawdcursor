@@ -43,7 +43,6 @@ export function getExtraTools(): ToolDefinition[] {
         note: { type: 'string', description: 'What went wrong, in a sentence or two', required: false },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async ({ note }) => {
         const { buildSessionReport, saveReportLocally, issueUrl, reportMarkdown } = await import('../surface/report');
@@ -66,7 +65,6 @@ export function getExtraTools(): ToolDefinition[] {
         'Only when the user asks. There is no opt-in here: the user runs `clawdcursor optin` themselves.',
       parameters: {},
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async () => {
         const { setTelemetryEnabled, STATE_FILE } = await import('../core/observability/telemetry');
@@ -87,7 +85,6 @@ export function getExtraTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -107,7 +104,6 @@ export function getExtraTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ x, y, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -153,7 +149,6 @@ export function getExtraTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ x, y, direction, amount, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -186,7 +181,6 @@ export function getExtraTools(): ToolDefinition[] {
         space: SPACE_PARAM,
       },
       category: 'mouse',
-      compactGroup: 'computer',
       safetyTier: 1,
       handler: async ({ path, space }, ctx) => {
         await ctx.ensureInitialized();
@@ -231,7 +225,6 @@ export function getExtraTools(): ToolDefinition[] {
         path: { type: 'string', description: 'Absolute filesystem path', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       destructive: true,
       handler: async ({ path: filePath }, ctx) => {
@@ -254,7 +247,6 @@ export function getExtraTools(): ToolDefinition[] {
         url: { type: 'string', description: 'https:// or http:// URL', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       handler: async ({ url }, ctx) => {
         await ctx.ensureInitialized();
@@ -323,7 +315,6 @@ export function getExtraTools(): ToolDefinition[] {
         uri: { type: 'string', description: 'A full URI like "mailto:bob@example.com?subject=hi&body=hello", "tel:+15551234", "slack://channel?team=T123&id=C456", "vscode://file/Users/me/code/x.ts", "https://example.com". Must be properly URL-encoded.', required: true },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 1,
       destructive: true,
       handler: async ({ uri }, ctx) => {
@@ -412,7 +403,6 @@ export function getExtraTools(): ToolDefinition[] {
         query:  { type: 'string', description: 'JSON object of query parameters, e.g. {"subject":"hi","body":"hello"}. Each value will be URL-encoded.', required: false },
       },
       category: 'orchestration',
-      compactGroup: 'window',
       safetyTier: 0,
       handler: async ({ scheme, path, query }) => {
         const s = String(scheme ?? '').trim().toLowerCase();
@@ -458,7 +448,6 @@ export function getExtraTools(): ToolDefinition[] {
       description: 'Return the current system time as ISO 8601 UTC + local components. Zero I/O.',
       parameters: {},
       category: 'perception',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async () => {
         const now = new Date();
@@ -491,7 +480,6 @@ export function getExtraTools(): ToolDefinition[] {
         },
       },
       category: 'window',
-      compactGroup: 'window',
       safetyTier: 1,
       handler: async ({ index, direction }, ctx) => {
         await ctx.ensureInitialized();
@@ -530,7 +518,6 @@ export function getExtraTools(): ToolDefinition[] {
         },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0,
       handler: async ({ limit }, ctx) => {
         const cap = typeof limit === 'number' ? Math.max(1, Math.min(500, Math.floor(limit))) : 200;
@@ -562,7 +549,6 @@ export function getExtraTools(): ToolDefinition[] {
         },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 1,
       destructive: true,
       handler: async ({ userNote, logIndex }) => {

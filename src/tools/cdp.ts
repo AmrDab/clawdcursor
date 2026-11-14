@@ -28,7 +28,6 @@ export function getCdpTools(): ToolDefinition[] {
         frame: { type: 'string', description: 'Optional: read only inside the iframe whose URL holds this text (a URL or an origin); the way to read a cross-origin iframe.', required: false },
       },
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 0,
       handler: async ({ selector, maxLength, frame }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
@@ -46,7 +45,6 @@ export function getCdpTools(): ToolDefinition[] {
         frame: { type: 'string', description: FRAME_DESC, required: false },
       },
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 1,
       handler: async ({ selector, value, frame }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
@@ -64,7 +62,6 @@ export function getCdpTools(): ToolDefinition[] {
         javascript: { type: 'string', description: 'JavaScript code to evaluate in the page', required: true },
       },
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 1,
       destructive: true,
       handler: async ({ javascript }, ctx) => {
@@ -89,7 +86,6 @@ export function getCdpTools(): ToolDefinition[] {
         frame: { type: 'string', description: FRAME_DESC, required: false },
       },
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 0,
       handler: async ({ selector, timeout, frame }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
@@ -103,7 +99,6 @@ export function getCdpTools(): ToolDefinition[] {
       description: 'List all open browser tabs with their URLs and titles.',
       parameters: {},
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 0,
       handler: async (_params, ctx) => {
         // Connected → the driver's own browser, whichever port/instance that is
@@ -134,7 +129,6 @@ export function getCdpTools(): ToolDefinition[] {
         target: { type: 'string', description: 'URL or title substring to match', required: true },
       },
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 1,
       handler: async ({ target }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };
@@ -156,7 +150,6 @@ export function getCdpTools(): ToolDefinition[] {
         amount: { type: 'number', description: 'Pixels to scroll (default: 500)', required: false },
       },
       category: 'browser',
-      compactGroup: 'browser',
       safetyTier: 1,
       handler: async ({ direction, amount }, ctx) => {
         if (!(await ctx.cdp.isConnected())) return { text: 'Not connected to CDP. Call cdp_connect first.', isError: true };

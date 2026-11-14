@@ -253,7 +253,6 @@ export function getBatchTools(): ToolDefinition[] {
         maxSteps: { type: 'number', description: `Hard cap on executed steps (default ${DEFAULT_MAX_STEPS}).`, required: false },
       },
       category: 'orchestration',
-      compactGroup: 'system',
       safetyTier: 0, // the batch itself is inert; the pill shows when a STEP acts (batchActs).
       handler: async (params, ctx: ToolContext): Promise<ToolResult> => {
         // `steps` arrives as a JSON string (constrained schema) or, from clients
