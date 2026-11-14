@@ -8,7 +8,7 @@
  * should reference raw process names — they go through this table.
  */
 
-import { normalizeAppName } from './normalize';
+import { normalizeAppName } from './app-name-normalize';
 
 export interface AppAlias {
   /** Process names to look for when checking "is this app running?". */

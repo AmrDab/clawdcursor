@@ -19,7 +19,7 @@
 import type { PlatformAdapter } from './types';
 import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
 import { quoteScreenText } from '../core/untrusted-screen-content';
-import { sleep } from '../core/sleep';
+import { sleep } from '../sleep';
 
 export interface SelectOptionResult {
   success: boolean;

@@ -10,7 +10,7 @@
  */
 import type { PlatformAdapter } from '../platform/types';
 import { quoteScreenText } from '../core/untrusted-screen-content';
-import { sleep } from '../core/sleep';
+import { sleep } from '../sleep';
 
 /** Clipboards differ in line endings and trailing whitespace (Windows reads come back trimmed). */
 const same = (a: string, b: string): boolean => a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim();

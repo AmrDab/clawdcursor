@@ -45,7 +45,7 @@ import {
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
 import { windowTextIncludes } from './window-text';
-import { sleep } from '../core/sleep';
+import { sleep } from '../sleep';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
@@ -1118,7 +1118,7 @@ export class MacOSAdapter implements PlatformAdapter {
   ): Promise<{ pid?: number; title?: string; handle?: number | string } | null> {
     // Prefer the alias's curated `searchTerm` (or `macOSAppName`); fall back
     // to the stripped bundle name. Keeps the launcher app-agnostic — adding
-    // apps still means a row in `aliases.ts`, not platform code. Without the
+    // apps still means a row in `app-aliases.ts`, not platform code. Without the
     // trailing `.app` Spotlight ranks the bundle correctly — typing
     // `Calculator.app` matches a Finder hit, `Calculator` the app itself.
     const searchText = (searchTermHint && searchTermHint.trim())

@@ -16,7 +16,7 @@ import request from 'supertest';
 import { createUtilityServer } from '../src/surface/http-utility';
 import { initServerToken } from '../src/surface/auth';
 import { DEFAULT_CONFIG } from '../src/types';
-import { VERSION } from '../src/surface/version';
+import { VERSION } from '../src/version';
 
 let token: string;
 beforeAll(() => {

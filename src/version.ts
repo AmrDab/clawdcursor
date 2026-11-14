@@ -5,7 +5,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { getPackageRoot } from '../paths';
+import { getPackageRoot } from './paths';
 
 let cachedVersion: string | null = null;
 

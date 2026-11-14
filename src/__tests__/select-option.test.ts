@@ -6,7 +6,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { selectOption } from '../platform/select-option';
 
-// The waits between steps (core/sleep.ts) run on fake time: a call is driven to its end at once.
+// The waits between steps (src/sleep.ts) run on fake time: a call is driven to its end at once.
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 async function settled<T>(p: Promise<T>): Promise<T> {

@@ -6,7 +6,7 @@
  * host goes; the daemon holds a lock, checks its port, mints the token and serves the HTTP routes.
  */
 import pc from 'picocolors';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import { e } from './format';
 import { resolveConfig } from '../config';
 import type { ToolContext } from '../tools/types';

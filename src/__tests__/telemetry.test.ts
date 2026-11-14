@@ -22,7 +22,7 @@ import {
   __setSenderForTests, COMMON_FIELDS, SENT_FIELDS, STATE_FILE, SPOOL_FILE, TELEMETRY_URL,
 } from '../core/observability/telemetry';
 import { getPackageRoot } from '../paths';
-import { VERSION } from '../surface/version';
+import { VERSION } from '../version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { withSteps, timeWait } from '../core/observability/steps';
 import worker, { validate, validEvent, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';

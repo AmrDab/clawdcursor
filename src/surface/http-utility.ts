@@ -6,7 +6,7 @@
 
 import express from 'express';
 import { dashboardPage } from './dashboard';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import { e } from './format';
 import { pauseGate, type PauseAnswer } from '../core/pause-gate';
 import { stopControl } from '../core/control';

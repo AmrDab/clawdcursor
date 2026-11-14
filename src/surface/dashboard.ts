@@ -6,7 +6,7 @@
  */
 
 import type { RequestHandler } from 'express';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 
 /** GET /: the page, and the daemon's token as an httpOnly cookie its requests carry. */
 export function dashboardPage(getToken?: () => string): RequestHandler {

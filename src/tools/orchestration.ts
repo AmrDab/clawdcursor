@@ -7,7 +7,7 @@ import { quoteScreenText } from '../core/untrusted-screen-content';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
-import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../core/router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../platform/app-aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 import { timeWait } from '../core/observability/steps';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';

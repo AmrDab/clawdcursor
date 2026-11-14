@@ -14,7 +14,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { powershellExe, psOpts } from './ps-spawn';
-import { appNameRefusal } from '../core/router/aliases';
+import { appNameRefusal } from './app-aliases';
 
 const execFileAsync = promisify(execFile);
 

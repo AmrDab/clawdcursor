@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as readline from 'readline';
-import { getVersion } from './version';
+import { getVersion } from '../version';
 import { TASK_LOGS_DIR, REPORTS_DIR } from '../paths';
 import { listSessions, readSession, type SessionTally } from './session-log';
 import { system32Exe } from '../platform/ps-spawn';

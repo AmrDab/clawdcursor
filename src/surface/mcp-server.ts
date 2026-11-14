@@ -10,7 +10,7 @@
 
 import type express from 'express';
 import type { ZodTypeAny } from 'zod';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
 import type { ParameterDef } from '../tools/types';
 import { getAllTools, getCompactSurface } from '../tools/registry';

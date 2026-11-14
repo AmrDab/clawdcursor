@@ -4,7 +4,7 @@
  * is the tool announced as destructive — so a path is refused here, on every OS, and the agent is pointed to open_file.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { appNameRefusal } from '../core/router/aliases';
+import { appNameRefusal } from '../platform/app-aliases';
 import { getOrchestrationTools } from '../tools/orchestration';
 import { resolveInstalledWindowsApp, isAppShapedStartEntry } from '../platform/win-app-resolve';
 import { readFileSync } from 'node:fs';

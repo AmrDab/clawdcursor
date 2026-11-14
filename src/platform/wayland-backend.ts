@@ -41,7 +41,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { modifierOf, type Modifier } from './keys';
-import { sleep } from '../core/sleep';
+import { sleep } from '../sleep';
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 5_000;

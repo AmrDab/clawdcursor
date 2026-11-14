@@ -59,7 +59,7 @@ process.on('unhandledRejection', (reason: any) => {
 
 import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
-import { VERSION } from './version';
+import { VERSION } from '../version';
 import { authHeaders } from './auth';
 import dotenv from 'dotenv';
 import pc from 'picocolors';

@@ -35,7 +35,7 @@ import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
 import { missText, untrusted, targetOf, targetText } from '../../core/miss-text';
-import { sleep } from '../../core/sleep';
+import { sleep } from '../../sleep';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;

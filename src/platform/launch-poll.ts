@@ -17,7 +17,7 @@
 
 import type { WindowInfo } from './types';
 import { appIdentity, ownsWindow, type AppIdentityHints } from './app-identity';
-import { sleep } from '../core/sleep';
+import { sleep } from '../sleep';
 
 /**
  * How often the diff-and-poll loop re-checks `listWindows()`.

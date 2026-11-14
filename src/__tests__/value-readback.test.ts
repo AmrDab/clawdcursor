@@ -10,7 +10,7 @@ import { buildUnifiedTools } from '../tools/projected/tools';
 import { readBackTyped, fieldRead } from '../tools/paste-guard';
 import { classifyResult } from '../core/result-codes';
 
-// The waits between steps (core/sleep.ts) run on fake time: a call is driven to its end at once.
+// The waits between steps (src/sleep.ts) run on fake time: a call is driven to its end at once.
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 async function settled<T>(p: Promise<T>): Promise<T> {
