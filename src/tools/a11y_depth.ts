@@ -1,5 +1,5 @@
 /**
- * Tranche 2 — accessibility-depth MCP tools: one element by name, and the
+ * Accessibility-depth MCP tools: one element by name, and the
  * children of a named element.
  */
 
@@ -72,10 +72,6 @@ export function getA11yDepthTools(): ToolDefinition[] {
     // containment inside the parent's bounds. Pragmatic — works for most
     // container→child cases (dialog children, menu items, list items) —
     // without requiring adapter-script changes.
-    //
-    // When the parent element has zero bounds or is not found, returns
-    // an empty list. The agent can always fall back to find_element for
-    // free-form searching.
 
     {
       name: 'a11y_list_children',
@@ -108,8 +104,7 @@ export function getA11yDepthTools(): ToolDefinition[] {
         // position, so [0] is often NOT the element the caller named (live
         // 2026-06-07: list_children("Choose your background color") resolved to
         // the "Back" button at [0] → zero children). Prefer an exact name match,
-        // then the largest-area match (a container, the likely parent), before
-        // falling back to [0]. OS-agnostic — operates on the returned elements.
+        // then the largest-area match (a container, the likely parent).
         const wantName = String(parentName).trim().toLowerCase();
         const area = (e: typeof parents[number]) => e.bounds.width * e.bounds.height;
         const parent =
@@ -160,16 +155,13 @@ export function getA11yDepthTools(): ToolDefinition[] {
         const parentArea = parent.bounds.width * parent.bounds.height;
 
         const children = tree.filter(el => {
-          // Skip the parent itself.
           if (el.name === parent.name && el.bounds.x === px && el.bounds.y === py) return false;
           if (el.bounds.width <= 0 || el.bounds.height <= 0) return false;
-          // Geometric containment.
           const ex = el.bounds.x;
           const ey = el.bounds.y;
           const er = ex + el.bounds.width;
           const eb = ey + el.bounds.height;
           if (ex < px || ey < py || er > pr || eb > pb) return false;
-          // Skip obvious ancestors (element larger than parent).
           if (el.bounds.width * el.bounds.height >= parentArea) return false;
           return true;
         });

@@ -44,16 +44,11 @@ export function getOrchestrationTools(): ToolDefinition[] {
         if (notAName) return { text: `open_app: ${notAName}`, isError: true };
 
         // Resolve through the canonical alias table so "Notepad" / "notepad" /
-        // "Calculator" / "calc" all map to the right launch hints. The MCP
-        // open_app used to call `Start-Process <name>` directly, which fails
-        // for UWP apps (Calculator, Win11 Notepad) and is case-sensitive on
-        // PowerShell's Start-Process arg. The alias table + platform adapter
-        // is the same path the autonomous agent-loop uses.
+        // "Calculator" / "calc" all map to the right launch hints. `Start-Process
+        // <name>` alone fails for UWP apps (Calculator, Win11 Notepad) and is
+        // case-sensitive on PowerShell's Start-Process arg.
         const alias = resolveAlias(rawName);
 
-        // If we have a PlatformAdapter (we always do post-v0.9 init), use it.
-        // Falls back to the old execFile path only when the adapter isn't
-        // available (shouldn't happen in normal operation).
         if (ctx.platform && typeof ctx.platform.launchApp === 'function') {
           let launchName = rawName;
           if (alias) {
@@ -88,7 +83,7 @@ export function getOrchestrationTools(): ToolDefinition[] {
           }
         }
 
-        // Fallback: pre-adapter path (kept for safety, should be unreachable).
+        // No PlatformAdapter (should be unreachable): start the app directly.
         try {
           if (process.platform === 'win32') {
             const exe = alias?.executable ?? rawName;

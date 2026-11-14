@@ -23,7 +23,7 @@
  * Selection:
  *   `clawdcursor mcp`             → granular tools (back-compat)
  *   `clawdcursor mcp --compact`   → compound tools (this file)
- *   GET /tools?mode=compact      → REST gets the same compact schemas
+ *   `clawdcursor start --compact` → the HTTP /mcp endpoint serves them too (also CLAWD_MCP_COMPACT=1)
  *
  * Extending: a new granular tool gets a route below under its compound (and a cost class, cost-class.ts).
  */
@@ -103,16 +103,13 @@ const ACCESSIBILITY_ACTIONS: ActionRoute[] = [
   { action: 'state',          delegate: 'get_element_state' },
   { action: 'list_children',  delegate: 'a11y_list_children', argRemap: { name: 'parentName' } },
   { action: 'wait_for',       delegate: 'wait_for_element' },
-  // el_NN UI State Compiler (v1.5.0) — the flagship perception substrate. These
-  // were granular-only, leaving compact-surface agents unable to reach the
-  // {element_id, snapshot_id} ref path the `invoke`/`set_value` actions accept
-  // (gauntlet F1). compile_ui fuses a11y+OCR into one ranked map with stable
-  // ids; the finders locate a target semantically and return an el_NN to act on.
+  // el_NN UI State Compiler: compile_ui fuses a11y+OCR into one ranked map with stable
+  // ids; the finders locate a target semantically and return an el_NN to act on (the
+  // {element_id, snapshot_id} ref the `invoke`/`set_value` actions accept).
   { action: 'compile_ui',     delegate: 'compile_ui' },
   { action: 'find_button',    delegate: 'find_action_button' },
   { action: 'find_field',     delegate: 'find_input_field' },
   // Smart auto-fallback (OCR → a11y → CDP, by element text — no coordinates).
-  // Restores the smart_* ergonomics to the recommended compound surface.
   { action: 'smart_click',    delegate: 'smart_click' },
   { action: 'smart_type',     delegate: 'smart_type' },
   { action: 'smart_read',     delegate: 'smart_read' },
@@ -150,7 +147,7 @@ const SYSTEM_ACTIONS: ActionRoute[] = [
   // Hand the desktop to the user at a roadblock (sign-in, 2FA, CAPTCHA) and
   // continue when they click Resume on screen.
   { action: 'pause_for_user',  delegate: 'pause_for_user' },
-  // v0.8.2 — Electron/WebView2 bridge
+  // Electron/WebView2 bridge
   { action: 'detect_webview',  delegate: 'detect_webview_apps' },
   { action: 'relaunch_with_cdp', delegate: 'relaunch_with_cdp' },
   // URI escape hatches — accomplish an intent WITHOUT driving UI by dispatching
@@ -209,7 +206,7 @@ function buildCompoundSchema(
 
   for (const route of routes) {
     const granular = getTool(route.delegate);
-    if (!granular) continue; // Defensive: unknown delegate (shouldn't happen).
+    if (!granular) continue;
     for (const [pname, pdef] of Object.entries(granular.parameters)) {
       // A delegate's own `action` (invoke_element's click|set-value|get-value…) is not the compound's: merged in, it
       // published `accessibility {action:"click"}`, which no route serves (audit 2026-11-05).
@@ -264,7 +261,7 @@ function buildCompoundSchema(
       }
       schema[targetName] = {
         ...pdef,
-        required: false, // Every arg is optional on the compound — sub-actions enforce their own.
+        required: false,
         description: pdef.description,
       };
     }
@@ -311,17 +308,10 @@ function actionCatalog(routes: ActionRoute[]): string {
 // ─── Compound dispatcher ───────────────────────────────────────────
 
 /**
- * Shared runtime: look up the granular tool for a compact (compound,
- * action) pair, optionally remap args, then hand off. Surfacing the
- * same ToolResult contract the granular tool returns.
- */
-/**
  * Index of every compound's action table — lets a misrouted action point the
  * caller at the compound that actually owns it (e.g. `system open_app` →
  * "that action is on `window`"), instead of a dead-end "unknown action".
  */
-// Exported so the schema-invariant test can iterate the LIVE tables instead of
-// a hand-maintained copy that silently drifts (review 2026-06-11).
 export const COMPOUND_ROUTE_INDEX: Record<string, ActionRoute[]> = {
   computer: COMPUTER_ACTIONS,
   accessibility: ACCESSIBILITY_ACTIONS,
@@ -420,6 +410,11 @@ export function renameJsonAdvice(text: string, compound: string): string {
   return out;
 }
 
+/**
+ * Shared runtime: look up the granular tool for a compact (compound,
+ * action) pair, optionally remap args, then hand off. Surfacing the
+ * same ToolResult contract the granular tool returns.
+ */
 async function dispatchCompound(
   compoundName: string,
   routes: ActionRoute[],
@@ -453,7 +448,6 @@ async function dispatchCompound(
     return { text: `${compoundName}: delegate "${route.delegate}" not registered`, isError: true };
   }
 
-  // Strip the `action` key + apply any remapping before forwarding.
   const forwarded: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
     // `shot` is checked by the MCP wrapper / batch (screen-guard.ts), not by the granular tool.
@@ -502,10 +496,6 @@ async function dispatchCompound(
   // declared param arriving MISSING, this one catches an undeclared param
   // arriving IGNORED. Warn rather than error — callers passing a surplus arg
   // work today, and failing them would break a running agent mid-task.
-  //
-  // `expect` is exempt only where the delegate checks it (projected System B
-  // tools, honorsExpect — they take it without declaring it). On a System A
-  // delegate it would be dropped, so it is reported like any ignored argument.
   const declared = new Set(Object.keys(granular.parameters));
   // `expect` is checked — by the delegate, or below after the action. Only with no platform to check it against is it
   // reported as ignored, never dropped in silence.

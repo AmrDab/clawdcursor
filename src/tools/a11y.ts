@@ -93,9 +93,6 @@ export function pageTextPart(text: string, from: string, opts: { find?: unknown;
  * / no page), an empty array when CDP responded but had no matches, or an
  * array of UiElement-shaped results synthesized from DOM nodes. The caller
  * decides how to surface "(no elements found)" vs the legitimate empty case.
- *
- * Note: bounding rects come back in CSS pixels; the existing `elementLine`
- * helper already expects unscaled coords, so no conversion is needed.
  */
 async function queryCdpDom(
   ctx: ToolContext,
@@ -163,10 +160,9 @@ async function queryCdpDom(
       name: h.name || '',
       controlType: h.controlType,
       bounds: h.bounds,
-      // The CSS-pixel rect is already in viewport coordinates relative to the
-      // browser content area. We don't have absolute screen coords here — the
-      // formatted output flags this with a [via CDP DOM] prefix so callers
-      // know to translate before clicking. smart_click already handles this.
+      // The CSS-pixel rect is in viewport coordinates relative to the
+      // browser content area, not screen coordinates: the result's first
+      // line says the coords are viewport-relative.
     } as UiElement));
   } catch {
     return null;
@@ -406,8 +402,7 @@ export function getA11yTools(): ToolDefinition[] {
           : await ctx.a11y.readClipboard();
         if (!raw) return { text: '(clipboard empty or non-text)' };
         // Clipboard content is user/third-party data, not instructions — wrap it
-        // so an injected "ignore your task and…" payload is framed as data on the
-        // MCP route too (parity with the System B perception wrapping, gauntlet F7).
+        // so an injected "ignore your task and…" payload is framed as data.
         return { text: wrapUntrustedScreenContent(raw) };
       },
     },
@@ -491,7 +486,6 @@ export function getA11yTools(): ToolDefinition[] {
       handler: async ({ processName, processId, title }, ctx) => {
         await ctx.ensureInitialized();
 
-        // Find the target window
         const windows = await ctx.a11y.getWindows(true);
         let target = (windows ?? []).find((w: any) => {
           if (processId && w.processId === processId) return true;
@@ -505,7 +499,6 @@ export function getA11yTools(): ToolDefinition[] {
         // Focus first (required for minimize shortcut), then minimize
         await ctx.a11y.focusWindow(undefined, target.processId).catch(() => {});
         await new Promise(r => setTimeout(r, 200));
-        // Cross-platform: Super+Down (Windows/Linux), Cmd+M (macOS)
         const minimizeKey = process.platform === 'darwin' ? 'cmd+m' : 'super+down';
         await ctx.desktop.keyPress(minimizeKey);
 

@@ -227,10 +227,6 @@ export function getAgentTools(): ToolDefinition[] {
           await ctx.ensureInitialized();
           const frame = await ctx.desktop.captureForLLM();
           setLastFrame(null);   // image coords now refer to this primary capture
-          // captureForLLM returns { buffer, scaleFactor, llmWidth, llmHeight,
-          // format }. Format is configured per-capture (`'jpeg'` by default,
-          // sometimes `'png'`); use it to set the correct mimeType instead
-          // of the previous hardcoded 'image/png' which lied for the JPEG path.
           const mimeType = frame.format === 'png' ? 'image/png' : 'image/jpeg';
           // The one capture path (core/fence.ts): under the test fence only the fenced window is shown.
           const ratio = Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio);

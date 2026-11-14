@@ -3,7 +3,7 @@
  *
  * Coordinate system: All mouse tools accept IMAGE-SPACE coordinates
  * (matching the downscaled screenshots from desktop_screenshot).
- * The server auto-scales to Windows LOGICAL coordinates via mouseScaleFactor.
+ * toMouse (types.ts) maps them to the mouse's space; space:"screen" passes through.
  */
 
 import { fenceImage } from '../core/fence';
@@ -29,16 +29,6 @@ const uncheckedNote = (): string => lastCaptureUnchecked()
   ? '\n(Screen Recording could not be checked on this Mac — if this image shows only the desktop background, the app running clawdcursor needs Screen Recording.)'
   : '';
 
-/**
- * Coordinate space for pointer/region tools. Mirrors COORD_SPACE_SCHEMA on the
- * System B tools so the `computer` compound means the same thing on every
- * action that takes coordinates.
- *
- * This existed only on click/drag/scroll. The System A pointer tools below
- * published `space` through the compound's unioned schema but ignored it and
- * ALWAYS image-scaled, so a caller passing a11y-snapshot (physical) coords got
- * them scaled a second time and the pointer landed on a different control.
- */
 /** A screenshot is the last resort: a target with a visible label is reached by name, not by the coordinates this image gives. */
 const LABEL_TAIL = ' If the target has a visible label, click it with smart_click {"target":"<label>"} instead of coordinates.';
 
@@ -71,6 +61,11 @@ function displayRefusal(displays: Display[], explicit: number | undefined, targe
   return null;
 }
 
+/**
+ * Coordinate space for pointer/region tools. Mirrors COORD_SPACE_SCHEMA on the
+ * System B tools so the `computer` compound means the same thing on every
+ * action that takes coordinates.
+ */
 export const SPACE_PARAM = {
   type: 'string' as const,
   enum: ['screen', 'image'],

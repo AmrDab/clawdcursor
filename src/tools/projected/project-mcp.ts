@@ -1,25 +1,6 @@
 /**
- * project-mcp.ts — Project System B (agent-loop) UnifiedTools onto the
- * System A (MCP/REST) ToolDefinition surface.
- *
- * src/tools/registry.ts projects the agent-loop tools through it. The public exports:
- *
- *   jsonSchemaToParamDefs(inputSchema)
- *     Convert a UnifiedTool.inputSchema (raw JSON Schema object) into the
- *     Record<string, ParameterDef> shape ToolDefinition expects.
- *
- *   toolContextToAgent(ctx)
- *     Build a synthetic AgentToolContext from a ToolContext so a projected
- *     handler can call the System B execute() function.
- *
- *   unifiedToToolResult(r)
- *     Map a UnifiedToolResult back to the ToolResult shape the MCP surface
- *     expects.
- *
- *   projectToToolDefinition(t)
- *     Assemble a complete ToolDefinition from a UnifiedTool + TOOL_META.
- *     The handler bridges ToolContext → AgentToolContext → UnifiedToolResult →
- *     ToolResult in a single async call.
+ * project-mcp.ts — turn the projected UnifiedTools (tools.ts) into ToolDefinitions for the MCP surface.
+ * src/tools/registry.ts projects them through projectToToolDefinition.
  */
 
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
@@ -34,19 +15,18 @@ import { expectRefusal, checkExpect } from '../../core/sense/reactive-check';
  * Record<string, ParameterDef> shape that ToolDefinition.parameters expects.
  *
  * Supported JSON Schema property types: "string" | "number" | "boolean" | "array".
- * Properties missing a supported type default to "string" with a note.
+ * Properties missing a supported type default to "string".
  * The `required` array in the schema is used to set ParameterDef.required.
  * `enum` is preserved when all values are strings.
  *
  * Description resolution order (per parameter):
- *   1. System B inputSchema property's own description (if non-empty).
- *   2. `paramDescriptions[key]` harvested from the corresponding System A
- *      ToolDefinition (passed as the optional second argument).
+ *   1. The inputSchema property's own description (if non-empty).
+ *   2. `paramDescriptions[key]` (TOOL_META, passed as the optional second argument).
  *   3. Empty string fallback.
  *
  * @param inputSchema - The raw JSON Schema object from UnifiedTool.inputSchema.
  * @param paramDescriptions - Optional per-parameter fallback descriptions
- *   harvested from the System A ToolDefinition (TOOL_META[name].paramDescriptions).
+ *   (TOOL_META[name].paramDescriptions).
  * @returns A Record mapping parameter names to ParameterDef instances.
  */
 export function jsonSchemaToParamDefs(
@@ -60,10 +40,8 @@ export function jsonSchemaToParamDefs(
   for (const [key, raw] of Object.entries(props)) {
     const prop = raw as Record<string, unknown>;
     const rawType = typeof prop.type === 'string' ? prop.type : 'string';
-    // Narrow to ParameterDef's allowed types; fall back to 'string'.
     const type: 'string' | 'number' | 'boolean' | 'array' =
       rawType === 'number' || rawType === 'boolean' || rawType === 'array' ? rawType : 'string';
-    // Prefer System B's own description; fall back to harvested System A description.
     const ownDescription = typeof prop.description === 'string' ? prop.description : '';
     const description = ownDescription || paramDescriptions?.[key] || '';
     const def: ParameterDef = {
@@ -81,7 +59,6 @@ export function jsonSchemaToParamDefs(
       const strEnum = (prop.enum as unknown[]).filter(v => typeof v === 'string') as string[];
       if (strEnum.length > 0) def.enum = strEnum;
     }
-    // Preserve numeric constraints.
     if (typeof prop.minimum === 'number') def.minimum = prop.minimum;
     if (typeof prop.maximum === 'number') def.maximum = prop.maximum;
 
@@ -96,17 +73,15 @@ export function jsonSchemaToParamDefs(
  *
  * Called once per projected handler invocation. Awaits
  * ctx.ensureInitialized() first to guarantee subsystems are ready
- * before the System B tool execute() accesses ctx.platform.*.
+ * before the tool's execute() accesses ctx.platform.*.
  *
- * @param ctx - The ToolContext injected by the MCP server / REST handler.
- * @returns A fully populated AgentToolContext ready for System B tool execute().
+ * @param ctx - The ToolContext injected by the MCP server.
+ * @returns A fully populated AgentToolContext for the tool's execute().
  */
 export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolContext> {
-  // Guarantee all subsystems are initialized (lazy init gate).
   await ctx.ensureInitialized();
 
-  // Derive the platform adapter. The `platform` field was added in Tranche 1A
-  // and is present on every modern ToolContext. Guard defensively for tests.
+  // ToolContext.platform is optional (tests build contexts without it).
   const platform = ctx.platform;
   if (!platform) {
     throw new Error(
@@ -115,10 +90,8 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
     );
   }
 
-  // Derive screen dimensions. System B tools use ctx.screen for coordinate math.
-  // ToolContext exposes getScreenSize() on ctx.desktop (NativeDesktop).
   let screen: AgentToolContext['screen'];
-  // The scale the System A tools click with: the latest screenshot's, whatever its max_edge.
+  // The scale the src/tools/*.ts tools click with: the latest screenshot's, whatever its max_edge.
   let imageToMouse: number | undefined;
   try {
     const size = ctx.desktop.getScreenSize() as { width: number; height: number };
@@ -155,8 +128,8 @@ export async function toolContextToAgent(ctx: ToolContext): Promise<AgentToolCon
  * - success=false maps to isError=true.
  * - targetLabel is not forwarded.
  *
- * @param r - The UnifiedToolResult from a System B tool execute() call.
- * @returns A ToolResult ready for the MCP / REST transport.
+ * @param r - The UnifiedToolResult from a projected tool's execute() call.
+ * @returns A ToolResult ready for the MCP transport.
  */
 export function unifiedToToolResult(r: UnifiedToolResult): ToolResult {
   return {
@@ -166,18 +139,8 @@ export function unifiedToToolResult(r: UnifiedToolResult): ToolResult {
 }
 
 /**
- * Project a System B UnifiedTool into a System A ToolDefinition.
- *
- * Assembles:
- *   - name: TOOL_META[t.name].mcpName ?? t.name
- *   - description: t.description (System B already has good descriptions)
- *   - parameters: via jsonSchemaToParamDefs(t.inputSchema)
- *   - category, safetyTier, destructive, costClass: from TOOL_META
- *   - handler: bridges ToolContext → AgentToolContext → t.execute() → ToolResult
- *
- * Terminal actions (done, give_up, cannot_read) and vision compound tools
- * (mouse, keyboard, window) should NOT be passed to this function — they have
- * no counterpart on the MCP surface or have their own projection path.
+ * Project a UnifiedTool into a ToolDefinition: name from TOOL_META[t.name].mcpName ?? t.name, category / tiers /
+ * costClass from TOOL_META.
  *
  * Throws if t.name has no TOOL_META entry (enforced by the coverage test).
  *
@@ -210,8 +173,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     // Invalidate the shared UIMap holder only when the screen-changing action
     // actually TOOK (pre-expect outcome — a DEVIATION still means the input
     // was dispatched). A rejected el_NN ref / failed dispatch changed nothing
-    // and must not stale a still-valid map (parity with the agent loop's
-    // outcome-gated invalidation; audit finding E/A1).
+    // and must not stale a still-valid map.
     // A typed-but-not-submitted result (read-back held Return) did change the field.
     const typedNotSubmitted = !executed && /^Typed \d+ chars /.test(result.text) && / — Return not pressed\./.test(result.text);
     if (t.changesScreen && (executed || typedNotSubmitted)) ctx.uiMaps?.invalidate();

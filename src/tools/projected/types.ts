@@ -1,19 +1,19 @@
 /**
- * Types of the agent-loop tools (tools.ts), which src/tools/registry.ts projects onto the MCP surface.
+ * Types of the projected tools (tools.ts), which src/tools/registry.ts projects onto the MCP surface.
  */
 
 import type { PlatformAdapter } from '../../platform/types';
 import type { CDPDriver } from '../../platform/cdp-driver';
 
-/** Environment the agent tools see at runtime (project-mcp.ts toolContextToAgent builds it). */
+/** Environment the projected tools see at runtime (project-mcp.ts toolContextToAgent builds it, per call). */
 export interface AgentToolContext {
   platform: PlatformAdapter;
-  /** Screen size — cached on first use; used for coordinate math in click/drag. */
+  /** Screen size, for coordinate math and the coordinate breadcrumb in results. */
   screen: { logicalWidth: number; logicalHeight: number; physicalWidth: number; physicalHeight: number; dpiRatio: number };
   /** Optional CDP driver — when present, the browser_* tools drive the
    *  browser via the DOM (selectors, not pixels). Null when the daemon didn't wire CDP. */
   cdp?: CDPDriver | null;
-  /** Session-scoped UIMap cache for safe el_NN element refs (Part 2). */
+  /** Session-scoped UIMap cache for safe el_NN element refs. */
   uiMaps?: import('../../core/sense/ui-map-holder').UIMapHolder;
   /** Test-only platform override consumed by imageScale() (defaults to
    *  process.platform in production). Lets coordinate-scaling tests pin the
@@ -23,16 +23,12 @@ export interface AgentToolContext {
   imageToMouse?: number;
 }
 
-/**
- * A unified tool — executable against PlatformAdapter,
- * LLM-visible. One source of truth for the full toolbox.
- */
+/** A projected tool: executes against PlatformAdapter; project-mcp.ts turns it into a ToolDefinition. */
 export interface UnifiedTool {
-  /** Tool name as exposed to the LLM. */
+  /** Tool name; TOOL_META.mcpName (tool-meta.ts) replaces it on the MCP surface where they differ. */
   name: string;
-  /** Description the LLM sees. Kept under ~140 chars for token budget. */
+  /** Published as the MCP tool's description. */
   description: string;
-  /** JSON-Schema for the tool's args. */
   inputSchema: {
     type: 'object';
     properties: Record<string, unknown>;
@@ -41,7 +37,6 @@ export interface UnifiedTool {
   };
   /** True when this tool plausibly changes what's on screen. */
   changesScreen: boolean;
-  /** Execute the tool. */
   execute: (args: Record<string, unknown>, ctx: AgentToolContext) => Promise<UnifiedToolResult>;
 }
 

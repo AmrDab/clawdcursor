@@ -1,6 +1,6 @@
 /**
  * Shared wording for blind-first perception results, used by both tool
- * surfaces (System A registry tools and the projected agent-loop tools).
+ * surfaces (the src/tools/*.ts tools and the projected tools in projected/).
  */
 import type { UiElement } from '../platform/types';
 

@@ -1,34 +1,7 @@
 /**
- * TOOL_META — MCP-surface metadata for every System B (agent-loop) UnifiedTool.
- *
- * WHY THIS FILE EXISTS
- * --------------------
- * The MCP surface (System A, src/tools/*) and the agent-loop (System B,
- * buildUnifiedTools) are currently two separate, parallel codebases. System B
- * has reliability tweaks (coord scaling, hedging guard, focus-guard, OCR
- * fallback, etc.) that System A lacks. The planned Step 3 will project the MCP
- * surface FROM System B tools, eliminating duplication. This file is Step 1 of
- * that refactor: a PURE DATA table mapping every System B tool name to the
- * metadata fields a ToolDefinition carries.
- *
- * project-mcp.ts reads it when src/tools/registry.ts projects these tools onto the MCP surface.
- *
- * NAME DIFFERENCES (System B → System A)
- * ----------------------------------------
- * Where the System B tool name differs from the granular MCP name:
- *   System B name       → MCP (System A) name
- *   list_windows        → get_windows
- *   click               → mouse_click
- *   drag                → mouse_drag
- *   scroll              → mouse_scroll
- *   type                → type_text
- *   key                 → key_press
- *   browser_connect     → cdp_connect
- *   browser_read        → cdp_page_context   (structured DOM listing path)
- *   browser_click       → cdp_click
- *   browser_type        → cdp_type
- *
- * All other System B names match their MCP counterparts exactly.
+ * TOOL_META — MCP-surface metadata for every projected UnifiedTool (tools.ts): the published name where it differs
+ * (mcpName), category, safety tier, cost class and fallback parameter descriptions. project-mcp.ts reads it when
+ * src/tools/registry.ts projects these tools onto the MCP surface.
  */
 
 import type {
@@ -36,11 +9,10 @@ import type {
   ToolDefinition,
 } from '../types';
 
-// Re-use the ToolDefinition category type rather than duplicating it.
 type ToolCategory = ToolDefinition['category'];
 
 /**
- * MCP-surface metadata for a System B UnifiedTool.
+ * MCP-surface metadata for a projected UnifiedTool.
  *
  * All fields mirror the corresponding ToolDefinition fields so a projector can
  * assemble a structurally complete ToolDefinition from (UnifiedTool + ToolMeta).
@@ -48,8 +20,8 @@ type ToolCategory = ToolDefinition['category'];
 export interface ToolMeta {
   /**
    * MCP surface name to use when projecting this tool.
-   * Present ONLY when it differs from the System B tool name.
-   * When absent, use the System B name as-is.
+   * Present ONLY when it differs from the tool's own name.
+   * When absent, the tool's own name is published.
    */
   mcpName?: string;
   /** Tool category for organization (matches ToolDefinition.category). */
@@ -61,21 +33,14 @@ export interface ToolMeta {
   /** Token cost class. */
   costClass: ToolCostClass;
   /**
-   * Per-parameter descriptions harvested from the corresponding System A
-   * ToolDefinition. Used by project-mcp.ts as a fallback when System B's
-   * inputSchema.properties[p].description is absent or empty — so projected
-   * MCP tools retain the rich parameter descriptions that System A had.
-   *
-   * Key: parameter name (matches inputSchema.properties key).
-   * Value: description string to use when System B has none.
+   * Per-parameter fallback descriptions: project-mcp.ts uses one when the tool's
+   * inputSchema.properties[p].description is absent or empty.
    */
   paramDescriptions?: Record<string, string>;
 }
 
 /**
- * Authoritative metadata table for System B UnifiedTool names.
- *
- * Key: System B tool name (as returned by buildUnifiedTools()).
+ * Key: the tool's name in buildUnifiedTools().
  * Value: ToolMeta for the projected MCP surface tool.
  */
 export const TOOL_META: Record<string, ToolMeta> = {
@@ -95,14 +60,12 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     safetyTier: 0,
     costClass: 'inspect',
-    // get_windows has no parameters in System A
   },
 
   // ─── A11Y ACTIONS ──────────────────────────────────────────────────────────
 
   invoke_element: {
-    // System A (smart.ts) invoke_element has category 'window'. The projected tool
-    // preserves this to match the System A behavior — same category, no regression.
+    // Category 'window', as invoke_element was published before it was projected: kept so it does not change.
     category: 'window',
     safetyTier: 1,
     costClass: 'act',
@@ -117,9 +80,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   },
 
   set_field_value: {
-    // a11y input action — same category as System A's a11y_depth.ts set_field_value
-    // (category: 'perception'). 'window' was incorrect; this is an accessibility
-    // write action, not a window-management action.
     category: 'perception',
     safetyTier: 1,
     costClass: 'act',
@@ -251,8 +211,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
       y: 'Y coordinate in image-space',
       button: 'Mouse button to click: "left" (default) or "right"',
       count: 'Click count: 1=single (default), 2=double',
-      // MCP callers omit `space` to get the image-space default (backward-compat).
-      // Pass space:"screen" to use a11y-snapshot coords without scaling.
       space: 'Coordinate space. Omit (default) or pass "image" for screenshot coords (scaled to physical). Pass "screen" for a11y-snapshot coords that are already in physical pixels.',
     },
   },
@@ -304,8 +262,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
-      // MCP surface (key_press) uses the parameter name 'key' for backward-compat.
-      // System B now also accepts 'key' as an alias for 'combo' — both are valid.
       key: 'Key/combo to press (e.g. "Return", "mod+a", "F5"; "mod" is cmd on macOS, ctrl on Windows and Linux). Space-separate combos for a sequence ("Down Down End").',
     },
   },
@@ -335,15 +291,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
   },
 
   minimize_window: {
-    // System B name is 'minimize_window'; the MCP surface distinguishes it as
-    // 'minimize_window_to_taskbar' (routed through the PlatformAdapter, not the
-    // legacy a11y bridge). The separate a11y-bridge 'minimize_window' in
-    // src/tools/a11y.ts is kept as-is; only 'minimize_window_to_taskbar' (from
-    // extras.ts) is re-projected from this System B tool.
+    // Published as minimize_window_to_taskbar: src/tools/a11y.ts serves a different
+    // `minimize_window` (the a11y bridge).
     mcpName: 'minimize_window_to_taskbar',
     category: 'window',
-    // Tier 1 (input): minimizing is reversible — the tier extras.ts and the
-    // window compound already give it. This projected copy still said 2.
+    // Tier 1 (input): minimizing is reversible.
     safetyTier: 1,
     costClass: 'act',
     paramDescriptions: {
@@ -395,10 +347,9 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     safetyTier: 0,
     costClass: 'inspect',
-    // list_displays has no parameters
   },
 
-  // ─── ACCESSIBILITY DEPTH (Tranche 1B) ──────────────────────────────────────
+  // ─── ACCESSIBILITY DEPTH ──────────────────────────────────────
 
   focus_element: {
     category: 'perception',
@@ -476,7 +427,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'keyboard',
     safetyTier: 1,
     costClass: 'act',
-    // undo_last has no parameters
   },
 
   // ─── BROWSER (CDP / DOM) ───────────────────────────────────────────────────
@@ -486,13 +436,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'browser',
     safetyTier: 1,
     costClass: 'act',
-    // browser_connect has no parameters
   },
 
   browser_read: {
-    // Closest System A equivalent is cdp_page_context (structured DOM listing).
-    // cdp_read_text covers the selector-based text path, but cdp_page_context
-    // is the more analogous default path. The projector uses this MCP name.
+    // Published as cdp_page_context (its no-selector path is the structured DOM listing);
+    // cdp_read_text (src/tools/cdp.ts) is a separate tool.
     mcpName: 'cdp_page_context',
     category: 'browser',
     safetyTier: 0,

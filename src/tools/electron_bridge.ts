@@ -1,5 +1,5 @@
 /**
- * v0.8.2 — Electron / WebView2 / WKWebView detection + CDP bridging hints.
+ * Electron / WebView2 / WKWebView detection + CDP bridging hints.
  *
  * Modern "native" apps on Windows and macOS are frequently Electron or
  * WebView2 wrappers around Chromium. Their accessibility trees often
@@ -21,7 +21,7 @@
  * way, but we CAN:
  *
  *   1. Detect which running processes are Electron/WebView2 shells by
- *      process-name heuristics + module snooping (on Windows).
+ *      process-name and window-title heuristics.
  *   2. Scan the common Electron remote-debug port range for already-
  *      enabled /json endpoints.
  *   3. Tell the agent HOW to relaunch the app with debugging enabled
@@ -29,8 +29,8 @@
  *
  * This file ships two tools:
  *   - `detect_webview_apps`  — enumerate candidates + their CDP status
- *   - `attach_webview_cdp`   — discover the debugger URL and connect
- *                              the existing cdp_driver to it
+ *   - `relaunch_with_cdp`    — close the app and relaunch it with a
+ *                              remote-debugging port
  *
  * Linux TODO: the same heuristics apply (look for
  * /proc/{pid}/cmdline containing `--type=renderer` or `.asar`), but
@@ -60,23 +60,15 @@ interface WebViewFingerprint {
 }
 
 const KNOWN_APPS: WebViewFingerprint[] = [
-  // Windows New Outlook — WebView2
   { processNames: ['olk'], titleSubstrings: ['- outlook'], displayName: 'New Outlook', kind: 'webview2' },
   // Teams (v2 is WebView2, v1 was Electron)
   { processNames: ['ms-teams', 'teams'], titleSubstrings: ['microsoft teams'], displayName: 'Microsoft Teams', kind: 'webview2' },
-  // Discord — Electron
   { processNames: ['discord'], titleSubstrings: ['discord'], displayName: 'Discord', kind: 'electron', debugFlag: '--remote-debugging-port=9222' },
-  // Slack — Electron
   { processNames: ['slack'], titleSubstrings: ['slack'], displayName: 'Slack', kind: 'electron', debugFlag: '--remote-debugging-port=9222' },
-  // VS Code — Electron
   { processNames: ['code', 'code - insiders'], titleSubstrings: ['visual studio code'], displayName: 'VS Code', kind: 'electron', debugFlag: '--inspect=9222' },
-  // GitHub Desktop — Electron
   { processNames: ['github desktop', 'githubdesktop'], titleSubstrings: ['github desktop'], displayName: 'GitHub Desktop', kind: 'electron' },
-  // Notion — Electron
   { processNames: ['notion'], titleSubstrings: ['notion'], displayName: 'Notion', kind: 'electron' },
-  // Obsidian — Electron
   { processNames: ['obsidian'], titleSubstrings: ['obsidian'], displayName: 'Obsidian', kind: 'electron' },
-  // Spotify — Chromium shell
   { processNames: ['spotify'], titleSubstrings: ['spotify'], displayName: 'Spotify', kind: 'chromium-shell' },
 ];
 
@@ -169,7 +161,6 @@ export function getElectronBridgeTools(): ToolDefinition[] {
         const windows = await ctx.platform.listWindows();
         const candidates: WebViewCandidate[] = [];
 
-        // Port scan is cheap; do it once and reuse.
         const cdpPort = await findLiveCdpPort();
 
         const seenPids = new Set<number>();
@@ -224,15 +215,10 @@ export function getElectronBridgeTools(): ToolDefinition[] {
         }
         const p = typeof port === 'number' ? port : 9222;
         const name = String(appName);
-        // Try to close the existing instance gracefully.
         await ctx.platform.setWindowState('close', { processName: name }).catch(() => false);
-        // Wait briefly for the close to propagate.
         await new Promise(r => setTimeout(r, 600));
 
         try {
-          // Relaunch with the debug flag. On Windows we pass args via launchApp's
-          // url field as a positional argument to Start-Process — adapter handles
-          // the quoting.
           const flag = `--remote-debugging-port=${p}`;
           if (ctx.platform.platform === 'win32') {
             const { spawn } = await import('child_process');
@@ -243,7 +229,6 @@ export function getElectronBridgeTools(): ToolDefinition[] {
             ], psOpts({ stdio: 'ignore', detached: true, windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } }));
             child.unref();
           } else {
-            // macOS / Linux — open -a / direct spawn.
             await ctx.platform.launchApp(name, { url: flag }).catch(() => ({}));
           }
           await new Promise(r => setTimeout(r, 1500));

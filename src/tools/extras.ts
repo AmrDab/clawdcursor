@@ -1,6 +1,5 @@
 /**
- * Tranche 1B tools — thin wrappers over the PlatformAdapter primitives
- * added in Tranche 1A.
+ * Thin wrappers over the PlatformAdapter primitives.
  *
  * Every tool here is OS-agnostic by construction: it calls through
  * `ctx.platform.*` and the adapter decides how to land the action on
@@ -8,7 +7,7 @@
  * Linux wmctrl/xdotool/nut-js).
  *
  * Coordinate convention: all mouse tools here take IMAGE-SPACE coords
- * (matching desktop_screenshot), scaled through `getMouseScaleFactor()`.
+ * (matching desktop_screenshot), scaled through `toMouse`.
  *
  * Every tool here is an input tool (safetyTier 1) unless it only reads; the ones that are destructive by
  * themselves (`open_file`, `open_uri`) say `destructive: true` (see ToolDefinition.destructive).
@@ -264,7 +263,7 @@ export function getExtraTools(): ToolDefinition[] {
             // `explorer.exe <url>` — the latter opens no explorer window, so
             // launchApp's window-find misses and falls back to a Start-menu
             // search (presses Win and types). The resolved browser exe has a
-            // findable window and foregrounds cleanly. See agent-loop open_url.
+            // findable window and foregrounds cleanly.
             const { resolveSchemeHandlerExecutable } = await import('../platform/uri-handler');
             const exe = await resolveSchemeHandlerExecutable('https').catch(() => null);
             await ctx.platform.launchApp(exe ?? 'explorer.exe', { url: u });
@@ -298,16 +297,6 @@ export function getExtraTools(): ToolDefinition[] {
       //   discord:   → Discord
       //   file:      → OS file-association dispatcher
       //   http(s):   → default browser
-      //
-      // This is THE app-agnostic escape route. ONE tool, every app that
-      // registers a protocol handler. The agent does not need to know
-      // which app is configured — the OS routes for us. Zero vision,
-      // zero a11y, zero app-specific code.
-      //
-      // The agent constructs the URI from semantic args. For mailto:
-      // that's to/cc/subject/body. For tel: it's just a number. For
-      // slack: it's a workspace and channel. The agent picks the
-      // scheme; we encode and dispatch.
       name: 'open_uri',
       description: 'Open ANY registered URI (mailto:, tel:, sms:, webcal:, file:, slack:, vscode:, obsidian:, spotify:, zoommtg:, https:, custom-scheme:, ...) via the OS protocol-handler registry. The OS routes to whichever app the user has registered as the handler. Replaces dozens of app-specific shortcuts with one general primitive. Tier 2 (mutation): the OS will dispatch to whatever app is registered for the scheme — that handler may be privileged or destructive (file: opens files which on Windows can execute .exe; vscode: opens a workspace; zoommtg: joins a call). The dispatcher does no scheme allowlist — callers + the agent loop are responsible for not constructing dangerous URIs.',
       parameters: {
@@ -392,8 +381,7 @@ export function getExtraTools(): ToolDefinition[] {
       // build_uri — helper for the common case where the agent has
       // semantic fields (recipient, subject, body) and wants the right
       // URI without doing the encoding itself. Pure: returns the URI as
-      // text, no I/O. Generalizes the old compose_email by parameterizing
-      // the scheme.
+      // text, no I/O.
       name: 'build_uri',
       description: 'Build a properly-encoded URI from a scheme + semantic fields. Returns the URI as text; pair with open_uri to dispatch it. Examples: scheme="mailto" + to/subject/body → RFC 6068 mailto URI. scheme="tel" + path="+15551234" → tel:+15551234. scheme="slack" + team/channel → slack URI.',
       parameters: {
@@ -497,9 +485,7 @@ export function getExtraTools(): ToolDefinition[] {
       },
     },
 
-    // ── DAEMON DIAGNOSTICS (v0.9 PR7.2) ────────────────────────────
-    // These tools replace REST endpoints that the dashboard used to
-    // call directly. They're intentionally minimal.
+    // ── DAEMON DIAGNOSTICS ─────────────────────────────────────────
 
     {
       name: 'logs_recent',

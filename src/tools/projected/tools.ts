@@ -1,5 +1,6 @@
 /**
- * The tools src/tools/registry.ts projects onto the MCP surface (project-mcp.ts), under the agent loop's names.
+ * The tools src/tools/registry.ts projects onto the MCP surface (project-mcp.ts). Where a tool's `name` here differs
+ * from its MCP name (click → mouse_click), TOOL_META.mcpName (tool-meta.ts) gives the published one.
  *
  * Design rules:
  *   - Every mutation goes through PlatformAdapter (OS-agnostic).
@@ -39,7 +40,6 @@ import { missText, untrusted, targetOf, targetText } from '../../core/miss-text'
 const GET_VALUE_MAX = 20_000;
 
 /** Reuse a cost-compatible current UIMap from the holder, or compile a fresh one.
- *  Date.now() is called at the tool-invocation boundary (correct: snapshot is fresh).
  *  Returns null when there is no holder on this context (non-UIMap-aware call sites). */
 async function finderMap(ctx: AgentToolContext, rawMaxCost: unknown) {
   const holder = ctx.uiMaps;
@@ -200,10 +200,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
           const plan = resolveRef(refIds, ctx.uiMaps, Date.now(), 'click', aw);
           if (!plan.ok) return { success: false, text: `invoke_element ref rejected: ${plan.error}`, isError: true };
           if (plan.via === 'name') {
-            // Mirror the by-name activation CASCADE: click → select → toggle.
             // A ref to a ListItem / combo-item / checkbox may not support
-            // InvokePattern, so we try the three activation verbs in order and
-            // stop at the first success — identical logic to the by-name path above.
+            // InvokePattern: the same activation ladder as the by-name path below.
             const { res: refRes, used: refUsed } = await runActivationLadder(
               (action) => ctx.platform.invokeElement({ name: plan.name, action }), ['click', 'select', 'toggle']);
             if (!refRes.success && canClickAtBounds(refRes)) {
@@ -372,7 +370,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       },
     },
 
-    // ─── A11Y DEPTH (Tranche 2) ────────────────────────────────
+    // ─── A11Y DEPTH ────────────────────────────────
     {
       name: 'a11y_expand',
       description: 'Expand a tree node / combo / disclosure by a11y name (UIA ExpandCollapsePattern, AX AXExpanded).',
@@ -646,8 +644,6 @@ export function buildUnifiedTools(): UnifiedTool[] {
         }
         const button = args.button === 'right' ? 'right' : 'left';
         const count = args.count === 2 ? 2 : 1;
-        // SCALE: 'image'/default coords (read off the 1280-wide screenshot) → physical;
-        // 'screen' (a11y coords, already physical) → pass through.
         const space = pointerSpace(args);
         const scale = space === 'image' ? imageScale(ctx) : 1;
         // Image coords go through the last frame (any monitor); screen coords pass through.
@@ -687,9 +683,6 @@ export function buildUnifiedTools(): UnifiedTool[] {
         const space = pointerSpace(args);
         const scale = space === 'image' ? imageScale(ctx) : 1;
 
-        // Stepped path variant: press at the first point, walk the rest,
-        // release at the last (canvas tracing — same gesture the MCP-side
-        // mouse_drag_stepped performs).
         if (args.path !== undefined) {
           let pts: Array<{ x: number; y: number }>;
           try { pts = typeof args.path === 'string' ? JSON.parse(args.path) : args.path as Array<{ x: number; y: number }>; }
@@ -751,7 +744,6 @@ export function buildUnifiedTools(): UnifiedTool[] {
       async execute(args, ctx) {
         const dir = args.direction === 'up' ? 'up' : 'down';
         const amount = typeof args.amount === 'number' ? args.amount : 3;
-        // Default to screen-center when x/y missing; coerce strings via the helper.
         const hasXY = args.x !== undefined || args.y !== undefined;
         const space = pointerSpace(args);
         const scale = space === 'image' ? imageScale(ctx) : 1;
@@ -793,7 +785,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if (!text) return { success: true, text: 'Typed 0 chars' };
         // FAST PATH: paste via the clipboard (one Ctrl/Cmd+V — instant) instead
         // of per-keystroke typing, which is visibly slow on anything longer than
-        // a few chars (~20ms/char). This is the legacy smart_type mechanism.
+        // a few chars (~20ms/char).
         // Save + restore the prior clipboard so a pending copy isn't clobbered
         // (e.g. a copy→paste→type flow). mod+v is portable across OSes.
         // Char-by-char is kept as a fallback for fields that reject paste.
@@ -871,9 +863,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
       inputSchema: {
         type: 'object',
         properties: {
-          // `combo` is the canonical System B name. `key` is accepted as a
-          // backward-compatible alias (matches the MCP surface param name
-          // `key_press.key` and the compound surface alias).
+          // `key` is accepted as an alias of `combo`: the MCP surface param name
+          // `key_press.key` and the compound surface alias.
           combo: { type: 'string', description: 'Key/combo to press (e.g. "Return", "mod+s"). Space-separate for a sequence.' },
           key: { type: 'string', description: 'Alias for combo — accepted for MCP/compound backward-compatibility.' },
           repeat: { type: 'number', minimum: 1, maximum: 100, description: 'Press it this many times (default 1).' },
@@ -885,9 +876,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       },
       changesScreen: true,
       async execute(args, ctx) {
-        // (b) Accept `key` as a backward-compatible alias for `combo`.
         const raw = (args.combo ?? args.key);
-        // (a) Guard: missing or empty argument → actionable error instead of crash.
         if (raw === undefined || raw === null || String(raw).trim() === '') {
           return {
             success: false,
@@ -906,15 +895,15 @@ export function buildUnifiedTools(): UnifiedTool[] {
           return { success: false, isError: true, text: 'key: "repeat" must be a whole number from 1 to 100.' };
         }
         const input = raw.trim();
-        // (b) "+" joins a chord; whitespace separates combos pressed in sequence.
+        // "+" joins a chord; whitespace separates combos pressed in sequence.
         const combos = input.split(/\s+/);
-        // (c) The hard key list (lock / log out / secure attention) is refused in the input layer, for every
-        //     caller: platform/hard-keys.ts, called from guardInputMethods.
+        // The hard key list (lock / log out / secure attention) is refused in the input layer, for every
+        // caller: platform/hard-keys.ts, called from guardInputMethods.
         ctx.platform.takeInputWarning?.();      // a warning left by some earlier keystrokes is not this call's
         for (let i = 0; i < times; i++) {
           for (const c of combos) {
             await ctx.platform.keyPress(c);
-            if (combos.length * times > 1) await sleep(50); // brief gap between sequence steps
+            if (combos.length * times > 1) await sleep(50);
           }
         }
         await sleep(150);
@@ -944,7 +933,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       },
     },
 
-    // ─── WINDOW STATE + BOUNDS (Tranche 1B primitives) ──────────
+    // ─── WINDOW STATE + BOUNDS ──────────
     {
       name: 'maximize_window',
       description: 'Maximize the foreground window (or a matched window). Polite request; WM may interpret.',
@@ -1066,7 +1055,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       },
     },
 
-    // ─── ACCESSIBILITY DEPTH (Tranche 1B) ───────────────────────
+    // ─── ACCESSIBILITY DEPTH ───────────────────────
     {
       name: 'focus_element',
       description: 'Keyboard-focus an element by a11y name. Does NOT raise window — use focus_window first if needed.',
@@ -1127,7 +1116,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
       },
     },
 
-    // ─── MOUSE + KEYBOARD EXTENDED (Tranche 1B) ────────────────
+    // ─── MOUSE + KEYBOARD EXTENDED ────────────────
     {
       name: 'mouse_move_relative',
       description: 'Move cursor by a relative offset (dx, dy). Wayland-safe via cursor cache.',
@@ -1293,9 +1282,8 @@ export function buildUnifiedTools(): UnifiedTool[] {
     // image scaling. These tools operate a DEDICATED, agent-owned browser
     // instance (separate profile + debug port) so they never disturb the
     // user's own windows. They DEGRADE GRACEFULLY: if CDP isn't wired or a
-    // browser can't be launched, they say so and the agent falls back to
-    // read_text / smart_click. Haiku stays the brain — it reads DOM text and
-    // decides; no vision model needed.
+    // browser can't be launched, they say so and point the caller at
+    // ocr_read_screen / smart_click.
     {
       name: 'browser_connect',
       description: 'Open/attach a dedicated browser the agent controls via the DOM (reliable for web pages — no pixels). Call this FIRST for any website task, then use navigate_browser, cdp_page_context, cdp_click, cdp_type. If it fails, fall back to ocr_read_screen/smart_click.',
@@ -1411,7 +1399,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
  * either take 10-20 seconds or hang outright. Pre-scoping to the
  * focused app's pid is almost always what the agent actually wants.
  *
- * Used by every agent-internal tool that calls `findElements` or
+ * Used by every tool here that calls `findElements` or
  * `invokeElement` with an optional `processId` arg.
  */
 async function resolveAgentPid(
@@ -1447,11 +1435,6 @@ async function boundsToClick(
   return vis.ok ? { ok: true, bounds: [vis.bounds.x, vis.bounds.y, vis.bounds.width, vis.bounds.height] } : vis;
 }
 
-/**
- * Try the activation verbs in order until one takes. A miss reports the FIRST verb's reason (the generic "click" the caller
- * asked for), not the last rung's: the last rung is a toggle, and an expandable Button that nothing took was reported as
- * "TogglePattern not supported" (live 2026-11-10) although the element was found.
- */
 /** The state an expand / collapse left the element in, read back by the bridge; says so when it did not change. */
 export function expandNote(data: Record<string, unknown> | undefined): string {
   const state = data?.expandState;
@@ -1469,6 +1452,11 @@ export function canClickAtBounds(res: { data?: Record<string, unknown> }): boole
   return res.data?.reason !== 'invoke_threw' && res.data?.reason !== 'disabled';
 }
 
+/**
+ * Try the activation verbs in order until one takes. A miss reports the FIRST verb's reason (the generic "click" the caller
+ * asked for), not the last rung's: the last rung is a toggle, and an expandable Button that nothing took was reported as
+ * "TogglePattern not supported" (live 2026-11-10) although the element was found.
+ */
 export async function runActivationLadder(
   call: (action: InvokeAction) => Promise<{ success: boolean; bounds?: { x: number; y: number; width: number; height: number }; data?: Record<string, unknown> }>,
   ladder: InvokeAction[],
@@ -1760,13 +1748,12 @@ function truncate(s: string, max: number): string {
  * and falls back to a clean parse otherwise.
  *
  * App-agnostic, OS-agnostic, model-agnostic. Used by every coordinate-taking
- * tool (click, drag, scroll, hover, move).
+ * tool here (click, drag, scroll).
  */
 export function coerceCoord(rawX: unknown, rawY: unknown): { x: number; y: number; warning?: string } {
   const parseOne = (v: unknown): number => {
     if (typeof v === 'number') return v;
     if (typeof v === 'string') {
-      // Strip parens, brackets, leading/trailing whitespace.
       const cleaned = v.replace(/[()[\]\s]/g, '');
       const n = Number(cleaned);
       return Number.isFinite(n) ? n : NaN;

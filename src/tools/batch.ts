@@ -1,12 +1,12 @@
 /**
  * Guarded action-sequence executor + the `batch` tool.
  *
- * Lets an AI driving clawdcursor (over MCP, or the autonomous loop) submit an
+ * Lets an AI driving clawdcursor over MCP submit an
  * ORDERED LIST of tool calls that run in one shot — collapsing N round-trips
  * into one — WITHOUT a code sandbox. It is DECLARATIVE on purpose:
  *
  *   - Each step is `{ name, arguments, expect? }` (`args` is accepted for
- *     `arguments`, matching the agent-loop batch) — a normal tool call plus an
+ *     `arguments`) — a normal tool call plus an
  *     optional precondition guard. No arbitrary code → no injection-as-control-
  *     flow, no element-handle staleness (every step re-queries by name), no
  *     opaque partial-execution blob.
@@ -15,8 +15,7 @@
  *     below every handler, the hard key list and the AI-host guard. A batch is not a way around any of them.
  *   - Between steps the executor RE-PERCEIVES to check each step's `expect`
  *     guard; on any guard miss / refusal / step error it HALTS and returns
- *     a structured trace so the caller re-plans from real state (the morph
- *     ladder's recovery, just coarser).
+ *     a structured trace so the caller re-plans from real state.
  *
  * This is the "batched planning" middle path: most of Code Mode's efficiency,
  * none of the sandbox's hard problems (see the architecture review).
@@ -32,7 +31,7 @@ import { effectLine } from '../core/effect';
 
 /** Resolve a step's tool by name from EITHER surface — a granular tool
  *  (`mouse_click`, `open_app`, …) or a compound tool (`computer`, `window`, …)
- *  — so a batch works whether the caller drives the 97-tool or 6-compound API. */
+ *  — so a batch works whether the caller drives the granular or 6-compound API. */
 function resolveAnyTool(name: string): ToolDefinition | undefined {
   return getTool(name) ?? getCompactTools().find(t => t.name === name);
 }
@@ -49,12 +48,12 @@ export interface BatchStep {
   /** Tool name — a compound (`computer`/`window`/…) with `arguments.action`, or a granular tool. */
   name: string;
   arguments?: Record<string, unknown>;
-  /** Alias of `arguments` — the agent-loop batch's spelling. A step written
+  /** Alias of `arguments`. A step written
    *  with `args` used to run with no arguments at all. */
   args?: Record<string, unknown>;
   /** Optional precondition; if it fails the batch halts here and reports back. */
   expect?: BatchGuard;
-  /** Canonical alias for `expect` (matches the agent-loop batch). An `expect`
+  /** Alias for `expect`, and wins over it. An `expect`
    *  ASSERTION ARRAY belongs inside `arguments` instead — the projected tool
    *  handlers verify it post-action. */
   precheck?: BatchGuard;
@@ -160,9 +159,6 @@ export async function executeBatch(
       return halt(i, `unknown tool "${step.name}"`);
     }
 
-    // Precondition: re-perceive and verify the step's expectation.
-    // `precheck` is the canonical name (parity with the agent-loop batch);
-    // `expect` remains the documented MCP alias for back-compat.
     const guard = step.precheck ?? step.expect;
     const args = stepArgs(step);
     const stepAction = typeof args.action === 'string' ? args.action : undefined;

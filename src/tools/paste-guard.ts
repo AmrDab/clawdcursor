@@ -187,6 +187,8 @@ export function fieldRead(res: { success: boolean; data?: Record<string, unknown
   return (typeof d.readable === 'boolean' ? d.readable : d.value !== '') ? { value: d.value, readable: true } : null;
 }
 
+/** How the typing fallback went: 'typed'; 'unfocused' (clicked, the focus did not go to the field, nothing typed); or why it was not tried. */
+export type Retyped = 'typed' | 'unfocused' | { skipped: string };
 /**
  * How every set_field_value path ends: one read-back (readBackTyped, whole value) decides the result. A field that holds
  * the value is confirmed; one that shows it with more after it or in another format, or cannot be read, is a success
@@ -199,8 +201,6 @@ export function fieldRead(res: { success: boolean; data?: Record<string, unknown
  * value into the field instead; when it did ('typed') the field is read again and the result names that path. Any other
  * mismatch (a reformat, other text) stays a failure, and a field that cannot be read (a password field) is never typed into.
  */
-/** How the typing fallback went: 'typed'; 'unfocused' (clicked, the focus did not go to the field, nothing typed); or why it was not tried. */
-export type Retyped = 'typed' | 'unfocused' | { skipped: string };
 export async function setResult(
   platform: Pick<PlatformAdapter, 'getFocusedElement' | 'invokeElement'>, value: string, label: string, how: string,
   named?: { name: string; controlType?: string; processId?: number },
