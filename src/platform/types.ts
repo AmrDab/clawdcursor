@@ -228,23 +228,11 @@ export interface PlatformAdapter {
   /** OS family this adapter handles. */
   readonly platform: 'darwin' | 'win32' | 'linux';
 
-  /**
-   * Optional environment hint — Linux sets this to 'wayland' or 'x11' so
-   * callers can surface graceful "not supported on Wayland" errors for
-   * known-broken primitives (cursor queries, some global hotkeys).
-   * Undefined on Windows and macOS.
-   */
-  readonly environment?: 'wayland' | 'x11';
-
   /** One-time setup (warm caches, start helpers). */
   init(): Promise<void>;
 
-  /** Cleanup on shutdown. */
-  shutdown(): Promise<void>;
-
   // ─── PERMISSIONS ────────────────────────────────────────────────
   checkPermissions(): Promise<PermissionStatus>;
-  requestPermissions(): Promise<PermissionStatus>;
 
   // ─── DISPLAY ────────────────────────────────────────────────────
   /** Get the primary display geometry. */
@@ -263,8 +251,6 @@ export interface PlatformAdapter {
   /** `region` captures that rectangle, in capture (physical) pixels — on macOS the Retina capture's pixels, not logical
    *  points, as the caller (tools/desktop.ts) passes them; `displayIndex` one monitor. */
   screenshot(opts?: { maxWidth?: number; displayIndex?: number; region?: { x: number; y: number; width: number; height: number } }): Promise<ScreenshotResult>;
-  /** Capture a region of the screen. */
-  screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult>;
 
   // ─── WINDOWS ────────────────────────────────────────────────────
   listWindows(): Promise<WindowInfo[]>;
@@ -276,12 +262,6 @@ export interface PlatformAdapter {
    * app, which it names). Taken once: a second call is null.
    */
   takeFocusFailure?(): string | null;
-
-  /**
-   * Legacy shim — preserved for back-compat. New code should call
-   * `setWindowState('maximize')`. Default behavior unchanged.
-   */
-  maximizeWindow(): Promise<void>;
 
   /**
    * Canonical window-state control. Semantics (Tranche 1A):
@@ -456,15 +436,6 @@ export interface PlatformAdapter {
   writeClipboard(text: string): Promise<void>;
 
   // ─── APPS ───────────────────────────────────────────────────────
-  /**
-   * Convenience wrapper around `launchApp`. Platform adapters keep this
-   * alias-data-agnostic — they DO NOT consult `APP_ALIASES`. Cross-OS
-   * name mapping (e.g. Windows "Notepad" → mac "TextEdit") and UWP /
-   * executable / searchTerm hints belong in the caller (the agent's
-   * `open_app` tool, the router's `handleOpenApp`), which resolves the
-   * alias and forwards the data through `launchApp` opts.
-   */
-  openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }>;
   launchApp(name: string, opts?: {
     /**
      * `name` is an app name an agent typed, not one from the alias table: start it only if it resolves to an APP the OS

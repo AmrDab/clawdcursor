@@ -23,11 +23,6 @@ const PLATFORM_PRIMARY_MOD = process.platform === 'darwin' ? 'Super' : 'Control'
  */
 export const MOD = 'mod';
 
-/** How an agent spells this OS's shortcut modifier. */
-export function primaryModifier(platform: NodeJS.Platform = process.platform): 'cmd' | 'ctrl' {
-  return platform === 'darwin' ? 'cmd' : 'ctrl';
-}
-
 /**
  * One paragraph for the agent, built once when the server starts: which OS this is and which keys its shortcuts use.
  * Without it an agent guesses, and sends Windows hotkeys to a Mac.
@@ -190,10 +185,3 @@ export function modifierOf(token: string, platform: NodeJS.Platform = process.pl
   }
 }
 
-/**
- * Normalize a key combo string like "ctrl+shift+a" → "Control+Shift+a"
- */
-export function normalizeKeyCombo(combo: string): string {
-  if (!combo.includes('+')) return normalizeKey(combo);
-  return combo.split('+').map(k => normalizeKey(k.trim())).join('+');
-}

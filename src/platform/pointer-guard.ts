@@ -84,7 +84,7 @@ export async function guardedInput<R>(method: string, args: unknown[], send: () 
 /** Synthetic keyboard and mouse input: refused while stopped, and when the agent's window is no longer in front. */
 const INPUT_METHODS = [
   'mouseClick', 'mouseDoubleClick', 'mouseRightClick', 'mouseDrag', 'mouseScroll', 'mouseDown',
-  'typeText', 'keyPress', 'keyDown', 'executeMouseAction', 'executeKeyboardAction',
+  'typeText', 'keyPress', 'keyDown',
 ];
 /**
  * Acts that do not go through the window in front — by element (accessibility), on a window by handle, or in a page
@@ -95,8 +95,8 @@ const INPUT_METHODS = [
  * run unguarded().
  */
 const STOP_METHODS = [
-  'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
-  'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'fillFormByLabels', 'focus', 'selectOption', 'pressKey',
+  'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds',
+  'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'focus', 'selectOption', 'pressKey',
   'writeClipboard', 'evaluate', 'switchTab',
 ];
 
@@ -104,7 +104,7 @@ const STOP_METHODS = [
 function pointerMethods(target: object): string[] {
   const names = new Set<string>();
   for (let o: object | null = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
-    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k) || k === 'executeMouseAction') names.add(k);
+    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k)) names.add(k);
   }
   return [...names];
 }
@@ -199,15 +199,13 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     return r;
   });
   // A launch types into the Start menu / Spotlight itself: its own keys run inside this one guarded call.
-  for (const m of ['openApp', 'launchApp']) {
-    wrap(m, async (g, f, args, nested) => {
-      if (!nested) { g.stopCheck(); announce(m); }
-      const r = await f(...args) as { pid?: number; title?: string } | undefined;
-      await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
-      announce(m);  // again, now that the launched window is known: the outline goes to it
-      return r;
-    });
-  }
+  wrap('launchApp', async (g, f, args, nested) => {
+    if (!nested) { g.stopCheck(); announce('launchApp'); }
+    const r = await f(...args) as { pid?: number; title?: string } | undefined;
+    await g.launched(r, typeof args[0] === 'string' ? args[0] : undefined);
+    announce('launchApp');  // again, now that the launched window is known: the outline goes to it
+    return r;
+  });
   guardHardKeys(target);
   fencePointerMethods(target);
   return target;

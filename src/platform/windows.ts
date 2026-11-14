@@ -103,20 +103,12 @@ export class WindowsAdapter implements PlatformAdapter {
     await this.getScreenSize().catch(() => null);
   }
 
-  async shutdown(): Promise<void> {
-    try { psRunner.stop(); } catch { /* */ }
-  }
-
   // ─── PERMISSIONS ──────────────────────────────────────────────────
 
   async checkPermissions(): Promise<PermissionStatus> {
     // Windows doesn't gate any of these behind TCC-style prompts. If the
     // user can run the binary at all, they can do input / capture / a11y.
     return { input: true, accessibility: true, screenRecording: true };
-  }
-
-  async requestPermissions(): Promise<PermissionStatus> {
-    return this.checkPermissions();
   }
 
   // ─── DISPLAY ──────────────────────────────────────────────────────
@@ -318,22 +310,6 @@ export class WindowsAdapter implements PlatformAdapter {
     return { buffer, width, height, scaleFactor };
   }
 
-  async screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult> {
-    const img = await screen.grab();
-    const rx = Math.max(0, Math.min(x, img.width - 1));
-    const ry = Math.max(0, Math.min(y, img.height - 1));
-    const rw = Math.min(w, img.width - rx);
-    const rh = Math.min(h, img.height - ry);
-
-    const buffer = await sharpFromGrab(img)
-      .extract({ left: rx, top: ry, width: rw, height: rh })
-      .png()
-      .toBuffer();
-    (img as any).data = null;
-
-    return { buffer, width: rw, height: rh, scaleFactor: 1 };
-  }
-
   // ─── WINDOWS ──────────────────────────────────────────────────────
 
   async listWindows(): Promise<WindowInfo[]> {
@@ -475,11 +451,6 @@ export class WindowsAdapter implements PlatformAdapter {
       this.focusFailure = err instanceof Error ? err.message : String(err);
       return false;
     }
-  }
-
-  async maximizeWindow(): Promise<void> {
-    // Win+Up is the portable Windows maximize shortcut.
-    await this.keyPress('super+up').catch(() => { /* non-fatal */ });
   }
 
   async setWindowState(
@@ -1283,17 +1254,6 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   // ─── APPS ─────────────────────────────────────────────────────────
-
-  /**
-   * Thin shim — delegates straight to `launchApp` with no alias resolution.
-   * The platform layer is alias-data-agnostic; alias resolution lives in
-   * the caller (the agent's `open_app` tool, the router's `handleOpenApp`).
-   * Callers that want UWP / executable / searchTerm hints must pass them
-   * via `launchApp` directly.
-   */
-  async openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }> {
-    return this.launchApp(name, opts);
-  }
 
   async launchApp(
     name: string,

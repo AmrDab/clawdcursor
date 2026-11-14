@@ -1,15 +1,14 @@
 /**
  * ClawdCursor Native Helper Integration (macOS only)
- * Communicates with the Swift helper via JSON-RPC over stdio
+ * Communicates with the ClawdCursorHost app via JSON-RPC over its local HTTP endpoint
  * 
  * On non-macOS platforms, all methods are no-ops or return appropriate defaults.
  */
 
-import { spawn, ChildProcess } from 'child_process';
+import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import * as readline from 'readline';
 import * as crypto from 'crypto';
 import { getPackageRoot } from '../paths';
 
@@ -37,178 +36,34 @@ interface PermissionStatus {
   bundleId?: string;
 }
 
+/**
+ * The ClawdCursorHost app's JSON-RPC endpoint (macOS). Constructed only on macOS (native-desktop.ts); its one use is `type`,
+ * the fallback when the keyboard route cannot type.
+ */
 export class NativeHelper {
-  private process: ChildProcess | null = null;
   private requestId = 0;
-  private pendingRequests = new Map<number, {
-    resolve: (value: unknown) => void;
-    reject: (error: Error) => void;
-  }>();
-  private readline: readline.Interface | null = null;
-  private useHostIpc = IS_MACOS;
-
-  /**
-   * Check if native helper is available (macOS only)
-   */
-  isAvailable(): boolean {
-    if (!IS_MACOS) return false;
-    try {
-      this.getHelperPath();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private getHelperPath(binary = 'clawdcursor-helper'): string {
-    if (!IS_MACOS) {
-      throw new Error('Native helper is only available on macOS');
-    }
-    // Look for the helper in various locations
-    const root = getPackageRoot();
-    const locations = [
-      // Development: native/ClawdCursor.app
-      path.join(root, 'native', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
-      // Installed via npm: node_modules/.clawdcursor/ClawdCursor.app
-      path.join(root, 'node_modules', '.clawdcursor', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
-      // Global install
-      path.join(os.homedir(), '.clawdcursor', 'ClawdCursor.app', 'Contents', 'MacOS', binary),
-    ];
-
-    for (const loc of locations) {
-      if (fs.existsSync(loc)) {
-        return loc;
-      }
-    }
-
-    throw new Error(
-      `ClawdCursor native helper not found. ${nativeBuildHint()}\n` +
-      'Searched locations:\n' + locations.map(l => `  - ${l}`).join('\n')
-    );
-  }
-
-  async start(): Promise<void> {
-    if (!IS_MACOS) {
-      throw new Error('Native helper is only available on macOS');
-    }
-    if (this.useHostIpc) {
-      await ensureHostAppRunning();
-      return;
-    }
-    if (this.process) return;
-
-    const helperPath = this.getHelperPath();
-    
-    this.process = spawn(helperPath, [], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    this.readline = readline.createInterface({
-      input: this.process.stdout!,
-      crlfDelay: Infinity,
-    });
-
-    this.readline.on('line', (line) => {
-      try {
-        const response = JSON.parse(line) as JsonRpcResponse;
-        const pending = this.pendingRequests.get(response.id);
-        if (pending) {
-          this.pendingRequests.delete(response.id);
-          if (response.error) {
-            pending.reject(new Error(`${response.error.message} (code ${response.error.code})`));
-          } else {
-            pending.resolve(response.result);
-          }
-        }
-      } catch {
-        // Ignore non-JSON lines (could be debug output)
-      }
-    });
-
-    this.process.stderr?.on('data', (data) => {
-      const msg = data.toString();
-      // Check for permission errors
-      if (msg.includes('accessibility_denied') || msg.includes('screen_recording_denied')) {
-        console.error(`\n⚠️  Permission Error:\n${msg}`);
-      }
-    });
-
-    this.process.on('exit', (code) => {
-      this.process = null;
-      this.readline = null;
-      // Reject all pending requests
-      for (const [id, pending] of this.pendingRequests) {
-        pending.reject(new Error(`Helper process exited with code ${code}`));
-        this.pendingRequests.delete(id);
-      }
-    });
-  }
-
-  async stop(): Promise<void> {
-    if (this.useHostIpc) return;
-    if (this.process) {
-      this.process.kill();
-      this.process = null;
-      this.readline = null;
-    }
-  }
 
   private async call<T>(method: string, params?: Record<string, unknown>): Promise<T> {
     const id = ++this.requestId;
     const request: JsonRpcRequest = { id, method, params };
-
-    const timeoutMs = method === 'captureScreen' ? 90000 : 30000;
-
-    if (this.useHostIpc) {
-      await ensureHostAppRunning();
-      const res = await fetch(`${HOST_BASE_URL}/rpc`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-clawdcursor-token': getOrCreateHostToken(),
-        },
-        body: JSON.stringify(request),
-        signal: AbortSignal.timeout(timeoutMs),
-      });
-      if (!res.ok) {
-        throw new Error(`Host IPC call failed (${res.status})`);
-      }
-      const rpc = await res.json() as JsonRpcResponse;
-      if (rpc.error) {
-        throw new Error(`${rpc.error.message} (code ${rpc.error.code})`);
-      }
-      return rpc.result as T;
-    }
-
-    if (!this.process) {
-      await this.start();
-    }
-
-    return new Promise((resolve, reject) => {
-      // Guard against process dying between start() and write()
-      if (!this.process?.stdin) {
-        reject(new Error('Helper process not available'));
-        return;
-      }
-
-      const timeout = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`Request ${method} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      this.pendingRequests.set(id, { 
-        resolve: (value) => {
-          clearTimeout(timeout);
-          (resolve as (value: unknown) => void)(value);
-        }, 
-        reject: (error) => {
-          clearTimeout(timeout);
-          reject(error);
-        }
-      });
-
-      this.process.stdin.write(JSON.stringify(request) + '\n');
+    await ensureHostAppRunning();
+    const res = await fetch(`${HOST_BASE_URL}/rpc`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-clawdcursor-token': getOrCreateHostToken(),
+      },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(30000),
     });
+    if (!res.ok) {
+      throw new Error(`Host IPC call failed (${res.status})`);
+    }
+    const rpc = await res.json() as JsonRpcResponse;
+    if (rpc.error) {
+      throw new Error(`${rpc.error.message} (code ${rpc.error.code})`);
+    }
+    return rpc.result as T;
   }
 
   // MARK: - Public API
@@ -224,18 +79,8 @@ let instance: NativeHelper | null = null;
 export function getNativeHelper(): NativeHelper {
   if (!instance) {
     instance = new NativeHelper();
-    // Cleanup on process exit
-    process.on('exit', () => {
-      instance?.stop();
-    });
-    process.on('SIGTERM', () => {
-      instance?.stop();
-      process.exit(0);
-    });
-    process.on('SIGINT', () => {
-      instance?.stop();
-      process.exit(0);
-    });
+    process.on('SIGTERM', () => process.exit(0));
+    process.on('SIGINT', () => process.exit(0));
   }
   return instance;
 }

@@ -25,7 +25,7 @@ vi.mock('../core/banner', () => ({
 }));
 
 import { createMcpServer } from '../surface/mcp-server';
-import { osKeysGuide, primaryModifier } from '../platform/keys';
+import { osKeysGuide } from '../platform/keys';
 import { SHORTCUTS, shortcutsFor, resolveShortcutKey, findShortcut } from '../shortcuts';
 import { getShortcutTools } from '../tools/shortcuts';
 import { getExtraTools } from '../tools/extras';
@@ -41,12 +41,6 @@ async function onPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T> | T
 }
 
 describe('the agent is told its OS and modifier in the server instructions', () => {
-  it('the modifier is cmd on macOS and ctrl on Windows and Linux', () => {
-    expect(primaryModifier('darwin')).toBe('cmd');
-    expect(primaryModifier('win32')).toBe('ctrl');
-    expect(primaryModifier('linux')).toBe('ctrl');
-  });
-
   it('macOS: cmd, not ctrl; ctrl only where an app binds it; no Windows shortcuts', () => {
     const g = osKeysGuide('darwin');
     expect(g).toMatch(/^This computer runs macOS: the shortcut modifier is cmd \(cmd\+c, cmd\+v, cmd\+s/);

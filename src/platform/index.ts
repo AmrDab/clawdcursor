@@ -32,11 +32,6 @@ export async function getPlatform(): Promise<PlatformAdapter> {
   return adapter;
 }
 
-/** For tests: reset the cache so a fresh adapter can be created. */
-export function _resetPlatformCache(): void {
-  cached = null;
-}
-
 export type {
   PlatformAdapter,
   ScreenSize,

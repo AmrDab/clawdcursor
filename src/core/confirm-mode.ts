@@ -135,12 +135,8 @@ async function consequential(method: string, args: unknown[], held: string[], ta
   const typed = (text: unknown) => typedCombo(text, held) ? { what: `type ${quote(String(text))} with ${quote(held.join('+'))} held` } : null;
   switch (method) {
     case 'mouseClick': case 'mouseDoubleClick': return clickAt(args[0], args[1]);
-    case 'executeMouseAction': return o.kind === 'click' || o.kind === 'double_click' ? clickAt(o.x, o.y) : null;
     case 'keyPress': case 'keyDown': case 'pressKey': return consequentialCombo(a, held) ? { what: `press ${quote(String(a))}` } : null;
     case 'typeText': return typed(a);
-    case 'executeKeyboardAction':
-      if (o.kind === 'type') return typed(o.text);
-      return o.kind === 'key_press' && consequentialCombo(o.key, held) ? { what: `press ${quote(String(o.key))}` } : null;
     // Reading, filling or opening an element is not the act; pressing, toggling or picking it is.
     case 'invokeElement': {
       if (!['click', 'toggle', 'select', undefined].includes(o.action as string)) return null;

@@ -146,7 +146,6 @@ function keyboard() {
     failNextUp: false,
     keyUp: vi.fn(async (c: string) => { if (kb.failNextUp) { kb.failNextUp = false; throw new Error('release failed'); } sent.push(`up ${c}`); }),
     typeText: vi.fn(async (t: string) => { sent.push(`type ${t}`); }),
-    async executeKeyboardAction(a: { key: string }) { await kb.keyPress(a.key); },   // NativeDesktop's composite action
     takeInputWarning: () => null,
   };
   return guardInputMethods(kb);
@@ -170,7 +169,6 @@ describe('one call site: the input layer, below every tool', () => {
     const kb = keyboard();
     await expect(kb.keyPress(LOCK)).rejects.toThrow(/dangerous key combo/);
     await expect(kb.keyDown(LOCK)).rejects.toThrow(/dangerous key combo/);
-    await expect(kb.executeKeyboardAction({ key: LOCK })).rejects.toThrow(/dangerous key combo/);
     expect(kb.sent).toEqual([]);
   });
 

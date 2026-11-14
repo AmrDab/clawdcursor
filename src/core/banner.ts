@@ -70,15 +70,14 @@ export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: stri
 // the window in front first, so the app is known; the others (accessibility, the browser driver) only say what they do.
 const ACTIVITY: Record<string, [string, boolean]> = {
   mouseClick: ['Clicking', true], mouseDoubleClick: ['Clicking', true], mouseRightClick: ['Clicking', true],
-  mouseDown: ['Clicking', true], executeMouseAction: ['Clicking', true], mouseDrag: ['Dragging', true],
+  mouseDown: ['Clicking', true], mouseDrag: ['Dragging', true],
   mouseScroll: ['Scrolling', true], typeText: ['Typing', true], keyPress: ['Pressing keys', true],
-  keyDown: ['Pressing keys', true], executeKeyboardAction: ['Pressing keys', true],
+  keyDown: ['Pressing keys', true],
   invokeElement: ['Clicking', false], click: ['Clicking', false], clickByText: ['Clicking', false], focus: ['Clicking', false],
   scrollIntoView: ['Scrolling', false], typeInField: ['Typing', false], typeByLabel: ['Typing', false],
-  fillFormByLabels: ['Filling a form', false], selectOption: ['Choosing an option', false], pressKey: ['Pressing keys', false],
-  navigate: ['Opening a page', false], openApp: ['Opening an app', false], launchApp: ['Opening an app', false],
+  selectOption: ['Choosing an option', false], pressKey: ['Pressing keys', false],
+  navigate: ['Opening a page', false], launchApp: ['Opening an app', false],
   setWindowState: ['Arranging windows', false], setWindowBounds: ['Arranging windows', false],
-  maximizeWindow: ['Arranging windows', false], restoreWindow: ['Arranging windows', false],
 };
 // Where the OS gave no display name (Linux, an elevated process the bridge may not open): process names that say little.
 const APP_NAMES: Record<string, string> = {

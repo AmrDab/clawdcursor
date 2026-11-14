@@ -79,9 +79,6 @@ export class MacOSAdapter implements PlatformAdapter {
 
   private screenSize: ScreenSize | null = null;
   private screenshotHelperPath: string | null = null;
-  private permissionCheckPath: string | null = null;
-  private inputPermissionTested = false;
-  private inputPermissionCached = false;
   private readonly ax: MacAx;
   private readonly keyboard: MacKeyboardGuard;
   private inputWarning: string | null = null;
@@ -104,7 +101,6 @@ export class MacOSAdapter implements PlatformAdapter {
   async init(): Promise<void> {
     // Find the helper binaries shipped with the app bundle.
     this.screenshotHelperPath = this.findHelper('screenshot-helper');
-    this.permissionCheckPath = this.findHelper('permission-check');
 
     // Build the accessibility helper in the background now, so the first window
     // list / tree read already has it (until then the osascript scripts answer).
@@ -112,10 +108,6 @@ export class MacOSAdapter implements PlatformAdapter {
 
     // Pre-warm screen size so first capture is fast.
     await this.getScreenSize().catch(() => null);
-  }
-
-  async shutdown(): Promise<void> {
-    // No long-lived processes to clean up — osascript and nut-js are stateless.
   }
 
   // ─── PERMISSIONS ──────────────────────────────────────────────────
@@ -127,18 +119,6 @@ export class MacOSAdapter implements PlatformAdapter {
       this.probeScreenRecording(),
     ]);
     return { input: accessibility, accessibility, screenRecording };
-  }
-
-  async requestPermissions(): Promise<PermissionStatus> {
-    // Spawn permission-check with prompt flags to trigger the native dialogs.
-    if (this.permissionCheckPath && fs.existsSync(this.permissionCheckPath)) {
-      try {
-        await execFileAsync(this.permissionCheckPath, ['--prompt', '--request-screen-recording'], { timeout: 30_000 });
-      } catch {
-        // The binary may exit non-zero if perms denied — that's fine, dialogs were shown.
-      }
-    }
-    return this.checkPermissions();
   }
 
   private async probeAccessibility(): Promise<boolean> {
@@ -330,12 +310,6 @@ export class MacOSAdapter implements PlatformAdapter {
     }
   }
 
-  async screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult> {
-    const full = await this.screenshot();
-    const buffer = await sharp(full.buffer).extract({ left: x, top: y, width: w, height: h }).png().toBuffer();
-    return { buffer, width: w, height: h, scaleFactor: 1 };
-  }
-
   // ─── WINDOWS ──────────────────────────────────────────────────────
 
   /**
@@ -486,11 +460,6 @@ export class MacOSAdapter implements PlatformAdapter {
     const state = await this.secureInput().catch(() => null);
     if (!state?.on) return detail;
     return `${secureInputMessage(state.holder)} (${detail.replace(/\.$/, '')})`;
-  }
-
-  async maximizeWindow(): Promise<void> {
-    // macOS native fullscreen toggle.
-    await this.keyPress('ctrl+mod+f').catch(() => { /* non-fatal */ });
   }
 
   async setWindowState(
@@ -1013,17 +982,6 @@ export class MacOSAdapter implements PlatformAdapter {
   }
 
   // ─── APPS ─────────────────────────────────────────────────────────
-
-  /**
-   * Thin shim — delegates straight to `launchApp` with no alias resolution.
-   * The platform layer is alias-data-agnostic; cross-OS name mapping (e.g.
-   * Windows "Notepad" → mac "TextEdit") happens in the caller above (the
-   * agent's `open_app` tool, the router's `handleOpenApp`). Callers that
-   * want bundle-name / searchTerm hints must pass them via `launchApp`.
-   */
-  async openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }> {
-    return this.launchApp(name, opts);
-  }
 
   async launchApp(
     name: string,

@@ -36,7 +36,7 @@ function fakeDesktop() {
     async mouseDrag(x: number, y: number) { sent.push(`drag ${x},${y}`); },
     async mouseScroll(x: number, y: number) { sent.push(`scroll ${x},${y}`); },
     async focusWindow(q: Win) { fg = q; return true; },
-    async openApp(_name: string) { return { pid: CHATGPT.processId, title: 'ChatGPT' }; },
+    async launchApp(_name: string) { return { pid: CHATGPT.processId, title: 'ChatGPT' }; },
   };
   return guardInputMethods(d);
 }
@@ -76,7 +76,7 @@ describe('input into an AI assistant the agent did not choose', () => {
   it('opening the app on purpose allows input as well', async () => {
     fg = CHATGPT;
     const d = fakeDesktop();
-    await d.openApp('ChatGPT');
+    await d.launchApp('ChatGPT');
     await d.typeText('hi');
     expect(d.sent).toEqual(['type hi']);
   });
@@ -147,7 +147,7 @@ function fakeLayer(opts: { launch?: { pid?: number; title?: string } } = {}) {
     async typeText(text: string) { sent.push(`type ${text}`); },
     async invokeElement(q: { name: string; action?: string; processId?: number }) { sent.push(`${q.action ?? 'click'} ${q.name}`); return { success: true }; },
     async focusWindow(q: Win) { fg = q; return true; },
-    async openApp(_name: string) { return opts.launch ?? {}; },
+    async launchApp(_name: string) { return opts.launch ?? {}; },
   };
   return guardInputMethods(d);
 }
@@ -155,7 +155,7 @@ function fakeLayer(opts: { launch?: { pid?: number; title?: string } } = {}) {
 describe('a launch that surfaced no window excuses nothing it did not start', () => {
   it('open_app "Foo" that surfaces nothing, then type, with Claude in front: refused', async () => {
     const d = fakeLayer();
-    await d.openApp('Foo');
+    await d.launchApp('Foo');
     await expect(d.typeText('hello')).rejects.toThrow(REFUSAL);
     expect(d.sent).toEqual([]);
   });
@@ -163,7 +163,7 @@ describe('a launch that surfaced no window excuses nothing it did not start', ()
   it('and not later either: the excuse is for the next input only', async () => {
     const d = fakeLayer();
     fg = NOTEPAD;
-    await d.openApp('Foo');
+    await d.launchApp('Foo');
     await d.typeText('a');
     fg = CLAUDE;
     await expect(d.typeText('b')).rejects.toThrow(/foreground changed|an AI assistant/);
@@ -172,7 +172,7 @@ describe('a launch that surfaced no window excuses nothing it did not start', ()
 
   it('launching the assistant itself, surfacing nothing yet, is asking for it', async () => {
     const d = fakeLayer();
-    await d.openApp('Claude');
+    await d.launchApp('Claude');
     await d.typeText('hi');
     expect(d.sent).toEqual(['type hi']);
   });
@@ -248,7 +248,7 @@ describe('review round 3', () => {
   it('a launch of "Code" that surfaced nothing does not excuse Codex', async () => {
     fg = { processId: 230, processName: 'Codex' };
     const d = fakeLayer();
-    await d.openApp('Code');
+    await d.launchApp('Code');
     await expect(d.typeText('x')).rejects.toThrow(/the window in front is "Codex", an AI assistant/);
     expect(d.sent).toEqual([]);
   });

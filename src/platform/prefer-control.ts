@@ -34,7 +34,6 @@ export function failReason(res: { error?: unknown; data?: Record<string, unknown
   return typeof e === 'string' && e.trim() ? `: ${untrusted(e.trim().replace(/[.\s]+$/, ''))}` : '';
 }
 
-export const holdsOptions = (r?: string) => HOLDS_OPTIONS.test(role(r));
 /** A list box or a dropdown list: where typing an option's text moves the selection to it. Not a tab strip, a radio group or a menu: there a letter is a shortcut. */
 export const typeAheadSelects = (r?: string) => /^(list|listbox|combobox|popupbutton)$/.test(role(r));
 /** An item of such a list. */

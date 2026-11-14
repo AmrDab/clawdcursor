@@ -22,7 +22,6 @@ import { defaultMacAx } from './mac-ax';
 import { utf8ClipboardEnv } from './mac-keyboard';
 import type { PlatformAdapter, UiElement } from './types';
 import { isOwnUiPid, guardInputMethods } from './pointer-guard';
-import { windowTextIncludes } from '../tools/window-text';
 import { psOpts, powershellExe } from './ps-spawn';
 import { normalizeControlType, unknownControlType } from './uia-control-type';
 
@@ -149,10 +148,6 @@ export class AccessibilityBridge {
 
   private screenContextCache: ScreenContextCache | null = null;
   private readonly SCREEN_CONTEXT_CACHE_TTL = 2000;
-
-  private taskbarCache: { buttons: UIElement[]; timestamp: number } | null = null;
-  private readonly TASKBAR_CACHE_TTL = 30000;
-  private explorerProcessId: number | null = null;
 
   constructor() {
     guardInputMethods(this);  // invoke / focus by element: refused once the user stops clawdcursor (pointer-guard.ts)
@@ -530,26 +525,6 @@ export class AccessibilityBridge {
         return null;
       }
     }
-  }
-
-  async findWindow(appNameOrTitle: string): Promise<WindowInfo | null> {
-    const lower = appNameOrTitle.toLowerCase();
-    const windows = await this.getWindows();
-    return (
-      windows.find(w => w.processName.toLowerCase() === lower) ??
-      windows.find(w => windowTextIncludes(w.title, lower)) ??
-      windows.find(w => w.processName.toLowerCase().includes(lower)) ??
-      null
-    );
-  }
-
-  /**
-   * Restore an off-screen window to a visible state.
-   * Uses focusWindow with restore:true — already cross-platform via winCmd/runMacScript.
-   * Caller should additionally press 'super+up' if bounds are still negative after this call.
-   */
-  async restoreWindow(processId?: number, title?: string): Promise<{ success: boolean; error?: string }> {
-    return this.focusWindow(title, processId);
   }
 
   async getFocusedElement(): Promise<FocusedElementInfo | null> {

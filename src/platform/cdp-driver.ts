@@ -36,9 +36,6 @@
  *   // Type into a Gmail field
  *   await cdp.typeInField('[aria-label="To"]', 'user@example.com');
  *
- *   // Fill a form by label
- *   await cdp.fillFormByLabels({ 'Subject': 'Hello', 'To': 'user@example.com' });
- *
  *   // Query elements
  *   const results = await cdp.querySelectorAll('button');
  */
@@ -962,34 +959,6 @@ export class CDPDriver {
         error: `typeByLabel("${label}") failed: ${err instanceof Error ? err.message : String(err)}`,
       };
     }
-  }
-
-  /**
-   * Fill a form by mapping label text → value.
-   *
-   * Example (Gmail compose):
-   *   await cdp.fillFormByLabels({
-   *     'To': 'friend@gmail.com',
-   *     'Subject': 'Hello!',
-   *     'Message Body': 'How are you doing?'
-   *   });
-   */
-  async fillFormByLabels(
-    fields: Record<string, string>,
-  ): Promise<{ success: boolean; results: Record<string, CDPInteractionResult> }> {
-    const results: Record<string, CDPInteractionResult> = {};
-    let allSuccess = true;
-
-    for (const [label, value] of Object.entries(fields)) {
-      const result = await this.typeByLabel(label, value);
-      results[label] = result;
-      if (!result.success) {
-        allSuccess = false;
-        console.log(`   ⚠️ CDPDriver: failed to fill "${label}": ${result.error}`);
-      }
-    }
-
-    return { success: allSuccess, results };
   }
 
   /**

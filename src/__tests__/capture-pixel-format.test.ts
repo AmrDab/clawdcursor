@@ -3,7 +3,7 @@
  *
  * nut-js `screen.grab()` returns BGRA (colorMode 0); on 24-bit X11 the alpha
  * byte is 0. A GDI pixel R=20,G=23,B=27 arrives as [27,23,20,255] and used to
- * leave WindowsAdapter.screenshotRegion as PNG pixel (27,23,20) — swapped.
+ * leave a WindowsAdapter capture as PNG pixel (27,23,20) — swapped.
  * On Linux [204,102,51,0] (#3366CC) came out fully transparent → black.
  * Every capture path must now emit the true, opaque colour.
  */
@@ -70,10 +70,10 @@ afterAll(() => {
 });
 
 describe('capture pixel format', () => {
-  it('WindowsAdapter.screenshotRegion emits the true RGB colour (not BGR)', async () => {
+  it('WindowsAdapter.screenshot emits the true RGB colour (not BGR)', async () => {
     const { WindowsAdapter } = await import('../platform/windows');
-    const shot = await new WindowsAdapter().screenshotRegion(0, 0, 1, 1);
-    expect(await pixels(shot.buffer)).toEqual(TRUE_WIN);
+    const shot = await new WindowsAdapter().screenshot();
+    expect((await pixels(shot.buffer)).slice(0, 4)).toEqual(TRUE_WIN);
   });
 
   it('WindowsAdapter.screenshot keeps the colour through resize', async () => {
@@ -91,12 +91,6 @@ describe('capture pixel format', () => {
     const { LinuxAdapter } = await import('../platform/linux');
     const shot = await new LinuxAdapter().screenshot();
     expect(await pixels(shot.buffer)).toEqual([...TRUE_WIN, ...TRUE_X11]);
-  });
-
-  it('LinuxAdapter.screenshotRegion is opaque and correctly ordered', async () => {
-    const { LinuxAdapter } = await import('../platform/linux');
-    const shot = await new LinuxAdapter().screenshotRegion(1, 0, 1, 1);
-    expect(await pixels(shot.buffer)).toEqual(TRUE_X11);
   });
 
   it('NativeDesktop capture paths emit the true colour', async () => {

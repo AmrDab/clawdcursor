@@ -13,7 +13,6 @@ import { setFenceCursorReader } from '../core/fence';
 import { unguarded } from './pointer-guard';
 import { beforePointerPress, guardInputMethods } from './pointer-guard';
 import os from 'os';
-import { EventEmitter } from 'events';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
 import { normalizeKey, modifierOf, type Modifier } from './keys';
@@ -26,7 +25,7 @@ import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo } from './mac-screen';
 import * as fs from 'fs';
-import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../types';
+import type { ClawdConfig, ScreenFrame } from '../types';
 
 // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
@@ -77,7 +76,7 @@ const KEY_MAP: Record<string, Key> = {
 };
 
 
-export class NativeDesktop extends EventEmitter {
+export class NativeDesktop {
   private config: ClawdConfig;
   private screenWidth = 0;
   private screenHeight = 0;
@@ -97,7 +96,6 @@ export class NativeDesktop extends EventEmitter {
   private dpiRatio = 1;
 
   constructor(config: ClawdConfig) {
-    super();
     this.config = config;
     guardInputMethods(this);  // the MCP tools type and click through this class (pointer-guard.ts)
     setFenceCursorReader(() => unguarded(() => this.getCursorPosition()));   // the test fence checks bare presses at the live pointer
@@ -795,95 +793,6 @@ export class NativeDesktop extends EventEmitter {
     return w;
   }
 
-  async executeMouseAction(action: MouseAction): Promise<void> {
-    switch (action.kind) {
-      case 'click':
-        await this.mouseClick(action.x, action.y);
-        break;
-      case 'double_click':
-        await this.mouseDoubleClick(action.x, action.y);
-        break;
-      case 'right_click':
-        await this.mouseRightClick(action.x, action.y);
-        break;
-      case 'move':
-        await this.mouseMove(action.x, action.y);
-        break;
-      case 'scroll':
-        await this.mouseScroll(action.x, action.y, action.scrollDelta || 3);
-        break;
-      case 'drag':
-        await this.mouseDrag(action.x, action.y, action.endX || action.x, action.endY || action.y);
-        break;
-    }
-  }
-
-  async executeKeyboardAction(action: KeyboardAction): Promise<void> {
-    switch (action.kind) {
-      case 'type':
-        if (action.text) await this.typeText(action.text);
-        break;
-      case 'key_press':
-        if (action.key) await this.keyPress(action.key);
-        break;
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
-
-  // ─── Low-level key control (for Computer Use API hold_key) ────────
-
-  async keyDown(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   ⌨️  Key down: ${keyCombo}`);
-    if (keyCombo === '+') { await keyboard.type('+'); return; }
-    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
-    for (const k of parts) {
-      const key = this.mapKey(k);
-      if (key === 'TYPE_CHAR') {
-        await keyboard.type(k);
-      } else {
-        await keyboard.pressKey(key);
-      }
-      await this.delay(20);
-    }
-  }
-
-  async keyUp(keyCombo: string): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   ⌨️  Key up: ${keyCombo}`);
-    if (keyCombo === '+') return; // type() already released
-    const parts = keyCombo.split('+').map(k => k.trim()).filter(k => k.length > 0);
-    for (const k of [...parts].reverse()) {
-      const key = this.mapKey(k);
-      if (key !== 'TYPE_CHAR') {
-        await keyboard.releaseKey(key);
-      }
-      await this.delay(20);
-    }
-  }
-
-  // ─── Low-level pointer control (for Computer Use API) ────────────
-
-  async mouseDown(x: number, y: number, button: number = 1): Promise<void> {
-    await beforePointerPress(); // clawdcursor's own pill must not be under the click
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Mouse down at (${x}, ${y})`);
-    await this.placePointer(x, y);
-    const btn = this.mapButton(button);
-    await mouse.pressButton(btn);
-  }
-
-  async mouseUp(x: number, y: number, button: number = 1): Promise<void> {
-    if (!this.connected) throw new Error('Not connected');
-    console.log(`   🖱️  Mouse up at (${x}, ${y})`);
-    await this.placePointer(x, y);
-    const btn = this.mapButton(button);
-    await mouse.releaseButton(btn);
-  }
-
   async mouseDrag(sx: number, sy: number, ex: number, ey: number): Promise<void> {
     await beforePointerPress(); // clawdcursor's own pill must not be under the click
     if (!this.connected) throw new Error('Not connected');
@@ -915,10 +824,6 @@ export class NativeDesktop extends EventEmitter {
     this.connected = false;
     this.screenWidth = 0;
     this.screenHeight = 0;
-    this.emit('disconnected');
-    // Remove all listeners so this instance can be GCd after disconnect.
-    // Must come after emit so 'disconnected' handlers still fire.
-    this.removeAllListeners();
     console.log('🐾 Native desktop disconnected');
   }
 

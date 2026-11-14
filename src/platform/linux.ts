@@ -11,7 +11,6 @@
  *     process names from /proc/<pid>.
  *   - A11y: AT-SPI via scripts/linux/atspi-bridge.py (read + invoke).
  *   - Clipboard: xclip -selection clipboard (X11 assumption).
- *   - openApp: spawn by name, falling back to xdg-open.
  *
  * All tool invocations tolerate missing binaries — if wmctrl/xclip/xdotool
  * are not installed the adapter still loads and methods return empty defaults.
@@ -155,10 +154,6 @@ export class LinuxAdapter implements PlatformAdapter {
     await this.getScreenSize().catch(() => null);
   }
 
-  async shutdown(): Promise<void> {
-    // No long-lived processes to clean up.
-  }
-
   // ─── PERMISSIONS ──────────────────────────────────────────────────
 
   async checkPermissions(): Promise<PermissionStatus> {
@@ -173,10 +168,6 @@ export class LinuxAdapter implements PlatformAdapter {
       return { input: canInject, accessibility: this.atspiAvailable, screenRecording: true };
     }
     return { input: true, accessibility: this.atspiAvailable, screenRecording: true };
-  }
-
-  async requestPermissions(): Promise<PermissionStatus> {
-    return this.checkPermissions();
   }
 
   // ─── DISPLAY ──────────────────────────────────────────────────────
@@ -391,24 +382,6 @@ export class LinuxAdapter implements PlatformAdapter {
     return { buffer, width, height, scaleFactor, ...(origin ? { origin } : {}) };
   }
 
-  async screenshotRegion(x: number, y: number, w: number, h: number): Promise<ScreenshotResult> {
-    const img = await this.grabScreen();
-    try {
-      // Clamp to image bounds so sharp doesn't throw.
-      const left = Math.max(0, Math.min(x, img.width - 1));
-      const top = Math.max(0, Math.min(y, img.height - 1));
-      const width = Math.max(1, Math.min(w, img.width - left));
-      const height = Math.max(1, Math.min(h, img.height - top));
-      const buffer = await sharpFromGrab(img)
-        .extract({ left, top, width, height })
-        .png()
-        .toBuffer();
-      return { buffer, width, height, scaleFactor: 1 };
-    } finally {
-      (img as any).data = null;
-    }
-  }
-
   private async grabScreen(): Promise<GrabImage> {
     await beforeCapture(); // clawdcursor's own pill must not be in the capture
     // Wayland: nut-js would open X11 and die (see wayland-screen.ts); grim or an honest error.
@@ -531,19 +504,6 @@ export class LinuxAdapter implements PlatformAdapter {
     } catch (err) {
       this.focusFailure = err instanceof Error ? err.message : String(err);
       return false;
-    }
-  }
-
-  async maximizeWindow(): Promise<void> {
-    if (!(await this.hasBinary('wmctrl'))) return;
-    try {
-      await execFileAsync(
-        'wmctrl',
-        ['-r', ':ACTIVE:', '-b', 'add,maximized_vert,maximized_horz'],
-        { timeout: TOOL_TIMEOUT_MS },
-      );
-    } catch {
-      /* non-fatal */
     }
   }
 
@@ -1363,16 +1323,6 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   // ─── APPS ─────────────────────────────────────────────────────────
-
-  /**
-   * Thin shim — delegates straight to `launchApp` with no alias resolution.
-   * The platform layer is alias-data-agnostic; cross-OS name mapping (e.g.
-   * Windows-style "Notepad" → Linux "gedit") happens in the caller above
-   * (the agent's `open_app` tool, the router's `handleOpenApp`).
-   */
-  async openApp(name: string, opts?: { alwaysNewInstance?: boolean }): Promise<{ pid?: number; title?: string }> {
-    return this.launchApp(name, opts);
-  }
 
   async launchApp(
     name: string,

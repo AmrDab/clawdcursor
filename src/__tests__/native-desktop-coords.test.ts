@@ -273,16 +273,6 @@ describe('native-desktop.ts source guards', () => {
     expect(body).toContain('this.placePointer(');
   });
 
-  it('mouseDown routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
-    const body = extractMethodBody(nativeDesktopSrc, 'async mouseDown(');
-    expect(body).toContain('this.placePointer(');
-  });
-
-  it('mouseUp routes through placePointer (any monitor; physicalToMouse as fallback)', () => {
-    const body = extractMethodBody(nativeDesktopSrc, 'async mouseUp(');
-    expect(body).toContain('this.placePointer(');
-  });
-
   it('mouseDrag places every waypoint through placePointer', () => {
     const body = extractMethodBody(nativeDesktopSrc, 'async mouseDrag(');
     const count = (body.match(/this\.placePointer\(/g) || []).length;
