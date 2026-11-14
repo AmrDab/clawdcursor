@@ -15,7 +15,7 @@ import { beforePointerPress, guardInputMethods } from './pointer-guard';
 import os from 'os';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
-import { normalizeKey, modifierOf, type Modifier } from './keys';
+import { normalizeKey, modifierOf } from './keys';
 import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } from './native-helper';
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
@@ -30,10 +30,6 @@ import type { ClawdConfig, ScreenFrame } from '../types';
 // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 const IS_MAC = os.platform() === 'darwin';
-/** System Events' name for each modifier (macOS: `super` is Cmd). */
-const MAC_USING: Record<Modifier, string> = { ctrl: 'control down', shift: 'shift down', alt: 'option down', super: 'command down' };
-/** A modifier pressed on its own ("shift"): tapped by its key code, as MacOSAdapter does (MAC_MODIFIER_KEY_CODES). */
-const MAC_MODIFIER_KEY_CODE: Record<Modifier, number> = { ctrl: 59, shift: 56, alt: 58, super: 55 };
 
 /** Safely resolve a nut-js Key enum value from multiple candidate names */
 function resolveNutKey(...candidates: string[]): Key {
@@ -698,7 +694,7 @@ export class NativeDesktop {
   private async macKeyPress(keyCombo: string): Promise<void> {
     // A system dialog or the lock screen owning the keyboard refuses here (a bare Escape is never checked).
     await this.guardMacKeys(keyCombo);
-    const { runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
+    const { MAC_MODIFIER, runAppleScript, hasNonAscii, refuseNonAsciiChord, typeTextMac } = await import('./mac-keyboard');
 
     if (keyCombo === '+') {
       await runAppleScript('tell application "System Events" to keystroke "+"', 5000);
@@ -715,7 +711,7 @@ export class NativeDesktop {
     const modUsing = parts.slice(0, -1).map(m => {
       const mod = modifierOf(m, 'darwin');
       if (!mod) throw new Error(`Unknown modifier: "${m}"`);
-      return MAC_USING[mod];
+      return `${MAC_MODIFIER[mod].name} down`;
     });
 
     // Map special key names to System Events key code actions
@@ -738,7 +734,7 @@ export class NativeDesktop {
 
     let script: string;
     const bareModifier = parts.length === 1 ? modifierOf(key, 'darwin') : null;
-    const special = bareModifier ? `key code ${MAC_MODIFIER_KEY_CODE[bareModifier]}` : specialKeys[key.toLowerCase()];
+    const special = bareModifier ? `key code ${MAC_MODIFIER[bareModifier].code}` : specialKeys[key.toLowerCase()];
     // A key outside ASCII ("é", "日"): typed as itself — `keystroke` would press "a", and with modifiers ⌘A (#242).
     if (!special && hasNonAscii(key)) {
       refuseNonAsciiChord(key, modUsing.length > 0);

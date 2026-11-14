@@ -53,6 +53,7 @@ import { llmSize } from '../core/agent-loop/coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { wellFormed } from './mac-ax';
+import { modifierOf, type Modifier } from './keys';
 
 const execFileAsync = promisify(execFile);
 
@@ -1223,20 +1224,17 @@ export class LinuxAdapter implements PlatformAdapter {
   }
 
   private resolveModifier(name: string): Key | null {
-    const m = name.toLowerCase();
-    // "mod" on Linux → Control (brief §9).
-    if (m === 'mod' || m === 'ctrl' || m === 'control') return Key.LeftControl;
-    if (m === 'shift') return Key.LeftShift;
-    if (m === 'alt' || m === 'option' || m === 'opt') return Key.LeftAlt;
-    if (m === 'super' || m === 'cmd' || m === 'command' || m === 'meta' || m === 'win') return Key.LeftSuper;
-    return null;
+    const m = modifierOf(name, 'linux');
+    return m ? NUT_MODIFIER[m] : null;
   }
 
   private resolveKey(name: string): Key | null {
     if (!name) return null;
     const lower = name.toLowerCase();
 
-    // Special / named keys.
+    // A modifier pressed on its own ("super" opens the launcher on most DEs).
+    const mod = this.resolveModifier(lower);
+    if (mod !== null) return mod;
     const named = LINUX_SPECIAL_KEYS[lower];
     if (named !== undefined) return named;
 
@@ -1758,6 +1756,8 @@ function atspiRoleQuery(controlType: string): string {
   return raws.length ? raws.join('|') : want;
 }
 
+const NUT_MODIFIER: Record<Modifier, Key> = { ctrl: Key.LeftControl, shift: Key.LeftShift, alt: Key.LeftAlt, super: Key.LeftSuper };
+
 // Named-key table — lowercase lookup, maps to nut-js Key enum.
 const LINUX_SPECIAL_KEYS: Record<string, Key> = {
   'return': Key.Return, 'enter': Key.Enter,
@@ -1765,12 +1765,6 @@ const LINUX_SPECIAL_KEYS: Record<string, Key> = {
   'space': Key.Space, 'spacebar': Key.Space,
   'backspace': Key.Backspace,
   'delete': Key.Delete, 'forwarddelete': Key.Delete,
-  // Modifiers pressed on their own ("super" opens the launcher on most DEs).
-  'super': Key.LeftSuper, 'meta': Key.LeftSuper, 'win': Key.LeftSuper, 'windows': Key.LeftSuper,
-  'cmd': Key.LeftSuper, 'command': Key.LeftSuper,
-  'ctrl': Key.LeftControl, 'control': Key.LeftControl, 'mod': Key.LeftControl,
-  'shift': Key.LeftShift,
-  'alt': Key.LeftAlt, 'option': Key.LeftAlt, 'opt': Key.LeftAlt,
   'escape': Key.Escape, 'esc': Key.Escape,
   'left': Key.Left, 'right': Key.Right, 'up': Key.Up, 'down': Key.Down,
   'home': Key.Home, 'end': Key.End,

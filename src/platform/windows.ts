@@ -30,7 +30,7 @@ import {
 
 import { psRunner } from './ps-runner';
 import { setWindowsClipboard } from './ps-input';
-import { normalizeKey } from './keys';
+import { modifierOf, normalizeKey } from './keys';
 import { sharpFromGrab } from './grab-image';
 import type {
   PlatformAdapter,
@@ -1168,12 +1168,7 @@ export class WindowsAdapter implements PlatformAdapter {
     const parts = combo.split('+').map(s => s.trim()).filter(Boolean);
     if (parts.length === 0) return;
 
-    // Convert "mod" → "ctrl" on Windows, leave the rest of the combo alone.
-    const normalized = parts.map(p => {
-      const l = p.toLowerCase();
-      if (l === 'mod' || l === 'cmd' || l === 'command' || l === 'meta') return 'ctrl';
-      return p;
-    });
+    const normalized = parts.map(p => modifierOf(p, 'win32') ?? p);
 
     // Map every part to a nut-js Key enum value, or 'TYPE_CHAR' for printable chars
     // like '*', '+', '.' that have no direct enum entry.

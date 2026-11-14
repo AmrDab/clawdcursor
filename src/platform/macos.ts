@@ -38,7 +38,8 @@ import { llmSize } from '../core/agent-loop/coord-scale';
 import { clampRegion } from './grab-image';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';
-import { MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
+import { MAC_MODIFIER, MacKeyboardGuard, hasNonAscii, refuseNonAsciiChord, runAppleScript, typeTextMac, utf8ClipboardEnv } from './mac-keyboard';
+import { modifierOf } from './keys';
 import {
   defaultMacAx, MacAxError,
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
@@ -866,16 +867,16 @@ export class MacOSAdapter implements PlatformAdapter {
     // rather than spliced in raw — a raw token can close the string literal
     // and run arbitrary AppleScript, including `do shell script`.
     const mods = parts.slice(0, -1).map(m => {
-      const n = this.normalizeMod(m);
-      if (!['command', 'shift', 'option', 'control'].includes(n)) throw new Error(`Unknown modifier: "${m}"`);
-      return n;
+      const mod = modifierOf(m, 'darwin');
+      if (!mod) throw new Error(`Unknown modifier: "${m}"`);
+      return MAC_MODIFIER[mod].name;
     });
 
     const usingClause = mods.length ? ` using {${mods.map(m => `${m} down`).join(', ')}}` : '';
 
     // Special keys → key code; printable single chars → keystroke. A modifier on its own ("shift") is that modifier key, tapped.
-    const bareModifier = mods.length === 0 ? MAC_MODIFIER_KEY_CODES[this.normalizeMod(key)] : undefined;
-    const keyCode = bareModifier ?? MAC_KEY_CODES[key.toLowerCase()];
+    const bareModifier = mods.length === 0 ? modifierOf(key, 'darwin') : null;
+    const keyCode = bareModifier ? MAC_MODIFIER[bareModifier].code : MAC_KEY_CODES[key.toLowerCase()];
     // One character outside ASCII ("é", "日", an emoji): typed as itself, never as `keystroke` — that presses "a" (#242).
     if (keyCode === undefined && hasNonAscii(key) && [...key].length === 1) {
       refuseNonAsciiChord(key, mods.length > 0);
@@ -895,23 +896,14 @@ export class MacOSAdapter implements PlatformAdapter {
     await runAppleScript(script, 6_000);
   }
 
-  private normalizeMod(mod: string): string {
-    const m = mod.toLowerCase();
-    if (m === 'mod' || m === 'cmd' || m === 'command' || m === 'super' || m === 'meta') return 'command';
-    if (m === 'shift') return 'shift';
-    if (m === 'alt' || m === 'option' || m === 'opt') return 'option';
-    if (m === 'ctrl' || m === 'control') return 'control';
-    return m;
-  }
-
   async keyDown(key: PortableKeyCombo): Promise<void> {
     // macOS key down/up via System Events. Supports named modifiers
     // (shift/option/control/command) and arbitrary key codes. Non-modifier
     // single chars fall back to a brief keystroke.
     const lower = key.trim().toLowerCase();
-    const asMod = this.modToAppleScript(lower);
-    if (asMod) {
-      const script = `tell application "System Events" to key down ${asMod}`;
+    const mod = modifierOf(lower, 'darwin');
+    if (mod) {
+      const script = `tell application "System Events" to key down ${MAC_MODIFIER[mod].name}`;
       await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
@@ -931,9 +923,9 @@ export class MacOSAdapter implements PlatformAdapter {
 
   async keyUp(key: PortableKeyCombo): Promise<void> {
     const lower = key.trim().toLowerCase();
-    const asMod = this.modToAppleScript(lower);
-    if (asMod) {
-      const script = `tell application "System Events" to key up ${asMod}`;
+    const mod = modifierOf(lower, 'darwin');
+    if (mod) {
+      const script = `tell application "System Events" to key up ${MAC_MODIFIER[mod].name}`;
       await runAppleScript(script, 3_000).catch(() => {});
       return;
     }
@@ -946,14 +938,6 @@ export class MacOSAdapter implements PlatformAdapter {
     // Printable single char: no-op — keystroke doesn't hold. Anything else (a chord, an unknown name) is an error: the
     // caller must not believe a key was released (pointer-guard.ts held keys).
     if ([...key.trim()].length !== 1) throw new Error(`Unknown key: "${key}"`);
-  }
-
-  private modToAppleScript(name: string): string | null {
-    if (name === 'mod' || name === 'cmd' || name === 'command' || name === 'meta' || name === 'super') return 'command';
-    if (name === 'shift') return 'shift';
-    if (name === 'alt' || name === 'option' || name === 'opt') return 'option';
-    if (name === 'ctrl' || name === 'control') return 'control';
-    return null;
   }
 
   // ─── CLIPBOARD ────────────────────────────────────────────────────
@@ -1197,9 +1181,6 @@ export class MacOSAdapter implements PlatformAdapter {
 }
 
 // macOS virtual keycodes for special keys (US ANSI keyboard).
-/** The left-hand modifier keys, for a modifier pressed on its own. */
-const MAC_MODIFIER_KEY_CODES: Record<string, number> = { shift: 56, command: 55, option: 58, control: 59 };
-
 const MAC_KEY_CODES: Record<string, number> = {
   'return': 36, 'enter': 36,
   'tab': 48,

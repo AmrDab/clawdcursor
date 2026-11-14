@@ -124,13 +124,13 @@ async function detectYdotoolGeneration(): Promise<YdotoolGeneration> {
  */
 const LINUX_KEYCODES: Record<string, number> = {
   // Modifiers
-  ctrl:     29,  control:   29,  leftctrl:  29,
+  ctrl:     29,  leftctrl:  29,
   rightctrl:97,
   shift:    42,  leftshift: 42,
   rightshift: 54,
-  alt:      56,  option:    56,  leftalt:   56,
+  alt:      56,  leftalt:   56,
   rightalt: 100, altgr:     100,
-  super:    125, meta:      125, win:       125, cmd: 125,
+  super:    125,
   rightsuper: 126,
 
   // Navigation / editing

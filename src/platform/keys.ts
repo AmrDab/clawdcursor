@@ -6,15 +6,6 @@
  */
 
 /**
- * Platform-aware "primary modifier" — `mod` resolves to Cmd on macOS and
- * Ctrl on Windows/Linux. This matches the convention used by editor
- * frameworks (CodeMirror, ProseMirror, Tiptap) and the v2 PlatformAdapter.
- * Without this alias the legacy `NativeDesktop.keyPress` would either throw
- * `Unknown key: "mod"` (Win/Linux) or silently drop the modifier on macOS.
- */
-const PLATFORM_PRIMARY_MOD = process.platform === 'darwin' ? 'Super' : 'Control';
-
-/**
  * `mod` — THE way clawdcursor's own code presses this OS's shortcut modifier: Cmd on macOS, Ctrl on Windows and Linux.
  * Every executor resolves it (this table, the three adapters, the Wayland backend), so a built-in combo is written once
  * as `mod+v` and is right on every OS. Never write `ctrl+` / `cmd+` in a built-in combo unless the key is that key on
@@ -39,8 +30,6 @@ export function osKeysGuide(platform: NodeJS.Platform = process.platform): strin
     `\`mod\` always means this OS's modifier, so mod+s is ctrl+s here; ${sys}. ` +
     'Do not send macOS shortcuts (cmd+q, cmd+space, cmd+w): use system shortcuts_list for this OS\'s keys. ';
 }
-const CMD_MOD = process.platform === 'win32' ? 'Control' : 'Super';
-
 /** Canonical key name map — input (case-insensitive) → normalized name */
 const KEY_ALIASES: Record<string, string> = {
   // Enter / Return
@@ -77,21 +66,12 @@ const KEY_ALIASES: Record<string, string> = {
   'alt': 'Alt',
   'opt': 'Alt',
   'option': 'Alt',
-  // cmd / command / meta are the Mac's primary modifier: Ctrl on Windows, as the Windows adapter has always pressed them
-  // (windows.ts keyPress). Mapping them to the Windows key here made the two executors disagree — "cmd+l" pressed
-  // Ctrl+L through one and Win+L (lock screen) through the other. Linux keeps Super, as its adapter does.
-  'meta': CMD_MOD,
   'super': 'Super',
   'super_l': 'Super',
   'win': 'Super',
   'windows': 'Super',
-  'cmd': CMD_MOD,
-  'command': CMD_MOD,
   'command_l': 'Super',
-
-  // Platform-aware "primary" modifier — Cmd on macOS, Ctrl on Win/Linux.
-  // Resolved at module load via PLATFORM_PRIMARY_MOD above.
-  'mod': PLATFORM_PRIMARY_MOD,
+  // mod / cmd / command / meta are a different key per OS: normalizeKey asks modifierOf.
 
   // Function keys
   'f1': 'F1', 'f2': 'F2', 'f3': 'F3', 'f4': 'F4',
@@ -152,8 +132,13 @@ export function normalizeKey(key: string): string {
   if (!key || typeof key !== 'string') {
     throw new Error(`normalizeKey: expected non-empty string, got ${typeof key}: ${JSON.stringify(key)}`);
   }
-  return KEY_ALIASES[key.toLowerCase()] || key;
+  const t = key.toLowerCase();
+  if (OS_DEPENDENT.has(t)) return MODIFIER_KEY[modifierOf(t)!];
+  return KEY_ALIASES[t] || key;
 }
+
+const OS_DEPENDENT = new Set(['mod', 'cmd', 'command', 'meta']);
+const MODIFIER_KEY: Record<Modifier, string> = { ctrl: 'Control', shift: 'Shift', alt: 'Alt', super: 'Super' };
 
 /** A modifier key, as an executor presses it. `super` is Cmd on macOS and the Super / Windows key elsewhere. */
 export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
@@ -173,7 +158,8 @@ const MAC_MODIFIER_NAMES = new Set(['mod', 'cmd', 'command', 'super', 'meta', 's
 export function modifierOf(token: string, platform: NodeJS.Platform = process.platform): Modifier | null {
   const t = token.trim().toLowerCase();
   if (platform === 'darwin' && !MAC_MODIFIER_NAMES.has(t)) return null;
-  // KEY_ALIASES resolves these three for the OS this process runs on; `platform` decides here.
+  // cmd / command / meta are the Mac's primary modifier: Ctrl on Windows, as the Windows adapter has always pressed them.
+  // As the Windows key, "cmd+l" pressed Win+L (lock screen) through one executor and Ctrl+L through the other.
   if (t === 'mod') return platform === 'darwin' ? 'super' : 'ctrl';
   if (t === 'cmd' || t === 'command' || t === 'meta') return platform === 'win32' ? 'ctrl' : 'super';
   switch (KEY_ALIASES[t]) {
