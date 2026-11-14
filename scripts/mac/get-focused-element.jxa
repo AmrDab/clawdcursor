@@ -20,7 +20,6 @@ function run() {
     const pid = proc.unixId();
     const procName = proc.name();
 
-    // Get the focused UI element
     let focused;
     try {
       focused = proc.focusedUIElement();
@@ -47,7 +46,6 @@ function run() {
       return JSON.stringify(null);
     }
 
-    // Extract properties safely
     let name = '', role = '', value = '', subrole = '';
     let bounds = { x: 0, y: 0, width: 0, height: 0 };
 

@@ -4,9 +4,9 @@
  * get-screen-context.jxa
  *
  * Combined script: gets windows list + focused window UI tree in ONE osascript spawn.
- * macOS equivalent of get-screen-context.ps1.
+ * macOS equivalent of the get-screen-context command in scripts/ps-bridge.ps1.
  *
- * Output shape (matches PS1 exactly so accessibility.ts needs no changes):
+ * Output shape (the same { windows, uiTree } as the Windows command):
  *   { windows: WindowInfo[], uiTree: UINode | null }
  *
  * Parameters (read from argv):

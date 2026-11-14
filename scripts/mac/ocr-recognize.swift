@@ -109,10 +109,8 @@ do {
     exit(0)
 }
 
-// Wait for async completion
 semaphore.wait()
 
-// Output JSON matching Windows format
 let result: [String: Any] = [
     "elements": elements,
     "fullText": fullText

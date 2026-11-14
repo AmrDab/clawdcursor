@@ -116,7 +116,6 @@ def search_stop(seen: list, depth: int) -> bool:
     return False
 INTERACTIVE_ROLES = {
     # Roles whose state/value the agent is most likely to care about.
-    # Used to prefer these over structural containers when truncating.
     'push button', 'toggle button', 'check box', 'radio button',
     'menu item', 'check menu item', 'radio menu item',
     'link', 'hyperlink',
@@ -242,7 +241,6 @@ def node_to_dict(acc: Any) -> Optional[dict]:
     bounds, coord_type = element_bounds(acc)
     x, y, w, h = bounds
 
-    # State flags
     focused = False
     enabled: Optional[bool] = True
     selected = False
@@ -283,7 +281,6 @@ def node_to_dict(acc: Any) -> Optional[dict]:
         if value is not None and value == name:
             value = None
 
-    # Process id
     pid = None
     try:
         pid = acc.get_process_id()
@@ -420,7 +417,6 @@ def active_application(process_id: Optional[int] = None,
         return None
     apps = [a for a in (safe(lambda i=i: desktop.get_child_at_index(i)) for i in range(n)) if a is not None]
 
-    # If caller supplied a pid, match on it.
     if process_id is not None:
         for app in apps:
             pid = safe(lambda app=app: app.get_process_id())
@@ -448,7 +444,6 @@ def active_application(process_id: Optional[int] = None,
         if has_focused_descendant(app):
             return app
 
-    # Fallback: first app.
     return apps[0] if apps else None
 
 

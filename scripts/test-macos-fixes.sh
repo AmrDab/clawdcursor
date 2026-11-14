@@ -34,7 +34,6 @@ else
     exit 1
 fi
 
-# Verify all 4 binaries
 APP_DIR="ClawdCursor.app/Contents/MacOS"
 ALL_PRESENT=true
 for bin in ClawdCursorHost clawdcursor-helper screenshot-helper permission-check; do
@@ -64,7 +63,6 @@ PERM_BIN="native/ClawdCursor.app/Contents/MacOS/permission-check"
 PERM_DIRECT=$("$PERM_BIN" 2>/dev/null || echo '{"error":"failed"}')
 echo "     Direct permission-check: $PERM_DIRECT"
 
-# Check it has processPath field
 if echo "$PERM_DIRECT" | grep -q '"processPath"'; then
     pass "permission-check returns processPath"
 else
@@ -141,7 +139,6 @@ fi
 # ── 5. Doctor should agree with status ───────────────────────────────
 echo ""
 echo "  🩺 Step 5: Doctor permission check (should match status)..."
-# Run doctor in a way that just checks permissions then exits
 DOCTOR_OUT=$(timeout 15 node dist/index.js doctor --provider skip 2>&1 || true)
 echo "$DOCTOR_OUT" | grep -E "permission|Permission|macOS|✅|❌" | while IFS= read -r line; do echo "     $line"; done
 pass "Doctor ran permission checks"

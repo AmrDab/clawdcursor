@@ -29,8 +29,6 @@ const TOOLCALL_OUT = 30;      // one tool_call generation
 const BATCH_OUT_PER_STEP = 18;// generating one step of the list
 const TRACE_PER_STEP = 35;    // one line of the batch result trace (perception FILTERED to a summary)
 
-// A representative perceive→act task: open app, then (perceive form, type field)×3, then send.
-
 function perCall(steps: readonly string[], catalog: number) {
   let input = 0, output = 0, history = 0;
   for (const kind of steps) {
@@ -43,10 +41,10 @@ function perCall(steps: readonly string[], catalog: number) {
 
 function batch(steps: readonly string[], catalog: number, replans: number) {
   const n = steps.length;
-  const genOut = n * BATCH_OUT_PER_STEP;        // generate the whole list
+  const genOut = n * BATCH_OUT_PER_STEP;
   const trace = n * TRACE_PER_STEP;             // combined result: summaries, not full perception blobs
   let input = 0, output = 0, history = 0, turns = 0;
-  for (let r = 0; r <= replans; r++) {          // 1 generation + `replans` re-plans
+  for (let r = 0; r <= replans; r++) {
     turns++;
     input += SYSTEM + catalog + history;
     output += genOut + (r > 0 ? 0 : 0);

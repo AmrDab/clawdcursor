@@ -10,8 +10,8 @@
 # Interaction contract with the parent (src/core/banner.ts):
 #   - Parent spawns:  powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File banner.ps1
 #   - Stop, or a DOUBLE-CLICK anywhere on the banner → prints "BANNER_STOP" on
-#     stdout and exits; the parent reacts by running the `clawdcursor stop` flow
-#     (abort in-flight task + graceful daemon shutdown).
+#     stdout and exits; the parent stops control (src/core/control.ts stopControl)
+#     until the user gives it back.
 #   - Parent kills this process to hide the banner.
 #   - stdin: "HIDE <ms>" steps aside for an agent's click; "ACTIVITY <text>" replaces
 #     the activity text (the first one comes in CLAWD_BANNER_ACTIVITY).
@@ -363,7 +363,6 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
         $b.Location  = New-Object System.Drawing.Point($x, $y)
         $b.Cursor    = [System.Windows.Forms.Cursors]::Hand
         $b.Tag       = $line
-        # Rounded once sized (a later Size change re-rounds); a lighter shade under the pointer.
         $b.Add_SizeChanged({ param($s, $e) Set-Round $s 8 })
         $b.Add_MouseEnter({ param($s, $e) $script:hoverBase[$s] = $s.BackColor; $s.BackColor = [System.Windows.Forms.ControlPaint]::Light($s.BackColor, 0.15) })
         $b.Add_MouseLeave({ param($s, $e) if ($script:hoverBase.ContainsKey($s)) { $s.BackColor = $script:hoverBase[$s]; $script:hoverBase.Remove($s) } })
@@ -379,9 +378,6 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     $gray = [System.Drawing.Color]::FromArgb(44, 48, 57)
     $dim  = $muted
 
-    # The card (set by pause_for_user): CLAWD_BANNER_CHOICES = JSON array of strings -> one button each, printing
-    # BANNER_CHOICE <index>; CLAWD_BANNER_INPUT = JSON {placeholder, multiline} -> a text box (sent as BANNER_REPLY).
-    # Neither set = the plain prompt. They sit above the usual Resume / End task row.
     $choices = New-Object System.Collections.ArrayList
     if ($env:CLAWD_BANNER_CHOICES) {
         try { foreach ($c in ($env:CLAWD_BANNER_CHOICES | ConvertFrom-Json)) { if (($c -is [string]) -and $c.Length -gt 0 -and $choices.Count -lt 6) { [void]$choices.Add($c) } } } catch { }
@@ -396,7 +392,6 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
 
     $y = 38 + $msgH + 14
     for ($i = 0; $i -lt $choices.Count; $i++) {
-        # One row per option, the full width of the card, read like a list.
         $cb = New-PillButton ([string]$choices[$i]) ('BANNER_CHOICE ' + $i) $pad $y ([System.Drawing.Color]::FromArgb(34, 38, 46))
         $cb.Font      = New-Object System.Drawing.Font('Segoe UI', 10)
         $cb.TextAlign = 'MiddleLeft'
@@ -514,7 +509,6 @@ if ($env:CLAWD_BANNER_MODE -eq 'paused') {
     foreach ($ctl in @($dot, $title, $msg) + @($extra) + @($yes, $other, $no, $reply, $send)) { if ($ctl) { $form.Controls.Add($ctl) } }
     Set-PillShape $form 14
 
-    # Slow blue pulse on the dot — calmer than the red "recording" blink.
     $timer = New-Object System.Windows.Forms.Timer
     $timer.Interval = 900
     $bright = $true
@@ -552,7 +546,7 @@ function New-PillLabel([string]$text, [string]$font, [float]$size, $color) {
     $l.AutoSize = $true
     return $l
 }
-$dot      = New-Object Orb   # the "working" orb: particles on their orbits while the agent works
+$dot      = New-Object Orb
 $dot.BackColor = $form.BackColor
 $brand    = New-PillLabel 'ClawdCursor' 'Segoe UI Semibold' 9 $muted
 $activity = New-PillLabel 'Working' 'Segoe UI Semibold' 9.5 ([System.Drawing.Color]::White)
@@ -572,7 +566,6 @@ $stop.Add_MouseLeave({ $stop.BackColor = [System.Drawing.Color]::FromArgb(64, 30
 
 $form.Controls.AddRange(@($dot, $brand, $activity, $elapsed, $stop))
 
-# Lay the row out left to right and size the pill to it (the activity text changes), centred again each time.
 function Update-Layout {
     $x = 12
     $dot.Location = New-Object System.Drawing.Point(($x - 2), 9);     $x += $dot.Width + 2

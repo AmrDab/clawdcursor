@@ -14,17 +14,14 @@ try {
     # Resolve to absolute path (required by WinRT StorageFile API)
     $ImagePath = (Resolve-Path $ImagePath -ErrorAction Stop).Path
 
-    # Load WinRT interop assembly
     Add-Type -AssemblyName System.Runtime.WindowsRuntime
 
-    # Load WinRT types
     $null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
     $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]
     $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
     $null = [Windows.Storage.StorageFile, Windows.Foundation, ContentType = WindowsRuntime]
     $null = [Windows.Storage.Streams.RandomAccessStream, Windows.Foundation, ContentType = WindowsRuntime]
 
-    # Find the AsTask<TResult>(IAsyncOperation<TResult>) extension method
     $asTaskOp = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
         $_.Name -eq 'AsTask' -and
         $_.IsGenericMethod -and
@@ -47,7 +44,6 @@ try {
         return $task.Result
     }
 
-    # Create OCR engine from user profile languages
     $ocr = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
     if (-not $ocr) {
         [Console]::Out.WriteLine('{"error":"Windows OCR engine not available - no recognized languages installed"}')
@@ -55,16 +51,13 @@ try {
         exit 0
     }
 
-    # Open image via WinRT StorageFile → stream → BitmapDecoder → SoftwareBitmap
     $storageFile = Invoke-Async ([Windows.Storage.StorageFile]::GetFileFromPathAsync($ImagePath)) ([Windows.Storage.StorageFile])
     $stream      = Invoke-Async ($storageFile.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
     $decoder     = Invoke-Async ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
     $bitmap      = Invoke-Async ($decoder.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
 
-    # Run OCR recognition
     $ocrResult = Invoke-Async ($ocr.RecognizeAsync($bitmap)) ([Windows.Media.Ocr.OcrResult])
 
-    # Build structured result — one entry per word with bounding box
     $elements = @()
     $lineIdx = 0
     foreach ($line in $ocrResult.Lines) {
@@ -82,11 +75,9 @@ try {
         $lineIdx++
     }
 
-    # Clean up WinRT resources
     try { $stream.Dispose() } catch {}
     try { $bitmap.Dispose() } catch {}
 
-    # Output single-line JSON
     $output = [PSCustomObject]@{
         elements = @($elements)   # force array even if 0 or 1 element
         fullText = if ($ocrResult.Text) { $ocrResult.Text } else { "" }
