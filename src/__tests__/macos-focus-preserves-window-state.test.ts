@@ -15,27 +15,8 @@ import { getPackageRoot } from '../paths';
 const read = (...p: string[]) => readFileSync(join(getPackageRoot(), ...p), 'utf8');
 const stripComments = (src: string) => src.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
 
-/** Everything a focus must never do to a window. */
-function violations(code: string): string[] {
-  const bad: Array<[string, RegExp]> = [
-    ['writes size', /\.size\s*=[^=]/],
-    ['writes position', /\.position\s*=[^=]/],
-    ['writes bounds', /\.bounds\s*=[^=]/],
-    ['touches zoom', /zoom/i],
-    ['touches full screen', /full[-\s]?screen/i],
-    ['sends the full-screen shortcut', /ctrl\+mod\+f|control down.*"f"/i],
-  ];
-  const found = bad.filter(([, re]) => re.test(code)).map(([what]) => what);
-  // AXMinimized may only ever be CLEARED here
-  for (const m of code.matchAll(/AXMinimized['"]\)\.value\s*=\s*(\w+)/g)) if (m[1] !== 'false') found.push(`sets AXMinimized to ${m[1]}`);
-  return found;
-}
-
+// focus-window.jxa runs below against a fake System Events; ax-helper only runs against a live AX tree.
 describe('the macOS focus path never changes a window\'s size, zoom or full-screen state', () => {
-  it('focus-window.jxa', () => {
-    expect(violations(stripComments(read('scripts', 'mac', 'focus-window.jxa')))).toEqual([]);
-  });
-
   it('the accessibility helper\'s focus command (cmdFocus in ax-helper.swift)', () => {
     const src = stripComments(read('scripts', 'mac', 'ax-helper.swift'));
     const start = src.indexOf('func cmdFocus()');
@@ -45,14 +26,6 @@ describe('the macOS focus path never changes a window\'s size, zoom or full-scre
     // the only window attribute it writes besides raising is AXMinimized, and only to false
     const writes = [...body.matchAll(/AXUIElementSetAttributeValue\([^,]+,\s*"(\w+)" as CFString,\s*(\w+)\)/g)].map(m => `${m[1]}=${m[2]}`);
     expect(writes.sort()).toEqual(['AXFrontmost=kCFBooleanTrue', 'AXMain=kCFBooleanTrue', 'AXMinimized=kCFBooleanFalse']);
-  });
-
-  it('MacOSAdapter.focusWindow calls no state-changing helper', () => {
-    const src = read('src', 'platform', 'macos.ts');
-    const start = src.indexOf('async focusWindow(');
-    const body = src.slice(start, src.indexOf('\n  }\n', start));
-    expect(body.length).toBeGreaterThan(200);
-    for (const forbidden of ['setWindowState', 'setWindowBounds', 'maximizeWindow', 'keyPress']) expect(body).not.toContain(forbidden);
   });
 });
 

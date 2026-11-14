@@ -1,6 +1,8 @@
 /**
- * expand / collapse on macOS: rules that must hold in the sources whatever machine runs the tests. The behaviour itself is
- * covered live (mac-ax-live.system.test.ts, CLAWD_LIVE_MAC_TESTS=1) and, for the key step, in macos-expand-key.test.ts.
+ * expand / collapse on macOS. The osascript fallback (invoke-element.jxa) runs here in a vm against fake elements, on any
+ * OS. The accessibility helper (ax-helper.swift) has no entry point that runs without a live AX tree, so its rules are
+ * read from the source; its behaviour is covered live (mac-ax-live.system.test.ts, CLAWD_LIVE_MAC_TESTS=1) and, for the
+ * key step, in macos-expand-key.test.ts.
  *
  *  - AXShowMenu is never an expansion: on web content it opens the PAGE's context menu (Reload, Back, ...); the tool said
  *    "Expanded", nothing had opened, and a menu stayed on screen (1.5.27 live test on a Mac).
@@ -12,30 +14,16 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { toUiElement } from '../platform/mac-ax';
+import { el, fakeApp, runInvoke } from './helpers/jxa-harness';
 
 const scripts = path.join(__dirname, '..', '..', 'scripts', 'mac');
 const swift = fs.readFileSync(path.join(scripts, 'ax-helper.swift'), 'utf8');
-const jxa = fs.readFileSync(path.join(scripts, 'invoke-element.jxa'), 'utf8');
 
-/** The text of one `case 'name':` block of a JXA switch, up to the next case. */
-function jxaCase(name: string): string {
-  const start = jxa.indexOf(`case '${name}':`);
-  expect(start).toBeGreaterThan(-1);
-  const next = jxa.indexOf('\n            case ', start + 10);
-  return jxa.slice(start, next === -1 ? undefined : next);
-}
 const expandBody = () => swift.slice(swift.indexOf('func expandOrCollapse('), swift.indexOf('func perform('));
 
 describe('expand / collapse never use AXShowMenu', () => {
   it('the helper does not press AXShowMenu anywhere', () => {
     expect(swift).not.toMatch(/press\(\s*\w+\s*,\s*"AXShowMenu"/);
-  });
-
-  it('the osascript fallback does not perform AXShowMenu for expand or collapse, and does not open a pop-up it could not close', () => {
-    for (const c of ['expand', 'collapse']) {
-      expect(jxaCase(c)).not.toMatch(/actions\[\s*['"]AXShowMenu['"]\s*\]/);
-      expect(jxaCase(c)).not.toMatch(/actions\[\s*['"]AXPress['"]\s*\]/);
-    }
   });
 
   it('the helper reads the result back before it reports one, never "the call returned"', () => {
@@ -52,6 +40,37 @@ describe('expand / collapse never use AXShowMenu', () => {
 
   it('an element that was already in the wanted state says so (expandChanged: false), so the tool reports "still expanded"', () => {
     expect(expandBody()).toMatch(/if method == "unchanged" \{ data\["expandChanged"\] = false \}/);
+  });
+});
+
+describe('the osascript fallback (invoke-element.jxa, run in a vm): expand / collapse set AXExpanded and read it back', () => {
+  // A disclosure triangle and a web <summary> (a button), each with AXPress and AXShowMenu on offer.
+  const run = (action: string, p: { role: string; expanded?: boolean; expandSettable?: boolean }) => {
+    const target = el({ name: 'More options', ...p });
+    const r = runInvoke(fakeApp(el({ name: 'Win', role: 'AXWindow' }, [target])), ['-ProcessId', '4242', '-Action', action, '-Name', 'More options']);
+    return { r, target };
+  };
+
+  it('a settable AXExpanded: set, read back, and reported with the method', () => {
+    const open = run('expand', { role: 'AXDisclosureTriangle', expanded: false, expandSettable: true });
+    expect(open.r).toEqual({ success: true, action: 'expand', method: 'AXExpanded' });
+    expect(open.target.props.expanded).toBe(true);
+    const shut = run('collapse', { role: 'AXDisclosureTriangle', expanded: true, expandSettable: true });
+    expect(shut.r).toEqual({ success: true, action: 'collapse', method: 'AXExpanded' });
+    expect(shut.target.props.expanded).toBe(false);
+  });
+
+  it('no settable AXExpanded: a failure that says the helper is needed, and neither AXShowMenu (the page\'s context menu) nor AXPress (a pop-up it could not close) is performed', () => {
+    for (const action of ['expand', 'collapse']) {
+      for (const p of [{ role: 'AXButton' }, { role: 'AXPopUpButton', expanded: false }, { role: 'AXDisclosureTriangle', expanded: true }]) {
+        const { r, target } = run(action, p);
+        expect(r.success, `${action} ${p.role}`).toBe(false);
+        expect(r.error).toMatch(/does not support (expand|collapse) here \(no settable AXExpanded\)/);
+        expect(target.showedMenu, `${action} ${p.role}`).toBeUndefined();
+        expect(target.pressed, `${action} ${p.role}`).toBeUndefined();
+        expect(target.clicked, `${action} ${p.role}`).toBeUndefined();
+      }
+    }
   });
 });
 

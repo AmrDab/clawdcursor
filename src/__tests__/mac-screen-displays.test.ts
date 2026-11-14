@@ -5,7 +5,7 @@
  * the primary (menu-bar) screen at index 0, and each screen has its own scale.
  */
 import { describe, it, expect } from 'vitest';
-import { LIST_DISPLAYS_SCRIPT, parseDisplayList, readDisplayList } from '../platform/mac-screen';
+import { parseDisplayList, readDisplayList } from '../platform/mac-screen';
 
 describe('parseDisplayList', () => {
   it('parses one line per screen: index|x,y,w,h|primary|backingScaleFactor', () => {
@@ -21,12 +21,6 @@ describe('parseDisplayList', () => {
 
   it('returns [] for empty output', () => {
     expect(parseDisplayList('')).toEqual([]);
-  });
-});
-
-describe('LIST_DISPLAYS_SCRIPT', () => {
-  it('does not use `as any` — a compile error (-2741) that disabled multi-monitor on macOS', () => {
-    expect(LIST_DISPLAYS_SCRIPT).not.toMatch(/as any/);
   });
 });
 

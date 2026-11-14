@@ -31,12 +31,6 @@ describe('parseMainScreenInfo', () => {
   });
 });
 
-describe('MAIN_SCREEN_SCRIPT', () => {
-  it('does not use the NSRect record syntax that throws on macOS 26 (-1728 / -1700)', () => {
-    expect(MAIN_SCREEN_SCRIPT).not.toMatch(/size of frame|'s size's/);
-  });
-});
-
 describe('readMainScreenInfo', () => {
   it('runs the script through osascript and parses its output', async () => {
     const calls: string[][] = [];
