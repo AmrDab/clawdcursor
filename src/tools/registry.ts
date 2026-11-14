@@ -19,7 +19,7 @@ import { getElectronBridgeTools } from './electron_bridge';
 import { getCompactTools } from './compact';
 import { getAgentTools } from './agent';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
-import { toJsonSchema, toMouseLength } from './types';
+import { toJsonSchema } from './types';
 import { stampCostClasses } from './cost-class';
 import { fenceTools } from '../core/fence';
 import { buildUnifiedTools } from './projected/tools';
@@ -56,18 +56,6 @@ const WINDOW_SYSB_NAMES = new Set([
   'list_displays',
 ]);
 
-/** MCP names that the projected window tools will carry (after mcpName rename). */
-const WINDOW_MCP_NAMES = new Set([
-  'get_windows',
-  'focus_window',
-  'maximize_window',
-  'minimize_window_to_taskbar',
-  'restore_window',
-  'close_window',
-  'resize_window',
-  'list_displays',
-]);
-
 /** Build projected window ToolDefinitions from System B (cached). */
 let _projectedWindowCache: ToolDefinition[] | null = null;
 function projectedWindowTools(): ToolDefinition[] {
@@ -86,28 +74,8 @@ function projectedWindowTools(): ToolDefinition[] {
 // mouse_down, mouse_up are re-projected from System B equivalents:
 //   click, drag, scroll, mouse_move_relative, mouse_down, mouse_up.
 //
-// COORDINATE-SPACE BACKWARD COMPATIBILITY
-// ----------------------------------------
-// The CURRENT System A mouse tools (desktop.ts) treat x/y as IMAGE-space
-// (screenshot pixels) and always scale to physical via getMouseScaleFactor().
-// External agents send image-space coords derived from the most-recent
-// screenshot, so omitting `space` must still produce image-space scaling.
-//
-// System B granular tools default to `space:'screen'` when the arg is absent
-// (accessibility-snapshot coords, no scaling). That default is WRONG for the
-// MCP surface where callers never pass `space` — it would silently break all
-// existing external agents on HiDPI/multi-monitor setups.
-//
-// FIX: for the coord-sensitive tools (click, drag, scroll) the projected
-// handler injects `space:'image'` when the caller omits it, preserving the
-// exact image→physical scaling that System A always applied.
-//
-// INTENDED BEHAVIOR CHANGE (bug fix)
-// ------------------------------------
-// Callers that now pass `space:'screen'` (e.g. a11y-snapshot coords) will
-// NOT be double-scaled. Previously, System A always scaled regardless of
-// origin — so a caller using a11y coords had to compensate. This is the one
-// intentional change; see CHANGELOG.md under Unreleased/v2.
+// COORDINATE SPACE: click / drag / scroll take image-space coords (the latest screenshot's) when `space` is omitted,
+// and mouse_move_relative scales dx/dy from image space: the tools do it themselves (projected/tools.ts).
 //
 // Tools WITHOUT a System B equivalent are left on System A:
 //   • mouse_hover          — no System B hover tool
@@ -136,22 +104,6 @@ const MOUSE_SYSB_NAMES = new Set([
   'mouse_up',
 ]);
 
-/** MCP names that the projected mouse tools will carry (after mcpName rename). */
-const MOUSE_MCP_NAMES = new Set([
-  'mouse_click',
-  'mouse_drag',
-  'mouse_scroll',
-  'mouse_move_relative',
-  'mouse_down',
-  'mouse_up',
-]);
-
-/**
- * Names of the coord-sensitive System B mouse tools (click/drag/scroll) that
- * need an image-space default injected for MCP backward compatibility.
- */
-const COORD_SENSITIVE_SYSB_NAMES = new Set(['click', 'drag', 'scroll']);
-
 /** Build projected mouse ToolDefinitions from System B (cached). */
 let _projectedMouseCache: ToolDefinition[] | null = null;
 function projectedMouseTools(): ToolDefinition[] {
@@ -160,63 +112,7 @@ function projectedMouseTools(): ToolDefinition[] {
   const sysBTools = buildUnifiedTools();
   _projectedMouseCache = sysBTools
     .filter(t => MOUSE_SYSB_NAMES.has(t.name))
-    .map(t => {
-      const base = projectToToolDefinition(t);
-
-      // mouse_move_relative: System A scaled dx/dy by the DPI factor; System B
-      // passes them raw. Restore the scaling on the MCP surface so relative
-      // moves don't undershoot 2-3x on HiDPI/retina screens. MCP-only — the
-      // internal agent keeps System B's raw behavior.
-      if (t.name === 'mouse_move_relative') {
-        const sysBHandler = base.handler;
-        return {
-          ...base,
-          handler: (params: Record<string, unknown>, ctx: ToolContext) => {
-            const dx = Number(params.dx);
-            const dy = Number(params.dy);
-            const scaled = { ...params };
-            if (Number.isFinite(dx)) scaled.dx = toMouseLength(ctx, dx);
-            if (Number.isFinite(dy)) scaled.dy = toMouseLength(ctx, dy);
-            return sysBHandler(scaled, ctx);
-          },
-        };
-      }
-
-      if (!COORD_SENSITIVE_SYSB_NAMES.has(t.name)) {
-        // mouse_down, mouse_up — button-only, no coords to scale.
-        return base;
-      }
-
-      // click / drag / scroll: wrap the handler so omitting `space` defaults
-      // to 'image' (image-space scaling) rather than System B's 'screen' default.
-      // This keeps every existing external MCP caller unaffected — they never
-      // pass `space` and expect their screenshot coords to be scaled.
-      // When a caller explicitly passes `space:'screen'` (a11y-sourced coords),
-      // they get pass-through — the intended double-scale bug fix.
-      //
-      // Correct the published `space` description too: System B's own schema
-      // text says "screen (default)", which is the INTERNAL default and the
-      // opposite of the MCP projection's default (image). An agent reading the
-      // MCP schema must see the accurate contract or it double-scales a11y coords.
-      if (base.parameters.space) {
-        base.parameters.space.description =
-          'Coordinate space. Omit (default) → image-space coords from the latest screenshot (the tool scales them to the screen). Pass "screen" → the positions an accessibility tree / find reports (@x,y), passed as reported, unscaled: physical pixels on Windows and Linux, POINTS on macOS (a Retina screenshot\'s "real" size is twice the point size).';
-      }
-      const sysBHandler = base.handler;
-      return {
-        ...base,
-        handler: (
-          params: Record<string, unknown>,
-          ctx: ToolContext,
-        ) => {
-          const withDefault =
-            params.space === undefined
-              ? { ...params, space: 'image' }
-              : params;
-          return sysBHandler(withDefault, ctx);
-        },
-      };
-    });
+    .map(t => projectToToolDefinition(t));
 
   return _projectedMouseCache;
 }
@@ -296,26 +192,6 @@ const A11Y_SYSB_NAMES = new Set([
   // NOTE: `read_text` (System B) is intentionally NOT projected. The MCP surface keeps
   // System A's `ocr_read_screen`: JSON (elements[] + bounds + coordinateSystem) for
   // scope:"screen", `@x,y "text"` rows with the centre of each text for scope:"window".
-]);
-
-/** MCP names that the projected a11y tools will carry (after mcpName rename). */
-const A11Y_MCP_NAMES = new Set([
-  'read_screen',
-  'invoke_element',
-  'set_field_value',
-  'focus_element',
-  'a11y_get_value',
-  'a11y_expand',
-  'a11y_collapse',
-  'a11y_toggle',
-  'a11y_select',
-  'get_element_state',
-  'wait_for_element',
-  'verify',
-  'compile_ui',
-  'find_action_button',
-  'find_input_field',
-  // `ocr_read_screen` stays on System A (structured OCR output) — see above.
 ]);
 
 /** Build projected a11y/perception ToolDefinitions from System B (cached). */
@@ -408,15 +284,6 @@ const BROWSER_SYSB_NAMES = new Set([
   // browser_navigate would silently strip the launch capability. Keep on System A.
 ]);
 
-/** MCP names that the projected browser tools will carry (after mcpName rename). */
-const BROWSER_MCP_NAMES = new Set([
-  'cdp_connect',
-  'cdp_page_context',
-  'cdp_click',
-  'cdp_type',
-  // 'navigate_browser' is NOT in this set — it stays on System A.
-]);
-
 /** Build projected CDP/browser ToolDefinitions from System B (cached). */
 let _projectedBrowserCache: ToolDefinition[] | null = null;
 function projectedBrowserTools(): ToolDefinition[] {
@@ -454,15 +321,6 @@ function projectedBrowserTools(): ToolDefinition[] {
 /** System B names of the keyboard tools to re-project onto the MCP surface. */
 const KEYBOARD_SYSB_NAMES = new Set(['type', 'key', 'key_down', 'key_up', 'undo_last']);
 
-/** MCP names that the projected keyboard tools will carry. */
-const KEYBOARD_MCP_NAMES = new Set([
-  'type_text',
-  'key_press',
-  'key_down',
-  'key_up',
-  'undo_last',
-]);
-
 /** Build projected keyboard ToolDefinitions from System B (cached). */
 let _projectedKeyboardCache: ToolDefinition[] | null = null;
 function projectedKeyboardTools(): ToolDefinition[] {
@@ -487,12 +345,8 @@ export { getCompactTools };
 let _granularCache: ToolDefinition[] | null = null;
 function granularTools(): ToolDefinition[] {
   if (_granularCache === null) {
-    // Assemble all System A tools, then substitute the window group (Step 3),
-    // the keyboard group (Step 4), the mouse group (Step 5), the a11y /
-    // perception group (Step 6), and the CDP / browser group (Step 7) with
-    // projected System B tools. System A tools whose MCP names appear in any
-    // of the five exclusion sets are filtered out before projected tools are
-    // appended to avoid duplicates.
+    // All System A tools, then the projected System B groups: window (Step 3), keyboard (Step 4), mouse (Step 5),
+    // a11y / perception (Step 6) and CDP / browser (Step 7).
     const systemATools = [
       ...getDesktopTools(),
       ...getA11yTools(),
@@ -506,13 +360,7 @@ function granularTools(): ToolDefinition[] {
       ...getA11yDepthTools(),
       ...getElectronBridgeTools(),
       ...getAgentTools(),
-    ].filter(t =>
-      !WINDOW_MCP_NAMES.has(t.name) &&
-      !KEYBOARD_MCP_NAMES.has(t.name) &&
-      !MOUSE_MCP_NAMES.has(t.name) &&
-      !A11Y_MCP_NAMES.has(t.name) &&
-      !BROWSER_MCP_NAMES.has(t.name),
-    );
+    ];
 
     // The fence (CLAWD_FENCE_PIDS, core/fence.ts): with it set, every handler is gated here, once. The MCP surface, the
     // compound tools and the steps of a batch all run these handlers. Unset, the list is returned as it is.

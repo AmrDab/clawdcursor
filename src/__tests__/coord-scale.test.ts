@@ -139,9 +139,9 @@ describe('click tool coordinate space', () => {
     expect(r.text).toMatch(/×2/);
   });
 
-  it('default (screen) passes a11y coords through unchanged', async () => {
+  it('space:"screen" passes a11y coords through unchanged', async () => {
     const clicks: Array<{ x: number; y: number }> = [];
-    await click.execute({ x: 1107, y: 423 }, makeCtx(clicks));
+    await click.execute({ x: 1107, y: 423, space: 'screen' }, makeCtx(clicks));
     expect(clicks[0]).toEqual({ x: 1107, y: 423 });
   });
 

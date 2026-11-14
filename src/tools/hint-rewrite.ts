@@ -1,6 +1,6 @@
 /**
  * Tool results are rewritten so hints name tools that exist on the caller's
- * surface (see toCompactNames / toMcpNames). That rewrite must only touch
+ * surface (see toCompactNames). That rewrite must only touch
  * clawdcursor's own prose:
  *   - a JSON result is data and stays byte-identical — the compact rewrite
  *     inserts `{action:"…"}` with raw double quotes, which made every OCR

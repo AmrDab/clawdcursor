@@ -276,12 +276,11 @@ describe('4. Conditional coordinate scaling', () => {
     expect(ctx.platform.mouseClick).toHaveBeenCalledWith(100, 200, expect.any(Object));
   });
 
-  it('default (no space arg) behaves as screen-space', async () => {
+  it('space:"screen" is unscaled (omitted space is image space: coord-space-default.test.ts)', async () => {
     const ctx = makeCtx();
     const tools = buildUnifiedTools();
     const clickTool = findTool(tools, 'click');
-    await clickTool.execute({ x: 100, y: 200 }, ctx);
-    // No space arg → defaults to 'screen' → unscaled
+    await clickTool.execute({ x: 100, y: 200, space: 'screen' }, ctx);
     expect(ctx.platform.mouseClick).toHaveBeenCalledWith(100, 200, expect.any(Object));
   });
 });

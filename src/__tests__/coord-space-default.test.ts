@@ -21,7 +21,7 @@ function ctx(over: Partial<AgentToolContext> = {}): AgentToolContext {
 
 const getDrag = () => buildUnifiedTools().find(t => t.name === 'drag')!;
 
-// The MCP projection passes space:"image" when the caller omits it (registry.ts); the tool's own default is "screen".
+// Omitting space means image space, the MCP default; space:"screen" passes coordinates through.
 describe('drag coordinate space', () => {
   it('space:"image" scales (×2 on a 2560/1280 screen)', async () => {
     const r = await getDrag().execute({ startX: 640, startY: 250, endX: 680, endY: 250, space: 'image' }, ctx());
@@ -30,9 +30,14 @@ describe('drag coordinate space', () => {
     expect(r.text).toMatch(/\[×2\]/);
   });
 
-  it('without space, coordinates are screen coordinates: passed through', async () => {
+  it('without space, coordinates are image coordinates: scaled', async () => {
     const r = await getDrag().execute({ startX: 640, startY: 250, endX: 680, endY: 250 }, ctx());
-    // screen-space: scale=1, coords pass through
+    expect(r.text).toMatch(/image \(640,250\).*→ screen \(1280,500\)/);
+    expect(r.text).toMatch(/\[×2\]/);
+  });
+
+  it('space:"screen" coordinates are passed through', async () => {
+    const r = await getDrag().execute({ startX: 640, startY: 250, endX: 680, endY: 250, space: 'screen' }, ctx());
     expect(r.text).toMatch(/screen \(640,250\)/);
     expect(r.text).toMatch(/\[×1\]/);
   });

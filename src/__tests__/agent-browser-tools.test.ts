@@ -84,7 +84,7 @@ describe('browser_read / click / type', () => {
       const args = name === 'browser_type' ? { text: 'x', selector: '#a' } : name === 'browser_click' ? { text: 'x' } : {};
       const r = await tool(name).execute(args, ctx(cdp));
       expect(r.success).toBe(false);
-      expect(r.text).toMatch(/browser_connect/);
+      expect(r.text).toMatch(/cdp_connect/);
     }
   });
 
@@ -97,7 +97,7 @@ describe('browser_read / click / type', () => {
     expect(cdp.getPageContext).toHaveBeenCalled();
   });
 
-  it('click by visible text uses clickByText; failure nudges to browser_read', async () => {
+  it('click by visible text uses clickByText; failure nudges to cdp_page_context', async () => {
     const ok = mockCdp();
     expect((await tool('browser_click').execute({ text: 'Search' }, ctx(ok))).success).toBe(true);
     expect(ok.clickByText).toHaveBeenCalledWith('Search', Infinity, undefined);
@@ -105,7 +105,7 @@ describe('browser_read / click / type', () => {
     const bad = mockCdp({ clickByText: vi.fn(async () => ({ success: false, error: 'not found' })) });
     const r = await tool('browser_click').execute({ text: 'Nope' }, ctx(bad));
     expect(r.success).toBe(false);
-    expect(r.text).toMatch(/browser_read/);
+    expect(r.text).toMatch(/cdp_page_context/);
   });
 
   it('type requires a selector or label', async () => {

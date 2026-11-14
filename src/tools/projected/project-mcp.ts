@@ -24,34 +24,10 @@
 
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../types';
-import { TOOL_META, TEXT_ONLY_RENAMES } from './tool-meta';
+import { TOOL_META } from './tool-meta';
 import { expectRefusal, checkExpect } from '../../core/sense/reactive-check';
-import { rewriteOutsideData } from '../hint-rewrite';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Rewrite System B tool names in free text (descriptions, "call X first"
- * hints) to their MCP names, so a projected tool never points the caller at
- * a name that only exists inside the agent loop (`browser_navigate` →
- * `navigate_browser`). Only renamed multi-word names are touched — `click`,
- * `type`, `key` are plain English and stay as-is.
- */
-let _renames: Array<[RegExp, string]> | null = null;
-export function toMcpNames(text: string): string {
-  if (!_renames) {
-    const pairs: Array<[string, string]> = [
-      ...Object.entries(TOOL_META).flatMap(([name, meta]): Array<[string, string]> => (meta.mcpName ? [[name, meta.mcpName]] : [])),
-      ...Object.entries(TEXT_ONLY_RENAMES),
-    ];
-    _renames = pairs
-      .filter(([name, mcpName]) => mcpName !== name && name.includes('_'))
-      .sort(([a], [b]) => b.length - a.length)
-      .map(([name, mcpName]) => [new RegExp(`\\b${name}\\b`, 'g'), mcpName]);
-  }
-  for (const [re, mcpName] of _renames) text = text.replace(re, mcpName);
-  return text;
-}
 
 /**
  * Convert a UnifiedTool JSON-Schema inputSchema into the
@@ -239,14 +215,12 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     // A typed-but-not-submitted result (read-back held Return) did change the field.
     const typedNotSubmitted = !executed && /^Typed \d+ chars /.test(result.text) && / — Return not pressed\./.test(result.text);
     if (t.changesScreen && (executed || typedNotSubmitted)) ctx.uiMaps?.invalidate();
-    const out = unifiedToToolResult(result);
-    out.text = rewriteOutsideData(out.text, toMcpNames);
-    return out;
+    return unifiedToToolResult(result);
   };
 
   return {
     name,
-    description: toMcpNames(t.description),
+    description: t.description,
     parameters,
     category: meta.category,
     safetyTier: meta.safetyTier,

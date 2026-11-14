@@ -4,8 +4,8 @@
  * names (browser_connect, browser_read, read_text…). And their MCP defaults: click / drag / scroll take image-space
  * coordinates when `space` is omitted, mouse_move_relative scales dx/dy from image space.
  *
- * Characterization: the texts are pinned as they were when a regex renamed them on the way out (project-mcp toMcpNames),
- * so writing the MCP names into the tools changes nothing an agent reads.
+ * Characterization: the texts were pinned while a regex still renamed them on the way out (project-mcp toMcpNames), so
+ * writing the MCP names into the tools changes nothing an agent reads, except read_screen's CDP hint (see there).
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
 import { getAllTools, getCompactSurface } from '../tools/registry';
@@ -93,15 +93,17 @@ describe('projected browser tools name MCP tools in their results', () => {
   });
 
   it('read_screen on the browser clawdcursor drives over CDP points at the browser tools', async () => {
+    // The hint names compact browser actions. The old rename turned its read_text into ocr_read_screen, an action
+    // `browser` does not have; written in the tool, it stays read_text.
     const r = await granular('read_screen').handler({ processId: 4242 }, ctxWith(driver({ getConnectionMode: () => 'attached' })));
     expect(r.text).toMatchInlineSnapshot(`
       "(empty a11y tree — app may be custom-canvas)
-      → This is the browser clawdcursor is attached to over CDP: read and act on its page with browser {"action":"page_context"} (interactive elements) · browser {"action":"ocr_read_screen"} · browser {"action":"click"} — they see the whole page, whatever the accessibility tree shows."
+      → This is the browser clawdcursor is attached to over CDP: read and act on its page with browser {"action":"page_context"} (interactive elements) · browser {"action":"read_text"} · browser {"action":"click"} — they see the whole page, whatever the accessibility tree shows."
     `);
     const viaCompact = await compact('accessibility').handler({ action: 'read_tree', processId: 4242 }, ctxWith(driver({ getConnectionMode: () => 'attached' })));
     expect(viaCompact.text).toMatchInlineSnapshot(`
       "(empty a11y tree — app may be custom-canvas)
-      → This is the browser clawdcursor is attached to over CDP: read and act on its page with browser {"action":"page_context"} (interactive elements) · browser {"action":"ocr_read_screen"} · browser {"action":"click"} — they see the whole page, whatever the accessibility tree shows."
+      → This is the browser clawdcursor is attached to over CDP: read and act on its page with browser {"action":"page_context"} (interactive elements) · browser {"action":"read_text"} · browser {"action":"click"} — they see the whole page, whatever the accessibility tree shows."
     `);
   });
 

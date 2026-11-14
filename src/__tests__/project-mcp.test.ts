@@ -64,7 +64,6 @@ import {
   toolContextToAgent,
   unifiedToToolResult,
   projectToToolDefinition,
-  toMcpNames,
 } from '../tools/projected/project-mcp';
 import { buildUnifiedTools } from '../tools/projected/tools';
 import { TOOL_META } from '../tools/projected/tool-meta';
@@ -421,11 +420,6 @@ describe('name mapping completeness', () => {
     for (const { sysbName, mcpName } of expectedRenames) {
       expect(TOOL_META[sysbName]?.mcpName).toBe(mcpName);
     }
-  });
-
-  // Names the projected tools' text mentions without being projected tools: rewritten all the same.
-  it('text-only names are rewritten too', () => {
-    expect(toMcpNames('escalate to read_text, or browser_navigate first')).toBe('escalate to ocr_read_screen, or navigate_browser first');
   });
 });
 

@@ -23,9 +23,7 @@
  *   scroll              → mouse_scroll
  *   type                → type_text
  *   key                 → key_press
- *   read_text           → ocr_read_screen     (in text only: TEXT_ONLY_RENAMES)
  *   browser_connect     → cdp_connect
- *   browser_navigate    → navigate_browser    (in text only: TEXT_ONLY_RENAMES)
  *   browser_read        → cdp_page_context   (structured DOM listing path)
  *   browser_click       → cdp_click
  *   browser_type        → cdp_type
@@ -526,13 +524,4 @@ export const TOOL_META: Record<string, ToolMeta> = {
       text: 'Text to type into the field',
     },
   },
-};
-
-/**
- * Agent-loop names that the projected tools' text (descriptions, hints) still mentions though they are not projected
- * tools themselves, and the MCP tool each means. toMcpNames (project-mcp.ts) rewrites them like the projected names.
- */
-export const TEXT_ONLY_RENAMES: Record<string, string> = {
-  read_text: 'ocr_read_screen',
-  browser_navigate: 'navigate_browser',
 };
