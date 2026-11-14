@@ -122,12 +122,12 @@ const KEY_ALIASES: Record<string, string> = {
  *
  * Returns the input unchanged if no alias is found (e.g. single characters).
  */
-export function normalizeKey(key: string): string {
+export function normalizeKey(key: string, platform: NodeJS.Platform = process.platform): string {
   if (!key || typeof key !== 'string') {
     throw new Error(`normalizeKey: expected non-empty string, got ${typeof key}: ${JSON.stringify(key)}`);
   }
   const t = key.toLowerCase();
-  if (OS_DEPENDENT.has(t)) return MODIFIER_KEY[modifierOf(t)!];
+  if (OS_DEPENDENT.has(t)) return MODIFIER_KEY[modifierOf(t, platform)!];
   return KEY_ALIASES[t] || key;
 }
 

@@ -1680,7 +1680,7 @@ export class WindowsAdapter implements PlatformAdapter {
 
     // Spelled-out aliases ("minus", "plus", "comma", …) — same table
     // native-desktop uses; without it `ctrl+minus` threw here.
-    const alias = normalizeKey(name);
+    const alias = normalizeKey(name, 'win32');
     if (alias !== name) return this.mapKey(alias);
 
     throw new Error(`Unknown key: "${name}"`);
