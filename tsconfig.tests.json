@@ -2,7 +2,10 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "rootDir": ".",
-    "noEmit": true
+    "noEmit": true,
+    "module": "preserve",
+    "moduleResolution": "bundler"
   },
-  "include": ["src", "tests", "src/__tests__", "bench"]
+  "include": ["src", "tests", "src/__tests__", "bench"],
+  "exclude": []
 }

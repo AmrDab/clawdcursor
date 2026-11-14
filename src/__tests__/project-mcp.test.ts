@@ -146,7 +146,6 @@ function makeMockToolContext(overrides: Partial<ToolContext> = {}): ToolContext 
       ensureConnected: vi.fn().mockResolvedValue(false),
     },
     platform: mockPlatform as any,
-    agent: undefined,
     getLogBuffer: undefined,
     getMouseScaleFactor: vi.fn().mockReturnValue(1),
     getScreenshotScaleFactor: vi.fn().mockReturnValue(1),

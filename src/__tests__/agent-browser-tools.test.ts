@@ -34,10 +34,7 @@ function mockCdp(overrides: Partial<Record<string, any>> = {}) {
 function ctx(cdp: any): AgentToolContext {
   return {
     platform: { platform: 'win32' } as any,
-    task: 'open youtube and play a song',
-    mode: 'blind',
     screen: { logicalWidth: 2560, logicalHeight: 1440, physicalWidth: 2560, physicalHeight: 1440, dpiRatio: 1 },
-    screenshotsCaptured: { n: 0 },
     cdp,
   };
 }

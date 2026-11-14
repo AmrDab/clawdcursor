@@ -44,7 +44,7 @@ vi.mock('sharp', () => ({
 }));
 
 // ── The key mock: control hasConsent() return value per test ─────────────────
-const mockHasConsent = vi.fn<[], boolean>();
+const mockHasConsent = vi.fn<() => boolean>();
 vi.mock('../surface/onboarding', () => ({
   hasConsent: () => mockHasConsent(),
   writeConsentFile: vi.fn(),
@@ -87,7 +87,7 @@ type HandlerFn = (params: Record<string, unknown>) => Promise<McpToolResult>;
 const capturedHandlers = new Map<string, HandlerFn>();
 // The host's side of MCP elicitation (the low-level server under McpServer).
 // Default: a host without elicitation support, so older tests are unaffected.
-const mockClientCaps = vi.fn<[], Record<string, unknown> | undefined>(() => undefined);
+const mockClientCaps = vi.fn<() => Record<string, unknown> | undefined>(() => undefined);
 const mockElicitInput = vi.fn();
 
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => {

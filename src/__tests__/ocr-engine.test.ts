@@ -54,7 +54,7 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public left: number, public top: number, public width: number, public height: number) {} },
 }));
 
-const sharpExtract = vi.hoisted(() => vi.fn(function (this: unknown) { return this; }));
+const sharpExtract = vi.hoisted(() => vi.fn(function (this: unknown, _region: unknown) { return this; }));
 vi.mock('sharp', () => ({
   default: vi.fn(() => ({
     resize: vi.fn().mockReturnThis(),

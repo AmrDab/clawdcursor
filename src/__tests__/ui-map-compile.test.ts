@@ -20,7 +20,7 @@ function deps(over: Partial<CompileDeps> = {}): CompileDeps {
     captureSnapshot: vi.fn(async () => snap([
       { name: 'Send', role: 'Button', x: 10, y: 20, width: 40, height: 12,
         source: 'a11y', interactive: true }])),
-    ocr: vi.fn(okOcr),
+    ocr: vi.fn(async () => okOcr()),
     vision: vi.fn(async () => ({ buffer: Buffer.alloc(0), width: 1, height: 1, scaleFactor: 1 })),
     getScreenSize: vi.fn(async () => ({ logicalWidth: 800, logicalHeight: 600,
       physicalWidth: 800, physicalHeight: 600, dpiRatio: 1 })),

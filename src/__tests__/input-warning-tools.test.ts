@@ -149,7 +149,7 @@ describe('agent loop type / key', () => {
     const { ctx } = platformCtx(kb);
     for (const repeat of [0, 101, 2.5, 'many']) {
       const r = await key.execute({ combo: 'Down', repeat }, ctx);
-      expect(r.isError).toBe(true);
+      expect(r.success).toBe(false);
       expect(r.text).toMatch(/"repeat" must be a whole number from 1 to 100/);
     }
     expect(kb.keyPress).not.toHaveBeenCalled();

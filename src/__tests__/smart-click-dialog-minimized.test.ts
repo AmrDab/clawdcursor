@@ -310,12 +310,12 @@ describe('invoke by element_id: an ambiguous name answers with the list, as the 
     expect(r.text).toContain('el_0');
     expect(r.text).toContain('[MenuItem] "Send" @2800,-1070 40x20');
     expect(r.text).toContain('[Button] "Send" @2816,-1030 64x72');
-    expect(classifyResult(r.text, true, true, 'mcp').code).toBe('AMBIGUOUS');
+    expect(classifyResult(r.text, true, true, 'mcp')?.code).toBe('AMBIGUOUS');
   });
 
   it('a hidden element says so (ELEMENT_HIDDEN), not a bare "missed"', async () => {
     const { r } = await run({ success: false, reason: 'hidden' });
-    expect(classifyResult(r.text, true, true, 'mcp').code).toBe('ELEMENT_HIDDEN');
+    expect(classifyResult(r.text, true, true, 'mcp')?.code).toBe('ELEMENT_HIDDEN');
   });
 });
 

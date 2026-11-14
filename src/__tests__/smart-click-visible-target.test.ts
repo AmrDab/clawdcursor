@@ -214,7 +214,7 @@ describe('an ambiguous name is reported with the elements it could mean', () => 
   it('is its own result code, with the next step', () => {
     const c = classifyResult(`a11y invoke "New" missed — ${missText(structuredMissFields(AMBIGUOUS))}.`, true, true, 'mcp');
     expect(c).toMatchObject({ outcome: 'failed', code: 'AMBIGUOUS' });
-    expect(c.hint).toMatch(/controlType|position/);
+    expect(c!.hint).toMatch(/controlType|position/);
   });
 });
 
@@ -247,7 +247,7 @@ describe('smart_click', () => {
     expect(mouseClick).not.toHaveBeenCalled();
     expect(r.text).toMatch(/2 elements on screen match that name, nothing was done/);
     expect(r.text).toContain('[Button] "New" @2816,-1030 64x72');
-    expect(classifyResult(r.text, true, true, 'mcp').code).toBe('AMBIGUOUS');
+    expect(classifyResult(r.text, true, true, 'mcp')?.code).toBe('AMBIGUOUS');
   });
 
   it('hidden (the only element with the name is on no monitor): not "Clicked via UI Automation"; the text OCR sees is clicked', async () => {
@@ -281,7 +281,7 @@ describe('accessibility invoke (invoke_element)', () => {
     const { r, invokeElement, mouseClick } = await run({ success: false, reason: 'hidden' });
     expect(invokeElement).toHaveBeenCalledTimes(1);
     expect(mouseClick).not.toHaveBeenCalled();
-    expect(classifyResult(r.text, true, true, 'mcp').code).toBe('ELEMENT_HIDDEN');
+    expect(classifyResult(r.text, true, true, 'mcp')?.code).toBe('ELEMENT_HIDDEN');
   });
 
   it('the ladder keeps the candidates of the rung that read the element', async () => {
@@ -299,7 +299,7 @@ describe('the reply names the element acted on, and a partial match is listed, n
     const text = missText(structuredMissFields(INEXACT));
     expect(text).toMatch(/^no element is named exactly that: 1 element on screen only contains it, nothing was done; to press one, call again with its full name/);
     expect(text).toContain('[Hyperlink] "What\'s New" in [Document] "Start page" @10,20 30x40');
-    expect(classifyResult(`a11y invoke "New" missed — ${text}.`, true, true, 'mcp').code).toBe('AMBIGUOUS');
+    expect(classifyResult(`a11y invoke "New" missed — ${text}.`, true, true, 'mcp')?.code).toBe('AMBIGUOUS');
   });
 
   it('missText: several equal matches offer within when they are in different windows; a minimized window offers a restore, not a position', () => {
@@ -361,7 +361,7 @@ describe('the reply names the element acted on, and a partial match is listed, n
     const platform = { invokeElement, mouseClick: vi.fn(), getActiveWindow: vi.fn(async () => null), listDisplays: vi.fn(async () => []) } as unknown as PlatformAdapter;
     const r = await invokeTool.execute({ name: 'Details' }, { platform, task: 't', screen: { logicalWidth: 1920, logicalHeight: 1080, physicalWidth: 1920, physicalHeight: 1080, dpiRatio: 1 }, screenshotsCaptured: { n: 0 } } as unknown as AgentToolContext);
     expect(r.text).toMatch(/^Invoked \(read back ✓\) \[Button\] "Details" via a11y/);
-    expect(classifyResult(r.text, false, true, 'mcp').outcome).toBe('confirmed');
+    expect(classifyResult(r.text, false, true, 'mcp')?.outcome).toBe('confirmed');
   });
 
   it('the screen text in a target is quoted and bounded, never free text', () => {

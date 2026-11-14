@@ -21,7 +21,7 @@ function fakePlatform(opts: { value?: string | null; options: string[]; sticks?:
       }
       return { success: false };
     }),
-    findElements: vi.fn(async (q: { name?: string }) =>
+    findElements: vi.fn(async (q: { name?: string }): Promise<Array<{ name: string; controlType: string; bounds?: object }>> =>
       [...opts.options, 'Profile', 'Plan'].filter(n => n.toLowerCase().includes(String(q.name).toLowerCase()))
         .map(n => ({ name: n, controlType: n === 'Plan' ? 'ComboBox' : 'ListItem', bounds: { x: 0, y: 0, width: 1, height: 1 } }))),
   };

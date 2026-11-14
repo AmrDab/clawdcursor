@@ -127,7 +127,7 @@ describe('find_element — CDP DOM fallback', () => {
       { name: 'Submit Order', controlType: 'web.button', bounds: { x: 200, y: 400, width: 80, height: 30 } },
     ]);
     const ctx = makeCtx({ processName: 'msedge', platformFindElements: [], cdpConnected: true, cdpPageEvaluate: cdpEvaluate });
-    ctx.platform.lastFindError = 'error';
+    ctx.platform!.lastFindError = 'error';
     const hit = await findElement.handler({ name: 'Submit' }, ctx);
     expect(hit.text).toContain('Submit Order');
     cdpEvaluate.mockResolvedValue([]);

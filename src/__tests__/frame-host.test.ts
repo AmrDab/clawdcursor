@@ -284,7 +284,7 @@ describe('the act line of the session log says who the act went to, as numbers',
 
   it('each step of a batch records its OWN target, verified when that step ran', async () => {
     // The user (or the app) changes what is in front between two steps of one batch.
-    let front: object = { processId: 42, processName: 'notepad', appName: 'Notepad', handle: 55 };
+    let front: { processId: number; processName: string; appName: string; handle: number } = { processId: 42, processName: 'notepad', appName: 'Notepad', handle: 55 };
     __setForegroundReaderForTests(async () => front);
     const platform = guardInputMethods({
       typeText: async (_t: string) => { front = { processId: 43, processName: 'winword', appName: 'Word', handle: 56 }; },

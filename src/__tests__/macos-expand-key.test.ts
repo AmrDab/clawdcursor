@@ -59,8 +59,9 @@ function installGuard(order: string[], refuse?: Error) {
     stopCheck: () => { order.push('stop'); },
     before: async () => { order.push('before'); if (refuse) throw refuse; },
     done: (movesFocus: boolean) => { order.push(`done:${movesFocus}`); },
-    focused: () => {},
-    launched: () => {},
+    focused: async () => {},
+    launched: async () => {},
+    byName: async () => {},
   });
 }
 // (the test setup turns the helper off; the keyboard guard only looks at the app in front when it is on)

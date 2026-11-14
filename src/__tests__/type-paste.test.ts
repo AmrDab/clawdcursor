@@ -10,9 +10,8 @@ import type { AgentToolContext } from '../tools/projected/types';
 
 function ctxWith(platform: any): AgentToolContext {
   return {
-    platform, task: 't', mode: 'blind',
+    platform,
     screen: { logicalWidth: 1280, logicalHeight: 720, physicalWidth: 1280, physicalHeight: 720, dpiRatio: 1 },
-    screenshotsCaptured: { n: 0 },
   };
 }
 const typeTool = () => buildUnifiedTools().find(t => t.name === 'type')!;

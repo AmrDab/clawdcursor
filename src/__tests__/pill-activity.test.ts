@@ -123,9 +123,9 @@ describe('pointer-guard announces guarded inputs', () => {
     setInputGuard({
       stopCheck: () => { if (refuse) throw new Error('stopped'); },
       before: async () => { if (refuse) throw new Error('stopped'); },
-      done: () => {}, focused: () => {}, launched: () => {},
+      done: () => {}, focused: async () => {}, launched: async () => {}, byName: async () => {},
     });
-    const target = guardInputMethods({ typeText: async () => {}, navigate: async () => {} });
+    const target = guardInputMethods({ typeText: async (_text: string) => {}, navigate: async (_url: string) => {} });
     await target.typeText('hi');
     await target.navigate('https://example.com');
     refuse = true;

@@ -120,10 +120,7 @@ function makeCtx(clicks: Array<{ x: number; y: number }>): AgentToolContext {
       mouseClick: vi.fn((x: number, y: number) => { clicks.push({ x, y }); return Promise.resolve(); }),
       getActiveWindow: vi.fn(() => Promise.resolve({ title: 'Edge', processName: 'msedge', processId: 1, bounds: { x: 0, y: 0, width: 1, height: 1 }, isMinimized: false })),
     } as any,
-    task: 't',
-    mode: 'hybrid',
     screen: { logicalWidth: 2560, logicalHeight: 1440, physicalWidth: 2560, physicalHeight: 1440, dpiRatio: 1 },
-    screenshotsCaptured: { n: 0 },
   };
 }
 
