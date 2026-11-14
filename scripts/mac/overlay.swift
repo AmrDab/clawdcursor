@@ -30,12 +30,14 @@
 //                  process's frontmost window while that app is in front, and follows it.
 //                  When the target app is in front with no window of its own (Finder's
 //                  desktop), the border goes around the screen the pointer is on.
-//                  The border: an amber ring with a brighter run going round it (Border
-//                  Beam's turn, below), drawn cheaply (windowOutline); --paused: the
-//                  ring, still, in blue. With Reduce Motion on: the ring, still.
+//                  The border: Border Beam's pulse-outside in sunset (below) - a warm glow
+//                  outside the window's edge that breathes, drawn cheaply (windowOutline);
+//                  --paused: the same glow in blue ("ocean"), still. With Reduce Motion on:
+//                  still. (--color is accepted and not used.)
 //
-// The pill's orb is a port of Thinking Orbs, and the beam takes its turn from Border Beam, by Jakub Antalik (libraries.dev,
-// github.com/Jakubantalik/Libraries.dev, packages/border-beam and packages/thinking-orbs), MIT License,
+// The pill's orb is a port of Thinking Orbs, and the beam is Border Beam (size "pulse-outside", colorVariant "sunset",
+// borderRadius 30), by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/border-beam and
+// packages/thinking-orbs), MIT License,
 // Copyright (c) 2026 Jakub Antalik. The recipe table and the licence notice in full are at the top of
 // scripts/window-outline.ps1, the Windows drawer.
 //
@@ -655,7 +657,8 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     /// What the outline goes around, in AppKit coordinates, and whether that is a whole screen: the target process's
     /// frontmost ordinary window while that app is in front (the windows are listed only then; the list is front to
-    /// back), or the pointer's screen when that app is in front with no window of its own (Finder's desktop).
+    /// back), or the pointer's screen when that app is in front with no window of its own (Finder's desktop). A window
+    /// that covers its screen counts as the screen (the glow then goes inward).
     func targetFrame() -> (frame: NSRect, screen: Bool)? {
         guard targetPid != 0,
               NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
@@ -667,24 +670,34 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
               let bounds = front[kCGWindowBounds as String] as? NSDictionary,
               let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return pointerScreen() }
         // Quartz measures down from the top of the primary display, AppKit up from its bottom.
-        return (frame: NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height), screen: false)
+        let frame = NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
+        // A zoomed or full-screen window has no room outside it for the glow: it is outlined as its screen, inward.
+        if let screen = NSScreen.screens.first(where: { frame.contains($0.visibleFrame) }) {
+            return (frame: frame.intersection(screen.frame), screen: true)
+        }
+        return (frame: frame, screen: false)
     }
 
-    /// The border beam (#392, #414): a thin ring at the edge of the frame, amber while the agent works and blue while it
-    /// waits, and while it works a brighter run of the ring going round clockwise once in 1.96 s (Border Beam's turn).
-    /// Drawn for power before looks (#414: the first port, a turning conic mask over window-sized gradient layers,
-    /// rendered the whole area off screen every frame - 55% of an M1's GPU around a full screen). Here:
-    ///   - the ring and its glow are layer borders, a 2 pt line over an 8 pt band at low alpha, rounded like the window:
-    ///     no texture, nothing drawn again;
-    ///   - the running part is two dashes, a soft 8 pt one with a bright 2 pt one in its middle, each on four
-    ///     CAShapeLayers (a side and the corner after it), so a layer is only as big as its side's band; Core Animation
-    ///     moves the dashes (lineDashPhase) with no code of ours running per frame;
-    ///   - no masks, shadows, filters or window-sized gradients, so the GPU's work follows the edge, not the area.
-    /// --paused, or Reduce Motion on: the ring alone, brighter and still: nothing changes once it is drawn.
+    /// The border beam (#392): Border Beam's pulse-outside in sunset, borderRadius 30, duration 1.96 s, by Jakub Antalik
+    /// (libraries.dev, MIT; the library's numbers and its licence notice are at the top of scripts/window-outline.ps1).
+    /// A glow outside the window's edge - a soft bloom, a tighter inner glow and patches of a 1 pt ring at radius 30 -
+    /// made of warm blobs that breathe (size, place, opacity) on the library's periods, with a slow hue drift.
+    /// Drawn for power (#414: window-sized layers with masks and filters once took 55% of an M1's GPU):
+    ///   - each blob is one CAGradientLayer only as big as the blob: radial, half an ellipse lying outside the edge (the
+    ///     blur is in its stops), or for the ring axial and 1 pt thick; four small CAShapeLayer arcs for the ring's
+    ///     corners. So the GPU's work follows the edge band, not the window's area;
+    ///   - no masks, shadows, filters or blurs, and no layer the size of the window;
+    ///   - Core Animation moves them (startPoint / endPoint / opacity / colors, autoreversing on the library's periods,
+    ///     at most 15 frames a second): no code of ours runs per frame.
+    /// The window is the target's frame and a 48 pt margin round it; around a whole screen (the desktop, a zoomed or
+    /// full-screen window) the glow is drawn inward from the edge instead.
+    /// --paused: the same glow in the library's "ocean" blues, still. Reduce Motion on: still. Nothing changes once a
+    /// still beam is drawn.
     func windowOutline() {
         let paused = CommandLine.arguments.contains("--paused")
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let turning = !paused && !still
+        let margin: CGFloat = 48
 
         let win = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: false)
         win.isOpaque = false
@@ -701,87 +714,305 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let stage = CALayer()
         stage.allowsGroupOpacity = false   // the fade in applies to each layer: no off-screen pass over the frame
         view.layer?.addSublayer(stage)
-
-        let amber = rgb(245, 158, 11)
-        let tint = paused ? blue : amber
-        let glow = CALayer()
-        glow.borderWidth = 8
-        glow.borderColor = tint.withAlphaComponent(turning ? 0.08 : 0.16).cgColor
-        let ring = CALayer()
-        ring.borderWidth = 2
-        ring.borderColor = tint.withAlphaComponent(turning ? 0.35 : 0.9).cgColor
-        stage.addSublayer(glow)
-        stage.addSublayer(ring)
-
-        // The running part: each dash's line width, colour and share of the ring; the bright one is drawn last, on top.
-        let dashes: [(width: CGFloat, color: NSColor, share: CGFloat)] = turning
-            ? [(width: 8, color: amber.withAlphaComponent(0.3), share: 0.3), (width: 2, color: rgb(255, 200, 60), share: 0.12)]
-            : []
-        let runs: [[CAShapeLayer]] = dashes.map { dash -> [CAShapeLayer] in
-            return (0..<4).map { _ -> CAShapeLayer in
-                let side = CAShapeLayer()
-                side.fillColor = nil
-                side.strokeColor = dash.color.cgColor
-                side.lineWidth = dash.width
-                stage.addSublayer(side)
-                return side
-            }
-        }
         let start = CACurrentMediaTime()
 
-        // The layers for a frame of this size. A whole screen has square corners; a window's are rounded like its own,
-        // or a wedge of what is behind shows at each one. The system does not give a window's radius: about 16 pt for a
-        // standard window on macOS 26 (which reports itself as 16 to a binary built with an older SDK), about 10 pt before.
-        let windowRadius: CGFloat = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 16 ? 16 : 10
-        func layout(_ size: NSSize, screen: Bool) {
+        // Border Beam's numbers (the table is in window-outline.ps1). The oscillators: from, to, period, delay - per
+        // blob region 1..3 its width, height, x, y; then the glow's height; then the opacity of each quarter (top-left,
+        // top-right, bottom-left, bottom-right).
+        let duration = 1.96, sp = 0.28, dr = 14.0, op = 0.46, gh = 0.16
+        let bs = duration, ss = 6.4 * duration / 2.3, ghs = 2.4 * duration / 2.3
+        let osc: [[Double]] = [
+            [1 - sp, 1 + sp * 1.1, ss * 0.9, 0], [1 + sp * 0.9, 1 - sp * 0.85, ss * 1.26, 0], [-dr, dr * 0.9, bs * 1.6, 0], [dr * 0.55, -dr * 0.7, bs * 1.6, 0],
+            [1 + sp, 1 - sp * 0.85, ss * 1.1, 0], [1 - sp * 0.8, 1 + sp * 1.05, ss * 0.81, 0], [dr * 0.8, -dr * 0.9, bs * 1.88, 0], [-dr, dr * 0.65, bs * 1.88, 0],
+            [1 - sp * 0.6, 1 + sp * 1.15, ss * 0.98, 0], [1 + sp * 0.75, 1 - sp, ss * 1.4, 0], [-dr * 0.6, dr, bs * 1.45, 0], [-dr * 0.85, dr * 0.45, bs * 1.45, 0],
+            [1 - gh, 1 + gh, ghs, 0],
+            [1 - op, 1, bs, 0], [1 - op, 1, bs * 1.32, bs * 0.28], [1 - op, 1, bs * 0.84, bs * 0.55], [1 - op, 1, bs * 1.58, bs * 0.83]]
+        // The ring's and the inner glow's blobs: colour, region, quarter, reach x, y (px), place x, y (% of the box).
+        let edgeBlobs: [[Double]] = [
+            [0, 1, 0, 80, 19, 27, 0], [6, 2, 1, 74, 11, 73, -1], [7, 3, 1, 15, 44, 100, 33], [8, 1, 3, 19, 38, 101, 72],
+            [4, 2, 3, 84, 13, 67, 100], [1, 3, 2, 60, 21, 24, 101], [2, 1, 2, 17, 40, 0, 60], [3, 2, 0, 13, 32, -1, 28]]
+        // The bloom's blobs: colour, reach x, y, place x, y. They do not breathe.
+        let bloomBlobs: [[Double]] = [
+            [0, 110, 30, 27, 3], [6, 100, 20, 73, 1], [7, 26, 62, 100, 33], [8, 30, 56, 101, 72], [4, 120, 22, 67, 99],
+            [1, 88, 32, 24, 99], [2, 28, 58, 0, 60]]
+        let sunset: [[Double]] = [[255, 80, 50], [255, 160, 40], [255, 120, 60], [255, 200, 50], [255, 100, 80],
+                                  [255, 180, 60], [255, 60, 60], [255, 140, 50], [255, 90, 70]]
+        let ocean: [[Double]] = [[100, 80, 220], [60, 120, 255], [80, 100, 200], [50, 140, 220], [120, 80, 255],
+                                 [70, 130, 255], [140, 100, 240], [90, 110, 230], [130, 70, 255]]
+        let palette = paused ? ocean : sunset
+        // Across the edge, how a blurred box edge falls off (a gaussian), sampled at six stops: the bloom's (blur 22.5,
+        // its box 20 px out, faded out by 48) and the inner glow's (blur 3, its box 2 px out, about 10 px deep).
+        let stops: [NSNumber] = [0, 0.2, 0.4, 0.6, 0.8, 1]
+        let bloomFall: [Double] = [1, 0.83, 0.63, 0.43, 0.165, 0], innerFall: [Double] = [1, 0.67, 0.34, 0.12, 0.03, 0]
+        let bloomDepth: CGFloat = 48, innerDepth: CGFloat = 10
+        // The hue drifts 30 degrees either way over 14 s (twelve steps, Core Animation blends between them).
+        let hueSteps = 12
+        let hues: [Double] = turning ? (0...hueSteps).map { 30 * sin(2 * Double.pi * Double($0) / Double(hueSteps)) } : [0]
+
+        func value(_ k: Int, _ t: Double) -> Double {
+            let o = osc[k]
+            return o[0] + (o[1] - o[0]) * (1 - cos(2 * Double.pi * (t - o[3]) / o[2])) / 2
+        }
+        // hue-rotate(deg) brightness(1.9) saturate(1.2), each clamped, as a browser does.
+        func filtered(_ ci: Int, _ degrees: Double) -> [Double] {
+            let c: Double = cos(degrees * Double.pi / 180), s: Double = sin(degrees * Double.pi / 180), t: Double = 1.2
+            let hue: [Double] = [0.213 + c * 0.787 - s * 0.213, 0.715 - c * 0.715 - s * 0.715, 0.072 - c * 0.072 + s * 0.928,
+                                 0.213 - c * 0.213 + s * 0.143, 0.715 + c * 0.285 + s * 0.140, 0.072 - c * 0.072 - s * 0.283,
+                                 0.213 - c * 0.213 - s * 0.787, 0.715 - c * 0.715 + s * 0.715, 0.072 + c * 0.928 + s * 0.072]
+            let sat: [Double] = [0.213 + 0.787 * t, 0.715 - 0.715 * t, 0.072 - 0.072 * t,
+                                 0.213 - 0.213 * t, 0.715 + 0.285 * t, 0.072 - 0.072 * t,
+                                 0.213 - 0.213 * t, 0.715 - 0.715 * t, 0.072 + 0.928 * t]
+            func clamp(_ v: Double) -> Double { return max(0, min(1, v)) }
+            func apply(_ m: [Double], _ v: [Double]) -> [Double] {
+                return (0..<3).map { (row: Int) -> Double in
+                    let x: Double = m[3 * row] * v[0]
+                    let y: Double = m[3 * row + 1] * v[1]
+                    let z: Double = m[3 * row + 2] * v[2]
+                    return clamp(x + y + z)
+                }
+            }
+            let rgb: [Double] = palette[ci].map { $0 / 255 }
+            let bright: [Double] = apply(hue, rgb).map { clamp(1.9 * $0) }
+            return apply(sat, bright)
+        }
+        func cg(_ rgb: [Double], _ alpha: Double) -> CGColor {
+            return NSColor(srgbRed: CGFloat(rgb[0]), green: CGFloat(rgb[1]), blue: CGFloat(rgb[2]), alpha: CGFloat(alpha)).cgColor
+        }
+        func capped(_ a: CAAnimation) {
+            if #available(macOS 12.0, *) { a.preferredFrameRateRange = CAFrameRateRange(minimum: 8, maximum: 15, preferred: 12) }
+        }
+        // An oscillator on a layer: from `from` to `to` and back over its period, in its phase (already under way).
+        func breathe(_ layer: CALayer, _ key: String, _ path: String, _ k: Int, from: Any, to: Any, additive: Bool) {
+            let a = CABasicAnimation(keyPath: path)
+            a.fromValue = from
+            a.toValue = to
+            a.duration = osc[k][2] / 2
+            a.autoreverses = true
+            a.repeatCount = .infinity
+            a.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            a.isAdditive = additive
+            a.beginTime = start + osc[k][3] - osc[k][2]
+            capped(a)
+            layer.add(a, forKey: key)
+        }
+        // An oscillator moving a gradient's point along the edge, by `scale` (unit coordinates) per unit it changes.
+        func shift(_ layer: CALayer, _ key: String, _ path: String, _ k: Int, _ scale: Double, alongX: Bool) {
+            let d = CGFloat((osc[k][1] - osc[k][0]) * scale)
+            breathe(layer, key, path, k, from: NSValue(point: .zero),
+                    to: NSValue(point: alongX ? CGPoint(x: d, y: 0) : CGPoint(x: 0, y: d)), additive: true)
+        }
+        func drift(_ layer: CALayer, _ path: String, _ values: [Any]) {
+            guard values.count > 1 else { return }
+            let a = CAKeyframeAnimation(keyPath: path)
+            a.values = values
+            a.duration = 14
+            a.repeatCount = .infinity
+            a.beginTime = start
+            capped(a)
+            layer.add(a, forKey: "drift")
+        }
+
+        // The layers for a frame of this size (pt). `inward`: around a whole screen, the glow drawn inward.
+        func layout(_ size: NSSize, inward: Bool) {
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            let bounds = CGRect(origin: .zero, size: size)
-            let radius = screen ? 0 : windowRadius
-            for layer in [stage, glow, ring] {
-                layer.frame = bounds
-                layer.cornerRadius = radius
+            stage.sublayers?.forEach { $0.removeFromSuperlayer() }
+            let w = Double(size.width), h = Double(size.height)
+            let off = Double(inward ? 0 : margin)
+            stage.frame = CGRect(x: 0, y: 0, width: w + 2 * off, height: h + 2 * off)
+            let gx = max(0.35, min(4, w / 350)), gy = max(0.35, min(4, h / 140)), rc = min(30, min(w, h) / 2)
+            let scale = win.backingScaleFactor
+
+            // Which side of the frame a blob placed at (fx, fy) % lies on: 0 top, 1 right, 2 bottom, 3 left.
+            func side(_ fx: Double, _ fy: Double) -> Int {
+                let d = [fy, 100 - fx, 100 - fy, fx]
+                return d.firstIndex(of: d.min()!)!
             }
-            for (dash, sides) in zip(dashes, runs) {
-                // The middle of the dash's line: inset by half its width, its corners to match.
-                let rect = bounds.insetBy(dx: dash.width / 2, dy: dash.width / 2)
-                let r = max(0, min(radius - dash.width / 2, min(rect.width, rect.height) / 2))
-                // Clockwise from the end of the top-left corner (y grows upward here): a side and the corner after it each.
-                let starts = [CGPoint(x: rect.minX + r, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY - r),
-                              CGPoint(x: rect.maxX - r, y: rect.minY), CGPoint(x: rect.minX, y: rect.minY + r)]
-                let corners = [CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.minY),
-                               CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.minX, y: rect.maxY)]
-                let arc = CGFloat.pi * r / 2
-                let lengths = [rect.width - 2 * r + arc, rect.height - 2 * r + arc, rect.width - 2 * r + arc, rect.height - 2 * r + arc]
-                let perimeter = lengths.reduce(0, +)
-                let lit = dash.share * perimeter
-                var along: CGFloat = 0
-                for (k, side) in sides.enumerated() {
-                    let path = CGMutablePath()
-                    path.move(to: starts[k])
-                    if r > 0 {
-                        path.addArc(tangent1End: corners[k], tangent2End: starts[(k + 1) % 4], radius: r)
-                    } else {
-                        path.addLine(to: corners[k])
-                    }
-                    // The layer is only as big as its piece of the ring.
-                    let box = path.boundingBoxOfPath.insetBy(dx: -(dash.width / 2 + 1), dy: -(dash.width / 2 + 1))
-                    var shift = CGAffineTransform(translationX: -box.minX, y: -box.minY)
-                    side.contentsScale = win.backingScaleFactor   // added by hand, so 1 otherwise: soft on Retina
-                    side.frame = box
-                    side.path = path.copy(using: &shift)
-                    // One dash per ring: a point `along` it is lit while (along + phase) mod perimeter < lit. The phase
-                    // falls by a whole ring per turn (clockwise); both dashes keep their middle on the same share of it.
-                    side.lineDashPattern = [NSNumber(value: Double(lit)), NSNumber(value: Double(perimeter - lit))]
-                    let run = CABasicAnimation(keyPath: "lineDashPhase")
-                    run.fromValue = Double(along + lit / 2 + perimeter)
-                    run.toValue = Double(along + lit / 2)
-                    run.duration = 1.96
-                    run.beginTime = start   // the same clock for every layer and every size: the dash runs on unbroken
-                    run.repeatCount = .infinity
-                    side.add(run, forKey: "run")
-                    along += lengths[k]
+            // A point along a side (x for the top and bottom, y down from the top for the others) in the stage's
+            // coordinates (y up), and the band beside that side, `depth` deep, outside (or inside) the frame.
+            func stageAlong(_ s: Int, _ a: Double) -> Double { return s % 2 == 0 ? off + a : off + h - a }
+            func band(_ s: Int, from a0: Double, to a1: Double, depth: Double) -> CGRect {
+                let lo = min(stageAlong(s, a0), stageAlong(s, a1)), len = abs(a1 - a0)
+                switch s {
+                case 0: return CGRect(x: lo, y: inward ? off + h - depth : off + h, width: len, height: depth)
+                case 2: return CGRect(x: lo, y: inward ? off : off - depth, width: len, height: depth)
+                case 3: return CGRect(x: inward ? off : off - depth, y: lo, width: depth, height: len)
+                default: return CGRect(x: inward ? off + w - depth : off + w, y: lo, width: depth, height: len)
                 }
+            }
+            // Where the edge is across a band, in its unit coordinates (the side of it that touches the frame).
+            func edgeAcross(_ s: Int) -> CGFloat {
+                switch s {
+                case 0: return inward ? 1 : 0
+                case 2: return inward ? 0 : 1
+                case 3: return inward ? 0 : 1
+                default: return inward ? 1 : 0
+                }
+            }
+            func unitPoint(_ s: Int, along: CGFloat, across: CGFloat) -> CGPoint {
+                return s % 2 == 0 ? CGPoint(x: along, y: across) : CGPoint(x: across, y: along)
+            }
+
+            // A glow blob: half an ellipse lying against the edge, centred at `a` along side `s`, reaching `reach`
+            // along it and `depth` across, with the colour's alpha falling off across as `fall`.
+            func glow(_ s: Int, a: Double, reach: Double, room: Double, depth: Double, fall: [Double], peak: Double,
+                      ci: Int) -> CAGradientLayer {
+                let length = s % 2 == 0 ? w : h
+                let a0 = max(-depth, a - room), a1 = min(length + depth, a + room)
+                let layer = CAGradientLayer()
+                layer.type = .radial
+                layer.contentsScale = scale
+                layer.frame = band(s, from: a0, to: max(a1, a0 + 1), depth: depth)
+                let flen = Double(s % 2 == 0 ? layer.frame.width : layer.frame.height)
+                let base = s % 2 == 0 ? Double(layer.frame.minX) : Double(layer.frame.minY)
+                let u = CGFloat((stageAlong(s, a) - base) / flen), across = edgeAcross(s)
+                layer.startPoint = unitPoint(s, along: u, across: across)
+                layer.endPoint = unitPoint(s, along: u + CGFloat(reach / flen), across: across + 1)
+                layer.locations = stops
+                let colours = hues.map { hue -> [CGColor] in let rgb = filtered(ci, hue); return fall.map { cg(rgb, peak * $0) } }
+                layer.colors = colours[0]
+                drift(layer, "colors", colours)
+                return layer
+            }
+
+            // The bloom: still, under everything; the first blob on top, as the library layers them.
+            for blob in bloomBlobs.reversed() {
+                let s = side(blob[3], blob[4]), alongX = s % 2 == 0
+                let cx = -20 + blob[3] / 100 * (w + 40), cy = -20 + blob[4] / 100 * (h + 40)
+                let rx = blob[1] * gx, ry = blob[2] * gy
+                // How strong the blob is where it meets its box's edge (20 px out).
+                let across = [abs(cy + 20), abs(cx - w - 20), abs(cy - h - 20), abs(cx + 20)][s]
+                let edge = max(0, 1 - across / (alongX ? ry : rx))
+                if edge <= 0 { continue }
+                let reach = (alongX ? rx : ry) + 22.5
+                stage.addSublayer(glow(s, a: alongX ? cx : cy, reach: reach, room: reach, depth: Double(bloomDepth),
+                                       fall: bloomFall, peak: 0.30 * 0.77 * edge * 0.813, ci: Int(blob[0])))
+            }
+
+            // The ring's and the inner glow's blobs as they are at the start (t = 0).
+            struct EdgeBlob { var s: Int; var ci: Int; var region: Int; var quarter: Int; var cx: Double; var cy: Double; var rx: Double; var ry: Double }
+            func edgeBlob(_ blob: [Double], reach e: Double) -> EdgeBlob {
+                let reg = Int(blob[1]) - 1
+                return EdgeBlob(s: side(blob[5], blob[6]), ci: Int(blob[0]), region: reg, quarter: Int(blob[2]),
+                                cx: -e + blob[5] / 100 * (w + 2 * e) + value(reg * 4 + 2, 0),
+                                cy: -e + blob[6] / 100 * (h + 2 * e) + value(reg * 4 + 3, 0),
+                                rx: blob[3] * value(reg * 4, 0) * gx, ry: blob[4] * value(reg * 4 + 1, 0) * value(12, 0) * gy)
+            }
+            // The breathing of a blob's gradient: its centre moves along the edge, its reach grows and shrinks, its
+            // opacity pulses with its quarter. `perUnit`: unit coordinates per px along the layer.
+            func animate(_ layer: CALayer, _ b: EdgeBlob, base: [Double], perUnit: Double, axial: Bool) {
+                let alongX = b.s % 2 == 0
+                let sign = alongX ? 1.0 : -1.0   // y down in the frame, y up on the stage
+                let opacity = value(13 + b.quarter, 0)
+                layer.opacity = Float(opacity)
+                guard turning else { return }
+                breathe(layer, "pulse", "opacity", 13 + b.quarter, from: osc[13 + b.quarter][0], to: osc[13 + b.quarter][1], additive: false)
+                let move = alongX ? b.region * 4 + 2 : b.region * 4 + 3
+                shift(layer, "moveStart", "startPoint", move, sign * perUnit, alongX: alongX)
+                shift(layer, "moveEnd", "endPoint", move, sign * perUnit, alongX: alongX)
+                // The reach: x times the region's width; y times its height and the glow's height (both, added).
+                let grow = alongX ? [(b.region * 4, base[0])] : [(b.region * 4 + 1, base[1]), (12, base[2])]
+                for (n, part) in grow.enumerated() {
+                    shift(layer, "growEnd\(n)", "endPoint", part.0, part.1 * perUnit, alongX: alongX)
+                    if axial { shift(layer, "growStart\(n)", "startPoint", part.0, -part.1 * perUnit, alongX: alongX) }
+                }
+            }
+
+            // The inner glow (2 px out, blurred 3 px), over the bloom.
+            for blob in edgeBlobs.reversed() {
+                let b = edgeBlob(blob, reach: 2), alongX = b.s % 2 == 0
+                let across = [abs(b.cy + 2), abs(b.cx - w - 2), abs(b.cy - h - 2), abs(b.cx + 2)][b.s]
+                let edge = max(0, 1 - across / (alongX ? b.ry : b.rx))
+                if edge <= 0 { continue }
+                let reach = (alongX ? b.rx : b.ry) + 3
+                let room = reach * 1.5 + dr
+                let layer = glow(b.s, a: alongX ? b.cx : b.cy, reach: reach, room: room, depth: Double(innerDepth),
+                                 fall: innerFall, peak: 0.34 * edge * 0.748, ci: b.ci)
+                let flen = Double(alongX ? layer.frame.width : layer.frame.height)
+                animate(layer, b, base: [blob[3] * gx, blob[4] * gy * value(12, 0), blob[4] * gy * value(b.region * 4 + 1, 0)],
+                        perUnit: 1 / flen, axial: false)
+                stage.addSublayer(layer)
+            }
+
+            // The ring, on top: the inner 1 pt of the frame, its sides lit where the blobs are (a line whose colour
+            // falls off from the blob's centre as the radial gradient does along it), its corners arcs of radius 30.
+            func ringAt(_ x: Double, _ y: Double, _ hue: Double) -> (rgb: [Double], alpha: Double) {
+                var r = 0.0, g = 0.0, bl = 0.0, al = 0.0
+                for blob in edgeBlobs.reversed() {
+                    let b = edgeBlob(blob, reach: 0)
+                    let dx = (x - b.cx) / b.rx, dy = (y - b.cy) / b.ry, d2 = dx * dx + dy * dy
+                    if d2 >= 1 { continue }
+                    let v = 1 - d2.squareRoot(), keep = 1 - v, c = filtered(b.ci, hue)   // (the quarter's pulse: opacity)
+                    r = c[0] * v + r * keep; g = c[1] * v + g * keep; bl = c[2] * v + bl * keep; al = v + al * keep
+                }
+                return al > 0 ? ([r / al, g / al, bl / al], al * 0.94) : ([0, 0, 0], 0)
+            }
+            for blob in edgeBlobs.reversed() {
+                let b = edgeBlob(blob, reach: 0), alongX = b.s % 2 == 0
+                let length = alongX ? w : h
+                let across = [abs(b.cy), abs(b.cx - w), abs(b.cy - h), abs(b.cx)][b.s]
+                let edge = max(0, 1 - across / (alongX ? b.ry : b.rx))
+                let a = alongX ? b.cx : b.cy, reach = alongX ? b.rx : b.ry
+                let room = reach * 1.5 + dr
+                let a0 = max(rc, a - room), a1 = min(length - rc, a + room)
+                if edge <= 0 || a1 - a0 < 1 { continue }
+                let layer = CAGradientLayer()
+                layer.contentsScale = scale
+                // The line: the inner 1 pt of the frame along this side.
+                let line = band(b.s, from: a0, to: a1, depth: 1)
+                let inside = CGFloat(inward ? 0 : 1)
+                switch b.s {
+                case 0: layer.frame = line.offsetBy(dx: 0, dy: -inside)
+                case 2: layer.frame = line.offsetBy(dx: 0, dy: inside)
+                case 3: layer.frame = line.offsetBy(dx: inside, dy: 0)
+                default: layer.frame = line.offsetBy(dx: -inside, dy: 0)
+                }
+                let flen = Double(alongX ? layer.frame.width : layer.frame.height)
+                let base = alongX ? Double(layer.frame.minX) : Double(layer.frame.minY)
+                let u = (stageAlong(b.s, a) - base) / flen, du = reach / flen
+                layer.startPoint = unitPoint(b.s, along: CGFloat(u - du), across: 0.5)
+                layer.endPoint = unitPoint(b.s, along: CGFloat(u + du), across: 0.5)
+                layer.locations = [0, 0.5, 1]
+                let colours = hues.map { hue -> [CGColor] in
+                    let rgb = filtered(b.ci, hue)
+                    return [cg(rgb, 0), cg(rgb, 0.94 * edge), cg(rgb, 0)]
+                }
+                layer.colors = colours[0]
+                drift(layer, "colors", colours)
+                animate(layer, b, base: [blob[3] * gx, blob[4] * gy * value(12, 0), blob[4] * gy * value(b.region * 4 + 1, 0)],
+                        perUnit: 1 / flen, axial: true)
+                stage.addSublayer(layer)
+            }
+            // The corners: a quarter circle each (the inner 1 pt of the frame, radius 30), in the colour the blobs give
+            // its middle, pulsing with its quarter. Points in the frame, y down: from a side, round the corner, to the next.
+            let o = 0.5, d = 0.70710678
+            let corners: [(from: CGPoint, corner: CGPoint, to: CGPoint, mid: CGPoint, quarter: Int)] = [
+                (CGPoint(x: o, y: rc), CGPoint(x: o, y: o), CGPoint(x: rc, y: o), CGPoint(x: rc - rc * d, y: rc - rc * d), 0),
+                (CGPoint(x: w - rc, y: o), CGPoint(x: w - o, y: o), CGPoint(x: w - o, y: rc), CGPoint(x: w - rc + rc * d, y: rc - rc * d), 1),
+                (CGPoint(x: rc, y: h - o), CGPoint(x: o, y: h - o), CGPoint(x: o, y: h - rc), CGPoint(x: rc - rc * d, y: h - rc + rc * d), 2),
+                (CGPoint(x: w - o, y: h - rc), CGPoint(x: w - o, y: h - o), CGPoint(x: w - rc, y: h - o), CGPoint(x: w - rc + rc * d, y: h - rc + rc * d), 3)]
+            func onStage(_ p: CGPoint) -> CGPoint { return CGPoint(x: CGFloat(off) + p.x, y: CGFloat(off + h) - p.y) }
+            for c in corners where rc >= 1 {
+                let tones = hues.map { hue -> (rgb: [Double], alpha: Double) in ringAt(Double(c.mid.x), Double(c.mid.y), hue) }
+                if tones[0].alpha < 0.01 { continue }
+                let arc = CGMutablePath()
+                arc.move(to: onStage(c.from))
+                arc.addArc(tangent1End: onStage(c.corner), tangent2End: onStage(c.to), radius: CGFloat(rc - o))
+                let shape = CAShapeLayer()
+                shape.contentsScale = scale
+                let box = arc.boundingBoxOfPath.insetBy(dx: -1, dy: -1)
+                var move = CGAffineTransform(translationX: -box.minX, y: -box.minY)
+                shape.frame = box
+                shape.path = arc.copy(using: &move)
+                shape.fillColor = nil
+                shape.lineWidth = 1
+                let strokes = tones.map { cg($0.rgb, $0.alpha) }
+                shape.strokeColor = strokes[0]
+                drift(shape, "strokeColor", strokes)
+                let q = 13 + c.quarter
+                shape.opacity = Float(value(q, 0))
+                if turning { breathe(shape, "pulse", "opacity", q, from: osc[q][0], to: osc[q][1], additive: false) }
+                stage.addSublayer(shape)
             }
             CATransaction.commit()
         }
@@ -791,16 +1022,16 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var laidOut: (NSSize, Bool)? = nil
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             guard let target = self?.targetFrame(), target.frame.width > 8, target.frame.height > 8 else { win.orderOut(nil); return }
-            let frame = target.frame
+            let frame = target.screen ? target.frame : target.frame.insetBy(dx: -margin, dy: -margin)
             if win.frame != frame { win.setFrame(frame, display: true) }
-            if laidOut == nil || laidOut!.0 != frame.size || laidOut!.1 != target.screen {
-                layout(frame.size, screen: target.screen)
-                laidOut = (frame.size, target.screen)
+            if laidOut == nil || laidOut!.0 != target.frame.size || laidOut!.1 != target.screen {
+                layout(target.frame.size, inward: target.screen)
+                laidOut = (target.frame.size, target.screen)
             }
             if !win.isVisible {
                 win.orderFrontRegardless()
                 if turning {
-                    // Coming up: from clear to full over .6 s (a still ring, as on Windows, just appears).
+                    // Coming up: from clear to full over .6 s (a still beam, as on Windows, just appears).
                     let rise = CABasicAnimation(keyPath: "opacity")
                     rise.fromValue = 0
                     rise.toValue = 1

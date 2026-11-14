@@ -26,16 +26,18 @@ by src/core/banner.ts:
                      keyboard, so the box is still a window opened by that click.)
                      stdin: "HIDE <ms>" steps aside for an agent's click;
                      "ACTIVITY <text>" replaces the activity text.
-  overlay.py outline [--color #RRGGBB]
-                     a thin border around the window the agent works in, and
+  overlay.py outline [--color #RRGGBB] [--paused]
+                     the border beam around the window the agent works in, and
                      nothing else: no fill, nothing on the rest of the screen;
                      clicks pass straight through it. stdin: "TARGET <xid> <pid>"
-                     names the window (a bare "TARGET": none); the border is drawn
+                     names the window (a bare "TARGET": none); the beam is drawn
                      while that is the active window, and follows it. "HIDE <ms>"
                      steps aside for a screen capture.
-                     The border is steady here: the travelling highlight of the
-                     Windows and macOS drawers (#392) waits until it can be
-                     checked on a live Linux desktop.
+                     The beam is Border Beam's pulse-outside in sunset (draw_beam):
+                     a warm glow outside the window's edge that breathes, about 10
+                     frames a second; inward on a window as wide as the screen.
+                     --paused: the same in blue ("ocean"), still. Without a
+                     compositor (no alpha): a plain steady line in --color.
 
 When stdin closes (the parent is gone) the process exits.
   overlay.py --probe prints "ok" when GTK can open the display (banner.ts uses
@@ -509,13 +511,190 @@ def run_pill():
         layout()
 
 
-def run_outline(color, thickness):
+# The border beam (#392): Border Beam's pulse-outside in sunset, borderRadius 30, duration 1.96 s, by Jakub Antalik
+# (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/border-beam), MIT License, Copyright (c) 2026 Jakub
+# Antalik. The library's numbers and its licence notice in full are at the top of scripts/window-outline.ps1.
+# A soft bloom and a tighter inner glow outside the window's edge and patches of a 1 px ring at radius 30, made of warm
+# blobs that breathe (size, place, opacity) on the library's periods, with a slow hue drift. Here each blob is half of
+# a cairo radial gradient lying against the edge (the blur is in its stops), drawn 10 times a second.
+BEAM_DURATION = 1.96
+_SP, _DR, _OP, _GH = 0.28, 14.0, 0.46, 0.16
+_BS, _SS, _GHS = BEAM_DURATION, 6.4 * BEAM_DURATION / 2.3, 2.4 * BEAM_DURATION / 2.3
+# from, to, period, delay: per blob region 1..3 its width, height, x, y; the glow's height; each quarter's opacity
+# (top-left, top-right, bottom-left, bottom-right).
+BEAM_OSC = [
+    (1 - _SP, 1 + _SP * 1.1, _SS * 0.9, 0), (1 + _SP * 0.9, 1 - _SP * 0.85, _SS * 1.26, 0),
+    (-_DR, _DR * 0.9, _BS * 1.6, 0), (_DR * 0.55, -_DR * 0.7, _BS * 1.6, 0),
+    (1 + _SP, 1 - _SP * 0.85, _SS * 1.1, 0), (1 - _SP * 0.8, 1 + _SP * 1.05, _SS * 0.81, 0),
+    (_DR * 0.8, -_DR * 0.9, _BS * 1.88, 0), (-_DR, _DR * 0.65, _BS * 1.88, 0),
+    (1 - _SP * 0.6, 1 + _SP * 1.15, _SS * 0.98, 0), (1 + _SP * 0.75, 1 - _SP, _SS * 1.4, 0),
+    (-_DR * 0.6, _DR, _BS * 1.45, 0), (-_DR * 0.85, _DR * 0.45, _BS * 1.45, 0),
+    (1 - _GH, 1 + _GH, _GHS, 0),
+    (1 - _OP, 1, _BS, 0), (1 - _OP, 1, _BS * 1.32, _BS * 0.28), (1 - _OP, 1, _BS * 0.84, _BS * 0.55),
+    (1 - _OP, 1, _BS * 1.58, _BS * 0.83)]
+# The ring's and the inner glow's blobs: colour, region, quarter, reach x, y (px), place x, y (% of the box).
+BEAM_EDGE = [(0, 1, 0, 80, 19, 27, 0), (6, 2, 1, 74, 11, 73, -1), (7, 3, 1, 15, 44, 100, 33), (8, 1, 3, 19, 38, 101, 72),
+             (4, 2, 3, 84, 13, 67, 100), (1, 3, 2, 60, 21, 24, 101), (2, 1, 2, 17, 40, 0, 60), (3, 2, 0, 13, 32, -1, 28)]
+# The bloom's blobs: colour, reach x, y, place x, y. They do not breathe.
+BEAM_BLOOM = [(0, 110, 30, 27, 3), (6, 100, 20, 73, 1), (7, 26, 62, 100, 33), (8, 30, 56, 101, 72),
+              (4, 120, 22, 67, 99), (1, 88, 32, 24, 99), (2, 28, 58, 0, 60)]
+BEAM_SUNSET = [(255, 80, 50), (255, 160, 40), (255, 120, 60), (255, 200, 50), (255, 100, 80), (255, 180, 60),
+               (255, 60, 60), (255, 140, 50), (255, 90, 70)]
+BEAM_OCEAN = [(100, 80, 220), (60, 120, 255), (80, 100, 200), (50, 140, 220), (120, 80, 255), (70, 130, 255),
+              (140, 100, 240), (90, 110, 230), (130, 70, 255)]
+BEAM_MARGIN = 48  # how far out the glow goes
+# Across the edge, how a blurred box edge falls off (a gaussian) at six stops: the bloom's (blur 22.5, its box 20 px
+# out, faded out by 48) and the inner glow's (blur 3, its box 2 px out, about 10 px deep).
+_STOPS = (0, 0.2, 0.4, 0.6, 0.8, 1)
+_BLOOM_FALL, _INNER_FALL = (1, 0.83, 0.63, 0.43, 0.165, 0), (1, 0.67, 0.34, 0.12, 0.03, 0)
+
+
+def _osc(k, t):
+    a, b, period, delay = BEAM_OSC[k]
+    return a + (b - a) * (1 - math.cos(2 * math.pi * (t - delay) / period)) / 2
+
+
+def _filtered(rgb, degrees):
+    """hue-rotate(deg) brightness(1.9) saturate(1.2), each clamped, as a browser does."""
+    c, s, t = math.cos(math.radians(degrees)), math.sin(math.radians(degrees)), 1.2
+    r, g, b = (v / 255 for v in rgb)
+
+    def clamp(v):
+        return max(0.0, min(1.0, v))
+
+    r1 = clamp(1.9 * clamp((0.213 + c * 0.787 - s * 0.213) * r + (0.715 - c * 0.715 - s * 0.715) * g + (0.072 - c * 0.072 + s * 0.928) * b))
+    g1 = clamp(1.9 * clamp((0.213 - c * 0.213 + s * 0.143) * r + (0.715 + c * 0.285 + s * 0.140) * g + (0.072 - c * 0.072 - s * 0.283) * b))
+    b1 = clamp(1.9 * clamp((0.213 - c * 0.213 - s * 0.787) * r + (0.715 - c * 0.715 + s * 0.715) * g + (0.072 + c * 0.928 + s * 0.072) * b))
+    return (clamp((0.213 + 0.787 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 - 0.072 * t) * b1),
+            clamp((0.213 - 0.213 * t) * r1 + (0.715 + 0.285 * t) * g1 + (0.072 - 0.072 * t) * b1),
+            clamp((0.213 - 0.213 * t) * r1 + (0.715 - 0.715 * t) * g1 + (0.072 + 0.928 * t) * b1))
+
+
+def _side(fx, fy):
+    """Which side a blob placed at (fx, fy) % lies on: 0 top, 1 right, 2 bottom, 3 left."""
+    d = (fy, 100 - fx, 100 - fy, fx)
+    return d.index(min(d))
+
+
+def draw_beam(cr, w, h, off, inward, t, palette):
+    """The beam for a w x h frame whose top-left corner is at (off, off), as it is `t` seconds in."""
+    gx, gy, rc = max(0.35, min(4, w / 350)), max(0.35, min(4, h / 140)), min(30, w / 2, h / 2)
+    hue = 30 * math.sin(2 * math.pi * t / 14)  # 30 degrees either way over 14 s
+    colours = [_filtered(c, hue) for c in palette]
+    o = [_osc(k, t) for k in range(len(BEAM_OSC))]
+    length = (w, h, w, h)
+
+    def half_ellipse(s, a, reach, depth, fall, peak, rgb):
+        """Half an ellipse against side s: centred `a` along it on the edge, `reach` along, `depth` across."""
+        if peak <= 0.002:
+            return
+        if s == 0:
+            cx, cy, rx, ry = off + a, off, reach, depth
+        elif s == 2:
+            cx, cy, rx, ry = off + a, off + h, reach, depth
+        elif s == 3:
+            cx, cy, rx, ry = off, off + a, depth, reach
+        else:
+            cx, cy, rx, ry = off + w, off + a, depth, reach
+        pattern = cairo.RadialGradient(0, 0, 0, 0, 0, 1)
+        for at, f in zip(_STOPS, fall):
+            pattern.add_color_stop_rgba(at, rgb[0], rgb[1], rgb[2], peak * f)
+        cr.save()
+        cr.translate(cx, cy)
+        cr.scale(rx, ry)
+        cr.set_source(pattern)
+        cr.arc(0, 0, 1, 0, 2 * math.pi)
+        cr.fill()  # (before restore: the source is part of the saved state)
+        cr.restore()
+
+    # The glow: only outside the frame (or, inward, only inside it); the bloom under the inner glow.
+    cr.save()
+    if inward:
+        cr.rectangle(off, off, w, h)
+    else:
+        cr.rectangle(0, 0, w + 2 * off, h + 2 * off)
+        cr.rectangle(off, off, w, h)
+        cr.set_fill_rule(cairo.FILL_RULE_EVEN_ODD)
+    cr.clip()
+    cr.set_fill_rule(cairo.FILL_RULE_WINDING)
+    for ci, bw, bh, fx, fy in reversed(BEAM_BLOOM):  # the first blob on top
+        s = _side(fx, fy)
+        cx, cy, rx, ry = -20 + fx / 100 * (w + 40), -20 + fy / 100 * (h + 40), bw * gx, bh * gy
+        across = (abs(cy + 20), abs(cx - w - 20), abs(cy - h - 20), abs(cx + 20))[s]
+        edge = max(0.0, 1 - across / (ry if s % 2 == 0 else rx))
+        half_ellipse(s, cx if s % 2 == 0 else cy, (rx if s % 2 == 0 else ry) + 22.5, BEAM_MARGIN,
+                     _BLOOM_FALL, 0.30 * 0.77 * edge * 0.813, colours[ci])
+    blobs = []
+    for ci, reg, quarter, bw, bh, fx, fy in BEAM_EDGE:
+        r = reg - 1
+        blobs.append((_side(fx, fy), ci, quarter, fx, fy, bw * o[r * 4] * gx, bh * o[r * 4 + 1] * o[12] * gy,
+                      o[r * 4 + 2], o[r * 4 + 3]))
+    for s, ci, quarter, fx, fy, rx, ry, dx, dy in reversed(blobs):
+        cx, cy = -2 + fx / 100 * (w + 4) + dx, -2 + fy / 100 * (h + 4) + dy
+        across = (abs(cy + 2), abs(cx - w - 2), abs(cy - h - 2), abs(cx + 2))[s]
+        edge = max(0.0, 1 - across / (ry if s % 2 == 0 else rx))
+        half_ellipse(s, cx if s % 2 == 0 else cy, (rx if s % 2 == 0 else ry) + 3, 10,
+                     _INNER_FALL, 0.34 * o[13 + quarter] * edge * 0.748, colours[ci])
+    cr.restore()
+
+    # The ring, on top: the inner 1 px of the frame, lit where the blobs are; its corners arcs of radius 30.
+    def ring_at(x, y):
+        r = g = b = a = 0.0
+        for s, ci, quarter, fx, fy, rx, ry, dx, dy in reversed(blobs):
+            ex, ey = (x - (fx / 100 * w + dx)) / rx, (y - (fy / 100 * h + dy)) / ry
+            d2 = ex * ex + ey * ey
+            if d2 >= 1:
+                continue
+            v = (1 - math.sqrt(d2)) * o[13 + quarter]
+            c = colours[ci]
+            r, g, b, a = c[0] * v + r * (1 - v), c[1] * v + g * (1 - v), c[2] * v + b * (1 - v), v + a * (1 - v)
+        return ((r / a, g / a, b / a), a * 0.94) if a > 0 else ((0, 0, 0), 0)
+
+    for s, ci, quarter, fx, fy, rx, ry, dx, dy in reversed(blobs):
+        cx, cy = fx / 100 * w + dx, fy / 100 * h + dy
+        along, reach = (cx, rx) if s % 2 == 0 else (cy, ry)
+        across = (abs(cy), abs(cx - w), abs(cy - h), abs(cx))[s]
+        edge = max(0.0, 1 - across / (ry if s % 2 == 0 else rx))
+        a0, a1 = max(rc, along - reach), min(length[s] - rc, along + reach)
+        peak = 0.94 * o[13 + quarter] * edge
+        if a1 - a0 < 1 or peak <= 0.002:
+            continue
+        rgb = colours[ci]
+        if s % 2 == 0:
+            line = cairo.LinearGradient(off + along - reach, 0, off + along + reach, 0)
+            cr.rectangle(off + a0, off if s == 0 else off + h - 1, a1 - a0, 1)
+        else:
+            line = cairo.LinearGradient(0, off + along - reach, 0, off + along + reach)
+            cr.rectangle(off + w - 1 if s == 1 else off, off + a0, 1, a1 - a0)
+        line.add_color_stop_rgba(0, rgb[0], rgb[1], rgb[2], 0)
+        line.add_color_stop_rgba(0.5, rgb[0], rgb[1], rgb[2], peak)
+        line.add_color_stop_rgba(1, rgb[0], rgb[1], rgb[2], 0)
+        cr.set_source(line)
+        cr.fill()
+    if rc >= 1:
+        cr.set_line_width(1)
+        for (ccx, ccy, start) in ((rc, rc, math.pi), (w - rc, rc, 1.5 * math.pi), (w - rc, h - rc, 0), (rc, h - rc, 0.5 * math.pi)):
+            mid = start + math.pi / 4
+            rgb, alpha = ring_at(ccx + rc * math.cos(mid), ccy + rc * math.sin(mid))
+            if alpha < 0.01:
+                continue
+            cr.set_source_rgba(rgb[0], rgb[1], rgb[2], alpha)
+            cr.new_sub_path()
+            cr.arc(off + ccx, off + ccy, rc - 0.5, start, start + math.pi / 2)
+            cr.stroke()
+
+
+def run_outline(color, paused):
     gi.require_version('GdkX11', '3.0')
     from gi.repository import GdkX11  # noqa: F401  (gives the active window its get_xid)
-    r, g, b = hex_rgb(color)
     screen = Gdk.Screen.get_default()
-    win, _composited = popup(1, 1)
-    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0)}
+    win, composited = popup(1, 1)
+    settings = Gtk.Settings.get_default()
+    # Paused: the blues, still. Where the desktop is set to show no animations: one still frame.
+    still = paused or (settings is not None and not settings.get_property('gtk-enable-animations'))
+    palette = BEAM_OCEAN if paused else BEAM_SUNSET
+    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0),
+             'inward': False, 'start': time.monotonic()}
 
     def shadow(xid, scale):
         # A client-decorated GTK window draws its shadow inside its own X window and says how wide it is in
@@ -532,8 +711,17 @@ def run_outline(color, thickness):
 
     def draw(_w, cr):
         cr.set_operator(cairo.OPERATOR_SOURCE)
-        cr.set_source_rgb(r, g, b)
+        if not composited:  # no alpha on this display: a plain steady line in the colour given
+            cr.set_source_rgb(*hex_rgb(color))
+            cr.paint()
+            return False
+        cr.set_source_rgba(0, 0, 0, 0)
         cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        if state['rect'] is not None:
+            _x, _y, w, h = state['rect']
+            draw_beam(cr, w, h, 0 if state['inward'] else BEAM_MARGIN, state['inward'],
+                      0 if still else time.monotonic() - state['start'], palette)
         return False
 
     win.connect('draw', draw)
@@ -554,6 +742,14 @@ def run_outline(color, thickness):
         w, h = e.width - left - right, e.height - top - bottom
         return (e.x + left, e.y + top, w, h) if w > 0 and h > 0 else None
 
+    def bands():
+        """Where the beam is in the window: the glow's band and the ring's corners (window coordinates)."""
+        x, y, w, h = state['rect']
+        m, c = (BEAM_MARGIN, 31) if not state['inward'] else (0, BEAM_MARGIN)
+        ww, wh = w + 2 * m, h + 2 * m
+        return [(0, 0, ww, m + c), (0, wh - m - c, ww, m + c), (0, m + c, m + c, wh - 2 * (m + c)),
+                (ww - m - c, m + c, m + c, wh - 2 * (m + c))]
+
     def follow():
         rect = frame()
         if rect == state['rect']:
@@ -563,16 +759,41 @@ def run_outline(color, thickness):
             win.hide()
             return True
         x, y, w, h = rect
-        t = min(thickness, w // 2, h // 2)
-        # The window is cut to a hollow frame: the middle is not part of it, so nothing lies over the content.
-        ring = cairo.Region(cairo.RectangleInt(0, 0, w, h))
-        ring.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
-        win.move(x, y)
-        win.resize(w, h)
+        root = screen.get_root_window()
+        # A window as wide as the screen (maximized) has no room outside it: the glow goes inward.
+        state['inward'] = root is not None and x <= 0 and x + w >= root.get_width()
+        m = 0 if state['inward'] else BEAM_MARGIN
+        if composited:
+            # The window is cut to the beam's band: outside the frame (or, inward, inside its edge), and the ring's
+            # corners; nothing lies over the content.
+            shape = cairo.Region(cairo.RectangleInt(0, 0, w + 2 * m, h + 2 * m))
+            if state['inward']:
+                inner = min(BEAM_MARGIN, w // 2, h // 2)
+                shape.subtract(cairo.RectangleInt(inner, inner, w - 2 * inner, h - 2 * inner))
+            else:
+                rc = int(min(30, w // 2, h // 2))
+                shape.subtract(cairo.RectangleInt(m + 1, m + rc, max(0, w - 2), max(0, h - 2 * rc)))
+                shape.subtract(cairo.RectangleInt(m + rc, m + 1, max(0, w - 2 * rc), max(0, h - 2)))
+        else:
+            t = min(3, w // 2, h // 2)
+            shape = cairo.Region(cairo.RectangleInt(0, 0, w, h))
+            shape.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
+            m = 0
+        win.move(x - m, y - m)
+        win.resize(w + 2 * m, h + 2 * m)
         win.show_all()
-        win.shape_combine_region(ring)
+        win.shape_combine_region(shape)
         # Click-through: an empty input shape sends every click to the window underneath.
         win.input_shape_combine_region(cairo.Region())
+        win.queue_draw()
+        return True
+
+    def breathe():
+        # About 10 frames a second, only the band the beam is in.
+        if state['rect'] is not None and composited and not still:
+            for bx, by, bw, bh in bands():
+                if bw > 0 and bh > 0:
+                    win.queue_draw_area(bx, by, bw, bh)
         return True
 
     def on_line(line):
@@ -607,7 +828,7 @@ def run_outline(color, thickness):
     except Exception:
         pass  # no stdin: nothing to listen to
     GLib.timeout_add(100, follow)
-
+    GLib.timeout_add(100, breathe)
 
 def main(argv):
     if '--probe' in argv:
@@ -615,14 +836,14 @@ def main(argv):
         print('ok' if ok and Gdk.Display.get_default() is not None else 'no-display')
         return 0 if ok else 1
     if not argv or argv[0] not in ('pill', 'outline'):
-        sys.stderr.write('usage: overlay.py pill | outline [--color #RRGGBB] | --probe\n')
+        sys.stderr.write('usage: overlay.py pill | outline [--color #RRGGBB] [--paused] | --probe\n')
         return 2
     if Gdk.Display.get_default() is None:
         return 1
     if argv[0] == 'pill':
         run_pill()
     else:
-        run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#f59e0b', 3)
+        run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#ff7a45', '--paused' in argv)
     Gtk.main()
     return 0
 
