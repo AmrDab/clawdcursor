@@ -9,7 +9,7 @@
  */
 
 /** Parameter definition for a tool (maps to JSON Schema) */
-import { mapImagePoint, mapImageLength, getLastFrame } from '../core/agent-loop/coord-scale';
+import { mapImagePoint, mapImageLength, getLastFrame } from '../platform/coord-scale';
 
 export interface ParameterDef {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';

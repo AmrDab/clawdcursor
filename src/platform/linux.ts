@@ -49,7 +49,7 @@ import type {
 } from './types';
 import { waitForLaunchedWindow, buildAppPredicate, type AppPredicate } from './launch-poll';
 import { getPackageRoot } from '../paths';
-import { llmSize } from '../core/agent-loop/coord-scale';
+import { llmSize } from './coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { wellFormed } from './mac-ax';

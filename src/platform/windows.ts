@@ -51,7 +51,7 @@ import type {
 import { waitForLaunchedWindow, within, TIMED_OUT } from './launch-poll';
 import { findWindowsProcesses } from './win-processes';
 import { appIdentity, ownsWindow, type AppIdentity } from './app-identity';
-import { llmSize } from '../core/agent-loop/coord-scale';
+import { llmSize } from './coord-scale';
 import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';

@@ -20,7 +20,7 @@ import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } f
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
 import { isWaylandSession, waylandScreenSize } from './wayland-screen';
-import { llmScale, llmSize, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { llmScale, llmSize, LLM_TARGET_WIDTH } from './coord-scale';
 import { setWorkingPoint } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo } from './mac-screen';

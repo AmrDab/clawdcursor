@@ -34,7 +34,7 @@ import type {
 import { waitForLaunchedWindow, buildAppPredicate } from './launch-poll';
 import { checkSecureInput, secureInputMessage, type SecureInputState } from './mac-secure-input';
 import { getPackageRoot } from '../paths';
-import { llmSize } from '../core/agent-loop/coord-scale';
+import { llmSize } from './coord-scale';
 import { clampRegion } from './grab-image';
 import { wheelUnitsPerNotch } from './wheel';
 import { readMainScreenInfo, readDisplayList } from './mac-screen';

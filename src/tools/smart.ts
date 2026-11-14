@@ -16,7 +16,7 @@ import type { ToolDefinition } from './types';
 import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
-import { windowOcrRegion } from './ocr';
+import { ocrPointToClickPoint, windowOcrRegion } from '../platform/coord-scale';
 import { waitForPaste, writeClipboardVerified, readBackTyped, typesAsKeys, EMPTY_AFTER_TYPING } from './paste-guard';
 import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 import { ensureVisible } from '../core/sense/ui-map-visible';
@@ -52,27 +52,6 @@ const EMPTY_A11Y_APPS = new Set([
   'hyper', 'mintty', 'conhost',
 ]);
 
-
-/**
- * Convert an OCR hit (PHYSICAL pixels, on every OS) into the coordinate space
- * NativeDesktop.mouseClick expects — which differs by OS (see physicalToMouse):
- *
- *   Windows / Linux — mouseClick takes PHYSICAL and divides by dpiRatio itself.
- *     Dividing here too double-converted: on a 2.25x display an OCR click
- *     landed at ~1/5 of the target.
- *   macOS — mouseClick takes LOGICAL; physicalToMouse is a no-op there. This
- *     division is the ONLY one, mapping Retina-physical OCR coords to logical
- *     points. Removing it re-introduces #154 (every click ~2x off on Retina).
- *
- * Exported so the per-OS rule is pinned by a test: a plausible-looking fix
- * ("just remove the division") fixes Windows and silently breaks every Mac.
- */
-export function ocrPointToClickPoint(
-  x: number, y: number, dpiRatio: number, platform: NodeJS.Platform,
-): { x: number; y: number } {
-  const div = platform === 'darwin' ? (dpiRatio || 1) : 1;
-  return { x: Math.round(x / div), y: Math.round(y / div) };
-}
 
 export function getSmartTools(): ToolDefinition[] {
   return [

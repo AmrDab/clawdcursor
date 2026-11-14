@@ -16,7 +16,7 @@
  * behavior end-to-end with a mock adapter (OS-agnostic).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { imageScale, scaleCoord, screenCenter, LLM_TARGET_WIDTH } from '../core/agent-loop/coord-scale';
+import { imageScale, scaleCoord, screenCenter, LLM_TARGET_WIDTH } from '../platform/coord-scale';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import type { AgentToolContext } from '../core/agent-loop/types';
 

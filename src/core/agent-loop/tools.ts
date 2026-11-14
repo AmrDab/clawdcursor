@@ -12,7 +12,7 @@
  */
 
 import type { UnifiedTool, AgentToolContext } from './types';
-import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } from './coord-scale';
+import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } from '../../platform/coord-scale';
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';

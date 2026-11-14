@@ -9,7 +9,7 @@
 import { fenceImage } from '../core/fence';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage, screenToPhysical } from './types';
-import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH, imageCost } from '../core/agent-loop/coord-scale';
+import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH, imageCost } from '../platform/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
 import { lastCaptureUnchecked } from '../platform/native-helper';

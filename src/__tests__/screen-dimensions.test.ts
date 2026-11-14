@@ -7,7 +7,7 @@
  * coordinate the model read back landed ~25% short.
  */
 import { describe, it, expect } from 'vitest';
-import { llmScale, llmSize, imageScale, LLM_TARGET_WIDTH, LLM_MAX_PIXELS } from '../core/agent-loop/coord-scale';
+import { llmScale, llmSize, imageScale, LLM_TARGET_WIDTH, LLM_MAX_PIXELS } from '../platform/coord-scale';
 
 const SCREENS: Array<[string, number, number]> = [
   ['800x600', 800, 600],

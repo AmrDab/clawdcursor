@@ -23,7 +23,8 @@ vi.mock('../platform/ocr-engine', () => {
   return { OcrEngine, ocrEngine: () => new OcrEngine() };
 });
 
-import { getOcrTools, windowOcrRegion } from '../tools/ocr';
+import { getOcrTools } from '../tools/ocr';
+import { windowOcrRegion } from '../platform/coord-scale';
 
 const REAL_PLATFORM = process.platform;
 const setPlatform = (p: string) => Object.defineProperty(process, 'platform', { value: p, configurable: true });

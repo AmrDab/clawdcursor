@@ -11,23 +11,8 @@ import { screenJson, wrapUntrustedScreenContent } from '../core/untrusted-screen
 import { getWorkingPoint } from '../platform/display-target';
 import type { OcrElement } from '../platform/ocr-engine';
 import type { ToolDefinition } from './types';
-import { ocrPointToClickPoint } from './smart';
+import { ocrPointToClickPoint, windowOcrRegion } from '../platform/coord-scale';
 
-
-/**
- * Physical-pixel rectangle (what the OCR engine crops) for a window's bounds,
- * or null when the window has no usable area. `bounds` are screen coordinates:
- * physical pixels on Windows / Linux, logical points on macOS (physical = ×ratio).
- */
-export function windowOcrRegion(
-  bounds: { x: number; y: number; width: number; height: number } | undefined,
-  dpiRatio: number,
-  platform: NodeJS.Platform,
-): { x: number; y: number; width: number; height: number } | null {
-  if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
-  const k = platform === 'darwin' ? (dpiRatio || 1) : 1;
-  return { x: Math.round(bounds.x * k), y: Math.round(bounds.y * k), width: Math.round(bounds.width * k), height: Math.round(bounds.height * k) };
-}
 
 /**
  * The words of a read as rows of `@x,y "text"`: x,y is the centre of the text, in the space `toScreen` gives (screen

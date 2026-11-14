@@ -57,7 +57,7 @@ vi.mock('../platform/ocr-engine', () => {
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
 import { buildUnifiedTools, coerceCoord } from '../core/agent-loop/tools';
-import { imageScale, scaleCoord } from '../core/agent-loop/coord-scale';
+import { imageScale, scaleCoord } from '../platform/coord-scale';
 import type { AgentToolContext } from '../core/agent-loop/types';
 import { makeMockPlatform } from './helpers/mock-platform';
 

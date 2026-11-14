@@ -22,7 +22,7 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { getDesktopTools } from '../tools/desktop';
 import { getTool } from '../tools/registry';
-import { llmSize, setLastFrame } from '../core/agent-loop/coord-scale';
+import { llmSize, setLastFrame } from '../platform/coord-scale';
 
 const tools = getDesktopTools();
 const region = tools.find(t => t.name === 'desktop_screenshot_region')!;

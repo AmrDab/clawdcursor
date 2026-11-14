@@ -5,7 +5,7 @@
 
 import { fenceImage } from '../core/fence';
 import type { ToolDefinition } from './types';
-import { setLastFrame } from '../core/agent-loop/coord-scale';
+import { setLastFrame } from '../platform/coord-scale';
 import { pauseGate, parsePauseCard } from '../core/pause-gate';
 import { timeWait } from '../core/observability/steps';
 import { promptSatisfies } from '../core/pause-text';

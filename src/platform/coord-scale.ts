@@ -125,6 +125,42 @@ export function screenCenter(ctx: {
   return { x: Math.floor((s.physicalWidth ?? 0) / 2), y: Math.floor((s.physicalHeight ?? 0) / 2) };
 }
 
+/**
+ * Convert an OCR hit (PHYSICAL pixels, on every OS) into the coordinate space
+ * NativeDesktop.mouseClick expects — which differs by OS (see physicalToMouse):
+ *
+ *   Windows / Linux — mouseClick takes PHYSICAL and divides by dpiRatio itself.
+ *     Dividing here too double-converted: on a 2.25x display an OCR click
+ *     landed at ~1/5 of the target.
+ *   macOS — mouseClick takes LOGICAL; physicalToMouse is a no-op there. This
+ *     division is the ONLY one, mapping Retina-physical OCR coords to logical
+ *     points. Removing it re-introduces #154 (every click ~2x off on Retina).
+ *
+ * Exported so the per-OS rule is pinned by a test: a plausible-looking fix
+ * ("just remove the division") fixes Windows and silently breaks every Mac.
+ */
+export function ocrPointToClickPoint(
+  x: number, y: number, dpiRatio: number, platform: NodeJS.Platform,
+): { x: number; y: number } {
+  const div = platform === 'darwin' ? (dpiRatio || 1) : 1;
+  return { x: Math.round(x / div), y: Math.round(y / div) };
+}
+
+/**
+ * Physical-pixel rectangle (what the OCR engine crops) for a window's bounds,
+ * or null when the window has no usable area. `bounds` are screen coordinates:
+ * physical pixels on Windows / Linux, logical points on macOS (physical = ×ratio).
+ */
+export function windowOcrRegion(
+  bounds: { x: number; y: number; width: number; height: number } | undefined,
+  dpiRatio: number,
+  platform: NodeJS.Platform,
+): { x: number; y: number; width: number; height: number } | null {
+  if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
+  const k = platform === 'darwin' ? (dpiRatio || 1) : 1;
+  return { x: Math.round(bounds.x * k), y: Math.round(bounds.y * k), width: Math.round(bounds.width * k), height: Math.round(bounds.height * k) };
+}
+
 // ── The frame the model is looking at ─────────────────────────────────────
 //
 // Screenshot coordinates only mean something relative to the image they were

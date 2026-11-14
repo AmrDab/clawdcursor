@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { imageCost, imageScale } from '../core/agent-loop/coord-scale';
+import { imageCost, imageScale } from '../platform/coord-scale';
 import { opaqueArea, opaqueAreaLine, shownHelp } from '../tools/blind-hints';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { stopControl, __setControlDirForTests } from '../core/control';

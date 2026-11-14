@@ -15,8 +15,7 @@ import { normalizeRole, normText } from './ui-map-normalize';
 import { iou } from './ui-map-geom';
 import { captureSnapshot } from './snapshot';
 import { ocrEngine } from '../../platform/ocr-engine';
-import { ocrPointToClickPoint } from '../../tools/smart';
-import { windowOcrRegion } from '../../tools/ocr';
+import { ocrPointToClickPoint, windowOcrRegion } from '../../platform/coord-scale';
 
 const SPARSE_A11Y_MAX = 0;          // ≤ this many named a11y elements ⇒ "sparse"
 const LOW_CONFIDENCE = 0.5;         // below this on a needed element ⇒ vision-worthy
