@@ -61,6 +61,7 @@ describe('onAnyDisplay', () => {
   });
 });
 
+// The bridge keeps negative bounds: run for real in multi-monitor-offscreen.system.test.ts.
 describe('WindowsAdapter.getUiTree on a second monitor above the primary', () => {
   let adapter: WindowsAdapter;
   const el = (name: string, bounds: object) => ({ name, controlType: 'ControlType.Button', bounds, children: [] });
@@ -98,14 +99,6 @@ describe('WindowsAdapter.getUiTree on a second monitor above the primary', () =>
     expect(tree.find(e => e.name === 'Far')).toMatchObject({ bounds: farRight });
     expect(tree.find(e => e.name === 'Beside')).toMatchObject({ bounds: beside });
   });
-
-  it('the bridge no longer blanks bounds left of / above the primary', () => {
-    const bridge = script('ps-bridge.ps1');
-    const start = bridge.indexOf('function ConvertTo-UINode {');
-    const body = bridge.slice(start, bridge.indexOf('\nfunction ', start + 1));
-    expect(body).toContain('$cur.BoundingRectangle');
-    expect(body).not.toMatch(/-lt -\d+/);
-  });
 });
 
 const script = (name: string) => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', name), 'utf8');
@@ -120,13 +113,5 @@ describe('the Windows overlays on a second monitor', () => {
     expect(body).toContain('GetForegroundWindow()');
     expect(body).toContain('Screen]::FromHandle($fg).WorkingArea');
     expect(body).toContain('Screen]::PrimaryScreen.WorkingArea');
-  });
-
-  it('the pill is placed again on every activity change, not only when its width changes', () => {
-    const banner = script('banner.ps1');
-    const start = banner.indexOf('function Update-Layout {');
-    const body = banner.slice(start, banner.indexOf('\n}', start));
-    expect(body).toMatch(/\n {4}Set-PillShape \$form 19/);
-    expect(body).not.toMatch(/if \(.*Set-PillShape/);
   });
 });

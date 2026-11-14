@@ -10,11 +10,7 @@
  * runs with a fake bridge reply.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { execFileSync } from 'child_process';
-import { psOpts } from '../platform/ps-spawn';
+import { runPs } from './helpers/ps-bridge-harness';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -36,24 +32,6 @@ vi.mock('../platform/ocr-engine', () => {
   return { OcrEngine, ocrEngine: () => new OcrEngine() };
 });
 
-const root = join(__dirname, '../..');
-const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');
-const fnBody = (name: string) => {
-  const start = bridge.indexOf(`function ${name}`);
-  expect(start, name).toBeGreaterThan(-1);
-  const next = bridge.indexOf('\nfunction ', start + 10);
-  return next === -1 ? bridge.slice(start) : bridge.slice(start, next);
-};
-function runPs(functions: string[], body: string): string[] {
-  const script = `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${functions.map(fnBody).join('\n')}\n${body}`;
-  // From a file: Cmd-InvokeElement alone is longer than a Windows command line may be. With a BOM, so PowerShell 5.1 reads UTF-8.
-  const dir = mkdtempSync(join(tmpdir(), 'cc-bridge-test-'));
-  const file = join(dir, 'run.ps1');
-  writeFileSync(file, String.fromCharCode(0xfeff) + script, 'utf8');
-  try {
-    return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', file], psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-}
 
 // The owner's monitors in physical pixels, and where things were: the ribbon button on the monitor above the primary,
 // the hidden web view's link far below every monitor.

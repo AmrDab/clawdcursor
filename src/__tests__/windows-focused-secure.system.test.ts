@@ -3,7 +3,8 @@
  * field's value. The type tool's "into a password field (not echoed)" relied on it, and it was missing on Windows only
  * (macOS and Linux already set it): the secret was echoed, and Edge's bullets read as a mismatch that held Return.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { FAKE_UIA, runPsJson } from './helpers/ps-bridge-harness';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -21,4 +22,30 @@ describe('ps-bridge get-focused-element: password fields', () => {
     if (!reply || reply.success === false) ctx.skip('nothing focused (headless runner)');
     expect(typeof reply.secure).toBe('boolean');
   }, 60_000);   // starting the real PowerShell bridge (UIA assemblies) is slow under a full parallel run
+});
+
+// The same command against a fake focused element (the harness rewrites AutomationElement.FocusedElement): a password
+// box is reported secure and its value is never read, through either pattern.
+describe.runIf(process.platform === 'win32')('ps-bridge get-focused-element (run for real, a fake focused element)', () => {
+  let out: Array<Record<string, unknown>>;
+  beforeAll(() => {
+    const focus = (el: string) => `$script:FakeFocused = ${el}\nConvertTo-Json -InputObject (Cmd-GetFocusedElement) -Compress -Depth 5`;
+    out = runPsJson(['Cmd-GetFocusedElement'], `${FAKE_UIA}\nfunction Add-StateFields { }`, [
+      focus(`New-FakeEl -Name 'Password' -Password -Patterns @{ Value = (New-ValuePattern 'hunter2'); Text = (New-TextPattern 'hunter2') }`),
+      focus(`New-FakeEl -Name 'Search' -Patterns @{ Value = (New-ValuePattern 'cats') }`),
+      focus(`New-FakeEl -Name 'Name' -Patterns @{ Value = (New-ValuePattern '') }`),
+      focus(`New-FakeEl -Name 'Canvas' -Type Pane`),
+    ]) as Array<Record<string, unknown>>;
+  }, 120_000);
+
+  it('a password field: secure, not readable, and its value appears nowhere in the reply', () => {
+    expect(out[0]).toMatchObject({ success: true, name: 'Password', value: '', readable: false, secure: true });
+    expect(JSON.stringify(out[0])).not.toContain('hunter2');
+  });
+
+  it('an ordinary field: its value, readable, not secure; an empty one is readable ""; no pattern is not readable', () => {
+    expect(out[1]).toMatchObject({ value: 'cats', readable: true, secure: false });
+    expect(out[2]).toMatchObject({ value: '', readable: true, secure: false });
+    expect(out[3]).toMatchObject({ value: '', readable: false, secure: false });
+  });
 });

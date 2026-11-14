@@ -446,22 +446,16 @@ describe('the Windows adapter', () => {
   });
 });
 
+// Get-HostedApp itself is run for real in frame-host.system.test.ts. Its callers read the real desktop's windows.
 describe('the bridge', () => {
   const bridge = fs.readFileSync(path.join(__dirname, '../../scripts/ps-bridge.ps1'), 'utf8');
   const body = (name: string) => { const i = bridge.indexOf(`function ${name}`); return bridge.slice(i, bridge.indexOf('\nfunction ', i + 10)); };
-
-  it('resolves the hosted app in one function: the owner of the frame\'s CoreWindow, its process name and display name', () => {
-    const fn = body('Get-HostedApp');
-    expect(fn).toContain("if ($cls -ne 'ApplicationFrameWindow') { return $null }");
-    expect(fn).toContain('[LaunchWin]::CoreOf($h)');
-    expect(fn).toContain('appName = (Get-AppName ([int]$cp) $n)');
-    expect(bridge.match(/CoreOf\(\$/g)).toHaveLength(1);   // nowhere else
-  });
 
   it('the window list and the foreground read both use it', () => {
     expect(body('Cmd-ListWindows')).toContain('Get-HostedApp $h $cls');
     expect(body('Cmd-ListWindows')).toContain('$w.hostedAppName = $hosted.appName');
     expect(body('Cmd-GetForegroundWindow')).toContain('Get-HostedApp $fgWin $cls');
     expect(body('Cmd-GetForegroundWindow')).toContain('$fg.hostedAppName = $hosted.appName');
+    expect(bridge.match(/CoreOf\(\$/g)).toHaveLength(1);   // the CoreWindow lookup is in Get-HostedApp alone
   });
 });

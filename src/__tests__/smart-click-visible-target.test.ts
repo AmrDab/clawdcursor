@@ -10,8 +10,6 @@
  * runs with a fake bridge reply.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -39,25 +37,6 @@ import { missText, structuredMissFields, targetOf, targetText } from '../core/mi
 import { classifyResult } from '../core/result-codes';
 import type { AgentToolContext } from '../tools/projected/types';
 import type { PlatformAdapter } from '../platform/types';
-
-const root = join(__dirname, '../..');
-const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');
-const fnBody = (name: string) => {
-  const start = bridge.indexOf(`function ${name}`);
-  expect(start, name).toBeGreaterThan(-1);
-  const next = bridge.indexOf('\nfunction ', start + 10);
-  return next === -1 ? bridge.slice(start) : bridge.slice(start, next);
-};
-
-describe('ps-bridge: the by-name action goes through the one choice', () => {
-  it('Cmd-InvokeElement asks Select-InvokeTarget and answers hidden / ambiguous with a reason, never a sentence of screen text', () => {
-    const inv = fnBody('Cmd-InvokeElement');
-    expect(inv).toMatch(/Select-InvokeTarget \$hits \(Get-MonitorRects\)/);
-    expect(inv).toMatch(/reason="hidden"/);
-    expect(inv).toMatch(/reason="ambiguous"; candidates=/);
-    expect(fnBody('Get-MonitorRects')).toContain('[ScreenPM]::Monitors()');
-  });
-});
 
 const CANDIDATES = [
   { name: 'New', controlType: 'ControlType.MenuItem', bounds: { x: 2800, y: -1070, width: 40, height: 20 } },

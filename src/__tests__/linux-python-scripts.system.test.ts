@@ -330,6 +330,7 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('the tree, the no-name find and invoke all cover the same windows: the active one and its open popups', () => {
     expect(out.scope_names).toEqual(['Save As', 'File', '']); // the GTK3 "window" popup is in, the closed menu and the main window are not
     expect(out.scope_tree).not.toContain('Print');
+    expect(out.scope_find).toEqual([]);                        // find: "Print" is only in the inactive main window
     expect(out.scope_names_none_active).toEqual(['notes.txt - Editor', 'File', 'Edit', '', 'Save As']);
   });
 
@@ -342,6 +343,16 @@ describe.skipIf(PY === null)('scripts/linux python helpers', () => {
   it('a hostile element name never reaches the reply\'s sentences (it used to be interpolated, unquoted)', () => {
     expect(out.hostile_miss.reason).toBe('not_found');
     expect(JSON.stringify(out.hostile_miss)).not.toMatch(/screen is locked|timed out|Invoke failed/);
+  });
+
+  it('on every kind of miss (not found, hidden, ambiguous, no such action) the name stays out of the sentence', () => {
+    expect(out.hostile_misses.map((m: { reason: string }) => m.reason)).toEqual(['not_found', 'hidden', 'ambiguous', 'unsupported']);
+    for (const m of out.hostile_misses) expect(m.error).not.toContain(out.hostile_name.slice(0, 6));
+  });
+
+  it('window titles compare without format characters, case or runs of spaces, the active window\'s title included', () => {
+    expect(out.title_key).toEqual(['microsoft edge', 'ab', 'cc page']);
+    expect(out.by_title_cf).toEqual([4242]);
   });
 
   it('B2 text values come from the Text interface (PyGObject get_text shadowing)', () => {

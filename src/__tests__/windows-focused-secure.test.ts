@@ -2,27 +2,9 @@
  * Windows: the focused element says whether it is a password field (UIA IsPassword) and never carries a password
  * field's value. The type tool's "into a password field (not echoed)" relied on it, and it was missing on Windows only
  * (macOS and Linux already set it): the secret was echoed, and Edge's bullets read as a mismatch that held Return.
+ * The bridge is run for real in windows-focused-secure.system.test.ts; this file is the adapter.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const bridgePath = join(here, '..', '..', 'scripts', 'ps-bridge.ps1');
-const bridge = readFileSync(bridgePath, 'utf8');
-const fn = bridge.slice(bridge.indexOf('function Cmd-GetFocusedElement'), bridge.indexOf('\nfunction ', bridge.indexOf('function Cmd-GetFocusedElement') + 1));
-
-describe('ps-bridge get-focused-element — password fields', () => {
-  it('reads IsPassword, skips reading the value when set, and reports secure', () => {
-    expect(fn).toMatch(/\$isPassword = \[bool\]\$cur\.IsPassword/);
-    expect(fn).toMatch(/if \(-not \$isPassword\) \{[\s\S]*ValuePattern/);
-    expect(fn).toMatch(/secure\s+= \$isPassword/);
-    // #377: whether the value itself was read, so an empty one is an empty field
-    expect(fn).toMatch(/readable\s+= \$readable/);
-  });
-
-});
 
 describe('WindowsAdapter maps secure through', () => {
   it('a password field comes back secure; an ordinary one does not carry the flag', async () => {

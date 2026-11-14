@@ -3,7 +3,8 @@
  *  - `find "Confirm"` also returned elements of an OLD background window the agent never saw (and the user's other windows);
  *  - `invoke "More options"` (a <details> summary: Button + ExpandCollapsePattern) answered "TogglePattern not supported";
  *  - `window focus` with the title as typed missed the live title, which has a zero-width space inside "Microsoft Edge".
- * The bridge itself needs a desktop; these tests read it, run its pure parts, and drive the TS layer with fakes.
+ * The Windows bridge is run for real in window-scope-invoke.system.test.ts; this file drives the TS layer with fakes,
+ * runs the JXA in a vm, and reads the parts of ax-helper that only run against a live AX tree.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'fs';
@@ -26,36 +27,10 @@ import { missText, untrusted, structuredMissFields } from '../core/miss-text';
 import { buildUnifiedTools } from '../tools/projected/tools';
 
 const root = join(__dirname, '../..');
-const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');
-const fnBody = (src: string, name: string) => {
-  const start = src.indexOf(`function ${name}`);
-  expect(start, name).toBeGreaterThan(-1);
-  const next = src.indexOf('\nfunction ', start + 10);
-  return next === -1 ? src.slice(start) : src.slice(start, next);
-};
 const ZWSP = String.fromCharCode(0x200b);
 const EDGE_TITLE = `CC Test Page - [InPrivate] - Microsoft${ZWSP} Edge`;
 
-describe('ps-bridge: which functions use the scope helper', () => {
-  it('find and invoke call Get-ProcessScopeWindows; invoke no longer takes the first window of the pid', () => {
-    expect(fnBody(bridge, 'Cmd-FindElement')).toMatch(/@\(Get-ProcessScopeWindows \$wpid\)/);
-    const inv = fnBody(bridge, 'Cmd-InvokeElement');
-    expect(inv).toMatch(/@\(Get-ProcessScopeWindows \$wpid\)/);
-    expect(inv).not.toMatch(/FindFirst\(\[System\.Windows\.Automation\.TreeScope\]::Children/);
-  });
-});
-
 describe('invoke activates an expandable element and reports why a miss is a miss', () => {
-  it('the click cascade ends in ExpandCollapsePattern and says which way it flipped', () => {
-    const inv = fnBody(bridge, 'Cmd-InvokeElement');
-    const click = inv.slice(inv.indexOf('"click" {'), inv.indexOf('"set-value" {'));
-    expect(click).toMatch(/ExpandCollapsePattern\]::Pattern/);
-    expect(click).toMatch(/\$was = \$p\.Current\.ExpandCollapseState/);
-    expect(click).toMatch(/method="ExpandCollapsePattern"; data=@\{ expandState=\$now/);
-    // a tree item is selected, not expanded: SelectionItem is tried first
-    expect(click.indexOf('SelectionItemPattern')).toBeLessThan(click.indexOf('ExpandCollapsePattern'));
-  });
-
   const nothing = { success: false, data: { error: 'No invoke/toggle/select/expand pattern' }, bounds: { x: 1, y: 2, width: 3, height: 4 } };
   it('a miss reports the click cascade\'s reason, not the last rung\'s ("TogglePattern not supported")', async () => {
     const call = vi.fn(async (a: string) => a === 'click' ? nothing
@@ -84,13 +59,6 @@ describe('invoke: bounds survive the ladder, and the expand reports the state it
     expect(res.bounds).toEqual(bounds);
   });
 
-  it('the expand rung is bounded and read back like toggle', () => {
-    const inv = fnBody(bridge, 'Cmd-InvokeElement');
-    expect(inv).toMatch(/\[UiaInvoker\]::Expand\(\$p, 1200\)/);
-    expect(inv).toMatch(/\[UiaInvoker\]::Collapse\(\$p, 1200\)/);
-    expect(inv).toMatch(/expandState=\$now; was=\$was; expandChanged=/);
-    expect(bridge).toMatch(/public static string Expand\(ExpandCollapsePattern p, int waitMs\)/);
-  });
 });
 
 describe('a miss says the search covered the front window only', () => {
@@ -104,10 +72,9 @@ describe('a miss says the search covered the front window only', () => {
     const note = await narrowedScopeNote({ listWindows: async () => [win(7, 'A')] }, [{ processId: 7, title: 'A' }]);
     expect(note).toBe(' — pass processId to target another app');
   });
-  it('the bridges put it on their own invoke misses', () => {
-    expect(bridge).toMatch(/reason="not_found"; otherWindows=\(Get-ScopeOtherWindows/);
+  // Run for real: ps-bridge in window-scope-invoke.system.test.ts, atspi-bridge in linux-python-scripts (miss_note).
+  it('ax-helper puts it on its own invoke misses', () => {
     expect(readFileSync(join(root, 'scripts/mac/ax-helper.swift'), 'utf8')).toMatch(/reason: "not_found", extra: \["otherWindows": otherWindowCount\(app, searched: toSearch\)\]/);
-    expect(readFileSync(join(root, 'scripts/linux/atspi-bridge.py'), 'utf8')).toMatch(/"reason": "not_found", "error": "element not found",\n\s+"otherWindows": other_windows_count/);
   });
 });
 
@@ -154,19 +121,11 @@ describe('window titles are compared without invisible characters', () => {
     expect(r.ok).toBe(true);
   });
 
-  it('the bridge compares titles through ConvertTo-TitleKey on both sides (focus-window)', () => {
-    const focus = fnBody(bridge, 'Cmd-FocusWindow');
-    expect(focus).not.toMatch(/\.ToLower\(\)/);
-    expect(focus.match(/ConvertTo-TitleKey/g)?.length).toBe(4);
-  });
-
-  it('the macOS and Linux bridges normalize both sides of a title match too', () => {
+  // ps-bridge: windows-focus-window.system.test.ts; atspi-bridge: linux-python-scripts (title_key, by_title_cf).
+  it('ax-helper normalizes both sides of a title match too', () => {
     const swift = readFileSync(join(root, 'scripts/mac/ax-helper.swift'), 'utf8');
     expect(swift).toMatch(/generalCategory != \.format/);
     expect(swift).toMatch(/titleKey\(title\)\.contains\(needle\)/);
-    const py = readFileSync(join(root, 'scripts/linux/atspi-bridge.py'), 'utf8');
-    expect(py).toMatch(/unicodedata\.category\(c\) != 'Cf'/);
-    expect(py).toMatch(/title_key\(safe\(lambda top=top: top\.get_name\(\), ''\)\) == title_key\(window_title\)/);
   });
 });
 
@@ -223,9 +182,8 @@ describe('page-controlled text never decides a result code', () => {
     }
   });
 
-  it('the bridges\' replies carry no name, title or exception text in their sentences', () => {
-    expect(readFileSync(join(root, 'scripts/linux/atspi-bridge.py'), 'utf8')).not.toMatch(/"error": f"[^"]*\{(?:name|role|name or role)\}/);
-    expect(bridge).toMatch(/reason="invoke_threw"|\$why2 = if \(\$disabled\)/);
+  // ps-bridge and atspi-bridge are run with hostile names (window-scope-invoke.system, linux-python-scripts hostile_*).
+  it('ax-helper\'s replies carry no name in their sentences', () => {
     expect(readFileSync(join(root, 'scripts/mac/ax-helper.swift'), 'utf8')).not.toMatch(/"Element not found: \\\(what/);
   });
 
@@ -272,10 +230,6 @@ describe('every echoed name and bridge string is quoted or untrusted', () => {
     expect(`${hidden?.hint}${failed?.hint}`).not.toMatch(/name may differ/);
   });
 
-  it('the scope helper\'s comment sits above its function', () => {
-    const i = bridge.indexOf('function Get-ScopeWindowHandle');
-    expect(bridge.slice(Math.max(0, i - 1500), i)).toMatch(/The window a find \/ invoke searches in a process[\s\S]*The three seams below are what a test replaces\.\n$/);
-  });
 });
 
 describe('invoke: expand state, disabled elements, no second click after a throw', () => {
@@ -337,17 +291,5 @@ describe('macOS and Linux find/invoke search only the key / active window', () =
     // the shared copy stays identical
     const picker = readFileSync(join(root, 'scripts/mac/_window-picker.jxa'), 'utf8');
     expect(picker).toContain(grab('titleKey'));
-  });
-
-  it('atspi-bridge find, the tree read and find_target all go through scope_toplevels', () => {
-    const py = readFileSync(join(root, 'scripts/linux/atspi-bridge.py'), 'utf8');
-    const tree = py.slice(py.indexOf('def cmd_get_tree'), py.indexOf('def cmd_find'));
-    expect(tree).toMatch(/scope_toplevels\(app\)/);
-    expect(tree).not.toMatch(/toplevels_active_first/);
-    const find = py.slice(py.indexOf('def cmd_find'), py.indexOf('def cmd_focused'));
-    expect(find).toMatch(/scope_toplevels\(app\)/);
-    expect(find).not.toMatch(/toplevels_active_first/);
-    const target = py.slice(py.indexOf('def find_target'), py.indexOf('def do_named_action'));
-    expect(target).toMatch(/scope_toplevels\(app\)/);
   });
 });

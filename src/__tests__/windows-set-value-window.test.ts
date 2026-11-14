@@ -2,11 +2,10 @@
  * Review of 1.5.27: the Windows set-value keyboard fallback compared the foreground window's PROCESS with the target's.
  * Two windows of one process (Explorer, Notepad, Edge) share a pid, so with the target in the background one, Ctrl+A and
  * the text went to the front window. It must compare the target's TOP-LEVEL window with the foreground window.
- * A keyboard set whose read-back is null is also unverified, not a success.
+ * A keyboard set whose read-back is null is also unverified, not a success. The bridge side is run for real in
+ * windows-set-value-window.system.test.ts; this file is the adapter and the tool.
  */
 import { describe, it, expect, vi } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {}, move: vi.fn(), click: vi.fn(), setPosition: vi.fn() },
@@ -25,38 +24,6 @@ vi.mock('../platform/ps-runner', () => ({
 
 import { WindowsAdapter } from '../platform/windows';
 import { buildUnifiedTools } from '../tools/projected/tools';
-
-const bridge = fs.readFileSync(path.join(__dirname, '../../scripts/ps-bridge.ps1'), 'utf8');
-const start = bridge.indexOf('# 2) Keyboard fallback');
-const fallback = bridge.slice(start, bridge.indexOf('"get-value" {', start));
-
-describe('ps-bridge set-value keyboard fallback', () => {
-  it('compares the target\'s top-level window with the foreground window, not their processes', () => {
-    expect(fallback).not.toMatch(/GetWindowThreadProcessId/);
-    expect(fallback).not.toMatch(/Current\.ProcessId/);
-    expect(fallback).toMatch(/ControlViewWalker/);
-    // An owned window (Save As) is a UIA child of its owner: no walk to the desktop root, which would end at the owner.
-    expect(fallback).not.toMatch(/Automation\]::Compare|RootElement/);
-    expect(fallback).toMatch(/\$hwnd = \[int64\]\$up\.Current\.NativeWindowHandle\s*\n\s*if \(\$hwnd -ne 0\) \{ break \}/);  // nearest handled ancestor
-    expect(fallback).toMatch(/GetAncestor\(\[IntPtr\]\$hwnd, 2\)/);                                          // GA_ROOT of the target's side
-    expect(fallback).toMatch(/GetAncestor\(\[Win32UIA\]::GetForegroundWindow\(\), 2\)/);                      // and of the foreground's
-  });
-
-  it('fails without a refusal (the caller\'s click-and-type then runs) when the top-level window cannot be resolved or is not in front', () => {
-    expect(fallback).toMatch(/\$topHwnd -eq 0 -or \$fgRoot -ne \$topHwnd/);
-    // the check comes before any key is sent
-    expect(fallback.indexOf('$fgRoot -ne $topHwnd')).toBeLessThan(fallback.indexOf('SendWait("^a")'));
-    // a plain failure, not a refusal, so set_value falls back to click-then-type
-    const refusal = fallback.slice(fallback.indexOf('$topHwnd -eq 0'), fallback.indexOf('SendWait('));
-    expect(refusal).toMatch(/success=\$false/);
-    expect(refusal).not.toMatch(/refused/);
-  });
-
-  it('a null read-back after typing is reported unverified, not as a plain success', () => {
-    expect(fallback).not.toMatch(/-eq \$value -or \$null -eq \$after/);
-    expect(fallback).toMatch(/if \(\$null -eq \$after\) \{ return @\{ success=\$true; unverified=\$true;/);
-  });
-});
 
 describe('an unverified keyboard set-value reaches the agent as such', () => {
   it('the adapter passes the bridge\'s unverified flag in data', async () => {

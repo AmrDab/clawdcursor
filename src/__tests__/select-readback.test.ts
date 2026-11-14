@@ -53,25 +53,15 @@ describe('select on an item: the result is what the item reads afterwards', () =
     });
 });
 
+// The Linux read-back is run by the atspi-bridge driver (linux-python-scripts: select.selected).
 describe('each bridge reads the item back after a select', () => {
   const script = (...p: string[]) => fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', ...p), 'utf8');
 
-  it('Windows: IsSelected after Select(), and a WinForms list box is told (LBN_SELCHANGE) as a user pick tells it', () => {
+  // Windows: the read-back and the LBN_SELCHANGE notice are run for real in select-readback.system.test.ts (fake list
+  // boxes). What a run cannot show: that no other path selects or asks Win32 GetParent (it answers a popup's OWNER).
+  it('Windows: one Select() in the bridge, through Select-Item; Win32 GetParent is never used', () => {
     const ps = script('ps-bridge.ps1');
-    const fn = ps.slice(ps.indexOf('function Select-Item'), ps.indexOf('# ── Command: invoke-element'));
-    expect(fn).toMatch(/\$p\.Select\(\)[\s\S]*IsSelected[\s\S]*SendMessageTimeout\(\$dad, 0x0111/);
-    // Only a WinForms list box: UIA's proxy for a plain Win32 "ListBox" (and a combo box) notifies by itself.
-    const cls = new RegExp(/-match '([^']+)'/.exec(fn)![1]);
-    expect(cls.test('WindowsForms10.LISTBOX.app.0.34f5582_r6_ad1')).toBe(true);
-    for (const other of ['ListBox', 'ComboLBox', 'WindowsForms10.COMBOBOX.app.0.34f5582_r6_ad1', 'TListBox', 'WindowsForms10.SysListView32.app.0']) expect(cls.test(other), other).toBe(false);
-    // Confined: the real parent (never GetParent, which answers with the OWNER of a popup), a child list box that
-    // notifies (LBS_NOTIFY), parent and list box in one process.
     expect(ps).not.toMatch(/GetParent\(IntPtr|::GetParent\(/);
-    expect(fn).toMatch(/\$dad = \[Win32UIA\]::GetAncestor\(\$h, 1\)/);
-    expect(fn).toMatch(/if \(\$isChild -and \$notifies -and \$listPid -ne 0 -and \$listPid -eq \$dadPid\) \{[\s\S]*SendMessageTimeout/);
-    expect(fn.match(/SendMessageTimeout/g)).toHaveLength(1);
-    expect(ps).toMatch(/"select" \{\s*try \{\s*\$selected = Select-Item \$element[\s\S]{0,300}selected = \$selected/);
-    // No other path selects without it.
     expect(ps.match(/\.Select\(\)/g)).toHaveLength(1);
   });
 
@@ -89,12 +79,6 @@ describe('each bridge reads the item back after a select', () => {
     expect(body('selectRow').match(/press\(/g)).toHaveLength(1);
     // selectRow keeps its own doc comment.
     expect(swift).toMatch(/\/\/\/ Select the row and check that it took[^\n]*\n\/\/\/[^\n]*\n\/\/\/[^\n]*\nfunc selectRow\(/);
-  });
-
-  it('Linux: is_child_selected after select_child', () => {
-    const py = script('linux', 'atspi-bridge.py');
-    const sel = py.slice(py.indexOf("elif action == 'select':"), py.indexOf("elif action in ('expand', 'collapse'):"));
-    expect(sel).toMatch(/select_child\(idx\)[\s\S]*is_child_selected\(idx\)[\s\S]*out\["selected"\]/);
   });
 });
 

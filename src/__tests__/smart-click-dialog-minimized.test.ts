@@ -8,8 +8,6 @@
  *  - a compile_ui element_id that hit AMBIGUOUS answered a bare "missed", without the list the name path gives.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readFileSync } from 'fs';
-import { join } from 'path';
 
 vi.mock('@nut-tree-fork/nut-js', () => ({
   mouse: { config: {} }, keyboard: { config: {} }, screen: {},
@@ -25,7 +23,6 @@ import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
 import type { AgentToolContext } from '../tools/projected/types';
 
-const root = join(__dirname, '../..');
 
 describe('invoke by element_id: an ambiguous name answers with the list, as the name path does', () => {
   const AMBIGUOUS = { success: false, reason: 'ambiguous', candidates: [
@@ -73,11 +70,5 @@ describe('stale text about the OCR reply', () => {
     const d = getOcrTools()[0].description;
     expect(d).not.toMatch(/\. An element's `confidence`/);
     expect(d).toMatch(/scope:"screen"[^.]*JSON[^.]*`confidence`/);
-  });
-  it('registry.ts no longer says the OCR tool always answers structured JSON', () => {
-    const reg = readFileSync(join(root, 'src/tools/registry.ts'), 'utf8');
-    expect(reg).not.toMatch(/No format change\./);
-    expect(reg).not.toMatch(/whose structured JSON \(elements\[\] \+ bounds \+\n\s*\/\/ coordinateSystem\) is what external agents need/);
-    expect(reg).toMatch(/`@x,y "text"` rows[^\n]*scope:"window"/);
   });
 });

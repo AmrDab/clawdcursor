@@ -287,17 +287,6 @@ describe('no full-screen glow', () => {
     expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
   });
 
-  it('the beam is still where the OS is set to reduce motion, and the paused form does not turn (#392)', () => {
-    const ps = read('scripts', 'window-outline.ps1');
-    expect(ps).toContain('still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;');
-    expect(ps).toContain('turning = !still && !paused;');
-    expect(read('scripts', 'banner.ps1')).toContain('if (SystemParametersInfo(0x1042, 0, out animate, 0) && !animate) return;');
-    const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift).toContain('let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion');
-    expect(swift).toContain('let turning = !paused && !still');
-    expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
-  });
-
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);

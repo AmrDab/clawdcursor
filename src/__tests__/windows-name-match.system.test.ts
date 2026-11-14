@@ -4,15 +4,7 @@
  * request (3+ chars and at least half its length); macOS and Linux only ever matched the forward way.
  */
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { psOpts } from '../platform/ps-spawn';
-
-const here = dirname(fileURLToPath(import.meta.url));
-const bridge = readFileSync(join(here, '..', '..', 'scripts', 'ps-bridge.ps1'), 'utf8');
-const fn = bridge.slice(bridge.indexOf('function Test-NameMatch'), bridge.indexOf('function Cmd-FindElement'));
+import { runPs } from './helpers/ps-bridge-harness';
 
 describe('ps-bridge name matching', () => {
   it.runIf(process.platform === 'win32')('the real function: single letters no longer match, real parts still do', () => {
@@ -25,9 +17,8 @@ describe('ps-bridge name matching', () => {
       ['name', 'file name', false],           // too small a part: the Save-as column header
       ['', 'x', false],
     ];
-    const script = `${fn}\n` + cases.map(([el, want]) => `Write-Output (Test-NameMatch '${el}' '${want}')`).join('\n');
-    const out = execFileSync('powershell', ['-NoProfile', '-Command', script], psOpts({ encoding: 'utf8', timeout: 30_000 }))
-      .split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    const out = runPs(['Test-NameMatch'], cases.map(([el, want]) => `Write-Output (Test-NameMatch '${el}' '${want}')`).join('\n'))
+      .map(s => s.trim()).filter(Boolean);
     expect(out).toEqual(cases.map(c => (c[2] ? 'True' : 'False')));
   });
 });

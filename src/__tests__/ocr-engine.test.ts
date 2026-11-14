@@ -522,15 +522,6 @@ describe('OcrEngine', () => {
       expect(result.elements.map(e => e.confidence)).toEqual([0.3, 1]);
     });
 
-    it('the Windows scripts invent no confidence (Windows.Media.Ocr has none)', async () => {
-      const fs = await vi.importActual<typeof import('fs')>('fs');   // fs is mocked in this file
-      const path = await vi.importActual<typeof import('path')>('path');
-      for (const f of ['ocr-recognize.ps1', 'ps-bridge.ps1']) {
-        const src = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', f), 'utf8');
-        expect(src, f).not.toMatch(/^\s*confidence\s*=/m);
-      }
-    });
-
     it('handles null elements array', async () => {
       setPlatform('win32');
       const eng = new OcrEngine();

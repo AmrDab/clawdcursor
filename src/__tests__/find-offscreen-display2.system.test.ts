@@ -25,23 +25,12 @@ vi.mock('../platform/ps-runner', () => ({
   psRunner: { run: (c: { cmd: string }) => Promise.resolve(replies[c.cmd]), start: vi.fn(), stop: vi.fn() },
 }));
 
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
-import { psOpts } from '../platform/ps-spawn';
+import { runPs } from './helpers/ps-bridge-harness';
 
 // The bridge cut find at 20 matches in TREE order, before anything put the visible ones first: a hidden web view with
 // more than 20 matches came first in the tree and the one element on screen was never returned.
 describe.runIf(process.platform === 'win32')('ps-bridge find-element (run for real, fake window): the cut comes after "on screen first"', () => {
-  const bridge = readFileSync(join(__dirname, '../../scripts/ps-bridge.ps1'), 'utf8');
-  const fnBody = (name: string) => {
-    const start = bridge.indexOf(`function ${name}`);
-    expect(start, name).toBeGreaterThan(-1);
-    return bridge.slice(start, bridge.indexOf('\nfunction ', start + 10));
-  };
-  const run = (body: string) => execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
-    `Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase\n${['Test-NameMatch', 'Test-RectOnMonitor', 'Get-ShownValue', 'Cmd-FindElement'].map(fnBody).join('\n')}\n${body}`],
-  psOpts({ encoding: 'utf8' })).trim().split(/\r?\n/);
+  const run = (body: string) => runPs(['Test-NameMatch', 'Test-RectOnMonitor', 'Get-ShownValue', 'Cmd-FindElement'], body);
   const FAKES = `
 function Get-ProcessScopeWindows { param($wpid) return $script:window }
 function Get-MonitorRects { return ,@(@{ x = 0; y = 0; width = 3840; height = 2400 }, @{ x = 2796; y = -1080; width = 1920; height = 1080 }) }
