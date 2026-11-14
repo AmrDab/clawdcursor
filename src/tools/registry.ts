@@ -25,130 +25,33 @@ import { fenceTools } from '../core/fence';
 import { buildUnifiedTools } from './projected/tools';
 import { projectToToolDefinition } from './projected/project-mcp';
 
-// ─── Window management ───────────────────────────────────────────────────────
+/**
+ * The tools built in projected/tools.ts that the MCP surface carries, in groups. The group order is their order in
+ * tools/list (the schema snapshot pins it); inside a group they keep buildUnifiedTools() order.
+ *
+ * Mouse: click / drag / scroll take image-space coords (the latest screenshot's) when `space` is omitted, and
+ * mouse_move_relative scales dx/dy from image space: the tools do it themselves (projected/tools.ts).
+ * No OCR tool is projected. The MCP surface's OCR is `ocr_read_screen` (ocr.ts): JSON (elements[] + bounds +
+ * coordinateSystem) for scope:"screen", `@x,y "text"` rows with the centre of each text for scope:"window".
+ */
+const PROJECTED_GROUPS: readonly (readonly string[])[] = [
+  // window
+  ['list_windows', 'focus_window', 'maximize_window', 'minimize_window', 'restore_window', 'close_window', 'resize_window', 'list_displays'],
+  // keyboard
+  ['type', 'key', 'key_down', 'key_up', 'undo_last'],
+  // mouse
+  ['click', 'drag', 'scroll', 'mouse_move_relative', 'mouse_down', 'mouse_up'],
+  // accessibility / perception
+  ['read_screen', 'invoke_element', 'set_field_value', 'focus_element', 'a11y_get_value', 'a11y_expand', 'a11y_collapse',
+    'a11y_toggle', 'a11y_select', 'get_element_state', 'wait_for_element', 'verify', 'compile_ui', 'find_action_button',
+    'find_input_field'],
+  // CDP / browser
+  ['browser_connect', 'browser_read', 'browser_click', 'browser_type'],
+];
 
-/** Names (in buildUnifiedTools()) of the window tools projected onto the MCP surface. */
-const WINDOW_SYSB_NAMES = new Set([
-  'list_windows',
-  'focus_window',
-  'maximize_window',
-  'minimize_window',
-  'restore_window',
-  'close_window',
-  'resize_window',
-  'list_displays',
-]);
-
-let _projectedWindowCache: ToolDefinition[] | null = null;
-function projectedWindowTools(): ToolDefinition[] {
-  if (_projectedWindowCache === null) {
-    const sysBTools = buildUnifiedTools();
-    _projectedWindowCache = sysBTools
-      .filter(t => WINDOW_SYSB_NAMES.has(t.name))
-      .map(t => projectToToolDefinition(t));
-  }
-  return _projectedWindowCache;
-}
-
-// ─── Mouse ───────────────────────────────────────────────────────────────────
-//
-// click / drag / scroll take image-space coords (the latest screenshot's) when `space` is omitted, and
-// mouse_move_relative scales dx/dy from image space: the tools do it themselves (projected/tools.ts).
-
-/** Names (in buildUnifiedTools()) of the mouse tools projected onto the MCP surface. */
-const MOUSE_SYSB_NAMES = new Set([
-  'click',
-  'drag',
-  'scroll',
-  'mouse_move_relative',
-  'mouse_down',
-  'mouse_up',
-]);
-
-let _projectedMouseCache: ToolDefinition[] | null = null;
-function projectedMouseTools(): ToolDefinition[] {
-  if (_projectedMouseCache !== null) return _projectedMouseCache;
-
-  const sysBTools = buildUnifiedTools();
-  _projectedMouseCache = sysBTools
-    .filter(t => MOUSE_SYSB_NAMES.has(t.name))
-    .map(t => projectToToolDefinition(t));
-
-  return _projectedMouseCache;
-}
-
-// ─── Accessibility / perception ──────────────────────────────────────────────
-
-/** Names (in buildUnifiedTools()) of the a11y / perception tools projected onto the MCP surface. */
-const A11Y_SYSB_NAMES = new Set([
-  'read_screen',
-  'invoke_element',
-  'set_field_value',
-  'focus_element',
-  'a11y_get_value',
-  'a11y_expand',
-  'a11y_collapse',
-  'a11y_toggle',
-  'a11y_select',
-  'get_element_state',
-  'wait_for_element',
-  'verify',
-  'compile_ui',
-  'find_action_button',
-  'find_input_field',
-  // NOTE: no OCR tool is projected. The MCP surface's OCR is `ocr_read_screen` (ocr.ts): JSON (elements[] + bounds +
-  // coordinateSystem) for scope:"screen", `@x,y "text"` rows with the centre of each text for scope:"window".
-]);
-
-let _projectedA11yCache: ToolDefinition[] | null = null;
-function projectedA11yTools(): ToolDefinition[] {
-  if (_projectedA11yCache !== null) return _projectedA11yCache;
-
-  const sysBTools = buildUnifiedTools();
-  _projectedA11yCache = sysBTools
-    .filter(t => A11Y_SYSB_NAMES.has(t.name))
-    .map(t => projectToToolDefinition(t));
-
-  return _projectedA11yCache;
-}
-
-// ─── CDP / browser ───────────────────────────────────────────────────────────
-
-/** Names (in buildUnifiedTools()) of the CDP / browser tools projected onto the MCP surface. */
-const BROWSER_SYSB_NAMES = new Set([
-  'browser_connect',
-  'browser_read',
-  'browser_click',
-  'browser_type',
-]);
-
-let _projectedBrowserCache: ToolDefinition[] | null = null;
-function projectedBrowserTools(): ToolDefinition[] {
-  if (_projectedBrowserCache !== null) return _projectedBrowserCache;
-
-  const sysBTools = buildUnifiedTools();
-  _projectedBrowserCache = sysBTools
-    .filter(t => BROWSER_SYSB_NAMES.has(t.name))
-    .map(t => projectToToolDefinition(t));
-
-  return _projectedBrowserCache;
-}
-
-// ─── Keyboard ────────────────────────────────────────────────────────────────
-
-/** Names (in buildUnifiedTools()) of the keyboard tools projected onto the MCP surface. */
-const KEYBOARD_SYSB_NAMES = new Set(['type', 'key', 'key_down', 'key_up', 'undo_last']);
-
-let _projectedKeyboardCache: ToolDefinition[] | null = null;
-function projectedKeyboardTools(): ToolDefinition[] {
-  if (_projectedKeyboardCache !== null) return _projectedKeyboardCache;
-
-  const sysBTools = buildUnifiedTools();
-  _projectedKeyboardCache = sysBTools
-    .filter(t => KEYBOARD_SYSB_NAMES.has(t.name))
-    .map(t => projectToToolDefinition(t));
-
-  return _projectedKeyboardCache;
+function projectedTools(): ToolDefinition[] {
+  const unified = buildUnifiedTools();
+  return PROJECTED_GROUPS.flatMap(group => unified.filter(t => group.includes(t.name)).map(t => projectToToolDefinition(t)));
 }
 
 export type { ToolDefinition, ToolContext, ToolResult };
@@ -161,7 +64,7 @@ export { getCompactTools };
 let _granularCache: ToolDefinition[] | null = null;
 function granularTools(): ToolDefinition[] {
   if (_granularCache === null) {
-    const systemATools = [
+    const handWritten = [
       ...getDesktopTools(),
       ...getA11yTools(),
       ...getCdpTools(),
@@ -179,12 +82,8 @@ function granularTools(): ToolDefinition[] {
     // The fence (CLAWD_FENCE_PIDS, core/fence.ts): with it set, every handler is gated here, once. The MCP surface, the
     // compound tools and the steps of a batch all run these handlers. Unset, the list is returned as it is.
     _granularCache = fenceTools([
-      ...systemATools,
-      ...projectedWindowTools(),
-      ...projectedKeyboardTools(),
-      ...projectedMouseTools(),
-      ...projectedA11yTools(),
-      ...projectedBrowserTools(),
+      ...handWritten,
+      ...projectedTools(),
     ]);
   }
   return _granularCache;
@@ -192,7 +91,6 @@ function granularTools(): ToolDefinition[] {
 
 /** Forget the built tool lists, so the next call builds them again (the schema snapshot builds them once per OS). */
 export function resetToolCaches(): void {
-  _projectedWindowCache = _projectedMouseCache = _projectedA11yCache = _projectedBrowserCache = _projectedKeyboardCache = null;
   _granularCache = null;
 }
 
