@@ -35,6 +35,7 @@ const stubContext = (): ToolContext => ({
 /** What `initialize` and `tools/list` return for one surface on one OS (serverInfo.version and the protocol version left out). */
 async function captureOnce(compact: boolean, os: Os): Promise<Record<string, unknown>> {
   const { createMcpServer } = await import('../surface/mcp-server');
+  const { resetToolCaches } = await import('../tools/registry');
   const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js' as string) as {
     InMemoryTransport: { createLinkedPair(): [LinkedTransport, LinkedTransport] };
   };
@@ -45,6 +46,7 @@ async function captureOnce(compact: boolean, os: Os): Promise<Record<string, unk
   Object.defineProperty(process, 'platform', { ...platform, value: os });
   process.env.CLAWDCURSOR_SESSION_LOG = '0';  // no session file for a server nobody calls
   try {
+    resetToolCaches();   // the tool lists are built on this OS, not reused from the OS captured before it
     const { server } = await createMcpServer({ compact, ctx: stubContext() });
     const [serverSide, clientSide] = InMemoryTransport.createLinkedPair();
     await server.connect(serverSide as never);
@@ -69,24 +71,32 @@ async function captureOnce(compact: boolean, os: Os): Promise<Record<string, unk
     delete result.protocolVersion;
     return result;
   } finally {
+    resetToolCaches();
     Object.defineProperty(process, 'platform', platform);
     if (sessionLogEnv === undefined) delete process.env.CLAWDCURSOR_SESSION_LOG;
     else process.env.CLAWDCURSOR_SESSION_LOG = sessionLogEnv;
   }
 }
 
-/** One surface on every OS: fields equal on all of them once, the rest under perOs. */
-async function captureSurface(compact: boolean): Promise<Record<string, unknown>> {
-  const byOs = {} as Record<Os, Record<string, unknown>>;
-  for (const os of OSES) byOs[os] = await captureOnce(compact, os);
+/**
+ * One surface's captures merged: a field equal on every OS once, the rest under perOs. The fields are those of all three
+ * OSes, so one that only some OS returns is kept (under perOs, absent on the others).
+ */
+export function mergeByOs(byOs: Record<Os, Record<string, unknown>>): Record<string, unknown> {
   const shared: Record<string, unknown> = {};
   const perOs: Record<string, Record<Os, unknown>> = {};
-  for (const key of Object.keys(byOs.win32)) {
+  for (const key of new Set([...Object.keys(byOs.win32), ...OSES.flatMap(os => Object.keys(byOs[os]))])) {
     const values = OSES.map(os => JSON.stringify(byOs[os][key]));
     if (values.every(v => v === values[0])) shared[key] = byOs.win32[key];
     else perOs[key] = Object.fromEntries(OSES.map(os => [os, byOs[os][key]])) as Record<Os, unknown>;
   }
   return { ...shared, perOs };
+}
+
+async function captureSurface(compact: boolean): Promise<Record<string, unknown>> {
+  const byOs = {} as Record<Os, Record<string, unknown>>;
+  for (const os of OSES) byOs[os] = await captureOnce(compact, os);
+  return mergeByOs(byOs);
 }
 
 /** Serialized snapshot string — deterministic across runs and across the OS it runs on. */

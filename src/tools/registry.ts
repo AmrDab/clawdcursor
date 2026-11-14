@@ -558,6 +558,12 @@ function granularTools(): ToolDefinition[] {
   return _granularCache;
 }
 
+/** Forget the built tool lists, so the next call builds them again (the schema snapshot builds them once per OS). */
+export function resetToolCaches(): void {
+  _projectedWindowCache = _projectedMouseCache = _projectedA11yCache = _projectedBrowserCache = _projectedKeyboardCache = null;
+  _granularCache = null;
+}
+
 export function getTools(options?: GetToolsOptions): ToolDefinition[] {
   const palette = options?.palette ?? 'granular';
 
