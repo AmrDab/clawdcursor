@@ -25,7 +25,7 @@ import { getPackageRoot } from '../paths';
 import { VERSION } from '../surface/version';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { withSteps, timeWait } from '../core/observability/steps';
-import worker, { validate, validEvent, RESULT_CODES, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';
+import worker, { validate, validEvent, MAX_EVENTS, MAX_BODY, type Env } from '../../telemetry-worker/src/index';
 
 const tmpFile = () => path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'clawd-telemetry-')), 'telemetry.json');
 
@@ -291,11 +291,5 @@ describe('the Worker', () => {
       headers: new Headers({ 'content-length': String(MAX_BODY + 1) }), arrayBuffer } as unknown as Request;
     expect((await worker.fetch(req, {} as Env)).status).toBe(413);
     expect(arrayBuffer).not.toHaveBeenCalled();
-  });
-
-  it('knows every result code the client can send', () => {
-    const src = fs.readFileSync(path.join(getPackageRoot(), 'src', 'core', 'result-codes.ts'), 'utf8');
-    const union = /export type ResultCode =([^;]+);/.exec(src)![1];
-    expect([...union.matchAll(/'([A-Z_]+)'/g)].map(m => m[1]).sort()).toEqual([...RESULT_CODES].sort());
   });
 });

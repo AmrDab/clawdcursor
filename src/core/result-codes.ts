@@ -13,13 +13,12 @@
 
 import { fenceActive } from './fence';
 import { defuseScreenDelimiters } from './untrusted-screen-content';
+import type { ResultCode } from './result-code-list';
+
+export type { ResultCode };
 
 export type ResultOutcome = 'confirmed' | 'unverified' | 'refused' | 'failed';
 
-export type ResultCode =
-  | 'CONSENT_REQUIRED' | 'KEYBOARD_OWNED' | 'SECURE_INPUT' | 'SCREEN_LOCKED' | 'CAPTURE_DENIED' | 'VISION_DISABLED' | 'OWN_UI' | 'PAUSED' | 'NOT_CONFIRMED' | 'DANGEROUS_KEY'
-  | 'STOPPED' | 'FOREGROUND_CHANGED' | 'FENCED' | 'CROSS_ORIGIN_FRAME'
-  | 'INVALID_ARGS' | 'READBACK_MISMATCH' | 'REPEATED' | 'STALE_SCREENSHOT' | 'DEVIATION' | 'STALE_REF' | 'TIMEOUT' | 'NOT_FOUND' | 'UNSUPPORTED_ACTION' | 'ELEMENT_HIDDEN' | 'AMBIGUOUS' | 'ACTION_FAILED' | 'NOT_CONNECTED' | 'UNKNOWN';
 
 /** Tool names as the caller sees them: the compact MCP surface. */
 export type Surface = 'mcp';
