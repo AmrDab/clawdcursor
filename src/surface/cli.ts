@@ -109,11 +109,11 @@ import { e } from './format';
 // The richer JSON lockfile records process start time, which lets the
 // liveness check distinguish a real live duplicate from a recycled PID
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
-import { claimPidFile, releasePidFile, isProcessAlive, pidFilePath, readPidLoose, recordLockPort, daemonPortForClient } from './pidfile';
+import { claimPidFile, releasePidFile, isProcessAlive, recordLockPort, daemonPortForClient, stopLockHolder } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { endAllSessions } from './session-log';
 import { spoolBeforeExit, setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
-import { privateRunDir, system32Exe } from '../platform/ps-spawn';
+import { privateRunDir } from '../platform/ps-spawn';
 
 const program = new Command();
 
@@ -131,92 +131,6 @@ async function isClawdInstance(port: number): Promise<boolean> {
     const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
     const data = await res.json() as any;
     return data.status === 'ok' && typeof data.version === 'string';
-  } catch {
-    return false;
-  }
-}
-
-async function forceKillPort(port: number): Promise<boolean> {
-  const { execSync, execFileSync } = await import('child_process');
-  const os = await import('os');
-
-  // #114: only ever kill processes that are plausibly OURS. The port is
-  // configurable and ports get reused — blindly SIGKILLing whatever listens on
-  // it can take down an unrelated app (dev server, another tool). clawdcursor
-  // always runs under node, so a listener with any other image name is not
-  // ours: skip it, tell the user, and let them resolve the conflict.
-  const OURS = /node|clawdcursor/i;
-
-  if (os.platform() === 'win32') {
-    try {
-      // No shell (it would search the working directory and parse the command line): netstat by absolute path, filtered here.
-      const output = execFileSync(system32Exe('netstat.exe'), ['-ano'], { encoding: 'utf-8' })
-        .split(/\r?\n/).filter(l => l.includes(`:${port}`) && l.includes('LISTENING')).join('\n');
-      const pids = new Set(
-        output.trim().split('\n')
-          .map(line => line.trim().split(/\s+/).pop())
-          .filter((pid): pid is string => !!pid && /^\d+$/.test(pid))
-      );
-
-      if (pids.size === 0) return false;
-      let killedAny = false;
-      for (const pid of pids) {
-        let image = '';
-        try {
-          const row = execFileSync(system32Exe('tasklist.exe'), ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf-8' });
-          image = (row.split(',')[0] ?? '').replace(/"/g, '').trim();
-        } catch { /* tasklist unavailable — treat as unknown */ }
-        if (image && !OURS.test(image)) {
-          console.warn(`${e('⚠️', '[WARN]')} Port ${port} is held by "${image}" (pid ${pid}) — not a clawdcursor process; refusing to kill it. Free the port or change server.port.`);
-          continue;
-        }
-        execFileSync(system32Exe('taskkill.exe'), ['/F', '/PID', String(pid)]);
-        console.log(`${e('🐾', '>')} Killed process ${pid}${image ? ` (${image})` : ''}`);
-        killedAny = true;
-      }
-      return killedAny;
-    } catch {
-      return false;
-    }
-  }
-
-  // Non-Windows: enumerate PIDs explicitly before killing, mirroring the
-  // Windows branch above. Running `kill -9 $(lsof -ti tcp:N)` with an empty
-  // substitution sends SIGKILL with no target argument — behavior is
-  // distro-dependent and can erroneously kill the current process on some
-  // systems. Instead: capture lsof output, parse PIDs in JS, and only kill
-  // when we have at least one confirmed PID.
-  try {
-    // macOS / Linux only: lsof and ps run through /bin/sh, which has no current-directory lookup for them (CWE-427 is the Windows
-    // rule); `port` and `pid` are numbers.
-    const lsofOut = execSync(`lsof -ti tcp:${port}`, { encoding: 'utf-8', shell: '/bin/sh' });
-    const pids = lsofOut.trim().split(/\s+/)
-      .map(s => parseInt(s, 10))
-      .filter(n => Number.isInteger(n) && n > 0);
-
-    if (pids.length === 0) return false;
-    let killedAny = false;
-    for (const pid of pids) {
-      let image = '';
-      try {
-        image = execSync(`ps -p ${pid} -o comm=`, { encoding: 'utf-8', shell: '/bin/sh' }).trim();
-      } catch { /* ps unavailable / pid gone — treat as unknown */ }
-      if (image && !OURS.test(image)) {
-        console.warn(`${e('⚠️', '[WARN]')} Port ${port} is held by "${image}" (pid ${pid}) — not a clawdcursor process; refusing to kill it. Free the port or change server.port.`);
-        continue;
-      }
-      try {
-        process.kill(pid, 'SIGKILL');
-        console.log(`${e('🐾', '>')} Killed process ${pid}${image ? ` (${image})` : ''}`);
-        killedAny = true;
-      } catch (err: any) {
-        // ESRCH = the process already exited between lsof and now — that's
-        // success for our purpose (the port is free). Re-throw anything else
-        // (e.g. EPERM) so the outer catch returns false.
-        if (err?.code !== 'ESRCH') throw err;
-      }
-    }
-    return killedAny;
   } catch {
     return false;
   }
@@ -336,6 +250,7 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
     host: BIND_HOST,
     onStop: async () => {
       endAllSessions('stopped with clawdcursor stop (POST /stop)');  // synchronous: in the log before the exit
+      releasePidFile('start');  // like the SIGINT/SIGTERM exits: a stale lock must not outlive the daemon
     },
   });
 
@@ -590,46 +505,35 @@ program
       }
     }
     if (!serverStopped) {
-      console.log(`${e('⚠️', '[WARN]')}  Graceful stop did not complete — force killing...`);
-      const killed = await forceKillPort(port);
-      if (killed) {
-        console.log(`${e('🐾', '>')} Clawd Cursor force stopped`);
-      } else {
-        console.error(`${e('❌', '[ERR]')} Could not force stop process on port ` + port);
-      }
+      console.log(`${e('⚠️', '[WARN]')}  Graceful stop did not complete — stopping the daemon its lock file names...`);
     }
 
     // v0.8.3 — also sweep every other clawdcursor-owned pidfile (mcp, serve,
-    // start) and kill anything still alive. The old `stop` only targeted
-    // port 3847 via `/stop`, which missed `mcp` (stdio, no port) and any
-    // zombie `serve` / `start` that had crashed-but-not-released its pidfile.
+    // start). The old `stop` only targeted port 3847 via `/stop`, which missed
+    // `mcp` (stdio, no port) and any zombie `serve` / `start` that had
+    // crashed-but-not-released its pidfile.
     // User-reported symptom: "Outlook keeps opening" — a stale serve process
     // was still receiving MCP / REST traffic after the user thought they'd
     // stopped. This sweep ensures `clawdcursor stop` means stop EVERYTHING.
+    // A lock is only acted on when it proves its process is the clawdcursor
+    // that wrote it (stopLockHolder):
+    // stale locks name pids the OS may have handed to an unrelated app, so
+    // those are deleted and nothing is signalled.
     let sweptCount = 0;
     for (const mode of ['start', 'mcp', 'serve'] as const) {
-      try {
-        const pidPath = pidFilePath(mode);
-        if (!fs.existsSync(pidPath)) continue;
-        // readPidLoose accepts both legacy bare-int and the new JSON format.
-        const pid = readPidLoose(mode);
-        if (pid === null || pid === process.pid) { fs.unlinkSync(pidPath); continue; }
-        if (isProcessAlive(pid)) {
-          try {
-            process.kill(pid, 'SIGTERM');
-            // Give it a moment to exit gracefully, then SIGKILL if still up.
-            await new Promise(r => setTimeout(r, 500));
-            if (isProcessAlive(pid)) process.kill(pid, 'SIGKILL');
-            sweptCount++;
-            console.log(`${e('🐾', '>')} Stopped ${mode} instance (pid ${pid})`);
-          } catch {
-            // Could not kill — the process may be owned by a different user.
-            console.warn(`${e('⚠', '[WARN]')} Could not stop ${mode} pid ${pid}`);
-          }
-        }
-        // Clean up the pidfile regardless.
-        try { fs.unlinkSync(pidPath); } catch {}
-      } catch { /* best-effort */ }
+      const r = await stopLockHolder(mode).catch(() => ({ outcome: 'none' as const }));
+      if (r.outcome === 'stopped') {
+        sweptCount++;
+        console.log(`${e('🐾', '>')} Stopped ${mode} instance (pid ${r.pid})`);
+      } else if (r.outcome === 'failed') {
+        // Could not kill — the process may be owned by a different user.
+        console.warn(`${e('⚠', '[WARN]')} Could not stop ${mode} pid ${r.pid}`);
+      } else if (r.outcome === 'stale') {
+        console.log(`${e('🧹', '>')} Removed a stale ${mode} lock file (its process is gone or is no longer clawdcursor; nothing was signalled)`);
+      }
+      if (mode === 'start' && !serverStopped && r.outcome !== 'stopped') {
+        console.error(`${e('❌', '[ERR]')} Port ${port} still answers, but no lock file proves which process that is — nothing was killed. Stop it yourself (Task Manager / kill) or free the port.`);
+      }
     }
     if (sweptCount > 0) {
       console.log(`${e('✅', '[OK]')} Swept ${sweptCount} additional clawdcursor instance${sweptCount === 1 ? '' : 's'}`);
@@ -751,23 +655,12 @@ program
       }
     } catch { /* server not running — that's fine */ }
 
-    // 0b. Fallback: if /stop didn't work, try killing via pidfile.
-    // readPidLoose() handles both the new JSON format and the legacy
-    // bare-int format from pre-0.9.2 lockfiles, so this works whether
-    // the running process is stale-old or freshly-installed.
+    // 0b. Fallback: if /stop didn't work, stop what the lock files name — only a
+    // holder its lock proves is clawdcursor (stopLockHolder); a stale lock is
+    // just deleted, never signalled.
     for (const mode of ['start', 'mcp', 'serve'] as const) {
-      try {
-        if (!fs.existsSync(pidFilePath(mode))) continue;
-        const pid = readPidLoose(mode);
-        if (pid !== null && pid !== process.pid) {
-          try {
-            process.kill(pid, 0); // check if alive
-            process.kill(pid, 'SIGTERM');
-            console.log(`   ${e('🛑', '[STOP]')}  Killed running ${mode} process (pid ${pid})`);
-            await new Promise(r => setTimeout(r, 500));
-          } catch { /* process already dead */ }
-        }
-      } catch { /* pidfile read failed — that's fine */ }
+      const r = await stopLockHolder(mode).catch(() => ({ outcome: 'none' as const }));
+      if (r.outcome === 'stopped') console.log(`   ${e('🛑', '[STOP]')}  Killed running ${mode} process (pid ${r.pid})`);
     }
 
     // 1. Remove config files in project root
