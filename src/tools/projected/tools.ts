@@ -16,24 +16,24 @@ import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } f
 import type { InvokeAction, UiElement } from '../../platform/types';
 import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
-import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../../tools/blind-hints';
+import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
-import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../verify/assertions';
-import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
-import { renderUIMap } from '../sense/ui-map-render';
-import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../untrusted-screen-content';
-import { resolveRef } from '../sense/ui-map-resolve';
-import { ensureVisible } from '../sense/ui-map-visible';
-import { findActionButton, findInputField } from '../sense/ui-map-find';
-import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, type Retyped } from '../../tools/paste-guard';
-import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
-import { timeWait } from '../observability/steps';
+import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../../core/verify/assertions';
+import { compileUIMap, defaultCompileDeps } from '../../core/sense/ui-map';
+import { renderUIMap } from '../../core/sense/ui-map-render';
+import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../../core/untrusted-screen-content';
+import { resolveRef } from '../../core/sense/ui-map-resolve';
+import { ensureVisible } from '../../core/sense/ui-map-visible';
+import { findActionButton, findInputField } from '../../core/sense/ui-map-find';
+import { waitForPaste, writeClipboardVerified, readBackTyped, setResult, setVerdict, fieldRead, typesAsKeys, EMPTY_AFTER_TYPING, type Retyped } from '../paste-guard';
+import { sleepUnlessStopped, STOPPED_TEXT } from '../../core/control';
+import { timeWait } from '../../core/observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
-import { effectLine, windowChange, type WindowRead } from '../effect';
-import { missText, untrusted, targetOf, targetText } from '../miss-text';
+import { effectLine, windowChange, type WindowRead } from '../../core/effect';
+import { missText, untrusted, targetOf, targetText } from '../../core/miss-text';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;

@@ -31,7 +31,7 @@ import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, isSparseTree } from '../tools/bli
 import { classifyResult, isUnverifiableAction } from '../core/result-codes';
 import { quoteScreenText } from '../core/untrusted-screen-content';
 import { sameApp, walkAncestors } from '../core/ai-hosts';
-import { expandReadBack } from '../core/agent-loop/tools';
+import { expandReadBack } from '../tools/projected/tools';
 import { SMART_MISS_NEXT } from '../tools/smart';
 import { EXPECT_DESCRIPTION } from '../core/verify/assertions';
 import type { UiElement } from '../platform/types';

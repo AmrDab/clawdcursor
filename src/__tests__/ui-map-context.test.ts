@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toolContextToAgent } from '../core/agent-loop/project-mcp';
+import { toolContextToAgent } from '../tools/projected/project-mcp';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { ToolContext } from '../tools/types';
 

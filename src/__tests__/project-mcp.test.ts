@@ -1,5 +1,5 @@
 /**
- * Tests for src/core/agent-loop/project-mcp.ts (Step 2 of the re-projection refactor).
+ * Tests for src/tools/projected/project-mcp.ts (Step 2 of the re-projection refactor).
  *
  * Tests:
  *   1. jsonSchemaToParamDefs: correctly converts a UnifiedTool.inputSchema
@@ -65,10 +65,10 @@ import {
   unifiedToToolResult,
   projectToToolDefinition,
   toMcpNames,
-} from '../core/agent-loop/project-mcp';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { TOOL_META } from '../core/agent-loop/tool-meta';
-import type { UnifiedTool, UnifiedToolResult } from '../core/agent-loop/types';
+} from '../tools/projected/project-mcp';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import { TOOL_META } from '../tools/projected/tool-meta';
+import type { UnifiedTool, UnifiedToolResult } from '../tools/projected/types';
 import type { ToolContext } from '../tools/types';
 
 // ── Mock helpers ──────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@
  *   3. "Could not focus/select" dropped the platform's reason.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { classifyResult } from '../core/result-codes';
 import { preferControl } from '../platform/prefer-control';
 

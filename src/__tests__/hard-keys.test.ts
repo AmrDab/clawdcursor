@@ -17,7 +17,7 @@ import { guardInputMethods, setInputGuard, unguarded, _resetHeldKeys } from '../
 import { normalizeKey } from '../platform/keys';
 import { getShortcutTools } from '../tools/shortcuts';
 import { SHORTCUTS, resolveShortcutKey } from '../shortcuts';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { ToolContext } from '../tools/types';
 
 const refused = (combo: unknown, os: NodeJS.Platform, held: string[] = []) => hardKeyRefusal(combo, held, os) !== null;

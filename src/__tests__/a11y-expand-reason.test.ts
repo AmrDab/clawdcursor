@@ -5,7 +5,7 @@
  * (1.5.27 live test on a Mac).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { untrusted } from '../core/miss-text';
 
 const platform = (res: { success: boolean; data?: Record<string, unknown> }) => ({

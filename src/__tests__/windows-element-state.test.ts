@@ -30,8 +30,8 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';

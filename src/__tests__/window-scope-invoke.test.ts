@@ -20,13 +20,13 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
-import { runActivationLadder, canClickAtBounds, expandNote } from '../core/agent-loop/tools';
+import { runActivationLadder, canClickAtBounds, expandNote } from '../tools/projected/tools';
 import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
 import { checkAssertions } from '../core/verify/assertions';
 import { narrowedScopeNote } from '../tools/scope-note';
 import { classifyResult } from '../core/result-codes';
 import { missText, untrusted, structuredMissFields } from '../core/miss-text';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 
 const root = join(__dirname, '../..');
 const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');

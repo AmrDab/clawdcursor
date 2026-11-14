@@ -32,10 +32,10 @@ vi.mock('../platform/ocr-engine', () => {
 });
 
 import { parseAssertions, validateExpect } from '../core/verify/assertions';
-import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { projectToToolDefinition } from '../tools/projected/project-mcp';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { ToolContext } from '../tools/types';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const NOTEPAD = { processId: 9, processName: 'notepad', title: 'Untitled - Notepad', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
 

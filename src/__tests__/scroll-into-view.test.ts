@@ -7,8 +7,8 @@
  * element is off the active window"; smart_type said "Could not find element". The field was only below the fold.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
 import { ensureVisible } from '../core/sense/ui-map-visible';

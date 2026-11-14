@@ -21,12 +21,12 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { structuredMissFields } from '../core/miss-text';
 import { classifyResult } from '../core/result-codes';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
 import type { UIMap, UIElement } from '../core/sense/ui-map-types';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const root = join(__dirname, '../..');
 const bridge = readFileSync(join(root, 'scripts/ps-bridge.ps1'), 'utf8');

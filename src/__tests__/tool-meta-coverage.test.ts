@@ -61,8 +61,8 @@ vi.mock('../platform/ocr-engine', () => {
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { TOOL_META } from '../core/agent-loop/tool-meta';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import { TOOL_META } from '../tools/projected/tool-meta';
 
 // ── Exclusion sets ────────────────────────────────────────────────────────────
 

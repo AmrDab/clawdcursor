@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 import type { PlatformAdapter } from '../platform/types';
 
 function ctx(over: Partial<AgentToolContext> = {}): AgentToolContext {

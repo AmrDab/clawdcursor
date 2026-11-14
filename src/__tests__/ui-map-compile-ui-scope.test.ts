@@ -18,9 +18,9 @@ vi.mock('../platform/ocr-engine', () => {
   return { OcrEngine, ocrEngine: () => new OcrEngine() };
 });
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 import type { PlatformAdapter } from '../platform/types';
 
 const tool = () => buildUnifiedTools().find(t => t.name === 'compile_ui')!;

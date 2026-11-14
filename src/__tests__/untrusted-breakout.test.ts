@@ -13,7 +13,7 @@ import { getA11yTools } from '../tools/a11y';
 import { getCdpTools } from '../tools/cdp';
 import { getSmartTools } from '../tools/smart';
 import { getOrchestrationTools } from '../tools/orchestration';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { copyAllText } from '../platform/copy-all-text';
 import { checkAssertions, renderReport } from '../core/verify/assertions';
 import type { ToolContext } from '../tools/types';

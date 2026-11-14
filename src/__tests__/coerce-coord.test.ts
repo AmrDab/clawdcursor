@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { coerceCoord } from '../core/agent-loop/tools';
+import { coerceCoord } from '../tools/projected/tools';
 
 describe('coerceCoord', () => {
   it('passes through clean number args unchanged', () => {

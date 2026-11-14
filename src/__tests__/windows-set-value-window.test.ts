@@ -24,7 +24,7 @@ vi.mock('../platform/ps-runner', () => ({
 }));
 
 import { WindowsAdapter } from '../platform/windows';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 
 const bridge = fs.readFileSync(path.join(__dirname, '../../scripts/ps-bridge.ps1'), 'utf8');
 const start = bridge.indexOf('# 2) Keyboard fallback');

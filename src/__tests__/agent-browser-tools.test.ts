@@ -7,8 +7,8 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import type { AgentToolContext } from '../tools/projected/types';
 
 const tool = (name: string) => buildUnifiedTools().find(t => t.name === name)!;
 

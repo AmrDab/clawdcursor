@@ -23,10 +23,10 @@
  */
 
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
-import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../../tools/types';
+import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../types';
 import { TOOL_META, TEXT_ONLY_RENAMES } from './tool-meta';
-import { expectRefusal, checkExpect } from '../sense/reactive-check';
-import { rewriteOutsideData } from '../../tools/hint-rewrite';
+import { expectRefusal, checkExpect } from '../../core/sense/reactive-check';
+import { rewriteOutsideData } from '../hint-rewrite';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -213,7 +213,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
   if (!meta) {
     throw new Error(
       `projectToToolDefinition: no TOOL_META entry for System B tool "${t.name}". ` +
-      'Add an entry to src/core/agent-loop/tool-meta.ts.',
+      'Add an entry to src/tools/projected/tool-meta.ts.',
     );
   }
 

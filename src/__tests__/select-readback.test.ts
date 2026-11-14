@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { selectOption, selectedResult } from '../platform/select-option';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { classifyResult } from '../core/result-codes';
 
 describe('select on an item: the result is what the item reads afterwards', () => {

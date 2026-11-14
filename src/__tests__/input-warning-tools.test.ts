@@ -9,7 +9,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { getSmartTools } from '../tools/smart';
 import { getCompactTools } from '../tools/compact';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { ToolContext } from '../tools/types';
 
 const WARNING = 'A modal dialog of "SomeAgent" — "Allow access?" (pid 9) is frontmost, so keystrokes go to it. If that is not the app you mean to drive, answer or close it first.';

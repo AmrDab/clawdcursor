@@ -297,7 +297,7 @@ describe('who can answer', () => {
 describe('a choice cannot lift a guard', () => {
   it('the input layer and the batch executor never read the pause gate for a go-ahead', () => {
     const src = join(dirname(fileURLToPath(import.meta.url)), '..');
-    for (const file of ['platform/hard-keys.ts', 'platform/pointer-guard.ts', 'tools/batch.ts', 'core/agent-loop/tools.ts']) {
+    for (const file of ['platform/hard-keys.ts', 'platform/pointer-guard.ts', 'tools/batch.ts', 'tools/projected/tools.ts']) {
       expect(readFileSync(join(src, file), 'utf8'), file).not.toMatch(/pause-gate|pauseGate/);
     }
   });

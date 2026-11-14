@@ -6,7 +6,7 @@
  * text); get_value failed with code UNKNOWN. Every path now ends in one read-back that compares the whole value.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import { readBackTyped, fieldRead } from '../tools/paste-guard';
 import { classifyResult } from '../core/result-codes';
 

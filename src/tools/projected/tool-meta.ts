@@ -36,7 +36,7 @@
 import type {
   ToolCostClass,
   ToolDefinition,
-} from '../../tools/types';
+} from '../types';
 
 // Re-use the ToolDefinition category type rather than duplicating it.
 type ToolCategory = ToolDefinition['category'];

@@ -22,8 +22,8 @@ import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
 import { fenceTools } from '../core/fence';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
+import { buildUnifiedTools } from './projected/tools';
+import { projectToToolDefinition } from './projected/project-mcp';
 
 // ─── Step 3: Window-management re-projection ─────────────────────────────────
 //

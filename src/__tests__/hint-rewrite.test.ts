@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { rewriteOutsideData } from '../tools/hint-rewrite';
 import { toCompactNames } from '../tools/compact';
-import { toMcpNames } from '../core/agent-loop/project-mcp';
+import { toMcpNames } from '../tools/projected/project-mcp';
 
 const ocrResult = JSON.stringify({
   elementCount: 1,

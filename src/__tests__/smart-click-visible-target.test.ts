@@ -37,10 +37,10 @@ vi.mock('../platform/ocr-engine', () => {
 });
 
 import { getSmartTools } from '../tools/smart';
-import { buildUnifiedTools, runActivationLadder } from '../core/agent-loop/tools';
+import { buildUnifiedTools, runActivationLadder } from '../tools/projected/tools';
 import { missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 import { classifyResult } from '../core/result-codes';
-import type { AgentToolContext } from '../core/agent-loop/types';
+import type { AgentToolContext } from '../tools/projected/types';
 import type { PlatformAdapter } from '../platform/types';
 
 const root = join(__dirname, '../..');

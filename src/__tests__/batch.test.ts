@@ -20,8 +20,8 @@ vi.mock('../core/pause-gate', () => ({ pauseGate: { current: () => pausePending 
 import { executeBatch, getBatchTools } from '../tools/batch';
 import { stopControl, sleepUnlessStopped, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import { projectToToolDefinition } from '../tools/projected/project-mcp';
 
 const tool = (name: string, handler: any) => ({ name, parameters: {}, safetyTier: 1, handler });
 const okTool = (name: string) => tool(name, vi.fn(async () => ({ text: `${name} ok` })));

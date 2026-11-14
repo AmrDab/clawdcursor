@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
+import { buildUnifiedTools } from '../tools/projected/tools';
 
 describe('coordinate tools surface the space:"image" guidance', () => {
   const tools = buildUnifiedTools();

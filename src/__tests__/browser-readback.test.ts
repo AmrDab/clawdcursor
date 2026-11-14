@@ -5,8 +5,8 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { getCdpTools } from '../tools/cdp';
-import { buildUnifiedTools } from '../core/agent-loop/tools';
-import { projectToToolDefinition } from '../core/agent-loop/project-mcp';
+import { buildUnifiedTools } from '../tools/projected/tools';
+import { projectToToolDefinition } from '../tools/projected/project-mcp';
 import { classifyResult } from '../core/result-codes';
 
 const tool = (n: string) => getCdpTools().find(t => t.name === n)!;
