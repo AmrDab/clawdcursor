@@ -13,7 +13,8 @@ import type { ToolContext } from '../tools/types';
 import { createToolContext } from './tool-context';
 import { captureConsole } from './log-buffer';
 import { createMcpServer, servedTools, startMcpStdio, startMcpHttp, type McpServerHandle } from './mcp-server';
-import { createUtilityServer, requireAuth, initServerToken, mountJson404 } from './http-utility';
+import { createUtilityServer, describeRoutes } from './http-utility';
+import { initServerToken } from './auth';
 import { endAllSessions, reportUncleanExits } from './session-log';
 import { claimPidFile, releasePidFile, recordLockPort, isProcessAlive } from './pidfile';
 import { spoolBeforeExit } from '../core/observability/telemetry';
@@ -246,25 +247,21 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     console.log(`   ${e('ℹ️', 'i')} CDP: no browser detected (will retry when web tools are called)`);
   });
 
+  let mcp: Awaited<ReturnType<typeof startMcpHttp>> | undefined;
+  try {
+    // A server per SDK-client session and per concurrent one-shot post — one shared server refused every request while
+    // another held it.
+    mcp = await startMcpHttp(createHandle);
+  } catch (err) {
+    console.warn('MCP HTTP transport not loaded:', (err as Error).message);
+  }
   const exit = exitRoutine(endAllSessions, () => releasePidFile('start'));
   const app = createUtilityServer({
     host: BIND_HOST,
     // POST /stop (and the dashboard Stop) exits like Ctrl+C: the lock is released, so `stop` never meets a stale one.
     onStop: () => exit('stopped with clawdcursor stop (POST /stop)'),
+    mcp: mcp?.handle,
   });
-  try {
-    // A server per SDK-client session and per concurrent one-shot post — one shared server refused every request while
-    // another held it.
-    const mcp = await startMcpHttp(createHandle);
-    app.use('/mcp', requireAuth);
-    app.post('/mcp', mcp.handle);
-    app.get('/mcp', mcp.handle);
-    app.delete('/mcp', mcp.handle);
-  } catch (err) {
-    console.warn('MCP HTTP transport not loaded:', (err as Error).message);
-  }
-  // LAST mount — JSON 404 for unmatched routes (must come after /mcp).
-  mountJson404(app);
 
   const toolCount = servedTools(compact).length;
   app.listen(resolved.port, BIND_HOST, async () => {
@@ -274,13 +271,8 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
     console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${resolved.port}`);
     console.log(`${pc.yellow(`${e('🔑', '[KEY]')} Auth token:`)} ${serverToken.slice(0, 8)}...`);
     console.log(pc.gray(`   (full token saved to ${TOKEN_PATH})`));
-    console.log(`\nSurviving HTTP routes:`);
-    console.log(`  GET  /         — Dashboard (calls /mcp via JSON-RPC)`);
-    console.log(`  GET  /health   — Readiness probe (no auth)`);
-    console.log(`  POST /stop     — Graceful shutdown (auth, localhost only)`);
-    console.log(`\nMCP endpoint (the only protocol):`);
-    console.log(`  POST /mcp      — JSON-RPC tools/call & tools/list (auth) — ${compact ? 'compact' : 'granular'} surface, ${toolCount} tools`);
-    console.log(`  GET  /mcp      — SSE notifications (auth)`);
+    console.log(`\nHTTP routes (agents use MCP at /mcp: the ${compact ? 'compact' : 'granular'} surface, ${toolCount} tools):`);
+    for (const line of describeRoutes()) console.log(`  ${line}`);
     if (!compact) {
       console.log(pc.gray(`   (tip: pass --compact or set CLAWD_MCP_COMPACT=1 to expose the 6-compound public surface)`));
     }

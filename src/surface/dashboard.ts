@@ -1,16 +1,17 @@
 /**
  * Dashboard — Single-page web dashboard for Clawd Cursor.
  * 
- * Exports a mount function that adds GET / to the Express app.
+ * Exports the GET / handler (the daemon's route table mounts it).
  * All HTML, CSS, and JS are inline — no external files or frameworks.
  */
 
-import type { Express } from 'express';
+import type { RequestHandler } from 'express';
 import { VERSION } from './version';
 import { dashboardToolCall } from './dashboard-tools';
 
-export function mountDashboard(app: Express, getToken?: () => string): void {
-  app.get('/', (_req, res) => {
+/** GET /: the page, and the daemon's token as an httpOnly cookie its requests carry. */
+export function dashboardPage(getToken?: () => string): RequestHandler {
+  return (_req, res) => {
     const token = getToken?.() ?? '';
     if (token) {
       res.cookie('clawdcursor_token', token, {
@@ -21,7 +22,7 @@ export function mountDashboard(app: Express, getToken?: () => string): void {
       });
     }
     res.type('html').send(DASHBOARD_HTML);
-  });
+  };
 }
 
 const DASHBOARD_HTML = `<!DOCTYPE html>

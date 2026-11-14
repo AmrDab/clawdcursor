@@ -70,9 +70,9 @@ process.on('unhandledRejection', (reason: any) => {
 import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
 import { VERSION } from './version';
+import { authHeaders, readToken } from './auth';
 import dotenv from 'dotenv';
 import * as fs from 'fs';
-import * as path from 'path';
 import pc from 'picocolors';
 import { migrateFromLegacyDir, getPackageRoot } from '../paths';
 import { stopHostApp } from '../platform/native-helper';
@@ -82,21 +82,6 @@ dotenv.config({ quiet: true });
 
 // Migrate data from legacy ~/.openclaw/clawdcursor/ to ~/.clawdcursor/
 migrateFromLegacyDir();
-
-// ── Auth helper ──────────────────────────────────────────────────────────────
-// Reads the saved Bearer token from ~/.clawdcursor/token (written by start/serve).
-function loadAuthToken(): string {
-  try {
-    const tokenPath = path.join(require('os').homedir(), '.clawdcursor', 'token');
-    return fs.readFileSync(tokenPath, 'utf-8').trim();
-  } catch {
-    return '';
-  }
-}
-function authHeaders(): Record<string, string> {
-  const token = loadAuthToken();
-  return token ? { 'Authorization': `Bearer ${token}` } : {};
-}
 
 // ── Emoji gate (shared utility) ──────────────────────────────────────────────
 import { e } from './format';
@@ -453,12 +438,10 @@ program
 
     // 0. Stop any running server first (before deleting token)
     try {
-      const tokenPath = path.join(homeDir, '.clawdcursor', 'token');
-      if (fs.existsSync(tokenPath)) {
-        const token = fs.readFileSync(tokenPath, 'utf-8').trim();
+      if (readToken()) {
         const resp = await fetch('http://127.0.0.1:3847/stop', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}` },
+          headers: authHeaders(),
         });
         if (resp.ok) {
           console.log(`   ${e('🛑', '[STOP]')}  Stopped running server`);

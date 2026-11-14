@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { dashboardToolCall } from '../surface/dashboard-tools';
-import { mountDashboard } from '../surface/dashboard';
+import { dashboardPage } from '../surface/dashboard';
 
 const GRANULAR = ['read_screen', 'resume_task', 'logs_recent'];
 const COMPACT = ['computer', 'accessibility', 'window', 'system', 'browser', 'batch'];
@@ -27,8 +27,8 @@ describe('dashboardToolCall', () => {
 describe('dashboard page', () => {
   function page(): string {
     let html = '';
-    const app = { get: (_p: string, h: (req: unknown, res: unknown) => void) => h({}, { cookie() {}, type() { return { send: (s: string) => { html = s; } }; } }) };
-    mountDashboard(app as never);
+    const res = { cookie() {}, type() { return { send: (s: string) => { html = s; } }; } };
+    dashboardPage()({} as never, res as never, () => {});
     return html;
   }
 

@@ -5,7 +5,8 @@
  */
 import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import request from 'supertest';
-import { createUtilityServer, initServerToken } from '../surface/http-utility';
+import { createUtilityServer } from '../surface/http-utility';
+import { initServerToken } from '../surface/auth';
 import { pauseGate, type PauseInfo } from '../core/pause-gate';
 
 const PENDING: PauseInfo = { id: 7, message: 'Sign in to Glama', since: 1, choices: ['Work account', 'Personal account'] };
