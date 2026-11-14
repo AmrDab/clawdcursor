@@ -22,7 +22,6 @@ export const DATA_DIR = path.join(os.homedir(), '.clawdcursor');
 /** Sub-directories */
 export const TASK_LOGS_DIR = path.join(DATA_DIR, 'task-logs');
 export const REPORTS_DIR = path.join(DATA_DIR, 'reports');
-export const UI_KNOWLEDGE_DIR = path.join(DATA_DIR, 'ui-knowledge');
 
 /** Persistent files */
 export const TOKEN_PATH = path.join(DATA_DIR, 'token');

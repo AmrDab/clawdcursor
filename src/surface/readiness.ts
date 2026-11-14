@@ -140,24 +140,3 @@ export async function printStatusReport(): Promise<void> {
     console.log('');
   }
 }
-
-/**
- * Quick check if basic requirements are met (for gating commands).
- */
-export async function isReadyForDesktopControl(): Promise<boolean> {
-  const status = await getReadinessStatus();
-  return status.readyForDesktopControl;
-}
-
-/**
- * Get a one-line summary suitable for doctor output.
- */
-export async function getReadinessSummary(): Promise<string> {
-  const status = await getReadinessStatus();
-  
-  if (status.readyForDesktopControl) {
-    return '✓ All systems ready';
-  } else {
-    return `✗ ${status.issues.length} issue(s): ${status.issues.slice(0, 2).join(', ')}`;
-  }
-}

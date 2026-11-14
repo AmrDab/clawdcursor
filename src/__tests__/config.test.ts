@@ -74,19 +74,6 @@ describe('port precedence', () => {
   });
 });
 
-describe('debug', () => {
-  it('defaults to false', () => {
-    expect(resolve().debug).toBe(false);
-  });
-
-  it('CLI > project > user', () => {
-    const projectConfigPath = writeJson('p.json', { debug: false });
-    const userConfigPath = writeJson('u.json', { debug: true });
-    expect(resolve({ projectConfigPath, userConfigPath }).debug).toBe(false);
-    expect(resolve({ cliFlags: { debug: true }, projectConfigPath, userConfigPath }).debug).toBe(true);
-  });
-});
-
 describe('disableVision', () => {
   it('--no-vision resolves to true', () => {
     expect(resolve({ cliFlags: { noVision: true } }).disableVision).toBe(true);
@@ -144,6 +131,6 @@ describe('unreadable config files', () => {
 
   it('model and key fields left in an old config file are ignored', () => {
     const r = resolve({ userConfigPath: writeJson('u.json', { apiKey: 'k', model: 'm', provider: 'p', port: 7001 }) });
-    expect(r).toEqual({ port: 7001, debug: false, disableVision: false });
+    expect(r).toEqual({ port: 7001, disableVision: false });
   });
 });

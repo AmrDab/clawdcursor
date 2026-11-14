@@ -677,6 +677,3 @@ export function getCompactTools(): ToolDefinition[] {
     ...getBatchTools(),
   ];
 }
-
-/** Names of all compact tools (for tier + doc lookups). */
-export const COMPACT_TOOL_NAMES = ['accessibility', 'system', 'window', 'browser', 'computer', 'batch'] as const;

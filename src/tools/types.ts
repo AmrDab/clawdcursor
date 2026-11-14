@@ -4,7 +4,6 @@
  * Tools are defined once here and adapted to:
  * - HTTP REST API (GET /tools, POST /execute/:name)
  * - MCP protocol (stdio or SSE)
- * - OpenAI function-calling format (GET /tools?format=openai)
  *
  * No MCP, no Zod, no framework dependency — just plain TypeScript.
  */
@@ -198,18 +197,6 @@ export function toJsonSchema(params: Record<string, ParameterDef>): object {
     properties,
     required: required.length > 0 ? required : undefined,
   };
-}
-
-/** Convert tools to OpenAI function-calling format */
-export function toOpenAiFunctions(tools: ToolDefinition[]): object[] {
-  return tools.map(t => ({
-    type: 'function',
-    function: {
-      name: t.name,
-      description: t.description,
-      parameters: toJsonSchema(t.parameters),
-    },
-  }));
 }
 
 /** Image-space (the latest screenshot) → mouse-space; `space:"screen"` passes

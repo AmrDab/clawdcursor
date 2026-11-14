@@ -19,7 +19,7 @@ import { getElectronBridgeTools } from './electron_bridge';
 import { getCompactTools } from './compact';
 import { getAgentTools } from './agent';
 import type { ToolDefinition, ToolContext, ToolResult, CompactGroup } from './types';
-import { toOpenAiFunctions, toJsonSchema, toMouseLength } from './types';
+import { toJsonSchema, toMouseLength } from './types';
 import { stampCostClasses } from './cost-class';
 import { fenceTools } from '../core/fence';
 import { buildUnifiedTools } from '../core/agent-loop/tools';
@@ -482,7 +482,7 @@ function projectedKeyboardTools(): ToolDefinition[] {
 }
 
 export type { ToolDefinition, ToolContext, ToolResult };
-export { toOpenAiFunctions, toJsonSchema };
+export { toJsonSchema };
 export { getCompactTools };
 
 /** Options for the unified getTools() accessor. */
@@ -592,11 +592,6 @@ export function getAllTools(): ToolDefinition[] {
  */
 export function getCompactSurface(): ToolDefinition[] {
   return getTools({ palette: 'compact' });
-}
-
-/** Get tools by category */
-export function getToolsByCategory(category: string): ToolDefinition[] {
-  return getAllTools().filter(t => t.category === category);
 }
 
 /** Get a tool by name */

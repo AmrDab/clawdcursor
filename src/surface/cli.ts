@@ -161,9 +161,9 @@ program
 // `--no-llm` is still accepted as a no-op so existing scripts keep working.
 interface AgentModeOpts {
   port?: string;
-  debug?: boolean;
   accept?: boolean;
-  noVision?: boolean;
+  /** Commander `--no-vision` → false. */
+  vision?: boolean;
   skipConsent?: boolean;
   compact?: boolean;
   /** Commander `--no-banner` → false. Undefined = banner enabled (default). */
@@ -192,8 +192,7 @@ function clientPort(raw: string | undefined): number {
 }
 
 async function runAgentMode(opts: AgentModeOpts): Promise<void> {
-  // commander stores the negated flag as `{ vision: false }`; callers/tests can also pass noVision directly.
-  const forceNoVision = Boolean(opts.noVision || (opts as any).vision === false);
+  const forceNoVision = opts.vision === false;
   const cliPort = portFlag(opts.port);
 
   // Single-instance guard — uses the legacy `start` lockfile name so
@@ -222,7 +221,6 @@ async function runAgentMode(opts: AgentModeOpts): Promise<void> {
   const resolved = resolveConfig({
     cliFlags: {
       port:     cliPort,
-      debug:    opts.debug,
       noVision: forceNoVision,
     },
   });
