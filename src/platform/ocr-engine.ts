@@ -120,6 +120,8 @@ export function ocrEngine(): OcrEngine {
 export class OcrEngine {
   private cachedResult: OcrResult | null = null;
   private cacheTimestamp = 0;
+  /** Bumped by invalidateCache: a read that started before an act does not cache the screen from before it. */
+  private generation = 0;
   private available: boolean | null = null;
 
   /**
@@ -183,6 +185,7 @@ export class OcrEngine {
   invalidateCache(): void {
     this.cachedResult = null;
     this.cacheTimestamp = 0;
+    this.generation++;
   }
 
   /**
@@ -200,6 +203,7 @@ export class OcrEngine {
     }
 
     const start = Date.now();
+    const generation = this.generation;
     try {
       // The working monitor via the bridge (Windows, non-primary); otherwise a
       // full-resolution nut-js grab (grim on Wayland) of the primary.
@@ -217,6 +221,8 @@ export class OcrEngine {
         // Release the raw RGBA buffer immediately after processing
         (img as any).data = null;
       }
+      // The result is the screen at this moment: its age counts from here, not from when the OCR finished.
+      const capturedAt = Date.now();
 
       // The test fence (core/fence.ts): only the fenced window's pixels reach the OCR engine. A no-op with no fence.
       pngBuffer = await fenceOcrCapture(pngBuffer, shot ? { x: shot.x, y: shot.y } : { x: 0, y: 0 });
@@ -232,9 +238,11 @@ export class OcrEngine {
         if (shot) for (const el of result.elements) { el.x += shot.x; el.y += shot.y; }
         result = await fenceOcrText(result);
 
-        // Cache
-        this.cachedResult = result;
-        this.cacheTimestamp = Date.now();
+        // Cached unless an act emptied the cache while this read ran: the result shows the screen from before it.
+        if (this.generation === generation) {
+          this.cachedResult = result;
+          this.cacheTimestamp = capturedAt;
+        }
 
         return result;
       } finally {

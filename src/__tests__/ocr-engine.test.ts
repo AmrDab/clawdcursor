@@ -406,6 +406,44 @@ describe('OcrEngine', () => {
       expect(result.elements[0].text).toBe('New');
       expect(mockExecFile).toHaveBeenCalledTimes(2);
     });
+
+    it('a read in flight when an act empties the cache does not cache the screen from before the act', async () => {
+      setPlatform('win32');
+      const eng = new OcrEngine();
+      mockExecFile.mockImplementationOnce(() => {
+        eng.invalidateCache();   // an act lands while this read's OCR runs
+        return { stdout: sampleOcrJson(SAMPLE_ELEMENTS) };
+      });
+      const late = await eng.recognizeScreen();
+      expect(late.elements).toHaveLength(3);   // the caller that asked still gets its read
+
+      mockExecFile.mockReturnValue({
+        stdout: sampleOcrJson([{ text: 'After', x: 0, y: 0, width: 10, height: 10, confidence: 1, line: 0 }]),
+      });
+      const next = await eng.recognizeScreen();
+      expect(next.elements[0].text).toBe('After');
+      expect(mockExecFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('a result is as old as its capture: an OCR slower than the cache window is not served again', async () => {
+      setPlatform('win32');
+      vi.useFakeTimers({ toFake: ['Date'] });
+      try {
+        const eng = new OcrEngine();
+        mockExecFile.mockImplementationOnce(() => {
+          vi.setSystemTime(Date.now() + 350);   // the OCR itself takes longer than the 300 ms cache window
+          return { stdout: sampleOcrJson(SAMPLE_ELEMENTS) };
+        });
+        await eng.recognizeScreen();
+        mockExecFile.mockReturnValue({
+          stdout: sampleOcrJson([{ text: 'Now', x: 0, y: 0, width: 10, height: 10, confidence: 1, line: 0 }]),
+        });
+        expect((await eng.recognizeScreen()).elements[0].text).toBe('Now');
+        expect(mockExecFile).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   // ── recognizeRegion ───────────────────────────────────────────────────────
