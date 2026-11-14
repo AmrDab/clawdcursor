@@ -57,11 +57,7 @@ export interface ToolContext {
    * async dance on every call.
    */
   platform?: import('../platform/types').PlatformAdapter;
-  /**
-   * Optional log buffer accessor — populated by the daemon's createServer.
-   * MCP `logs_recent` reads through this; null/missing means logs are not
-   * captured (e.g. stdio MCP).
-   */
+  /** The server's captured console lines (surface/log-buffer.ts), read by `logs_recent`; missing means none are captured. */
   getLogBuffer?: () => Array<{ timestamp: number; level: string; message: string }>;
   /** Session-scoped UIMap cache for safe el_NN element refs (Part 2). */
   uiMaps?: import('../core/sense/ui-map-holder').UIMapHolder;

@@ -83,10 +83,10 @@ describe('utility server smoke tests', () => {
 describe('PR7 cutover invariants', () => {
   it('the legacy REST routes are gone', async () => {
     const app = makeUtilityApp();
-    // /task, /favorites, /tools, /execute, /action, /logs, /task-logs,
-    // /screenshot, /report, /learn — all deleted in PR7.4. The utility
-    // server only owns /, /health, /stop. Anything else 404s.
-    for (const route of ['/task', '/favorites', '/tools', '/execute/foo', '/action', '/logs', '/task-logs', '/screenshot', '/report', '/learn', '/abort', '/status']) {
+    // /task, /favorites, /tools, /execute, /action, /task-logs,
+    // /screenshot, /report, /learn — all deleted in PR7.4 (GET /logs is
+    // back, for the dashboard's log panel). Anything else 404s.
+    for (const route of ['/task', '/favorites', '/tools', '/execute/foo', '/action', '/task-logs', '/screenshot', '/report', '/learn', '/abort', '/status']) {
       const res = await request(app).get(route).set('Authorization', `Bearer ${token}`);
       expect(res.status).toBe(404);
     }

@@ -11,6 +11,7 @@ import { e } from './format';
 import { pauseGate, type PauseAnswer } from '../core/pause-gate';
 import { stopControl } from '../core/control';
 import { isLoopbackHost, localOnly, requireLocalHostHeader, requireToken, serverToken } from './auth';
+import { getLogBuffer } from './log-buffer';
 
 type Method = 'GET' | 'POST' | 'DELETE';
 type RouteKey = `${Method} ${string}`;
@@ -29,6 +30,8 @@ interface Route {
 export const ROUTES: readonly Route[] = [
   { method: 'GET', path: '/', auth: 'none', summary: 'Dashboard' },
   { method: 'GET', path: '/health', auth: 'none', summary: 'Readiness probe' },
+  // The dashboard's log panel. Not through MCP: a poll there was a recorded call every 2 s, refused while stopped.
+  { method: 'GET', path: '/logs', auth: 'token', localOnly: 'Logs', summary: 'Recent console lines' },
   // The pause message is agent-written text about what the user is doing: never on the public /health.
   { method: 'GET', path: '/resume', auth: 'token', localOnly: 'Resume', summary: 'The pause waiting for the user, if any' },
   { method: 'POST', path: '/resume', auth: 'token', localOnly: 'Resume', summary: 'Answer that pause: {answer: "resume" | "end" | "reply"}' },
@@ -106,6 +109,7 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
   const handlers: Partial<Record<RouteKey, express.RequestHandler>> = {
     'GET /': offLoopback ? undefined : dashboardPage(serverToken),
     'GET /health': (_req, res) => { res.json({ status: 'ok', version: VERSION }); },
+    'GET /logs': (_req, res) => { res.json(getLogBuffer()); },
     'GET /resume': (_req, res) => {
       const pause = pauseGate.current();
       res.json({ waiting: pause !== null, pause });

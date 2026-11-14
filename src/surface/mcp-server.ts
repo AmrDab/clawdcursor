@@ -14,9 +14,8 @@
  * flavors. createMcpServer() is the registry-to-MCP adapter; the
  * transports are independent and either or both can be active.
  *
- * The HTTP transport is mounted on the existing Express app at /mcp,
- * with the same Bearer-token requireAuth middleware the REST routes used.
- * That keeps localhost-only auth invariants identical across transports.
+ * The HTTP transport is the daemon's /mcp route, gated like its other
+ * routes (http-utility.ts ROUTES, auth.ts).
  */
 
 import type express from 'express';

@@ -7,7 +7,6 @@
 
 import type { RequestHandler } from 'express';
 import { VERSION } from './version';
-import { dashboardToolCall } from './dashboard-tools';
 
 /** GET /: the page, and the daemon's token as an httpOnly cookie its requests carry. */
 export function dashboardPage(getToken?: () => string): RequestHandler {
@@ -275,82 +274,6 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
     return h;
   }
 
-  // ── MCP-over-HTTP helper (v0.9 PR7.3) ────────────────────────────
-  // The daemon mounts a streamable-HTTP MCP transport at /mcp. Every
-  // dashboard action is a JSON-RPC tools/call request through this
-  // helper. /health and /stop remain plain HTTP — they're operational
-  // endpoints, not tools.
-  var __mcpRequestId = 1;
-  async function mcpCall(name, args) {
-    var body = JSON.stringify({
-      jsonrpc: '2.0',
-      id: __mcpRequestId++,
-      method: 'tools/call',
-      params: { name: name, arguments: args || {} }
-    });
-    var res = await fetch('/mcp', {
-      method: 'POST',
-      headers: authHeaders({
-        'Content-Type': 'application/json',
-        'Accept': 'application/json, text/event-stream'
-      }),
-      body: body
-    });
-    if (!res.ok) throw new Error('MCP HTTP ' + res.status);
-    var ct = res.headers.get('Content-Type') || '';
-    var rpc;
-    if (ct.indexOf('text/event-stream') !== -1) {
-      // SSE response — parse the first data: chunk as the JSON-RPC reply.
-      var raw = await res.text();
-      var lines = raw.split(/\\r?\\n/);
-      var dataLine = lines.find(function(l) { return l.indexOf('data: ') === 0; });
-      if (!dataLine) throw new Error('MCP SSE response missing data line');
-      rpc = JSON.parse(dataLine.slice(6));
-    } else {
-      rpc = await res.json();
-    }
-    if (rpc.error) throw new Error(rpc.error.message || 'MCP error');
-    var result = rpc.result || {};
-    if (result.isError) {
-      var content = result.content || [];
-      var msg = content.map(function(c) { return c.text || ''; }).join(' ').trim();
-      throw new Error(msg || 'MCP tool error');
-    }
-    // Convenience: if the only content piece is text and parses as JSON,
-    // return the parsed object so callers don't have to unwrap manually.
-    var content = result.content || [];
-    var firstText = content.find(function(c) { return c.type === 'text'; });
-    if (firstText && firstText.text) {
-      try { return JSON.parse(firstText.text); } catch (e) { return firstText.text; }
-    }
-    return result;
-  }
-
-  // Which surface does this daemon serve? A --compact daemon has no
-  // granular tools: ask tools/list once and map every call onto
-  // what is served (dashboardToolCall, shared with the server-side tests).
-  ${dashboardToolCall.toString()}
-  var __servedTools = null;
-  function servedTools() {
-    __servedTools = __servedTools || (async function() {
-      try {
-        var res = await fetch('/mcp', {
-          method: 'POST',
-          headers: authHeaders({ 'Content-Type': 'application/json', 'Accept': 'application/json, text/event-stream' }),
-          body: JSON.stringify({ jsonrpc: '2.0', id: __mcpRequestId++, method: 'tools/list', params: {} })
-        });
-        var rpc = await res.json();
-        return ((rpc.result && rpc.result.tools) || []).map(function(t) { return t.name; });
-      } catch (e) { __servedTools = null; return []; }
-    })();
-    return __servedTools;
-  }
-  async function toolCall(tool, args) {
-    var call = dashboardToolCall(await servedTools(), tool, args || {});
-    if (!call) throw new Error('Not available on the --compact MCP surface of this daemon (start it without --compact for ' + tool + ')');
-    return mcpCall(call.name, call.arguments);
-  }
-
   // State
   let lastLogCount = 0;
   let paused = false;
@@ -449,8 +372,9 @@ const DASHBOARD_HTML = `<!DOCTYPE html>
   // Logs polling
   async function pollLogs() {
     try {
-      // v0.9 PR7.3: logs_recent replaces GET /logs.
-      const logs = await toolCall('logs_recent', {});
+      const res = await fetch('/logs', { headers: authHeaders() });
+      if (!res.ok) return;
+      const logs = await res.json();
       if (!Array.isArray(logs) || logs.length === 0) return;
 
       if (logs.length !== lastLogCount) {
