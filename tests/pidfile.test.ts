@@ -310,3 +310,33 @@ describe('daemonPortForClient', () => {
     } finally { restore(); }
   });
 });
+
+describe('sweepAllLocks (`stop` and `uninstall`)', () => {
+  const LOOKUP_MS = 30_000;   // a cold PowerShell + WMI start-time query can take seconds under a parallel run
+
+  it('stops only a holder its lock proves; a live pid under a wrong start time is left alone; every lock is removed', async () => {
+    const { mod, restore } = await loadPidfileWithHome(tmpHome);
+    const ours = spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
+    const stranger = spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
+    try {
+      const startTime = mod.getProcessStartTime(ours.pid!, LOOKUP_MS);
+      expect(startTime).not.toBeNull();
+      fs.mkdirSync(path.dirname(mod.pidFilePath('start')), { recursive: true });
+      expect(mod.claimPidFile(mod.DAEMON_LOCK)).toBeNull();                            // this process: removed, not killed
+      fs.writeFileSync(mod.pidFilePath('serve'), JSON.stringify({ v: 1, pid: ours.pid, startTime, mode: 'serve' }));
+      // A reused pid: alive, but not the process that wrote the lock.
+      fs.writeFileSync(mod.pidFilePath('mcp'), JSON.stringify({ v: 1, pid: stranger.pid, startTime: 1_000_000_000_000, mode: 'mcp' }));
+      const exited = new Promise(r => ours.once('exit', r));
+      const kill = vi.spyOn(process, 'kill');
+      expect(await mod.sweepAllLocks(LOOKUP_MS)).toEqual([
+        { mode: 'start', outcome: 'stale' },
+        { mode: 'mcp', outcome: 'stale' },
+        { mode: 'serve', outcome: 'stopped', pid: ours.pid },
+      ]);
+      expect(kill.mock.calls.filter(([pid, sig]) => sig !== 0 && pid !== ours.pid)).toEqual([]);
+      await exited;
+      expect(mod.isProcessAlive(stranger.pid!)).toBe(true);
+      for (const mode of ['start', 'mcp', 'serve'] as const) expect(fs.existsSync(mod.pidFilePath(mode))).toBe(false);
+    } finally { ours.kill('SIGKILL'); stranger.kill('SIGKILL'); restore(); }
+  }, 60_000);
+});

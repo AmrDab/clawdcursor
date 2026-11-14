@@ -34,7 +34,7 @@ export interface SkillRegSummary {
 }
 
 /** Agent frameworks that expose a skills registry, and where it lives. */
-function hostRegistries(homeDir: string): [name: string, skillsDir: string][] {
+export function hostRegistries(homeDir: string): [name: string, skillsDir: string][] {
   return [
     // Claude Code — ~/.claude/skills/<name>/SKILL.md (Skill tool + /<skill>).
     ['Claude Code', path.join(homeDir, '.claude', 'skills')],
@@ -123,4 +123,22 @@ export function registerSkills(folderName = 'clawdcursor'): SkillRegSummary {
   }
 
   return { registered, results };
+}
+
+/**
+ * The registrations registerSkills made, for `uninstall`: in each host's skills dir, a `clawdcursor` link to a clawdcursor
+ * package, or a folder holding only the SKILL.md it copied. A folder the user made there (registerSkills only refreshes
+ * the SKILL.md inside one) is not ours and is left.
+ */
+export function ourSkillRegistrations(homeDir: string, folderName = 'clawdcursor'): string[] {
+  return hostRegistries(homeDir).map(([, dir]) => path.join(dir, folderName)).filter(target => {
+    try {
+      if (fs.lstatSync(target).isSymbolicLink()) {
+        return JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8')).name === 'clawdcursor';
+      }
+      return fs.readdirSync(target).join('/') === 'SKILL.md';
+    } catch {
+      return false;
+    }
+  });
 }

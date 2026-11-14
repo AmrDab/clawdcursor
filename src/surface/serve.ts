@@ -16,7 +16,7 @@ import { createMcpServer, servedTools, startMcpStdio, startMcpHttp, type McpServ
 import { createUtilityServer, describeRoutes } from './http-utility';
 import { initServerToken } from './auth';
 import { endAllSessions, reportUncleanExits } from './session-log';
-import { claimPidFile, releasePidFile, recordLockPort, isProcessAlive } from './pidfile';
+import { claimPidFile, releasePidFile, recordLockPort, isProcessAlive, DAEMON_LOCK } from './pidfile';
 import { spoolBeforeExit } from '../core/observability/telemetry';
 import { logger } from '../core/observability/logger';
 import { controlBanner } from '../core/banner';
@@ -186,9 +186,7 @@ async function serveStdio(opts: ServeOptions): Promise<void> {
 }
 
 async function serveHttp(opts: ServeOptions): Promise<void> {
-  // Single-instance guard — uses the legacy `start` lockfile name so
-  // existing `clawdcursor stop` sweeps still find it.
-  const existingPid = claimPidFile('start');
+  const existingPid = claimPidFile(DAEMON_LOCK);
   if (existingPid !== null) {
     console.error(`${e('❌', '[ERR]')} clawdcursor agent is already running (pid ${existingPid}). Run \`clawdcursor stop\` first.`);
     process.exit(1);
@@ -255,7 +253,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
   } catch (err) {
     console.warn('MCP HTTP transport not loaded:', (err as Error).message);
   }
-  const exit = exitRoutine(endAllSessions, () => releasePidFile('start'));
+  const exit = exitRoutine(endAllSessions, () => releasePidFile(DAEMON_LOCK));
   const app = createUtilityServer({
     host: BIND_HOST,
     // POST /stop (and the dashboard Stop) exits like Ctrl+C: the lock is released, so `stop` never meets a stale one.
@@ -266,7 +264,7 @@ async function serveHttp(opts: ServeOptions): Promise<void> {
   const toolCount = servedTools(compact).length;
   app.listen(resolved.port, BIND_HOST, async () => {
     // Where `stop` / `resume` find this daemon (see daemonPortForClient).
-    recordLockPort('start', resolved.port);
+    recordLockPort(DAEMON_LOCK, resolved.port);
     const serverToken = initServerToken();
     console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${resolved.port}`);
     console.log(`${pc.yellow(`${e('🔑', '[KEY]')} Auth token:`)} ${serverToken.slice(0, 8)}...`);

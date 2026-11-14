@@ -45,6 +45,11 @@ import { powershellExe, psOpts } from '../platform/ps-spawn';
 
 export type LockMode = 'start' | 'mcp' | 'serve';
 
+/** The daemon's lock (`clawdcursor agent`). Named `start` so every `stop` since 0.8 finds it. */
+export const DAEMON_LOCK: LockMode = 'start';
+/** Every lock a clawdcursor ever wrote: `mcp` and `serve` only by older versions, which a sweep still stops. */
+const ALL_LOCKS: readonly LockMode[] = ['start', 'mcp', 'serve'];
+
 const PID_DIR = path.join(os.homedir(), '.clawdcursor');
 
 const SCHEMA_VERSION = 1;
@@ -248,7 +253,7 @@ export function recordLockPort(mode: LockMode, port: number): void {
  */
 export function daemonPortForClient(flag?: number): number {
   if (flag !== undefined) return flag;
-  const lock = readLockFile('start');
+  const lock = readLockFile(DAEMON_LOCK);
   if (lock && typeof lock.port === 'number' && isProcessAlive(lock.pid)) return lock.port;
   return DEFAULT_CONFIG.server.port;
 }
@@ -320,4 +325,20 @@ export async function stopLockHolder(mode: LockMode, timeoutMs?: number): Promis
   }
   unlink();
   return { outcome: 'stopped', pid };
+}
+
+export type SweptLock = { mode: LockMode } & Exclude<StopLockResult, { outcome: 'none' }>;
+
+/**
+ * Stop the clawdcursor holding each lock and remove the locks (stopLockHolder: only a holder its lock proves is
+ * signalled; a stale, recycled or bare-integer lock is deleted untouched). Used by `stop` and `uninstall`. Modes with no
+ * lock file are left out.
+ */
+export async function sweepAllLocks(timeoutMs?: number): Promise<SweptLock[]> {
+  const swept: SweptLock[] = [];
+  for (const mode of ALL_LOCKS) {
+    const r = await stopLockHolder(mode, timeoutMs).catch((): StopLockResult => ({ outcome: 'none' }));
+    if (r.outcome !== 'none') swept.push({ mode, ...r });
+  }
+  return swept;
 }
