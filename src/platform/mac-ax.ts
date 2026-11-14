@@ -177,7 +177,8 @@ function viaStdin(fields: Record<string, string | undefined>): { args: string[];
 }
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
-const wellFormed = (s: string): string => s.replace(LONE_SURROGATE, '\uFFFD');
+/** Lone surrogates become U+FFFD, so text sent as JSON on a helper's / script's stdin parses there as argv would have carried it. */
+export const wellFormed = (s: string): string => s.replace(LONE_SURROGATE, '\uFFFD');
 
 /** A name or identifier counts only if it says something: "   " would substring-match the first control with a space in its label. */
 const given = (s: string | undefined): string | undefined => (s !== undefined && s.trim() !== '' ? s : undefined);
@@ -698,7 +699,7 @@ export function createMacAx(deps: MacAxDeps): MacAx {
       const flags = text.length ? [...args, '-ArgsStdin'] : args;
       // The '--' keeps osascript from reading the script's own -Flags as its options.
       const argv = ['-l', 'JavaScript', path.join(deps.scriptsDir, script), ...(flags.length ? ['--', ...flags] : [])];
-      ({ stdout } = await deps.exec('osascript', argv, text.length ? { timeoutMs, input: JSON.stringify(Object.fromEntries(text)) } : { timeoutMs }));
+      ({ stdout } = await deps.exec('osascript', argv, text.length ? { timeoutMs, input: JSON.stringify(Object.fromEntries(text.map(([k, v]) => [k, wellFormed(v!)]))) } : { timeoutMs }));
     } catch (err) {
       if (isTimeout(err)) throw withHint(timeoutError(what, timeoutMs));
       throw withHint(new MacAxError('failed', `${what} failed: ${msg(err)}`));

@@ -53,6 +53,7 @@ import { getPackageRoot } from '../paths';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
+import { wellFormed } from './mac-ax';
 
 const execFileAsync = promisify(execFile);
 
@@ -749,7 +750,7 @@ export class LinuxAdapter implements PlatformAdapter {
       const child = execFile('python3', argv, opts, (err, stdout) => (err ? reject(err) : resolve({ stdout: String(stdout ?? '') })));
       // The bridge may exit (or be killed at the timeout) before it has read everything: a closed pipe is not our error.
       child.stdin?.on('error', () => { /* reported by the exit callback */ });
-      child.stdin?.end(fields.length ? JSON.stringify(Object.fromEntries(fields)) : '');
+      child.stdin?.end(fields.length ? JSON.stringify(Object.fromEntries(fields.map(([k, v]) => [k, wellFormed(v!)]))) : '');
     });
   }
 

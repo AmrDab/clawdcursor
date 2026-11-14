@@ -33,7 +33,7 @@ describe.runIf(process.platform === 'win32')('AccessibilityBridge on Windows —
     const bridge = new AccessibilityBridge();
     expect(await bridge.findElement({ name: 'OK', controlType: 'ControlType.Bogus', processId: 7 })).toEqual([]);
     const res = await bridge.invokeElement({ name: 'OK', controlType: 'Bogus', action: 'click', processId: 7 });
-    expect(res).toMatchObject({ success: false, error: expect.stringMatching(/Unknown controlType/) });
+    expect(res).toMatchObject({ success: false, error: expect.stringMatching(/Unknown controlType "Bogus" — use one of: Button, CheckBox, .*MenuItem.*Window$/) });
     expect(runCalls.filter(c => c.cmd === 'find-element' || c.cmd === 'invoke-element')).toEqual([]);
   });
 });

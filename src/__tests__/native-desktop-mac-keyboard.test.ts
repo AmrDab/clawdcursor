@@ -122,6 +122,22 @@ describe('modifiers are mapped or refused, never dropped', () => {
     expect(spawned).toHaveLength(0);
   });
 
+  it('win+q is refused, not sent as Cmd+Q (which quits the front app); cmd+q is Cmd+Q', async () => {
+    for (const combo of ['win+q', 'windows+q', 'command_l+q']) {
+      await expect(desktop().keyPress(combo)).rejects.toThrow(/Unknown modifier/);
+    }
+    expect(spawned).toHaveLength(0);
+    await desktop().keyPress('cmd+q');
+    expect(programs()).toEqual(['tell application "System Events" to keystroke "q" using {command down}']);
+  });
+
+  it.each([
+    ['shift', 56], ['cmd', 55], ['ctrl', 59], ['alt', 58], ['opt', 58],
+  ])('a bare %s is tapped as that key (key code %i), not refused', async (combo, code) => {
+    await desktop().keyPress(combo);
+    expect(programs()).toEqual([`tell application "System Events" to key code ${code}`]);
+  });
+
   it('an unknown key name is an error, not typed as text', async () => {
     await expect(desktop().keyPress('cmd+nosuchkey')).rejects.toThrow(/Unknown key: "nosuchkey"/);
     expect(spawned).toHaveLength(0);

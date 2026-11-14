@@ -164,12 +164,20 @@ export function normalizeKey(key: string): string {
 export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
 
 /**
+ * The modifier names macOS accepts — exactly MacOSAdapter.normalizeMod's, so both Mac executors agree. win / windows /
+ * super_l / command_l are not among them: there `super` is Cmd, and win+q pressed Cmd+Q (quitting the front app).
+ */
+const MAC_MODIFIER_NAMES = new Set(['mod', 'cmd', 'command', 'super', 'meta', 'shift', 'alt', 'option', 'opt', 'ctrl', 'control']);
+
+/**
  * The modifier a combo's modifier token presses on `platform`, by the aliases above (opt / option = alt, win = super,
  * `mod` = this OS's shortcut modifier, cmd / command / meta = Ctrl on Windows and Super elsewhere). Null when the token is
  * no modifier: an executor refuses that combo instead of pressing the key without it (`opt+x` must never send a plain x).
+ * On macOS only MAC_MODIFIER_NAMES count.
  */
 export function modifierOf(token: string, platform: NodeJS.Platform = process.platform): Modifier | null {
   const t = token.trim().toLowerCase();
+  if (platform === 'darwin' && !MAC_MODIFIER_NAMES.has(t)) return null;
   // KEY_ALIASES resolves these three for the OS this process runs on; `platform` decides here.
   if (t === 'mod') return platform === 'darwin' ? 'super' : 'ctrl';
   if (t === 'cmd' || t === 'command' || t === 'meta') return platform === 'win32' ? 'ctrl' : 'super';

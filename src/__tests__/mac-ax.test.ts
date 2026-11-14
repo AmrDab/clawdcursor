@@ -716,6 +716,14 @@ describe('stdin payload — always well-formed', () => {
     expect(JSON.parse(calls[0].input!).name).toBe('x\ufffdy');
   });
 
+  it('the osascript fallback (viaJxa) sends well-formed text too', async () => {
+    const { ax, calls } = harness({ helper: null, reply: JSON.stringify({ success: true }) });
+    await ax.invoke({ processId: 7, name: 'Notes', action: 'set-value', value: 'ok \ud83d tail' });
+    const jxa = calls.find(c => c.file === 'osascript')!;
+    expect(jxa.input).not.toMatch(/\\ud[89ab][0-9a-f]{2}/i);
+    expect(JSON.parse(jxa.input!).value).toBe('ok � tail');
+  });
+
   it('a proper surrogate pair (an emoji) is left alone', async () => {
     const { ax, calls } = harness({ reply: JSON.stringify({ ok: true, success: true }) });
     await ax.invoke({ processId: 7, name: 'Notes', action: 'set-value', value: 'hi 🙂 日本語' });

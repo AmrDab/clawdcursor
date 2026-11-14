@@ -21,7 +21,7 @@
  *   mousemove -w -x <hwheel> -y <wheel>    (REL_WHEEL: +up / REL_HWHEEL: +right)
  *   click 0xC0                  (left)   0xC1 (right)   0xC2 (middle)
  *   key <code>:1                (down)   <code>:0      (up)
- *   type --delay 10 --file -    (the text on stdin)
+ *   type --key-delay 10 --key-hold 5 --file -   (the text on stdin; 1.x has no --delay)
  *
  * 0.1.x ("legacy" — Ubuntu 24.04 / Debian ship 0.1.8):
  *   mousemove <x> <y>           (absolute; `--absolute` is an unknown option
@@ -85,9 +85,9 @@ function modifiersOf(tokens: string[]): Modifier[] {
 }
 
 /** Run `cmd` with `input` on its stdin (typed text never goes on argv). */
-function execWithStdin(cmd: string, args: string[], input: string, timeout: number): Promise<void> {
+function execWithStdin(cmd: string, args: string[], input: string, timeout: number, env?: NodeJS.ProcessEnv): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = execFile(cmd, args, { timeout }, err => (err ? reject(err) : resolve()));
+    const child = execFile(cmd, args, { timeout, env }, err => (err ? reject(err) : resolve()));
     // The tool may exit (or be killed at the timeout) before it has read everything: a closed pipe is not our error.
     child.stdin?.on('error', () => { /* reported by the exit callback */ });
     child.stdin?.end(input);
@@ -379,14 +379,15 @@ export class WaylandBackend {
   async typeText(text: string): Promise<void> {
     if (this.kind === 'none' || !text) return;
     if (this.kind === 'ydotool') {
-      // Small delay so fast apps don't drop chars (0.1.x calls it --key-delay).
-      const delayFlag = this.generation === 'legacy' ? '--key-delay' : '--delay';
+      // Small delay so fast apps don't drop chars. 0.1.x (boost options) rejects the unknown --key-hold; 1.x knows it
+      // (1.0.4) or skips it (older 1.x getopt, which in --file mode ignores the stray value).
+      const hold = this.generation === 'legacy' ? [] : ['--key-hold', '5'];
       // `--file -`: the text on stdin (both generations), never argv.
-      await execWithStdin('ydotool', ['type', delayFlag, '10', '--file', '-'], text, TIMEOUT_MS + text.length * 15);
+      await execWithStdin('ydotool', ['type', '--key-delay', '10', ...hold, '--file', '-'], text, TIMEOUT_MS + text.length * 15);
       return;
     }
-    // wtype: `-` reads the text from stdin.
-    await execWithStdin('wtype', ['-'], text, TIMEOUT_MS + text.length * 15);
+    // wtype: `-` reads the text from stdin, decoded by the locale: under C / POSIX non-ASCII is dropped with exit 0.
+    await execWithStdin('wtype', ['-'], text, TIMEOUT_MS + text.length * 15, { ...process.env, LC_ALL: 'C.UTF-8' });
   }
 
   // ── Internals ───────────────────────────────────────────────

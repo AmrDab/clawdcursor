@@ -13,6 +13,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const calls = vi.hoisted(() => [] as string[][]);
 /** What each call wrote to the tool's stdin, by call. */
 const stdins = vi.hoisted(() => new Map<string[], string>());
+/** The options (env) each call was run with, by call. */
+const opts = vi.hoisted(() => new Map<string[], { env?: Record<string, string | undefined> }>());
 const state = vi.hoisted(() => ({ help: '', helpFails: false }));
 
 const LEGACY_HELP = 'Usage: ydotool <cmd> <args>\nAvailable commands:\n  click\n  key\n  mousemove\n  recorder\n  type\n';
@@ -35,6 +37,7 @@ vi.mock('child_process', async () => {
     let err: Error | null = null;
     try { r = run(a[0] as string, a[1] as string[]); } catch (e) { err = e as Error; }
     const call = calls[calls.length - 1];
+    if (typeof a[2] === 'object' && a[2]) opts.set(call, a[2] as { env?: Record<string, string | undefined> });
     setImmediate(() => (err ? cb(err) : cb(null, r!.stdout, r!.stderr)));
     return { stdin: { on: () => {}, end: (d?: string) => { if (d !== undefined) stdins.set(call, d); } } };
   };
@@ -50,6 +53,7 @@ const ydotoolCalls = () => calls.filter(c => c[0] === 'ydotool' && c[1] !== 'hel
 beforeEach(() => {
   calls.length = 0;
   stdins.clear();
+  opts.clear();
   state.helpFails = false;
 });
 
@@ -192,7 +196,8 @@ describe('ydotool 1.x (ydotoold)', () => {
   it('types text on stdin, never in argv', async () => {
     const be = await WaylandBackend.detect(hasYdotool);
     await be.typeText('hunter2');
-    expect(typedVia('ydotool')).toEqual({ args: ['type', '--delay', '10', '--file', '-'], stdin: 'hunter2' });
+    // 1.x has no --delay (only --key-delay / --key-hold); --key-hold is 1.x only: 0.1.8 rejects unknown options.
+    expect(typedVia('ydotool')).toEqual({ args: ['type', '--key-delay', '10', '--key-hold', '5', '--file', '-'], stdin: 'hunter2' });
   });
 
   it('an unknown modifier is refused before any key goes down; opt / option are alt', async () => {
@@ -261,5 +266,13 @@ describe('wtype (keyboard only)', () => {
     const be = new WaylandBackend('wtype-keyboard-only');
     await be.typeText('hunter2');
     expect(typedVia('wtype')).toEqual({ args: ['-'], stdin: 'hunter2' });
+  });
+
+  it('runs wtype under a UTF-8 locale, so non-ASCII is not dropped under C / POSIX', async () => {
+    const be = new WaylandBackend('wtype-keyboard-only');
+    await be.typeText('café 日本');
+    const call = calls.filter(c => c[0] === 'wtype').at(-1)!;
+    expect(stdins.get(call)).toBe('café 日本');
+    expect(opts.get(call)?.env?.LC_ALL).toBe('C.UTF-8');
   });
 });

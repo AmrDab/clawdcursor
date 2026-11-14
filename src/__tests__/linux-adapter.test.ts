@@ -457,6 +457,14 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
     expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
   });
 
+  it('a lone surrogate reaches the bridge as U+FFFD, as on macOS (stdin JSON stays well-formed)', async () => {
+    h.exec = defaultExec(() => ({ success: true, action: 'set-value' }));
+    const adapter = new LinuxAdapter();
+    await adapter.init();
+    await adapter.invokeElement({ name: 'x\ude00y', action: 'set-value', value: 'ok \ud83d tail' });
+    expect(bridgeText(0)).toEqual({ name: 'x�y', value: 'ok � tail' });
+  });
+
   it('passes --value for set-value and surfaces value / toggleState in data', async () => {
     let reply: unknown = { success: true, action: 'set-value' };
     h.exec = defaultExec(() => reply);

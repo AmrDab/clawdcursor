@@ -24,7 +24,7 @@ import type { PlatformAdapter, UiElement } from './types';
 import { isOwnUiPid, guardInputMethods } from './pointer-guard';
 import { windowTextIncludes } from '../tools/window-text';
 import { psOpts, powershellExe } from './ps-spawn';
-import { normalizeControlType } from './uia-control-type';
+import { normalizeControlType, unknownControlType } from './uia-control-type';
 
 const execFileAsync = promisify(execFile);
 const PLATFORM = os.platform();
@@ -394,7 +394,7 @@ export class AccessibilityBridge {
       // Same control-type vocabulary as findElement: a raw "ControlType.Button" dropped the role filter, so invoke could
       // act on a same-named element of another type.
       const ct = normalizeControlType(opts.controlType || undefined);
-      if (ct === null) return { success: false, error: `Unknown controlType "${opts.controlType}"` };
+      if (ct === null) return { success: false, error: unknownControlType(opts.controlType) };
       const result = await this.winCmd({
         cmd: 'invoke-element',
         processId,

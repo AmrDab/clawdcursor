@@ -292,7 +292,7 @@ export class MacOSAdapter implements PlatformAdapter {
       let origin: { x: number; y: number } | undefined;
 
       if (opts?.region) {
-        // A region (screen px) is cut out of the capture, as on Windows: ignored, the caller got the whole screen.
+        // A region (capture px: physical, Retina) is cut out of the capture, as on Windows: ignored, the caller got the whole screen.
         const r = clampRegion(opts.region, width, height);
         buffer = await sharp(buffer).extract(r).png().toBuffer();
         width = r.width;

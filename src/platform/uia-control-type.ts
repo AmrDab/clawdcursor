@@ -42,3 +42,8 @@ export function normalizeControlType(raw: string | undefined): string | null | u
   const key = raw.replace(/^ControlType\./i, '').replace(/\s+/g, '').toLowerCase();
   return UIA_CONTROL_TYPE_BY_KEY.get(key) ?? null;  // null = unhonorable
 }
+
+/** The refusal for a control type normalizeControlType cannot honor, naming the ones it can. */
+export function unknownControlType(raw: string | undefined): string {
+  return `Unknown controlType "${raw}" — use one of: ${[...UIA_CONTROL_TYPES].join(', ')}`;
+}

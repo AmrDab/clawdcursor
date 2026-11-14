@@ -33,6 +33,8 @@ const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 const IS_MAC = os.platform() === 'darwin';
 /** System Events' name for each modifier (macOS: `super` is Cmd). */
 const MAC_USING: Record<Modifier, string> = { ctrl: 'control down', shift: 'shift down', alt: 'option down', super: 'command down' };
+/** A modifier pressed on its own ("shift"): tapped by its key code, as MacOSAdapter does (MAC_MODIFIER_KEY_CODES). */
+const MAC_MODIFIER_KEY_CODE: Record<Modifier, number> = { ctrl: 59, shift: 56, alt: 58, super: 55 };
 
 /** Safely resolve a nut-js Key enum value from multiple candidate names */
 function resolveNutKey(...candidates: string[]): Key {
@@ -737,7 +739,8 @@ export class NativeDesktop extends EventEmitter {
     };
 
     let script: string;
-    const special = specialKeys[key.toLowerCase()];
+    const bareModifier = parts.length === 1 ? modifierOf(key, 'darwin') : null;
+    const special = bareModifier ? `key code ${MAC_MODIFIER_KEY_CODE[bareModifier]}` : specialKeys[key.toLowerCase()];
     // A key outside ASCII ("é", "日"): typed as itself — `keystroke` would press "a", and with modifiers ⌘A (#242).
     if (!special && hasNonAscii(key)) {
       refuseNonAsciiChord(key, modUsing.length > 0);

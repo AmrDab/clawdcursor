@@ -71,9 +71,17 @@ describe('normalizeKey', () => {
 describe('modifierOf — one alias table for every executor', () => {
   it.each([
     ['opt', 'alt'], ['option', 'alt'], ['alt', 'alt'], ['ctrl', 'ctrl'], ['Control', 'ctrl'], ['shift', 'shift'],
-    ['win', 'super'], ['windows', 'super'], ['super', 'super'], [' Super ', 'super'],
+    ['super', 'super'], [' Super ', 'super'],
   ])('%s is %s on every OS', (token, mod) => {
     for (const os of ['darwin', 'linux', 'win32'] as const) expect(modifierOf(token, os)).toBe(mod);
+  });
+
+  it('win / windows / super_l / command_l are Super off the Mac, and no modifier on it (win+q must not be Cmd+Q)', () => {
+    for (const t of ['win', 'windows', 'super_l', 'command_l']) {
+      expect(modifierOf(t, 'linux')).toBe('super');
+      expect(modifierOf(t, 'win32')).toBe('super');
+      expect(modifierOf(t, 'darwin')).toBeNull();
+    }
   });
 
   it('mod is this OS\'s shortcut modifier; cmd / command / meta are Ctrl on Windows only', () => {
