@@ -6,12 +6,8 @@
  * the el_NN UI map, the SEE/ACT ladder, handing a step to the user).
  * An agent that only gets the MCP tools has the hands but not the playbook.
  *
- * This used to run ONLY inside `clawdcursor doctor`. But doctor configures the
- * autonomous daemon, and the MCP-first onboarding explicitly tells people to
- * skip it — so MCP-direct users never registered the skill, and clawdcursor
- * showed up as bare MCP tools with none of the guidance. Pulling it out here
- * lets `consent` (always required) and `clawdcursor register-skill` install the
- * skill into EVERY detected agent framework, regardless of install path.
+ * `consent` (always required), `clawdcursor register-skill` and `doctor` install
+ * the skill into EVERY detected agent framework, regardless of install path.
  *
  * Best-effort and non-invasive: only writes into a framework's skills directory
  * if that directory already exists (never creates host config the user doesn't

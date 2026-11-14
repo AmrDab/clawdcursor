@@ -24,8 +24,8 @@
  * Fix (2) is two-layered and deterministic — stdin-EOF alone is NOT reliable
  * when the host is a GUI app (quitting the Claude desktop app on Windows does
  * not deliver stdin EOF to the child):
- *   - the lock holder runs a parent-PID watchdog (see the `mcp` command in
- *     cli.ts) and self-exits when its host process dies; and
+ *   - the lock holder runs a parent-PID watchdog (serve.ts) and self-exits
+ *     when its host process dies; and
  *   - this module records the holder's parent PID (`ppid`) so a later claimant
  *     can detect a holder whose parent is dead — a confirmed orphan — and reap
  *     it instead of refusing to start (see claimPidFile).
@@ -71,8 +71,8 @@ interface LockData {
    *  died — and reap it instead of refusing to start. Optional for back-compat
    *  with locks written before this field existed. */
   ppid?: number;
-  /** The port the daemon actually bound (`start` lock only, set once it listens). Client commands (`stop`, `resume`,
-   *  `task`) read it here — never from a config file, which a repo in the cwd could plant to point the bearer token at
+  /** The port the daemon actually bound (`start` lock only, set once it listens). Client commands (`stop`, `resume`)
+   *  read it here — never from a config file, which a repo in the cwd could plant to point the bearer token at
    *  another local port. The lock lives in the user's own data dir, like the token file: mode 0600 on POSIX; on
    *  Windows the mode is ignored and the file inherits the user profile's ACL. */
   port?: number;
@@ -207,7 +207,6 @@ export function claimPidFile(mode: LockMode): number | null {
         // conservative and treat it as a live duplicate.)
         if (existing.ppid && existing.ppid > 1 && !isProcessAlive(existing.ppid)) {
           try { process.kill(existing.pid); } catch { /* already gone */ }
-          // Fall through to overwrite — we are taking the lock.
         } else {
           return existing.pid;
         }

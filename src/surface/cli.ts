@@ -38,15 +38,8 @@ process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   process.exit(1);
 });
 
-// v0.8.1: unhandledRejection handler.
-// Prior behavior: rejected promises inside the agent loop killed the Node
-// process with only Node's default warning — HTTP clients would see connection
-// drops with no trace. Log through the new leveled logger so correlation IDs
-// come along, and keep the server running (server stability > loud death).
-// In CLI mode (no active server) we still exit 1 to surface the bug.
 process.on('unhandledRejection', (reason: any) => {
   try {
-    // Lazy-require to avoid pulling the pipeline module at cold CLI startup.
     const { logger } = require('../core/observability/logger');
     // Code and stack frames only, home path stripped (same rule as `crash`): the message can carry user content.
     const code = reason instanceof Error ? (reason as NodeJS.ErrnoException).code : undefined;
@@ -79,17 +72,12 @@ import { stopControl, resumeControl, isStopped } from '../core/control';
 
 dotenv.config({ quiet: true });
 
-// Migrate data from legacy ~/.openclaw/clawdcursor/ to ~/.clawdcursor/
 migrateFromLegacyDir();
 
 // ── Emoji gate (shared utility) ──────────────────────────────────────────────
 import { e } from './format';
 
 // ── Single-instance pidfile lock ─────────────────────────────────────────────
-// Implementation lives in ./pidfile so it can be unit-tested independently.
-// The richer JSON lockfile records process start time, which lets the
-// liveness check distinguish a real live duplicate from a recycled PID
-// (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
 import { daemonPortForClient, sweepAllLocks, DAEMON_LOCK } from './pidfile';
 import { userArgs, parsePort } from './argv';
 import { setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
@@ -183,17 +171,9 @@ program
   .option('--compact', 'Expose the 6-compound MCP surface over HTTP /mcp (also CLAWD_MCP_COMPACT=1)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts) => {
-    // v0.9 PR7.4 — `start` is now a thin deprecation alias for `agent`.
-    // The legacy /task /favorites /execute REST surface was deleted; callers
-    // that still ran `clawdcursor start` keep working through this proxy
-    // until v0.10. Removed in v0.10.
     console.warn(`${e('⚠', '[WARN]')} \`clawdcursor start\` is deprecated; use \`clawdcursor agent\`. Removed in v0.10.`);
     await runAgentMode(opts);
   });
-
-// ── Legacy start command body deleted in PR7.4 ──
-// The runAgentMode() function above is the canonical implementation.
-// `start` and `serve` are now thin deprecation aliases.
 
 program
   .command('doctor')
@@ -286,13 +266,11 @@ program
       // fetch may fail because server died mid-response — that's actually success
     }
 
-    // Verify it actually stopped (wait up to 3s)
     let serverStopped = false;
     for (let i = 0; i < 6; i++) {
       await new Promise(r => setTimeout(r, 500));
       try {
         await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1000) });
-        // Still alive — keep waiting
       } catch {
         // Connection refused = dead = success
         console.log(`${e('✅', '[OK]')} Server confirmed stopped`);
@@ -304,17 +282,9 @@ program
       console.log(`${e('⚠️', '[WARN]')}  Graceful stop did not complete — stopping the daemon its lock file names...`);
     }
 
-    // v0.8.3 — also sweep every other clawdcursor-owned pidfile (mcp, serve,
-    // start). The old `stop` only targeted port 3847 via `/stop`, which missed
-    // `mcp` (stdio, no port) and any zombie `serve` / `start` that had
-    // crashed-but-not-released its pidfile.
-    // User-reported symptom: "Outlook keeps opening" — a stale serve process
-    // was still receiving MCP / REST traffic after the user thought they'd
-    // stopped. This sweep ensures `clawdcursor stop` means stop EVERYTHING.
-    // A lock is only acted on when it proves its process is the clawdcursor
-    // that wrote it (sweepAllLocks → stopLockHolder):
-    // stale locks name pids the OS may have handed to an unrelated app, so
-    // those are deleted and nothing is signalled.
+    // `/stop` reaches only the daemon on `port`, not a process that crashed without releasing its pidfile. User-reported
+    // symptom: "Outlook keeps opening" — a stale serve process was still receiving MCP traffic after the user thought
+    // they'd stopped. Only a holder its lock proves is signalled: a stale lock may name a pid the OS gave another app.
     const swept = await sweepAllLocks();
     for (const r of swept) {
       if (r.outcome === 'stopped') {
@@ -400,11 +370,6 @@ program
     await serveMcp({ transport: 'stdio', compact: opts.compact === true, banner: opts.banner !== false });
   });
 
-// ── `serve` deprecation alias (v0.9 PR7.4) ──
-//
-// `clawdcursor serve` was the legacy "tool server only" daemon. v0.9.0
-// folded it into `clawdcursor agent`. Kept here as a soft-deprecation alias
-// for one release; removed in v0.10.
 program
   .command('serve')
   .description('[deprecated — use `clawdcursor agent`] Start the tool server only')
@@ -445,7 +410,6 @@ program
       return;
     }
 
-    // Interactive mode
     await interactiveReport();
   });
 
@@ -482,7 +446,6 @@ program
       return;
     }
 
-    // Interactive flow
     const accepted = await runOnboarding('consent');
     if (accepted) {
       await autoRegisterSkill();
@@ -517,7 +480,7 @@ program
     console.log(telemetryStatusText());
   });
 
-/** Two-path "what to do next" panel shown after consent and after doctor success. */
+/** The "what to do next" panel shown after consent. */
 function printPostConsentNextSteps(): void {
   console.log('');
   console.log(`  ${pc.bold('Use clawdcursor from your own agent (Claude Code, Codex, Cursor, ...):')}`);
@@ -531,7 +494,7 @@ function printPostConsentNextSteps(): void {
 /** Register the skill into every detected agent framework (best-effort). Runs on
  *  consent so MCP-direct users get clawdcursor's skill without needing `doctor`
  *  — the skill carries the "how to use me sustainably" knowledge the bare MCP
- *  tools don't (fallback positioning, the el_NN UI map, the autonomous daemon). */
+ *  tools don't (fallback positioning, the el_NN UI map). */
 async function autoRegisterSkill(): Promise<void> {
   try {
     const { registerSkills } = await import('./skill-register');

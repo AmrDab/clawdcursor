@@ -16,7 +16,6 @@ import { ourSkillRegistrations } from './skill-register';
 
 /**
  * Stop the daemon on the port it recorded (before the data dir and its token go), then every clawdcursor a lock proves.
- * Before, this always asked :3847, so a daemon on another port kept running.
  */
 export async function stopRunningDaemon(): Promise<void> {
   try {
@@ -62,8 +61,7 @@ export async function runUninstall(): Promise<void> {
   // current log file, AV/indexer) can briefly hold a path open → EPERM/EBUSY.
   // rmSync's maxRetries rides out the transient lock; the try/catch downgrades
   // a hard failure to a warning + manual-cleanup hint and CONTINUES to the next
-  // step (the old code threw here, crashing as an unhandledRejection and
-  // leaving the install half-removed).
+  // step.
   const safeRemove = (target: string, label: string): void => {
     try {
       if (!fs.existsSync(target)) return;
@@ -81,7 +79,6 @@ export async function runUninstall(): Promise<void> {
 
   await stopRunningDaemon();
 
-  // 1. Remove config files in project root
   const configFiles = [
     path.join(clawdRoot, '.clawdcursor-config.json'),
     path.join(clawdRoot, '.clawdcursor-favorites.json'),   // written by installs before 1.6
@@ -89,28 +86,19 @@ export async function runUninstall(): Promise<void> {
   ];
   for (const f of configFiles) safeRemove(f, path.basename(f));
 
-  // 2. Remove ~/.clawdcursor data directory (token, consent, task logs, pid)
   safeRemove(path.join(homeDir, '.clawdcursor'), path.join(homeDir, '.clawdcursor'));
-  // Also remove legacy data directory
   safeRemove(path.join(homeDir, '.clawd-cursor'), `legacy ${path.join(homeDir, '.clawd-cursor')}`);
 
-  // 3. Remove debug folder
   safeRemove(path.join(clawdRoot, 'debug'), 'debug/');
 
-  // 4. Remove the skill registrations clawdcursor wrote (skill-register.ts), in every host it registers with.
   for (const sp of ourSkillRegistrations(homeDir)) safeRemove(sp, `skill registration: ${sp}`);
 
-  // 5. Remove MCP server entries from known config files
   const mcpConfigs = [
-    // Claude Code
     path.join(homeDir, '.claude', 'settings.json'),
     path.join(homeDir, '.claude', 'settings.local.json'),
-    // Cursor
     path.join(homeDir, '.cursor', 'mcp.json'),
-    // Windsurf
     path.join(homeDir, '.windsurf', 'mcp.json'),
     path.join(homeDir, '.codeium', 'windsurf', 'mcp_config.json'),
-    // VS Code / Continue
     path.join(homeDir, '.vscode', 'mcp.json'),
   ];
   for (const configPath of mcpConfigs) {
@@ -118,7 +106,6 @@ export async function runUninstall(): Promise<void> {
       if (!fs.existsSync(configPath)) continue;
       const raw = fs.readFileSync(configPath, 'utf-8');
       const json = JSON.parse(raw);
-      // Look for "clawdcursor" or "clawd-cursor" key in mcpServers
       const servers = json.mcpServers || json.servers || {};
       let found = false;
       for (const key of Object.keys(servers)) {
@@ -135,13 +122,11 @@ export async function runUninstall(): Promise<void> {
     } catch { /* skip unreadable configs */ }
   }
 
-  // 6. Remove dist folder
   safeRemove(path.join(clawdRoot, 'dist'), 'dist/');
   // macOS native helper build output — regenerable, not tracked (#155).
   safeRemove(path.join(clawdRoot, 'native', '.build'), 'native/.build/');
   safeRemove(path.join(clawdRoot, 'native', 'ClawdCursor.app'), 'native/ClawdCursor.app/');
 
-  // 7. Unlink global npm command
   try {
     // Left on PATH on purpose: the user runs this uninstall themselves, and npm is theirs to resolve (not a system program).
     execSync('npm unlink -g clawdcursor', { stdio: 'pipe', timeout: 15000, cwd: privateRunDir() });
@@ -162,7 +147,7 @@ export async function runUninstall(): Promise<void> {
   console.log(`   ${clawdRoot}`);
 
   // Closing the reinstall dead-end: this command just removed the global
-  // `clawdcursor` shim, so `clawdcursor install` can't work afterwards — and
+  // `clawdcursor` shim, so no `clawdcursor` command works afterwards — and
   // the natural next step shouldn't be a guess. Point the user at the package
   // manager (works everywhere) plus the turnkey one-liner for their OS.
   const reinstallOneLiner = process.platform === 'win32'

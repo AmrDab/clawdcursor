@@ -89,7 +89,6 @@ function parseStoredConfig(json: Record<string, any>): StoredConfigFields {
   return result;
 }
 
-/** Walk the precedence ladder and return the resolved config. */
 export function resolveConfig(input?: ResolveInput): ResolvedConfig {
   const env = input?.envOverride ?? (process.env as Record<string, string | undefined>);
   const cli = input?.cliFlags;

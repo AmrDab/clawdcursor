@@ -86,7 +86,6 @@ export async function runDoctor(): Promise<void> {
     try {
       let perms = await checkPermissionsQuick();
 
-      // If any permission is missing, trigger system popups to request them
       if (!perms.accessibility || perms.screenRecording === false) {
         console.log('   🔐 Requesting macOS permissions (system dialogs may appear)...');
         try {
@@ -185,9 +184,6 @@ export async function runDoctor(): Promise<void> {
   printSummary(results);
 }
 
-/**
- * Print the final summary.
- */
 function printSummary(results: DiagResult[]): void {
   const allOk = results.every(r => r.ok);
   const consentMissing = results.some(r => r.name === 'Desktop control consent' && !r.ok);
@@ -211,7 +207,6 @@ function printSummary(results: DiagResult[]): void {
       console.log(`   ❌ ${f.name}: ${f.detail}`);
     }
 
-    // Consent is critical — highlight it
     if (consentMissing) {
       console.log(`\n🔐 Consent required before desktop control can work:`);
       console.log(`   Run: clawdcursor consent`);
@@ -224,10 +219,8 @@ function printSummary(results: DiagResult[]): void {
 
 /**
  * Register Clawd Cursor as a skill in detected external platforms (Claude Code,
- * OpenClaw, Codex, Cursor). Delegates to the shared, install-path-agnostic
- * implementation in ./skill-register so `consent` and `register-skill` register
- * the skill the same way doctor does (the logic used to live ONLY here, which is
- * why MCP-direct users — told to skip doctor — never got the skill).
+ * OpenClaw, Codex, Cursor), the same way `consent` and `register-skill` do
+ * (./skill-register).
  */
 async function registerExternalSkills(results: DiagResult[]): Promise<void> {
   const { registerSkills } = await import('./skill-register');

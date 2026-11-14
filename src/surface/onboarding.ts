@@ -16,12 +16,10 @@ import { VERSION } from './version';
 const CONSENT_DIR = path.join(os.homedir(), '.clawdcursor');
 const CONSENT_FILE = path.join(CONSENT_DIR, 'consent');
 
-/** Check if the user has already given consent */
 export function hasConsent(): boolean {
   return fs.existsSync(CONSENT_FILE);
 }
 
-/** Save consent to disk */
 function saveConsent(source?: string): void {
   if (!fs.existsSync(CONSENT_DIR)) {
     fs.mkdirSync(CONSENT_DIR, { recursive: true });
@@ -183,7 +181,7 @@ export async function runOnboarding(context: 'start' | 'consent' = 'start', star
   return false;
 }
 
-/** Revoke consent (for uninstall) */
+/** Revoke consent (`clawdcursor consent --revoke`). */
 export function revokeConsent(): void {
   if (fs.existsSync(CONSENT_FILE)) {
     fs.unlinkSync(CONSENT_FILE);

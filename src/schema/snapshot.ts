@@ -113,7 +113,6 @@ export function toolCounts(snapshot: string): string {
 
 /** Resolve the committed snapshot file at repo root. */
 export function snapshotPath(): string {
-  // This file lives at src/schema/snapshot.ts → repo root is two levels up.
   return path.resolve(__dirname, '..', '..', 'schema.snapshot.json');
 }
 
@@ -128,7 +127,6 @@ export function readStoredSnapshot(): string | null {
   return fs.readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
 }
 
-/** Write a snapshot to the committed file. */
 export function writeSnapshot(snapshot: string): void {
   fs.writeFileSync(snapshotPath(), snapshot);
 }

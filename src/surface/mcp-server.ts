@@ -4,16 +4,6 @@
  * Claude Code, Cursor, Windsurf) and the streamable-HTTP transport
  * (the long-running `clawdcursor agent` daemon).
  *
- * Why this module exists
- * ----------------------
- * Up to v0.8.x clawdcursor had two transports:
- *   - REST API in src/server.ts   (the daemon's /task /favorites /etc)
- *   - MCP stdio    in src/index.ts (the `mcp` subcommand, inline-built)
- *
- * v0.9 PR7 collapses those into a single MCP server with two transport
- * flavors. createMcpServer() is the registry-to-MCP adapter; the
- * transports are independent and either or both can be active.
- *
  * The HTTP transport is the daemon's /mcp route, gated like its other
  * routes (http-utility.ts ROUTES, auth.ts).
  */
@@ -86,7 +76,6 @@ export interface McpTransportLike {
   ) => Promise<void>;
 }
 
-/** Options for createMcpServer. */
 export interface CreateMcpServerOptions {
   /** When true, expose the 6-compound surface instead of granular. */
   compact?: boolean;
@@ -94,7 +83,6 @@ export interface CreateMcpServerOptions {
   ctx: ToolContext;
 }
 
-/** A constructed MCP server with its registered tool count. */
 export interface McpServerHandle {
   /** The configured McpServer instance — connect a transport via .connect(). */
   server: McpServerLike;
@@ -111,12 +99,6 @@ export function servedTools(compact: boolean | undefined): ToolDefinition[] {
   return compact ? getCompactSurface() : getAllTools();
 }
 
-/**
- * Build a configured McpServer with all clawdcursor tools registered.
- *
- * The caller is responsible for connecting a transport via `server.connect(...)`.
- * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
- */
 /** A compact (tool, action), or a granular tool reached through its compound route, that changes something. */
 function isActingCall(toolName: string, action: string | undefined, test: typeof isActingAction = isActingAction): boolean {
   const c = compactCall(toolName, action);
@@ -133,6 +115,12 @@ function batchActs(steps: unknown): boolean {
   });
 }
 
+/**
+ * Build a configured McpServer with all clawdcursor tools registered.
+ *
+ * The caller is responsible for connecting a transport via `server.connect(...)`.
+ * Use `startMcpStdio` for editor integrations and `startMcpHttp` for the daemon.
+ */
 export async function createMcpServer(options: CreateMcpServerOptions): Promise<McpServerHandle> {
   const { compact, ctx } = options;
   // Dynamic import: the SDK is ESM and our build is CJS. The specifier cast is
@@ -193,11 +181,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
 
   const server = new McpServer({ name: 'clawdcursor', version: VERSION }, { instructions });
 
-  // First tool call without consent: ask the USER in the host's own UI (MCP
-  // elicitation) instead of telling them to go run a terminal command. The
-  // model cannot answer an elicitation — the host shows it to the person.
-  // Asked at most once per server: concurrent calls share the one prompt, and
-  // a decline is not re-asked on every call (the text prompt takes over).
   // Local record of this session (tool / action / blind-vs-vision / ok — no
   // content). Feeds `clawdcursor report` and the vision-streak nudge below.
   const sessionLog = new SessionLog({ version: VERSION, surface: compact ? 'compact' : 'granular' });
@@ -214,6 +197,11 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   const clientInfo = () => (server as unknown as { server?: { getClientVersion?: () => { name?: string; version?: string } | undefined } })
     .server?.getClientVersion?.();
 
+  // First tool call without consent: ask the USER in the host's own UI (MCP
+  // elicitation) instead of telling them to go run a terminal command. The
+  // model cannot answer an elicitation — the host shows it to the person.
+  // Asked at most once per server: concurrent calls share the one prompt, and
+  // a decline is not re-asked on every call (the text prompt takes over).
   let consentPrompt: Promise<boolean> | null = null;
   const askConsentInHost = (): Promise<boolean> => {
     consentPrompt ??= (async () => {
@@ -308,7 +296,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     // MCP SDK 1.29 arg parsing breaks if schema is undefined (shifts callback
     // position). Always pass a schema — use empty object for parameterless tools.
     const hasParams = Object.keys(zodParams).length > 0;
-    // Phase A: surface the token-cost class to the tool-picking LLM. The
+    // Surface the token-cost class to the tool-picking LLM. The
     // high-level SDK `server.tool()` API has no slot for a vendor metadata
     // field, so a `[costClass]` description prefix is the reliable
     // LLM-readable channel in tools/list. `costClass` in source stays the
@@ -371,7 +359,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
         if (refused) return refuse(refused.guard, refused.why);
         const started = Date.now();
         const wasIn = actedIn();
-        // The app this call acted in, labelled as on the pill: each act keeps its own foreground read, so the same one means it did not.
         // What this call acted on, as the input guard verified it when it sent the act (control.ts actRecord).
         const acted = () => actRecord(wasIn);
         const releasePill = controlBanner.hold();  // the call has control until it returns, waits included
@@ -446,6 +433,16 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
 }
 
 /**
+ * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool carries destructiveHint only when
+ * it declares `destructive: true` (closing a window, overwriting the clipboard, opening a file or URI, page script).
+ * The values are the ones 1.5.27 published: hosts build their own approval UI on them, so they change only on purpose.
+ */
+export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier' | 'destructive'>): NonNullable<ToolDefinition['annotations']> {
+  if (tool.annotations) return tool.annotations;
+  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive === true };
+}
+
+/**
  * Drop the root `$schema` keyword from every tool's inputSchema in tools/list.
  *
  * SDK 1.29's zod-to-JSON-Schema step always stamps
@@ -463,16 +460,6 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
  * and nothing crashes. A wire-level test asserts `$schema` is absent, so such
  * an upgrade is caught by CI rather than silently re-breaking Gemini.
  */
-/**
- * MCP tool annotations: the tool's own, else derived — tier 0 reads only; an input tool carries destructiveHint only when
- * it declares `destructive: true` (closing a window, overwriting the clipboard, opening a file or URI, page script).
- * The values are the ones 1.5.27 published: hosts build their own approval UI on them, so they change only on purpose.
- */
-export function toolAnnotations(tool: Pick<ToolDefinition, 'annotations' | 'safetyTier' | 'destructive'>): NonNullable<ToolDefinition['annotations']> {
-  if (tool.annotations) return tool.annotations;
-  return (tool.safetyTier ?? 1) === 0 ? { readOnlyHint: true } : { readOnlyHint: false, destructiveHint: tool.destructive === true };
-}
-
 function stripRootSchemaDialect(server: McpServerLike): void {
   const handlers = (server as unknown as {
     server?: { _requestHandlers?: Map<string, (req: unknown, extra: unknown) => Promise<unknown>> };

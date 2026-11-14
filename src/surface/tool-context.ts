@@ -32,12 +32,10 @@ export async function createToolContext(opts: { disableVision: boolean }): Promi
   const cdp = new CDPDriver(DEFAULT_CDP_PORT);
   // Session-scoped el_NN UIMap cache. Without this, compile_ui / find_* and
   // the {element_id, snapshot_id} ref path fail with "no UIMap holder on this
-  // context" over stdio MCP — the v1.5.0 substrate was unreachable for editor-
-  // hosted agents (only the `agent` daemon constructed one). Gauntlet F1.
+  // context".
   const { UIMapHolder } = await import('../core/sense/ui-map-holder');
   const uiMaps = new UIMapHolder();
-  // Lazy adapter handle — Tranche 1A primitives run through this. Populated
-  // in ensureInitialized so we share the same adapter the unified pipeline uses.
+  // Undefined until ensureInitialized runs.
   let platform: import('../platform/types').PlatformAdapter | undefined;
 
   let initialized = false;
