@@ -24,8 +24,8 @@
 import { getTool, getCompactTools } from './registry';
 import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
-import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
-import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { refusalBefore, afterCall, type GuardedCall, type Refusal } from './call-guards';
+import { isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { logger } from '../core/observability/logger';
 import { clipScreenText } from '../core/untrusted-screen-content';
 import { quoteScreenText } from '../core/result-codes';
@@ -140,6 +140,12 @@ export async function executeBatch(
 
   const halt = (i: number, reason: string): BatchResult =>
     ({ total: steps.length, completed, allDone: false, stoppedAt: i, stopReason: reason, steps: outcomes, ...shot });
+  const block = (i: number, label: string, c: GuardedCall, r: Refusal): BatchResult => {
+    logger.warn('safety.refused', { tool: c.tool, action: c.action, guard: r.guard, reason: r.why, batchStep: i });
+    // The Stop and pause texts whole: they say what to do next.
+    outcomes.push({ i, label, status: 'blocked', text: r.guard === 'stopped' || r.guard === 'own_ui' ? r.why : r.why.slice(0, 200) });
+    return halt(i, `step ${i} (${label}): ${r.why}`);
+  };
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
@@ -162,14 +168,14 @@ export async function executeBatch(
     const guard = step.precheck ?? step.expect;
     const args = stepArgs(step);
     const stepAction = typeof args.action === 'string' ? args.action : undefined;
-    // The user's own controls are never a target, and nothing runs while a pause waits (own-ui-guard.ts) — checked before
-    // the precondition, which reads the screen; a step with one is never pause-safe.
-    const ownUi = ownUiRefusal(args, !guard && isPauseSafeCall(tool.name, stepAction), !guard && isStopSafeCall(tool.name, stepAction));
-    if (ownUi) {
-      logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'own_ui', reason: ownUi, batchStep: i });
-      outcomes.push({ i, label, status: 'blocked', text: ownUi });
-      return halt(i, `step ${i} (${label}): ${ownUi}`);
-    }
+    // Refused as the same call made directly would be (call-guards.ts), before the precondition, which reads the screen;
+    // a step with one is never pause- or stop-safe.
+    const call: GuardedCall = {
+      tool: tool.name, action: stepAction, args,
+      pauseSafe: !guard && isPauseSafeCall(tool.name, stepAction), stopSafe: !guard && isStopSafeCall(tool.name, stepAction),
+    };
+    const refused = await refusalBefore(call, ctx);
+    if (refused) return block(i, label, call, refused);
 
     if (guard) {
       const g = await checkGuard(guard, ctx);
@@ -179,17 +185,6 @@ export async function executeBatch(
       }
     }
 
-    // Screenshot-bound: a later click in the batch whose screen changed under it (a dialog opened) is refused.
-    if (isImagePointerCall(tool.name, stepAction, args)) {
-      const why = await imagePointerRefusal(ctx, args);
-      if (why) {
-        logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'screen_binding', reason: why, batchStep: i });
-        outcomes.push({ i, label, status: 'blocked', text: why.slice(0, 200) });
-        return halt(i, `step ${i} (${label}): ${why}`);
-      }
-    }
-
-    // Execute via the real handler.
     let res: ToolResult;
     const before = actedIn();
     try {
@@ -204,15 +199,10 @@ export async function executeBatch(
       return halt(i, `step ${i} (${label}) errored`);
     }
 
-    // High-security mode: refused as a direct call is, and never recorded as a screenshot the model has seen.
-    if (ctx.disableVision && res.image) {
-      logger.warn('safety.refused', { tool: tool.name, action: stepAction, guard: 'no_vision', reason: VISION_DISABLED_REFUSAL, batchStep: i });
-      outcomes.push({ i, label, status: 'blocked', text: VISION_DISABLED_REFUSAL.slice(0, 200) });
-      return halt(i, `step ${i} (${label}): ${VISION_DISABLED_REFUSAL}`);
-    }
-
+    const after = await afterCall(call, res, ctx);
+    if ('guard' in after) return block(i, label, call, after);
     // A screenshot step names its id first, so it survives the step text's truncation.
-    const shotNote = isFullScreenshotCall(tool.name, stepAction) ? `${(await noteScreenshot(ctx)).split(' — ')[0]} · ` : '';
+    const shotNote = after.screenshotNote ? `${after.screenshotNote.split(' — ')[0]} · ` : '';
     outcomes.push({ i, label, status: 'ok', text: `${shotNote}${clipScreenText(res.text || '', 160)}`, pressedKeys: res.pressedKeys, ...target });
     if (res.image) shot = { image: res.image, imageStep: i };
     completed++;

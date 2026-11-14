@@ -27,8 +27,8 @@ import { getAllTools, getCompactSurface } from '../tools/registry';
 import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
-import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
-import { isStopped, STOPPED_TEXT, actedIn, actRecord } from '../core/control';
+import { isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
+import { actedIn, actRecord } from '../core/control';
 import { logger } from '../core/observability/logger';
 import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
 
@@ -39,7 +39,7 @@ import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
-import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from '../tools/screen-guard';
+import { refusalBefore, afterCall, type GuardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -354,24 +354,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
             isError: true,
           };
         }
-        // The user's stop comes right after consent and before every other refusal (screen binding, own UI):
-        // an agent told "no screenshot taken" never learns the user took control back (control.ts).
-        if (isStopped() && !isStopSafeCall(tool.name, callAction)) {
-          const label = callAction ? `${tool.name} {action:"${callAction}"}` : tool.name;
-          logger.warn('safety.refused', { tool: tool.name, action: callAction, guard: 'stopped', reason: STOPPED_TEXT });
-          sessionLog.record(tool.name, callAction, false, 0, STOPPED_TEXT, clientInfo(), { outcome: 'refused' });
-          return { content: [{ type: 'text', text: withOutcome(`${label}: ${STOPPED_TEXT}`, true) }], isError: true };
-        }
-        // Transparency: any consequential (mutating) tool call from an
-        // EXTERNAL agent pokes the on-screen control banner — it shows on the
-        // first poke and auto-hides after ~30s of inactivity. Read-only
-        // perception (tier 0) stays silent.
-        // Compound tools (compact surface) decide per action in dispatchCompound.
-        if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
-        // A batch that acts at any step shows the pill from its start: its first step may be a 30 s wait, and a pill that
-        // is not there cannot be double-clicked (#294).
-        if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
-        const action = typeof params?.action === 'string' ? params.action : undefined;
+        const action = callAction;
         // A guard that refuses logs its own verdict.
         const refuse = (guard: string, why: string): McpToolResult => {
           const label = action ? `${tool.name} {action:"${action}"}` : tool.name;
@@ -379,16 +362,18 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           sessionLog.record(tool.name, action, false, 0, why, clientInfo(), { outcome: 'refused' });
           return { content: [{ type: 'text', text: withOutcome(`${label}: ${why}`, true) }], isError: true };
         };
-        // Screenshot-bound pointer actions: image coordinates from a screenshot of a screen that has since changed
-        // point at something else (screen-binding.ts).
-        if (isImagePointerCall(tool.name, action, params ?? {})) {
-          const why = await imagePointerRefusal(ctx, params ?? {});
-          if (why) return refuse('screen_binding', why);
-        }
-        // The user's own controls (the pill, the pause prompt) are never a target, and nothing acts while a pause waits.
-        // Last before the handler: a pause that came up during the checks above still stops it.
-        const ownUi = ownUiRefusal(params, isPauseSafeCall(tool.name, action), isStopSafeCall(tool.name, action));
-        if (ownUi) return refuse('own_ui', ownUi);
+        const call: GuardedCall = {
+          tool: tool.name, action, args: params ?? {}, pauseSafe: isPauseSafeCall(tool.name, action), stopSafe: isStopSafeCall(tool.name, action),
+        };
+        // Once the call is known not to be stopped, a consequential one (tier 1+) pokes the pill: it shows on the first
+        // poke and hides after ~30 s without one. Compound tools decide per action in dispatchCompound. A batch that acts
+        // at any step shows it from its start: its first step may be a 30 s wait, and a pill that is not there cannot be
+        // double-clicked (#294).
+        const refused = await refusalBefore(call, ctx, () => {
+          if ((tool.safetyTier ?? 0) >= 1 && !COMPOUND_TOOLS.has(tool.name)) controlBanner.touch();
+          if (tool.name === 'batch' && batchActs(params?.steps)) controlBanner.touch();
+        });
+        if (refused) return refuse(refused.guard, refused.why);
         const started = Date.now();
         const wasIn = actedIn();
         // The app this call acted in, labelled as on the pill: each act keeps its own foreground read, so the same one means it did not.
@@ -409,14 +394,9 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           return { content: [{ type: 'text', text: withOutcome(`${tool.name}: ${msg}`, true) }], isError: true };
         }
         let result = run.result;
-        // High-security mode: no image reaches the model, whichever tool produced it. The capture stays in memory and
-        // is dropped here, before the screenshot is recorded as one the model has seen.
-        if (ctx.disableVision && result.image) {
-          return refuse('no_vision', VISION_DISABLED_REFUSAL);
-        }
-        if (!result.isError && isFullScreenshotCall(tool.name, action)) {
-          result = { ...result, text: `${result.text}\n${await noteScreenshot(ctx)}` };
-        }
+        const after = await afterCall(call, result, ctx);
+        if ('guard' in after) return refuse(after.guard, after.why);
+        if (after.screenshotNote) result = { ...result, text: `${result.text}\n${after.screenshotNote}` };
         // A batch: one row per step class, not one act-other row. Steps the cap skipped never ran.
         const steps = result.steps?.filter(s => s.status !== 'skipped').map(s => ({
           tool: s.tool, action: s.action, ok: s.status === 'ok',
