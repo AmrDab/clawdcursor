@@ -24,7 +24,8 @@ import { freshHostedAppOf, hostedAppOf, isFrameHost, withHostedApp, withHostedAp
 import { actTarget, SessionLog, readSession } from '../surface/session-log';
 import { buildSessionReport } from '../surface/report';
 import * as os from 'os';
-import { appLabel, activityLabel } from '../core/banner';
+import { activityLabel } from '../core/banner';
+import { appLabel } from '../core/app-label';
 import { __setFenceProcessTableForTests } from '../core/fence';
 import { actedIn, actRecord, workingIn, __setForegroundReaderForTests } from '../core/control';
 import { guardedInput, guardInputMethods } from '../platform/pointer-guard';

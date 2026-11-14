@@ -53,6 +53,7 @@ import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput,
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { isStopped, workingIn, workingWindow } from './control';
+import { appLabel } from './app-label';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -65,26 +66,6 @@ const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
  * ("Typing in Edge"); `app` names the agent's window on the paused card.
  */
 export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
-
-// Where the OS gave no display name (Linux, an elevated process the bridge may not open): process names that say little.
-const APP_NAMES: Record<string, string> = {
-  msedge: 'Edge', chrome: 'Chrome', firefox: 'Firefox', explorer: 'File Explorer', code: 'VS Code',
-  winword: 'Word', excel: 'Excel', powerpnt: 'PowerPoint', outlook: 'Outlook',
-};
-const oneLine = (s: string | undefined) => (s ?? '').replace(/[\r\n]+/g, ' ').trim().slice(0, 40);
-
-/**
- * The app as a person knows it: its own display name when the OS gave one ("Designcenter NX" for ugraf.exe), as it is;
- * else from the process name: "msedge.exe" → "Edge", "notepad" → "Notepad". The one exception: explorer.exe calls itself
- * "Windows Explorer", and people know it as File Explorer.
- */
-export function appLabel(processName: string | undefined, appName?: string): string | undefined {
-  const base = oneLine((processName ?? '').replace(/\.(exe|app)$/i, ''));
-  const own = base.toLowerCase() === 'explorer' ? '' : oneLine(appName);
-  if (own) return own;
-  if (!base || /^pid \d+$/.test(base)) return undefined;
-  return APP_NAMES[base.toLowerCase()] ?? base.charAt(0).toUpperCase() + base.slice(1);
-}
 
 /**
  * "Typing in Edge" — what the running pill shows for a guarded method (pointer-guard.ts GUARDED_METHODS); undefined for

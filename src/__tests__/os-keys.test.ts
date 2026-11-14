@@ -18,7 +18,6 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
 }));
 vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => []) },
-  appLabel: (s: string) => s,
 }));
 
 import { createMcpServer } from '../surface/mcp-server';

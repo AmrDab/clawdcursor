@@ -18,7 +18,7 @@
  */
 import { fenceActive, fenceCheck, fenceInput, isFenceRefusal } from './fence';
 import { freshHostedAppOf, isFrameHost } from '../platform/frame-host';
-import { appLabel } from './banner';
+import { appLabel } from './app-label';
 import * as fs from 'fs';
 import { quoteScreenText } from './untrusted-screen-content';
 import * as path from 'path';

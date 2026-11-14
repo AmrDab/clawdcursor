@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { ChildProcess } from 'child_process';
-import { controlBanner, overlayEnv, activityLabel, appLabel, type OverlayMode } from '../core/banner';
+import { controlBanner, overlayEnv, activityLabel, type OverlayMode } from '../core/banner';
+import { appLabel } from '../core/app-label';
 import { guardInputMethods, setInputGuard, setOnAgentInput } from '../platform/pointer-guard';
 
 class FakeChild extends EventEmitter {

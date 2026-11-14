@@ -22,8 +22,7 @@ const consent = { given: true };
 vi.mock('../surface/onboarding', () => ({
   hasConsent: () => consent.given, writeConsentFile: vi.fn(), revokeConsent: vi.fn(), runOnboarding: vi.fn(),
 }));
-vi.mock('../core/banner', async (actual) => ({
-  appLabel: (await actual<typeof import('../core/banner')>()).appLabel,
+vi.mock('../core/banner', () => ({
   controlBanner: { touch: vi.fn(), hold: vi.fn(() => () => {}), pin: vi.fn(), unpin: vi.fn(), isVisible: vi.fn(), overlayPids: vi.fn(() => [4242]) },
 }));
 
