@@ -44,7 +44,8 @@ export interface ServeOptions {
 
 // SECURITY (#113, #293): this surface is full desktop control, so the daemon
 // binds loopback only — there is no setting or flag that widens it. For remote
-// use, tunnel the port: `ssh -L 3847:127.0.0.1:3847 user@host`.
+// use, tunnel the port with the same port on both ends (auth.ts checks the Host):
+// `ssh -L 3847:127.0.0.1:3847 user@host`.
 const BIND_HOST = '127.0.0.1';
 
 export async function serveMcp(opts: ServeOptions): Promise<void> {

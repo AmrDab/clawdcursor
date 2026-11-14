@@ -15,6 +15,7 @@
  * etc.) resolve — falling back to a plain SKILL.md copy when symlinks are blocked.
  */
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { getPackageRoot } from '../paths';
 
@@ -51,8 +52,7 @@ export function hostRegistries(homeDir: string): [name: string, skillsDir: strin
  */
 export function registerSkills(folderName = 'clawdcursor'): SkillRegSummary {
   const results: SkillRegResult[] = [];
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-  if (!homeDir) return { registered: 0, results };
+  const homeDir = os.homedir();   // the home `uninstall` cleans (uninstall.ts)
 
   const clawdCursorRoot = getPackageRoot();
   const skillSource = path.join(clawdCursorRoot, 'SKILL.md');
@@ -123,16 +123,19 @@ export function registerSkills(folderName = 'clawdcursor'): SkillRegSummary {
 
 /**
  * The registrations registerSkills made, for `uninstall`: in each host's skills dir, a `clawdcursor` link to a clawdcursor
- * package, or a folder holding only the SKILL.md it copied. A folder the user made there (registerSkills only refreshes
- * the SKILL.md inside one) is not ours and is left.
+ * package, or a folder holding only a SKILL.md identical to the package's (the copy it made). Any other folder there is
+ * the user's (registerSkills only refreshes the SKILL.md inside one) and is left.
  */
 export function ourSkillRegistrations(homeDir: string, folderName = 'clawdcursor'): string[] {
+  let ourSkill: Buffer;
+  try { ourSkill = fs.readFileSync(path.join(getPackageRoot(), 'SKILL.md')); } catch { ourSkill = Buffer.alloc(0); }
   return hostRegistries(homeDir).map(([, dir]) => path.join(dir, folderName)).filter(target => {
     try {
       if (fs.lstatSync(target).isSymbolicLink()) {
         return JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8')).name === 'clawdcursor';
       }
-      return fs.readdirSync(target).join('/') === 'SKILL.md';
+      return fs.readdirSync(target).join('/') === 'SKILL.md' && ourSkill.length > 0
+        && fs.readFileSync(path.join(target, 'SKILL.md')).equals(ourSkill);
     } catch {
       return false;
     }

@@ -14,7 +14,7 @@ import { stopRunningDaemon } from '../surface/uninstall';
 import { ourSkillRegistrations, hostRegistries } from '../surface/skill-register';
 import { claimPidFile, recordLockPort, pidFilePath, DAEMON_LOCK } from '../surface/pidfile';
 import { initServerToken } from '../surface/auth';
-import { TOKEN_PATH } from '../paths';
+import { TOKEN_PATH, getPackageRoot } from '../paths';
 
 describe('uninstall stops the daemon where it runs', () => {
   it('POSTs /stop, with the token, to the port the daemon recorded', async () => {
@@ -77,16 +77,18 @@ describe('the skill registrations uninstall removes', () => {
       fs.mkdirSync(path.dirname(from), { recursive: true });
       fs.symlinkSync(to, from, process.platform === 'win32' ? 'junction' : 'dir');
     };
-    const copied = (dir: string, extra?: string) => {
+    const ourSkill = fs.readFileSync(path.join(getPackageRoot(), 'SKILL.md'));
+    const copied = (dir: string, skill: string | Buffer = ourSkill, extra?: string) => {
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'SKILL.md'), '---\nname: clawdcursor\n---\n');
+      fs.writeFileSync(path.join(dir, 'SKILL.md'), skill);
       if (extra) fs.writeFileSync(path.join(dir, extra), 'mine');
     };
     expect(hostRegistries(home).map(([n]) => n)).toEqual(['Claude Code', 'OpenClaw', 'OpenClaw (dev)', 'OpenClaw (flat)', 'Codex', 'Cursor']);
     link(target(0), ours);                     // Claude Code: the symlink registerSkills makes
     copied(target(5));                         // Cursor: its SKILL.md-copy fallback
     link(target(4), pkg('someone-else'));      // Codex: a link to another package
-    copied(target(1), 'notes.md');             // OpenClaw: the user's own folder (registerSkills only refreshed SKILL.md)
+    copied(target(1), ourSkill, 'notes.md');   // OpenClaw: the user's own folder (registerSkills only refreshed SKILL.md)
+    copied(target(2), '---\nname: clawdcursor\n---\nmine\n');   // OpenClaw (dev): the user's own SKILL.md, alone in its folder
     expect(ourSkillRegistrations(home)).toEqual([target(0), target(5)]);
   });
 });

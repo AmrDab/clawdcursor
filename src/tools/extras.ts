@@ -490,9 +490,8 @@ export function getExtraTools(): ToolDefinition[] {
     {
       name: 'logs_recent',
       description:
-        'Return the last 200 captured console log entries from the daemon ' +
-        '(level + timestamp + message). Empty array when no log buffer is ' +
-        'attached (e.g. stdio MCP without a running daemon).',
+        'Return the last 200 captured console log entries from this ' +
+        'clawdcursor server, stdio or HTTP (level + timestamp + message).',
       parameters: {
         limit: {
           type: 'number',
