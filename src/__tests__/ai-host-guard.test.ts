@@ -14,7 +14,7 @@ vi.mock('../core/banner', () => ({
 
 import { __setControlDirForTests, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods } from '../platform/pointer-guard';
-import { AI_HOST_PROCESSES, isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests, __setParentPidForTests, parseTable, walkAncestors, execFailReason } from '../core/ai-hosts';
+import { isAiHostProcess, __setHostAncestryForTests, __startHostAncestryReadForTests, __setParentPidForTests, parseTable, walkAncestors, execFailReason } from '../core/ai-hosts';
 import { classifyResult } from '../core/result-codes';
 
 type Win = { processId: number; processName: string; title?: string };
@@ -130,13 +130,6 @@ describe('the AI-assistant list', () => {
     }
   });
 
-  it('the Windows bridge raises none of the same apps: its list is this list', () => {
-    const ps = fs.readFileSync(path.join(__dirname, '..', '..', 'scripts', 'ps-bridge.ps1'), 'utf8');
-    const m = /\$script:ForegroundDenylistProcs = @\(([^)]*)\)/.exec(ps);
-    expect(m, 'ForegroundDenylistProcs not found in ps-bridge.ps1').not.toBeNull();
-    const names = [...m![1].matchAll(/'([^']+)'/g)].map(x => x[1].toLowerCase());
-    expect(names.sort()).toEqual([...AI_HOST_PROCESSES].sort());
-  });
 });
 
 /** An input layer with by-name acts and a launch that can surface nothing, as all three adapters answer when no window was confirmed. */

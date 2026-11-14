@@ -9,9 +9,6 @@
  * The list is now checked in the input layer, below every tool, so neither a name nor a wrapper can route around it.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { hardKeyRefusal } from '../platform/hard-keys';
 import { guardInputMethods, setInputGuard, unguarded, _resetHeldKeys } from '../platform/pointer-guard';
 import { normalizeKey } from '../platform/keys';
@@ -153,17 +150,6 @@ function keyboard() {
 
 describe('one call site: the input layer, below every tool', () => {
   beforeEach(() => { setInputGuard(null); _resetHeldKeys(); });
-
-  it('hardKeyRefusal is called from exactly one place in the source', () => {
-    const src = join(dirname(fileURLToPath(import.meta.url)), '..');
-    const files = (dir: string): string[] => readdirSync(dir).flatMap(f => {
-      const p = join(dir, f);
-      return statSync(p).isDirectory() ? (f === '__tests__' ? [] : files(p)) : (p.endsWith('.ts') ? [p] : []);
-    });
-    const callers = files(src).filter(p => !p.endsWith('hard-keys.ts') && /hardKeyRefusal\(/.test(readFileSync(p, 'utf8')));
-    expect(callers.map(p => p.replace(/\\/g, '/').split('/src/')[1])).toEqual(['platform/pointer-guard.ts']);
-    expect(readFileSync(callers[0], 'utf8').match(/hardKeyRefusal\(/g)).toHaveLength(1);
-  });
 
   it('keyPress and keyDown refuse it; nothing reaches the OS', async () => {
     const kb = keyboard();

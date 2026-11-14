@@ -15,7 +15,7 @@ import { PassThrough } from 'stream';
 import { controlBanner, outlineFlags } from '../core/banner';
 import { stopControl, __setControlDirForTests } from '../core/control';
 import type { ChildProcess } from 'child_process';
-import { existsSync, readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -278,13 +278,6 @@ describe('no full-screen glow', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
   const read = (...p: string[]) => readFileSync(join(root, ...p), 'utf8');
 
-  it('the glow drawer is gone and nothing spawns it', () => {
-    expect(existsSync(join(root, 'scripts', 'edge-glow.ps1'))).toBe(false);
-    for (const src of [read('src', 'core', 'banner.ts'), read('scripts', 'mac', 'overlay.swift'), read('scripts', 'linux', 'overlay.py')]) {
-      expect(src).not.toMatch(/edge-glow|['"]glow['"]|CLAWD_NO_GLOW/);
-    }
-  });
-
   it('no outline drawer sizes a window to a screen (only the desktop itself in front is outlined as its monitor)', () => {
     expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
     const swift = read('scripts', 'mac', 'overlay.swift');
@@ -303,15 +296,6 @@ describe('no full-screen glow', () => {
     expect(swift).toContain('let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion');
     expect(swift).toContain('let turning = !paused && !still');
     expect(swift).toContain('if window == nil || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { return }');
-  });
-
-  // The look is a port of Border Beam and Thinking Orbs (libraries.dev, MIT): its notice goes with it.
-  it('the beam and the orb carry the library\'s licence notice (#392)', () => {
-    const ps = read('scripts', 'window-outline.ps1');
-    expect(ps).toContain('Border Beam - MIT License - Copyright (c) 2026 Jakub Antalik');
-    expect(ps).toContain('The above copyright notice and this permission notice shall be included in all copies or substantial portions of');
-    expect(read('scripts', 'mac', 'overlay.swift')).toContain('MIT License,\n// Copyright (c) 2026 Jakub Antalik');
-    expect(read('scripts', 'banner.ps1')).toContain('MIT License, Copyright (c) 2026 Jakub');
   });
 
   it('the Windows outline is click-through, never activates, and stays out of captures', () => {

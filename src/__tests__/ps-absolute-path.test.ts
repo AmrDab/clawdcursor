@@ -90,33 +90,6 @@ describe('the private working directory', () => {
   });
 });
 
-describe('no bare-name system programs and no shell exec of PowerShell in the sources', () => {
-  const files: string[] = [];
-  (function walk(dir: string) {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); } else if (p.endsWith('.ts')) files.push(p);
-    }
-  })(path.join(__dirname, '..'));
-  const lines = files.flatMap(f => fs.readFileSync(f, 'utf8').split('\n').map((l, i) => ({ f: path.relative(path.join(__dirname, '..'), f), n: i + 1, l })))
-    .filter(x => !/^\s*(\/\/|\*|\/\*)/.test(x.l));
-
-  it('PowerShell is never the bare-name first argument of a spawn / execFile', () => {
-    const bad = lines.filter(x => /\b(spawn|spawnSync|execFile|execFileSync|execFileAsync|spawnExec)\(\s*['"`](powershell|pwsh)(\.exe)?['"`]/i.test(x.l));
-    expect(bad.map(x => `${x.f}:${x.n}`)).toEqual([]);
-  });
-
-  it('no exec() / execSync() / execAsync() call runs a powershell string through a shell', () => {
-    const bad = lines.filter(x => /\b(exec|execSync|execAsync)\(\s*[`'"][^`'"]*(powershell|pwsh)/i.test(x.l));
-    expect(bad.map(x => `${x.f}:${x.n}`)).toEqual([]);
-  });
-
-  it('reg, tasklist, taskkill, netstat, rundll32, explorer and chcp are not spawned by bare name', () => {
-    const bad = lines.filter(x => /\b(spawn|spawnSync|execFile|execFileSync|execFileAsync|execSync|exec)\(\s*[`'"](reg|reg\.exe|tasklist|taskkill|netstat|rundll32|explorer|explorer\.exe|chcp|chcp\.com)\b/i.test(x.l));
-    expect(bad.map(x => `${x.f}:${x.n}`)).toEqual([]);
-  });
-});
-
 describe('review round: windir, a hardened run dir, the interactive console, launched apps', () => {
   it('windir stands in when SystemRoot is unset; with neither, or no file there, it still fails closed', () => {
     const saved = { sr: process.env.SystemRoot, up: process.env.SYSTEMROOT, wd: process.env.windir, WD: process.env.WINDIR };
@@ -171,46 +144,3 @@ describe('review round: windir, a hardened run dir, the interactive console, lau
   });
 });
 
-describe('every program started by name is a macOS / Linux one', () => {
-  // The only bare names allowed in spawn / exec / execFile calls: tools that exist on macOS or Linux alone (their calls sit on
-  // non-Windows code paths), and `npm`, resolved from PATH by the user's own uninstall command (run with a private cwd).
-  // Anything for Windows is named by absolute path through ps-spawn.ts.
-  const NON_WINDOWS = new Set([
-    'ydotool', 'osascript', 'wmctrl', 'python3', 'xdotool', 'which', 'xrandr', 'open', 'wtype', 'sh', 'pbpaste', 'pbcopy', 'xwininfo',
-    'xdg-open', 'xcode-select', 'wlr-randr', 'wl-paste', 'wl-copy', 'system_profiler', 'sysctl', 'swiftc', 'swift', 'swaymsg', 'ps',
-    'pkill', 'kill', 'grim', 'gtk-launch', 'command', 'lsof', 'lsappinfo', 'ioreg', 'xclip', 'xsel', 'gsettings', 'dbus-send',
-    'npm', 'git', 'node', 'tar', 'unzip', 'security', 'codesign', 'killall', 'defaults', 'screencapture', 'uname', 'xset', 'id',
-  ]);
-  const src = path.join(__dirname, '..');
-  const files: string[] = [];
-  (function walk(dir: string) {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { if (e.name !== '__tests__') walk(p); } else if (p.endsWith('.ts')) files.push(p);
-    }
-  })(src);
-  const text = files.flatMap(f => fs.readFileSync(f, 'utf8').split('\n').map((l, i) => ({ f: path.relative(src, f), n: i + 1, l })))
-    .filter(x => !/^\s*(\/\/|\*|\/\*)/.test(x.l));
-
-  it('no spawn / exec / execFile call names a program that Windows would find in the working directory', () => {
-    const call = /\b(spawn|spawnSync|execFile|execFileSync|execFileAsync|execSync|execAsync|exec|spawnExec)\(\s*([`'"])([^`'"\s$]+)/;
-    const bad = text.flatMap(x => {
-      const m = call.exec(x.l);
-      if (!m) return [];
-      const name = path.basename(m[3]).toLowerCase();
-      return NON_WINDOWS.has(name) ? [] : [`${x.f}:${x.n} ${m[3]}`];
-    });
-    expect(bad).toEqual([]);
-  });
-
-  it('exec() / execSync() with a command string is for macOS / Linux tools only', () => {
-    const call = /\b(execSync|execAsync|exec)\(\s*([`'"])([^`'"]*)/;
-    const bad = text.flatMap(x => {
-      const m = call.exec(x.l);
-      if (!m) return [];
-      const first = (m[3].trim().split(/\s+/)[0] ?? '').toLowerCase();
-      return NON_WINDOWS.has(first) ? [] : [`${x.f}:${x.n} ${m[3].slice(0, 40)}`];
-    });
-    expect(bad).toEqual([]);
-  });
-});

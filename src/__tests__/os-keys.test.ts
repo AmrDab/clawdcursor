@@ -6,9 +6,6 @@
  * An agent's explicit `ctrl+x` is NOT translated on macOS: Ctrl is a real key there (terminals).
  */
 import { describe, it, expect, vi } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 let capturedInstructions = '';
 vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
@@ -165,36 +162,7 @@ describe('shortcuts resolve for the current OS only', () => {
 });
 
 describe('clawdcursor\'s own combos use the platform modifier', () => {
-  // Per-OS adapters and their tables are where a literal modifier belongs; the shortcut table is checked above.
-  const PER_OS = /[\\/]platform[\\/](windows|macos|linux|wayland-backend|native-desktop|keys|hard-keys|mac-[a-z-]+|pointer-guard)\.ts$|[\\/]src[\\/]shortcuts\.ts$/;
-  const src = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const files = (dir: string): string[] => readdirSync(dir).flatMap(f => {
-    const p = join(dir, f);
-    return statSync(p).isDirectory() ? (f === '__tests__' ? [] : files(p)) : (p.endsWith('.ts') ? [p] : []);
-  });
-
-  it('no built-in key press hardcodes ctrl / control outside the per-OS adapters (Ctrl+Tab tab cycling excepted)', () => {
-    const offenders: string[] = [];
-    for (const p of files(src).filter(p => !PER_OS.test(p))) {
-      readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
-        // A press or hold of a literal chord that starts with Ctrl, however it is quoted.
-        const m = /key(?:Press|Down)\(\s*[^)]*?['"`](?:ctrl|control)\+([^'"`]+)['"`]/i.exec(line);
-        if (m && !/^(shift\+)?tab$/i.test(m[1])) offenders.push(`${p.split(/[\\/]src[\\/]/)[1]}:${i + 1} ${line.trim()}`);
-      });
-    }
-    expect(offenders).toEqual([]);
-  });
-
-  it('no built-in combo is chosen by an inline darwin check: one helper (`mod`) decides', () => {
-    const offenders: string[] = [];
-    for (const p of files(src).filter(p => !PER_OS.test(p))) {
-      readFileSync(p, 'utf8').split('\n').forEach((line, i) => {
-        if (/(darwin|IS_MAC)[^\n]{0,20}\?\s*['"`](cmd|super|command|meta)\+[a-z]['"`]\s*:\s*['"`](ctrl|control)\+/i.test(line)) offenders.push(`${p.split(/[\\/]src[\\/]/)[1]}:${i + 1}`);
-      });
-    }
-    expect(offenders).toEqual([]);
-  });
-
+  // The repo-wide "no literal ctrl+ outside the per-OS adapters" scans are in repo-invariants.test.ts.
   it.each(OSES)('type_text pastes with mod+v on %s', async (platform) => {
     let clip = '';
     const keyPress = vi.fn(async (_c: string) => {});
