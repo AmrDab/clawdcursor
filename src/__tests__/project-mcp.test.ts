@@ -331,32 +331,16 @@ describe('projectToToolDefinition', () => {
     expect(def.costClass).toBeDefined();
   });
 
-  it('applies the type → type_text MCP name mapping', () => {
-    const def = projectToToolDefinition(typeTool);
-    // System B name is 'type'; TOOL_META maps it to MCP name 'type_text'.
-    expect(def.name).toBe('type_text');
-  });
-
-  it('applies the click → mouse_click MCP name mapping', () => {
-    const clickTool = buildUnifiedTools().find(t => t.name === 'click');
-    expect(clickTool).toBeDefined();
-    const def = projectToToolDefinition(clickTool!);
-    expect(def.name).toBe('mouse_click');
-  });
-
-  it('applies the list_windows → get_windows MCP name mapping', () => {
-    const lw = buildUnifiedTools().find(t => t.name === 'list_windows');
-    expect(lw).toBeDefined();
-    const def = projectToToolDefinition(lw!);
-    expect(def.name).toBe('get_windows');
-  });
-
   it('handler calls succeed and return a valid ToolResult', async () => {
     const def = projectToToolDefinition(readScreenTool);
     const ctx = makeMockToolContext();
 
     // Must not throw — the system B execute() wraps errors internally.
     await expect(def.handler({}, ctx)).resolves.toBeTruthy();
+  });
+
+  it('the projection publishes the TOOL_META MCP name (type → type_text; the full rename table is checked below)', () => {
+    expect(projectToToolDefinition(typeTool).name).toBe('type_text');
   });
 
   it('handler does not throw for the type tool', async () => {

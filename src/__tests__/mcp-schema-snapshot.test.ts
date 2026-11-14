@@ -8,8 +8,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import * as fs from 'fs';
-import { currentSnapshot, readStoredSnapshot, snapshotPath } from '../schema/snapshot';
+import { currentSnapshot, readStoredSnapshot } from '../schema/snapshot';
 
 describe('MCP schema snapshot', () => {
   it('matches the committed schema.snapshot.json', async () => {
@@ -20,8 +19,4 @@ describe('MCP schema snapshot', () => {
     ).not.toBeNull();
     expect(await currentSnapshot()).toEqual(stored);
   }, 60_000);
-
-  it('snapshot file exists at repo root', () => {
-    expect(fs.existsSync(snapshotPath()), 'schema.snapshot.json should be committed at repo root').toBe(true);
-  });
 });

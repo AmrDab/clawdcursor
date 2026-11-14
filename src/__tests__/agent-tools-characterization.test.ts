@@ -10,9 +10,9 @@
  *
  * Pinned behaviors:
  *  1. buildUnifiedTools() catalog composition
- *  2. coerceCoord: smushed "x,y" string splits + warns
+ *  2. a smushed "x,y" click: the split warning reaches the result (coerceCoord itself: coerce-coord.test.ts)
  *  3. coordBreadcrumb: click result text contains the "(x,y) → screen (x,y)" pattern
- *  4. Conditional coord scaling: space:'image' scales; space:'screen' does not
+ *     (the scaling itself: coord-scale.test.ts)
  *  6. resolveAgentPid fallback: a11y tool with no processId uses active-window pid
  *  7. type tool paste-fast-path: result text says "(paste)"
  */
@@ -56,8 +56,7 @@ vi.mock('../platform/ocr-engine', () => {
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
-import { buildUnifiedTools, coerceCoord } from '../tools/projected/tools';
-import { imageScale, scaleCoord } from '../platform/coord-scale';
+import { buildUnifiedTools } from '../tools/projected/tools';
 import type { AgentToolContext } from '../tools/projected/types';
 import { makeMockPlatform } from './helpers/mock-platform';
 
@@ -133,42 +132,6 @@ describe('1. buildUnifiedTools() — flat catalog composition', () => {
 
 describe('2. coerceCoord — smushed coordinate handling', () => {
 
-  it('splits "390, 79" (with space) into x=390, y=79 and warns', () => {
-    const result = coerceCoord('390, 79', undefined);
-    expect(result.x).toBe(390);
-    expect(result.y).toBe(79);
-    expect(result.warning).toBeDefined();
-    expect(result.warning).toMatch(/split/i);
-    expect(result.warning).toMatch(/separate/i);
-  });
-
-  it('splits "390,79" (no space) into x=390, y=79 and warns', () => {
-    const result = coerceCoord('390,79', undefined);
-    expect(result.x).toBe(390);
-    expect(result.y).toBe(79);
-    expect(result.warning).toBeDefined();
-  });
-
-  it('splits "(390, 79)" (with parens) into x=390, y=79 and warns', () => {
-    const result = coerceCoord('(390, 79)', undefined);
-    expect(result.x).toBe(390);
-    expect(result.y).toBe(79);
-    expect(result.warning).toBeDefined();
-  });
-
-  it('numeric x,y pass through unchanged without a warning', () => {
-    const result = coerceCoord(390, 79);
-    expect(result.x).toBe(390);
-    expect(result.y).toBe(79);
-    expect(result.warning).toBeUndefined();
-  });
-
-  it('NaN x with numeric y produces NaN x (no crash)', () => {
-    const result = coerceCoord('not-a-number', 79);
-    expect(Number.isNaN(result.x)).toBe(true);
-    expect(result.y).toBe(79);
-  });
-
   it('smushed click: click tool reads the warning and appends it to result.text', async () => {
     const ctx = makeCtx();
     const tools = buildUnifiedTools();
@@ -228,59 +191,6 @@ describe('3. coordBreadcrumb — click result contains image→screen breadcrumb
     expect(result.success).toBe(true);
     // The coordBreadcrumb only adds "→ screen (sx,sy)" when scale !== 1
     expect(result.text).not.toContain('→ screen');
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 4. Conditional coordinate scaling
-// ─────────────────────────────────────────────────────────────────────────────
-
-describe('4. Conditional coordinate scaling', () => {
-
-  it('imageScale: physicalWidth=2560, LLM_TARGET_WIDTH=1280 → scale=2', () => {
-    const ctx = makeCtx(); // physicalWidth=2560
-    expect(imageScale(ctx)).toBe(2);
-  });
-
-  it('imageScale: physicalWidth=1280 → scale=1 (no downscale)', () => {
-    const ctx = makeCtx({ screen: { logicalWidth: 1280, logicalHeight: 720, physicalWidth: 1280, physicalHeight: 720, dpiRatio: 1 } });
-    expect(imageScale(ctx)).toBe(1);
-  });
-
-  it('imageScale: physicalWidth=0 (missing) → scale=1', () => {
-    expect(imageScale({ screen: { physicalWidth: 0 } } as any)).toBe(1);
-  });
-
-  it('scaleCoord rounds correctly', () => {
-    expect(scaleCoord(100, 2)).toBe(200);
-    expect(scaleCoord(101, 2)).toBe(202);
-    expect(scaleCoord(100.6, 2)).toBe(201); // Math.round(201.2) = 201
-  });
-
-  it('space:"image" click: platform receives SCALED coords', async () => {
-    const ctx = makeCtx(); // physicalWidth=2560, scale=2
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    await clickTool.execute({ x: 100, y: 200, space: 'image' }, ctx);
-    // mouseClick should be called with scaled coords: x=200, y=400
-    expect(ctx.platform.mouseClick).toHaveBeenCalledWith(200, 400, expect.any(Object));
-  });
-
-  it('space:"screen" click: platform receives ORIGINAL coords (no scaling)', async () => {
-    const ctx = makeCtx(); // physicalWidth=2560, scale would be 2 if image
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    await clickTool.execute({ x: 100, y: 200, space: 'screen' }, ctx);
-    // mouseClick should be called with unscaled coords: x=100, y=200
-    expect(ctx.platform.mouseClick).toHaveBeenCalledWith(100, 200, expect.any(Object));
-  });
-
-  it('space:"screen" is unscaled (omitted space is image space: coord-space-default.test.ts)', async () => {
-    const ctx = makeCtx();
-    const tools = buildUnifiedTools();
-    const clickTool = findTool(tools, 'click');
-    await clickTool.execute({ x: 100, y: 200, space: 'screen' }, ctx);
-    expect(ctx.platform.mouseClick).toHaveBeenCalledWith(100, 200, expect.any(Object));
   });
 });
 

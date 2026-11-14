@@ -46,6 +46,10 @@ describe('ps-bridge set-value keyboard fallback', () => {
     expect(fallback).toMatch(/\$topHwnd -eq 0 -or \$fgRoot -ne \$topHwnd/);
     // the check comes before any key is sent
     expect(fallback.indexOf('$fgRoot -ne $topHwnd')).toBeLessThan(fallback.indexOf('SendWait("^a")'));
+    // a plain failure, not a refusal, so set_value falls back to click-then-type
+    const refusal = fallback.slice(fallback.indexOf('$topHwnd -eq 0'), fallback.indexOf('SendWait('));
+    expect(refusal).toMatch(/success=\$false/);
+    expect(refusal).not.toMatch(/refused/);
   });
 
   it('a null read-back after typing is reported unverified, not as a plain success', () => {

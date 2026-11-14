@@ -35,6 +35,7 @@ describe('1. a read-back toggle / select is confirmed', () => {
     const p = plat([], () => ({ success: true, data: { toggleState: 'On', toggleChanged: false } }));
     const b = await agentTool('a11y_toggle').execute({ name: 'Accept', processId: 1 }, { platform: p } as any);
     expect(b.text).toMatch(/not confirmed/);
+    expect(b.text).not.toMatch(/→/);   // never presents the unchanged read as the result ("→ On")
     expect(classifyResult(b.text, false, true)).toEqual({ outcome: 'unverified' });
   });
 
