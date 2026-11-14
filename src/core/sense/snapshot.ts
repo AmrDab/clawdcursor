@@ -1,11 +1,8 @@
 /**
  * Snapshot builder — assembles a structured Snapshot from the PlatformAdapter.
  *
- * Blind-first scope: accessibility tree only.
- *
- * OCR fusion on top of a11y (merging OCR hits with a11y bounds into a single
- * element list) is a cost-saving enhancement we can layer in later without
- * changing the `Snapshot` contract.
+ * Blind-first scope: accessibility tree only. compileUIMap (ui-map.ts) fuses
+ * OCR on top.
  */
 
 import type { PlatformAdapter } from '../../platform/types';
@@ -36,10 +33,6 @@ function looksSecure(controlType?: string, name?: string, subrole?: string): boo
   return false;
 }
 
-/**
- * Capture a structured snapshot. a11y-only for v0.8.1; OCR merge is a
- * future enhancement.
- */
 /** `processId` reads that app's window instead of the focused one. */
 export async function captureSnapshot(adapter: PlatformAdapter, processId?: number): Promise<Snapshot> {
   const capturedAt = Date.now();

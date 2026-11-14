@@ -33,8 +33,8 @@
  * (CLAWD_BANNER_CHOICES, a JSON array of strings; a click prints BANNER_CHOICE <index>) and a text box
  * (CLAWD_BANNER_INPUT, JSON {placeholder?, multiline?}; sent as BANNER_REPLY like "Something else").
  *
- *   - pin()/unpin(): the autonomous task loop pins the banner for the whole
- *     task (agent.executeTask). A pinned banner ignores idle timers.
+ *   - pin()/unpin(): a pinned banner ignores idle timers. Nothing pins it in
+ *     production; a stop (surface/serve.ts) calls unpin() to hide it.
  *   - touch(): every consequential (safetyTier ≥ 1) MCP tool call pokes the
  *     banner; it shows on the first poke and auto-hides after IDLE_HIDE_MS of
  *     inactivity. This covers EXTERNAL agents (editor-hosted over stdio or
@@ -345,7 +345,7 @@ class ControlBanner {
     else this.touch(); // external-agent session: running form, then the idle hide
   }
 
-  /** Show and keep shown until unpin() — the autonomous-task lifecycle. */
+  /** Show and keep shown until unpin(). */
   pin(): void {
     if (!this.enabled || isStopped()) return;
     this.pinned = true;
@@ -366,7 +366,7 @@ class ControlBanner {
   touch(idleMs: number = IDLE_HIDE_MS): void {
     if (!this.enabled || isStopped()) return; // after a stop, a refused call must not bring the pill back
     this.show();
-    if (this.pinned || this.paused) return; // task lifecycle / pending pause owns visibility
+    if (this.pinned || this.paused) return; // a pin / pending pause owns visibility
     this.clearIdleTimer();
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;

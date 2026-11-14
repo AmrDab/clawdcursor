@@ -2,21 +2,19 @@
  * `normalizeAppName` — turn a free-form app reference into the short
  * canonical token the alias table is keyed on.
  *
- * Background. When a user says "open outlook app" the router's regex
- * `/^(?:open|launch|start|run)\s+(.+?)$/` captures `"outlook app"`. The
- * alias table is keyed on `'outlook'` — so without normalization the
- * lookup misses, the launcher falls back to "type literal string into
- * Start Menu", and Windows Search returns whichever app it ranks
- * highest for "outlook app" (often nothing useful). Same pattern hits
- * "the calculator", "edge browser", "chrome browser", etc.
+ * Background. A model calls `open_app` with `"outlook app"`. The alias
+ * table is keyed on `'outlook'` — so without normalization the lookup
+ * misses and the raw name goes to the launcher, which finds no installed
+ * app called "outlook app". Same pattern hits "the calculator",
+ * "edge browser", "chrome browser", etc.
  *
  * Properties:
  *   - **App-agnostic.** No allowlist of specific apps. Operates on
  *     stop-word stripping rules that work for any English app name.
  *   - **OS-agnostic.** Pure string transform. No platform calls.
  *   - **Model-agnostic.** Can be applied at the alias-resolution choke
- *     point so every caller (router, agent's open_app, MCP, REST) gets
- *     it without knowing it exists.
+ *     point so every caller (open_app, open_file) gets it without
+ *     knowing it exists.
  *
  * Why not ask the LLM to normalize? Because the agent's `open_app` tool
  * receives a `name` argument from the LLM directly, and we want the
@@ -66,9 +64,6 @@ export function normalizeAppName(name: string): string {
   let s = name.replace(QUOTE_CHARS, '').trim().toLowerCase();
   if (!s) return '';
   s = s.replace(ARTICLE_PREFIX, '').trim();
-  // Iteratively strip suffixes — handles "outlook app application",
-  // "edge browser app", etc. Bounded to a few passes so a pathological
-  // input never loops.
   for (let i = 0; i < 4; i += 1) {
     const next = s.replace(FILLER_SUFFIX, '').trim();
     if (next === s) break;

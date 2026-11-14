@@ -66,9 +66,6 @@ export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutco
     if ('error' in parsed) {
       return { success: false, text: `${input.toolText}\nexpect rejected: ${parsed.error}` };
     }
-    // Poll until the assertions pass or the settle budget runs out — the UI
-    // is allowed to take a moment to manifest the effect before we call it
-    // a DEVIATION (which tells the model to retry a possibly-taken action).
     const budget = input.settleMs ?? SETTLE_BUDGET_MS;
     const deadline = Date.now() + budget;
     let report = await checkAssertions(parsed.assertions, { adapter: input.adapter, ocrText: input.ocrText });

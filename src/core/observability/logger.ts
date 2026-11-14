@@ -92,7 +92,6 @@ const supportsColor =
 
 const colors = pc.createColors(supportsColor);
 
-// Type for a color/style function — picocolors functions all share this shape.
 type Style = (s: string | number) => string;
 
 const C: Record<'dim' | 'bold' | 'gray' | 'red' | 'green' | 'yellow' | 'blue' | 'magenta' | 'cyan', Style> = {
@@ -110,8 +109,8 @@ const C: Record<'dim' | 'bold' | 'gray' | 'red' | 'green' | 'yellow' | 'blue' | 
 let logDir: string | null = null;
 function getLogDir(): string {
   if (logDir) return logDir;
-  // CLAWDCURSOR_LOG_DIR: tests point this at a temp dir — the suite's stub-model
-  // runs used to fill the user's real ~/.clawdcursor/logs.
+  // CLAWDCURSOR_LOG_DIR: tests point this at a temp dir (tests/vitest.setup.ts)
+  // so they never write the user's real ~/.clawdcursor/logs.
   logDir = process.env.CLAWDCURSOR_LOG_DIR || path.join(os.homedir(), '.clawdcursor', 'logs');
   try { fs.mkdirSync(logDir, { recursive: true }); } catch { /* best-effort */ }
   return logDir;
@@ -143,7 +142,6 @@ function writeJsonLine(line: string): void {
   catch { /* logger must never throw */ }
 }
 
-/** Map an event to the layer tag used in the pretty output. */
 function layerTag(event: string): { label: string; color: Style } {
   if (event.startsWith('safety.')) return { label: 'safety', color: C.red };
   return { label: 'log', color: C.gray };
@@ -160,8 +158,6 @@ function colorize(text: string, color: Style): string {
 const ANSI_RE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 function pad(text: string, len: number): string {
-  // ANSI-aware right-pad so the visible width matches `len` even with
-  // escape sequences in `text`.
   const visible = text.replace(ANSI_RE, '');
   const delta = len - visible.length;
   return delta > 0 ? text + ' '.repeat(delta) : text;
@@ -171,10 +167,6 @@ function truncate(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
-/**
- * Compact inline meta — excludes redundant fields (correlationId, task) that
- * are already rendered in the header.
- */
 function compactArgs(args: Record<string, unknown> | undefined): string {
   if (!args) return '';
   const parts: string[] = [];
@@ -189,11 +181,6 @@ function compactArgs(args: Record<string, unknown> | undefined): string {
   return parts.join(' ');
 }
 
-/**
- * Write one pretty-formatted line to the TTY with the standard timestamp
- * prefix. Every callable line goes through here so the stamp column is
- * always aligned — callers hand in the already-formatted line body.
- */
 function writePrettyLine(body: string): void {
   const ts = formatTtyTimestamp();
   const prefix = ts ? colorize(ts, C.gray) + ' ' : '';
@@ -211,7 +198,6 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
   const tag = layerTag(event);
   const tagStr = colorize(`[${pad(tag.label, 7)}]`, tag.color);
 
-  // Unknown or less-common events — one compact line.
   if (level === 'warn' || level === 'error') {
     const reason = meta?.reason || meta?.error || meta?.text || '';
     const rest = compactArgs(stripHeaderMeta(meta));
@@ -220,9 +206,8 @@ function prettyEmit(level: Level, event: string, meta?: Record<string, unknown>)
     return;
   }
 
-  if (level === 'debug') return; // stay quiet at debug
+  if (level === 'debug') return;
 
-  // Default info rendering for anything not explicitly handled.
   const rest = compactArgs(stripHeaderMeta(meta));
   writePrettyLine(`${tagStr} ${event}${rest ? ` ${colorize(rest, C.dim)}` : ''}`);
 }
@@ -251,7 +236,6 @@ function emit(level: Level, msg: string, meta?: Record<string, unknown>): void {
   };
   writeJsonLine(JSON.stringify(record));
 
-  // TTY: pretty if we're a TTY / user opted in. Otherwise raw JSON-line.
   if (prettyMode) {
     prettyEmit(level, msg, meta);
   } else if (ttySink === 'stderr') {

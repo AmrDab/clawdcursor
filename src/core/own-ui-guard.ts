@@ -65,7 +65,7 @@ export function ownUiRefusal(args: Record<string, unknown> | undefined, pauseSaf
     const v = args?.[k];
     if (typeof v === 'string' && OVERLAY_NAME.test(v.trim())) return OWN(`"${v.trim()}"`);
   }
-  // An `expect` (the post-check) or `done`'s `assertions` make any call a screen read — OCR, element reads — so never pause-safe.
+  // An `expect` (the post-check) or `verify`'s `assertions` make any call a screen read — OCR, element reads — so never pause-safe.
   const safe = pauseSafe && READ_ARGS.every(k => args?.[k] === undefined || args?.[k] === null);
   if (!safe && (pauseGate.current() || foreign.paused)) {
     const whose = !pauseGate.current() && foreign.pausedBy ? ` (shown by clawdcursor process ${foreign.pausedBy})` : '';

@@ -3,9 +3,7 @@
  *
  * THE PROBLEM THIS SOLVES
  * -----------------------
- * Task verification used to be model-claimed: `done(evidence)` took a prose
- * string and the guards only checked it for length/hedging — nothing
- * re-checked reality. In the 2026-06-06 live Outlook run the model looked at
+ * A model's own claim of success is not proof. In the 2026-06-06 live Outlook run the model looked at
  * a real screenshot, "verified" a recipient that was never committed, and the
  * task died 12 turns later at send time.
  *
@@ -23,9 +21,9 @@
  * LAYERING
  * --------
  * This module is pure core: it depends on PlatformAdapter (reads only) and
- * node:fs — never on tools, the agent loop, or the MCP surface. It is mounted
- * twice: by the System B `verify` tool (which projects to the MCP surface for
- * external agents) and by the `done(assertions)` completion gate.
+ * node:fs — never on tools or the MCP surface. Callers: the projected `verify`
+ * tool, every tool's `expect` (sense/reactive-check.ts), and pause_for_user's
+ * `done_when` (tools/agent.ts).
  */
 
 import { promises as fs } from 'node:fs';
