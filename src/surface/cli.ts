@@ -52,12 +52,9 @@ process.on('unhandledRejection', (reason: any) => {
     // Logger itself failed — say that much, still without the message.
     console.error('unhandledRejection (logger unavailable)');
   }
-  // In server mode, (process.env.CLAWD_SERVER_MODE === '1') keep running.
-  // In CLI / one-shot mode, exit to surface the bug.
-  if (process.env.CLAWD_SERVER_MODE !== '1') {
-    try { require('../core/observability/telemetry').spoolBeforeExit(); } catch { /* never block the exit */ }
-    process.exit(1);
-  }
+  // Exit, as Node's default does, so the bug surfaces; the crash report is kept for the next start.
+  try { require('../core/observability/telemetry').spoolBeforeExit(); } catch { /* never block the exit */ }
+  process.exit(1);
 });
 
 import './quiet-warnings';   // first: before any dependency can emit DEP0040

@@ -211,7 +211,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
       y: 'Y coordinate in image-space',
       button: 'Mouse button to click: "left" (default) or "right"',
       count: 'Click count: 1=single (default), 2=double',
-      space: 'Coordinate space. Omit (default) or pass "image" for screenshot coords (scaled to physical). Pass "screen" for a11y-snapshot coords that are already in physical pixels.',
     },
   },
 
@@ -226,7 +225,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
       endX: 'End X in image-space',
       endY: 'End Y in image-space',
       path: 'Stepped drag path: array of {x,y} points (min 2). When given, startX/startY/endX/endY are ignored.',
-      space: 'Coordinate space. Omit (default) or pass "image" for screenshot coords. Pass "screen" for a11y coords already in physical pixels.',
     },
   },
 
@@ -240,7 +238,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
       y: 'Y coordinate in image-space',
       direction: 'Scroll direction',
       amount: 'Scroll amount in wheel ticks (default: 3)',
-      space: 'Coordinate space. Omit (default) or pass "image" for screenshot coords. Pass "screen" for a11y coords already in physical pixels.',
     },
   },
 
@@ -261,9 +258,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'keyboard',
     safetyTier: 1,
     costClass: 'act',
-    paramDescriptions: {
-      key: 'Key/combo to press (e.g. "Return", "mod+a", "F5"; "mod" is cmd on macOS, ctrl on Windows and Linux). Space-separate combos for a sequence ("Down Down End").',
-    },
   },
 
   // ─── APPS & WINDOWS ────────────────────────────────────────────────────────

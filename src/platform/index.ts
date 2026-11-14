@@ -28,7 +28,7 @@ export async function getPlatform(): Promise<PlatformAdapter> {
   await adapter.init();
   // The test fence (core/fence.ts): the window list holds fenced windows only. Unset, the adapter is untouched.
   cached = fencePlatform(guardInputMethods(adapter));
-  return adapter;
+  return cached;
 }
 
 export type {

@@ -286,7 +286,7 @@ describe('errorClass', () => {
 describe('unhandledRejection', () => {
   it('logs the code and stack frames, never the message', () => {
     const src = fs.readFileSync(path.join(__dirname, '../surface/cli.ts'), 'utf8');
-    const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf('In server mode'));
+    const h = src.slice(src.indexOf("process.on('unhandledRejection'"), src.indexOf("import './quiet-warnings'"));
     expect(h).toMatch(/safeStack\(/);
     expect(h).toMatch(/errorClass\(/);
     expect(h).not.toMatch(/\.message/);

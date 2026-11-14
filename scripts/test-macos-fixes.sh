@@ -105,7 +105,7 @@ fi
 
 # 3d. Check clawdcursor status uses the same values
 echo "     Running clawdcursor status..."
-STATUS_OUT=$(node dist/index.js status 2>&1 || true)
+STATUS_OUT=$(node dist/surface/cli.js status 2>&1 || true)
 echo "$STATUS_OUT" | while IFS= read -r line; do echo "     $line"; done
 pass "clawdcursor status ran"
 
@@ -139,7 +139,7 @@ fi
 # ── 5. Doctor should agree with status ───────────────────────────────
 echo ""
 echo "  🩺 Step 5: Doctor permission check (should match status)..."
-DOCTOR_OUT=$(timeout 15 node dist/index.js doctor --provider skip 2>&1 || true)
+DOCTOR_OUT=$(timeout 15 node dist/surface/cli.js doctor 2>&1 || true)
 echo "$DOCTOR_OUT" | grep -E "permission|Permission|macOS|✅|❌" | while IFS= read -r line; do echo "     $line"; done
 pass "Doctor ran permission checks"
 

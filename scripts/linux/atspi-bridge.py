@@ -114,15 +114,6 @@ def search_stop(seen: list, depth: int) -> bool:
         cut_search('time limit')
         return True
     return False
-INTERACTIVE_ROLES = {
-    # Roles whose state/value the agent is most likely to care about.
-    'push button', 'toggle button', 'check box', 'radio button',
-    'menu item', 'check menu item', 'radio menu item',
-    'link', 'hyperlink',
-    'text', 'entry', 'password text', 'editable text', 'combo box',
-    'list item', 'tree item', 'tab',
-    'slider', 'spin button', 'scroll bar',
-}
 
 
 INT_MIN = -2147483648   # AT-SPI extents of children scrolled out of a viewport
