@@ -65,13 +65,17 @@ describe('utility server smoke tests', () => {
     expect(res.status).toBe(403);
   });
 
-  it('accepts allowed-origin browser requests', async () => {
-    const app = makeUtilityApp();
-    const res = await request(app)
-      .get('/health')
-      .set('Origin', 'http://127.0.0.1:3847');
-    expect(res.status).toBe(200);
-    expect(res.headers['access-control-allow-origin']).toBe('http://127.0.0.1:3847');
+  it('accepts allowed-origin browser requests (the server own origin, on the port it listens on)', async () => {
+    const server = makeUtilityApp().listen(0, '127.0.0.1');
+    await new Promise(r => server.once('listening', r));
+    try {
+      const origin = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+      const res = await request(server)
+        .get('/health')
+        .set('Origin', origin);
+      expect(res.status).toBe(200);
+      expect(res.headers['access-control-allow-origin']).toBe(origin);
+    } finally { server.close(); }
   });
 });
 
