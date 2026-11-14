@@ -14,8 +14,8 @@ import type { FixtureState } from '../lib/types';
 vi.useRealTimers();
 
 describe.runIf(process.platform === 'win32')('the Windows native fixture', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-fixture-test-'));
-  const exe = path.join(dir, 'BenchFixture.exe');
+  let dir = '';
+  let exe = '';
   const powershell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
   const selftest = (mode: string): FixtureState => {
     const state = path.join(dir, `${mode}.json`);
@@ -24,6 +24,8 @@ describe.runIf(process.platform === 'win32')('the Windows native fixture', () =>
   };
 
   beforeAll(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-fixture-test-'));
+    exe = path.join(dir, 'BenchFixture.exe');
     execFileSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
       path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', dir], { timeout: 90_000, cwd: dir });
   }, 120_000);

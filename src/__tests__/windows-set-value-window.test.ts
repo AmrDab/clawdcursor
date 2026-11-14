@@ -42,7 +42,7 @@ describe('ps-bridge set-value keyboard fallback', () => {
     expect(fallback).toMatch(/GetAncestor\(\[Win32UIA\]::GetForegroundWindow\(\), 2\)/);                      // and of the foreground's
   });
 
-  it('refuses (the caller\'s click-and-type then runs) when the top-level window cannot be resolved or is not in front', () => {
+  it('fails without a refusal (the caller\'s click-and-type then runs) when the top-level window cannot be resolved or is not in front', () => {
     expect(fallback).toMatch(/\$topHwnd -eq 0 -or \$fgRoot -ne \$topHwnd/);
     // the check comes before any key is sent
     expect(fallback.indexOf('$fgRoot -ne $topHwnd')).toBeLessThan(fallback.indexOf('SendWait("^a")'));

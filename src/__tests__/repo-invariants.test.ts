@@ -52,12 +52,13 @@ describe('programs are started by absolute path, PowerShell from the private run
   });
 
   it('exec() / execSync() with a command string is for macOS / Linux tools only (never a powershell string through a shell)', () => {
-    const call = /\b(execSync|execAsync|exec)\(\s*([`'"])([^`'"]*)/;
+    const call = /\b(execSync|execAsync|exec)\(\s*([`'"])((?:(?!\2).)*)/;   // the string, to its own closing quote
     const bad = CODE.flatMap(x => {
       const m = call.exec(x.l);
       if (!m) return [];
       const first = (m[3].trim().split(/\s+/)[0] ?? '').toLowerCase();
-      return NON_WINDOWS.has(first) ? [] : [`${x.f}:${x.n} ${m[3].slice(0, 40)}`];
+      // `sh -c "powershell ..."` starts with an allowed program, so the whole string is checked for PowerShell too.
+      return NON_WINDOWS.has(first) && !/\b(powershell|pwsh)\b/i.test(m[3]) ? [] : [`${x.f}:${x.n} ${m[3].slice(0, 40)}`];
     });
     expect(bad).toEqual([]);
   });

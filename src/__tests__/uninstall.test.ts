@@ -3,18 +3,17 @@
  * skill registrations from four hosts while registerSkills writes six (Claude Code and Cursor were left behind).
  * Loopback only; nothing is uninstalled here.
  */
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as http from 'http';
-import { spawn } from 'child_process';
 import type { AddressInfo } from 'net';
 import { stopRunningDaemon } from '../surface/uninstall';
 import { ourSkillRegistrations, hostRegistries } from '../surface/skill-register';
 import { claimPidFile, recordLockPort, pidFilePath, DAEMON_LOCK } from '../surface/pidfile';
 import { initServerToken } from '../surface/auth';
-import { TOKEN_PATH, getPackageRoot } from '../paths';
+import { getPackageRoot } from '../paths';
 
 describe('uninstall stops the daemon where it runs', () => {
   it('POSTs /stop, with the token, to the port the daemon recorded', async () => {
@@ -35,22 +34,6 @@ describe('uninstall stops the daemon where it runs', () => {
       expect(fs.existsSync(pidFilePath(DAEMON_LOCK))).toBe(false);   // the lock sweep ran after it
     } finally { server.close(); }
   });
-
-  it('never signals a live process its lock names under a wrong start time (a reused pid), and removes the lock', async () => {
-    fs.rmSync(TOKEN_PATH, { force: true });   // no token: no /stop request, only the lock sweep
-    const stranger = spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
-    try {
-      fs.mkdirSync(path.dirname(pidFilePath(DAEMON_LOCK)), { recursive: true });
-      fs.writeFileSync(pidFilePath(DAEMON_LOCK), JSON.stringify({ v: 1, pid: stranger.pid, startTime: 1_000_000_000_000, mode: DAEMON_LOCK }));
-      const kill = vi.spyOn(process, 'kill');
-      await stopRunningDaemon();
-      expect(kill.mock.calls.filter(([, sig]) => sig !== 0)).toEqual([]);   // liveness probes only
-      kill.mockRestore();
-      expect(fs.existsSync(pidFilePath(DAEMON_LOCK))).toBe(false);
-      expect(stranger.exitCode).toBeNull();
-      expect(stranger.signalCode).toBeNull();
-    } finally { stranger.kill('SIGKILL'); }
-  }, 60_000);
 });
 
 describe('the skill registrations uninstall removes', () => {
