@@ -8,7 +8,7 @@
  * macOS:   Apple Vision framework via Swift script (scripts/mac/ocr-recognize.swift).
  * Linux:   Tesseract OCR via Python script (scripts/linux/ocr-recognize.py).
  *
- * Caching: last result is kept for 300ms. Invalidated on any action execution.
+ * One engine per process (ocrEngine()): its last result is kept for 300 ms, and every agent act empties it.
  */
 
 import { fenceOcrCapture, fenceOcrText } from '../core/fence';
@@ -27,6 +27,7 @@ import { pickDisplay } from './display-target';
 import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
 import type { Display } from './types';
 import { psOpts, powershellExe } from './ps-spawn';
+import { onAgentAct } from './pointer-guard';
 
 const execFileAsync = promisify(execFile);
 
@@ -102,6 +103,19 @@ function isEngineMissing(err: any): boolean {
 }
 
 // ─── OcrEngine ────────────────────────────────────────────────────────────────
+
+let shared: OcrEngine | null = null;
+/**
+ * The process's one OCR engine, for every reader: one 300 ms cache and one availability check. Each agent act (input,
+ * an act by element, a focus, a launch) empties the cache, so a read after an act never returns the screen from before it.
+ */
+export function ocrEngine(): OcrEngine {
+  if (!shared) {
+    shared = new OcrEngine();
+    onAgentAct(() => shared?.invalidateCache());
+  }
+  return shared;
+}
 
 export class OcrEngine {
   private cachedResult: OcrResult | null = null;

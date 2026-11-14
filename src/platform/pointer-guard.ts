@@ -59,7 +59,15 @@ let onAgentInput: ((method: string) => void) | null = null;
 export function setOnAgentInput(f: ((method: string) => void) | null): void {
   onAgentInput = f;
 }
-const announce = (m: string) => { try { onAgentInput?.(m); } catch { /* cosmetic */ } };
+/** Told before every agent act, as the pill is: what was read from the screen before it is stale (ocr-engine.ts). */
+const actListeners: Array<() => void> = [];
+export function onAgentAct(f: () => void): void {
+  actListeners.push(f);
+}
+const announce = (m: string) => {
+  for (const f of actListeners) f();
+  try { onAgentInput?.(m); } catch { /* cosmetic */ }
+};
 
 /** For clawdcursor's own housekeeping on the user's behalf (giving the keyboard back after a pause): not agent input. */
 export function unguarded<R>(fn: () => R): R {

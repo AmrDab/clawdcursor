@@ -8,14 +8,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const recognizeScreen = vi.fn();
 const recognizeRegion = vi.fn();
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     recognizeScreen() { return recognizeScreen(); }
     recognizeRegion(x: number, y: number, w: number, h: number) { return recognizeRegion(x, y, w, h); }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 import { buildUnifiedTools } from '../core/agent-loop/tools';
 import { UIMapHolder } from '../core/sense/ui-map-holder';

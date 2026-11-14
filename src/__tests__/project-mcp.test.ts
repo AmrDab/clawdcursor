@@ -48,13 +48,14 @@ vi.mock('sharp', () => ({
   })),
 }));
 
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 // ── Imports after mocks ──────────────────────────────────────────────────────
 

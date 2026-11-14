@@ -26,14 +26,15 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public left: number, public top: number, public width: number, public height: number) {} },
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     // The ribbon's "New" as OCR sees it, on the monitor above the primary.
     async recognizeScreen() { return { elements: [{ text: 'New', x: 2830, y: -1010, width: 36, height: 14, line: 0 }], fullText: 'New', durationMs: 1 }; }
     async recognizeRegion() { return { elements: [], fullText: '', durationMs: 1 }; }
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 import { getSmartTools } from '../tools/smart';
 import { buildUnifiedTools, runActivationLadder } from '../core/agent-loop/tools';

@@ -5,7 +5,7 @@
  * box coordinates — cheaper than a screenshot + vision LLM call.
  */
 
-import { OcrEngine } from '../platform/ocr-engine';
+import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { screenJson, wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
 import { getWorkingPoint } from '../platform/display-target';
@@ -13,13 +13,6 @@ import type { OcrElement } from '../platform/ocr-engine';
 import type { ToolDefinition } from './types';
 import { ocrPointToClickPoint } from './smart';
 
-// Shared OcrEngine instance
-let ocrEngine: OcrEngine | null = null;
-
-function getOcrEngine(): OcrEngine {
-  if (!ocrEngine) ocrEngine = new OcrEngine();
-  return ocrEngine;
-}
 
 /**
  * Physical-pixel rectangle (what the OCR engine crops) for a window's bounds,
@@ -85,7 +78,7 @@ export function getOcrTools(): ToolDefinition[] {
       safetyTier: 0,
       handler: async ({ scope }, ctx) => {
         await ctx.ensureInitialized();
-        const engine = getOcrEngine();
+        const engine = ocrEngine();
 
         if (!engine.isAvailable()) {
           return {

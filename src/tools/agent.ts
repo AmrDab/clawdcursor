@@ -11,14 +11,11 @@ import { timeWait } from '../core/observability/steps';
 import { promptSatisfies } from '../core/pause-text';
 import { parseAssertions, checkAssertions, renderReport } from '../core/verify/assertions';
 import { foreignOverlayState } from '../core/overlay-state';
-import { OcrEngine } from '../platform/ocr-engine';
+import { ocrEngine } from '../platform/ocr-engine';
 
 const PAUSE_WAIT_DEFAULT_MS = 45_000; // under common 60s MCP client timeouts
 const normMessage = (s: string) => s.replace(/\s+/g, ' ').trim().toLowerCase();
 
-/** OCR for done_when's ocr_contains — created on first use only. */
-let pauseOcr: OcrEngine | null = null;
-const getPauseOcr = (): OcrEngine => (pauseOcr ??= new OcrEngine());
 
 export function getAgentTools(): ToolDefinition[] {
   return [
@@ -112,7 +109,7 @@ export function getAgentTools(): ToolDefinition[] {
           }
           const platform = ctx?.platform;
           if (!platform) return { text: 'pause_for_user: done_when needs the desktop platform, which is not available here.', isError: true };
-          const deps = { adapter: platform, ocrText: async () => (await getPauseOcr().recognizeScreen()).fullText ?? '' };
+          const deps = { adapter: platform, ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '' };
           const now = await checkAssertions(parsed.assertions, deps);
           if (now.ok) {
             return {

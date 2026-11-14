@@ -14,7 +14,7 @@ import { computeAnchors } from './ui-map-anchors';
 import { normalizeRole, normText } from './ui-map-normalize';
 import { iou } from './ui-map-geom';
 import { captureSnapshot } from './snapshot';
-import { OcrEngine } from '../../platform/ocr-engine';
+import { ocrEngine } from '../../platform/ocr-engine';
 import { ocrPointToClickPoint } from '../../tools/smart';
 import { windowOcrRegion } from '../../tools/ocr';
 
@@ -24,7 +24,7 @@ const LOW_CONFIDENCE = 0.5;         // below this on a needed element ⇒ vision
 export interface CompileDeps {
   /** a11y spine — defaults to captureSnapshot(adapter) in production. */
   captureSnapshot: () => Promise<Snapshot>;
-  /** OCR puller — defaults to () => new OcrEngine().recognizeScreen(). */
+  /** OCR puller — defaults to the shared engine's recognizeScreen(). */
   ocr: () => Promise<OcrResult>;
   /** Vision puller — defaults to adapter.screenshot(). */
   vision: () => Promise<ScreenshotResult>;
@@ -132,8 +132,6 @@ export async function compileUIMap(deps: CompileDeps, hints: CompileHints): Prom
   };
 }
 
-let _ocr: OcrEngine | null = null;
-function ocrEngine(): OcrEngine { return (_ocr ??= new OcrEngine()); }
 
 /** Production deps wired to a real adapter. now/snapshotId are caller-passed
  *  (the agent loop owns the clock + the obs_N counter). `processId` scopes the

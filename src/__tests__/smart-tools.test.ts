@@ -30,8 +30,7 @@ vi.mock('sharp', () => ({
 
 // Mock OCR engine for OCR fallback tests
 vi.mock('../platform/ocr-engine', () => {
-  return {
-    OcrEngine: class MockOcrEngine {
+  const OcrEngine = class MockOcrEngine {
       isAvailable() { return true; }
       async recognizeScreen() {
         return {
@@ -45,8 +44,8 @@ vi.mock('../platform/ocr-engine', () => {
         };
       }
       invalidateCache() {}
-    },
   };
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
 });
 
 // ── Import after mocks ────────────────────────────────────────────────────────

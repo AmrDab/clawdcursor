@@ -15,15 +15,16 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public left: number, public top: number, public width: number, public height: number) {} },
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return true; }
     async recognizeScreen() {
       return { elements: [{ text: 'Send', x: 10, y: 10, width: 40, height: 12, confidence: 0.95 }], fullText: 'Send', durationMs: 1 };
     }
     async recognizeRegion() { return { elements: [], fullText: '', durationMs: 1 }; }
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 import { getSmartTools } from '../tools/smart';
 import { isGuardRefusal } from '../core/control';

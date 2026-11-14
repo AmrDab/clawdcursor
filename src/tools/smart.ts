@@ -13,7 +13,7 @@
  */
 
 import type { ToolDefinition } from './types';
-import { OcrEngine } from '../platform/ocr-engine';
+import { ocrEngine } from '../platform/ocr-engine';
 import { screenLockedMessage } from '../platform/mac-ax';
 import { getBrowserProcessNames } from '../platform/browser-config';
 import { windowOcrRegion } from './ocr';
@@ -26,12 +26,6 @@ import { unguarded } from '../platform/pointer-guard';
 import { isGuardRefusal } from '../core/control';
 import { untrusted, missText, structuredMissFields, targetOf, targetText } from '../core/miss-text';
 
-// Shared OCR engine singleton — avoids re-initialization per call
-let sharedOcr: OcrEngine | null = null;
-function getOcr(): OcrEngine {
-  if (!sharedOcr) sharedOcr = new OcrEngine();
-  return sharedOcr;
-}
 
 // ── Known apps with empty accessibility trees ──
 // These apps expose no useful UIA nodes — skip a11y, go straight to OCR.
@@ -159,7 +153,7 @@ export function getSmartTools(): ToolDefinition[] {
         // Launch both in parallel
         const ocrPromise = (async () => {
           try {
-            const engine = getOcr();
+            const engine = ocrEngine();
             if (!engine.isAvailable()) return null;
             const result = await engine.recognizeScreen();
             if (result.elements.length === 0) return null;
@@ -347,7 +341,7 @@ export function getSmartTools(): ToolDefinition[] {
           // OCR reads text, not windows: it cannot honour `within`.
           if (within) { ocrDiag = 'ocr: not tried (within names a window or dialog, which OCR cannot tell apart)'; return null; }
           try {
-            const engine = getOcr();
+            const engine = ocrEngine();
             if (!engine.isAvailable()) { ocrDiag = 'ocr: engine unavailable'; return null; }
             const result = await engine.recognizeScreen();
             const wordsRead = result.elements?.length ?? 0;
@@ -712,7 +706,7 @@ export function getSmartTools(): ToolDefinition[] {
             await new Promise(r => setTimeout(r, 400));
             let changed: boolean | null = null;
             try {
-              const eng = getOcr();
+              const eng = ocrEngine();
               eng.invalidateCache();
               const after = await eng.recognizeScreen();
               const awAfter = await ctx.a11y.getActiveWindow().catch(() => null);

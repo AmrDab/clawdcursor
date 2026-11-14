@@ -27,12 +27,8 @@ import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../.
 import { TOOL_META, TEXT_ONLY_RENAMES } from './tool-meta';
 import { reactiveCheck } from '../sense/reactive-check';
 import { validateExpect } from '../verify/assertions';
-import { OcrEngine } from '../../platform/ocr-engine';
+import { ocrEngine } from '../../platform/ocr-engine';
 import { rewriteOutsideData } from '../../tools/hint-rewrite';
-
-// Lazy OCR singleton for ocr_contains assertions in MCP-route expect checks.
-let _mcpOcr: OcrEngine | null = null;
-function mcpOcr(): OcrEngine { return (_mcpOcr ??= new OcrEngine()); }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -247,7 +243,7 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
         toolText: result.text,
         toolSuccess: result.success,
         adapter: agentCtx.platform,
-        ocrText: async () => (await mcpOcr().recognizeScreen()).fullText ?? '',
+        ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
       }).catch(() => null);
       if (reactive) result = { ...result, success: reactive.success, text: reactive.text };
     }

@@ -14,7 +14,7 @@
 import type { UnifiedTool, AgentToolContext } from './types';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength } from './coord-scale';
 import type { InvokeAction, UiElement } from '../../platform/types';
-import { OcrEngine } from '../../platform/ocr-engine';
+import { ocrEngine } from '../../platform/ocr-engine';
 import { selectOption, selectedResult } from '../../platform/select-option';
 import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, SPARSE_NEXT_STEP, isSparseTree, CUT_VALUE_NEXT_STEP, cdpStepFor } from '../../tools/blind-hints';
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
@@ -35,15 +35,6 @@ import { preferControl, notSelectableReason, failReason, sameElement, inside, en
 import { quoteScreenText } from '../result-codes';
 import { effectLine, windowChange, type WindowRead } from '../effect';
 import { missText, untrusted, targetOf, targetText } from '../miss-text';
-
-/** Lazy OCR singleton for the agent-loop perception tools (read_text, smart_click).
- *  Mirrors the pattern in src/tools/smart.ts. Construction never throws; the real
- *  availability check happens in isAvailable(). */
-let _agentOcr: OcrEngine | null = null;
-function getAgentOcr(): OcrEngine {
-  if (!_agentOcr) _agentOcr = new OcrEngine();
-  return _agentOcr;
-}
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;
@@ -573,7 +564,7 @@ export function buildUnifiedTools(): UnifiedTool[] {
         if ('error' in parsed) return { success: false, text: `verify rejected: ${parsed.error}` };
         const report = await checkAssertions(parsed.assertions, {
           adapter: ctx.platform,
-          ocrText: async () => (await getAgentOcr().recognizeScreen()).fullText ?? '',
+          ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
         });
         return {
           success: report.ok,

@@ -39,7 +39,7 @@ import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { reactiveCheck } from '../core/sense/reactive-check';
 import { validateExpect, EXPECT_DESCRIPTION } from '../core/verify/assertions';
-import { OcrEngine } from '../platform/ocr-engine';
+import { ocrEngine } from '../platform/ocr-engine';
 
 // ─── Action → granular-tool delegation table ────────────────────────
 
@@ -318,8 +318,6 @@ const EXPECT_PARAM: import('./types').ParameterDef = {
   },
 };
 
-/** OCR for an `expect` with ocr_contains on a delegate that does not check expect itself — created on first use. */
-let expectOcr: OcrEngine | null = null;
 
 /** Human-readable one-line list of actions for the tool description. */
 function actionCatalog(routes: ActionRoute[]): string {
@@ -563,7 +561,7 @@ async function dispatchCompound(
       toolText: result.text ?? '',
       toolSuccess: !result.isError,
       adapter: ctx.platform!,
-      ocrText: async () => (await (expectOcr ??= new OcrEngine()).recognizeScreen()).fullText ?? '',
+      ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
     }).catch(() => null);
     if (checked) result = { ...result, text: checked.text, isError: !checked.success };
   }

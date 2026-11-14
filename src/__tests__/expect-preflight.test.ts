@@ -22,13 +22,14 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
   Region: class { constructor(public l: number, public t: number, public w: number, public h: number) {} },
 }));
 vi.mock('sharp', () => ({ default: vi.fn() }));
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 import { parseAssertions, validateExpect } from '../core/verify/assertions';
 import { projectToToolDefinition } from '../core/agent-loop/project-mcp';

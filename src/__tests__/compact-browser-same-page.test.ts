@@ -34,13 +34,14 @@ vi.mock('sharp', () => ({
   })),
 }));
 
-vi.mock('../platform/ocr-engine', () => ({
-  OcrEngine: class {
+vi.mock('../platform/ocr-engine', () => {
+  class OcrEngine {
     isAvailable() { return false; }
     async recognizeScreen() { return { elements: [], fullText: '', durationMs: 0 }; }
     invalidateCache() {}
-  },
-}));
+  }
+  return { OcrEngine, ocrEngine: () => new OcrEngine() };
+});
 
 // Never spawn a real browser from a tool under test. `which` and the browser
 // binaries "succeed" instantly so the legacy launch path returns "Opened:".
