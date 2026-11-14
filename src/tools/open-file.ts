@@ -54,7 +54,7 @@ export async function openFilePath(
     const title = res?.title ?? '';
     if (!leaf || !windowTextIncludes(title, leaf)) {
       return {
-        text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with list_windows.`,
+        text: `open_file: launched Explorer but could NOT confirm the folder "${leaf}" opened (window: ${quoteScreenText(title || 'none')}). The path may not exist, or Explorer focused a different window. Verify with get_windows.`,
         isError: true,
       };
     }

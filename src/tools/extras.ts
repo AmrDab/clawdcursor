@@ -356,7 +356,7 @@ export function getExtraTools(): ToolDefinition[] {
                 return { text: `Opened ${scheme}: via the OS shell handler. New window: ${quoteScreenText(shell.title ?? '(untitled)')}. (URI: ${u.length > 120 ? u.slice(0, 120) + '…' : u})` };
               }
               return {
-                text: `open_uri: dispatched ${scheme}: via the OS shell but no new window appeared within 5s${shell.error ? ` (${shell.error})` : ''}. The handler may have routed into an existing window — verify with list_windows.`,
+                text: `open_uri: dispatched ${scheme}: via the OS shell but no new window appeared within 5s${shell.error ? ` (${shell.error})` : ''}. The handler may have routed into an existing window — verify with get_windows.`,
                 isError: true,
               };
             }

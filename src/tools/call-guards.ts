@@ -50,12 +50,20 @@ export async function refusalBefore(c: GuardedCall, ctx: ToolContext, passedStop
   return ownUi ? { guard: 'own_ui', why: ownUi } : null;
 }
 
+/**
+ * A call that acts may have changed the screen: empty the OCR cache. Input empties it in the input layer; an act done by
+ * starting a process (open_url, open_app's fallbacks, relaunch_with_cdp) sends no input, and neither does cdp_connect,
+ * which can launch a browser window (it is no acting call for the outcome line: it changes no page). Also after a call
+ * that failed or threw: a failed launch can still have opened a window.
+ */
+export function forgetScreenIfActed(c: GuardedCall): void {
+  const cc = compactCall(c.tool, c.action);
+  if (isActingAction(cc.tool, cc.action) || (cc.tool === 'browser' && cc.action === 'connect')) ocrEngine().invalidateCache();
+}
+
 /** After the call: refused when it returned an image with vision off, else the line naming a full screenshot (null for any other call). */
 export async function afterCall(c: GuardedCall, result: ToolResult, ctx: ToolContext): Promise<Refusal | { screenshotNote: string | null }> {
-  // Input empties the OCR cache in the input layer; an act done by starting a process (open_url, open_app's fallbacks,
-  // relaunch_with_cdp) sends no input, so a call that acts empties it here too.
-  const cc = compactCall(c.tool, c.action);
-  if (isActingAction(cc.tool, cc.action)) ocrEngine().invalidateCache();
+  forgetScreenIfActed(c);
   if (ctx.disableVision && result.image) return { guard: 'no_vision', why: VISION_DISABLED_REFUSAL };
   return { screenshotNote: !result.isError && isFullScreenshotCall(c.tool, c.action) ? await noteScreenshot(ctx) : null };
 }

@@ -24,7 +24,7 @@
 import { getTool, getCompactTools } from './registry';
 import { windowTextIncludes } from '../platform/window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
-import { refusalBefore, afterCall, guardedCall, type GuardedCall, type Refusal } from './call-guards';
+import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall, type GuardedCall, type Refusal } from './call-guards';
 import { logger } from '../core/observability/logger';
 import { clipScreenText, quoteScreenText } from '../core/untrusted-screen-content';
 import { actedIn, actRecord } from '../core/control';
@@ -192,6 +192,7 @@ export async function executeBatch(
     // This step's own target (if it acted on a window at all), as the input guard verified it when the step ran.
     const target = actRecord(before);
     if (res.isError) {
+      forgetScreenIfActed(call);   // the halt skips afterCall
       outcomes.push({ i, label, status: 'error', text: clipScreenText(res.text || '', 200), pressedKeys: res.pressedKeys, ...target });
       return halt(i, `step ${i} (${label}) errored`);
     }

@@ -37,7 +37,7 @@ import { withSteps, watchChildProcesses } from '../core/observability/steps';
 import { inMcpSession } from '../core/verify/assertions';
 import { allowNames, setHost } from '../core/observability/telemetry';
 import { classifyResult, renderResultLine, isJsonText, isActingAction, isUnverifiableAction } from '../core/result-codes';
-import { refusalBefore, afterCall, guardedCall } from '../tools/call-guards';
+import { refusalBefore, afterCall, forgetScreenIfActed, guardedCall } from '../tools/call-guards';
 import { OPAQUE_MARK } from '../tools/blind-hints';
 
 // ── Typed SDK boundary (#115) ────────────────────────────────────────────────
@@ -383,6 +383,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
           // platform adapter failed to init) must NOT propagate to the MCP SDK
           // — in stdio mode an unhandled rejection can corrupt the JSON-RPC
           // stream. Convert to a clean isError result.
+          forgetScreenIfActed(call);   // a throw skips afterCall
           const err = run.error;
           const msg = err instanceof Error ? err.message : String(err);
           sessionLog.record(tool.name, action, false, Date.now() - started, msg, clientInfo(), { outcome: outcomeOf(true, msg), ...acted(), timing: run.steps });

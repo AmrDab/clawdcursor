@@ -37,6 +37,8 @@ import { __resetShotsForTests } from '../core/screen-binding';
 import { noteScreenshot } from '../tools/screen-guard';
 import { afterCall, guardedCall } from '../tools/call-guards';
 import { ocrEngine } from '../platform/ocr-engine';
+import { getTool } from '../tools/registry';
+import { isActingAction } from '../core/result-codes';
 import { stopControl, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 import type { ToolContext } from '../tools/types';
 import * as fs from 'fs';
@@ -124,5 +126,54 @@ describe('after a call', () => {
     } finally {
       empty.mockRestore();
     }
+  });
+});
+
+describe('an acting call that fails or throws', () => {
+  const failing = (outcome: 'throw' | 'error') => {
+    const click = getTool('mouse_click')!;
+    return vi.spyOn(click, 'handler').mockImplementation(async () => {
+      if (outcome === 'throw') throw new Error('driver gone');
+      return { text: 'click failed', isError: true };
+    });
+  };
+  const runs = [
+    ['the MCP server', async () => { await createMcpServer({ ctx, compact: false }); await handlers.get('mouse_click')!({ x: 1, y: 1, space: 'screen' }); }],
+    ['a batch step', async () => { await executeBatch([{ name: 'mouse_click', arguments: { x: 1, y: 1, space: 'screen' } }], ctx); }],
+  ] as const;
+
+  it.each(runs.flatMap(([name, run]) => (['throw', 'error'] as const).map(o => [`${name}, ${o}`, o, run] as const)))(
+    '%s: the OCR cache is still emptied (the screen may have changed before it failed)', async (_label, outcome, run) => {
+      const handler = failing(outcome);
+      const empty = vi.spyOn(ocrEngine(), 'invalidateCache');
+      try {
+        await run();
+        expect(handler).toHaveBeenCalled();
+        expect(empty).toHaveBeenCalled();
+      } finally { handler.mockRestore(); empty.mockRestore(); }
+    });
+
+  it('a read that throws does not empty it', async () => {
+    const read = vi.spyOn(getTool('read_screen')!, 'handler').mockRejectedValue(new Error('no tree'));
+    const empty = vi.spyOn(ocrEngine(), 'invalidateCache');
+    try {
+      await createMcpServer({ ctx, compact: false });
+      await handlers.get('read_screen')!({});
+      await executeBatch([{ name: 'read_screen', arguments: {} }], ctx);
+      expect(read).toHaveBeenCalledTimes(2);
+      expect(empty).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); empty.mockRestore(); }
+  });
+});
+
+describe('cdp_connect', () => {
+  it('empties the OCR cache (it can launch a browser window) but stays out of the acting calls of the outcome line', async () => {
+    const empty = vi.spyOn(ocrEngine(), 'invalidateCache');
+    try {
+      await afterCall(guardedCall('cdp_connect', undefined, {}), { text: 'ok' }, ctx);
+      await afterCall(guardedCall('browser', 'connect', {}), { text: 'ok' }, ctx);
+      expect(empty).toHaveBeenCalledTimes(2);
+      expect(isActingAction('browser', 'connect')).toBe(false);
+    } finally { empty.mockRestore(); }
   });
 });
