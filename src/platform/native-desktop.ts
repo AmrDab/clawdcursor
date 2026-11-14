@@ -16,7 +16,7 @@ import os from 'os';
 import { EventEmitter } from 'events';
 import sharp from 'sharp';
 import { mouse, keyboard, screen, Button, Key, Point } from '@nut-tree-fork/nut-js';
-import { normalizeKey } from './keys';
+import { normalizeKey, modifierOf, type Modifier } from './keys';
 import { getNativeHelper, captureScreenViaHelper, ScreenRecordingDeniedError } from './native-helper';
 import { rawScreenGrab } from './screen-grab';
 import { sharpFromGrab, type GrabImage } from './grab-image';
@@ -31,6 +31,8 @@ import type { ClawdConfig, ScreenFrame, MouseAction, KeyboardAction } from '../t
 // On macOS, Command key = Key.LeftCmd. On other platforms, Super = Key.LeftSuper.
 const SUPER_KEY = os.platform() === 'darwin' ? Key.LeftCmd : Key.LeftSuper;
 const IS_MAC = os.platform() === 'darwin';
+/** System Events' name for each modifier (macOS: `super` is Cmd). */
+const MAC_USING: Record<Modifier, string> = { ctrl: 'control down', shift: 'shift down', alt: 'option down', super: 'command down' };
 
 /** Safely resolve a nut-js Key enum value from multiple candidate names */
 function resolveNutKey(...candidates: string[]): Key {
@@ -708,19 +710,13 @@ export class NativeDesktop extends EventEmitter {
     if (!key) {
       throw new Error(`macKeyPress: empty key after parsing combo "${keyCombo}"`);
     }
-    const mods = parts.slice(0, -1).map(k => k.toLowerCase());
-
-    // Map modifier names to System Events syntax.
-    // `mod` is the platform-aware "primary" modifier that resolves to Cmd
-    // on macOS — without this branch macKeyPress would silently type the
-    // bare letter (e.g. `mod+s` becomes a literal `s` keystroke).
-    const modUsing: string[] = [];
-    for (const m of mods) {
-      if (m === 'cmd' || m === 'command' || m === 'super' || m === 'mod') modUsing.push('command down');
-      else if (m === 'shift') modUsing.push('shift down');
-      else if (m === 'alt' || m === 'option') modUsing.push('option down');
-      else if (m === 'ctrl' || m === 'control') modUsing.push('control down');
-    }
+    // Modifier names → System Events syntax, by the aliases keys.ts knows (mod / cmd / meta = Cmd, opt = Option). An
+    // unknown one is refused before anything is pressed: dropped, `opt+x` typed a plain x.
+    const modUsing = parts.slice(0, -1).map(m => {
+      const mod = modifierOf(m, 'darwin');
+      if (!mod) throw new Error(`Unknown modifier: "${m}"`);
+      return MAC_USING[mod];
+    });
 
     // Map special key names to System Events key code actions
     const specialKeys: Record<string, string> = {
@@ -765,9 +761,8 @@ export class NativeDesktop extends EventEmitter {
         script = `tell application "System Events" to keystroke "${escaped}"`;
       }
     } else {
-      // Unknown key — try keystroke as-is
-      const escaped = key.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      script = `tell application "System Events" to keystroke "${escaped}"`;
+      // An unknown key name is an error, as in MacOSAdapter — typed as text it dropped the modifiers too.
+      throw new Error(`Unknown key: "${key}"`);
     }
 
     try {

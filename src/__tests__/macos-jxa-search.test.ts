@@ -90,16 +90,29 @@ function loadScript(file: string): string {
   return readFileSync(join(getPackageRoot(), 'scripts', 'mac', file), 'utf8').replace(/^#!.*\n/, '');
 }
 
-function runInvoke(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[]) {
-  const ctx = vm.createContext({ Application: fx.Application, JSON, Date, String, Number, Math, Array, Object });
+/** Foundation's stdin as the scripts read it (-ArgsStdin): readDataToEndOfFile → NSString → unwrap. */
+const stdinOf = (stdin = '') => ({
+  NSFileHandle: { fileHandleWithStandardInput: { readDataToEndOfFile: stdin } },
+  NSString: { alloc: { initWithDataEncoding: (data: string) => data } },
+  NSUTF8StringEncoding: 4,
+});
+
+function runInvoke(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[], stdin?: string) {
+  const ctx = vm.createContext({
+    Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
+    ObjC: { unwrap: (x: unknown) => x }, $: stdinOf(stdin),
+  });
   return JSON.parse(vm.runInContext(`${loadScript('invoke-element.jxa')}\nrun(${JSON.stringify(argv)})`, ctx));
 }
 
-function runFind(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[]) {
+function runFind(fx: Pick<ReturnType<typeof fixture>, 'Application'>, argv: string[], stdin?: string) {
   const ctx = vm.createContext({
     Application: fx.Application, JSON, Date, String, Number, Math, Array, Object,
     ObjC: { unwrap: (x: unknown) => x, import: () => {} },
-    $: { NSProcessInfo: { processInfo: { arguments: ['osascript', '-l', 'JavaScript', 'find-element.jxa', ...argv] } }, exit: () => {} },
+    $: {
+      NSProcessInfo: { processInfo: { arguments: ['osascript', '-l', 'JavaScript', 'find-element.jxa', ...argv] } }, exit: () => {},
+      ...stdinOf(stdin),
+    },
   });
   return JSON.parse(vm.runInContext(loadScript('find-element.jxa'), ctx));
 }
@@ -111,6 +124,13 @@ describe('macOS invoke-element.jxa', () => {
     expect(r.success).toBe(true);
     expect(fx.field.written).toBe('Ada');
     expect(fx.label.written).toBeUndefined();
+  });
+
+  it('-ArgsStdin: the name and the value come from stdin (never argv, where every process can read them)', () => {
+    const fx = fixture();
+    const r = runInvoke(fx, ['-ProcessId', '4242', '-Action', 'set-value', '-ArgsStdin'], JSON.stringify({ name: 'First name', value: 'hunter2' }));
+    expect(r.success).toBe(true);
+    expect(fx.field.written).toBe('hunter2');
   });
 
   it('a -ControlType Edit role matches AXTextField', () => {
@@ -143,6 +163,11 @@ describe('macOS invoke-element.jxa', () => {
 });
 
 describe('macOS find-element.jxa', () => {
+  it('-ArgsStdin: the name comes from stdin', () => {
+    const out = runFind(fixture(), ['-ProcessId', '4242', '-ArgsStdin'], JSON.stringify({ name: 'Row 50' }));
+    expect(out.map((e: { name: string }) => e.name)).toContain('Row 50');
+  });
+
   it('finds a button nested inside a scroll area', () => {
     const out = runFind(fixture(), ['-Name', 'Row 50', '-ProcessId', '4242']);
     expect(out.map((e: any) => e.name)).toEqual(['Row 50']);

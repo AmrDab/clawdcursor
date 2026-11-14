@@ -54,56 +54,17 @@ import { appIdentity, ownsWindow, type AppIdentity } from './app-identity';
 import { llmSize } from '../core/agent-loop/coord-scale';
 import { setWorkingPoint, onAnyDisplay } from './display-target';
 import { wheelUnitsPerNotch } from './wheel';
-import { windowTextIncludes } from '../tools/window-text';
+import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
 import * as os from 'os';
+import { normalizeControlType } from './uia-control-type';
 
 const execFileAsync = promisify(execFile);
 
 // Tunables
 const PS_TIMEOUT_MS = 8_000;
 const CLIPBOARD_TIMEOUT_MS = 3_000;
-
-/**
- * UIA control types the PowerShell bridge's $ctMap accepts (ps-bridge.ps1).
- * Keep in sync with that table.
- */
-const UIA_CONTROL_TYPES: ReadonlySet<string> = new Set([
-  'Button', 'CheckBox', 'ComboBox', 'Custom', 'DataGrid', 'DataItem', 'Document',
-  'Edit', 'Group', 'Hyperlink', 'Image', 'List', 'ListItem', 'Menu', 'MenuBar',
-  'MenuItem', 'Pane', 'RadioButton', 'ScrollBar', 'Slider', 'Spinner',
-  'SplitButton', 'Tab', 'TabItem', 'Text', 'ToolBar', 'Tree', 'TreeItem', 'Window',
-]);
-
-/**
- * Normalize a caller-supplied control type to the bridge's vocabulary.
- *
- * The bridge keys $ctMap on BARE names ("CheckBox"), but everything the agent
- * READS is normalized the other way — normalizeElement strips the prefix — and
- * the tool schema's own example says to send the prefixed form
- * ("ControlType.Button"). So the documented input was the one form the bridge
- * could not match: `ContainsKey` failed, no role condition was added, and the
- * search silently ran UNFILTERED. With no role filter the bridge falls back to
- * bidirectional substring name matching, so asking for a CheckBox named
- * "Allow npm publish" could return a Text element named "npm".
- *
- * Spelling is matched case- and space-insensitively: UIA itself reports a role
- * as "ControlType.MenuItem" (ProgrammaticName) AND "menu item"
- * (LocalizedControlType), and agents copy whichever they saw. Only the exact
- * PascalCase bare name used to pass, so `controlType:"menu item"` failed closed
- * on a menu item the unfiltered invoke found (live 2026-10-14).
- *
- * Returns null for a type the bridge cannot honor, so callers can fail closed
- * rather than silently searching without the filter they asked for.
- */
-const UIA_CONTROL_TYPE_BY_KEY: ReadonlyMap<string, string> =
-  new Map([...UIA_CONTROL_TYPES].map(t => [t.toLowerCase(), t]));
-function normalizeControlType(raw: string | undefined): string | null | undefined {
-  if (raw === undefined) return undefined;          // no filter requested
-  const key = raw.replace(/^ControlType\./i, '').replace(/\s+/g, '').toLowerCase();
-  return UIA_CONTROL_TYPE_BY_KEY.get(key) ?? null;  // null = unhonorable
-}
 
 export class WindowsAdapter implements PlatformAdapter {
   readonly platform = 'win32' as const;
@@ -619,7 +580,10 @@ export class WindowsAdapter implements PlatformAdapter {
           '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();' +
           '[DllImport("user32.dll")] public static extern bool ShowWindowAsync(System.IntPtr hWnd, int nCmdShow);' +
           "' -PassThru | Out-Null;" +
-          // [string]: an empty env var reads as $null, which is -ne "".
+          // [string]: an empty env var reads as $null, which is -ne "". The title comes normalized (normalizeWindowText)
+          // and each window name is normalized the same way here (ps-bridge.ps1 ConvertTo-TitleKey): invisible format
+          // characters dropped, whitespace runs folded to one space, lower case. Edge's title has U+200B / NBSP in it, so a
+          // raw ToLower().Contains() never matched "Microsoft Edge".
           '$title = [string]$env:CLAWD_PS_TITLE;' +
           `$h = ${target};` +
           '$el = $null;' +
@@ -631,7 +595,8 @@ export class WindowsAdapter implements PlatformAdapter {
           '  $root = [System.Windows.Automation.AutomationElement]::RootElement;' +
           '  $cond = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Window);' +
           '  foreach ($w in $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)) {' +
-          '    $n = $w.Current.Name; if ($n -and $n.ToLower().Contains($title.ToLower())) { $el = $w; break }' +
+          "    $n = ([regex]::Replace([regex]::Replace([string]$w.Current.Name, '\\p{Cf}', ''), '\\s+', ' ')).Trim().ToLower();" +
+          '    if ($n -and $n.Contains($title)) { $el = $w; break }' +
           '  }' +
           '}' +
           // Strategy B — the caller-resolved handle. Strategy C — foreground.
@@ -645,7 +610,7 @@ export class WindowsAdapter implements PlatformAdapter {
           '    $ok = $true } }' +
           '  if ($ok) { "ok" } else { "no-window" } }';
         const { stdout } = await execFileAsync(powershellExe(), ['-NoProfile', '-Command', ps],
-          psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: query?.title ?? '' } }));
+          psOpts({ timeout: PS_TIMEOUT_MS, env: { ...process.env, CLAWD_PS_TITLE: normalizeWindowText(query?.title) } }));
         return stdout.trim() === 'ok';
       }
 
@@ -789,7 +754,7 @@ export class WindowsAdapter implements PlatformAdapter {
     }
   }
 
-  async findElements(query: { name?: string; controlType?: string; processId?: number }): Promise<UiElement[]> {
+  async findElements(query: { name?: string; controlType?: string; automationId?: string; processId?: number }): Promise<UiElement[]> {
     // Default to the foreground window's pid when caller omits processId.
     // Without this, the PSBridge searches from the desktop root across ALL
     // windows and hits its 20-element cap before finding deep targets. The
@@ -824,6 +789,9 @@ export class WindowsAdapter implements PlatformAdapter {
         const result = await psRunner.run({
           cmd: 'find-element',
           ...(query.name !== undefined ? { name: query.name } : {}),
+          // The bridge matches the id exactly, as a search condition: filtered afterwards, an id past its first 20
+          // elements was never found.
+          ...(query.automationId ? { automationId: query.automationId } : {}),
           ...(ct !== undefined ? { controlType: ct } : {}),
           ...(scope.processId !== undefined ? { processId: scope.processId } : {}),
         }) as any;
@@ -868,6 +836,7 @@ export class WindowsAdapter implements PlatformAdapter {
   async invokeElement(query: {
     name?: string;
     controlType?: string;
+    automationId?: string;
     processId?: number;
     action?: InvokeAction;
     value?: string;
@@ -890,7 +859,7 @@ export class WindowsAdapter implements PlatformAdapter {
     if (ct === null) return { success: false };
 
     let processId = query.processId;
-    if (processId === undefined && query.name) {
+    if (processId === undefined && (query.name || query.automationId)) {
       const fg = await this.getActiveWindow();
       if (fg?.processId) {
         processId = fg.processId;
@@ -898,6 +867,7 @@ export class WindowsAdapter implements PlatformAdapter {
         const candidates = await this.findElements({
           name: query.name,
           controlType: ct,
+          automationId: query.automationId,
         });
         if (candidates.length === 0) return { success: false };
         processId = (candidates[0] as any).processId
@@ -920,6 +890,7 @@ export class WindowsAdapter implements PlatformAdapter {
         processId,
         action: query.action ?? 'click',
         ...(query.name !== undefined ? { name: query.name } : {}),
+        ...(query.automationId ? { automationId: query.automationId } : {}),
         ...(ct !== undefined ? { controlType: ct } : {}),
         ...(query.value !== undefined ? { value: query.value } : {}),
         ...(query.within ? { within: query.within } : {}),

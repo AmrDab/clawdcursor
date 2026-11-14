@@ -36,24 +36,27 @@ const h = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('child_process', () => ({
-  execFile: (cmd: string, args: string[], opts: unknown, cb?: (e: unknown, r?: unknown) => void) => {
-    const done = (typeof opts === 'function' ? opts : cb) as (e: unknown, r?: unknown) => void;
-    const call: { cmd: string; args: string[]; stdin?: string } = { cmd, args };
-    h.calls.push(call);
+vi.mock('child_process', async () => {
+  const { promisify } = await import('util');
+  const run = (cmd: string, args: string[]): Promise<ExecResult> => {
+    h.calls.push({ cmd, args });
     try {
-      Promise.resolve(h.exec!(cmd, args)).then(
-        r => done(null, { stdout: r.stdout, stderr: r.stderr ?? '' }),
-        e => done(e),
-      );
+      return Promise.resolve(h.exec!(cmd, args));
     } catch (e) {
-      done(e);
+      return Promise.reject(e);
     }
+  };
+  // As node's: the callback gets (err, stdout, stderr); promisify(execFile) resolves { stdout, stderr }.
+  const execFile: any = (cmd: string, args: string[], opts: unknown, cb?: (e: unknown, out?: string, err?: string) => void) => {
+    const done = (typeof opts === 'function' ? opts : cb) as (e: unknown, out?: string, err?: string) => void;
+    run(cmd, args).then(r => done(null, r.stdout, r.stderr ?? ''), e => done(e));
+    const call = h.calls[h.calls.length - 1];
     // What the adapter writes to the child's stdin is recorded on the call.
     return { stdin: { on: () => {}, end: (d?: string) => { call.stdin = d; } } };
-  },
-  spawn: (cmd: string, args: string[], opts: unknown) => h.spawn!(cmd, args, opts),
-}));
+  };
+  execFile[promisify.custom] = (cmd: string, args: string[]) => run(cmd, args).then(r => ({ stdout: r.stdout, stderr: r.stderr ?? '' }));
+  return { execFile, spawn: (cmd: string, args: string[], opts: unknown) => h.spawn!(cmd, args, opts) };
+});
 
 vi.mock('@nut-tree-fork/nut-js', async () => {
   // Real Key enum (pure data, no native binding) so the adapter's key tables
@@ -146,6 +149,14 @@ afterEach(() => {
     if (savedEnv[k] === undefined) delete process.env[k]; else process.env[k] = savedEnv[k];
   }
 });
+
+/** The caller text the i-th bridge call got on stdin (`--args-stdin`), never on argv. */
+function bridgeText(i: number): Record<string, string> {
+  const calls = h.calls.filter(c => c.cmd === 'python3' && c.args[0] !== '-c');
+  const call = calls.at(i)!;
+  expect(call.args).toContain('--args-stdin');
+  return JSON.parse(call.stdin!);
+}
 
 /** Python-bridge invocations (cmd === 'python3' with the script path first). */
 function bridgeCalls() {
@@ -442,7 +453,7 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
     const args = bridgeCalls()[0];
     expect(args.slice(0, 2)).toEqual(['--cmd', 'invoke']);
     expect(args[args.indexOf('--action') + 1]).toBe('click');
-    expect(args).toContain('--name=7');
+    expect(bridgeText(0)).toEqual({ name: '7' });
     expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
   });
 
@@ -453,7 +464,9 @@ describe('L8 — invokeElement drives the AT-SPI bridge', () => {
     await adapter.init();
     await adapter.invokeElement({ name: 'Name', action: 'set-value', value: 'Ada' });
     let args = bridgeCalls()[0];
-    expect(args).toContain('--value=Ada');
+    // The value (a password field's too) is never on argv, where every process can read it (/proc/<pid>/cmdline).
+    expect(bridgeText(0)).toEqual({ name: 'Name', value: 'Ada' });
+    expect(args.join(' ')).not.toContain('Ada');
 
     reply = { success: true, action: 'get-value', value: '42' };
     const got = await adapter.invokeElement({ name: 'Display', action: 'get-value' });
@@ -503,7 +516,8 @@ describe('scrollIntoView drives the AT-SPI bridge (Component.scroll_to)', () => 
     expect(res).toEqual({ success: true, method: 'Component.scroll_to', bounds: { x: 10, y: 400, width: 300, height: 80 } });
     const args = bridgeCalls()[0];
     expect(args.slice(0, 2)).toEqual(['--cmd', 'scroll-into-view']);
-    expect(args).toContain('--name=Describe');
+    expect(bridgeText(0)).toEqual({ name: 'Describe' });
+    expect(args.join(' ')).not.toContain('Describe');
     expect(args[args.indexOf('--process-id') + 1]).toBe('4242');
   });
 
@@ -643,10 +657,11 @@ describe('B4/B5 — a11y calls are scoped to the foreground window, even without
     await adapter.findElements({ name: '7' });
     await adapter.invokeElement({ name: '7', action: 'click' });
     await adapter.getFocusedElement();
-    for (const args of bridgeCalls()) {
+    bridgeCalls().forEach((args, i) => {
       expect(args).not.toContain('--process-id');
-      expect(args).toContain('--window-title=xcalc');
-    }
+      expect(bridgeText(i).window_title).toBe('xcalc');
+      expect(args.join(' ')).not.toContain('xcalc');
+    });
     expect(bridgeCalls()).toHaveLength(4);
   });
 });
@@ -799,7 +814,7 @@ describe('R2 — a pid-less window whose title another app also uses is never sc
     await adapter.init();
     await adapter.findElements({ name: '=' });
     const args = bridgeCalls()[0];
-    expect(args).toContain('--window-title=Calculator');
+    expect(bridgeText(0).window_title).toBe('Calculator');
     expect(args[args.indexOf('--exclude-pids') + 1]).toBe('4242');
   });
 });
@@ -830,13 +845,13 @@ describe('R3 — the bridge says why a read came back short', () => {
     expect(adapter.lastTreeTruncated).toBe(true);
   });
 
-  it('a name starting with "-" is passed as --name=…, never as a separate argument', async () => {
+  it('a name starting with "-" goes on stdin, where argparse cannot read it as an option', async () => {
     const adapter = new LinuxAdapter();
     await adapter.init();
     await adapter.findElements({ name: '--Select--' });
     const args = bridgeCalls().at(-1)!;
-    expect(args).toContain('--name=--Select--');
-    expect(args).not.toContain('--name');
+    expect(bridgeText(-1)).toEqual({ name: '--Select--' });
+    expect(args.join(' ')).not.toContain('Select');
   });
 });
 

@@ -21,24 +21,26 @@
  *   mousemove -w -x <hwheel> -y <wheel>    (REL_WHEEL: +up / REL_HWHEEL: +right)
  *   click 0xC0                  (left)   0xC1 (right)   0xC2 (middle)
  *   key <code>:1                (down)   <code>:0      (up)
- *   type --delay 10 "text"
+ *   type --delay 10 --file -    (the text on stdin)
  *
  * 0.1.x ("legacy" — Ubuntu 24.04 / Debian ship 0.1.8):
  *   mousemove <x> <y>           (absolute; `--absolute` is an unknown option
  *                                that still EXITS 0 without moving)
  *   click 1|2|3                 (left/right/middle; `0xC1` parses as 0 = left)
  *   key CTRL+s                  (names only; `29:1` TYPES the digit 2)
- *   type --key-delay 10 "text"
+ *   type --key-delay 10 --file -
  *   No wheel, no separate press/release, no relative move — those report an
  *   honest error rather than a silent no-op or stray keystrokes.
  *
  * All command construction goes through `execFile` (not shell), so
  * there is NO shell interpolation of user text — clawdcursor typing
- * a string with `$` or backticks is safe.
+ * a string with `$` or backticks is safe. Typed text goes on stdin, never
+ * argv: argv is readable by every process (`ps`, /proc/<pid>/cmdline).
  */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { modifierOf, type Modifier } from './keys';
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 5_000;
@@ -54,12 +56,7 @@ export type YdotoolGeneration = 'modern' | 'legacy';
  * Table_FunctionKeys, matched case-insensitively). Single characters go
  * through as-is; anything else has no 0.1.x spelling.
  */
-const LEGACY_MODIFIERS: Record<string, string> = {
-  mod: 'CTRL', ctrl: 'CTRL', control: 'CTRL',
-  shift: 'SHIFT',
-  alt: 'ALT', option: 'ALT',
-  super: 'SUPER', meta: 'SUPER', cmd: 'SUPER', command: 'SUPER', win: 'SUPER',
-};
+const LEGACY_MODIFIERS: Record<Modifier, string> = { ctrl: 'CTRL', shift: 'SHIFT', alt: 'ALT', super: 'SUPER' };
 const LEGACY_KEYS: Record<string, string> = {
   return: 'ENTER', enter: 'ENTER',
   tab: 'TAB',
@@ -74,6 +71,28 @@ const LEGACY_KEYS: Record<string, string> = {
   f1: 'F1', f2: 'F2', f3: 'F3', f4: 'F4', f5: 'F5', f6: 'F6',
   f7: 'F7', f8: 'F8', f9: 'F9', f10: 'F10', f11: 'F11', f12: 'F12',
 };
+
+/**
+ * A combo's modifier tokens, by the aliases keys.ts knows (opt, win, mod …). An unknown one throws before anything is
+ * pressed: dropped, `opt+x` sent a plain x.
+ */
+function modifiersOf(tokens: string[]): Modifier[] {
+  return tokens.map(t => {
+    const m = modifierOf(t, 'linux');
+    if (!m) throw new Error(`Unknown modifier: "${t}"`);
+    return m;
+  });
+}
+
+/** Run `cmd` with `input` on its stdin (typed text never goes on argv). */
+function execWithStdin(cmd: string, args: string[], input: string, timeout: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(cmd, args, { timeout }, err => (err ? reject(err) : resolve()));
+    // The tool may exit (or be killed at the timeout) before it has read everything: a closed pipe is not our error.
+    child.stdin?.on('error', () => { /* reported by the exit callback */ });
+    child.stdin?.end(input);
+  });
+}
 
 function legacyUnsupported(what: string): Error {
   return new Error(
@@ -163,24 +182,10 @@ function charToKeycode(ch: string): number | null {
 export class WaylandBackend {
   readonly kind: WaylandInputKind;
   readonly generation: YdotoolGeneration;
-  private readonly mod2code: Record<string, number>;
 
   constructor(kind: WaylandInputKind, generation: YdotoolGeneration = 'modern') {
     this.kind = kind;
     this.generation = generation;
-    this.mod2code = {
-      mod: LINUX_KEYCODES.ctrl, // Linux "mod" resolves to Ctrl (same as clawdcursor's portable spec)
-      ctrl: LINUX_KEYCODES.ctrl,
-      control: LINUX_KEYCODES.ctrl,
-      shift: LINUX_KEYCODES.shift,
-      alt: LINUX_KEYCODES.alt,
-      option: LINUX_KEYCODES.alt,
-      super: LINUX_KEYCODES.super,
-      meta: LINUX_KEYCODES.super,
-      cmd: LINUX_KEYCODES.super,
-      command: LINUX_KEYCODES.super,
-      win: LINUX_KEYCODES.super,
-    };
   }
 
   static async detect(hasBinary: (name: string) => Promise<boolean>): Promise<WaylandBackend> {
@@ -278,12 +283,8 @@ export class WaylandBackend {
     if (this.kind === 'wtype-keyboard-only') {
       // wtype: -M <mod> repeatable, then -k <keyname> or bare text.
       const args: string[] = [];
-      const modsLower = parts.slice(0, -1).map(p => p.toLowerCase());
       const key = parts[parts.length - 1];
-      for (const m of modsLower) {
-        const wm = wtypeModName(m);
-        if (wm) { args.push('-M', wm); }
-      }
+      for (const m of modifiersOf(parts.slice(0, -1))) args.push('-M', WTYPE_MODIFIERS[m]);
       // wtype named keys (Return, Tab, etc.) go via `-k`.
       const wtypeKey = wtypeKeyName(key);
       if (wtypeKey) {
@@ -301,7 +302,7 @@ export class WaylandBackend {
 
     if (this.generation === 'legacy') {
       // 0.1.x: one `key NAME+NAME` call presses everything and releases in reverse.
-      const mods = parts.slice(0, -1).map(p => LEGACY_MODIFIERS[p.toLowerCase()]).filter(Boolean);
+      const mods = modifiersOf(parts.slice(0, -1)).map(m => LEGACY_MODIFIERS[m]);
       const key = parts[parts.length - 1];
       const name = LEGACY_KEYS[key.toLowerCase()] ?? (key.length === 1 ? key : null);
       if (name !== null) {
@@ -319,11 +320,7 @@ export class WaylandBackend {
     }
 
     // ydotool path: press all modifier codes (down), tap main key, release modifiers.
-    const modCodes: number[] = [];
-    for (let i = 0; i < parts.length - 1; i++) {
-      const code = this.mod2code[parts[i].toLowerCase()];
-      if (typeof code === 'number') modCodes.push(code);
-    }
+    const modCodes = modifiersOf(parts.slice(0, -1)).map(m => LINUX_KEYCODES[m]);
     const mainName = parts[parts.length - 1];
     const mainCode = this.keyToCode(mainName);
     // An unknown key name is an error, as on X11, Windows and macOS, and before any modifier goes down. Typed as text
@@ -354,14 +351,14 @@ export class WaylandBackend {
   }
 
   async keyDown(key: string): Promise<void> {
-    if (this.kind !== 'ydotool') return;
+    if (this.kind !== 'ydotool') throw cannotHold('holding a key');
     if (this.generation === 'legacy') throw legacyUnsupported('holding a key');
     const code = this.oneKeyCode(key);
     await execFileAsync('ydotool', ['key', `${code}:1`], { timeout: TIMEOUT_MS });
   }
 
   async keyUp(key: string): Promise<void> {
-    if (this.kind !== 'ydotool') return;
+    if (this.kind !== 'ydotool') throw cannotHold('releasing a held key');
     if (this.generation === 'legacy') throw legacyUnsupported('releasing a key');
     const code = this.oneKeyCode(key);
     await execFileAsync('ydotool', ['key', `${code}:0`], { timeout: TIMEOUT_MS });
@@ -384,15 +381,12 @@ export class WaylandBackend {
     if (this.kind === 'ydotool') {
       // Small delay so fast apps don't drop chars (0.1.x calls it --key-delay).
       const delayFlag = this.generation === 'legacy' ? '--key-delay' : '--delay';
-      await execFileAsync('ydotool', ['type', delayFlag, '10', '--', text], {
-        timeout: TIMEOUT_MS + text.length * 15,
-      });
+      // `--file -`: the text on stdin (both generations), never argv.
+      await execWithStdin('ydotool', ['type', delayFlag, '10', '--file', '-'], text, TIMEOUT_MS + text.length * 15);
       return;
     }
-    // wtype: positional arg
-    await execFileAsync('wtype', ['--', text], {
-      timeout: TIMEOUT_MS + text.length * 15,
-    });
+    // wtype: `-` reads the text from stdin.
+    await execWithStdin('wtype', ['-'], text, TIMEOUT_MS + text.length * 15);
   }
 
   // ── Internals ───────────────────────────────────────────────
@@ -400,19 +394,22 @@ export class WaylandBackend {
   private keyToCode(name: string): number | null {
     const low = name.toLowerCase();
     if (low in LINUX_KEYCODES) return LINUX_KEYCODES[low];
-    if (low in this.mod2code) return this.mod2code[low];
+    const mod = modifierOf(low, 'linux');
+    if (mod) return LINUX_KEYCODES[mod];
     const ch = charToKeycode(name);
     if (ch !== null) return ch;
     return null;
   }
 }
 
-function wtypeModName(m: string): string | null {
-  if (m === 'ctrl' || m === 'control' || m === 'mod') return 'ctrl';
-  if (m === 'shift') return 'shift';
-  if (m === 'alt' || m === 'option') return 'alt';
-  if (m === 'super' || m === 'cmd' || m === 'command' || m === 'meta' || m === 'win') return 'logo';
-  return null;
+const WTYPE_MODIFIERS: Record<Modifier, string> = { ctrl: 'ctrl', shift: 'shift', alt: 'alt', super: 'logo' };
+
+/**
+ * wtype taps keys (`-M` / `-m` hold a modifier only within one call), so a key held across calls needs ydotool. Said,
+ * not skipped: the held-key record (pointer-guard.ts) must never believe a key is down that is not.
+ */
+function cannotHold(what: string): Error {
+  return new Error(`${what} needs ydotool (with ydotoold running) on Wayland; wtype, the only input tool found, cannot hold a key`);
 }
 
 function wtypeKeyName(k: string): string | null {

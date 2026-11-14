@@ -1203,7 +1203,15 @@ def main() -> int:
     p.add_argument('--bounds', default=None)
     # scroll-into-view: the active window's screen origin "x,y" (for window-relative extents)
     p.add_argument('--origin', default=None)
+    # Caller text (name / value / within / window_title) as one JSON object on stdin, not argv: argv is readable by every
+    # process on the machine while the bridge runs, and the value can be a password (linux.ts runAtspi).
+    p.add_argument('--args-stdin', action='store_true')
     args = p.parse_args()
+    if args.args_stdin:
+        text = json.loads(sys.stdin.buffer.read().decode('utf-8') or '{}')
+        for key in ('name', 'value', 'within', 'window_title'):
+            if isinstance(text.get(key), str):
+                setattr(args, key, text[key])
     excl = {int(x) for x in args.exclude_pids.split(',') if x.strip().isdigit()}
 
     try:

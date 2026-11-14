@@ -105,3 +105,25 @@ describe('WindowsAdapter — controlType spelling (MenuItem / "menu item" / menu
     expect(runCalls).toHaveLength(0);
   });
 });
+
+// Audit 2026-11-13: the adapter dropped automationId, so a find by id searched the window unfiltered, the bridge cut that
+// at 20 elements, and tools/a11y.ts filtered the 20 by id afterwards: an id further down the window was never found.
+describe('WindowsAdapter — automationId reaches the bridge', () => {
+  let adapter: WindowsAdapter;
+
+  beforeEach(() => {
+    runCalls.length = 0;
+    adapter = new WindowsAdapter();
+    vi.spyOn(adapter, 'getActiveWindow').mockResolvedValue({ processId: 42 } as never);
+  });
+
+  it('findElements sends it as a search condition', async () => {
+    await adapter.findElements({ automationId: 'SubmitButton' });
+    expect(runCalls[0]).toMatchObject({ cmd: 'find-element', automationId: 'SubmitButton', processId: 42 });
+  });
+
+  it('invokeElement sends it, and an id alone is scoped to the foreground window like a name', async () => {
+    await adapter.invokeElement({ automationId: 'SubmitButton', action: 'click' });
+    expect(runCalls[0]).toMatchObject({ cmd: 'invoke-element', automationId: 'SubmitButton', processId: 42 });
+  });
+});

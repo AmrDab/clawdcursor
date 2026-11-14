@@ -160,6 +160,28 @@ export function normalizeKey(key: string): string {
   return KEY_ALIASES[key.toLowerCase()] || key;
 }
 
+/** A modifier key, as an executor presses it. `super` is Cmd on macOS and the Super / Windows key elsewhere. */
+export type Modifier = 'ctrl' | 'shift' | 'alt' | 'super';
+
+/**
+ * The modifier a combo's modifier token presses on `platform`, by the aliases above (opt / option = alt, win = super,
+ * `mod` = this OS's shortcut modifier, cmd / command / meta = Ctrl on Windows and Super elsewhere). Null when the token is
+ * no modifier: an executor refuses that combo instead of pressing the key without it (`opt+x` must never send a plain x).
+ */
+export function modifierOf(token: string, platform: NodeJS.Platform = process.platform): Modifier | null {
+  const t = token.trim().toLowerCase();
+  // KEY_ALIASES resolves these three for the OS this process runs on; `platform` decides here.
+  if (t === 'mod') return platform === 'darwin' ? 'super' : 'ctrl';
+  if (t === 'cmd' || t === 'command' || t === 'meta') return platform === 'win32' ? 'ctrl' : 'super';
+  switch (KEY_ALIASES[t]) {
+    case 'Control': return 'ctrl';
+    case 'Shift': return 'shift';
+    case 'Alt': return 'alt';
+    case 'Super': return 'super';
+    default: return null;
+  }
+}
+
 /**
  * Normalize a key combo string like "ctrl+shift+a" → "Control+Shift+a"
  */

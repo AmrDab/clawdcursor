@@ -55,3 +55,20 @@ export function sharpFromGrab(img: GrabImage): ReturnType<typeof sharp> {
   const raw = normalizeGrab(img);
   return sharp(raw.data, { raw: { width: raw.width, height: raw.height, channels: raw.channels } });
 }
+
+/**
+ * `screenshot({region})` on a whole-screen grab (macOS, Linux): the part of the region inside the `width` x `height` image,
+ * in sharp's extract() shape, at least 1x1 — the same clamp as NativeDesktop.captureRegionForLLM.
+ */
+export function clampRegion(
+  region: { x: number; y: number; width: number; height: number }, width: number, height: number,
+): { left: number; top: number; width: number; height: number } {
+  const left = Math.max(0, Math.min(Math.round(region.x), width - 1));
+  const top = Math.max(0, Math.min(Math.round(region.y), height - 1));
+  return {
+    left,
+    top,
+    width: Math.max(1, Math.min(Math.round(region.width), width - left)),
+    height: Math.max(1, Math.min(Math.round(region.height), height - top)),
+  };
+}

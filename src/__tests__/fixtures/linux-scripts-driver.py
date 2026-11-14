@@ -562,4 +562,22 @@ doc_out = []
 bridge.walk(Acc('win', 'frame', children=[Acc('New', 'push button'), Acc('Start', 'document web', children=[Acc("What's New", 'link')])]), doc_out, 1)
 OUT['in_document'] = [e['name'] + ('*' if e.get('inDocument') else '') for e in doc_out]
 
+# --args-stdin: the caller's text (a password included) is read from stdin, never argv, and reaches the command.
+import io
+seen = {}
+real_cmd_invoke = bridge.cmd_invoke
+bridge.cmd_invoke = lambda name, role, pid, action, value, title, excl, within: seen.update(
+    name=name, action=action, value=value, window_title=title, within=within) or {'success': True}
+saved = (sys.argv, sys.stdin, sys.stdout)
+sys.argv = ['atspi-bridge.py', '--cmd', 'invoke', '--action', 'set-value', '--args-stdin']
+sys.stdin = io.TextIOWrapper(io.BytesIO(json.dumps(
+    {'name': '--Password--', 'value': 'hunter2 é', 'within': 'Log in', 'window_title': 'Sign in'}).encode('utf-8')))
+sys.stdout = io.StringIO()
+try:
+    bridge.main()
+finally:
+    sys.argv, sys.stdin, sys.stdout = saved
+    bridge.cmd_invoke = real_cmd_invoke
+OUT['args_stdin'] = seen
+
 sys.stdout.write(json.dumps(OUT))
