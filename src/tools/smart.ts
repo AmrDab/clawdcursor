@@ -922,30 +922,20 @@ export function getSmartTools(): ToolDefinition[] {
             }
           } catch (err) { if (isGuardRefusal(err)) throw err; /* else fall through */ }
 
-          // Try CDP focus (browser)
+          // Try CDP focus (browser), through the driver's evaluate: it is guarded, so a Stop pressed meanwhile refuses it.
           if (!focused) {
             try {
               if (await ctx.cdp.isConnected()) {
-                const page = ctx.cdp.getPage();
-                if (page) {
-                  const found = await page.evaluate((label: string) => {
-                    const inputs = document.querySelectorAll('input, textarea, [contenteditable]');
-                    for (const el of inputs) {
-                      const htmlEl = el as HTMLElement;
-                      const ariaLabel = htmlEl.getAttribute('aria-label') || '';
-                      const placeholder = htmlEl.getAttribute('placeholder') || '';
-                      const name = htmlEl.getAttribute('name') || '';
-                      if ([ariaLabel, placeholder, name].some(a => a.toLowerCase().includes(label.toLowerCase()))) {
-                        htmlEl.focus();
-                        return true;
-                      }
-                    }
-                    return false;
-                  }, target).catch(() => false);
-                  if (found) focused = true;
-                }
+                const found = await ctx.cdp.evaluate(`((label) => {
+                  for (const el of document.querySelectorAll('input, textarea, [contenteditable]')) {
+                    const names = [el.getAttribute('aria-label'), el.getAttribute('placeholder'), el.getAttribute('name')];
+                    if (names.some(a => (a || '').toLowerCase().includes(label.toLowerCase()))) { el.focus(); return true; }
+                  }
+                  return false;
+                })(${JSON.stringify(target)})`);
+                if (found) focused = true;
               }
-            } catch { /* fall through */ }
+            } catch (err) { if (isGuardRefusal(err)) throw err; /* else fall through */ }
           }
 
           // The lookup find_field uses (the compiled UI: a field's label may not be its accessibility name), scrolled into view.

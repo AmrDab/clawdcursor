@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   checkAssertions,
+  inMcpSession,
   wasTrueAtBaseline,
   hasDiscriminatingEvidence,
   type Assertion,
@@ -56,10 +57,19 @@ describe('file_changed_since_start assertion', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('fails (safely) when no task-start timestamp is wired', async () => {
+  it('fails (safely) outside an MCP session with no start wired', async () => {
     const r = await checkAssertions([{ type: 'file_changed_since_start', path: fp }], deps(undefined));
     expect(r.ok).toBe(false);
-    expect(r.outcomes[0].detail).toMatch(/no task-start timestamp/);
+    expect(r.outcomes[0].detail).toMatch(/no start time/);
+  });
+
+  it('inside an MCP session, measures from the session start', async () => {
+    await fs.writeFile(fp, 'written now');
+    const check = () => checkAssertions([{ type: 'file_changed_since_start', path: fp }], deps(undefined));
+    expect((await inMcpSession(Date.now() - 60_000, check)).ok).toBe(true);
+    const later = await inMcpSession(Date.now() + 60_000, check);
+    expect(later.ok).toBe(false);
+    expect(later.outcomes[0].detail).toMatch(/NOT modified since the session started/);
   });
 });
 

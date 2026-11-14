@@ -625,7 +625,7 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
 
     {
       name: 'verify',
-      description: 'Deterministically check CURRENT state against machine-checkable assertions — the harness executes them, no guessing. Types: window_title_contains{value}, app_running{name}, element_exists{name}, element_value_contains{name,value}, clipboard_contains{value}, file_exists{path}, file_contains{path,value}, ocr_contains{value}, file_changed_since_start{path} (proves a file was written during THIS task). Cheaper and more reliable than a screenshot — use after a critical step.',
+      description: 'Deterministically check CURRENT state against machine-checkable assertions — the harness executes them, no guessing. Types: window_title_contains{value}, app_running{name}, element_exists{name}, element_value_contains{name,value}, clipboard_contains{value}, file_exists{path}, file_contains{path,value}, ocr_contains{value}, file_changed_since_start{path} (proves a file was written since your MCP session started). Cheaper and more reliable than a screenshot — use after a critical step.',
       inputSchema: {
         type: 'object',
         properties: {

@@ -29,6 +29,7 @@
  */
 
 import { promises as fs } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { quoteScreenText } from '../result-codes';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
@@ -54,9 +55,15 @@ export interface AssertionDeps {
    *  check). Left unwired in contexts without an OCR engine; the assertion
    *  then fails with an explanatory detail instead of throwing. */
   ocrText?: () => Promise<string>;
-  /** Epoch-ms timestamp of task start. Required by `file_changed_since_start`
-   *  (the proof that a mutating task actually wrote the file it claims to). */
+  /** Epoch-ms timestamp of task start, for `file_changed_since_start` (the proof that a mutating task actually wrote
+   *  the file it claims to). Unset: the start of the MCP session the call runs in (`inMcpSession`). */
   taskStartedAt?: number;
+}
+
+/** When the MCP session a tool call runs in started (its agent connected): the start `file_changed_since_start` means. */
+const mcpSessionStart = new AsyncLocalStorage<number>();
+export function inMcpSession<R>(startedAt: number, fn: () => R): R {
+  return mcpSessionStart.run(startedAt, fn);
 }
 
 export interface AssertionOutcome {
@@ -246,15 +253,16 @@ async function checkOne(a: Assertion, deps: AssertionDeps): Promise<{ ok: boolea
       // wallpaper task 'verified' via the clock while the wallpaper file went
       // untouched). Discriminating by construction: at task start nothing has
       // been modified-since-start yet.
-      if (deps.taskStartedAt === undefined) {
-        return { ok: false, detail: 'no task-start timestamp in this context — file_changed_since_start only works inside a task run' };
+      const start = deps.taskStartedAt ?? mcpSessionStart.getStore();
+      if (start === undefined) {
+        return { ok: false, detail: 'no start time in this context — file_changed_since_start works inside an MCP session' };
       }
       try {
         const st = await fs.stat(expandHome(a.path));
-        const delta = Math.round((st.mtimeMs - deps.taskStartedAt) / 1000);
-        return st.mtimeMs > deps.taskStartedAt
-          ? { ok: true, detail: `modified ${delta}s into the task` }
-          : { ok: false, detail: `NOT modified since the task started (mtime is ${Math.abs(delta)}s older than task start) — your action did not change this file` };
+        const delta = Math.round((st.mtimeMs - start) / 1000);
+        return st.mtimeMs > start
+          ? { ok: true, detail: `modified ${delta}s after the session started` }
+          : { ok: false, detail: `NOT modified since the session started (mtime is ${Math.abs(delta)}s older than the start) — your action did not change this file` };
       } catch {
         return { ok: false, detail: `no file at "${a.path}"` };
       }
