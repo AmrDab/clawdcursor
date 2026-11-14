@@ -6,8 +6,6 @@
  * It configures nothing about models: clawdcursor runs none.
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
 import pc from 'picocolors';
 import { NativeDesktop } from '../platform/native-desktop';
 import { AccessibilityBridge } from '../platform/accessibility';
@@ -16,7 +14,8 @@ import { DEFAULT_CONFIG } from '../types';
 import { getPackageRoot } from '../paths';
 import { hasConsent } from './onboarding';
 import { checkPermissionsQuick, requestPermissions, screenRecordingGranted, nativeBuildHint, isMacOS } from '../platform/native-helper';
-import { findInstalledCopies, describeCopies } from './installed-copies';
+import { findInstalledCopies, describeCopies, compareVersions } from './installed-copies';
+import { VERSION } from '../version';
 import { installMethod, howToUpdate } from './update';
 
 interface DiagResult {
@@ -250,9 +249,7 @@ function checkInstalledCopies(results: DiagResult[], latest: string | undefined)
  */
 async function checkForUpdates(results: DiagResult[]): Promise<string | undefined> {
   try {
-    const pkgPath = path.join(getPackageRoot(), 'package.json');
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-    const currentVersion = pkg.version || '0.0.0';
+    const currentVersion = VERSION;
     console.log(`   Current: v${currentVersion}`);
 
     const controller = new AbortController();
@@ -297,26 +294,6 @@ async function checkForUpdates(results: DiagResult[]): Promise<string | undefine
       console.log(`   ⚠️  Update check failed — skipping`);
     }
     // Don't fail the doctor for a version check issue
-    const pkgPath = path.join(getPackageRoot(), 'package.json');
-    try {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      results.push({ name: 'Version', ok: true, detail: `v${pkg.version} (update check unavailable)` });
-    } catch {
-      results.push({ name: 'Version', ok: true, detail: 'unknown (update check unavailable)' });
-    }
+    results.push({ name: 'Version', ok: true, detail: `v${VERSION} (update check unavailable)` });
   }
-}
-
-/**
- * Simple semver comparison. Returns >0 if a > b, <0 if a < b, 0 if equal.
- */
-function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map(Number);
-  const pb = b.split('.').map(Number);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const na = pa[i] || 0;
-    const nb = pb[i] || 0;
-    if (na !== nb) return na - nb;
-  }
-  return 0;
 }
