@@ -17,7 +17,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile, execFileSync, spawn, type ChildProcess } from 'child_process';
 import { getPackageRoot } from '../paths';
-import { macAxBinary } from '../platform/mac-ocr-binary';
+import { macAxBinary } from '../platform/mac-swift-binary';
 import { runAppleScript, MacKeyboardGuard } from '../platform/mac-keyboard';
 import { selectOption } from '../platform/select-option';
 

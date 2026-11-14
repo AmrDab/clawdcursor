@@ -24,7 +24,7 @@ import { sharpFromGrab, type GrabImage } from './grab-image';
 import { rawScreenGrab } from './screen-grab';
 import { psRunner } from './ps-runner';
 import { pickDisplay } from './display-target';
-import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-ocr-binary';
+import { cachedMacOcrBinary, compileMacOcrBinary } from './mac-swift-binary';
 import type { Display } from './types';
 import { psOpts, powershellExe } from './ps-spawn';
 import { onAgentAct } from './pointer-guard';

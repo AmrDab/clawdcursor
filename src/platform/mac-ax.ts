@@ -31,7 +31,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getPackageRoot } from '../paths';
-import { macAxBinary } from './mac-ocr-binary';
+import { macAxBinary } from './mac-swift-binary';
 import type { InvokeAction, UiElement, WindowInfo } from './types';
 import { isOwnUiPid } from './pointer-guard';
 import { structuredMissFields, targetOf } from '../core/miss-text';

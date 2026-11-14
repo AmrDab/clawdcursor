@@ -26,7 +26,7 @@ vi.mock('child_process', async (orig) => {
 
 import {
   cachedMacOcrBinary, compileMacOcrBinary, macOcrBinaryPath, resetMacOcrBinaryState, macOverlayBinary,
-} from '../platform/mac-ocr-binary';
+} from '../platform/mac-swift-binary';
 
 let dir: string;
 let script: string;

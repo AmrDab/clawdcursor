@@ -65,7 +65,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      # The macOS helpers and overlay are compiled on the user's Mac at first use (mac-ocr-binary.ts: swiftc -O); a compile
+      # The macOS helpers and overlay are compiled on the user's Mac at first use (mac-swift-binary.ts: swiftc -O); a compile
       # error there silently disables pauses or the accessibility helper. Compile every script the same way here.
       - name: Compile the macOS Swift scripts
         if: runner.os == 'macOS'
