@@ -324,16 +324,8 @@ describe('projectToToolDefinition', () => {
   it('produces a structurally valid ToolDefinition for read_screen', () => {
     const def = projectToToolDefinition(readScreenTool);
 
-    // Name
     expect(def.name).toBe('read_screen');
-    // Description comes from System B
-    expect(typeof def.description).toBe('string');
     expect(def.description.length).toBeGreaterThan(0);
-    // Parameters
-    expect(typeof def.parameters).toBe('object');
-    // Handler
-    expect(typeof def.handler).toBe('function');
-    // Metadata
     expect(def.category).toBeDefined();
     expect(def.safetyTier).toBeDefined();
     expect(def.costClass).toBeDefined();
@@ -363,21 +355,15 @@ describe('projectToToolDefinition', () => {
     const def = projectToToolDefinition(readScreenTool);
     const ctx = makeMockToolContext();
 
-    const result = await def.handler({}, ctx);
-
-    expect(typeof result.text).toBe('string');
-    expect(typeof result.isError).toBe('boolean');
     // Must not throw — the system B execute() wraps errors internally.
+    await expect(def.handler({}, ctx)).resolves.toBeTruthy();
   });
 
   it('handler does not throw for the type tool', async () => {
     const def = projectToToolDefinition(typeTool);
     const ctx = makeMockToolContext();
 
-    const result = await def.handler({ text: 'hello world' }, ctx);
-
-    expect(typeof result.text).toBe('string');
-    expect(typeof result.isError).toBe('boolean');
+    await expect(def.handler({ text: 'hello world' }, ctx)).resolves.toBeTruthy();
   });
 
   it('throws when passed a tool name not in TOOL_META', () => {

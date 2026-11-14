@@ -38,11 +38,11 @@ function invokerSource(): string {
 }
 
 describe('ps-bridge: Win32 controls keep their real control type (bug 1)', () => {
-  it.runIf(process.platform === 'win32')('a ListView is reported as List, not Pane, after a FromHandle-first session', () => {
+  it.runIf(process.platform === 'win32')('a ListView is reported as List, not Pane, after a FromHandle-first session', (ctx) => {
     const pidOut = execFileSync('powershell', ['-NoProfile', '-Command',
       '(Get-Process explorer -ErrorAction SilentlyContinue | Select-Object -First 1).Id'], psOpts({ encoding: 'utf8' })).trim();
     const pid = Number(pidOut);
-    if (!pid) return; // no shell (headless runner): nothing to probe
+    if (!pid) ctx.skip('no shell (headless runner): nothing to probe');
     const input = [
       JSON.stringify({ cmd: 'get-foreground-window' }),
       JSON.stringify({ cmd: 'find-element', automationId: '1', processId: pid, maxResults: 10 }),
@@ -53,7 +53,7 @@ describe('ps-bridge: Win32 controls keep their real control type (bug 1)', () =>
     const lines = out.split(/\r?\n/).filter(Boolean);
     const found = JSON.parse(lines[lines.length - 1]) as Array<{ className: string; controlType: string }>;
     const listViews = found.filter(e => e.className === 'SysListView32');
-    if (listViews.length === 0) return; // no desktop icon view on this machine
+    if (listViews.length === 0) ctx.skip('no desktop icon view on this machine');
     for (const lv of listViews) expect(lv.controlType).toBe('ControlType.List');
   }, 90_000);
 });

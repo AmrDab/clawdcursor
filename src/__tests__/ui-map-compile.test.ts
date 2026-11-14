@@ -143,7 +143,5 @@ describe('defaultCompileDeps', () => {
     const d = defaultCompileDeps(adapter, 5, 'obs_9');
     expect(d.now).toBe(5);
     expect(d.snapshotId).toBe('obs_9');
-    expect(typeof d.captureSnapshot).toBe('function');
-    expect(typeof d.ocr).toBe('function');
   });
 });

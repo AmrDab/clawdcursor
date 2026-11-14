@@ -12,6 +12,7 @@ import type express from 'express';
 import type { ZodTypeAny } from 'zod';
 import { VERSION } from './version';
 import type { ToolContext, ToolDefinition } from '../tools/registry';
+import type { ParameterDef } from '../tools/types';
 import { getAllTools, getCompactSurface } from '../tools/registry';
 import { controlBanner } from '../core/banner';
 import { osKeysGuide } from '../platform/keys';
@@ -251,47 +252,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     // Convert parameter defs to a Zod schema map. The MCP SDK uses zod
     // shape objects (Record<string, ZodType>) — not full ZodObjects.
     const zodParams: Record<string, ZodTypeAny> = {};
-    for (const [key, def] of Object.entries(tool.parameters)) {
-      let schema: ZodTypeAny;
-      if (def.type === 'number') schema = z.number();
-      else if (def.type === 'boolean') schema = z.boolean();
-      // 'array' params accept a real array (preferred) OR a JSON-encoded string,
-      // matching dual-accept handlers (e.g. batch.steps). Without this branch the
-      // default below coerced arrays to z.string() and rejected the array form
-      // the README/inputSchema advertise ("Expected string, received array").
-      //
-      // Published as a PLAIN `{type:"array", items:<real schema>}`, not as the
-      // `z.union` it used to be. The union serialized to
-      // `anyOf:[{type:"array",items:{}},{type:"string"}]`, which hits two
-      // documented provider rejections that stop a host registering the server:
-      //   - Gemini (verbatim-relay hosts): `anyOf` with a sibling `description`
-      //     is a 400 — "schema specified other fields alongside any_of".
-      //   - OpenAI `strict: true`: `items: {}` has no `type` — "schema must
-      //     have a 'type' key".
-      // Runtime acceptance is unchanged: z.any() + refine still takes a real
-      // array OR a JSON-encoded string, so dual-accept handlers see the same
-      // inputs, and anything else is still rejected as before.
-      else if (def.type === 'array') {
-        schema = z.any()
-          .refine(v => v === null || Array.isArray(v) || typeof v === 'string', {   // null: some hosts send it for "not given"
-            message: 'Expected an array (or a JSON-encoded array string).',
-          })
-          .meta({ type: 'array', items: def.items ?? { type: 'object' } });
-      }
-      // 'object' params: a real object (or its JSON text, like arrays); the handler validates the fields.
-      else if (def.type === 'object') {
-        schema = z.any()
-          .refine(v => v === null || (typeof v === 'object' && !Array.isArray(v)) || typeof v === 'string', {
-            message: 'Expected an object (or a JSON-encoded object string).',
-          })
-          .meta({ type: 'object', properties: def.properties ?? {} });
-      }
-      else schema = z.string();
-      if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
-      schema = schema.describe(def.description);
-      if (def.required === false) schema = schema.optional();
-      zodParams[key] = schema;
-    }
+    for (const [key, def] of Object.entries(tool.parameters)) zodParams[key] = paramSchema(z, def);
 
     // MCP SDK 1.29 arg parsing breaks if schema is undefined (shifts callback
     // position). Always pass a schema — use empty object for parameterless tools.
@@ -430,6 +391,49 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
   stripRootSchemaDialect(server);
 
   return { server, toolCount: tools.length, tools, sessionLog };
+}
+
+/** The zod schema a tool parameter is published and validated with (zod is passed in: it is loaded lazily). */
+export function paramSchema(z: typeof import('zod').z, def: ParameterDef): ZodTypeAny {
+  let schema: ZodTypeAny;
+  if (def.type === 'number') schema = z.number();
+  else if (def.type === 'boolean') schema = z.boolean();
+  // 'array' params accept a real array (preferred) OR a JSON-encoded string,
+  // matching dual-accept handlers (e.g. batch.steps). Without this branch the
+  // default below coerced arrays to z.string() and rejected the array form
+  // the README/inputSchema advertise ("Expected string, received array").
+  //
+  // Published as a PLAIN `{type:"array", items:<real schema>}`, not as the
+  // `z.union` it used to be. The union serialized to
+  // `anyOf:[{type:"array",items:{}},{type:"string"}]`, which hits two
+  // documented provider rejections that stop a host registering the server:
+  //   - Gemini (verbatim-relay hosts): `anyOf` with a sibling `description`
+  //     is a 400 — "schema specified other fields alongside any_of".
+  //   - OpenAI `strict: true`: `items: {}` has no `type` — "schema must
+  //     have a 'type' key".
+  // Runtime acceptance is unchanged: z.any() + refine still takes a real
+  // array OR a JSON-encoded string, so dual-accept handlers see the same
+  // inputs, and anything else is still rejected as before.
+  else if (def.type === 'array') {
+    schema = z.any()
+      .refine(v => v === null || Array.isArray(v) || typeof v === 'string', {   // null: some hosts send it for "not given"
+        message: 'Expected an array (or a JSON-encoded array string).',
+      })
+      .meta({ type: 'array', items: def.items ?? { type: 'object' } });
+  }
+  // 'object' params: a real object (or its JSON text, like arrays); the handler validates the fields.
+  else if (def.type === 'object') {
+    schema = z.any()
+      .refine(v => v === null || (typeof v === 'object' && !Array.isArray(v)) || typeof v === 'string', {
+        message: 'Expected an object (or a JSON-encoded object string).',
+      })
+      .meta({ type: 'object', properties: def.properties ?? {} });
+  }
+  else schema = z.string();
+  if (def.enum) schema = z.enum(def.enum as [string, ...string[]]);
+  schema = schema.describe(def.description);
+  if (def.required === false) schema = schema.optional();
+  return schema;
 }
 
 /**

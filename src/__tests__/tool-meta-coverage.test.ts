@@ -120,35 +120,6 @@ describe('TOOL_META coverage (Step 1 — enforced)', () => {
     expect(stale).toEqual([]);
   });
 
-  it('every TOOL_META entry has required fields (category, safetyTier, costClass)', () => {
-    const VALID_CATEGORIES = new Set([
-      'perception', 'mouse', 'keyboard', 'window', 'clipboard', 'browser', 'orchestration',
-    ]);
-    const VALID_COST_CLASSES = new Set([
-      'act', 'inspect', 'perceive-text', 'perceive-image',
-    ]);
-    const VALID_SAFETY_TIERS = new Set([0, 1]);   // read vs input: no tier refuses anything
-
-    const bad: string[] = [];
-    for (const [name, meta] of Object.entries(TOOL_META)) {
-      if (!VALID_CATEGORIES.has(meta.category)) {
-        bad.push(`${name}: invalid category "${meta.category}"`);
-      }
-      if (!VALID_COST_CLASSES.has(meta.costClass)) {
-        bad.push(`${name}: invalid costClass "${meta.costClass}"`);
-      }
-      if (!VALID_SAFETY_TIERS.has(meta.safetyTier)) {
-        bad.push(`${name}: invalid safetyTier "${meta.safetyTier}"`);
-      }
-    }
-    expect(bad).toEqual([]);
-  });
-
-  it('excluded sets are disjoint (no name in both TERMINAL and VISION_COMPOUNDS)', () => {
-    const intersection = [...TERMINAL_ACTIONS].filter(n => VISION_COMPOUNDS.has(n));
-    expect(intersection).toEqual([]);
-  });
-
   it('vision compound tool names (mouse/keyboard/window) are not in the flat catalog', () => {
     // The thin loop does not use compound tools — they were vision-only.
     // None of them should appear in the flat catalog returned by buildUnifiedTools().

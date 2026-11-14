@@ -1299,13 +1299,10 @@ describe('first call while the helper is still being built', () => {
     expect(exec.mock.calls.every(c => c[0] === 'lsappinfo')).toBe(true);
   });
 
-  it('concurrent first calls share one build', async () => {
-    let builds = 0;
-    const { ax, calls } = building(async () => { builds++; return '/fake/ax-helper'; });
-    // each call asks ensureHelper while helper() is still null; the real compile() memoises, this fake counts asks
+  it('concurrent first calls both run on the helper once it is built (one build: mac-swift-binary.test.ts)', async () => {
+    const { ax, calls } = building(async () => '/fake/ax-helper');
     await Promise.all([ax.listWindows(), ax.activeWindow()]);
     expect(calls.every(c => c.file === '/fake/ax-helper')).toBe(true);
-    expect(builds).toBeGreaterThanOrEqual(1);
   });
 });
 

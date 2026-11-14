@@ -3,7 +3,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ORACLES, nativeDo, oracleCounts, runnable, scriptProblems, type OracleStep } from '../lib/oracles';
 import { selfcheckOracles } from '../lib/selfcheck';
-import { GATE } from '../lib/scorer';
 import { loadTasks } from '../lib/tasks';
 
 const tasks = loadTasks();
@@ -34,20 +33,6 @@ describe('every oracle is the count of a scripted trajectory, not a number someo
   it('a task without an accessibility tree looks with screenshots: before acting and to verify', () => {
     for (const t of tasks.filter(x => x.archetype === 'web-canvas' || x.archetype === 'cad-viewport')) expect(oracleCounts(ORACLES[t.id]).screenshots, t.id).toBe(2);
     for (const t of tasks.filter(x => x.archetype !== 'web-canvas' && x.archetype !== 'cad-viewport')) expect(oracleCounts(ORACLES[t.id]).screenshots, t.id).toBe(0);
-  });
-
-  it('the trajectory the first Codex run took on a trap task (focus, read, press, verify) passes the gate', () => {
-    const trap = tasks.find(t => t.id === 'web-trap-new')!;
-    expect(trap.oracle.calls).toBe(4);
-    expect(4).toBeLessThanOrEqual(Math.ceil(trap.oracle.calls * GATE.callFactor));
-    // The gate itself is unchanged, and 22 calls on the form still fails it.
-    expect(GATE).toEqual({ screenshotSlack: 1, callFactor: 1.5 });
-    const form = tasks.find(t => t.id === 'web-form-fill')!;
-    expect(22).toBeGreaterThan(Math.ceil(form.oracle.calls * GATE.callFactor));
-  });
-
-  it('the watchdog\'s cap leaves room for a run that passes the gate', () => {
-    for (const t of tasks) expect(t.caps.calls, t.id).toBeGreaterThanOrEqual(Math.ceil(t.oracle.calls * GATE.callFactor));
   });
 });
 

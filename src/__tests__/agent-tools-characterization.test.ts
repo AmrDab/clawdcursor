@@ -213,8 +213,7 @@ describe('3. coordBreadcrumb — click result contains image→screen breadcrumb
     // Breadcrumb must show original image coords AND the scaled screen coords
     expect(result.text).toContain('100');
     expect(result.text).toContain('200');
-    // The scaled values at 2× should appear: 100*2=200, 200*2=400
-    expect(result.text).toContain('200');
+    // The scaled y at 2× should appear: 200*2=400 (the scaled x, 200, is already in the text as the image y)
     expect(result.text).toContain('400');
     // Must show the arrow breadcrumb
     expect(result.text).toContain('→ screen');

@@ -85,9 +85,9 @@ describe.skipIf(!isMac)('ax-helper — protocol (macOS)', () => {
     }
   });
 
-  it('a locked screen is reported by every command that would read garbage (the AX tree behind it is empty shells)', async () => {
+  it('a locked screen is reported by every command that would read garbage (the AX tree behind it is empty shells)', async (ctx) => {
     const { locked } = await run(['frontmost']);
-    if (!locked) return;   // only meaningful while the screen happens to be locked
+    if (!locked) ctx.skip('only meaningful while the screen happens to be locked');
     for (const args of [['windows'], ['active'], ['focused'], ['tree'], ['find', '--name', 'x'], ['invoke', '--name', 'x', '--action', 'click'], ['apps', '--name', 'Finder']]) {
       const r = await run(args);
       expect(r, args.join(' ')).toMatchObject({ ok: false, kind: 'locked' });

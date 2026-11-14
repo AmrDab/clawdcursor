@@ -15,7 +15,7 @@ vi.mock('os', async (orig) => {
   return { ...real, default: { ...real, platform: () => 'darwin' }, platform: () => 'darwin' };
 });
 vi.mock('@nut-tree-fork/nut-js', () => ({
-  mouse: { config: {} },
+  mouse: { config: {}, setPosition: vi.fn(async () => {}), click: vi.fn(async () => {}) },
   keyboard: { config: {} },
   screen: { config: {}, grab: vi.fn(), width: vi.fn(async () => 2240), height: vi.fn(async () => 1260) },
   Button: { LEFT: 0, RIGHT: 1, MIDDLE: 2 },
@@ -110,6 +110,15 @@ describe('NativeDesktop.connect() on macOS with the screenshot-helper', () => {
     const quiet = [vi.spyOn(console, 'warn').mockImplementation(() => {}), vi.spyOn(console, 'error').mockImplementation(() => {})];
     await expect(new NativeDesktop(config).connect()).rejects.toThrow(/Failed to capture screen/);
     quiet.forEach(s => s.mockRestore());
+  });
+
+  it('a click is not divided by dpiRatio: callers pass logical points, which nut-js takes on macOS (#154)', async () => {
+    const nut = await import('@nut-tree-fork/nut-js');
+    const d = new NativeDesktop(config);
+    await d.connect();
+    expect(d.getDpiRatio()).toBe(2);
+    await d.mouseClick(1000, 500);
+    expect(nut.mouse.setPosition).toHaveBeenLastCalledWith({ x: 1000, y: 500 });
   });
 
   it('keeps dpiRatio at 1 when NSScreen is unreadable, without failing connect()', async () => {

@@ -182,15 +182,11 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
 
       const handler = await buildAndGetHandler();
       // Allow any tool-level errors; we only inspect the consent-error shape.
-      const result = await handler({}).catch((): null => null);
-
-      if (result !== null) {
-        const text = result.content.find(b => b.type === 'text') as { type: 'text'; text: string } | undefined;
-        const isConsentError = text?.text.includes('clawdcursor consent --accept');
-        expect(isConsentError).toBe(false);
-      }
-      // If the promise rejected that's also fine — it means a tool threw, which
-      // is past the consent gate.
+      // A rejection is fine too: a tool threw, which is past the consent gate. Either way it is not the consent error.
+      const result = await handler({}).catch((e: unknown) => e);
+      const text = result instanceof Error ? result.message
+        : (result as McpToolResult).content.find(b => b.type === 'text')?.text;
+      expect(text ?? '').not.toContain('clawdcursor consent --accept');
     });
 
     it('passes through to the handler (the call takes the pill)', async () => {

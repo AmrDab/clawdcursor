@@ -82,6 +82,6 @@ describe('imageScale maps image px to the mouse driver on every shape', () => {
 
   it('macOS portrait Retina uses the height-capped image width', () => {
     const f = imageScale({ screen: { physicalWidth: 2160, physicalHeight: 3840, logicalWidth: 1080, logicalHeight: 1920 }, _platform: 'darwin' });
-    expect(f).toBeCloseTo(1080 / llmSize(2160, 3840).width, 6);
+    expect(f).toBeCloseTo(1.5, 6);   // 1080 logical over the 720-wide image of a 2160x3840 panel
   });
 });

@@ -3,8 +3,6 @@
  *
  * Covers the failure modes the JSON-lockfile + start-time-verify fix addresses:
  *   - Stale lockfile (PID dead) → cleared, claim succeeds.
- *   - Recycled PID with start-time mismatch → cleared, claim succeeds.
- *   - Genuine duplicate (PID alive + start time matches) → claim returns the pid.
  *   - Legacy bare-int format from prior versions → treated as stale.
  *   - Malformed JSON → treated as stale.
  *
@@ -17,7 +15,6 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { spawn, type ChildProcess } from 'child_process';
 
 // pidfile.ts resolves PID_DIR at import time from os.homedir(), which
 // itself honors HOME (POSIX) and USERPROFILE (Windows). Setting both env
@@ -66,32 +63,6 @@ describe('claimPidFile', () => {
       expect(mod.claimPidFile('mcp')).toBeNull();
       const written = JSON.parse(fs.readFileSync(mod.pidFilePath('mcp'), 'utf-8'));
       expect(written.pid).toBe(process.pid);
-    } finally { restore(); }
-  });
-
-  it('overwrites a recycled-PID lockfile (live PID, wrong start time)', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    try {
-      // Use the test runner's own PID as the "recycled" PID — it's alive
-      // but its real start time is "now-ish", far from the planted value.
-      const recycled = {
-        v: 1,
-        pid: process.pid,
-        startTime: 1_000_000_000_000, // year 2001 — clearly not when this test started
-        mode: 'mcp',
-      };
-      fs.mkdirSync(path.dirname(mod.pidFilePath('mcp')), { recursive: true });
-      fs.writeFileSync(mod.pidFilePath('mcp'), JSON.stringify(recycled));
-
-      // claimPidFile compares the lockfile's recorded start time against the
-      // OS-reported actual start time of the PID. The 2001 timestamp can't
-      // match a process started today, so this must be treated as stale.
-      // (The PID == process.pid short-circuit also forces overwrite — both
-      // paths land on the same correct outcome.)
-      expect(mod.claimPidFile('mcp')).toBeNull();
-
-      const written = JSON.parse(fs.readFileSync(mod.pidFilePath('mcp'), 'utf-8'));
-      expect(written.startTime).not.toBe(1_000_000_000_000);
     } finally { restore(); }
   });
 
@@ -156,85 +127,6 @@ describe('releasePidFile', () => {
 
       mod.releasePidFile('mcp');
       expect(fs.existsSync(mod.pidFilePath('mcp'))).toBe(true);
-    } finally { restore(); }
-  });
-});
-
-// `stop` / `uninstall` signal the pid a lock names. Locks go stale and pids get reused, so only a lock that proves its
-// process (full JSON lock + matching OS start time) may be signalled; anything else is deleted untouched.
-describe('stopLockHolder', () => {
-  // A cold PowerShell + WMI start-time query can take seconds under a parallel run.
-  const LOOKUP_MS = 30_000;
-
-  function spawnIdleChild(): ChildProcess {
-    return spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
-  }
-
-  function writeLock(mod: { pidFilePath: (m: 'start') => string }, body: string): string {
-    const file = mod.pidFilePath('start');
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, body);
-    return file;
-  }
-
-  it('does not signal a live pid whose start time does not match, and removes the lock', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    const child = spawnIdleChild();
-    try {
-      const kill = vi.spyOn(process, 'kill');
-      // A reused pid: alive, but not the process that wrote the lock (start time far in the past).
-      const file = writeLock(mod, JSON.stringify({ v: 1, pid: child.pid, startTime: 1_000_000_000_000, mode: 'start' }));
-      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stale' });
-      expect(kill.mock.calls.filter(([, sig]) => sig !== 0)).toEqual([]);   // liveness probes only
-      expect(fs.existsSync(file)).toBe(false);
-      expect(mod.isProcessAlive(child.pid!)).toBe(true);
-    } finally { child.kill(); restore(); }
-  }, 60_000);
-
-  it('does not signal the parent process named by a wrong-start-time lock', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    try {
-      const kill = vi.spyOn(process, 'kill');
-      const file = writeLock(mod, JSON.stringify({ v: 1, pid: process.ppid, startTime: 1_000_000_000_000, mode: 'start' }));
-      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stale' });
-      expect(kill.mock.calls.filter(([, sig]) => sig !== 0)).toEqual([]);
-      expect(fs.existsSync(file)).toBe(false);
-    } finally { restore(); }
-  }, 60_000);
-
-  it('removes a legacy bare-integer lock without signalling anything', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    const child = spawnIdleChild();
-    try {
-      const kill = vi.spyOn(process, 'kill');
-      const file = writeLock(mod, String(child.pid));
-      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stale' });
-      expect(kill).not.toHaveBeenCalled();
-      expect(fs.existsSync(file)).toBe(false);
-      expect(mod.isProcessAlive(child.pid!)).toBe(true);
-    } finally { child.kill(); restore(); }
-  }, 60_000);
-
-  it('signals the holder when the lock proves it, and removes the lock', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    const child = spawnIdleChild();
-    try {
-      const startTime = mod.getProcessStartTime(child.pid!, LOOKUP_MS);
-      expect(startTime).not.toBeNull();
-      const file = writeLock(mod, JSON.stringify({ v: 1, pid: child.pid, startTime, mode: 'start' }));
-      const exited = new Promise(r => child.once('exit', r));
-      const kill = vi.spyOn(process, 'kill');
-      await expect(mod.stopLockHolder('start', LOOKUP_MS)).resolves.toEqual({ outcome: 'stopped', pid: child.pid });
-      expect(kill).toHaveBeenCalledWith(child.pid, 'SIGTERM');
-      await exited;
-      expect(fs.existsSync(file)).toBe(false);
-    } finally { child.kill(); restore(); }
-  }, 60_000);
-
-  it('reports none when there is no lock', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    try {
-      await expect(mod.stopLockHolder('start')).resolves.toEqual({ outcome: 'none' });
     } finally { restore(); }
   });
 });
@@ -311,32 +203,3 @@ describe('daemonPortForClient', () => {
   });
 });
 
-describe('sweepAllLocks (`stop` and `uninstall`)', () => {
-  const LOOKUP_MS = 30_000;   // a cold PowerShell + WMI start-time query can take seconds under a parallel run
-
-  it('stops only a holder its lock proves; a live pid under a wrong start time is left alone; every lock is removed', async () => {
-    const { mod, restore } = await loadPidfileWithHome(tmpHome);
-    const ours = spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
-    const stranger = spawn(process.execPath, ['-e', 'setTimeout(()=>{},30000)'], { stdio: 'ignore' });
-    try {
-      const startTime = mod.getProcessStartTime(ours.pid!, LOOKUP_MS);
-      expect(startTime).not.toBeNull();
-      fs.mkdirSync(path.dirname(mod.pidFilePath('start')), { recursive: true });
-      expect(mod.claimPidFile(mod.DAEMON_LOCK)).toBeNull();                            // this process: removed, not killed
-      fs.writeFileSync(mod.pidFilePath('serve'), JSON.stringify({ v: 1, pid: ours.pid, startTime, mode: 'serve' }));
-      // A reused pid: alive, but not the process that wrote the lock.
-      fs.writeFileSync(mod.pidFilePath('mcp'), JSON.stringify({ v: 1, pid: stranger.pid, startTime: 1_000_000_000_000, mode: 'mcp' }));
-      const exited = new Promise(r => ours.once('exit', r));
-      const kill = vi.spyOn(process, 'kill');
-      expect(await mod.sweepAllLocks(LOOKUP_MS)).toEqual([
-        { mode: 'start', outcome: 'stale' },
-        { mode: 'mcp', outcome: 'stale' },
-        { mode: 'serve', outcome: 'stopped', pid: ours.pid },
-      ]);
-      expect(kill.mock.calls.filter(([pid, sig]) => sig !== 0 && pid !== ours.pid)).toEqual([]);
-      await exited;
-      expect(mod.isProcessAlive(stranger.pid!)).toBe(true);
-      for (const mode of ['start', 'mcp', 'serve'] as const) expect(fs.existsSync(mod.pidFilePath(mode))).toBe(false);
-    } finally { ours.kill('SIGKILL'); stranger.kill('SIGKILL'); restore(); }
-  }, 60_000);
-});

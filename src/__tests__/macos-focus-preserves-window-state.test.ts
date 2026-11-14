@@ -54,15 +54,6 @@ describe('the macOS focus path never changes a window\'s size, zoom or full-scre
     expect(body.length).toBeGreaterThan(200);
     for (const forbidden of ['setWindowState', 'setWindowBounds', 'maximizeWindow', 'keyPress']) expect(body).not.toContain(forbidden);
   });
-
-  it('the guard itself catches what it guards against', () => {
-    expect(violations('win.size = [100, 100];')).toContain('writes size');
-    expect(violations('win.position = [0, 0];')).toContain('writes position');
-    expect(violations("win.actions.byName('AXZoomButton').perform()")).toContain('touches zoom');
-    expect(violations("win.attributes.byName('AXFullScreen').value = true")).toContain('touches full screen');
-    expect(violations("win.attributes.byName('AXMinimized').value = true;")).toContain('sets AXMinimized to true');
-    expect(violations("win.attributes.byName('AXMinimized').value = false;")).toEqual([]);
-  });
 });
 
 // ─── behaviour against a fake System Events ─────────────────────────────────

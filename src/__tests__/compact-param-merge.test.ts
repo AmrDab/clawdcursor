@@ -17,6 +17,8 @@ vi.mock('sharp', () => ({ default: vi.fn() }));
 import { getTool } from '../tools/registry';
 import { getCompactTools, COMPOUND_ROUTE_INDEX } from '../tools/compact';
 import type { ParameterDef } from '../tools/types';
+import { z } from 'zod';
+import { paramSchema } from '../surface/mcp-server';
 
 /** A value the granular tool itself accepts for this param. */
 function sampleFor(def: ParameterDef): unknown {
@@ -27,14 +29,8 @@ function sampleFor(def: ParameterDef): unknown {
   return 'free text value';
 }
 
-/** Mirrors the MCP server's zod projection of a ParameterDef. */
-function accepts(def: ParameterDef, v: unknown): boolean {
-  if (def.enum) return typeof v === 'string' && def.enum.includes(v);
-  if (def.type === 'number') return typeof v === 'number';
-  if (def.type === 'boolean') return typeof v === 'boolean';
-  if (def.type === 'array') return Array.isArray(v) || typeof v === 'string';
-  return typeof v === 'string';
-}
+/** Whether the MCP server's schema for this parameter takes the value. */
+const accepts = (def: ParameterDef, v: unknown): boolean => paramSchema(z, def).safeParse(v).success;
 
 describe('compound schema merge', () => {
   const compounds = new Map(getCompactTools().map(t => [t.name, t]));

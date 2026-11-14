@@ -210,7 +210,7 @@ describe('the results directory', () => {
     const b = prepareOutDir();
     try {
       expect(a).not.toBe(b);
-      expect(path.dirname(a)).toBe(fs.realpathSync(os.tmpdir()) === os.tmpdir() ? os.tmpdir() : path.dirname(a));
+      expect(fs.realpathSync(path.dirname(a))).toBe(fs.realpathSync(os.tmpdir()));
       expect(path.basename(a)).toMatch(/^clawdcursor-bench-.{6}$/);
       expect(fs.readdirSync(a)).toEqual([]);
       if (process.platform !== 'win32') expect(fs.statSync(a).mode & 0o077).toBe(0);
