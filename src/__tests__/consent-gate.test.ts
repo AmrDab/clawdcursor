@@ -238,12 +238,12 @@ describe('consent gate in createMcpServer tool handlers (PR #169)', () => {
   });
 
   // ── 4. cli.ts mcp command no longer exits on missing consent ────────────────
-  describe('cli.ts — mcp command is non-fatal on missing consent', () => {
+  describe('serve.ts — the stdio server is non-fatal on missing consent', () => {
     it('does NOT contain process.exit(1) in the mcp consent branch', () => {
       const { readFileSync } = require('node:fs');
       const { join } = require('node:path');
       const cliSrc = readFileSync(
-        join(__dirname, '..', 'surface', 'cli.ts'),
+        join(__dirname, '..', 'surface', 'serve.ts'),
         'utf8',
       ) as string;
 

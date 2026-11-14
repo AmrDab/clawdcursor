@@ -69,16 +69,13 @@ process.on('unhandledRejection', (reason: any) => {
 
 import './quiet-warnings';   // first: before any dependency can emit DEP0040
 import { Command } from 'commander';
-import { createUtilityServer, requireAuth, initServerToken, getServerLogBuffer, mountJson404 } from './http-utility';
 import { VERSION } from './version';
 import dotenv from 'dotenv';
-import { resolveConfig } from '../config';
 import * as fs from 'fs';
 import * as path from 'path';
 import pc from 'picocolors';
 import { migrateFromLegacyDir, getPackageRoot } from '../paths';
-import { ensureHostAppRunning, stopHostApp } from '../platform/native-helper';
-import { UIMapHolder } from '../core/sense/ui-map-holder';
+import { stopHostApp } from '../platform/native-helper';
 import { stopControl, resumeControl, isStopped } from '../core/control';
 
 dotenv.config({ quiet: true });
@@ -109,10 +106,9 @@ import { e } from './format';
 // The richer JSON lockfile records process start time, which lets the
 // liveness check distinguish a real live duplicate from a recycled PID
 // (the bug behind "Failed to reconnect to clawdcursor: -32000" on Windows).
-import { claimPidFile, releasePidFile, isProcessAlive, recordLockPort, daemonPortForClient, stopLockHolder } from './pidfile';
+import { daemonPortForClient, stopLockHolder } from './pidfile';
 import { userArgs, parsePort } from './argv';
-import { endAllSessions } from './session-log';
-import { spoolBeforeExit, setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
+import { setTelemetryEnabled, offReason, telemetryStatusText, STATE_FILE as TELEMETRY_FILE } from '../core/observability/telemetry';
 import { privateRunDir } from '../platform/ps-spawn';
 
 const program = new Command();
@@ -141,24 +137,9 @@ program
   .description('🐾 Desktop control for AI agents: an MCP tool layer your agent drives')
   .version(VERSION);
 
-// ── Agent mode (v0.9 PR7.4) ────────────────────────────────────────────
-//
-// Single daemon entry point: the HTTP MCP server. It runs no model and needs no
-// key; the connecting agent (Claude Code, Codex, Cursor, ...) drives the tools.
-// Replaces the legacy `start` and `serve` commands; both still exist as
-// deprecated aliases that print a warning and proxy to runAgentMode.
-//
-// Surface mounted on the daemon's port (default 3847):
-//   GET  /         — dashboard (calls /mcp via JSON-RPC)
-//   GET  /health   — readiness probe (no auth)
-//   POST /stop     — graceful shutdown (auth + localhost-only)
-//   GET  /resume   — the pending pause for the user, if any (auth + localhost-only)
-//   POST /resume   — answer a pause for the user (auth + localhost-only)
-//   POST /mcp      — MCP streamable-HTTP transport (auth)
-//   GET  /mcp      — MCP SSE channel (auth)
-//   DELETE /mcp    — MCP session terminate (auth)
-//
-// `--no-llm` is still accepted as a no-op so existing scripts keep working.
+// ── The daemon: `clawdcursor agent` serves MCP over HTTP (serve.ts). It runs no model and needs no key; the connecting
+// agent (Claude Code, Codex, Cursor, ...) drives the tools. `start` and `serve` are deprecated aliases. `--no-llm` is still
+// accepted as a no-op so existing scripts keep working.
 interface AgentModeOpts {
   port?: string;
   accept?: boolean;
@@ -169,11 +150,6 @@ interface AgentModeOpts {
   /** Commander `--no-banner` → false. Undefined = banner enabled (default). */
   banner?: boolean;
 }
-
-// SECURITY (#113, #293): this surface is full desktop control, so the daemon
-// binds loopback only — there is no setting or flag that widens it. For remote
-// use, tunnel the port: `ssh -L 3847:127.0.0.1:3847 user@host`.
-const BIND_HOST = '127.0.0.1';
 
 /** A `--port` flag: undefined when not given; anything but an integer in 1..65535 exits with "Invalid port number". */
 function portFlag(raw: string | undefined): number | undefined {
@@ -192,171 +168,10 @@ function clientPort(raw: string | undefined): number {
 }
 
 async function runAgentMode(opts: AgentModeOpts): Promise<void> {
-  const forceNoVision = opts.vision === false;
-  const cliPort = portFlag(opts.port);
-
-  // Single-instance guard — uses the legacy `start` lockfile name so
-  // existing `clawdcursor stop` sweeps still find it.
-  const existingPid = claimPidFile('start');
-  if (existingPid !== null) {
-    console.error(`${e('❌', '[ERR]')} clawdcursor agent is already running (pid ${existingPid}). Run \`clawdcursor stop\` first.`);
-    process.exit(1);
-  }
-
-  // ── Consent ──
-  const { hasConsent, writeConsentFile, runOnboarding } = await import('./onboarding');
-  const canSkipDev = opts.skipConsent && process.env.NODE_ENV === 'development';
-  if (opts.accept) {
-    writeConsentFile();
-    console.log('  Consent recorded.\n');
-  } else if (!canSkipDev && !hasConsent()) {
-    const accepted = await runOnboarding('start', resolveConfig({ cliFlags: { port: cliPort } }).port);
-    if (!accepted) process.exit(1);
-  }
-
-  if (process.platform === 'darwin') {
-    await ensureHostAppRunning();
-  }
-
-  const resolved = resolveConfig({
-    cliFlags: {
-      port:     cliPort,
-      noVision: forceNoVision,
-    },
-  });
-
-  // ── Port pre-check — on the port the daemon will really bind (--port, else
-  // server.port from config, else 3847), not just the flag. ──
-  const net = await import('net');
-  const portFree = await new Promise<boolean>((resolve) => {
-    const tester = net.createServer()
-      .once('error', () => resolve(false))
-      .once('listening', () => { tester.close(); resolve(true); });
-    tester.listen(resolved.port, BIND_HOST);
-  });
-  if (!portFree) {
-    console.error(`\n${e('❌', '[ERR]')} Port ${resolved.port} is already in use.`);
-    console.error(`Another clawdcursor instance may be running.`);
-    console.error(`Run 'clawdcursor stop' first, or use --port <other_port>`);
-    process.exit(1);
-  }
-
-  console.log(`${pc.green('✓')} ${pc.bold('clawdcursor')} ${pc.gray(`v${VERSION}`)} ${pc.gray(`— desktop control active on ${BIND_HOST}:${resolved.port}`)}`);
-
-  // ── HTTP utility surface (/, /health, /stop) + MCP transport at /mcp ──
-  const app = createUtilityServer({
-    host: BIND_HOST,
-    onStop: async () => {
-      endAllSessions('stopped with clawdcursor stop (POST /stop)');  // synchronous: in the log before the exit
-      releasePidFile('start');  // like the SIGINT/SIGTERM exits: a stale lock must not outlive the daemon
-    },
-  });
-
-  // Starting the daemon is the user's own act: it gives control back after a stop.
-  if (isStopped()) {
-    resumeControl('daemon_start');
-    console.log(`   ${e('▶', '>')} An earlier stop was cleared: starting clawdcursor gives it control again.`);
-  }
-
-  // ── On-screen control banner: double-click = the user takes control back ──
-  // Every clawdcursor process refuses to act until the user gives control back
-  // (control.ts, #294). The daemon stays up; `clawdcursor stop` still shuts it down. Disable with --no-banner / CLAWD_NO_BANNER=1.
-  const { controlBanner } = await import('../core/banner');
-  if (opts.banner === false) controlBanner.setEnabled(false);
-  controlBanner.configure({
-    onStopRequested: () => {
-      console.log(`\n${e('🛑', '[STOP]')} Control banner double-clicked — stopped; nothing runs until you give control back.`);
-      stopControl('pill');
-      controlBanner.unpin();
-    },
-  });
-
-  // Build the ToolContext shared by every MCP handler.
-
-  // One UIMapHolder per daemon session, shared by the MCP surface (via toolCtx
-  // → toolContextToAgent bridge).
-  const uiMapHolder = new UIMapHolder();
-
-  const toolCtx: any = await createToolContext();
-  toolCtx.ensureInitialized().catch((err: any) => {
-    console.error('Subsystem init failed:', err?.message);
-  });
-  if (toolCtx.cdp) {
-    // connect() resolves false on failure (it logs the reason itself): only true is a connection.
-    toolCtx.cdp.connect().then((ok: boolean) => {
-      if (ok) console.log(`   ${e('🌐', '[NET]')} CDP connected to browser`);
-      else console.log(`   ${e('ℹ️', 'i')} CDP: no browser detected (will retry when web tools are called)`);
-    }).catch(() => {
-      console.log(`   ${e('ℹ️', 'i')} CDP: no browser detected (will retry when web tools are called)`);
-    });
-  }
-  toolCtx.getLogBuffer = getServerLogBuffer;
-  toolCtx.uiMaps = uiMapHolder;
-  toolCtx.disableVision = resolved.disableVision;
-
-  // Mount /mcp behind the same Bearer-auth gate the legacy REST routes used.
-  // Compact-over-HTTP: default granular for backward compatibility (the
-  // dashboard at / calls 9 granular tool names — see dashboard.ts). External
-  // agent hosts can opt into the 6-compound public surface via
-  // `clawdcursor agent --compact` or `CLAWD_MCP_COMPACT=1`.
-  const compactSurface = opts.compact === true || process.env.CLAWD_MCP_COMPACT === '1';
-  let mcpToolCount = 0;
-  try {
-    const { createMcpServer, startMcpHttp } = await import('./mcp-server');
-    const { server: mcpServer, toolCount } = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
-    mcpToolCount = toolCount;
-    app.use('/mcp', requireAuth);
-    // A server per SDK-client session and per concurrent one-shot post —
-    // one shared server refused every request while another held it.
-    await startMcpHttp(mcpServer, app, '/mcp',
-      async () => {
-        const h = await createMcpServer({ compact: compactSurface, ctx: toolCtx });
-        h.server.onSessionEnd = reason => h.sessionLog.end(reason, 'session');
-        return h.server;
-      });
-  } catch (err) {
-    console.warn('MCP HTTP transport not loaded:', (err as Error).message);
-  }
-
-  // LAST mount — JSON 404 for unmatched routes (must come after /mcp).
-  mountJson404(app);
-
-  app.listen(resolved.port, BIND_HOST, async () => {
-    // Where `stop` / `resume` find this daemon (see daemonPortForClient).
-    recordLockPort('start', resolved.port);
-    const serverToken = initServerToken();
-    const tokenPath = path.join(require('os').homedir(), '.clawdcursor', 'token');
-    console.log(`\n${pc.green(`${e('🌐', '[NET]')} API server:`)} http://${BIND_HOST}:${resolved.port}`);
-    console.log(`${pc.yellow(`${e('🔑', '[KEY]')} Auth token:`)} ${serverToken.slice(0, 8)}...`);
-    console.log(pc.gray(`   (full token saved to ${tokenPath})`));
-    console.log(`\nSurviving HTTP routes:`);
-    console.log(`  GET  /         — Dashboard (calls /mcp via JSON-RPC)`);
-    console.log(`  GET  /health   — Readiness probe (no auth)`);
-    console.log(`  POST /stop     — Graceful shutdown (auth, localhost only)`);
-    console.log(`\nMCP endpoint (the only protocol):`);
-    console.log(`  POST /mcp      — JSON-RPC tools/call & tools/list (auth) — ${compactSurface ? 'compact' : 'granular'} surface, ${mcpToolCount} tools`);
-    console.log(`  GET  /mcp      — SSE notifications (auth)`);
-    if (!compactSurface) {
-      console.log(pc.gray(`   (tip: pass --compact or set CLAWD_MCP_COMPACT=1 to expose the 6-compound public surface)`));
-    }
-    console.log(`\nAll mutating endpoints require: ${pc.cyan('Authorization: Bearer <token>')}`);
-
-    console.log(`\nReady. ${e('🐾', '')}`);
-  });
-
-  process.on('SIGINT', () => {
-    console.log(`\n${e('👋', '--')} Shutting down...`);
-    endAllSessions('SIGINT (Ctrl+C)');
-    releasePidFile('start');
-    spoolBeforeExit();
-    process.exit(0);
-  });
-  process.on('SIGTERM', () => {
-    endAllSessions('SIGTERM (a kill or the system stopped the daemon)');
-    releasePidFile('start');
-    spoolBeforeExit();
-    process.exit(0);
-  });
+  const port = portFlag(opts.port);
+  const { serveMcp } = await import('./serve');
+  await serveMcp({ transport: 'http', compact: opts.compact === true, banner: opts.banner !== false, port,
+    vision: opts.vision, accept: opts.accept, skipConsent: opts.skipConsent });
 }
 
 program
@@ -759,83 +574,6 @@ program
     console.log(`   or:           ${reinstallOneLiner}\n`);
   });
 
-// ── Shared subsystem initialization (used by mcp + serve) ──
-
-/**
- * Image-space → mouse-driver factor for the image the model was last sent.
- * Physical px on Windows/Linux (= screenshot scale); logical points on macOS
- * (logical width / image width — may be < 1, e.g. a 2560-px panel shown at
- * 1024 points). Read live, never cached.
- */
-function mouseScaleFor(
-  desktop: { getScaleFactor(): number; getLlmWidth(): number },
-  macLogicalWidth: number,
-): number {
-  const llmW = desktop.getLlmWidth();
-  if (process.platform === 'darwin' && macLogicalWidth > 0 && llmW > 0) return macLogicalWidth / llmW;
-  return desktop.getScaleFactor();
-}
-
-async function createToolContext() {
-  const { NativeDesktop } = await import('../platform/native-desktop');
-  const { AccessibilityBridge } = await import('../platform/accessibility');
-  const { CDPDriver } = await import('../platform/cdp-driver');
-  const { DEFAULT_CONFIG } = await import('../types');
-  const { DEFAULT_CDP_PORT } = await import('../platform/browser-config');
-  const { getPlatform } = await import('../platform');
-
-  const desktop = new NativeDesktop({ ...DEFAULT_CONFIG });
-  const a11y = new AccessibilityBridge();
-  const cdp = new CDPDriver(DEFAULT_CDP_PORT);
-  // Session-scoped el_NN UIMap cache. Without this, compile_ui / find_* and
-  // the {element_id, snapshot_id} ref path fail with "no UIMap holder on this
-  // context" over stdio MCP — the v1.5.0 substrate was unreachable for editor-
-  // hosted agents (only the `agent` daemon constructed one). Gauntlet F1.
-  const { UIMapHolder } = await import('../core/sense/ui-map-holder');
-  const uiMaps = new UIMapHolder();
-  // Lazy adapter handle — Tranche 1A primitives run through this. Populated
-  // in ensureInitialized so we share the same adapter the unified pipeline uses.
-  let platform: import('../platform/types').PlatformAdapter | undefined;
-
-  let initialized = false;
-  let initPromise: Promise<void> | null = null;
-  // macOS logical (point) width; 0 elsewhere. Scale factors are read LIVE from
-  // the desktop's last capture (mouseScaleFor) — freezing them at startup broke
-  // clicks after a rotation / resolution change.
-  let macLogicalWidth = 0;
-
-  const ensureInitialized = async (): Promise<void> => {
-    if (initialized) return;
-    if (initPromise) return initPromise;
-    initPromise = (async () => {
-      await desktop.connect();
-      platform = await getPlatform();
-      // mouse factor: image-space → mouse-driver coords (see mouseScaleFor).
-      //  • Windows / Linux: nut-js drives PHYSICAL px → the screenshot scale.
-      //  • macOS: nut-js drives LOGICAL points; on Retina physical≠logical and
-      //    the physical scale double-counts the backing scale (#154).
-      if (process.platform === 'darwin') {
-        try {
-          const lsize = await platform.getScreenSize(); // NSScreen logical + physical dims
-          macLogicalWidth = lsize?.logicalWidth ?? 0;
-        } catch { /* best-effort fallback: physical scale */ }
-      }
-      await a11y.warmup();
-      initialized = true;
-      console.log(`Subsystems initialized (mouseScale=${mouseScaleFor(desktop, macLogicalWidth)}, screenshotScale=${desktop.getScaleFactor()})`);
-    })();
-    return initPromise;
-  };
-
-  return {
-    desktop, a11y, cdp, uiMaps,
-    get platform() { return platform; },
-    getMouseScaleFactor: () => mouseScaleFor(desktop, macLogicalWidth),
-    getScreenshotScaleFactor: () => desktop.getScaleFactor(),
-    ensureInitialized,
-  };
-}
-
 // ── MCP Mode (for Claude Code, Cursor, Windsurf, Zed, etc.) ──
 
 program
@@ -844,138 +582,8 @@ program
   .option('--compact', 'Expose 6 compound tools instead of the granular surface, where every action is its own tool (recommended for most agents)')
   .option('--no-banner', 'Disable the on-screen "desktop control in progress" banner (also CLAWD_NO_BANNER=1)')
   .action(async (opts: { compact?: boolean; banner?: boolean }) => {
-    // No single-instance lock in MCP mode. Hosts legitimately run several
-    // copies at once — Claude Desktop starts a protocol probe, the main
-    // connection and a Cowork/Code pool for one extension, and another editor
-    // may be running clawdcursor too — and the old lock made every copy after
-    // the first exit "already running … Kill it first", so the .mcpb never
-    // connected (live, 2026-10). The lock existed to stop orphans piling up;
-    // each copy now reaps itself instead (stdin EOF + parent-PID watchdog below).
-
-    // MCP mode: stdout is protocol, logs go to stderr
-    const stderrWrite = (prefix: string, args: any[]) =>
-      process.stderr.write(`${prefix}${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}\n`);
-    console.log = (...args: any[]) => stderrWrite('', args);
-    console.warn = (...args: any[]) => stderrWrite('[WARN] ', args);
-    console.error = (...args: any[]) => stderrWrite('[ERROR] ', args);
-    // debug / info / dir / table ALSO write to stdout in Node. Only the three
-    // above were redirected, so any of these on a reachable path — e.g. the
-    // console.debug on every Linux accessibility call, and on the CDP failure
-    // paths — wrote a non-JSON line into the protocol stream and corrupted it
-    // for every stdio host at once.
-    console.debug = (...args: any[]) => stderrWrite('[DEBUG] ', args);
-    console.info = (...args: any[]) => stderrWrite('', args);
-    console.dir = (obj: unknown) => stderrWrite('', [obj]);
-    console.table = (data: unknown) => stderrWrite('', [data]);
-
-    // Consent gate — REQUIRED before any tool runs, but NON-FATAL to startup.
-    // Exiting here made the host show an opaque "MCP server failed" with no
-    // reason: the message only goes to stderr, which most editor hosts hide.
-    // Instead we start the server normally so the requirement surfaces as a
-    // VISIBLE consent prompt on every tool call (enforced in mcp-server.ts) —
-    // and it takes effect the moment `clawdcursor consent --accept` runs, with
-    // no restart needed.
-    const { hasConsent, acceptConsentFromEnv } = await import('./onboarding');
-    // A host that collected consent in its own UI (the .mcpb install screen)
-    // passes it as CLAWDCURSOR_CONSENT=true.
-    if (acceptConsentFromEnv()) process.stderr.write('[clawdcursor] Consent accepted via the host\'s install setting.\n');
-    if (!hasConsent()) {
-      process.stderr.write(
-        `\n[clawdcursor] One-time consent not yet accepted. The server will start, but\n` +
-        `every tool call returns a consent prompt until you run:\n` +
-        `  clawdcursor consent --accept   # this tool gives AI full control of your desktop\n\n`
-      );
-    }
-
-    const mode = opts.compact ? 'compact' : 'granular';
-    console.log(`clawdcursor MCP mode starting... (${mode})`);
-
-    const ctx: import('../tools/types').ToolContext = await createToolContext();
-    // CLAWD_DISABLE_VISION=1 / config disableVision holds here too (no --no-vision flag on stdio).
-    ctx.disableVision = resolveConfig().disableVision;
-
-    // v0.9 PR7: server construction is shared with the HTTP transport in
-    // src/mcp-server.ts — same registry, same guards, same param shape.
-    const { createMcpServer, startMcpStdio } = await import('./mcp-server');
-    const { server, toolCount, sessionLog } = await createMcpServer({ compact: opts.compact, ctx });
-    await startMcpStdio(server);
-    console.log(`clawdcursor MCP ready — ${toolCount} tools registered`);
-    const { logger } = await import('../core/observability/logger');
-    logger.info('mcp.start', { version: VERSION, pid: process.pid, hostPid: process.ppid, surface: mode, readyMs: Math.round(process.uptime() * 1000) });
-    const { reportUncleanExits } = await import('./session-log');
-    reportUncleanExits();
-
-    ctx.ensureInitialized().catch((err: any) => {
-      console.error('Subsystem init failed:', err?.message);
-    });
-
-    // Exit when the host goes away. Guard against double-fire (both 'end' and
-    // 'close' can emit on the same stdin teardown). Defer process.exit via
-    // setImmediate so libuv finishes its stream-close bookkeeping before the
-    // exit syscall — calling process.exit() synchronously inside a stdin
-    // 'end' handler causes SIGSEGV on Linux where libuv is still unwinding
-    // the read handle.
-    let mcpExiting = false;
-    const releaseMcp = (reason: string) => {
-      if (mcpExiting) return;
-      mcpExiting = true;
-      sessionLog.end(reason);                      // synchronous: in the log before the exit
-      spoolBeforeExit();                           // a queued bug report goes out at the next start (telemetry.ts)
-      setImmediate(() => process.exit(0));         // deferred — lets libuv unwind cleanly
-    };
-    process.on('SIGINT', () => releaseMcp('SIGINT (Ctrl+C or the host stopping the server)'));
-    process.on('SIGTERM', () => releaseMcp('SIGTERM (the host or a kill stopped the server)'));
-
-    // On-screen control banner for EXTERNAL agents driving over stdio. The
-    // mcp-server tool wrapper touches it on every consequential call; a
-    // double-click is the human kill switch. It used to exit the server, but the host
-    // respawned a fresh one on the agent's next call that knew nothing of the stop (#294):
-    // now the stop is a state every clawdcursor process honours (control.ts), and the
-    // agent's in-flight batch ends with "stopped by the user" instead of a dead transport.
-    const { controlBanner } = await import('../core/banner');
-    if (opts.banner === false) controlBanner.setEnabled(false);
-    controlBanner.configure({
-      onStopRequested: () => {
-        process.stderr.write('\n[STOP] Control banner double-clicked — stopped; nothing runs until the user gives control back.\n');
-        stopControl('pill');
-        controlBanner.unpin();
-      },
-    });
-
-    // Parent-death detection (orphan teardown).
-    //
-    // MCP stdio servers receive their JSON-RPC traffic over stdin. When the
-    // host editor (Claude Code, Cursor, etc.) exits without first killing
-    // its child, the child's stdin pipe closes immediately. Without an EOF
-    // handler the orphaned server keeps running, holds its lockfile, and
-    // blocks every subsequent reconnect with "already running, kill it
-    // first". Listen for end / close / error and shut down cleanly so the
-    // next host spawn finds a fresh slate.
-    //
-    // The MCP SDK's StdioServerTransport also installs handlers on stdin,
-    // but its close path is asynchronous and host-dependent; treating EOF
-    // as a hard exit signal here makes the orphan-reaping behavior
-    // deterministic and the same on every platform.
-    process.stdin.on('end', () => releaseMcp('the host closed the connection (stdin ended)'));
-    process.stdin.on('close', () => releaseMcp('the host closed the connection (stdin closed)'));
-    process.stdin.on('error', (err) => releaseMcp(`stdin error: ${err?.message ?? err}`));
-
-    // Parent-death watchdog — the DETERMINISTIC orphan reaper.
-    //
-    // The stdin EOF handlers above are only a fast path. The comment's claim
-    // that "the child's stdin pipe closes immediately" is FALSE when the host
-    // is a GUI app: quitting the Claude *desktop* app on Windows does not
-    // deliver stdin EOF to this child, so the server orphans, keeps its
-    // lockfile, and blocks every reconnect with "already running, kill it
-    // first" (observed in the wild). Polling the parent PID closes that gap on
-    // every platform: once the host process is gone, release the lock and exit.
-    // .unref() so the watchdog never keeps the process alive on its own.
-    const parentPid = process.ppid;
-    if (parentPid && parentPid > 1) {
-      setInterval(() => {
-        if (!isProcessAlive(parentPid)) releaseMcp(`the host process (pid ${parentPid}) is gone`);
-      }, 2000).unref();
-    }
+    const { serveMcp } = await import('./serve');
+    await serveMcp({ transport: 'stdio', compact: opts.compact === true, banner: opts.banner !== false });
   });
 
 // ── `serve` deprecation alias (v0.9 PR7.4) ──

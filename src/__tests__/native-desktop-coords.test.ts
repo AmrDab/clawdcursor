@@ -9,7 +9,7 @@
  * WHAT IS LOCKED IN:
  *   1. physicalToMouse: identity at dpiRatio=1, correct division at dpiRatio=2.25.
  *   2. macOS special-case: physicalToMouse MUST be a no-op on darwin regardless
- *      of dpiRatio — callers already pass LOGICAL coords (cli.ts macOS mouseScaleFactor
+ *      of dpiRatio — callers already pass LOGICAL coords (tool-context.ts macOS mouseScaleFactor
  *      maps image→logical, not image→physical). Dividing again would double-correct.
  *   3. MCP computer path: image (x) × mouseScaleFactor → physical → ÷dpiRatio = logical.
  *      On Windows mouseScaleFactor = screenshotScaleFactor = physicalWidth/1280,
@@ -94,7 +94,7 @@ describe('physicalToMouse — coordinate conversion', () => {
 // ── 2. macOS exemption — darwin must ALWAYS be a no-op ───────────────────────
 describe('physicalToMouse — macOS exemption (critical for #154 non-regression)', () => {
   it('darwin + dpiRatio>1 → identity (not double-corrected)', () => {
-    // On macOS, callers (MCP computer path via cli.ts createToolContext) already
+    // On macOS, callers (MCP computer path via tool-context.ts createToolContext) already
     // map image → logical via mouseScaleFactor = logicalWidth / LLM_TARGET_WIDTH.
     // If physicalToMouse also divided by dpiRatio here, we'd apply the Retina
     // scale TWICE. The darwin guard must fire BEFORE the dpiRatio<=1 check.

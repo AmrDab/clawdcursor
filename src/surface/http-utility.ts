@@ -162,70 +162,6 @@ export function requireAuth(req: express.Request, res: express.Response, next: e
   next();
 }
 
-// ── Log buffer (server-side console capture for the dashboard) ─────────
-
-interface LogEntry {
-  timestamp: number;
-  level: 'info' | 'success' | 'warn' | 'error';
-  message: string;
-}
-
-const MAX_LOGS = 200;
-const logBuffer: LogEntry[] = [];
-const MAX_LOG_MSG_LEN = 500;
-
-function addLog(level: LogEntry['level'], message: string): void {
-  const truncated = message.length > MAX_LOG_MSG_LEN
-    ? message.slice(0, MAX_LOG_MSG_LEN) + '…'
-    : message;
-  logBuffer.push({ timestamp: Date.now(), level, message: truncated });
-  if (logBuffer.length > MAX_LOGS) {
-    logBuffer.splice(0, logBuffer.length - MAX_LOGS);
-  }
-}
-
-let consoleHooked = false;
-function hookConsole(): void {
-  if (consoleHooked) return;
-  consoleHooked = true;
-
-  const origLog = console.log;
-  const origError = console.error;
-  const origWarn = console.warn;
-
-  console.log = (...args: unknown[]) => {
-    origLog.apply(console, args);
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-    const lower = msg.toLowerCase();
-    if (lower.includes('error') || lower.includes('failed') || lower.includes('❌')) {
-      addLog('error', msg);
-    } else if (lower.includes('✅') || lower.includes('success') || lower.includes('completed')) {
-      addLog('success', msg);
-    } else if (lower.includes('⚠') || lower.includes('warn')) {
-      addLog('warn', msg);
-    } else {
-      addLog('info', msg);
-    }
-  };
-
-  console.error = (...args: unknown[]) => {
-    origError.apply(console, args);
-    const msg = args.map(a => typeof a === 'string' ? a : (a instanceof Error ? a.message : JSON.stringify(a))).join(' ');
-    addLog('error', msg);
-  };
-
-  console.warn = (...args: unknown[]) => {
-    origWarn.apply(console, args);
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-    addLog('warn', msg);
-  };
-}
-
-/** Read-only snapshot accessor for the captured log buffer. */
-export function getServerLogBuffer(): LogEntry[] {
-  return logBuffer.slice();
-}
-
 // ── Express app factory ─────────────────────────────────────────────────
 
 export interface UtilityServerOptions {
@@ -241,8 +177,6 @@ export interface UtilityServerOptions {
  * gate exported above).
  */
 export function createUtilityServer(options: UtilityServerOptions): express.Express {
-  hookConsole();
-
   const app = express();
   app.use(express.json());
 

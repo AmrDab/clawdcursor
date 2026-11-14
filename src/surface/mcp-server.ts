@@ -75,8 +75,6 @@ export interface McpServerLike {
     handler: (params: Record<string, unknown>) => Promise<McpToolResult>,
   ): void;
   connect(transport: McpTransportLike): Promise<void>;
-  /** Called once when the client session this server was made for closes. */
-  onSessionEnd?: (reason: string) => void;
 }
 
 /** The slice of an SDK transport that clawdcursor drives. */
@@ -105,8 +103,13 @@ export interface McpServerHandle {
   toolCount: number;
   /** Snapshot of the tools that were registered (in registration order). */
   tools: ToolDefinition[];
-  /** This server's session record: the stdio entry closes it with the exit reason. */
+  /** This server's session record: closed with the exit reason (stdio), or when its HTTP session closes. */
   sessionLog: SessionLog;
+}
+
+/** The tools a server serves: the 6 compounds, or the granular surface where every action is its own tool. */
+export function servedTools(compact: boolean | undefined): ToolDefinition[] {
+  return compact ? getCompactSurface() : getAllTools();
 }
 
 /**
@@ -247,7 +250,7 @@ export async function createMcpServer(options: CreateMcpServerOptions): Promise<
     })();
     return consentPrompt;
   };
-  const tools = compact ? getCompactSurface() : getAllTools();
+  const tools = servedTools(compact);
   // Bug telemetry sends a tool or action name only when it is one of these (telemetry.ts), and the host only by an allowlist.
   allowNames(tools.flatMap(t => [t.name, ...(t.parameters.action?.enum ?? [])]));
   // When this session started: when its agent connected (initialized). `expect` / `verify` file_changed_since_start
@@ -501,17 +504,17 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
 }
 
 /**
- * Mount the streamable HTTP MCP transport on an Express app at /mcp.
+ * The streamable HTTP MCP transport, as one request handler for POST / GET / DELETE on the daemon's /mcp route.
  *
  * Two kinds of caller share the endpoint:
  *   - MCP SDK clients (editor hosts, agents) send `initialize`, then reuse the
  *     Mcp-Session-Id they get back and open a long-lived GET stream. Each such
- *     session gets its OWN server (from `createServer`) and a stateful
- *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern.
- *   - One-shot JSON-RPC posts with no initialize and no session (the
- *     dashboard, curl) get a fresh stateless transport on
- *     an idle server: `server` when it is free, another from `createServer`
- *     while it is busy (a long tool call must not block a status poll).
+ *     session gets its OWN server (from `createHandle`) and a stateful
+ *     transport — the MCP TS SDK's jsonResponseStreamableHttp pattern. When the
+ *     session closes, its session log is closed with it.
+ *   - One-shot JSON-RPC posts with no initialize and no session (curl) get a
+ *     fresh stateless transport on an idle server from a pool (a long tool call
+ *     must not block another post).
  *
  * Previously ONE server was connected to a fresh transport per request. An SDK
  * client's GET stream (or any in-flight call) kept that server connected, so
@@ -519,17 +522,17 @@ export async function startMcpStdio(server: McpServerLike): Promise<void> {
  * Ubuntu VM 2026-10-15).
  *
  * `enableJsonResponse: true` keeps POST replies as one plain JSON-RPC body
- * instead of SSE (`event: message\ndata: …`), which single-JSON clients
+ * instead of SSE (`event: message
+data: …`), which single-JSON clients
  * (Claude Code's among them) need.
  *
- * Auth — the caller must apply Bearer-token middleware before this route.
+ * Auth — the caller gates the route (the daemon's route table, http-utility.ts).
  */
+export type McpHttpHandle = Pick<McpServerHandle, 'server'> & { sessionLog: Pick<SessionLog, 'end'> };
+
 export async function startMcpHttp(
-  server: McpServerLike,
-  app: express.Express,
-  mountPath: string = '/mcp',
-  createServer?: () => Promise<McpServerLike>,
-): Promise<{ close: () => Promise<void> }> {
+  createHandle: () => Promise<McpHttpHandle>,
+): Promise<{ handle: (req: express.Request, res: express.Response) => void; close: () => Promise<void> }> {
   type HttpTransport = Omit<McpTransportLike, 'close'> & { sessionId?: string; onclose?: () => void; close: () => Promise<void> };
   const { StreamableHTTPServerTransport } = await import(
     '@modelcontextprotocol/sdk/server/streamableHttp.js' as string
@@ -550,17 +553,16 @@ export async function startMcpHttp(
   };
 
   // ── One-shot posts: stateless transport on an idle server ──
-  const idleServers: McpServerLike[] = [server];
+  const idle: McpServerLike[] = [];
   const oneShot = async (req: express.Request, res: express.Response, body: unknown) => {
-    const srv = idleServers.pop() ?? (createServer ? await createServer() : undefined);
-    if (!srv) { jsonError(res, 503, -32000, 'MCP server busy — retry'); return; }
+    const srv = idle.pop() ?? (await createHandle()).server;
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     let released = false;
     const release = async () => {
       if (released) return;
       released = true;
       try { await transport.close(); } catch { /* already closed */ }
-      idleServers.push(srv);
+      idle.push(srv);
     };
     res.on('close', () => { void release(); });
     try {
@@ -593,12 +595,13 @@ export async function startMcpHttp(
       enableJsonResponse: true,
       onsessioninitialized: id => { sessions.set(id, { transport, open: 0, lastActive: Date.now() }); },
     });
-    transport.onclose = () => { if (transport.sessionId) sessions.delete(transport.sessionId); };
-    const srv = await createServer!();
+    const h = await createHandle();
     // A session's server is not reused: when its client goes away its session log is closed (the daemon's `live` set stays small).
-    const closed = transport.onclose;
-    transport.onclose = () => { closed?.(); srv.onSessionEnd?.('the client session closed'); };
-    await srv.connect(transport);
+    transport.onclose = () => {
+      if (transport.sessionId) sessions.delete(transport.sessionId);
+      h.sessionLog.end('the client session closed', 'session');
+    };
+    await h.server.connect(transport);
     await transport.handleRequest?.(req, res, body);
   };
 
@@ -611,40 +614,30 @@ export async function startMcpHttp(
     return s ?? null;
   };
 
-  // POST /mcp — JSON-RPC requests. Express has already parsed the body.
-  app.post(mountPath, (req, res) => {
+  // POST — JSON-RPC requests (Express has already parsed the body). GET — a session's server-to-client SSE stream
+  // (stateless has none). DELETE — end a session.
+  const handle = (req: express.Request, res: express.Response) => {
     void (async () => {
       try {
         const s = sessionOf(req, res);
         if (s === null) return;
+        if (req.method !== 'POST') {
+          if (!s) { res.status(405).set('Allow', 'POST').send('Method Not Allowed'); return; }
+          track(s, res);
+          await s.transport.handleRequest?.(req, res);
+          return;
+        }
         if (s) { track(s, res); await s.transport.handleRequest?.(req, res, req.body); return; }
-        if (createServer && isInitializeRequest(req.body)) { await openSession(req, res, req.body); return; }
+        if (isInitializeRequest(req.body)) { await openSession(req, res, req.body); return; }
         await oneShot(req, res, req.body);
       } catch (err) {
         jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
       }
     })();
-  });
-
-  // GET /mcp — a session's server-to-client SSE stream. Stateless has none.
-  // DELETE /mcp — end a session.
-  const sessionOnly = (req: express.Request, res: express.Response) => {
-    void (async () => {
-      try {
-        const s = sessionOf(req, res);
-        if (s === null) return;
-        if (!s) { res.status(405).set('Allow', 'POST').send('Method Not Allowed'); return; }
-        track(s, res);
-        await s.transport.handleRequest?.(req, res);
-      } catch (err) {
-        jsonError(res, 500, -32603, `MCP transport error: ${(err as Error).message}`);
-      }
-    })();
   };
-  app.get(mountPath, sessionOnly);
-  app.delete(mountPath, sessionOnly);
 
   return {
+    handle,
     close: async () => {
       clearInterval(sweep);
       await Promise.all([...sessions.values()].map(s => s.transport.close().catch(() => { /* gone */ })));
