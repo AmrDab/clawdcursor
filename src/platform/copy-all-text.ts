@@ -19,6 +19,7 @@
 import type { PlatformAdapter, UiElement, WindowInfo } from './types';
 import { unguarded } from './pointer-guard';
 import { quoteScreenText } from '../core/untrusted-screen-content';
+import { sleep } from '../core/sleep';
 
 const TERMINALS = /^(windowsterminal|wt|cmd|powershell|pwsh|conhost|openconsole|terminal|iterm2?|gnome-terminal(-server)?|konsole|xterm|uxterm|alacritty|kitty|wezterm(-gui)?|tilix|xfce4-terminal|terminator|lxterminal|mate-terminal|hyper|warp|tabby|foot|ghostty)(\.exe)?$/i;
 
@@ -66,8 +67,6 @@ export function selectAllHazard(focused: Pick<UiElement, 'controlType' | 'name'>
   if (ITEM_ROLE.test(role)) return `focus is on ${what} — select-all there selects every item, and a following Delete would act on all of them`;
   return null;
 }
-
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 /** Wall-clock budget for the copy to reach the clipboard. Each read can be a
  *  process spawn (~0.5 s on Windows), so polls are bounded by time, not count. */

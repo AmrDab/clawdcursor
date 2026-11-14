@@ -19,6 +19,7 @@
 import type { PlatformAdapter } from './types';
 import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
 import { quoteScreenText } from '../core/untrusted-screen-content';
+import { sleep } from '../core/sleep';
 
 export interface SelectOptionResult {
   success: boolean;
@@ -28,7 +29,6 @@ export interface SelectOptionResult {
 }
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase();
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 /**
  * Does the control show the option? EXACTLY it: case and outer whitespace aside, nothing is forgiven. Not the rule a typed
  * value is read back with (holdsValue): "10 GB", "10%", "10.0" and "$10" are other options than "10".

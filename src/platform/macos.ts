@@ -45,13 +45,13 @@ import {
   type AppState, type FrontmostInfo, type InvokeResult, type MacAx, type SkippedApp,
 } from './mac-ax';
 import { windowTextIncludes } from './window-text';
+import { sleep } from '../core/sleep';
 
 const execFileAsync = promisify(execFile);
 const SCRIPTS_DIR = path.join(getPackageRoot(), 'scripts', 'mac');
 
 // Tunables (kept here, not magic numbers)
 const OSASCRIPT_TIMEOUT_MS = 8_000;
-const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const SCREENSHOT_TIMEOUT_MS = 10_000;
 /** How long open_app waits for a launched app to show a window before calling it "still loading". */
 const LAUNCH_CONFIRM_MS = 4_000;

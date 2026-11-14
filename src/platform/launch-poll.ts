@@ -17,6 +17,7 @@
 
 import type { WindowInfo } from './types';
 import { appIdentity, ownsWindow, type AppIdentityHints } from './app-identity';
+import { sleep } from '../core/sleep';
 
 /**
  * How often the diff-and-poll loop re-checks `listWindows()`.
@@ -169,8 +170,4 @@ export function within<T>(p: Promise<T>, ms: number): Promise<T | null | typeof 
     const timer = setTimeout(() => resolve(TIMED_OUT), ms);
     p.then(v => { clearTimeout(timer); resolve(v); }, () => { clearTimeout(timer); resolve(null); });
   });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }

@@ -10,6 +10,7 @@
  */
 import type { PlatformAdapter } from '../platform/types';
 import { quoteScreenText } from '../core/untrusted-screen-content';
+import { sleep } from '../core/sleep';
 
 /** Clipboards differ in line endings and trailing whitespace (Windows reads come back trimmed). */
 const same = (a: string, b: string): boolean => a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim();
@@ -46,7 +47,6 @@ export async function waitForPaste(
   opts: { minMs?: number; blindMs?: number; maxMs?: number; stepMs?: number } = {},
 ): Promise<void> {
   const { minMs = 100, blindMs = 400, maxMs = 1000, stepMs = 50 } = opts;
-  const sleep = (ms: number) => new Promise<null>(r => setTimeout(() => r(null), ms));
   const want = text.replace(/\r\n/g, '\n').trim();
   const t0 = Date.now();
   await sleep(minMs);
@@ -56,7 +56,7 @@ export async function waitForPaste(
     const left = maxMs - (Date.now() - t0);
     if (left <= 0) return;
     let v: string | null | undefined = null;
-    try { v = await Promise.race([readFocusedValue(), sleep(left)]); } catch { /* unreadable */ }
+    try { v = await Promise.race([readFocusedValue(), sleep(left).then(() => null)]); } catch { /* unreadable */ }
     if (typeof v === 'string') {
       const norm = v.replace(/\r\n/g, '\n');
       if (!want || norm.includes(want)) return;

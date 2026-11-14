@@ -35,6 +35,7 @@ import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
 import { effectLine, windowChange, type WindowRead } from '../../core/effect';
 import { missText, untrusted, targetOf, targetText } from '../../core/miss-text';
+import { sleep } from '../../core/sleep';
 
 /** a11y_get_value returns a value whole up to this size (a long document, not a whole book). */
 const GET_VALUE_MAX = 20_000;
@@ -1729,10 +1730,6 @@ export function focusTheftWarning(
     + ` (the OS kept another window in front, or the point is over a different window). DO NOT type next:`
     + ` re-focus the intended window first (focus_window / window.focus by processId),`
     + ` or act on an a11y/el_NN target instead of coordinates.`;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
 }
 
 function truncate(s: string, max: number): string {

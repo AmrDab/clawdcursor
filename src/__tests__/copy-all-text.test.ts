@@ -3,8 +3,17 @@
  * restored. Field session (Stripe in Edge): OCR read `l` as `1` and `Ko4Wn`
  * as `K04Wn`; ctrl+A / ctrl+C / clipboard_read got every ID right.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { copyAllText, isTerminalWindow, selectAllHazard } from '../platform/copy-all-text';
+
+// The waits between steps (core/sleep.ts) run on fake time: a call is driven to its end at once.
+beforeEach(() => { vi.useFakeTimers(); });
+afterEach(() => { vi.useRealTimers(); });
+async function settled<T>(p: Promise<T>): Promise<T> {
+  p.catch(() => {});   // settled below; not an unhandled rejection meanwhile
+  await vi.runAllTimersAsync();
+  return p;
+}
 
 function fakePlatform(opts: { processName: string; pageText?: string | null; prior?: string }) {
   let clip = opts.prior ?? 'user clipboard';
@@ -25,7 +34,7 @@ function fakePlatform(opts: { processName: string; pageText?: string | null; pri
 describe('copyAllText', () => {
   it('returns the exact page text and restores the user clipboard', async () => {
     const p = fakePlatform({ processName: 'msedge', pageText: 'price_1TcLWTCMmq8Ko4WnKwK37pVL $29.99' });
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r).toMatchObject({ ok: true, text: 'price_1TcLWTCMmq8Ko4WnKwK37pVL $29.99' });
     expect(p.keys).toEqual(['mod+a', 'mod+c']);
     expect(p.clip).toBe('user clipboard');
@@ -34,7 +43,7 @@ describe('copyAllText', () => {
   it('refuses in a terminal without pressing anything (Ctrl+C would interrupt it)', async () => {
     for (const name of ['WindowsTerminal', 'pwsh.exe', 'iTerm2', 'gnome-terminal-server', 'Terminal']) {
       const p = fakePlatform({ processName: name });
-      const r = await copyAllText(p as any);
+      const r = await settled(copyAllText(p as any));
       expect(r.ok).toBe(false);
       expect(r.text).toMatch(/terminal/i);
       expect(p.keys).toEqual([]);
@@ -43,7 +52,7 @@ describe('copyAllText', () => {
 
   it('reports "nothing copied" instead of returning stale clipboard text', async () => {
     const p = fakePlatform({ processName: 'msedge', pageText: null, prior: 'old secret' });
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r.ok).toBe(false);
     expect(r.text).toMatch(/nothing was copied/);
     expect(r.text).not.toContain('old secret');
@@ -80,7 +89,7 @@ describe('copyAllText', () => {
   it('a UWP / XAML window skips select-all and returns its accessibility text, saying so', async () => {
     const p = { ...fakePlatform({ processName: 'ApplicationFrameHost' }), getUiTree: vi.fn(async () => tree) };
     p.getActiveWindow = vi.fn(async () => ({ processName: 'ApplicationFrameHost', title: 'Settings', processId: 4, className: 'ApplicationFrameWindow' } as any));
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(r.ok).toBe(true);
     expect(r.source).toBe('accessibility');
@@ -92,7 +101,7 @@ describe('copyAllText', () => {
   // opened NX's own Copy dialog. Select-all means "text" only in a browser page: nowhere else is a key pressed.
   it('outside a browser the tree is returned as names only, labelled so, and no key is pressed', async () => {
     const p = { ...fakePlatform({ processName: 'someapp' }), getUiTree: vi.fn(async () => tree) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(p.writeClipboard).not.toHaveBeenCalled();
     expect(r).toMatchObject({ ok: true, source: 'accessibility' });
@@ -105,7 +114,7 @@ describe('copyAllText', () => {
 
   it('a truncated tree is marked PARTIAL', async () => {
     const p = { ...fakePlatform({ processName: 'someapp' }), getUiTree: vi.fn(async () => tree), lastTreeTruncated: true };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r.text).toMatch(/^\(names only[^\n]*PARTIAL/);
   });
 
@@ -116,7 +125,7 @@ describe('copyAllText', () => {
     ['has no reader', undefined],
   ])('outside a browser a tree that %s refuses and points at ocr: still no key', async (_what, getUiTree) => {
     const p = { ...fakePlatform({ processName: 'someapp' }), ...(getUiTree ? { getUiTree } : {}) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(p.writeClipboard).not.toHaveBeenCalled();
     expect(r.ok).toBe(false);
@@ -129,23 +138,23 @@ describe('copyAllText', () => {
     const chrome = [{ name: 'Stripe - Work - Microsoft Edge', controlType: 'Window' }, { name: 'Address and search bar', controlType: 'Edit', value: 'stripe.com' }];
     const getUiTree = vi.fn(async () => chrome);
     const p = { ...fakePlatform({ processName: 'msedge' }), getUiTree };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual(['mod+a', 'mod+c']);
     expect(r).toMatchObject({ ok: true, source: 'clipboard', text: 'page text', pressedKeys: true });
     expect(getUiTree).not.toHaveBeenCalled();
   });
 
   it('when keys are pressed the result says which keys and where — on success and on failure, with the real key on macOS', async () => {
-    const ok = await copyAllText(fakePlatform({ processName: 'msedge' }) as any);
+    const ok = await settled(copyAllText(fakePlatform({ processName: 'msedge' }) as any));
     expect(ok).toMatchObject({ ok: true, source: 'clipboard', pressedKeys: true });
     expect(ok.note).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Stripe"/);
-    const failed = await copyAllText(fakePlatform({ processName: 'msedge', pageText: null }) as any);
+    const failed = await settled(copyAllText(fakePlatform({ processName: 'msedge', pageText: null }) as any));
     expect(failed).toMatchObject({ ok: false, pressedKeys: true });
     expect(failed.text).toMatch(/Pressed (Ctrl|Cmd)\+A and (Ctrl|Cmd)\+C in \["msedge"\] "Stripe"/);
     const real = Object.getOwnPropertyDescriptor(process, 'platform')!;
     Object.defineProperty(process, 'platform', { value: 'darwin' });
     try {
-      const mac = await copyAllText(fakePlatform({ processName: 'Safari' }) as any);
+      const mac = await settled(copyAllText(fakePlatform({ processName: 'Safari' }) as any));
       expect(mac.note).toMatch(/Pressed Cmd\+A and Cmd\+C in \["Safari"\]/);
       expect(mac.note).not.toMatch(/Ctrl/);
     } finally {
@@ -170,7 +179,7 @@ describe('copyAllText', () => {
     ['nx', { controlType: 'Pane', name: 'Graphics' }],
   ])('%s with focus on %o: no select-all, names only', async (proc, focused) => {
     const p = withFocus(proc, focused);
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(r).toMatchObject({ ok: true, source: 'accessibility' });
     expect(r.text).toMatch(/No keys were pressed/);
@@ -179,7 +188,7 @@ describe('copyAllText', () => {
 
   it('a browser with focus in the address bar: no select-all, names only, and it says why and what to do', async () => {
     const p = withFocus('msedge', { controlType: 'Edit', name: 'Address and search bar' });
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(r).toMatchObject({ ok: true, source: 'accessibility' });
     expect(r.text).toMatch(/editable field/);
@@ -189,7 +198,7 @@ describe('copyAllText', () => {
 
   it('a web page (the browser document has focus) is still copied exactly, and the result says the page is now selected', async () => {
     const p = withFocus('msedge', { controlType: 'Document', name: 'Glama' });
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual(['mod+a', 'mod+c']);
     expect(r).toMatchObject({ ok: true, source: 'clipboard', text: 'page text' });
     expect(r.note).toMatch(/now selected/);
@@ -197,7 +206,7 @@ describe('copyAllText', () => {
 
   it('unknown focus (no reading, or it failed) does not block the copy', async () => {
     const p = { ...fakePlatform({ processName: 'msedge' }), getFocusedElement: vi.fn(async () => { throw new Error('bridge down'); }) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual(['mod+a', 'mod+c']);
     expect(r.ok).toBe(true);
   });
@@ -205,20 +214,20 @@ describe('copyAllText', () => {
   it('an Electron app that reports its focus as a bare Pane is not select-all\'d (live: the Claude app\'s prompt read as "Pane")', async () => {
     const p = withFocus('claude', { controlType: 'Pane', name: '' });
     p.getActiveWindow = vi.fn(async () => ({ processName: 'claude', title: 'Claude', processId: 9, className: 'Chrome_WidgetWin_1' } as any));
-    await copyAllText(p as any);
+    await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
   });
 
   it.each(['firefox-esr', 'firefox-bin', 'chromium-browser', 'google-chrome', 'google-chrome-stable'])('%s (a Linux browser process name) is a browser: its page is copied', async (proc) => {
     const p = withFocus(proc, { controlType: 'document web', name: 'page' });
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual(['mod+a', 'mod+c']);
     expect(r).toMatchObject({ ok: true, source: 'clipboard' });
   });
 
   it('reads the document through accessibility first: no keystrokes, nothing selected, clipboard untouched', async () => {
     const p = { ...withFocus('msedge', { controlType: 'Document', name: 'Stripe' }), getPageText: vi.fn(async () => ({ text: 'price_1TcLWT $29.99', name: 'Stripe' })) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(p.writeClipboard).not.toHaveBeenCalled();
     expect(r).toMatchObject({ ok: true, source: 'document', text: 'price_1TcLWT $29.99' });
@@ -227,7 +236,7 @@ describe('copyAllText', () => {
 
   it('an editor read through its document needs no refusal: the full text, still no keys', async () => {
     const p = { ...withFocus('notepad', { controlType: 'Document', name: 'Text editor' }), getPageText: vi.fn(async () => ({ text: 'line one\nline two' })) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(p.keys).toEqual([]);
     expect(r).toMatchObject({ ok: true, source: 'document', text: 'line one\nline two' });
   });
@@ -235,28 +244,28 @@ describe('copyAllText', () => {
   it('text without object marks comes back exactly: blank and space-only lines kept (live macOS run: TextEdit)', async () => {
     const doc = 'line one\n   \n\n\n\nline two';
     const p = { ...withFocus('TextEdit', { controlType: 'Document', name: 'doc' }), getPageText: vi.fn(async () => ({ text: doc })) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r.text).toBe(doc);
   });
 
   it('embedded-object marks (U+FFFC) are dropped: TextPattern returned whole lines of them (live: GitHub in Edge)', async () => {
     const raw = '￼\r\nSkip to content\r\n￼\r\n￼\r\n￼\r\nCongratulations, you\'re all set!\r\nYour device is now connected.';
     const p = { ...withFocus('msedge', { controlType: 'Document', name: 'Device Activation' }), getPageText: vi.fn(async () => ({ text: raw })) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r.text).not.toContain('￼');
     expect(r.text).toBe('\nSkip to content\n\nCongratulations, you\'re all set!\nYour device is now connected.');
   });
 
   it('a page that is nothing but object marks counts as empty and falls through', async () => {
     const p = { ...withFocus('msedge', { controlType: 'Document', name: 'page' }), getPageText: vi.fn(async () => ({ text: '￼\n￼' })) };
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r.source).not.toBe('document');
   });
 
   it('an empty or failing document read falls through to the guarded select-all path', async () => {
     for (const getPageText of [vi.fn(async () => ({ text: '  ' })), vi.fn(async () => null), vi.fn(async () => { throw new Error('bridge down'); })]) {
       const p = { ...withFocus('msedge', { controlType: 'Document', name: 'page' }), getPageText };
-      const r = await copyAllText(p as any);
+      const r = await settled(copyAllText(p as any));
       expect(p.keys).toEqual(['mod+a', 'mod+c']);
       expect(r.source).toBe('clipboard');
     }
@@ -276,7 +285,7 @@ describe('copyAllText', () => {
     const slow = p.readClipboard;
     p.readClipboard = vi.fn(async () => { await new Promise(r => setTimeout(r, 300)); return slow(); });
     const t0 = Date.now();
-    const r = await copyAllText(p as any);
+    const r = await settled(copyAllText(p as any));
     expect(r.ok).toBe(false);
     expect(Date.now() - t0).toBeLessThan(2600);
   });

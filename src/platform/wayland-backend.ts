@@ -41,6 +41,7 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { modifierOf, type Modifier } from './keys';
+import { sleep } from '../core/sleep';
 
 const execFileAsync = promisify(execFile);
 const TIMEOUT_MS = 5_000;
@@ -423,8 +424,4 @@ function wtypeKeyName(k: string): string | null {
     f7:'F7',f8:'F8',f9:'F9',f10:'F10',f11:'F11',f12:'F12',
   };
   return map[lo] ?? null;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(r => setTimeout(r, ms));
 }
