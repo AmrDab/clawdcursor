@@ -49,7 +49,7 @@ import { psOpts, powershellExe } from '../platform/ps-spawn';
 import * as readline from 'readline';
 import { getPackageRoot } from '../paths';
 import { macOverlayBinary } from '../platform/mac-ocr-binary';
-import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput } from '../platform/pointer-guard';
+import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput, GUARDED_METHODS } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
 import { isStopped, workingIn, workingWindow } from './control';
@@ -66,19 +66,6 @@ const PAUSED_OUTLINE = '#3b82f6'; // blue — "your turn"
  */
 export interface OverlayMode { paused?: PauseInfo; activity?: string; app?: string }
 
-// What the running pill says the agent is doing, per guarded input method (pointer-guard.ts). `true`: the method read
-// the window in front first, so the app is known; the others (accessibility, the browser driver) only say what they do.
-const ACTIVITY: Record<string, [string, boolean]> = {
-  mouseClick: ['Clicking', true], mouseDoubleClick: ['Clicking', true], mouseRightClick: ['Clicking', true],
-  mouseDown: ['Clicking', true], mouseDrag: ['Dragging', true],
-  mouseScroll: ['Scrolling', true], typeText: ['Typing', true], keyPress: ['Pressing keys', true],
-  keyDown: ['Pressing keys', true],
-  invokeElement: ['Clicking', false], click: ['Clicking', false], clickByText: ['Clicking', false], focus: ['Clicking', false],
-  scrollIntoView: ['Scrolling', false], typeInField: ['Typing', false], typeByLabel: ['Typing', false],
-  selectOption: ['Choosing an option', false], pressKey: ['Pressing keys', false],
-  navigate: ['Opening a page', false], launchApp: ['Opening an app', false],
-  setWindowState: ['Arranging windows', false], setWindowBounds: ['Arranging windows', false],
-};
 // Where the OS gave no display name (Linux, an elevated process the bridge may not open): process names that say little.
 const APP_NAMES: Record<string, string> = {
   msedge: 'Edge', chrome: 'Chrome', firefox: 'Firefox', explorer: 'File Explorer', code: 'VS Code',
@@ -99,12 +86,16 @@ export function appLabel(processName: string | undefined, appName?: string): str
   return APP_NAMES[base.toLowerCase()] ?? base.charAt(0).toUpperCase() + base.slice(1);
 }
 
-/** "Typing in Edge" — what the running pill shows for an input method; undefined for a method it has no words for. */
+/**
+ * "Typing in Edge" — what the running pill shows for a guarded method (pointer-guard.ts GUARDED_METHODS); undefined for
+ * one it has no words for. Only window-checked input names the app: it read the window in front first. The others
+ * (accessibility, the browser driver) only say what they do.
+ */
 export function activityLabel(method: string, processName?: string, appName?: string): string | undefined {
-  const a = ACTIVITY[method];
-  if (!a) return undefined;
-  const app = a[1] ? appLabel(processName, appName) : undefined;
-  return app ? `${a[0]} in ${app}` : a[0];
+  const g = GUARDED_METHODS[method];
+  if (!g?.activity) return undefined;
+  const app = g.kind === 'input' ? appLabel(processName, appName) : undefined;
+  return app ? `${g.activity} in ${app}` : g.activity;
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
 /** The window the outline goes around: Windows and Linux find it by handle, macOS by its process. */

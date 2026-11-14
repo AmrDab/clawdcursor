@@ -89,24 +89,36 @@ export async function guardedInput<R>(method: string, args: unknown[], send: () 
   return r;
 }
 
-/** Synthetic keyboard and mouse input: refused while stopped, and when the agent's window is no longer in front. */
-const INPUT_METHODS = [
-  'mouseClick', 'mouseDoubleClick', 'mouseRightClick', 'mouseDrag', 'mouseScroll', 'mouseDown',
-  'typeText', 'keyPress', 'keyDown',
-];
 /**
- * Acts that do not go through the window in front — by element (accessibility), on a window by handle, or in a page
- * (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
- * writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every other pointer method
- * (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than by name, so a new one is
- * not left moving after a Stop. Putting the user's own clipboard back after a paste is not agent input: those restores
- * run unguarded().
+ * Every guarded method of the input layers, by name, with what the running pill says while it runs (banner.ts).
+ *  - `input`: synthetic keyboard and mouse input, refused while stopped and when the agent's window is no longer in
+ *    front; the pill names that window's app.
+ *  - `stop`: acts that do not go through the window in front — by element (accessibility), on a window by handle, or in
+ *    a page (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
+ *    writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every other pointer
+ *    method (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than by name, so a
+ *    new one is not left moving after a Stop. Putting the user's own clipboard back after a paste is not agent input:
+ *    those restores run unguarded().
+ *  - `launch`: launchApp, wrapped on its own below (it rebinds the window the agent works in).
  */
-const STOP_METHODS = [
-  'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds',
-  'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'focus', 'selectOption', 'pressKey',
-  'writeClipboard', 'evaluate', 'switchTab',
-];
+export const GUARDED_METHODS: Readonly<Record<string, { kind: 'input' | 'stop' | 'launch'; activity?: string }>> = {
+  mouseClick: { kind: 'input', activity: 'Clicking' }, mouseDoubleClick: { kind: 'input', activity: 'Clicking' },
+  mouseRightClick: { kind: 'input', activity: 'Clicking' }, mouseDown: { kind: 'input', activity: 'Clicking' },
+  mouseDrag: { kind: 'input', activity: 'Dragging' }, mouseScroll: { kind: 'input', activity: 'Scrolling' },
+  typeText: { kind: 'input', activity: 'Typing' }, keyPress: { kind: 'input', activity: 'Pressing keys' },
+  keyDown: { kind: 'input', activity: 'Pressing keys' },
+  invokeElement: { kind: 'stop', activity: 'Clicking' }, scrollIntoView: { kind: 'stop', activity: 'Scrolling' },
+  setWindowState: { kind: 'stop', activity: 'Arranging windows' }, setWindowBounds: { kind: 'stop', activity: 'Arranging windows' },
+  navigate: { kind: 'stop', activity: 'Opening a page' }, click: { kind: 'stop', activity: 'Clicking' },
+  clickByText: { kind: 'stop', activity: 'Clicking' }, typeInField: { kind: 'stop', activity: 'Typing' },
+  typeByLabel: { kind: 'stop', activity: 'Typing' }, focus: { kind: 'stop', activity: 'Clicking' },
+  selectOption: { kind: 'stop', activity: 'Choosing an option' }, pressKey: { kind: 'stop', activity: 'Pressing keys' },
+  writeClipboard: { kind: 'stop' }, evaluate: { kind: 'stop' }, switchTab: { kind: 'stop' },
+  launchApp: { kind: 'launch', activity: 'Opening an app' },
+};
+const methodsOf = (kind: 'input' | 'stop') => Object.keys(GUARDED_METHODS).filter(m => GUARDED_METHODS[m].kind === kind);
+const INPUT_METHODS = methodsOf('input');
+const STOP_METHODS = methodsOf('stop');
 
 /** Every pointer method of the object (a move, press, release, click, drag, scroll), its prototypes' included. */
 function pointerMethods(target: object): string[] {
