@@ -25,6 +25,7 @@
  */
 import { AsyncLocalStorage } from 'async_hooks';
 import { freshHostedAppOf } from '../platform/frame-host';
+import { pixelsPerPoint } from '../platform/coord-scale';
 import { execFile } from 'child_process';
 import * as os from 'os';
 import type { ToolDefinition, ToolResult } from '../tools/types';
@@ -193,8 +194,7 @@ const platformDesktop: Desktop = {
   captureScale: async () => {
     if (process.platform !== 'darwin') return 1;
     const displays = await (await (await import('../platform')).getPlatform()).listDisplays();
-    const ratio = Number(displays.find(d => d.primary)?.dpiRatio);
-    return ratio > 0 ? ratio : 1;
+    return pixelsPerPoint(Number(displays.find(d => d.primary)?.dpiRatio), 'darwin');
   },
 };
 let desktop: Desktop = platformDesktop;

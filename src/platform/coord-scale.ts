@@ -141,8 +141,17 @@ export function screenCenter(ctx: {
 export function ocrPointToClickPoint(
   x: number, y: number, dpiRatio: number, platform: NodeJS.Platform,
 ): { x: number; y: number } {
-  const div = platform === 'darwin' ? (dpiRatio || 1) : 1;
+  const div = pixelsPerPoint(dpiRatio, platform);
   return { x: Math.round(x / div), y: Math.round(y / div) };
+}
+
+/**
+ * Capture pixels per screen-coordinate unit. Screen coordinates (window bounds, mouse positions) are physical pixels on
+ * Windows and Linux, the same as a capture; macOS gives them in points, and a Retina capture has `dpiRatio` pixels per
+ * point. A missing or unusable ratio counts as 1.
+ */
+export function pixelsPerPoint(dpiRatio: number, platform: NodeJS.Platform): number {
+  return platform === 'darwin' && dpiRatio > 0 ? dpiRatio : 1;
 }
 
 /**
@@ -156,7 +165,7 @@ export function windowOcrRegion(
   platform: NodeJS.Platform,
 ): { x: number; y: number; width: number; height: number } | null {
   if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
-  const k = platform === 'darwin' ? (dpiRatio || 1) : 1;
+  const k = pixelsPerPoint(dpiRatio, platform);
   return { x: Math.round(bounds.x * k), y: Math.round(bounds.y * k), width: Math.round(bounds.width * k), height: Math.round(bounds.height * k) };
 }
 

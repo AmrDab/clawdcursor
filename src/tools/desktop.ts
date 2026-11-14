@@ -9,18 +9,14 @@
 import { fenceImage } from '../core/fence';
 import type { ToolDefinition, ToolContext } from './types';
 import { toMouse, toImage, screenToPhysical } from './types';
-import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH, imageCost } from '../platform/coord-scale';
+import { setLastFrame, getLastFrame, mapImagePoint, mapImageLength, llmScale, LLM_TARGET_WIDTH, imageCost, pixelsPerPoint } from '../platform/coord-scale';
 import { pickDisplay, displayNote } from '../platform/display-target';
 import type { Display } from '../platform/types';
 import { lastCaptureUnchecked } from '../platform/native-helper';
 
-/**
- * Window bounds are physical pixels on Windows and Linux, the same as a capture; macOS reports them in points, and a
- * Retina capture has `dpiRatio` pixels per point. The fence's mask needs both in one unit.
- */
+/** The fence's mask needs window bounds and the capture in one unit (pixelsPerPoint). */
 function fenceBoundsScale(ctx: ToolContext): number {
-  const ratio = Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio);
-  return process.platform === 'darwin' && ratio > 0 ? ratio : 1;
+  return pixelsPerPoint(Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio), process.platform);
 }
 
 

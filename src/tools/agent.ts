@@ -5,7 +5,7 @@
 
 import { fenceImage } from '../core/fence';
 import type { ToolDefinition } from './types';
-import { setLastFrame } from '../platform/coord-scale';
+import { setLastFrame, pixelsPerPoint } from '../platform/coord-scale';
 import { pauseGate, parsePauseCard } from '../core/pause-gate';
 import { timeWait } from '../core/observability/steps';
 import { promptSatisfies } from '../core/pause-text';
@@ -229,9 +229,9 @@ export function getAgentTools(): ToolDefinition[] {
           setLastFrame(null);   // image coords now refer to this primary capture
           const mimeType = frame.format === 'png' ? 'image/png' : 'image/jpeg';
           // The one capture path (core/fence.ts): under the test fence only the fenced window is shown.
-          const ratio = Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio);
+          const boundsScale = pixelsPerPoint(Number((ctx.desktop as unknown as { dpiRatio?: number }).dpiRatio), process.platform);
           const image = await fenceImage(Buffer.isBuffer(frame.buffer) ? frame.buffer : Buffer.from(frame.buffer), mimeType,
-            { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale: process.platform === 'darwin' && ratio > 0 ? ratio : 1 });
+            { originX: 0, originY: 0, scale: frame.scaleFactor, boundsScale });
           return {
             text: JSON.stringify({
               scaleFactor: frame.scaleFactor,
