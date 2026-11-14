@@ -34,6 +34,7 @@ vi.mock('@modelcontextprotocol/sdk/server/mcp.js', () => ({
 import { createMcpServer } from '../surface/mcp-server';
 import { executeBatch } from '../tools/batch';
 import { __resetShotsForTests } from '../core/screen-binding';
+import { noteScreenshot } from '../tools/screen-guard';
 import { stopControl, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 import type { ToolContext } from '../tools/types';
 import * as fs from 'fs';
@@ -78,5 +79,29 @@ describe.each([['the MCP server', mcpText], ['a batch step', batchText]] as cons
   it('a screen-space click while a pause waits: the pause answers', async () => {
     pause.pending = { message: 'Sign in' };
     expect(await run({ x: 10, y: 10, space: 'screen' })).toMatch(PAUSED);
+  });
+});
+
+describe('a batch step with a precondition', () => {
+  it('is checked again after the precondition: a window that came to the front meanwhile refuses the image click', async () => {
+    const editor = { title: 'Editor', processId: 7, processName: 'editor', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false };
+    const dialog = { title: 'Save changes?', processId: 8, processName: 'dialog', bounds: { x: 100, y: 100, width: 300, height: 200 }, isMinimized: false };
+    let front = editor;
+    const platform = {
+      getActiveWindow: vi.fn(async () => front),
+      listWindows: vi.fn(async () => [editor]),
+      mouseClick: vi.fn(async () => undefined),
+    };
+    const live = { ...ctx, platform } as unknown as ToolContext;
+    await noteScreenshot(live);   // the screenshot shows the editor only
+    // The first read is the check before the precondition; the second is the precondition's own (get_active_window), and
+    // a dialog opens while it runs.
+    let reads = 0;
+    platform.getActiveWindow.mockImplementation(async () => { const w = front; if (++reads === 2) front = dialog; return w; });
+
+    const r = await executeBatch([{ name: 'mouse_click', arguments: { x: 10, y: 10 }, expect: { window: 'Editor' } }], live);
+    expect(r.steps[0].status).toBe('blocked');
+    expect(r.steps[0].text).toMatch(/is in front now/);
+    expect(platform.mouseClick).not.toHaveBeenCalled();
   });
 });

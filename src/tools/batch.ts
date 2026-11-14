@@ -177,6 +177,9 @@ export async function executeBatch(
         outcomes.push({ i, label, status: 'guard_failed', text: `precondition failed: ${g.detail}` });
         return halt(i, `precondition failed at step ${i} — re-plan from current state`);
       }
+      // The precondition takes time (find_element: seconds) and the screen can change meanwhile: check again.
+      const again = await refusalBefore(call, ctx);
+      if (again) return block(i, label, call, again);
     }
 
     let res: ToolResult;
