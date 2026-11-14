@@ -37,9 +37,8 @@ import { controlBanner } from '../core/banner';
 import { getBatchTools } from './batch';
 import { rewriteOutsideData } from './hint-rewrite';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
-import { reactiveCheck } from '../core/sense/reactive-check';
-import { validateExpect, EXPECT_DESCRIPTION } from '../core/verify/assertions';
-import { ocrEngine } from '../platform/ocr-engine';
+import { expectRefusal, checkExpect } from '../core/sense/reactive-check';
+import { EXPECT_SCHEMA } from '../core/verify/assertions';
 
 // ─── Action → granular-tool delegation table ────────────────────────
 
@@ -305,18 +304,7 @@ function requiredByAction(routes: ActionRoute[]): string {
   return ` Required: ${[...groups].map(([fields, actions]) => `${actions.join('/')}: ${fields}`).join('; ')}.`;
 }
 
-/** The `expect` post-condition list, as projected tools publish it (core/verify/assertions types). */
-const EXPECT_PARAM: import('./types').ParameterDef = {
-  type: 'array',
-  required: false,
-  description: EXPECT_DESCRIPTION,
-  items: {
-    type: 'object',
-    properties: { type: { type: 'string', enum: ['window_title_contains', 'app_running', 'element_exists', 'element_value_contains',
-      'clipboard_contains', 'file_exists', 'file_contains', 'ocr_contains', 'file_changed_since_start'] } },
-    required: ['type'],
-  },
-};
+const EXPECT_PARAM: import('./types').ParameterDef = { ...EXPECT_SCHEMA, required: false };
 
 
 /** Human-readable one-line list of actions for the tool description. */
@@ -522,10 +510,10 @@ async function dispatchCompound(
   // don't. mcp-server leaves compounds to this check.
   // A malformed `expect` is refused before acting, as the projected delegates do — after the action, the caller is told
   // "nothing ran" about an action that ran, and retries it.
-  const checkExpect = args.expect !== undefined && args.expect !== null && !granular.honorsExpect && !!ctx.platform;
-  if (checkExpect) {
-    const expectError = validateExpect(args.expect);
-    if (expectError) return { text: `expect rejected (nothing executed): ${expectError}`, isError: true };
+  const expectHere = args.expect !== undefined && args.expect !== null && !granular.honorsExpect && !!ctx.platform;
+  if (expectHere) {
+    const refusal = expectRefusal(args.expect);
+    if (refusal) return { text: refusal, isError: true };
   }
 
   if ((granular.safetyTier ?? 0) >= 1) controlBanner.touch();
@@ -555,14 +543,8 @@ async function dispatchCompound(
 
   // `expect` is checked for every action: projected delegates check it themselves; for the rest the same check runs
   // here, after the action — so it is never accepted and silently dropped. Last, so its verdict ends the text.
-  if (checkExpect) {
-    const checked = await reactiveCheck({
-      expect: args.expect,
-      toolText: result.text ?? '',
-      toolSuccess: !result.isError,
-      adapter: ctx.platform!,
-      ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
-    }).catch(() => null);
+  if (expectHere) {
+    const checked = await checkExpect(args.expect, { text: result.text ?? '', success: !result.isError }, ctx.platform!);
     if (checked) result = { ...result, text: checked.text, isError: !checked.success };
   }
 

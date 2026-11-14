@@ -25,9 +25,7 @@
 import type { UnifiedTool, UnifiedToolResult, AgentToolContext } from './types';
 import type { ToolDefinition, ToolContext, ToolResult, ParameterDef } from '../../tools/types';
 import { TOOL_META, TEXT_ONLY_RENAMES } from './tool-meta';
-import { reactiveCheck } from '../sense/reactive-check';
-import { validateExpect } from '../verify/assertions';
-import { ocrEngine } from '../../platform/ocr-engine';
+import { expectRefusal, checkExpect } from '../sense/reactive-check';
 import { rewriteOutsideData } from '../../tools/hint-rewrite';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -226,27 +224,13 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     params: Record<string, unknown>,
     ctx: ToolContext,
   ): Promise<ToolResult> => {
-    // Validate `expect` BEFORE acting: a malformed one must not cost a click
-    // (the agent would retry and double-act — live regression 2026-10).
-    const expectError = validateExpect(params.expect);
-    if (expectError) return { text: `expect rejected (nothing executed): ${expectError}`, isError: true };
+    const refusal = expectRefusal(params.expect);
+    if (refusal) return { text: refusal, isError: true };
     const agentCtx = await toolContextToAgent(ctx);
     let result = await t.execute(params, agentCtx);
     const executed = result.success;
-    // Honor a caller-supplied `expect` assertion array. The projected schemas
-    // advertise it (same as the agent loop), so an external agent passing
-    // post-conditions over MCP must get them VERIFIED — they were silently
-    // dropped before (audit 2026-06-10, finding E).
-    if (params.expect !== undefined && params.expect !== null) {
-      const reactive = await reactiveCheck({
-        expect: params.expect,
-        toolText: result.text,
-        toolSuccess: result.success,
-        adapter: agentCtx.platform,
-        ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
-      }).catch(() => null);
-      if (reactive) result = { ...result, success: reactive.success, text: reactive.text };
-    }
+    const checked = await checkExpect(params.expect, result, agentCtx.platform);
+    if (checked) result = { ...result, ...checked };
     // Invalidate the shared UIMap holder only when the screen-changing action
     // actually TOOK (pre-expect outcome — a DEVIATION still means the input
     // was dispatched). A rejected el_NN ref / failed dispatch changed nothing

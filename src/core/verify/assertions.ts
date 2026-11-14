@@ -308,3 +308,14 @@ export function renderReport(report: VerifyReport): string {
 export const EXPECT_DESCRIPTION =
   'Checks run after the action; a failed check returns DEVIATION. Example: [{"type":"window_title_contains","value":"Inbox"}]. ' +
   'Fields: value for *_contains; name for app_running and element_exists; name+value for element_value_contains; path for file_*. State an outcome you can observe, not the text you typed.';
+
+/** The `expect` parameter every acting tool publishes: a list of assertions, one of the types above each. */
+export const EXPECT_SCHEMA = {
+  type: 'array',
+  description: EXPECT_DESCRIPTION,
+  items: {
+    type: 'object',
+    properties: { type: { type: 'string', enum: Object.keys(FIELDS_BY_TYPE) } },
+    required: ['type'],
+  },
+} as const;

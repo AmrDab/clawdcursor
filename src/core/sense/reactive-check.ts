@@ -5,7 +5,8 @@
  * See docs/superpowers/specs/2026-06-07-ui-state-compiler-layer-c-design.md.
  */
 import type { PlatformAdapter } from '../../platform/types';
-import { parseAssertions, checkAssertions, renderReport } from '../verify/assertions';
+import { ocrEngine } from '../../platform/ocr-engine';
+import { parseAssertions, checkAssertions, renderReport, validateExpect } from '../verify/assertions';
 
 export interface ReactiveInput {
   /** Raw `expect` arg from the tool call (assertions array), or undefined. */
@@ -33,6 +34,27 @@ export const SETTLE_INTERVAL_MS = 250;
 
 /** A modified result (success/text) to replace the tool's, or null = leave as-is. */
 export interface ReactiveOutcome { success: boolean; text: string; }
+
+/**
+ * `expect` before the action: why it is refused, or null. A malformed one is refused before anything runs: told after
+ * the action, the caller would read "rejected" as "nothing ran", retry, and act twice.
+ */
+export function expectRefusal(expect: unknown): string | null {
+  const error = validateExpect(expect);
+  return error ? `expect rejected (nothing executed): ${error}` : null;
+}
+
+/** `expect` after the action: the result with its verdict at the end of the text, or null when there is nothing to check. */
+export async function checkExpect(expect: unknown, result: ReactiveOutcome, adapter: PlatformAdapter): Promise<ReactiveOutcome | null> {
+  if (expect === undefined || expect === null) return null;
+  return reactiveCheck({
+    expect,
+    toolText: result.text,
+    toolSuccess: result.success,
+    adapter,
+    ocrText: async () => (await ocrEngine().recognizeScreen()).fullText ?? '',
+  }).catch(() => null);
+}
 
 export async function reactiveCheck(input: ReactiveInput): Promise<ReactiveOutcome | null> {
   const hasExpect = input.expect !== undefined && input.expect !== null;

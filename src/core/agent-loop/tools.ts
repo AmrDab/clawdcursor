@@ -20,7 +20,7 @@ import { SCREEN_COORDS_NOTE, shownValue, shownHelp, opaqueArea, opaqueAreaLine, 
 import { getUiTreeWithWake } from '../../platform/a11y-wake';
 import { isBrowserProcess } from '../../platform/browser-config';
 import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/browser-config';
-import { parseAssertions, checkAssertions, renderReport, EXPECT_DESCRIPTION } from '../verify/assertions';
+import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
 import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-content';
@@ -1546,24 +1546,6 @@ function buildWinQuery(args: Record<string, unknown>): { processName?: string; p
   if (typeof args.title === 'string') q.title = args.title;
   return Object.keys(q).length ? q : undefined;
 }
-
-/**
- * Shared `expect` arg schema for consequential tools. The agent loop (and the
- * batch executor) verify these post-conditions reactively after the action —
- * a failure surfaces as a DEVIATION (Layer C). Exposed on every tool the model
- * uses for send/save/submit-class actions, including the OCR/coordinate
- * fallbacks (click/smart_click/open_uri/browser_click) where verification
- * matters most (audit 2026-06-10, finding C2/M3).
- */
-const EXPECT_SCHEMA = {
-  type: 'array',
-  description: EXPECT_DESCRIPTION,
-  items: {
-    type: 'object',
-    properties: { type: { type: 'string', enum: ['window_title_contains', 'app_running', 'element_exists', 'element_value_contains', 'clipboard_contains', 'file_exists', 'file_contains', 'ocr_contains', 'file_changed_since_start'] } },
-    required: ['type'],
-  },
-} as const;
 
 /** Shared `space` arg schema for the granular pointer tools (click/drag/scroll). */
 const COORD_SPACE_SCHEMA = {
