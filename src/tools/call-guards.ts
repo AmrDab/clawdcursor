@@ -4,13 +4,16 @@
  * Before it runs: the user's Stop first (an agent told "no screenshot taken" would never learn the user took control
  * back), then a screenshot-bound pointer call whose screen has changed since (screen-binding.ts), then clawdcursor's own
  * on-screen controls and a pending pause (own-ui-guard.ts) — last, so a pause that came up during the checks above still
- * stops the call. After it ran: high-security mode's no-image rule, then the record of a full screenshot the model has seen.
+ * stops the call. After it ran: the OCR cache is emptied if the call acted, then high-security mode's no-image rule, then
+ * the record of a full screenshot the model has seen.
  */
 import type { ToolContext, ToolResult } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
 import { compactCall } from './compact';
 import { isStopped, STOPPED_TEXT } from '../core/control';
+import { isActingAction } from '../core/result-codes';
+import { ocrEngine } from '../platform/ocr-engine';
 
 export interface Refusal { guard: 'stopped' | 'screen_binding' | 'own_ui' | 'no_vision'; why: string }
 
@@ -49,6 +52,10 @@ export async function refusalBefore(c: GuardedCall, ctx: ToolContext, passedStop
 
 /** After the call: refused when it returned an image with vision off, else the line naming a full screenshot (null for any other call). */
 export async function afterCall(c: GuardedCall, result: ToolResult, ctx: ToolContext): Promise<Refusal | { screenshotNote: string | null }> {
+  // Input empties the OCR cache in the input layer; an act done by starting a process (open_url, open_app's fallbacks,
+  // relaunch_with_cdp) sends no input, so a call that acts empties it here too.
+  const cc = compactCall(c.tool, c.action);
+  if (isActingAction(cc.tool, cc.action)) ocrEngine().invalidateCache();
   if (ctx.disableVision && result.image) return { guard: 'no_vision', why: VISION_DISABLED_REFUSAL };
   return { screenshotNote: !result.isError && isFullScreenshotCall(c.tool, c.action) ? await noteScreenshot(ctx) : null };
 }

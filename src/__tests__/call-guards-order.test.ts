@@ -35,6 +35,8 @@ import { createMcpServer } from '../surface/mcp-server';
 import { executeBatch } from '../tools/batch';
 import { __resetShotsForTests } from '../core/screen-binding';
 import { noteScreenshot } from '../tools/screen-guard';
+import { afterCall, guardedCall } from '../tools/call-guards';
+import { ocrEngine } from '../platform/ocr-engine';
 import { stopControl, STOPPED_TEXT, __setControlDirForTests } from '../core/control';
 import type { ToolContext } from '../tools/types';
 import * as fs from 'fs';
@@ -103,5 +105,24 @@ describe('a batch step with a precondition', () => {
     expect(r.steps[0].status).toBe('blocked');
     expect(r.steps[0].text).toMatch(/is in front now/);
     expect(platform.mouseClick).not.toHaveBeenCalled();
+  });
+});
+
+describe('after a call', () => {
+  it('a call that acts empties the OCR cache, input or not (a launch, a URL, a relaunch); a read does not', async () => {
+    const empty = vi.spyOn(ocrEngine(), 'invalidateCache');
+    try {
+      for (const [tool, action] of [['window', 'open_url'], ['system', 'open_uri'], ['window', 'open_app'], ['system', 'relaunch_with_cdp'], ['navigate_browser', undefined]] as const) {
+        empty.mockClear();
+        await afterCall(guardedCall(tool, action, {}), { text: 'ok' }, ctx);
+        expect(empty, `${tool} ${action ?? ''}`).toHaveBeenCalledTimes(1);
+      }
+      empty.mockClear();
+      await afterCall(guardedCall('accessibility', 'read_tree', {}), { text: 'ok' }, ctx);
+      await afterCall(guardedCall('read_screen', undefined, {}), { text: 'ok' }, ctx);
+      expect(empty).not.toHaveBeenCalled();
+    } finally {
+      empty.mockRestore();
+    }
   });
 });
