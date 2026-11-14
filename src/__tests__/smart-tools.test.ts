@@ -54,6 +54,7 @@ vi.mock('../platform/ocr-engine', () => {
 import { getSmartTools } from '../tools/smart';
 import type { ToolContext } from '../tools/types';
 import { classifyResult } from '../core/result-codes';
+import { guardInputMethods, setInputGuard } from '../platform/pointer-guard';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -189,6 +190,32 @@ describe('Smart Tools', () => {
     const r = await smartType.handler({ target: 'First name', text: 'Ada' }, createCtx());
     expect(r.isError).toBeFalsy();
     expect(mockMouseClick).toHaveBeenCalledWith(180, 17);
+  });
+
+  // Audit 2026-11-13: the browser focus ran page script on the raw Playwright page, past the Stop guard.
+  it('smart_type focuses a browser field through the guarded driver: after a Stop nothing runs in the page', async () => {
+    mockInvokeElement.mockResolvedValue({ success: false });
+    mockFindElement.mockResolvedValue([]);
+    const pageScript = vi.fn(async () => true);
+    const cdp = guardInputMethods({
+      isConnected: async () => true,
+      getPage: () => ({ evaluate: pageScript }),
+      evaluate: pageScript,
+    });
+    let stopped = false;
+    setInputGuard({
+      stopCheck: () => { if (stopped) throw new Error('stopped by the user'); },
+      before: async () => {}, done: () => {}, focused: async () => {}, launched: async () => {}, byName: async () => {},
+    });
+    try {
+      const ok = await smartType.handler({ target: 'Email', text: 'a' }, createCtx({ cdp }));
+      expect(ok.isError).toBeFalsy();
+      expect(String((pageScript.mock.calls[0] as unknown[])[0])).toContain('"Email"');
+      pageScript.mockClear();
+      stopped = true;
+      await expect(smartType.handler({ target: 'Email', text: 'a' }, createCtx({ cdp }))).rejects.toThrow(/stopped by the user/);
+      expect(pageScript).not.toHaveBeenCalled();
+    } finally { setInputGuard(null); }
   });
 
   it('registers all 4 smart tools', () => {

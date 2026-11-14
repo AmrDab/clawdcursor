@@ -127,8 +127,9 @@ describe('with CLAWD_FENCE_PIDS unset, nothing changes', () => {
   it('the pointer methods of a driver are the originals, and so is a window list', () => {
     class Driver { async mouseMove() {} async mouseMoveRelative() {} async mouseUp() {} async mouseDragStepped() {} async getWindows() { return []; } }
     const d = guardInputMethods(new Driver());
-    // Methods the input guard itself does not wrap: with no fence nothing else may wrap them either.
-    for (const m of ['mouseMoveRelative', 'mouseUp', 'mouseDragStepped'] as const) {
+    // Methods the input guard itself does not wrap (a release; every other pointer method stops): with no fence nothing
+    // else may wrap them either.
+    for (const m of ['mouseUp'] as const) {
       expect(Object.prototype.hasOwnProperty.call(d, m), m).toBe(false);
       expect(d[m]).toBe(Driver.prototype[m]);
     }

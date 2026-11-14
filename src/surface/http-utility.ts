@@ -253,10 +253,9 @@ export function createUtilityServer(options: UtilityServerOptions): express.Expr
   // origin.
   app.use((req, res, next) => {
     const origin = req.headers['origin'];
-    const allowedOrigins = [
-      'http://localhost:3847',
-      'http://127.0.0.1:3847',
-    ];
+    // The dashboard is served by this server: its origin carries the port the daemon really listens on (--port), not 3847.
+    const port = req.socket.localPort;
+    const allowedOrigins = [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
     if (origin) {
       if (allowedOrigins.includes(origin)) {
         res.setHeader('Access-Control-Allow-Origin', origin);

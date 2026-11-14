@@ -89,14 +89,25 @@ const INPUT_METHODS = [
 /**
  * Acts that do not go through the window in front — by element (accessibility), on a window by handle, or in a page
  * (CDP) — still stop when the user does: a handler already running when they stop must not carry on (#294).
- * mouseMove (hover opens menus), writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05).
- * Putting the user's own clipboard back after a paste is not agent input: those restores run unguarded().
+ * writeClipboard, evaluate (any page script) and switchTab act too (audit 2026-11-05). So does every other pointer method
+ * (`pointerMethods`: mouseMove — hover opens menus — and mouseMoveRelative), by rule rather than by name, so a new one is
+ * not left moving after a Stop. Putting the user's own clipboard back after a paste is not agent input: those restores
+ * run unguarded().
  */
 const STOP_METHODS = [
   'invokeElement', 'scrollIntoView', 'setWindowState', 'setWindowBounds', 'maximizeWindow', 'restoreWindow',
   'navigate', 'click', 'clickByText', 'typeInField', 'typeByLabel', 'fillFormByLabels', 'focus', 'selectOption', 'pressKey',
-  'mouseMove', 'writeClipboard', 'evaluate', 'switchTab',
+  'writeClipboard', 'evaluate', 'switchTab',
 ];
+
+/** Every pointer method of the object (a move, press, release, click, drag, scroll), its prototypes' included. */
+function pointerMethods(target: object): string[] {
+  const names = new Set<string>();
+  for (let o: object | null = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k) || k === 'executeMouseAction') names.add(k);
+  }
+  return [...names];
+}
 
 /**
  * Opt-in confirm mode (core/confirm-mode.ts, #373): CLAWD_CONFIRM=1 holds an act that looks irreversible until the user
@@ -162,7 +173,9 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
     }
     return f(...args);
   });
-  for (const m of STOP_METHODS.filter(m => m !== 'invokeElement')) {
+  // A release (mouseUp) is never refused; the window-checked pointer input is wrapped above.
+  const stopOnly = [...STOP_METHODS, ...pointerMethods(target).filter(m => m !== 'mouseUp' && !INPUT_METHODS.includes(m))];
+  for (const m of stopOnly.filter(m => m !== 'invokeElement')) {
     wrap(m, async (g, f, args, nested) => {
       if (nested) return f(...args);
       g.stopCheck();
@@ -207,12 +220,8 @@ export function guardInputMethods<T extends object>(target: T, actedPid?: () => 
  */
 function fencePointerMethods(target: object): void {
   if (!fenceActive()) return;   // no fence: the methods stay exactly as they are
-  const names = new Set<string>();
-  for (let o: object | null = target; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
-    for (const k of Object.getOwnPropertyNames(o)) if (/^mouse[A-Z]/.test(k) || k === 'executeMouseAction') names.add(k);
-  }
   const t = target as Record<string, unknown>;
-  for (const m of names) {
+  for (const m of pointerMethods(target)) {
     const f = t[m];
     if (typeof f !== 'function') continue;
     t[m] = async (...args: unknown[]) => {

@@ -86,8 +86,8 @@ describe('reactiveCheck', () => {
   });
 
   it('chip-safe: an outcome assertion (element_exists) passes regardless of typed text', async () => {
-    const a = adapter({ findElements: vi.fn(async () => [{ name: 'Amr Dabbas', controlType: 'Text', bounds: { x: 1, y: 1, width: 10, height: 10 } }]) });
-    const r = await reactiveCheck({ ...base, toolText: 'Typed amr@x.com', expect: [{ type: 'element_exists', name: 'Amr Dabbas' }], adapter: a });
+    const a = adapter({ findElements: vi.fn(async () => [{ name: 'Test User', controlType: 'Text', bounds: { x: 1, y: 1, width: 10, height: 10 } }]) });
+    const r = await reactiveCheck({ ...base, toolText: 'Typed user@example.com', expect: [{ type: 'element_exists', name: 'Test User' }], adapter: a });
     expect(r!.success).toBe(true);
   });
 });

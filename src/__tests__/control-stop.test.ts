@@ -42,6 +42,7 @@ function fakeDesktop() {
     async mouseClick(x: number, y: number) { sent.push(`click ${x},${y}`); if (d.clickOpens) later(d.clickOpens); },
     async mouseUp() { sent.push('up'); },
     async mouseMove(x: number, y: number) { sent.push(`move ${x},${y}`); },
+    async mouseMoveRelative(dx: number, dy: number) { sent.push(`nudge ${dx},${dy}`); },
     async writeClipboard(t: string) { sent.push(`clip ${t}`); },
     async evaluate(js: string) { sent.push(`js ${js}`); },
     async switchTab(t: string) { sent.push(`tab ${t}`); return true; },
@@ -208,6 +209,27 @@ describe('stop is a state (#294)', () => {
     await expect(d.switchTab('Bank')).rejects.toThrow(/stopped by the user/);
     await unguarded(() => d.writeClipboard('the user clipboard'));
     expect(d.sent).toEqual(['clip the user clipboard']);
+  });
+
+  // Audit 2026-11-13: mouseMoveRelative was in neither guard list, so a relative move still went out after a Stop.
+  it('a stop refuses every pointer method, by rule: a relative move, and one on an adapter class (its prototype)', async () => {
+    const d = fakeDesktop();
+    stopControl('pill');
+    await expect(d.mouseMoveRelative(10, 0)).rejects.toThrow(/stopped by the user/);
+    const sent: string[] = [];
+    class Adapter {
+      async mouseMoveRelative(dx: number, dy: number) { sent.push(`nudge ${dx},${dy}`); }
+      async mouseWiggle() { sent.push('wiggle'); }   // a pointer method no list names
+      async mouseUp() { sent.push('up'); }
+    }
+    const a = guardInputMethods(new Adapter());
+    await expect(a.mouseMoveRelative(0, 5)).rejects.toThrow(/stopped by the user/);
+    await expect(a.mouseWiggle()).rejects.toThrow(/stopped by the user/);
+    await a.mouseUp();   // a release is still sent
+    expect([...d.sent, ...sent]).toEqual(['up']);
+    resumeControl('pill');
+    await a.mouseMoveRelative(0, 5);
+    expect(sent).toEqual(['up', 'nudge 0,5']);
   });
 
   it('survives a restart, and a resume from another process reaches this one (no in-process copy)', () => {

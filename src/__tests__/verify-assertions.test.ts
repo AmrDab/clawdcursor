@@ -29,10 +29,10 @@ function makeAdapter(overrides: Partial<Record<string, unknown>> = {}): Platform
   return {
     listWindows: vi.fn(async () => [
       { processId: 100, processName: 'notepad', title: 'Untitled - Notepad', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false },
-      { processId: 200, processName: 'olk', title: 'Inbox - amr dabbas - Outlook', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false },
+      { processId: 200, processName: 'olk', title: 'Inbox - Test User - Outlook', bounds: { x: 0, y: 0, width: 800, height: 600 }, isMinimized: false },
     ]),
     findElements: vi.fn(async () => [{ name: 'To', controlType: 'Edit', bounds: { x: 1, y: 1, width: 10, height: 10 } }]),
-    invokeElement: vi.fn(async () => ({ success: true, data: { value: 'amraldabbas19@gmail.com' } })),
+    invokeElement: vi.fn(async () => ({ success: true, data: { value: 'user@example.com' } })),
     readClipboard: vi.fn(async () => 'hello clipboard'),
     ...overrides,
   } as unknown as PlatformAdapter;
@@ -97,11 +97,11 @@ describe('checkAssertions', () => {
   });
 
   it('element_value_contains — via UIA get-value', async () => {
-    const ok = await run([{ type: 'element_value_contains', name: 'To', value: 'amraldabbas19@gmail.com' }]);
+    const ok = await run([{ type: 'element_value_contains', name: 'To', value: 'user@example.com' }]);
     expect(ok.ok).toBe(true);
     const fail = await run([{ type: 'element_value_contains', name: 'To', value: 'someone@else.com' }]);
     expect(fail.ok).toBe(false);
-    expect(fail.outcomes[0].detail).toContain('amraldabbas19@gmail.com'); // shows the ACTUAL value
+    expect(fail.outcomes[0].detail).toContain('user@example.com'); // shows the ACTUAL value
   });
 
   it('clipboard_contains', async () => {
