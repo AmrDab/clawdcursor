@@ -8,8 +8,7 @@
  * text in plain quotes or outside any block.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { wrapUntrustedScreenContent, clipScreenText, screenJson, defuseScreenDelimiters } from '../core/untrusted-screen-content';
-import { quoteScreenText } from '../core/result-codes';
+import { wrapUntrustedScreenContent, clipScreenText, screenJson, defuseScreenDelimiters, quoteScreenText } from '../core/untrusted-screen-content';
 import { getA11yTools } from '../tools/a11y';
 import { getCdpTools } from '../tools/cdp';
 import { getSmartTools } from '../tools/smart';

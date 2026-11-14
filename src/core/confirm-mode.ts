@@ -32,7 +32,7 @@ import { keysOf } from '../platform/hard-keys';
 import { modifierOf, normalizeKey } from '../platform/keys';
 import type { UiElement } from '../platform/types';
 import type { Page } from 'playwright';
-import { quoteScreenText } from './result-codes';
+import { quoteScreenText } from './untrusted-screen-content';
 
 const LABEL = /\b(send|delete|remove|pay|buy|submit|close|discard)\b/i;
 const COMBOS = ['alt+f4', 'mod+w', 'mod+q', 'mod+enter', 'shift+delete'];

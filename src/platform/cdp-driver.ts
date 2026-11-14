@@ -47,7 +47,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { AGENT_CDP_PORT } from './browser-config';
 import { fenceCdpOnly } from '../core/fence';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 import { guardInputMethods } from './pointer-guard';
 
 // ── Default CDP port — matches browser-config.ts and tool launch flags ──

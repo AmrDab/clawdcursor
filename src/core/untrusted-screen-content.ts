@@ -6,7 +6,7 @@
  * THE one place the delimiter is written. A tool result never builds the tags by hand: text the screen, a page, a
  * document, the clipboard or another app controls goes through one of
  *   - wrapUntrustedScreenContent — free text (page text, OCR, a tree dump, the clipboard, a field's value);
- *   - quoteScreenText (result-codes.ts) — a short name inline (a window title, an element name, a URL);
+ *   - quoteScreenText — a short name inline (a window title, an element name, a URL);
  *   - screenJson — a JSON result whose strings come from the screen.
  * Each defuses the delimiter inside the text, so content can neither close a block early nor open a fake one.
  */
@@ -39,6 +39,18 @@ export function defuseScreenDelimiters(text: string): string {
     if (text.charCodeAt(k) === 62 /* > */) { out += `${text.slice(i + 1, k)}›`; last = k + 1; } else { last = i + 1; }
   }
   return last === 0 ? text : out + text.slice(last);
+}
+
+/**
+ * Text the screen controls (a window title, an element name) must not steer the classification: a window titled "the screen
+ * is locked" would turn any miss into SCREEN_LOCKED. Producers quote such text with quoteScreenText (or put it in an
+ * <untrusted-screen-content> block); the classifier (result-codes.ts) reads the result with quoted spans, `key='value'`
+ * spans and untrusted blocks blanked out, so only clawdcursor's own words are matched.
+ */
+export function quoteScreenText(s: string): string {
+  // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
+  const defused = defuseScreenDelimiters(String(s ?? ''));
+  return `"${defused.replace(/["\r\n]+/g, "'")}"`;
 }
 
 /**

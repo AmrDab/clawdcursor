@@ -13,8 +13,7 @@ import { narrowedScopeNote } from './scope-note';
 import { untrusted } from '../core/miss-text';
 import { copyAllText, pageTextPart, PAGE_TEXT_CAP } from '../platform/copy-all-text';
 import { SCREEN_COORDS_NOTE, SPARSE_NEXT_STEP, CUT_VALUE_NEXT_STEP, cdpBrowserPid, cdpStepFor, nameMissHint, shownValue, shownHelp } from './blind-hints';
-import { wrapUntrustedScreenContent, screenJson } from '../core/untrusted-screen-content';
-import { quoteScreenText } from '../core/result-codes';
+import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 
 /**
  * Query Chrome DevTools Protocol DOM for interactive elements when UIA returns

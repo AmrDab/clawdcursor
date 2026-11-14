@@ -5,8 +5,7 @@
 
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
 import type { UiElement } from '../platform/types';
-import { quoteScreenText } from '../core/result-codes';
-import { screenJson } from '../core/untrusted-screen-content';
+import { screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 
 function needPlatform(tool: string): ToolResult {
   return {

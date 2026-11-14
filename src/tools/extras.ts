@@ -16,10 +16,9 @@
 
 import type { ToolDefinition } from './types';
 import { MOD } from '../platform/keys';
-import { screenJson } from '../core/untrusted-screen-content';
+import { screenJson, quoteScreenText } from '../core/untrusted-screen-content';
 import { toMouse } from './types';
 import { SPACE_PARAM } from './desktop';
-import { quoteScreenText } from '../core/result-codes';
 import { openFilePath } from './open-file';
 
 function needPlatform(tool: string): { text: string; isError: true } {

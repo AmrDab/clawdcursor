@@ -12,7 +12,7 @@
  */
 
 import { fenceActive } from './fence';
-import { defuseScreenDelimiters } from './untrusted-screen-content';
+import { quoteScreenText } from './untrusted-screen-content';
 import type { ResultCode } from './result-code-list';
 
 export type { ResultCode };
@@ -233,17 +233,6 @@ export function isUnverifiableAction(compound: string, action: string | undefine
 
 const HEAD = 400;
 
-/**
- * Text the screen controls (a window title, an element name) must not steer the classification: a window titled "the screen
- * is locked" would turn any miss into SCREEN_LOCKED. Producers quote such text with quoteScreenText (or put it in an
- * <untrusted-screen-content> block); the classifier reads the result with quoted spans, `key='value'` spans and untrusted
- * blocks blanked out, so only clawdcursor's own words are matched.
- */
-export function quoteScreenText(s: string): string {
-  // The block delimiters are defused too: a name carrying a closing delimiter would otherwise pair with a real block.
-  const defused = defuseScreenDelimiters(String(s ?? ''));
-  return `"${defused.replace(/["\r\n]+/g, "'")}"`;
-}
 function ownWords(text: string): string {
   return text
     .replace(/<untrusted-screen-content>[\s\S]*?<\/untrusted-screen-content>/g, ' ')

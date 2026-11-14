@@ -9,7 +9,7 @@
  */
 import type { PlatformAdapter } from './types';
 import { missText, untrusted } from '../core/miss-text';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 
 export type ByNameAction = 'focus' | 'set-value' | 'toggle' | 'select';
 

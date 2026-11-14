@@ -9,7 +9,7 @@
  * What was typed or set is then read back from the field (readBackTyped, setResult).
  */
 import type { PlatformAdapter } from '../platform/types';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 
 /** Clipboards differ in line endings and trailing whitespace (Windows reads come back trimmed). */
 const same = (a: string, b: string): boolean => a.replace(/\r\n/g, '\n').trim() === b.replace(/\r\n/g, '\n').trim();

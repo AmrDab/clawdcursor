@@ -3,7 +3,7 @@
  */
 
 import { execFile } from 'child_process';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';

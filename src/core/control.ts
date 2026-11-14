@@ -20,7 +20,7 @@ import { fenceActive, fenceCheck, fenceInput, isFenceRefusal } from './fence';
 import { freshHostedAppOf, isFrameHost } from '../platform/frame-host';
 import { appLabel } from './banner';
 import * as fs from 'fs';
-import { quoteScreenText } from './result-codes';
+import { quoteScreenText } from './untrusted-screen-content';
 import * as path from 'path';
 import { DATA_DIR } from '../paths';
 import { logger } from './observability/logger';

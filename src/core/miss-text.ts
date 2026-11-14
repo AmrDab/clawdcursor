@@ -9,8 +9,7 @@
  * it contains.
  */
 
-import { wrapUntrustedScreenContent } from './untrusted-screen-content';
-import { quoteScreenText } from './result-codes';
+import { wrapUntrustedScreenContent, quoteScreenText } from './untrusted-screen-content';
 
 export type MissReason = 'not_found' | 'unsupported' | 'invoke_threw' | 'disabled' | 'timeout' | 'no_window' | 'hidden' | 'ambiguous' | 'failed';
 const REASONS: ReadonlySet<string> = new Set<MissReason>(['not_found', 'unsupported', 'invoke_threw', 'disabled', 'timeout', 'no_window', 'hidden', 'ambiguous', 'failed']);

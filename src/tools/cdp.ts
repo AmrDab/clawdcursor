@@ -6,8 +6,7 @@
  */
 
 import type { ToolDefinition } from './types';
-import { quoteScreenText } from '../core/result-codes';
-import { wrapUntrustedScreenContent } from '../core/untrusted-screen-content';
+import { wrapUntrustedScreenContent, quoteScreenText } from '../core/untrusted-screen-content';
 import { DEFAULT_CDP_PORT } from '../platform/browser-config';
 import { shownResult } from '../platform/select-option';
 import { timeWait } from '../core/observability/steps';

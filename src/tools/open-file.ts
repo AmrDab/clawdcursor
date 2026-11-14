@@ -8,7 +8,7 @@
 import { promises as fsp } from 'node:fs';
 import type { PlatformAdapter } from '../platform/types';
 import { windowTextIncludes } from './window-text';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 import { resolveAlias, startedNoWindowText } from '../core/router/aliases';
 
 export async function openFilePath(

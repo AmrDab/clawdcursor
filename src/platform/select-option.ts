@@ -18,7 +18,7 @@
  */
 import type { PlatformAdapter } from './types';
 import { findControls, typeAheadSelects, isListItem, isTextBox, sameElement, inside, ensureInFront } from './prefer-control';
-import { quoteScreenText } from '../core/result-codes';
+import { quoteScreenText } from '../core/untrusted-screen-content';
 
 export interface SelectOptionResult {
   success: boolean;

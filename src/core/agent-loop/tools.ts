@@ -23,7 +23,7 @@ import { agentBrowserConnectOptions, DEFAULT_CDP_PORT } from '../../platform/bro
 import { parseAssertions, checkAssertions, renderReport, EXPECT_SCHEMA } from '../verify/assertions';
 import { compileUIMap, defaultCompileDeps } from '../sense/ui-map';
 import { renderUIMap } from '../sense/ui-map-render';
-import { wrapUntrustedScreenContent, screenJson } from '../untrusted-screen-content';
+import { wrapUntrustedScreenContent, screenJson, quoteScreenText } from '../untrusted-screen-content';
 import { resolveRef } from '../sense/ui-map-resolve';
 import { ensureVisible } from '../sense/ui-map-visible';
 import { findActionButton, findInputField } from '../sense/ui-map-find';
@@ -32,7 +32,6 @@ import { sleepUnlessStopped, STOPPED_TEXT } from '../control';
 import { timeWait } from '../observability/steps';
 import { unguarded } from '../../platform/pointer-guard';
 import { preferControl, notSelectableReason, failReason, sameElement, inside, ensureInFront } from '../../platform/prefer-control';
-import { quoteScreenText } from '../result-codes';
 import { effectLine, windowChange, type WindowRead } from '../effect';
 import { missText, untrusted, targetOf, targetText } from '../miss-text';
 

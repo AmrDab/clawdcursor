@@ -3,7 +3,7 @@
  * its process — never by its title. A title is the document's or the page's to change (a tab switch, a saved file, a
  * page that loads), so a changed title says nothing about which window has the keyboard.
  */
-import { quoteScreenText } from './result-codes';
+import { quoteScreenText } from './untrusted-screen-content';
 
 export type WindowRead = { processId?: number; hostedProcessId?: number; handle?: number | string; title?: string; processName?: string;
   appName?: string; guessed?: boolean } | null | undefined;

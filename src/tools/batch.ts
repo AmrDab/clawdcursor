@@ -26,8 +26,7 @@ import { windowTextIncludes } from './window-text';
 import type { ToolContext, ToolResult, ToolDefinition } from './types';
 import { refusalBefore, afterCall, guardedCall, type GuardedCall, type Refusal } from './call-guards';
 import { logger } from '../core/observability/logger';
-import { clipScreenText } from '../core/untrusted-screen-content';
-import { quoteScreenText } from '../core/result-codes';
+import { clipScreenText, quoteScreenText } from '../core/untrusted-screen-content';
 import { actedIn, actRecord } from '../core/control';
 import { effectLine } from '../core/effect';
 

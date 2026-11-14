@@ -30,7 +30,7 @@
 
 import { promises as fs } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { quoteScreenText } from '../result-codes';
+import { quoteScreenText } from '../untrusted-screen-content';
 import { homedir } from 'node:os';
 import type { PlatformAdapter } from '../../platform/types';
 import { isOwnUiPid } from '../../platform/pointer-guard';
