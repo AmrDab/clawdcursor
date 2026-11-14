@@ -19,7 +19,7 @@ import { osKeysGuide } from '../platform/keys';
 import { enableHostAncestry } from '../core/ai-hosts';
 import { actedIn, actRecord } from '../core/control';
 import { logger } from '../core/observability/logger';
-import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX, compactCall } from '../tools/compact-routes';
 
 const COMPOUND_TOOLS = new Set(Object.keys(COMPOUND_ROUTE_INDEX));
 import { hasConsent, writeConsentFile } from './onboarding';

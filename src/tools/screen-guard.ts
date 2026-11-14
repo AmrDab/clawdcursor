@@ -5,7 +5,7 @@
  */
 import type { ToolContext } from './types';
 import { checkImagePointer, recordShot, latestShotGuardsWindows, type ShotWindow } from '../core/screen-binding';
-import { compactCall } from './compact';
+import { compactCall } from './compact-routes';
 
 /** `computer` actions that point at coordinates; a granular tool is one when its route is (compactCall). */
 const POINTER_ACTIONS = new Set(['click', 'double_click', 'right_click', 'middle_click', 'triple_click', 'hover', 'move', 'mouse_move',

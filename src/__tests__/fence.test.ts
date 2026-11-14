@@ -26,7 +26,7 @@ import { outcomeOf } from '../surface/session-log';
 import { isGuardRefusal, __setForegroundReaderForTests } from '../core/control';
 import { guardInputMethods, guardedInput } from '../platform/pointer-guard';
 import { getTools, getCompactSurface } from '../tools/registry';
-import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
 import type { ToolDefinition, ToolContext } from '../tools/types';
 
 // Processes: 100 is the fixture, 101 its child, 102 a grandchild. 200 is the owner's app. 300 is ApplicationFrameHost,

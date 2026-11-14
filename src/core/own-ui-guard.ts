@@ -25,7 +25,7 @@ const OVERLAY_NAME = /^clawd-overlay(-[0-9a-f]+)?$/i;
 
 /**
  * Calls that wait on, end or report a pause, in compact names (`tool:action`, or a granular tool no compound routes to);
- * a granular call counts as its route (tools/compact.ts compactCall). `resume` is recorded as unverified — it cannot
+ * a granular call counts as its route (tools/compact-routes.ts compactCall). `resume` is recorded as unverified — it cannot
  * pass for the user's answer.
  */
 const PAUSE_SAFE = new Set([
@@ -36,7 +36,7 @@ const PAUSE_SAFE = new Set([
   'system:telemetry_optout',
 ]);
 
-/** `tool` / `action` in compact names (tools/compact.ts compactCall). */
+/** `tool` / `action` in compact names (tools/compact-routes.ts compactCall). */
 export function isPauseSafeCall(toolName: string, action?: string): boolean {
   return PAUSE_SAFE.has(action ? `${toolName}:${action}` : toolName);
 }
@@ -44,7 +44,7 @@ export function isPauseSafeCall(toolName: string, action?: string): boolean {
 /** While the user has stopped clawdcursor: only asking them for control back, and reporting. Not even waiting or reading. */
 const STOP_SAFE = new Set(['system:pause_for_user', 'system:report', 'system:telemetry_optout']);
 
-/** `tool` / `action` in compact names (tools/compact.ts compactCall). */
+/** `tool` / `action` in compact names (tools/compact-routes.ts compactCall). */
 export function isStopSafeCall(toolName: string, action?: string): boolean {
   return STOP_SAFE.has(action ? `${toolName}:${action}` : toolName);
 }

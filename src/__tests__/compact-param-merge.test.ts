@@ -15,7 +15,8 @@ vi.mock('@nut-tree-fork/nut-js', () => ({
 vi.mock('sharp', () => ({ default: vi.fn() }));
 
 import { getTool } from '../tools/registry';
-import { getCompactTools, COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { getCompactTools } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
 import type { ParameterDef } from '../tools/types';
 import { z } from 'zod';
 import { paramSchema } from '../surface/mcp-server';

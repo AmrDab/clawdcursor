@@ -1,11 +1,11 @@
 /**
  * The per-call facts the guards read — allowed while a pause waits / while stopped, an image-space pointer call, a full
  * screenshot — for every granular tool and every compound action. Written once in compact names; a granular tool has the
- * facts of its route (compact.ts COMPOUND_ROUTE_INDEX), so the two surfaces can not disagree about the same handler.
+ * facts of its route (compact-routes.ts COMPOUND_ROUTE_INDEX), so the two surfaces can not disagree about the same handler.
  */
 import { describe, it, expect } from 'vitest';
 import { getAllTools } from '../tools/registry';
-import { COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
 import { isImagePointerCall, isFullScreenshotCall } from '../tools/screen-guard';
 import { guardedCall } from '../tools/call-guards';
 

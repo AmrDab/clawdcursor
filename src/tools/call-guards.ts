@@ -10,7 +10,7 @@
 import type { ToolContext, ToolResult } from './types';
 import { isImagePointerCall, isFullScreenshotCall, imagePointerRefusal, noteScreenshot, VISION_DISABLED_REFUSAL } from './screen-guard';
 import { ownUiRefusal, isPauseSafeCall, isStopSafeCall } from '../core/own-ui-guard';
-import { compactCall } from './compact';
+import { compactCall } from './compact-routes';
 import { isStopped, STOPPED_TEXT } from '../core/control';
 import { isActingAction } from '../core/result-codes';
 import { ocrEngine } from '../platform/ocr-engine';

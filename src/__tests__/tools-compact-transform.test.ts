@@ -2,7 +2,7 @@
  * PR5 invariant tests — compact surface as a transform over the granular registry.
  *
  * Asserts:
- *   1. Every (compound, action) route of compact.ts delegates to a granular
+ *   1. Every (compound, action) route of compact-routes.ts delegates to a granular
  *      tool that actually exists in getAllTools().
  *   3. Each compact description lists every route action.
  *   5. For representative actions, dispatching via the compact compound
@@ -44,7 +44,8 @@ vi.mock('../platform/ocr-engine', () => {
 // ── Imports after mocks ──────────────────────────────────────────────────────
 
 import { getAllTools, getTools } from '../tools/registry';
-import { getCompactTools, COMPOUND_ROUTE_INDEX } from '../tools/compact';
+import { getCompactTools } from '../tools/compact';
+import { COMPOUND_ROUTE_INDEX } from '../tools/compact-routes';
 import type { ToolContext } from '../tools/types';
 import { makeMockPlatform } from './helpers/mock-platform';
 
