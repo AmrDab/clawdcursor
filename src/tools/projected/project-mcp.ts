@@ -139,8 +139,8 @@ export function unifiedToToolResult(r: UnifiedToolResult): ToolResult {
 }
 
 /**
- * Project a UnifiedTool into a ToolDefinition: name from TOOL_META[t.name].mcpName ?? t.name, category / tiers /
- * costClass from TOOL_META.
+ * Project a UnifiedTool into a ToolDefinition: name from TOOL_META[t.name].mcpName ?? t.name, category / tiers
+ * from TOOL_META (the cost class is stamped later, from tools/cost-class.ts).
  *
  * Throws if t.name has no TOOL_META entry (enforced by the coverage test).
  *
@@ -187,7 +187,6 @@ export function projectToToolDefinition(t: UnifiedTool): ToolDefinition {
     category: meta.category,
     safetyTier: meta.safetyTier,
     destructive: meta.destructive,
-    costClass: meta.costClass,
     honorsExpect: true,
     handler,
   };

@@ -7,7 +7,7 @@
  *
  *   2. projectToToolDefinition: projecting a representative System B tool (read_screen)
  *      yields a structurally valid ToolDefinition (name, description, parameters,
- *      category, safetyTier, costClass, handler).
+ *      category, safetyTier, handler).
  *
  *   3. Name mapping: the type → type_text mapping is applied (mcpName from TOOL_META).
  *
@@ -328,7 +328,6 @@ describe('projectToToolDefinition', () => {
     expect(def.description.length).toBeGreaterThan(0);
     expect(def.category).toBeDefined();
     expect(def.safetyTier).toBeDefined();
-    expect(def.costClass).toBeDefined();
   });
 
   it('handler calls succeed and return a valid ToolResult', async () => {
@@ -367,7 +366,6 @@ describe('projectToToolDefinition', () => {
     const def = projectToToolDefinition(readScreenTool);
     expect(def.category).toBe('perception');
     expect(def.safetyTier).toBe(0);
-    expect(def.costClass).toBe('perceive-text');
   });
 });
 

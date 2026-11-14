@@ -1,13 +1,10 @@
 /**
  * TOOL_META — MCP-surface metadata for every projected UnifiedTool (tools.ts): the published name where it differs
- * (mcpName), category, safety tier, cost class and fallback parameter descriptions. project-mcp.ts reads it when
- * src/tools/registry.ts projects these tools onto the MCP surface.
+ * (mcpName), category, safety tier and fallback parameter descriptions. project-mcp.ts reads it when
+ * src/tools/registry.ts projects these tools onto the MCP surface. The cost class is in tools/cost-class.ts.
  */
 
-import type {
-  ToolCostClass,
-  ToolDefinition,
-} from '../types';
+import type { ToolDefinition } from '../types';
 
 type ToolCategory = ToolDefinition['category'];
 
@@ -30,8 +27,6 @@ export interface ToolMeta {
   safetyTier: 0 | 1;
   /** `true`: a tool that is destructive by itself (ToolDefinition.destructive). */
   destructive?: boolean;
-  /** Token cost class. */
-  costClass: ToolCostClass;
   /**
    * Per-parameter fallback descriptions: project-mcp.ts uses one when the tool's
    * inputSchema.properties[p].description is absent or empty.
@@ -49,17 +44,12 @@ export const TOOL_META: Record<string, ToolMeta> = {
   read_screen: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'perceive-text',
-    paramDescriptions: {
-      processId: 'Focus on a specific process ID (optional — reads foreground window by default)',
-    },
   },
 
   list_windows: {
     mcpName: 'get_windows',
     category: 'window',
     safetyTier: 0,
-    costClass: 'inspect',
   },
 
   // ─── A11Y ACTIONS ──────────────────────────────────────────────────────────
@@ -68,25 +58,13 @@ export const TOOL_META: Record<string, ToolMeta> = {
     // Category 'window', as invoke_element was published before it was projected: kept so it does not change.
     category: 'window',
     safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      name: 'Element name to find',
-      automationId: 'Element automation ID (more precise than name)',
-      controlType: 'Filter by control type (e.g., "ControlType.Button")',
-      processId: 'Target process ID',
-      action: 'Action to perform (default: "click"). Options: click, set-value, get-value, focus, expand, collapse',
-      value: 'Value for set-value action',
-    },
   },
 
   set_field_value: {
     category: 'perception',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
-      name: 'Accessibility name of the field',
       value: 'Value to write',
-      controlType: 'Optional role filter (e.g. "Edit")',
       processId: 'Scope to a process',
     },
   },
@@ -96,7 +74,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   a11y_expand: {
     category: 'perception',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name to match',
       controlType: 'Optional role filter',
@@ -107,7 +84,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   a11y_collapse: {
     category: 'perception',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name',
       controlType: 'Optional role filter',
@@ -118,7 +94,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   a11y_toggle: {
     category: 'perception',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name',
       controlType: 'Optional role filter',
@@ -129,7 +104,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   a11y_select: {
     category: 'perception',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name',
       controlType: 'Optional role filter',
@@ -140,7 +114,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   a11y_get_value: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'inspect',
     paramDescriptions: {
       name: 'Accessibility name',
       controlType: 'Optional role filter',
@@ -151,47 +124,26 @@ export const TOOL_META: Record<string, ToolMeta> = {
   verify: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'inspect',
-    paramDescriptions: {
-      assertions: 'Array of machine-checkable assertions, each {type, ...fields}',
-    },
   },
 
   compile_ui: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'perceive-text',
-    paramDescriptions: {
-      purpose: 'What the compile is for',
-      target_text: 'Text to find (may pull OCR)',
-      max_cost: 'Perception cost ceiling',
-    },
   },
 
   find_action_button: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'perceive-text',
-    paramDescriptions: {
-      intent: 'What you want to do (submit/cancel/search/login/...)',
-      max_cost: 'Perception cost ceiling (default ocr_ok)',
-    },
   },
 
   find_input_field: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'perceive-text',
-    paramDescriptions: {
-      purpose: 'What the field is for (recipient/subject/body/search/...)',
-      max_cost: 'Perception cost ceiling (default ocr_ok)',
-    },
   },
 
   get_element_state: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'inspect',
     paramDescriptions: {
       name: 'Accessibility name',
       controlType: 'Optional role filter',
@@ -205,12 +157,10 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'mouse_click',
     category: 'mouse',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       x: 'X coordinate in image-space',
       y: 'Y coordinate in image-space',
       button: 'Mouse button to click: "left" (default) or "right"',
-      count: 'Click count: 1=single (default), 2=double',
     },
   },
 
@@ -218,13 +168,11 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'mouse_drag',
     category: 'mouse',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       startX: 'Start X in image-space',
       startY: 'Start Y in image-space',
       endX: 'End X in image-space',
       endY: 'End Y in image-space',
-      path: 'Stepped drag path: array of {x,y} points (min 2). When given, startX/startY/endX/endY are ignored.',
     },
   },
 
@@ -232,12 +180,10 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'mouse_scroll',
     category: 'mouse',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       x: 'X coordinate in image-space',
       y: 'Y coordinate in image-space',
       direction: 'Scroll direction',
-      amount: 'Scroll amount in wheel ticks (default: 3)',
     },
   },
 
@@ -247,7 +193,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'type_text',
     category: 'keyboard',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       text: 'The text to type',
     },
@@ -257,7 +202,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'key_press',
     category: 'keyboard',
     safetyTier: 1,
-    costClass: 'act',
   },
 
   // ─── APPS & WINDOWS ────────────────────────────────────────────────────────
@@ -265,7 +209,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   focus_window: {
     category: 'window',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       processName: 'Process name to focus (e.g. "notepad", "msedge")',
       processId: 'Process ID to focus',
@@ -276,7 +219,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   maximize_window: {
     category: 'window',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
       processId: 'Optional process id match',
@@ -291,7 +233,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     // Tier 1 (input): minimizing is reversible.
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
       processId: 'Optional process id match',
@@ -302,7 +243,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   restore_window: {
     category: 'window',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
       processId: 'Optional process id match',
@@ -314,7 +254,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     category: 'window',
     safetyTier: 1,
     destructive: true,
-    costClass: 'act',
     paramDescriptions: {
       processName: 'Optional process name match',
       processId: 'Optional process id match',
@@ -325,7 +264,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   resize_window: {
     category: 'window',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       x: 'New X (top-left origin, logical px)',
       y: 'New Y (top-left origin, logical px)',
@@ -340,7 +278,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   list_displays: {
     category: 'window',
     safetyTier: 0,
-    costClass: 'inspect',
   },
 
   // ─── ACCESSIBILITY DEPTH ──────────────────────────────────────
@@ -348,7 +285,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   focus_element: {
     category: 'perception',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       name: 'Accessibility name of the element',
       controlType: 'Optional role filter (Button, Edit, etc.)',
@@ -359,13 +295,10 @@ export const TOOL_META: Record<string, ToolMeta> = {
   wait_for_element: {
     category: 'perception',
     safetyTier: 0,
-    costClass: 'inspect',
     paramDescriptions: {
       name: 'Accessibility name to match',
       controlType: 'Role filter (e.g. "Button")',
       processId: 'Scope the search to a process',
-      timeoutMs: 'Max wait in milliseconds (default 5000)',
-      intervalMs: 'Poll interval in ms (default 250)',
     },
   },
 
@@ -374,7 +307,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   mouse_move_relative: {
     category: 'mouse',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       dx: 'X offset in image-space pixels',
       dy: 'Y offset in image-space pixels',
@@ -384,7 +316,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   mouse_down: {
     category: 'mouse',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       button: 'Which button (default: left)',
     },
@@ -393,7 +324,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   mouse_up: {
     category: 'mouse',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       button: 'Which button (default: left)',
     },
@@ -402,7 +332,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   key_down: {
     category: 'keyboard',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       key: 'Key token (e.g. "shift", "ctrl", "a", "Return")',
     },
@@ -411,7 +340,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   key_up: {
     category: 'keyboard',
     safetyTier: 1,
-    costClass: 'act',
     paramDescriptions: {
       key: 'Key token',
     },
@@ -420,7 +348,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
   undo_last: {
     category: 'keyboard',
     safetyTier: 1,
-    costClass: 'act',
   },
 
   // ─── BROWSER (CDP / DOM) ───────────────────────────────────────────────────
@@ -429,7 +356,6 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'cdp_connect',
     category: 'browser',
     safetyTier: 1,
-    costClass: 'act',
   },
 
   browser_read: {
@@ -438,32 +364,17 @@ export const TOOL_META: Record<string, ToolMeta> = {
     mcpName: 'cdp_page_context',
     category: 'browser',
     safetyTier: 0,
-    costClass: 'perceive-text',
-    paramDescriptions: {
-      selector: 'Optional CSS selector to read text from (default: structured interactive-element list for the whole page).',
-    },
   },
 
   browser_click: {
     mcpName: 'cdp_click',
     category: 'browser',
     safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      selector: 'CSS selector to click (e.g. "#submit", "button.primary")',
-      text: 'Visible text of the element to click (alternative to selector)',
-    },
   },
 
   browser_type: {
     mcpName: 'cdp_type',
     category: 'browser',
     safetyTier: 1,
-    costClass: 'act',
-    paramDescriptions: {
-      selector: 'CSS selector for the input field',
-      label: 'Label text associated with the input (alternative to selector)',
-      text: 'Text to type into the field',
-    },
   },
 };
