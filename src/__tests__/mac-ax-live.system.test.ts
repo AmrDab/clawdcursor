@@ -9,7 +9,7 @@
  * CLAWD_LIVE_MAC_TESTS=1 — it opens a window (without taking focus), so it is not
  * part of a plain `npm test`.
  *
- *   CLAWD_LIVE_MAC_TESTS=1 npx vitest run src/__tests__/mac-ax-live.test.ts
+ *   CLAWD_LIVE_MAC_TESTS=1 npx vitest run --project system src/__tests__/mac-ax-live.system.test.ts
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'fs';

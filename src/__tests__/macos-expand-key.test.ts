@@ -5,7 +5,7 @@
  *   - runs the key through the same input guard as every other key (stop, clawdcursor's own control, the window the agent works in)
  *     and the keyboard guard (a system dialog owning the keyboard refuses),
  *   - and only then calls the helper again with the key allowed.
- * The helper is a fake here; what it does with the key is covered live (mac-ax-live.test.ts).
+ * The helper is a fake here; what it does with the key is covered live (mac-ax-live.system.test.ts).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 

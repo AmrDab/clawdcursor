@@ -1,11 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
-import { execFileSync } from 'child_process';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { startFixtureServer, stationCode, renderLongread, WEB_PAGES, type FixtureServer } from '../lib/fixture-server';
 import { evaluate, loadTasks } from '../lib/tasks';
-import type { FixtureState } from '../lib/types';
 
 vi.useRealTimers();
 
@@ -189,50 +186,6 @@ describe('the web pages', () => {
     for (const page of WEB_PAGES.filter(p => p !== 'longread')) expect(read(`${page}.html`)).not.toMatch(/https?:\/\//);
     expect(renderLongread()).not.toMatch(/https?:\/\//);
   });
-});
-
-// The WinForms fixture: built with Add-Type and run with --selftest (off screen, never activated, closes itself).
-describe.runIf(process.platform === 'win32')('the Windows native fixture', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-fixture-test-'));
-  const exe = path.join(dir, 'BenchFixture.exe');
-  const powershell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-  const selftest = (mode: string): FixtureState => {
-    const state = path.join(dir, `${mode}.json`);
-    execFileSync(exe, ['--state', state, '--mode', mode, '--selftest'], { timeout: 30_000 });
-    return JSON.parse(fs.readFileSync(state, 'utf8'));
-  };
-
-  beforeAll(() => {
-    execFileSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
-      path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', dir], { timeout: 90_000, cwd: dir });
-  }, 120_000);
-  afterAll(() => { fs.rmSync(dir, { recursive: true, force: true }); });
-
-  it('records the dialog: fields, list, checkbox, the duplicate buttons and the modal', () => {
-    const fx = selftest('dialog');
-    expect(fx.state).toEqual({ name: 'Self Test', email: 'self@test.example', priority: 'High', subscribe: true,
-      applied: { name: 'Self Test', email: 'self@test.example', priority: 'High', subscribe: true },
-      billingEdit: 0, shippingEdit: 1, mainOk: 0, mainCancel: 0, modalOpen: false, modalResult: 'ok' });
-    expect(fx.events.map(e => `${e.type}:${e.target}`)).toEqual(['input:name', 'input:email', 'select:priority', 'toggle:subscribe',
-      'click:shippingEdit', 'click:apply', 'click:delete', 'click:modalOk']);
-    expect(fx.events.every(e => Math.abs(e.t - Date.now()) < 60_000)).toBe(true);
-    // The state has the keys the native tasks read.
-    const modal = loadTasks().find(t => t.id === 'native-dialog-modal')!;
-    expect(evaluate(modal.success!, { ...fx, state: { ...fx.state, shippingEdit: 0 } })).toBe(true);
-    expect(evaluate(modal.success!, { ...fx, state: { ...fx.state, shippingEdit: 0, mainOk: 1 } })).toBe(false);
-  }, 40_000);
-
-  it('records the editor text with plain line breaks', () => {
-    const fx = selftest('editor');
-    expect(fx.state).toEqual({ text: 'first line\nsecond line' });
-    const task = loadTasks().find(t => t.id === 'editor-type-lines')!;
-    expect(evaluate(task.success!, fx)).toBe(false);
-    expect(evaluate(task.success!, { state: { text: 'Benchmark line one\nBenchmark line two' }, events: [] })).toBe(true);
-  }, 40_000);
-
-  it('exits with an error when it is not told where to write its state', () => {
-    expect(() => execFileSync(exe, ['--selftest'], { timeout: 30_000 })).toThrow();
-  }, 40_000);
 });
 
 // The three native fixtures are one fixture in three toolkits: the same windows, control names and state keys.

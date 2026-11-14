@@ -36,12 +36,4 @@ describe('readDisplayList', () => {
     expect(await readDisplayList(exec as never)).toBeNull();
   });
 
-  it.skipIf(process.platform !== 'darwin')('on a real Mac: at least one screen, index 0 is the primary', async () => {
-    const rows = await readDisplayList();
-    expect(rows).not.toBeNull();
-    expect(rows!.length).toBeGreaterThan(0);
-    expect(rows![0].primary).toBe(true);
-    expect(rows![0].width).toBeGreaterThan(0);
-    expect(rows![0].backingScaleFactor).toBeGreaterThanOrEqual(1);
-  });
 });

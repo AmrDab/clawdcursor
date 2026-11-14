@@ -94,8 +94,12 @@ jobs:
         if: runner.os == 'Linux'
         run: python3 -m py_compile bench/fixtures/native/linux/bench_fixture.py
 
+      # Both projects: unit, then system (real processes, one file at a time). CLAWD_LIVE_TESTS=1 adds the system tests
+      # that write the clipboard or depend on the machine's apps; they never run in a plain local `npm test`.
       - name: Run test suite
         run: npm run test:ci
+        env:
+          CLAWD_LIVE_TESTS: '1'
 
       # #117 — coverage ratchet + production-path perf tripwire. One matrix
       # cell only (ubuntu/22): thresholds are platform-independent and running
@@ -103,6 +107,8 @@ jobs:
       - name: Coverage gate (ratchet thresholds)
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.x'
         run: npm run test:coverage
+        env:
+          CLAWD_LIVE_TESTS: '1'
 
       - name: Perf smoke (production paths)
         if: matrix.os == 'ubuntu-latest' && matrix.node-version == '22.x'

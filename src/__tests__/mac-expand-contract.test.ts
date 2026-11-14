@@ -1,6 +1,6 @@
 /**
  * expand / collapse on macOS: rules that must hold in the sources whatever machine runs the tests. The behaviour itself is
- * covered live (mac-ax-live.test.ts, CLAWD_LIVE_MAC_TESTS=1) and, for the key step, in macos-expand-key.test.ts.
+ * covered live (mac-ax-live.system.test.ts, CLAWD_LIVE_MAC_TESTS=1) and, for the key step, in macos-expand-key.test.ts.
  *
  *  - AXShowMenu is never an expansion: on web content it opens the PAGE's context menu (Reload, Back, ...); the tool said
  *    "Expanded", nothing had opened, and a menu stayed on screen (1.5.27 live test on a Mac).

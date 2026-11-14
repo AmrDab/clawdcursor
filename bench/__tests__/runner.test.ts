@@ -3,7 +3,6 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { EventEmitter } from 'events';
-import { execFileSync } from 'child_process';
 import { RESULT_FILES, agentRoot, needsImages, notApplicable, notRunAfter, parseArgs, prepareOutDir, readBaseline, selectTasks, writeTaskResults } from '../run';
 import { which } from '../lib/proc';
 import { globalPackageRoots, resolveCli } from '../lib/isolated';
@@ -238,17 +237,6 @@ describe('where the agents run', () => {
       if (process.platform === 'win32' && process.env.PUBLIC) expect(dir.toLowerCase().startsWith(home + path.sep)).toBe(false);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
-  it.runIf(process.platform === 'win32')('is readable by the current user alone: it holds the MCP config with the bearer token', () => {
-    const dir = agentRoot();
-    try {
-      const acl = execFileSync(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'icacls.exe'), [dir], { encoding: 'utf8' });
-      const entries = acl.split(/\r?\n/).map(l => l.replace(dir, '').trim()).filter(l => /:\(/.test(l));
-      expect(entries).toHaveLength(1);                                   // one entry: no inherited Users / Everyone / INTERACTIVE
-      expect(entries[0]).toMatch(/:\(OI\)\(CI\)\(F\)$/);
-      expect(acl).not.toMatch(/BUILTIN\\Users|Everyone|INTERACTIVE|Authenticated Users/i);
-      fs.writeFileSync(path.join(dir, 'mcp.json'), '{}');                // and the owner can still use it
-    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  });
 
   it('falls back to the temp directory', () => {
     const dir = agentRoot('linux', {});
@@ -401,22 +389,6 @@ describe('a task\'s results directory: one writer per file', () => {
       }
     } finally { fs.rmSync(base, { recursive: true, force: true }); }
   });
-
-  it.runIf(process.platform === 'win32')('the same with the real WinForms fixture writing its state (its self-test: no window)', () => {
-    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-results-test-'));
-    try {
-      const powershell = path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-      execFileSync(powershell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, '..', 'fixtures', 'native', 'windows', 'build.ps1'), '-OutDir', base],
-        { timeout: 90_000, cwd: base });
-      for (const [i, mode] of ['editor', 'dialog', 'editor'].entries()) {
-        const workDir = path.join(base, `run-${i}`);
-        fs.mkdirSync(workDir);
-        const { state } = nativeTask(workDir, stateFile => { execFileSync(path.join(base, 'BenchFixture.exe'), ['--state', stateFile, '--mode', mode, '--selftest'], { timeout: 30_000 }); });
-        expect(state?.events.length).toBeGreaterThan(0);
-        expect(fs.existsSync(path.join(workDir, 'fixture-state.json'))).toBe(true);
-      }
-    } finally { fs.rmSync(base, { recursive: true, force: true }); }
-  }, 120_000);
 
   it('the runner writes its files once: a second write to the same directory is refused, not an overwrite', () => {
     const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bench-results-test-'));

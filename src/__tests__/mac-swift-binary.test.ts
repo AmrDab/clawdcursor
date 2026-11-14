@@ -25,7 +25,7 @@ vi.mock('child_process', async (orig) => {
 });
 
 import {
-  cachedMacOcrBinary, compileMacOcrBinary, macOcrBinaryPath, resetMacOcrBinaryState, macOverlayBinary,
+  cachedMacOcrBinary, compileMacOcrBinary, macOcrBinaryPath, resetMacOcrBinaryState,
 } from '../platform/mac-swift-binary';
 
 let dir: string;
@@ -79,37 +79,3 @@ describe('mac OCR binary cache', () => {
   });
 });
 
-describe.runIf(process.platform === 'darwin')('real Vision binary (macOS only)', () => {
-  it('compiles the shipped script and returns the OCR JSON shape', async () => {
-    swiftc.real = true;                       // the other tests fake swiftc; this one needs the real compiler
-    resetMacOcrBinaryState();                 // forget the previous test's failed-compile latch
-    const { execFileSync } = await vi.importActual<typeof import('child_process')>('child_process');
-    const real = path.resolve(__dirname, '../../scripts/mac/ocr-recognize.swift');
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-macocr-real-'));
-    const bin = await compileMacOcrBinary(real, out);
-    expect(bin, 'swiftc must be able to build scripts/mac/ocr-recognize.swift').toBeTruthy();
-    expect(swiftc.calls, 'a real compile ran').toHaveLength(0);          // (the fake records its calls; the real one does not)
-    expect(fs.readFileSync(bin!).subarray(0, 2).toString(), 'a real executable, not the fake shell script').not.toBe('#!');
-    // A plain white PNG: no text, but a valid image — the binary must answer with the JSON shape.
-    const sharp = (await import('sharp')).default;
-    const png = path.join(out, 'blank.png');
-    await sharp({ create: { width: 200, height: 80, channels: 3, background: '#ffffff' } }).png().toFile(png);
-    const data = JSON.parse(execFileSync(bin!, [png], { encoding: 'utf8', timeout: 60_000 }).trim());
-    expect(data.error).toBeUndefined();
-    expect(Array.isArray(data.elements)).toBe(true);
-    expect(typeof data.fullText).toBe('string');
-  }, 300_000);
-});
-
-describe.runIf(process.platform === 'darwin')('real overlay binary (macOS only)', () => {
-  it('compiles scripts/mac/overlay.swift; an unknown mode exits 2 without touching the screen', async () => {
-    swiftc.real = true;
-    macOverlayBinary.reset();
-    const { spawnSync } = await vi.importActual<typeof import('child_process')>('child_process');
-    const script = path.resolve(__dirname, '../../scripts/mac/overlay.swift');
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cc-macoverlay-real-'));
-    const bin = await macOverlayBinary.compile(script, out);
-    expect(bin, 'swiftc must be able to build scripts/mac/overlay.swift').toBeTruthy();
-    expect(spawnSync(bin!, ['bogus'], { timeout: 30_000 }).status).toBe(2);
-  }, 300_000);
-});

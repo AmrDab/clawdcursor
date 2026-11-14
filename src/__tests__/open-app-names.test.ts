@@ -95,14 +95,6 @@ describe('a name outside the alias table only ever starts an installed app', () 
     for (const n of [...URIS, ...PATHS, ...ODD]) expect(await resolveInstalledWindowsApp(n), n).toBeNull();
   });
 
-  it.runIf(process.platform === 'win32')('live (read-only): a program on PATH resolves to its full path, a Start-menu app to its app id, anything else to nothing', async () => {
-    const notepad = await resolveInstalledWindowsApp('notepad');
-    expect(notepad?.path ?? notepad?.appId).toBeTruthy();
-    if (notepad?.path) expect(notepad.path).toMatch(/^[A-Za-z]:\\.+\.exe$/i);
-    expect(await resolveInstalledWindowsApp('no-such-app-clawdcursor-test')).toBeNull();
-    expect(await resolveInstalledWindowsApp('payload.exe')).toBeNull();
-  }, 60_000);
-
   // Security scan: the Start menu also lists URL and document shortcuts, and a loose match could pick an unrelated
   // entry ("a", "Uninstall"). An entry is accepted only if it has an app's shape, and only when its name IS the name asked for.
   it('a Start-menu entry is accepted only with an app\'s shape: a packaged app id, or a shortcut to a .exe / .com', () => {
@@ -131,22 +123,6 @@ describe('a name outside the alias table only ever starts an installed app', () 
     expect(w).not.toMatch(/IndexOf\(|StartsWith\(|-like|-match \$n/);
     expect(w).toMatch(/\$_\.Name -eq \$n/);   // PowerShell -eq on strings ignores case
   });
-
-  it.runIf(process.platform === 'win32')('live (read-only): the apps people ask for still resolve, to something app-shaped; a prefix or a fragment does not', async () => {
-    for (const name of ['notepad', 'Calculator', 'Microsoft Edge', 'calculator', 'MICROSOFT EDGE']) {
-      const hit = await resolveInstalledWindowsApp(name);
-      expect(hit, name).not.toBeNull();
-      if (hit?.appId) expect(isAppShapedStartEntry(hit.appId, hit.target), name).toBe(true);
-    }
-    // A prefix of real entries, and a name that cannot exist. (Not "Uninstall" or "a": a machine may well have a
-    // Start-menu entry called exactly that, and an exact name is allowed to resolve.)
-    const noSuch = `zz-no-such-app-${Math.random().toString(36).slice(2, 12)}`;
-    for (const name of ['Microsoft', noSuch]) {
-      const hit = await resolveInstalledWindowsApp(name);
-      expect(hit?.appId, name).toBeUndefined();   // only a real program of that name on PATH could answer
-    }
-    expect(await resolveInstalledWindowsApp(noSuch)).toBeNull();
-  }, 120_000);
 
   it('Windows: a name-only launch starts the resolved program or app id, and never types into the Start menu', () => {
     const w = src('windows.ts');
