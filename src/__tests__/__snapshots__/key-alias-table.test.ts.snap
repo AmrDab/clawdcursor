@@ -114,6 +114,82 @@ bogus     ERR Unknown key: "bogus"
 "
 `;
 
+exports[`NativeDesktop on macOS (its own AppleScript key path) > keyPress t 1`] = `
+"
+mod       key code 55
+Mod       key code 55
+cmd       key code 55
+Cmd       key code 55
+command   key code 55
+meta      key code 55
+Meta      key code 55
+super     key code 55
+Super     key code 55
+super_l   ERR Unknown key: "super_l"
+win       ERR Unknown key: "win"
+Win       ERR Unknown key: "Win"
+windows   ERR Unknown key: "windows"
+command_l ERR Unknown key: "command_l"
+ctrl      key code 59
+Ctrl      key code 59
+CTRL      key code 59
+control   key code 59
+Control   key code 59
+shift     key code 56
+Shift     key code 56
+alt       key code 58
+Alt       key code 58
+opt       key code 58
+option    key code 58
+Option    key code 58
+altgr     ERR Unknown key: "altgr"
+leftctrl  ERR Unknown key: "leftctrl"
+rightalt  ERR Unknown key: "rightalt"
+lwin      ERR Unknown key: "lwin"
+fn        ERR Unknown key: "fn"
+hyper     ERR Unknown key: "hyper"
+bogus     ERR Unknown key: "bogus"
+"
+`;
+
+exports[`NativeDesktop on macOS (its own AppleScript key path) > keyPress t+a 1`] = `
+"
+mod       keystroke "a" using {command down}
+Mod       keystroke "a" using {command down}
+cmd       keystroke "a" using {command down}
+Cmd       keystroke "a" using {command down}
+command   keystroke "a" using {command down}
+meta      keystroke "a" using {command down}
+Meta      keystroke "a" using {command down}
+super     keystroke "a" using {command down}
+Super     keystroke "a" using {command down}
+super_l   ERR Unknown modifier: "super_l"
+win       ERR Unknown modifier: "win"
+Win       ERR Unknown modifier: "Win"
+windows   ERR Unknown modifier: "windows"
+command_l ERR Unknown modifier: "command_l"
+ctrl      keystroke "a" using {control down}
+Ctrl      keystroke "a" using {control down}
+CTRL      keystroke "a" using {control down}
+control   keystroke "a" using {control down}
+Control   keystroke "a" using {control down}
+shift     keystroke "a" using {shift down}
+Shift     keystroke "a" using {shift down}
+alt       keystroke "a" using {option down}
+Alt       keystroke "a" using {option down}
+opt       keystroke "a" using {option down}
+option    keystroke "a" using {option down}
+Option    keystroke "a" using {option down}
+altgr     ERR Unknown modifier: "altgr"
+leftctrl  ERR Unknown modifier: "leftctrl"
+rightalt  ERR Unknown modifier: "rightalt"
+lwin      ERR Unknown modifier: "lwin"
+fn        ERR Unknown modifier: "fn"
+hyper     ERR Unknown modifier: "hyper"
+bogus     ERR Unknown modifier: "bogus"
+"
+`;
+
 exports[`Wayland backend > wtype keyPress t 1`] = `
 "
 mod       ERR Unknown key: "mod"

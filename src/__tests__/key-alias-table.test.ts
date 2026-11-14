@@ -41,6 +41,7 @@ import { WindowsAdapter } from '../platform/windows';
 import { MacOSAdapter } from '../platform/macos';
 import { LinuxAdapter } from '../platform/linux';
 import { WaylandBackend } from '../platform/wayland-backend';
+import { NativeDesktop } from '../platform/native-desktop';
 import type { MacAx } from '../platform/mac-ax';
 import { keysOf } from '../platform/hard-keys';
 import { modifierOf } from '../platform/keys';
@@ -108,6 +109,14 @@ describe('macOS adapter', () => {
   it('keyPress t', async () => { expect(await table(t => mac.keyPress(t), programs)).toMatchSnapshot(); });
   it('keyDown t', async () => { expect(await table(t => mac.keyDown(t), programs)).toMatchSnapshot(); });
   it('keyUp t', async () => { expect(await table(t => mac.keyUp(t), programs)).toMatchSnapshot(); });
+});
+
+describe('NativeDesktop on macOS (its own AppleScript key path)', () => {
+  // The key path alone: the keyboard guard (a dialog or the lock screen owning the keyboard) needs a Mac.
+  const nd = Object.create(NativeDesktop.prototype) as { macKeyPress(combo: string): Promise<void>; guardMacKeys(): Promise<void> };
+  nd.guardMacKeys = async () => {};
+  it('keyPress t+a', async () => { expect(await table(t => nd.macKeyPress(`${t}+a`), programs)).toMatchSnapshot(); });
+  it('keyPress t', async () => { expect(await table(t => nd.macKeyPress(t), programs)).toMatchSnapshot(); });
 });
 
 describe('Linux (X11) adapter', () => {
