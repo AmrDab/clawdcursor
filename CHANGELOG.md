@@ -48,6 +48,17 @@ All notable changes to Clawd Cursor will be documented in this file.
     `scripts/window-outline.ps1`.
 
 ### Fixed
+- **Windows: `open_app` starts apps directly again, not through the Start menu (10–12 s per launch).** The PowerShell that runs
+  `Start-Process` was spawned detached, and a detached PowerShell exits 0 without starting anything. Every alias launch
+  (Paint, Character Map, the Snipping Tool, ...) waited 4 s for a window, then fell back to the Start menu: Escape, Win,
+  the app's name, Enter, typed on your desktop. The launcher PowerShell and the `explorer.exe shell:AppsFolder` spawns
+  are now attached (still hidden, no pipes, and the app keeps running after clawdcursor exits). The same applies to the
+  `ms-settings:`-style URI dispatch and `relaunch_with_cdp`.
+  - The Start-menu fallback is no longer hidden. Each key and the typing are steps in the call's step log
+    (`start-menu key Escape`, `start-menu key Super`, `start-menu type-text`, `start-menu key Return`), along with the
+    route that produced the window (`launch uwp`, `launch start-process`, `launch start-menu`,
+    `launch already-running`). The typed text is not logged. When the fallback ran, `open_app` says so:
+    `(opened through the Start menu after Start-Process showed no window in 4 s)`.
 - **Linux: password field values stay out of tree reads**, as on Windows and macOS. An AT-SPI `password text` element now
   returns no value or text in `read_tree`, `find`, the focused element and page text. A screenshot or OCR can still show
   whatever is visible on screen.

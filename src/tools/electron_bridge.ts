@@ -239,10 +239,11 @@ export function getElectronBridgeTools(): ToolDefinition[] {
           if (ctx.platform.platform === 'win32') {
             const { spawn } = await import('child_process');
             // The name arrives as $env:, never as script source (platform/ps-input.ts).
+            // Not detached: a detached PowerShell's Start-Process starts nothing (platform/windows.ts startProcess).
             const child = spawn(powershellExe(), [
               '-NoProfile', '-Command',
               `Start-Process -FilePath $env:CLAWD_PS_FILE -WorkingDirectory $env:USERPROFILE -ArgumentList '${flag}'`,
-            ], psOpts({ stdio: 'ignore', detached: true, windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } }));
+            ], psOpts({ stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_PS_FILE: name } }));
             child.unref();
           } else {
             // macOS / Linux — open -a / direct spawn.
