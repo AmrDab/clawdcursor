@@ -49,6 +49,9 @@ describe('claude -p', () => {
     expect(flag(a, '--append-system-prompt')).toBe(SYSTEM_PROMPT);
     expect(SYSTEM_PROMPT).toMatch(/PASS: .*FAIL: /);
   });
+  it('waits for the clawdcursor server before the first turn, up to 60 s', () => {
+    expect(claudeTaskCommand({ exe: 'claude', mcpConfigPath: 'm.json', task: 't' }).env).toEqual({ MCP_CONNECTION_NONBLOCKING: 'false', MCP_TIMEOUT: '60000' });
+  });
   it('sends the task as one stream-json user message on stdin, not on the command line', () => {
     expect(a.join(' ')).not.toContain('Notepad');
     expect(cmd.stdin!.endsWith('\n')).toBe(true);

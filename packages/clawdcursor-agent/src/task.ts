@@ -82,9 +82,13 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
   let finalError = false;
   let serverState: string | undefined;
   let lastText = '';
+  let lastError = '';
+  let toolCalls = 0;
   const show = (ev: TraceEvent) => {
     if (ev.kind === 'start') serverState = ev.server;
     if (ev.kind === 'text') lastText = ev.text;
+    if (ev.kind === 'error') lastError = ev.text;
+    if (ev.kind === 'call') toolCalls++;
     if (ev.kind === 'final') { finalText = ev.text; finalError = ev.error === true; }
     const line = renderEvent(ev, p, who);
     if (line) out(`${p.dim(elapsed(Date.now() - started))}  ${line}`);
@@ -159,15 +163,14 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
     fs.rmSync(workDir, { recursive: true, force: true, maxRetries: 2 });
   }
 
-  const verdict = interrupted ? null : verdictOf(finalText);
-  let reason: string | undefined;
-  if (interrupted) reason = 'stopped with Ctrl-C';
-  else if (serverState && serverState !== 'connected') reason = `the clawdcursor MCP server did not connect (${serverState})`;
-  else if (!verdict && !finalText && command) reason = `${runner} exited with code ${exitCode}${stderrTail.trim() ? `: ${stderrTail.trim().split('\n').slice(-3).join(' ').slice(0, 300)}` : ''}`;
-  else if (!verdict) reason = finalError ? 'the agent ended with an error' : 'the agent gave no PASS/FAIL line';
+  const claimed = interrupted ? null : verdictOf(finalText);
+  // A PASS with no tool call is not one: an agent left without its tools can describe steps it never took.
+  const verdict = claimed === 'PASS' && toolCalls === 0 ? null : claimed;
+  const reason = reasonOf({ interrupted, claimed, verdict, runner, finalText, finalError, lastError, toolCalls, serverState, exitCode, stderrTail,
+    ranCli: !!command });
   const code = interrupted ? 130 : verdict === 'PASS' ? 0 : 1;
   const session = sessionOfRun(sessionsDir(ctx.dataDir), runId, started);
-  log.write({ type: 'end', verdict, exitCode: code, agentExitCode: exitCode, ...(reason ? { reason } : {}), ...(session ? { session: session.id } : {}), ms: Date.now() - started });
+  log.write({ type: 'end', verdict, ...(claimed !== verdict ? { claimed } : {}), toolCalls, exitCode: code, agentExitCode: exitCode, ...(reason ? { reason } : {}), ...(session ? { session: session.id } : {}), ms: Date.now() - started });
 
   const tag = verdict === 'PASS' ? p.green(p.bold('PASS')) : verdict === 'FAIL' ? p.red(p.bold('FAIL')) : p.red(p.bold(interrupted ? 'STOPPED' : 'NO VERDICT'));
   const last = finalText.split('\n').map(l => l.trim()).filter(Boolean).pop() ?? '';
@@ -175,4 +178,32 @@ export async function runTask(opts: TaskOptions, ctx: CoreContext, io: TaskIo = 
   out(`${tag}  ${verdict ? last.replace(/^[\s*_`>#"'-]*(?:verdict:\s*)?(PASS|FAIL)\b[:\s-]*/i, '') : reason ?? ''}`);
   out(p.dim(`run log ${log.file}${session ? ` · clawdcursor session ${session.id}` : ''} · ${((Date.now() - started) / 1000).toFixed(1)} s · clawdcursor logs --run ${runId}`));
   return { exitCode: code, verdict, runId, runFile: log.file, session: session?.id ?? null, finalText, ...(reason ? { reason } : {}) };
+}
+
+/**
+ * Why a run ended without PASS/FAIL, in one line. "pending" (Claude Code's state for a server still connecting at
+ * init) is reported only when the agent then called no tool; an agent that ended with an error says that error.
+ */
+export function reasonOf(r: { interrupted: boolean; claimed: 'PASS' | 'FAIL' | null; verdict: 'PASS' | 'FAIL' | null; runner: string;
+  finalText: string; finalError: boolean; lastError: string; toolCalls: number; serverState?: string; exitCode: number | null;
+  stderrTail: string; ranCli: boolean }): string | undefined {
+  if (r.interrupted) return 'stopped with Ctrl-C';
+  if (r.serverState && r.serverState !== 'connected' && r.serverState !== 'pending') return `the clawdcursor MCP server did not connect (${r.serverState})`;
+  const notReady = r.toolCalls === 0 && r.serverState === 'pending' ? ': the clawdcursor MCP server was still starting (pending)' : '';
+  if (r.claimed === 'PASS' && !r.verdict) return `the agent said PASS without calling a clawdcursor tool${notReady}`;
+  if (r.verdict) return undefined;
+  const lastLine = (t: string) => t.split('\n').map(l => l.trim()).filter(Boolean).pop()?.slice(0, 300) ?? '';
+  const error = r.finalError ? lastLine(r.finalText) : lastLine(r.lastError);
+  if (error) {
+    const login = /\b401\b|authenticat|unauthori[sz]ed/i.test(error)
+      ? r.runner === 'claude' ? ' (sign in again: run `claude`, then /login)' : r.runner === 'codex' ? ' (sign in again: `codex login`)' : ''
+      : '';
+    return `${r.runner} ended with an error: ${error}${login}`;
+  }
+  if (!r.finalText && r.ranCli) {
+    const tail = r.stderrTail.trim();
+    return `${r.runner} exited with code ${r.exitCode}${tail ? `: ${tail.split('\n').slice(-3).join(' ').slice(0, 300)}` : ''}${notReady}`;
+  }
+  if (notReady) return `the agent called no clawdcursor tool${notReady}`;
+  return r.finalError ? 'the agent ended with an error' : 'the agent gave no PASS/FAIL line';
 }
