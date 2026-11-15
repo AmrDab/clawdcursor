@@ -22,7 +22,7 @@ import type { UnifiedTool, AgentToolContext } from './types';
 import { buildBatchTool } from './batch-tool';
 import { imageScale, scaleCoord, screenCenter, mapImagePoint, mapImageLength, setLastFrame } from './coord-scale';
 import { ensureTargetForeground, sameProcess } from './focus-guard';
-import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText, startMenuNote } from '../router/aliases';
 import { openFilePath } from '../../tools/open-file';
 import { resolveSchemeHandlerExecutable, launchHandlerAndVerify } from '../../platform/uri-handler';
 import type { InvokeAction, UiElement } from '../../platform/types';
@@ -1095,14 +1095,15 @@ export function buildUnifiedTools(opts: { disableVision?: boolean } = {}): Unifi
           return { success: false, text: `Failed to launch ${quoteScreenText(name)}: ${err instanceof Error ? err.message : String(err)}` };
         }
         await sleep(800);
-        if (res.title) return { success: true, text: `Opened ${quoteScreenText(name)} (pid=${res.pid}, window="${res.title}")` };
+        const via = startMenuNote(res);
+        if (res.title) return { success: true, text: `Opened ${quoteScreenText(name)} (pid=${res.pid}, window="${res.title}")${via}` };
         // Running but no window yet: a slow app still loading. Not a failure —
         // a failure invites a second launch.
         if (res.pid) {
-          return { success: true, text: startedNoWindowText(quoteScreenText(name), res, 'agent') };
+          return { success: true, text: startedNoWindowText(quoteScreenText(name), res, 'agent') + via };
         }
         // No process and no window is not a launch: say so instead of "Launched".
-        return { success: false, text: notConfirmedText(quoteScreenText(name), name, 'agent') };
+        return { success: false, text: notConfirmedText(quoteScreenText(name), name, 'agent') + via };
       },
     },
 

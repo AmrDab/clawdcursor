@@ -64,6 +64,9 @@ export async function timeStep<T>(name: string, fn: () => Promise<T>): Promise<T
   finally { call?.add(name, performance.now() - t0); }
 }
 
+/** Note that something happened in the call running now (which launch route answered): a step of no time of its own. */
+export function markStep(name: string): void { current.getStore()?.add(name, 0); }
+
 /** A deliberate wait (a pause for the user, `wait`, a wait_for): slow by design, so it is not counted as a slow call. */
 export function timeWait<T>(fn: () => Promise<T>): Promise<T> { return timeStep(WAIT_STEP, fn); }
 

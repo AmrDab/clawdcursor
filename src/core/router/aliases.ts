@@ -170,6 +170,18 @@ export function startedNoWindowText(quotedName: string, res: { pid?: number; pro
   return `Started ${quotedName} (${exe}pid=${res.pid}) but its window isn't up yet — some apps take a minute. Do not launch it again; wait, then ${focus}.`;
 }
 
+/**
+ * What open_app adds when the Windows Start-menu fallback ran (launchApp `startMenuAfter`): keys were pressed and text
+ * typed on the user's desktop, and the answer used to say only `Opened "mspaint"`. Empty otherwise. The 4 s is
+ * launchApp's budget for the first route (platform/windows.ts).
+ */
+export function startMenuNote(res: { pid?: number; title?: string; startMenuAfter?: string }): string {
+  if (!res.startMenuAfter) return '';
+  return res.title || res.pid
+    ? ` (opened through the Start menu after ${res.startMenuAfter} showed no window in 4 s)`
+    : ` (${res.startMenuAfter} showed no window in 4 s; a Start-menu search found none either)`;
+}
+
 /** open_app's answer when neither a window nor a process of the app was found. */
 export function notConfirmedText(quotedName: string, rawName: string, surface: 'mcp' | 'agent' = 'mcp'): string {
   const by = `"processName":${JSON.stringify(rawName)}`;
