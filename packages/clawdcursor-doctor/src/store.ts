@@ -7,9 +7,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-/** The icacls arguments that leave `user` as the file's only entry, with full control. */
+/**
+ * The icacls arguments that leave `user` as the file's only entry, with full control. SYSTEM and Administrators are
+ * removed as well: where the folder passes nothing down (CI's temp folder), a new file gets them as its own entries,
+ * which /inheritance:r keeps.
+ */
 export function icaclsArgs(file: string, user: string): string[] {
-  return [file, '/inheritance:r', '/grant:r', `${user}:F`];
+  return [file, '/inheritance:r', '/grant:r', `${user}:F`, '/remove:g', '*S-1-5-18', '*S-1-5-32-544'];
 }
 
 /** DOMAIN\\user on Windows, as icacls takes it. */

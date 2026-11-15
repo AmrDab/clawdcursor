@@ -11,7 +11,7 @@ afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
 
 describe('agent.json, which can hold an API key, is owner-only', () => {
   it('Windows: icacls removes the inherited entries and grants the user alone full control', () => {
-    expect(icaclsArgs('C:\\Users\\u\\.clawdcursor\\agent.json', 'PC\\u')).toEqual(['C:\\Users\\u\\.clawdcursor\\agent.json', '/inheritance:r', '/grant:r', 'PC\\u:F']);
+    expect(icaclsArgs('C:\\Users\\u\\.clawdcursor\\agent.json', 'PC\\u')).toEqual(['C:\\Users\\u\\.clawdcursor\\agent.json', '/inheritance:r', '/grant:r', 'PC\\u:F', '/remove:g', '*S-1-5-18', '*S-1-5-32-544']);
     expect(windowsUser({ USERDOMAIN: 'PC' })).toBe(`PC\\${os.userInfo().username}`);
   });
 
