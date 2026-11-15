@@ -48,6 +48,8 @@ All notable changes to Clawd Cursor will be documented in this file.
     `scripts/window-outline.ps1`.
 
 ### Fixed
+- **`clawdcursor doctor` returns to the prompt.** After "All systems go!" it never exited: the accessibility bridge it
+  started kept the process alive (2.0.0 too).
 - **Windows: `open_app` starts apps directly again, not through the Start menu (10–12 s per launch).** The PowerShell that runs
   `Start-Process` was spawned detached, and a detached PowerShell exits 0 without starting anything. Every alias launch
   (Paint, Character Map, the Snipping Tool, ...) waited 4 s for a window, then fell back to the Start menu: Escape, Win,
