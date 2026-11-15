@@ -185,7 +185,8 @@ export async function shellDispatchUriAndVerify(
     const child = spawn(
       powershellExe(),
       ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', 'Start-Process -FilePath $env:CLAWD_URI -WorkingDirectory $env:USERPROFILE'],
-      psOpts({ detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
+      // Not detached: a detached PowerShell's Start-Process starts nothing (windows.ts startProcess).
+      psOpts({ stdio: 'ignore', windowsHide: true, env: { ...process.env, CLAWD_URI: uri } }),
     );
     child.unref();
     child.on('error', () => { /* poll reports no-window */ });

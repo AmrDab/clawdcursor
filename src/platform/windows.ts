@@ -57,6 +57,7 @@ import { wheelUnitsPerNotch } from './wheel';
 import { normalizeWindowText, windowTextIncludes } from '../tools/window-text';
 import { structuredMissFields, targetOf } from '../core/miss-text';
 import { psOpts, powershellExe, windowsDirExe } from './ps-spawn';
+import { markStep, timeStep } from '../core/observability/steps';
 import * as os from 'os';
 import { normalizeControlType } from './uia-control-type';
 
@@ -1360,8 +1361,14 @@ export class WindowsAdapter implements PlatformAdapter {
       await this.focusWindow({ processId: existing.processId }).catch(() => {});
       return { pid: existing.processId, title: existing.title, handle: existing.handle };
     };
+    // Which route answered goes into this call's step log (steps.ts): a 10 s open_app used to show only its PowerShell
+    // and bridge steps, never that the Start-menu keyboard fallback had opened the app.
+    const via = (route: 'uwp' | 'start-process' | 'start-menu' | 'already-running', r: LaunchResult): LaunchResult => {
+      if (r.title || r.pid) markStep(`launch ${route}`);
+      return r;
+    };
     const running = await focusExisting();
-    if (running) return running;
+    if (running) return via('already-running', running);
 
     // Name-only launch (an agent-typed name outside the alias table): resolve it to an installed app first, read-only
     // (win-app-resolve.ts), and start exactly that. The raw name never reaches Start-Process, where the shell would read
@@ -1376,7 +1383,7 @@ export class WindowsAdapter implements PlatformAdapter {
         uwpAppId: found.appId?.includes('!') ? found.appId : undefined,
       }));
       const alreadyUp = await focusExisting();
-      if (alreadyUp) return alreadyUp;
+      if (alreadyUp) return via('already-running', alreadyUp);
       let started: boolean | undefined;
       if (found.path) {
         started = await this.startProcess({ ...process.env, CLAWD_PS_FILE: found.path },
@@ -1384,7 +1391,7 @@ export class WindowsAdapter implements PlatformAdapter {
       } else {
         // explorer's exit status says nothing about the app it activates: only a spawn that could not happen is known.
         try {
-          spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${found.appId}`], { stdio: 'ignore', detached: true, windowsHide: true, cwd: os.homedir() }).unref();
+          spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${found.appId}`], { stdio: 'ignore', windowsHide: true, cwd: os.homedir() }).unref();
         } catch {
           started = false;
         }
@@ -1394,7 +1401,8 @@ export class WindowsAdapter implements PlatformAdapter {
       if (started === false) throw new Error(`launchApp: Windows could not start "${name}"${found.path ? ` (${found.path})` : ''}`);
       // Name-only: only a process begun by THIS launch counts — the name was typed by an agent, and a process that was
       // already there (a tray app) says nothing about what this launch did.
-      return this.foregroundLaunched(await this.findLaunchedWindow(app, windowsBefore, 8_000, { since: launchedAt }));
+      return this.foregroundLaunched(via(found.path ? 'start-process' : 'uwp',
+        await this.findLaunchedWindow(app, windowsBefore, 8_000, { since: launchedAt })));
     }
 
     // Route 1: UWP apps via explorer shell:AppsFolder\<id>. This is the Windows-
@@ -1410,7 +1418,7 @@ export class WindowsAdapter implements PlatformAdapter {
       }
       try {
         const child = spawn(windowsDirExe('explorer.exe'), [`shell:AppsFolder\\${id}`], {
-          stdio: 'ignore', detached: true, windowsHide: true, cwd: os.homedir(),
+          stdio: 'ignore', windowsHide: true, cwd: os.homedir(),
         });
         child.unref();
       } catch {
@@ -1421,9 +1429,10 @@ export class WindowsAdapter implements PlatformAdapter {
       // the router's strategy ladder.
       const uwpResult = await this.findLaunchedWindow(app, windowsBefore, 4_000, { since: launchedAt });
       // Its process is up and the window is not (a slow starter): started. Searching the Start menu would launch it twice.
-      if (uwpResult.title || uwpResult.pid) return this.foregroundLaunched(uwpResult);
+      if (uwpResult.title || uwpResult.pid) return this.foregroundLaunched(via('uwp', uwpResult));
       if (opts?.noStartMenuFallback) return uwpResult; // {} — caller verifies
-      return this.foregroundLaunched(await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore, app));
+      return this.foregroundLaunched(via('start-menu',
+        await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore, app, 'shell:AppsFolder')));
     }
 
     // Route 2: classic Start-Process via PowerShell; the values arrive as $env:, never as script source (ps-input.ts).
@@ -1462,7 +1471,7 @@ export class WindowsAdapter implements PlatformAdapter {
     // Through a launcher (open_file), the Start-Process that succeeded is explorer.exe's: it says nothing about the
     // file. Only a process begun by this launch counts there — never an older one of the same name.
     const direct = await this.findLaunchedWindow(app, windowsBefore, 4_000, { since: launchedAt, started: opts?.viaLauncher ? undefined : started });
-    if (direct.title || direct.pid) return this.foregroundLaunched(direct);
+    if (direct.title || direct.pid) return this.foregroundLaunched(via('start-process', direct));
     if (opts?.noStartMenuFallback || opts?.viaLauncher) return direct; // {} — caller verifies (open_file)
 
     // Route 3: Start Menu search fallback — universal for any app indexed by
@@ -1470,11 +1479,12 @@ export class WindowsAdapter implements PlatformAdapter {
     // the same pattern the router's zero-LLM fast path uses; ported here so
     // every caller of launchApp (agent's open_app, MCP, REST) gets the
     // reliability without duplicating router logic.
-    return this.foregroundLaunched(await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore, app));
+    return this.foregroundLaunched(via('start-menu',
+      await this.launchViaStartMenuSearch(name, opts?.searchTerm, windowsBefore, app, 'Start-Process')));
   }
 
   /**
-   * Bring a freshly-launched window to the foreground. A detached spawn opens
+   * Bring a freshly-launched window to the foreground. A launch opens
    * the app BEHIND the current foreground (Windows foreground-lock), so without
    * this `open_app("calc")` left Calculator in the background and every
    * subsequent focused-window op (read_screen, find_element) targeted the wrong
@@ -1497,12 +1507,18 @@ export class WindowsAdapter implements PlatformAdapter {
    * adapter directly — this is internal platform logic, not an agent action.
    *
    * Tuned to the same cadence as the router's startMenuSearch helper.
+   *
+   * Every key it presses and the text it types are steps of the call's log (steps.ts), and the result says it came
+   * this way (`startMenuAfter`: the route that showed no window first). open_app used to answer `Opened "mspaint"`
+   * with nothing to show that Escape, Win, "Paint" and Enter had been pressed on the user's desktop. The typed text
+   * is not in the step name: a step never carries an argument.
    */
   private async launchViaStartMenuSearch(
     name: string,
     searchTermHint: string | undefined,
     windowsBefore: readonly WindowInfo[],
     app: AppWindows,
+    after: 'shell:AppsFolder' | 'Start-Process',
   ): Promise<LaunchResult> {
     // Pick the term Windows Search will actually rank correctly. The alias's
     // `searchTerm` (when provided) is the human-friendly name an end user
@@ -1518,19 +1534,20 @@ export class WindowsAdapter implements PlatformAdapter {
     try {
       // Close any in-progress Start Menu / search overlay so the Win key
       // reliably opens a fresh one.
-      await this.keyPress('Escape').catch(() => {});
+      const key = (k: string) => timeStep(`start-menu key ${k}`, () => this.keyPress(k));
+      await key('Escape').catch(() => {});
       await this.delay(120);
-      await this.keyPress('Super');
+      await key('Super');
       await this.delay(600);
-      await this.typeText(searchText);
+      await timeStep('start-menu type-text', () => this.typeText(searchText));
       await this.delay(700);
-      await this.keyPress('Return');
+      await key('Return');
     } catch {
       // Keyboard layer flaky — caller will see empty result and decide.
     }
 
     // Whatever the search opened, only a window of THIS app is reported: the top hit can be another app or a document.
-    return this.findLaunchedWindow(app, windowsBefore, 4_000, { since: Date.now() - 2_000 });
+    return { ...await this.findLaunchedWindow(app, windowsBefore, 4_000, { since: Date.now() - 2_000 }), startMenuAfter: after };
   }
 
   /**
@@ -1585,15 +1602,20 @@ export class WindowsAdapter implements PlatformAdapter {
   }
 
   /**
-   * Start-Process in a detached PowerShell (values as $env:, never as script text). Resolves true / false with
+   * Start-Process in a PowerShell (values as $env:, never as script text). Resolves true / false with
    * PowerShell's exit status — Start-Process returns as soon as the program is started, and fails when Windows
    * cannot find or run it — or undefined when that is not known within a few seconds.
+   *
+   * Not detached: a detached PowerShell exited 0 in 0.2 s and started nothing — no window for Paint, charmap or the
+   * Snipping Tool — so every alias launch fell through to the Start-menu keyboard fallback (live, 2026-11-14).
+   * Attached, the window is up in 1.2–1.6 s. The app is PowerShell's child, not ours, and keeps running after
+   * clawdcursor exits. unref() keeps a PowerShell that has not exited yet from holding the MCP process open.
    */
   private startProcess(env: NodeJS.ProcessEnv, command: string): Promise<boolean | undefined> {
     return new Promise(resolve => {
       let child: ReturnType<typeof spawn>;
       try {
-        child = spawn(powershellExe(), ['-NoProfile', '-Command', command], psOpts({ stdio: 'ignore' as const, detached: true, windowsHide: true, env }));
+        child = spawn(powershellExe(), ['-NoProfile', '-Command', command], psOpts({ stdio: 'ignore' as const, windowsHide: true, env }));
       } catch {
         resolve(false);
         return;
@@ -1781,7 +1803,11 @@ function startProcessArgument(value: string): string {
   return `"${p.replace(/\\+$/, '')}"`;
 }
 
-type LaunchResult = { pid?: number; title?: string; handle?: number | string; processName?: string; alreadyRunning?: boolean };
+type LaunchResult = {
+  pid?: number; title?: string; handle?: number | string; processName?: string; alreadyRunning?: boolean;
+  /** The Start-menu fallback ran, after this route showed no window (PlatformAdapter.launchApp). */
+  startMenuAfter?: 'shell:AppsFolder' | 'Start-Process';
+};
 
 /** One app's windows: see `WindowsAdapter.appWindows`. */
 interface AppWindows {

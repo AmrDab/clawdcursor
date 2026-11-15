@@ -7,7 +7,7 @@ import { quoteScreenText } from '../core/result-codes';
 import { promisify } from 'util';
 import type { ToolDefinition } from './types';
 import { agentBrowserConnectOptions } from '../platform/browser-config';
-import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText } from '../core/router/aliases';
+import { resolveAlias, appNameRefusal, startedNoWindowText, notConfirmedText, startMenuNote } from '../core/router/aliases';
 import { sleepUnlessStopped, STOPPED_TEXT } from '../core/control';
 import { timeWait } from '../core/observability/steps';
 import { psOpts, powershellExe, windowsDirExe } from '../platform/ps-spawn';
@@ -76,14 +76,15 @@ export function getOrchestrationTools(): ToolDefinition[] {
                 ?? (process.platform === 'darwin' ? alias?.macOSAppName : undefined),
             });
             ctx.a11y.invalidateCache();
-            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window=${quoteScreenText(res.title)})` };
+            const via = startMenuNote(res ?? {});
+            if (res?.title) return { text: `Opened "${rawName}" (pid=${res.pid}, window=${quoteScreenText(res.title)})${via}` };
             // Running but no window yet: a slow app still loading (Outlook, IDEs).
             // Not an error — an error invites a second launch.
             if (res?.pid) {
-              return { text: startedNoWindowText(`"${rawName}"`, res) };
+              return { text: startedNoWindowText(`"${rawName}"`, res) + via };
             }
             // No process and no window is not a launch: say so instead of "Launched".
-            return { text: notConfirmedText(`"${rawName}"`, rawName), isError: true };
+            return { text: notConfirmedText(`"${rawName}"`, rawName) + via, isError: true };
           } catch (err: any) {
             return { text: `Failed to launch "${rawName}": ${err?.message ?? err}`, isError: true };
           }

@@ -133,3 +133,29 @@ describe('open_app — the launch was handed to a process that was already runni
     expect(r.text).toMatch(/Do not launch it again/);
   });
 });
+
+describe('open_app — the Windows Start-menu fallback is said, not hidden (it pressed keys and typed on the desktop)', () => {
+  const NOTE = '(opened through the Start menu after Start-Process showed no window in 4 s)';
+  const viaMenu = async () => ({ pid: 800, title: 'Untitled - Paint', startMenuAfter: 'Start-Process' });
+
+  it('MCP and agent loop: an opened window says it came through the Start menu', async () => {
+    const r = await mcpOpenApp.handler({ name: 'mspaint' }, mcpCtx(viaMenu));
+    expect(r.isError).toBeFalsy();
+    expect(r.text).toBe(`Opened "mspaint" (pid=800, window="Untitled - Paint") ${NOTE}`);
+    const a = await agentOpenApp.execute({ name: 'mspaint' }, agentCtx(viaMenu));
+    expect(a.success).toBe(true);
+    expect(a.text).toContain(NOTE);
+  });
+
+  it('a direct launch keeps its wording', async () => {
+    const r = await mcpOpenApp.handler({ name: 'mspaint' }, mcpCtx(async () => ({ pid: 800, title: 'Untitled - Paint' })));
+    expect(r.text).toBe('Opened "mspaint" (pid=800, window="Untitled - Paint")');
+  });
+
+  it('a fallback that found nothing says the Start menu was searched too', async () => {
+    const r = await mcpOpenApp.handler({ name: 'calculator' }, mcpCtx(async () => ({ startMenuAfter: 'shell:AppsFolder' })));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/no window appeared/);
+    expect(r.text).toContain('(shell:AppsFolder showed no window in 4 s; a Start-menu search found none either)');
+  });
+});
