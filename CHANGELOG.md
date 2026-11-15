@@ -68,6 +68,15 @@ All notable changes to Clawd Cursor will be documented in this file.
   says; any other lock (stale, reused pid, old bare-number format) is deleted and nothing is signalled. A daemon that
   does not answer `/stop` is no longer killed by whoever holds its port unless its lock proves it is clawdcursor. A
   daemon stopped from the dashboard or `POST /stop` now removes its lock file, like Ctrl+C does.
+- **Windows: `open_file` on a folder and `open_app "File Explorer"` open a File Explorer window again.** The
+  PowerShell that runs `Start-Process` was started detached, and Explorer opens no folder window for a detached
+  launcher, so both reported that no window appeared (and none did). That PowerShell is no longer detached; it exits
+  as soon as `Start-Process` returns, and the app it starts still stays open after clawdcursor exits. The same applies
+  to `open_uri` and the Electron debug relaunch.
+- **`open_app "File Explorer"` no longer says it was "handed off to the running explorer.exe"** when nothing opened.
+  explorer.exe is also the desktop shell (taskbar, desktop) and is always running, so it was claimed as the app, and
+  the agent was told to wait for a window that would never come. The shell's process no longer counts as a launched
+  or already-running app. File Explorer is now started as `explorer.exe`, not by its display name.
 
 ### Changed
 - README and clawdcursor.com describe 2.0: install per host, what protects you (including auto-approving hosts), and

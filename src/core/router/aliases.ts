@@ -66,10 +66,11 @@ export const APP_ALIASES: Record<string, AppAlias> = {
   'word':               { processNames: ['WINWORD'],                          searchTerm: 'Word',               macOSAppName: 'Microsoft Word' },
   'excel':              { processNames: ['EXCEL'],                            searchTerm: 'Excel',              macOSAppName: 'Microsoft Excel' },
 
-  // Shell
-  'explorer':           { processNames: ['explorer'],                         searchTerm: 'File Explorer',      macOSAppName: 'Finder' },
+  // Shell. File Explorer is started as explorer.exe: "File Explorer" is a display name, not a program, and the launch
+  // must not depend on Windows happening to resolve it.
+  'explorer':           { processNames: ['explorer'],                         searchTerm: 'File Explorer',      executable: 'explorer.exe', macOSAppName: 'Finder' },
   'finder':             { processNames: ['Finder'],                           searchTerm: 'Finder',             macOSAppName: 'Finder' },
-  'file explorer':      { processNames: ['explorer'],                         searchTerm: 'File Explorer',      macOSAppName: 'Finder' },
+  'file explorer':      { processNames: ['explorer'],                         searchTerm: 'File Explorer',      executable: 'explorer.exe', macOSAppName: 'Finder' },
   'cmd':                { processNames: ['cmd'],                              searchTerm: 'Command Prompt',     macOSAppName: 'Terminal' },
   'terminal':           { processNames: ['WindowsTerminal', 'cmd', 'Terminal'], searchTerm: 'Terminal',         macOSAppName: 'Terminal' },
   'powershell':         { processNames: ['powershell', 'pwsh'],               searchTerm: 'PowerShell' },

@@ -40,7 +40,7 @@
 
 import { screenJson } from '../core/untrusted-screen-content';
 import type { ToolDefinition, ToolResult, ToolContext } from './types';
-import { psOpts, powershellExe } from '../platform/ps-spawn';
+import { powershellExe, psOpts } from '../platform/ps-spawn';
 
 /**
  * Known Electron / WebView2 app fingerprints. Match is case-insensitive
