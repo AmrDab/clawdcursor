@@ -23,15 +23,13 @@
 //                  the keyboard; Esc gives it back), replacing "Something else".
 //                  In a multiline field Return adds a line, Cmd+Return sends.
 //   overlay outline [--color #RRGGBB] [--paused]
-//                  a thin border around the window the agent works in, and nothing
-//                  else: no fill, nothing on the rest of the screen; clicks pass
-//                  straight through it. stdin: "TARGET <handle> <pid>" names the
-//                  process (a bare "TARGET": none). The border is drawn around the
-//                  process's frontmost window while that app is in front, and follows it.
-//                  When the target app is in front with no window of its own (Finder's
-//                  desktop), the border goes around the screen the pointer is on.
+//                  a thin border around the display, on every screen, and nothing
+//                  else: no fill, nothing over the middle of a screen; clicks pass
+//                  straight through it. It is up from the start and tracks no window
+//                  (a "TARGET" line on stdin, from an older parent, is ignored); the
+//                  screens are looked at again every 100 ms.
 //                  The border: Border Beam's pulse-inner (below) - coloured blobs that
-//                  breathe just inside the window's edge, a 1 pt ring and a glow 28 pt
+//                  breathe just inside the screen's edge, a 1 pt ring and a glow 28 pt
 //                  deep, drawn cheaply (windowOutline); --paused: the same in blue
 //                  ("ocean"), still. With Reduce Motion on: still. (--color is accepted
 //                  and not used.)
@@ -361,10 +359,6 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 } else if line.hasPrefix("ACTIVITY ") {
                     let text = String(line.dropFirst(9))
                     DispatchQueue.main.async { self?.setActivity(text) }
-                } else if line == "TARGET" || line.hasPrefix("TARGET ") {
-                    let parts = line.split(separator: " ")
-                    let pid = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
-                    DispatchQueue.main.async { self?.targetPid = pid }
                 }
             }
         }
@@ -645,42 +639,17 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
-    /// The process whose window gets the outline ("TARGET <handle> <pid>" on stdin); 0: none.
-    var targetPid = 0
-
-    /// The screen the pointer is on (where the agent's last click went), in AppKit coordinates: the part of it below
-    /// the menu bar and beside the Dock, which are above the outline and would hide a side of it.
-    func pointerScreen() -> NSRect? {
-        let at = NSEvent.mouseLocation
-        guard let screen = NSScreen.screens.first(where: { $0.frame.contains(at) }) ?? NSScreen.main else { return nil }
-        return screen.visibleFrame
-    }
-
-    /// What the outline goes around, in AppKit coordinates: the target process's frontmost ordinary window while that
-    /// app is in front (the windows are listed only then; the list is front to back), or the pointer's screen when
-    /// that app is in front with no window of its own (Finder's desktop). A window that covers its screen is cut to it.
-    func targetFrame() -> NSRect? {
-        guard targetPid != 0,
-              NSWorkspace.shared.frontmostApplication?.processIdentifier == pid_t(targetPid),
-              let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
-              let primary = NSScreen.screens.first else { return nil }
-        guard let front = list.first(where: {
-                  ($0[kCGWindowOwnerPID as String] as? Int) == targetPid && ($0[kCGWindowLayer as String] as? Int) == 0
-              }),
-              let bounds = front[kCGWindowBounds as String] as? NSDictionary,
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return pointerScreen() }
-        // Quartz measures down from the top of the primary display, AppKit up from its bottom.
-        let frame = NSRect(x: rect.minX, y: primary.frame.height - rect.maxY, width: rect.width, height: rect.height)
-        if let screen = NSScreen.screens.first(where: { frame.contains($0.visibleFrame) }) {
-            return frame.intersection(screen.frame)
-        }
-        return frame
+    /// What the beam on screen `index` goes around, in AppKit coordinates: the part of that screen below the menu bar
+    /// and beside the Dock, which are above the beam and would hide a side of it. nil: there is no such screen (now).
+    func screenFrame(_ index: Int) -> NSRect? {
+        let screens = NSScreen.screens
+        return screens.indices.contains(index) ? screens[index].visibleFrame : nil
     }
 
     /// The border beam (#392): Border Beam as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23}
     /// duration={3.9} hueRange={46}> - the library's defaults for the rest, theme "dark" - by Jakub Antalik (libraries.dev,
     /// MIT; the library's numbers and its licence notice are at the top of scripts/window-outline.ps1).
-    /// Inside the window's edge: an inner glow of coloured blobs (and faint white ones at the corners) within 28 pt of
+    /// Inside the screen's edge: an inner glow of coloured blobs (and faint white ones at the corners) within 28 pt of
     /// the edge, a 1 pt ring of radius 23 lit by the same blobs, and a bloom on that ring; the blobs breathe (size,
     /// place, opacity) on the library's periods and the colours turn the whole wheel every 16 s (hueRange does
     /// nothing for the pulse sizes, in the web library or its React Native port).
@@ -692,11 +661,11 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     ///   - no masks, shadows, filters or blurs, and no layer the size of the window;
     ///   - Core Animation moves them (startPoint / endPoint / opacity / colors, autoreversing on the library's periods,
     ///     at most 15 frames a second): no code of ours runs per frame.
-    /// The window is the target's frame, whatever it is (a normal, zoomed or full-screen window, or the screen itself
-    /// for the desktop): the beam lies over the window's edge.
+    /// The window is the screen's frame (one beam window per screen, see windowOutline): the beam lies over the
+    /// screen's edge.
     /// --paused: the same in the library's "ocean" blues, still. Reduce Motion on: still. Nothing changes once a still
     /// beam is drawn.
-    func windowOutline() {
+    func beamOn(_ index: Int) {
         let paused = CommandLine.arguments.contains("--paused")
         let still = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let turning = !paused && !still
@@ -1050,10 +1019,9 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
 
         windows.append(win)
-        listenForCommands()
         var laidOut: NSSize? = nil
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
-            guard let frame = self?.targetFrame(), frame.width > 8, frame.height > 8 else { win.orderOut(nil); return }
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let frame = self?.screenFrame(index), frame.width > 8, frame.height > 8 else { win.orderOut(nil); return }
             if win.frame != frame { win.setFrame(frame, display: true) }
             if laidOut != frame.size {
                 layout(frame.size)
@@ -1071,6 +1039,18 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 }
             }
         }
+    }
+
+    /// The beam on every screen: one beamOn window per screen, built as screens appear (one plugged in later gets its
+    /// own); a beam whose screen is gone hides itself and comes back if that index is used again.
+    func windowOutline() {
+        listenForCommands()
+        var built = 0
+        let add = {
+            while built < NSScreen.screens.count { self.beamOn(built); built += 1 }
+        }
+        add()
+        Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in add() }
     }
 }
 

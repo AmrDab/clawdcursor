@@ -177,27 +177,18 @@ describe('controlBanner', () => {
   });
 });
 
-describe('the outline around the window the agent works in', () => {
+describe('the beam around the display', () => {
   const live = () => outlines.filter(o => !o.killed);
 
-  it('with no window known the outline is told nothing: it draws nothing, the pill alone shows control', () => {
+  it('is on from the start and is told nothing: no window is tracked, and banner.ts never writes TARGET to it', async () => {
+    vi.useRealTimers();
     controlBanner.pin();
     expect(outlines[0].written).toEqual([]);
-  });
-
-  it('is told the working window, told again when it changes, and never the same window twice', () => {
-    controlBanner.pin();
-    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
-    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
-    controlBanner.setWorkingWindow({ processId: 300, handle: 0x7b2 });
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET 1970 300']);
-  });
-
-  it('is told when there is no window any more, so it hides', () => {
-    controlBanner.pin();
-    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
-    controlBanner.setWorkingWindow(undefined);
-    expect(outlines[0].written).toEqual(['TARGET 1440 100', 'TARGET']);
+    controlBanner.setActivity('Typing in Edge');
+    controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
+    await controlBanner.dodge(1500, true);
+    for (const o of outlines) expect(o.written.filter(l => l.includes('TARGET'))).toEqual([]);
+    expect((controlBanner as unknown as Record<string, unknown>).setWorkingWindow).toBeUndefined();
   });
 
   it('the paused outline is spawned paused and blue on every OS; the running one with no flags (#392)', () => {
@@ -212,25 +203,10 @@ describe('the outline around the window the agent works in', () => {
     expect(outlineFlags(true, 'linux')).toEqual(['--color', '#3b82f6', '--paused']);
   });
 
-  it('a window known only by its process (macOS) is sent with handle 0', () => {
+  it('the paused form replaces the running outline process, and starts with nothing sent', () => {
     controlBanner.pin();
-    controlBanner.setWorkingWindow({ processId: 100 });
-    expect(outlines[0].written).toEqual(['TARGET 0 100']);
-  });
-
-  it('a new outline process (the paused form) starts on the window the agent was working in', () => {
-    controlBanner.pin();
-    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
     controlBanner.showPaused({ id: 1, message: 'Sign in', since: 0 }, () => {});
     expect(outlines[0].killed).toBe(true);
-    expect(live()[0].written).toEqual(['TARGET 1440 100']);
-  });
-
-  it('the next session does not open on the last one\'s window', () => {
-    controlBanner.pin();
-    controlBanner.setWorkingWindow({ processId: 100, handle: 0x5a0 });
-    controlBanner.unpin();
-    controlBanner.pin();
     expect(live()[0].written).toEqual([]);
   });
 
@@ -285,13 +261,17 @@ describe('no full-screen glow', () => {
     }
   });
 
-  it('no outline drawer sizes a window to a screen (only the desktop itself in front is outlined as its monitor)', () => {
-    expect(read('scripts', 'window-outline.ps1')).not.toMatch(/AllScreens|PrimaryScreen|\.Bounds\b/);
+  it('every outline drawer frames every monitor and tracks no window', () => {
+    const ps = read('scripts', 'window-outline.ps1');
+    expect(ps).toContain('EnumDisplayMonitors(');
+    expect(ps).not.toMatch(/GetForegroundWindow|IsIconic|DwmGetWindowAttribute|GetShellWindow|p\[0\]\.EndsWith\("TARGET"\)/);
     const swift = read('scripts', 'mac', 'overlay.swift');
-    expect(swift.slice(swift.indexOf('func windowOutline()'))).not.toMatch(/screen\.frame|NSScreen\.screens/);
+    expect(swift.slice(swift.indexOf('func windowOutline()'))).toContain('NSScreen.screens');
     const py = read('scripts', 'linux', 'overlay.py');
     const start = py.indexOf('def run_outline(');
-    expect(py.slice(start, py.indexOf('\ndef ', start + 1))).not.toMatch(/get_monitor|get_n_monitors/);
+    const run = py.slice(start, py.indexOf('\ndef ', start + 1));
+    expect(run).toContain('get_n_monitors');
+    expect(run).not.toMatch(/== 'TARGET'|xid/);
   });
 
   it('the beam is still where the OS is set to reduce motion, and the paused form does not turn (#392)', () => {
@@ -377,27 +357,28 @@ describe('no full-screen glow', () => {
     expect(py).toContain("run_outline(argv[argv.index('--color') + 1] if '--color' in argv else '#ff7a45', '--paused' in argv)");
   });
 
-  it('the beam lies inside the window\'s edge on every drawer, whatever the window, at a capped rate', () => {
+  it('the beam lies inside each monitor\'s edge on every drawer, at a capped rate', () => {
     const ps = read('scripts', 'window-outline.ps1');
     const swift = read('scripts', 'mac', 'overlay.swift');
     const py = read('scripts', 'linux', 'overlay.py');
-    // Windows: the eight strips lie inside the frame, 28 px deep; no outward or inward form any more.
+    // Windows: the eight strips lie inside the monitor, 28 px deep; no outward or inward form any more.
     expect(ps).toContain('public const int Band = 28;');
     expect(ps).toContain('int[] r = { 0, 0, c, c,   w - c, 0, c, c,   w - c, h - c, c, c,   0, h - c, c, c,');
-    expect(ps).toContain('beam.Layout(w, h);');
+    expect(ps).toContain('d.Beam.Layout(w, h);');
     expect(ps).not.toMatch(/inward|Margin/);
-    // A maximized or full-screen window is cut to its monitor, and outlined like any other.
-    expect(ps).toMatch(/if \(on && GetMonitorInfo\(screen, ref info\) && \(IsZoomed\(t\)/);
+    // One set of strips per monitor, laid out again when the monitors change (the 100 ms poll).
+    expect(ps).toContain('List<Display> displays');
+    expect(ps).toContain('poll.Interval = 100;');
     // 12.5 frames a second while it breathes, worked out and pushed only where a blob is; the paused and still forms
     // are drawn once.
     expect(ps).toContain('frame.Interval = 80;');
-    expect(ps).toContain('frame.Tick += (s, e) => { if (shown && turning) Paint(false); };');
+    expect(ps).toContain('frame.Tick += (s, e) => { if (turning) foreach (Display d in displays) if (d.Shown) Paint(d, false); };');
     expect(ps).toContain('if (lines == 0) continue;');
-    // macOS: the window is the target's frame itself.
-    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    // macOS: one window per screen, the screen's frame itself.
+    const outline = swift.slice(swift.indexOf('func beamOn('));
     expect(outline).toContain('if win.frame != frame { win.setFrame(frame, display: true) }');
     expect(outline).not.toMatch(/margin|inward/);
-    // Linux: the window is the frame, cut to the band inside its edge.
+    // Linux: a window per monitor, cut to the band inside its edge.
     const run = py.slice(py.indexOf('def run_outline('));
     expect(run).toContain('win.move(x, y)');
     expect(run).toContain('t = min(BEAM_BAND if composited else 3, w // 2, h // 2)');
@@ -406,7 +387,7 @@ describe('no full-screen glow', () => {
 
   it('the macOS beam keeps its GPU work to the edge band (#414): small gradient layers, no masks, filters or shadows', () => {
     const swift = read('scripts', 'mac', 'overlay.swift');
-    const outline = swift.slice(swift.indexOf('func windowOutline()'));
+    const outline = swift.slice(swift.indexOf('func beamOn('));
     expect(outline).not.toMatch(/\.mask\s*=|CIFilter|\.filters\s*=|backgroundFilters|compositingFilter|shadowOpacity|shadowRadius|shadowPath/);
     expect(outline).toContain('layer.type = .radial');
     expect(outline).toContain('layer.contentsScale = scale');
@@ -418,16 +399,16 @@ describe('no full-screen glow', () => {
     const ps = read('scripts', 'window-outline.ps1');
     for (const style of ['0x00080000', '0x00000020', '0x08000000', '0x00000080', '0x00000008']) expect(ps).toContain(style);
     expect(ps).toContain('SetWindowDisplayAffinity(Handle, 0x11)');
-    // Where the frame is, is read in physical pixels (per-monitor-v2); the strips themselves are not DPI aware, so
+    // Where the monitors are is read in physical pixels (per-monitor-v2); the strips themselves are not DPI aware, so
     // Windows draws them at the monitor's scale.
     expect(ps).toContain('IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2');
     expect(ps).toContain('SetThreadDpiAwarenessContext([IntPtr](-1))');
-    // Re-placed only when it moved or is no longer above its window (walking up the z-order), never on every poll.
-    expect(ps).toContain('if (placed && !moved) return;');
-    // TARGET and HIDE act on receipt, not on the next poll: a capture follows HIDE after 90 ms.
-    expect(ps).toContain('BeginInvoke((Action)Follow)');
+    // Re-placed only when a monitor's bounds changed, never on every poll.
+    expect(ps).toContain('if (!moved) continue;');
+    // HIDE acts on receipt, not on the next poll: a capture follows HIDE after 90 ms. TARGET is ignored.
+    expect(ps).toContain('sync.BeginInvoke((Action)Follow)');
+    expect(ps).not.toContain('"TARGET")');
     // A byte-order mark in front of the first line (a .NET parent) does not lose the command.
-    expect(ps).toContain('p[0].EndsWith("TARGET")');
     expect(ps).toContain('p[0].EndsWith("HIDE")');
   });
 });

@@ -27,14 +27,14 @@ by src/core/banner.ts:
                      stdin: "HIDE <ms>" steps aside for an agent's click;
                      "ACTIVITY <text>" replaces the activity text.
   overlay.py outline [--color #RRGGBB] [--paused]
-                     the border beam around the window the agent works in, and
-                     nothing else: no fill, nothing on the rest of the screen;
-                     clicks pass straight through it. stdin: "TARGET <xid> <pid>"
-                     names the window (a bare "TARGET": none); the beam is drawn
-                     while that is the active window, and follows it. "HIDE <ms>"
-                     steps aside for a screen capture.
+                     the border beam around the display, on every monitor, and
+                     nothing else: no fill, nothing over the middle of the screen;
+                     clicks pass straight through it. It is up from the start and
+                     tracks no window; the monitors are looked at again every
+                     100 ms. stdin: "HIDE <ms>" steps aside for a screen capture
+                     ("TARGET ..." lines are ignored).
                      The beam is Border Beam's pulse-inner (draw_beam): coloured
-                     blobs that breathe just inside the window's edge, a 1 px ring
+                     blobs that breathe just inside the screen's edge, a 1 px ring
                      and a glow 28 px deep, about 10 frames a second.
                      --paused: the same in blue ("ocean"), still. Without a
                      compositor (no alpha): a plain steady line in --color.
@@ -673,97 +673,88 @@ def draw_beam(cr, w, h, t, palette):
 
 
 def run_outline(color, paused):
-    gi.require_version('GdkX11', '3.0')
-    from gi.repository import GdkX11  # noqa: F401  (gives the active window its get_xid)
-    screen = Gdk.Screen.get_default()
-    win, composited = popup(1, 1)
+    # One beam window per monitor, each the size of its monitor, cut to the band just inside its edge.
+    display = Gdk.Display.get_default()
     settings = Gtk.Settings.get_default()
     # Paused: the blues, still. Where the desktop is set to show no animations: one still frame.
     still = paused or (settings is not None and not settings.get_property('gtk-enable-animations'))
     palette = BEAM_OCEAN if paused else BEAM_GOLD
-    state = {'xid': 0, 'rect': None, 'hidden_until': 0.0, 'buf': b'', 'sized': None, 'shadow': (0, 0, 0, 0),
-             'start': time.monotonic()}
+    state = {'hidden_until': 0.0, 'buf': b'', 'beams': [], 'start': time.monotonic()}  # beams: [win, rect, composited]
 
-    def shadow(xid, scale):
-        # A client-decorated GTK window draws its shadow inside its own X window and says how wide it is in
-        # _GTK_FRAME_EXTENTS (left, right, top, bottom, device pixels). Without xprop the border sits outside the shadow.
-        if not shutil.which('xprop'):
-            return (0, 0, 0, 0)
-        try:
-            out = subprocess.run(['xprop', '-id', str(xid), '_GTK_FRAME_EXTENTS'],
-                                 capture_output=True, text=True, timeout=1).stdout
-            sides = tuple(int(v) // scale for v in out.split('=')[1].split(','))
-            return sides if len(sides) == 4 else (0, 0, 0, 0)
-        except Exception:
-            return (0, 0, 0, 0)  # the property is not set: server-side decorations
+    def make_beam():
+        win, composited = popup(1, 1)
+        beam = [win, None, composited]
 
-    def draw(_w, cr):
-        cr.set_operator(cairo.OPERATOR_SOURCE)
-        if not composited:  # no alpha on this display: a plain steady line in the colour given
-            cr.set_source_rgb(*hex_rgb(color))
+        def draw(_w, cr):
+            cr.set_operator(cairo.OPERATOR_SOURCE)
+            if not composited:  # no alpha on this display: a plain steady line in the colour given
+                cr.set_source_rgb(*hex_rgb(color))
+                cr.paint()
+                return False
+            cr.set_source_rgba(0, 0, 0, 0)
             cr.paint()
+            cr.set_operator(cairo.OPERATOR_OVER)
+            if beam[1] is not None:
+                _x, _y, w, h = beam[1]
+                draw_beam(cr, w, h, 0 if still else time.monotonic() - state['start'], palette)
             return False
-        cr.set_source_rgba(0, 0, 0, 0)
-        cr.paint()
-        cr.set_operator(cairo.OPERATOR_OVER)
-        if state['rect'] is not None:
-            _x, _y, w, h = state['rect']
-            draw_beam(cr, w, h, 0 if still else time.monotonic() - state['start'], palette)
-        return False
 
-    win.connect('draw', draw)
+        win.connect('draw', draw)
+        return beam
 
-    def frame():
-        """The target's visible frame (decorations included, a GTK shadow not) while it is the active window."""
-        if not state['xid'] or time.monotonic() < state['hidden_until']:
-            return None
-        active = screen.get_active_window()
-        if active is None or active.get_xid() != state['xid']:
-            return None
-        e = active.get_frame_extents()
-        sized = (state['xid'], e.width, e.height)
-        if sized != state['sized']:  # asked again only when the window changes or resizes (a maximized one has no shadow)
-            state['sized'] = sized
-            state['shadow'] = shadow(state['xid'], max(1, active.get_scale_factor()))
-        left, right, top, bottom = state['shadow']
-        w, h = e.width - left - right, e.height - top - bottom
-        return (e.x + left, e.y + top, w, h) if w > 0 and h > 0 else None
+    def monitors():
+        """Every monitor's rectangle, none while stepping aside for a capture."""
+        if time.monotonic() < state['hidden_until']:
+            return []
+        out = []
+        for i in range(display.get_n_monitors()):
+            g = display.get_monitor(i).get_geometry()
+            if g.width > 0 and g.height > 0:
+                out.append((g.x, g.y, g.width, g.height))
+        return out
 
-    def bands():
-        """Where the beam is in the window: the band just inside the frame's edge."""
-        x, y, w, h = state['rect']
+    def bands(rect):
+        """Where the beam is on a monitor: the band just inside its edge."""
+        x, y, w, h = rect
         c = min(BEAM_BAND, w // 2, h // 2)
         return [(0, 0, w, c), (0, h - c, w, c), (0, c, c, h - 2 * c), (w - c, c, c, h - 2 * c)]
 
     def follow():
-        rect = frame()
-        if rect == state['rect']:
-            return True
-        state['rect'] = rect
-        if rect is None:
-            win.hide()
-            return True
-        x, y, w, h = rect
-        # The window is the frame, cut to the beam's band just inside its edge (or, without a compositor, to the plain
-        # line): nothing lies over the middle of it.
-        t = min(BEAM_BAND if composited else 3, w // 2, h // 2)
-        shape = cairo.Region(cairo.RectangleInt(0, 0, w, h))
-        shape.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
-        win.move(x, y)
-        win.resize(w, h)
-        win.show_all()
-        win.shape_combine_region(shape)
-        # Click-through: an empty input shape sends every click to the window underneath.
-        win.input_shape_combine_region(cairo.Region())
-        win.queue_draw()
+        rects = monitors()
+        while len(state['beams']) < len(rects):
+            state['beams'].append(make_beam())
+        for i, beam in enumerate(state['beams']):
+            win, old, composited = beam
+            rect = rects[i] if i < len(rects) else None
+            if rect == old:
+                continue
+            beam[1] = rect
+            if rect is None:
+                win.hide()
+                continue
+            x, y, w, h = rect
+            # The window is the monitor, cut to the beam's band just inside its edge (or, without a compositor, to the
+            # plain line): nothing lies over the middle of it.
+            t = min(BEAM_BAND if composited else 3, w // 2, h // 2)
+            shape = cairo.Region(cairo.RectangleInt(0, 0, w, h))
+            shape.subtract(cairo.RectangleInt(t, t, w - 2 * t, h - 2 * t))
+            win.move(x, y)
+            win.resize(w, h)
+            win.show_all()
+            win.shape_combine_region(shape)
+            # Click-through: an empty input shape sends every click to the window underneath.
+            win.input_shape_combine_region(cairo.Region())
+            win.queue_draw()
         return True
 
     def breathe():
         # About 10 frames a second, only the band the beam is in.
-        if state['rect'] is not None and composited and not still:
-            for bx, by, bw, bh in bands():
-                if bw > 0 and bh > 0:
-                    win.queue_draw_area(bx, by, bw, bh)
+        if not still:
+            for win, rect, composited in state['beams']:
+                if rect is not None and composited:
+                    for bx, by, bw, bh in bands(rect):
+                        if bw > 0 and bh > 0:
+                            win.queue_draw_area(bx, by, bw, bh)
         return True
 
     def on_line(line):
@@ -771,9 +762,8 @@ def run_outline(color, paused):
         if not parts:
             return
         try:
-            if parts[0] == 'TARGET':
-                state['xid'] = int(parts[1]) if len(parts) > 1 else 0
-            elif parts[0] == 'HIDE' and len(parts) > 1:
+            # (A "TARGET" line, from an older parent, is ignored: the beam is on every monitor.)
+            if parts[0] == 'HIDE' and len(parts) > 1:
                 state['hidden_until'] = time.monotonic() + max(50, min(int(parts[1]), 10000)) / 1000
         except ValueError:
             return

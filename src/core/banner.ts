@@ -3,17 +3,16 @@
  *   - the pill: topmost, never-focused; a small dotted orb, what the agent is doing
  *     ("Typing in Edge", sent as `ACTIVITY <text>` on its stdin), the time since
  *     it appeared, and a Stop button (a double-click anywhere stops too).
- *   - the outline: a click-through beam along the edge of the window the agent
- *     is working in (control.ts workingWindow), and nothing else: no fill,
- *     nothing on the rest of the screen, nothing at all while that window is not
- *     in front. It is the "border beam" of libraries.dev (#392), size
- *     pulse-inner in its "gold" palette: golden blobs that breathe just
- *     inside the window's edge, a thin ring and a glow 28 px deep (the paused
- *     form is the same in blue, still; still too where the OS reduces motion),
- *     over a maximized or full-screen window as over any other. When the
- *     window is the desktop itself, it goes around the monitor. Spawned/
- *     killed in lockstep with the pill; `TARGET <handle> <pid>` on its stdin
- *     names the window, a bare `TARGET` none.
+ *   - the outline: a click-through beam along the edge of the display, on
+ *     every monitor, and nothing else: no fill, nothing over the middle of the
+ *     screen. It does not track any window: it is up for as long as the
+ *     process runs, and the drawer re-lays it out when a monitor is plugged in
+ *     or out or changes resolution. It is the "border beam" of libraries.dev
+ *     (#392), size pulse-inner in its "gold" palette: golden blobs that breathe
+ *     just inside the screen's edge, a thin ring and a glow 28 px deep (the
+ *     paused form, while a pause asks the user for a step, is the same in blue,
+ *     still; still too where the OS reduces motion). Spawned/killed in
+ *     lockstep with the pill. Nothing is sent to it but `HIDE <ms>`.
  * Both exit by themselves when their stdin closes: a host that hard-kills this
  * process must not leave them on screen.
  *
@@ -54,7 +53,7 @@ import { macOverlayBinary } from '../platform/mac-ocr-binary';
 import { setBeforePointerPress, setBeforeCapture, setOwnUiPids, setOnAgentInput } from '../platform/pointer-guard';
 import type { PauseAnswer, PauseInfo } from './pause-gate';
 import { publishOverlayState, foreignOverlayState } from './overlay-state';
-import { isStopped, workingIn, workingWindow } from './control';
+import { isStopped, workingIn } from './control';
 
 const IDLE_HIDE_MS = 30_000;
 /** How long the pill stays hidden around an agent's click, and how long to wait for it to be gone before clicking. */
@@ -110,8 +109,6 @@ export function activityLabel(method: string, processName?: string, appName?: st
   return app ? `${a[0]} in ${app}` : a[0];
 }
 type Spawner = (mode: OverlayMode) => ChildProcess;
-/** The window the outline goes around: Windows and Linux find it by handle, macOS by its process. */
-type WorkingWindow = { processId: number; handle?: number | string };
 
 /** One line to an overlay's stdin; false when it has none or is gone. */
 function send(child: ChildProcess | null, line: string): boolean {
@@ -219,7 +216,7 @@ export function outlineFlags(paused: boolean, platform: NodeJS.Platform): string
 
 class ControlBanner {
   private child: ChildProcess | null = null;        // the pill (carries BANNER_STOP)
-  private outlineChild: ChildProcess | null = null; // the border around the agent's window
+  private outlineChild: ChildProcess | null = null; // the border beam around the display
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private pinned = false;
   private enabled = OVERLAY_OS.has(process.platform) && process.env.CLAWD_NO_BANNER !== '1';
@@ -276,17 +273,6 @@ class ControlBanner {
   /** Before a screenshot or OCR: where the overlay would be in the capture, the pill and the outline step aside. */
   async beforeCapture(): Promise<void> {
     if (this.capturable) await this.dodge(DODGE_MS, true);
-  }
-
-  private working: WorkingWindow | undefined;
-  private target = ''; // the last line the live outline was sent
-
-  /** The window the agent works in now: the outline moves to it, or draws nothing when there is none. */
-  setWorkingWindow(w: WorkingWindow | undefined): void {
-    this.working = w;
-    const line = w ? `TARGET ${Number(w.handle) || 0} ${w.processId}` : 'TARGET';
-    if (line === this.target) return;
-    if (send(this.outlineChild, line)) this.target = line;
   }
 
   private activity = '';
@@ -479,13 +465,11 @@ class ControlBanner {
       return; // cosmetic — never let it break control
     }
     this.outlineChild = child;
-    this.target = '';
     this.publish();
     child.stdin?.on?.('error', () => { /* the outline is gone */ });
     child.stdout?.on?.('data', d => { if (String(d).includes('OUTLINE_CAPTURABLE')) this.capturable = true; });
     child.on('error', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
     child.on('exit', () => { if (this.outlineChild === child) { this.outlineChild = null; this.publish(); } });
-    if (this.working) this.setWorkingWindow(this.working);
   }
 
   // Neither overlay may outlive its owner — an orphaned "control in progress"
@@ -527,7 +511,6 @@ class ControlBanner {
   private forceHide(): void {
     this.clearIdleTimer();
     this.activity = ''; // the next session's pill must not open with this one's last action
-    this.working = undefined; // ...nor its outline on this one's window
     this.paused = null;
     this.onAnswer = undefined;
     this.onRefocus = undefined;
@@ -565,7 +548,6 @@ setOwnUiPids(() => [...controlBanner.overlayPids(), ...foreignOverlayState().pid
 setOnAgentInput(method => {
   const label = activityLabel(method, workingIn()?.processName, workingIn()?.appName);
   if (label) controlBanner.setActivity(label);
-  controlBanner.setWorkingWindow(workingWindow());
 });
 // Captures: the overlay is never in one — it excludes itself where the OS can, and steps aside where it cannot.
 setBeforeCapture(() => controlBanner.beforeCapture());

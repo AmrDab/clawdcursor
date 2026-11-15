@@ -103,7 +103,7 @@ In tool terms:
 - **OCR:** text recognition, reading the words in a picture of the screen. It runs on your computer.
 - **Playwright and CDP:** Playwright is a library that controls Chrome and Edge from the inside, over the Chrome DevTools Protocol (CDP), the browser's own debugging connection. Apps built on a browser engine (Electron or WebView2) can be reached the same way; `system detect_webview` finds them.
 - **Compact tools:** the six tools your AI sees with `--compact`. Without it there are 89 smaller tools, one per action. See [The tools](#the-tools).
-- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a border marks the window it is working in: an amber beam that runs round its edge while your AI works, steady blue while it waits for you. Clicks go through it, and it stays out of your AI's screenshots.
+- **The pill and the outline:** while your AI is working, a pill on screen says what it is doing ("Typing in Edge") and a beam runs round the edge of your screen (every monitor): gold while your AI works, steady blue while it waits for you. Clicks go through it, and it stays out of your AI's screenshots.
 
 ---
 
@@ -441,7 +441,7 @@ MIT. See [LICENSE](LICENSE).
 
 Built on the Model Context Protocol SDK, nut-js, Playwright, sharp, and the AT-SPI, UI Automation and AX accessibility APIs.
 
-The outline around the agent's window follows **Border Beam** (size `pulse-inner`, `gold` palette) and the pill's orb
+The beam around the edge of the display follows **Border Beam** (size `pulse-inner`, `gold` palette) and the pill's orb
 **Thinking Orbs**, both by Jakub Antalik ([libraries.dev](https://libraries.dev),
 [github.com/Jakubantalik/Libraries.dev](https://github.com/Jakubantalik/Libraries.dev)), MIT License, Copyright (c) 2026
 Jakub Antalik. Their values (palettes, timings, opacities) are used in `scripts/window-outline.ps1`,

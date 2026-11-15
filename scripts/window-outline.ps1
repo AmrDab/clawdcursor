@@ -1,8 +1,9 @@
-# window-outline.ps1 - the "border beam" around the window the agent is working in.
+# window-outline.ps1 - the "border beam" around the edge of the display (every monitor).
 #
-# Spawned/killed by src/core/banner.ts in lockstep with the control-banner pill. It draws ONLY along the frame: eight
-# strip windows (four sides, four corners) just INSIDE the window's edge, 28 px deep, over the window's own content
-# there. Nothing lies over the middle of the window and nothing on the rest of the screen.
+# Spawned/killed by src/core/banner.ts in lockstep with the control-banner pill. It draws ONLY along the screen's edge:
+# on each monitor, eight strip windows (four sides, four corners) just INSIDE the monitor's edge, 28 px deep, over
+# whatever is on screen there. Nothing lies over the middle of the screen. No window is tracked: the beam is up on
+# every monitor for as long as this process runs.
 #
 # THE LOOK IS Border Beam by Jakub Antalik (libraries.dev, github.com/Jakubantalik/Libraries.dev, packages/border-beam,
 # MIT - notice below) as <BorderBeam size="pulse-inner" colorVariant="gold" borderRadius={23} duration={3.9}
@@ -42,11 +43,11 @@
 #   fade              in over .6 s when it appears
 #
 # What is ours, because this is a desktop overlay and not a card on a page:
-#   - The window is the library's element and its content the card: the beam is drawn over the window's content along
-#     its edge, as the library draws its layers over the card's. The same for a normal, a maximized and a full-screen
-#     window and for the desktop (the monitor): there is never anything outside the edge.
-#   - The ring's corners have the owner's radius 23 while a Windows 11 window's are 8: at each corner the ring curves
-#     in across the window's own corner.
+#   - The monitor is the library's element and the screen its card: the beam is drawn over the screen's content along
+#     its edge, as the library draws its layers over the card's. One beam per monitor, each laid out at that monitor's
+#     bounds and zoom; the monitors are looked at again every 100 ms, so one plugged in or out, or a new resolution,
+#     is laid out again.
+#   - The ring's corners have the owner's radius 23: at each corner the ring curves in across the screen's own corner.
 #   - The bloom's blur is worked out once per size, not per frame (its blobs do not move; only its colour turns): at
 #     each point along the edge, the inside half of a gaussian of 8 px across it (sampled every 2 px in), then a
 #     gaussian of 8 px along the edge.
@@ -56,7 +57,7 @@
 #     (a value every 4 px) and the inner glow's at eight depths (every 4 px in), then fills each pixel of a side by
 #     blending the two values either side of it, from fixed weights; the corners pixel by pixel. Only the points of a
 #     side a blob reaches (or reached the frame before) are worked out and drawn, as deep as they are lit, and only the
-#     span from the first to the last is handed to Windows (the blobs keep their size in px, so on a large window most
+#     span from the first to the last is handed to Windows (the blobs keep their size in px, so on a large screen most
 #     of the edge is dark).
 #   - Paused: the same shape in the library's "ocean" blues, still (drawn once). Where Windows is set to show no
 #     animations (SPI_GETCLIENTAREAANIMATION off): one still frame in gold.
@@ -74,13 +75,10 @@
 # OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 # stdin, from the parent:
-#   TARGET <hwnd> <pid>   the window to outline (the pid is for the macOS drawer; ignored here)
-#   TARGET                draw nothing
 #   HIDE <ms>             step aside for a screen capture (only sent after OUTLINE_CAPTURABLE)
-# The beam is shown while that window is the one in front and not minimized, and follows it as it moves or resizes
-# (polled every 100 ms). A target that is the desktop itself (Progman / WorkerW) is outlined as the monitor.
-# It starts with no window. The parent kills this process to remove it; when stdin closes (the parent is gone without
-# doing so) it exits by itself.
+#   TARGET ...            ignored (an older parent sent the window to outline; the beam is on the whole display now)
+# The beam is up from the start, on every monitor, until the parent kills this process to remove it; when stdin
+# closes (the parent is gone without doing so) it exits by itself.
 #
 # stdout: OUTLINE_CAPTURABLE, once, where Windows cannot keep this window out of a capture (before Windows 10 2004).
 #
@@ -89,11 +87,9 @@
 #   WS_EX_TRANSPARENT  0x00000020  click-through
 #   WS_EX_NOACTIVATE   0x08000000  never steals focus (agent keeps typing)
 #   WS_EX_TOOLWINDOW   0x00000080  no taskbar / alt-tab entry
-#   WS_EX_TOPMOST      0x00000008  stays above the window it outlines. (Only an always-on-top window can be put over
-#                                  the window in front by another process: placed just above it, or at the top of the
-#                                  ordinary windows, the border ended up behind that window's own popups or was
-#                                  re-placed on every poll - measured 2026-11-10.) The pill raises itself again on
-#                                  its own clock, so it stays above the beam where the two meet.
+#   WS_EX_TOPMOST      0x00000008  stays above the windows on screen (only an always-on-top window can be put over
+#                                  the window in front by another process). The pill raises itself again on its own
+#                                  clock, so it stays above the beam where the two meet.
 #
 # The Windows drawer; macOS and Linux use scripts/mac/overlay.swift and scripts/linux/overlay.py (`outline`).
 
@@ -112,7 +108,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -211,7 +206,7 @@ public class BeamStrip : Form {
     }
 }
 
-// The beam's pixels, apart from any window: Layout lays out the eight strips for a frame of a size, Paint fills them
+// The beam's pixels, apart from any window: Layout lays out the eight strips for a monitor of a size, Paint fills them
 // for a moment. All in CSS px, the frame's top-left corner at (0, 0).
 public class Beam {
     // -- Border Beam, pulse-inner, gold, radius 23, 3.9 s, dark theme (see the table at the top of this file) --
@@ -329,7 +324,7 @@ public class Beam {
         lit = new byte[n]; was = new byte[n];
 
         // The bloom, once: its blobs do not move (only its colour turns, after the blur). At each point, the inside half
-        // of a gaussian across the edge (there is nothing outside the window to blur in), every 2 px in ...
+        // of a gaussian across the edge (there is nothing outside the screen to blur in), every 2 px in ...
         int[] pal = Paused ? Ocean : Gold;
         int nb = Bloom.Length / 3;
         bloomR = new double[n]; bloomG = new double[n]; bloomB = new double[n]; bloomA = new double[n];
@@ -635,68 +630,40 @@ public class Beam {
     }
 }
 
+// One monitor's beam: its eight strips and the pixels for them.
+public class Display {
+    public Beam Beam = new Beam();
+    public BeamStrip[] Strips = new BeamStrip[8];
+    public double Zoom = 1;       // physical pixels to a CSS px on this monitor
+    public double ShownAt;        // when the beam came up here (for the fade in)
+    public string Layout = "";    // what the strips were laid out for
+    public bool Shown;
+    public int Left, Top, Right, Bottom;
+}
+
 public class WindowOutline {
     [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
-    [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
-    [StructLayout(LayoutKind.Sequential)] struct MONITORINFO { public int Size; public RECT Monitor, Work; public int Flags; }
+    delegate bool MonitorEnumProc(IntPtr monitor, IntPtr dc, ref RECT rect, IntPtr data);
     [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr c);
-    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] static extern IntPtr GetShellWindow();
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hWnd, StringBuilder name, int max);
-    [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hWnd, uint cmd);
-    [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
-    [DllImport("user32.dll")] static extern bool IsZoomed(IntPtr hWnd);
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hWnd, int cmd);
     [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
-    [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hWnd, int flags);
-    [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(POINT p, int flags);
-    [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MONITORINFO info);
-    [DllImport("user32.dll")] static extern bool GetCursorPos(out POINT p);
+    [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorEnumProc proc, IntPtr data);
     [DllImport("user32.dll")] static extern bool SystemParametersInfo(uint action, uint param, out bool value, uint flags);
     [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int type, out uint x, out uint y);
-    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hWnd, int attr, out RECT rect, int size);
 
-    // The desktop itself: clicking it puts Progman (or the WorkerW that holds the icons) in front. There is no window
-    // to go around, so the monitor is outlined.
-    static bool IsDesktop(IntPtr t) {
-        if (t == GetShellWindow()) return true;
-        StringBuilder name = new StringBuilder(32);
-        GetClassName(t, name, 32);
-        string c = name.ToString();
-        return c == "Progman" || c == "WorkerW";
-    }
-
-    volatile IntPtr target = IntPtr.Zero;   // written by the stdin thread, read by the timer
     long hideUntil;                         // DateTime ticks (UTC); written by the stdin thread
-    RECT last;
-    bool shown;
     bool paused;
     bool still;                 // Windows is set to show no animations: one still frame
     bool turning;               // the beam breathes: not paused, not still
-    string layout = "";         // what the strips were laid out for
-    double zoom = 1;            // physical pixels to a CSS px on the frame's monitor
-    double shownAt;             // when the beam came up (for the fade in)
-    Beam beam = new Beam();
-    BeamStrip[] strips = new BeamStrip[8];
+    List<Display> displays = new List<Display>();   // one per monitor, in the order Windows lists them
+    Control sync;               // a window of no size, so the stdin thread can hand work to this one
     Stopwatch clock = Stopwatch.StartNew();
     System.Windows.Forms.Timer poll, frame;
 
-    IntPtr Handle { get { return strips[0].Handle; } }
-    void BeginInvoke(Action a) { strips[0].BeginInvoke(a); }
-
     public void Start(bool pausedForm) {
         paused = pausedForm;
-        beam.Paused = pausedForm;
-        // The strips are windows that are NOT DPI aware: their pixels are CSS px, and the desktop compositor draws
-        // them at the monitor's scale. At 150% that is less than half the pixels to fill, at 225% a fifth; the beam is
-        // soft, and loses nothing a card on a page at that zoom would have.
-        IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-1));   // DPI_AWARENESS_CONTEXT_UNAWARE
-        for (int i = 0; i < strips.Length; i++) {
-            strips[i] = new BeamStrip();
-            IntPtr created = strips[i].Handle;   // the windows exist (hidden) before the timers or stdin touch them
-        }
-        SetThreadDpiAwarenessContext(aware);
-        if (BeamStrip.Capturable) { try { Console.Out.WriteLine("OUTLINE_CAPTURABLE"); Console.Out.Flush(); } catch { } }
+        sync = new Control();
+        IntPtr made = sync.Handle;
         var t = new Thread(() => {
             try {
                 string line;
@@ -705,17 +672,20 @@ public class WindowOutline {
                     long n = 0;
                     if (p.Length > 1) long.TryParse(p[1], out n);
                     // EndsWith: a parent that puts a byte-order mark in front of its first line must not lose it.
-                    if (p[0].EndsWith("TARGET")) target = new IntPtr(n);
-                    else if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
+                    // (A TARGET line, from an older parent, is ignored: the beam is on every monitor.)
+                    if (p[0].EndsWith("HIDE")) Interlocked.Exchange(ref hideUntil, DateTime.UtcNow.AddMilliseconds(Math.Max(50, Math.Min(n, 10000))).Ticks);
                     else continue;
                     // At once, not on the next poll: the parent waits only 90 ms after HIDE before it captures.
-                    try { BeginInvoke((Action)Follow); } catch { }
+                    try { sync.BeginInvoke((Action)Follow); } catch { }
                 }
                 Environment.Exit(0);   // stdin closed: the parent is gone, and a beam must not outlive it
             } catch { }
         });
         t.IsBackground = true;
         t.Start();
+        Follow();
+        if (BeamStrip.Capturable) { try { Console.Out.WriteLine("OUTLINE_CAPTURABLE"); Console.Out.Flush(); } catch { } }
+        // The monitors are looked at again every 100 ms: one plugged in or out, or a new resolution, is laid out again.
         poll = new System.Windows.Forms.Timer();
         poll.Interval = 100;
         poll.Tick += (s, e) => Follow();
@@ -724,7 +694,7 @@ public class WindowOutline {
         // drawn once, when they are laid out).
         frame = new System.Windows.Forms.Timer();
         frame.Interval = 80;
-        frame.Tick += (s, e) => { if (shown && turning) Paint(false); };
+        frame.Tick += (s, e) => { if (turning) foreach (Display d in displays) if (d.Shown) Paint(d, false); };
         frame.Start();
     }
 
@@ -735,93 +705,96 @@ public class WindowOutline {
         return dpi / 96.0;
     }
 
-    // Is this window somewhere above `t` in the z-order? (Walks up from `t`: few windows are above the one in front;
-    // the cap is for a z-order that changes under the walk.)
-    bool Above(IntPtr t) {
-        IntPtr h = GetWindow(t, 3); // GW_HWNDPREV
-        for (int i = 0; h != IntPtr.Zero && i < 1000; i++, h = GetWindow(h, 3)) if (h == Handle) return true;
-        return false;
-    }
-
-    // Where the frame is, in physical pixels: per-monitor aware for as long as this runs.
+    // The monitors, in physical pixels: per-monitor aware for as long as this runs.
     void Follow() {
         IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-4));   // DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2
         try { Place(); } finally { SetThreadDpiAwarenessContext(aware); }
     }
 
-    void Place() {
-        IntPtr t = target;
-        RECT r = new RECT();
-        IntPtr screen = IntPtr.Zero;
-        bool on = DateTime.UtcNow.Ticks >= Interlocked.Read(ref hideUntil);
-        // The desktop in front: the monitor the pointer is on, where the agent's last click went.
-        bool desk = on && t != IntPtr.Zero && GetForegroundWindow() == t && IsDesktop(t);
-        MONITORINFO info = new MONITORINFO();
-        info.Size = 40;
-        if (desk) {
-            POINT at;
-            on = GetCursorPos(out at) && GetMonitorInfo(screen = MonitorFromPoint(at, 2), ref info); // MONITOR_DEFAULTTONEAREST
-            r = info.Monitor;
-        } else {
-            // The visible frame (DWMWA_EXTENDED_FRAME_BOUNDS = 9), not GetWindowRect, which includes invisible resize borders.
-            on = on && t != IntPtr.Zero && GetForegroundWindow() == t && !IsIconic(t)
-                && DwmGetWindowAttribute(t, 9, out r, 16) == 0;
-            if (on) screen = MonitorFromWindow(t, 2);
-            // A maximized or full-screen window: its frame can reach past the monitor's edge, where the beam would not show.
-            if (on && GetMonitorInfo(screen, ref info) && (IsZoomed(t)
-                || (r.Left <= info.Work.Left && r.Top <= info.Work.Top && r.Right >= info.Work.Right && r.Bottom >= info.Work.Bottom))) {
-                r.Left = Math.Max(r.Left, info.Monitor.Left); r.Top = Math.Max(r.Top, info.Monitor.Top);
-                r.Right = Math.Min(r.Right, info.Monitor.Right); r.Bottom = Math.Min(r.Bottom, info.Monitor.Bottom);
+    // A display with its strips. They are windows that are NOT DPI aware: their pixels are CSS px, and the desktop
+    // compositor draws them at the monitor's scale. At 150% that is less than half the pixels to fill, at 225% a
+    // fifth; the beam is soft, and loses nothing a card on a page at that zoom would have.
+    Display NewDisplay() {
+        Display d = new Display();
+        d.Beam.Paused = paused;
+        IntPtr aware = SetThreadDpiAwarenessContext(new IntPtr(-1));   // DPI_AWARENESS_CONTEXT_UNAWARE
+        try {
+            for (int i = 0; i < d.Strips.Length; i++) {
+                d.Strips[i] = new BeamStrip();
+                IntPtr created = d.Strips[i].Handle;   // the windows exist (hidden) before anything touches them
             }
+        } finally { SetThreadDpiAwarenessContext(aware); }
+        return d;
+    }
+
+    void Hide(Display d) {
+        if (!d.Shown) return;
+        foreach (BeamStrip s in d.Strips) ShowWindow(s.Handle, 0); // SW_HIDE
+        d.Shown = false;
+    }
+
+    void Place() {
+        bool on = DateTime.UtcNow.Ticks >= Interlocked.Read(ref hideUntil);   // not stepping aside for a capture
+        List<IntPtr> screens = new List<IntPtr>();
+        List<RECT> rects = new List<RECT>();
+        if (on) {
+            EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr m, IntPtr dc, ref RECT r, IntPtr data) => {
+                if (r.Right > r.Left && r.Bottom > r.Top) { screens.Add(m); rects.Add(r); }
+                return true;
+            }, IntPtr.Zero);
         }
-        on = on && r.Right > r.Left && r.Bottom > r.Top;
-        if (!on) {
-            if (shown) { foreach (BeamStrip s in strips) ShowWindow(s.Handle, 0); shown = false; } // SW_HIDE
-            return;
+        if (rects.Count == 0) { foreach (Display h in displays) Hide(h); return; }
+        while (displays.Count > rects.Count) {   // a monitor unplugged
+            Display gone = displays[displays.Count - 1];
+            displays.RemoveAt(displays.Count - 1);
+            foreach (BeamStrip s in gone.Strips) s.Close();
         }
+        while (displays.Count < rects.Count) displays.Add(NewDisplay());
+        for (int i = rects.Count; i < displays.Count; i++) Hide(displays[i]);
+
         bool animate;
         bool wasStill = still;
         still = SystemParametersInfo(0x1042, 0, out animate, 0) && !animate;   // SPI_GETCLIENTAREAANIMATION
         turning = !still && !paused;
-        bool placed = desk ? shown : Above(t);
-        bool moved = !shown || still != wasStill || r.Left != last.Left || r.Top != last.Top || r.Right != last.Right || r.Bottom != last.Bottom;
-        if (moved) zoom = ZoomOf(screen);
-        if (placed && !moved) return;
-        if (moved) {
-            if (!shown) shownAt = clock.Elapsed.TotalSeconds;
-            // In CSS px from here: the frame as a page at this zoom would measure it.
-            int w = Math.Max(1, (int)Math.Round((r.Right - r.Left) / zoom)), h = Math.Max(1, (int)Math.Round((r.Bottom - r.Top) / zoom));
+        for (int i = 0; i < displays.Count; i++) {
+            Display d = displays[i];
+            RECT r = rects[i];
+            bool moved = !d.Shown || still != wasStill || r.Left != d.Left || r.Top != d.Top || r.Right != d.Right || r.Bottom != d.Bottom;
+            if (!moved) continue;
+            if (!d.Shown) d.ShownAt = clock.Elapsed.TotalSeconds;
+            d.Zoom = ZoomOf(screens[i]);
+            // In CSS px from here: the monitor as a page at this zoom would measure it.
+            int w = Math.Max(1, (int)Math.Round((r.Right - r.Left) / d.Zoom)), h = Math.Max(1, (int)Math.Round((r.Bottom - r.Top) / d.Zoom));
             string key = w + "x" + h;
-            if (key != layout) {
-                layout = key;
-                beam.Layout(w, h);
-                for (int k = 0; k < strips.Length; k++) strips[k].SetSize(beam.X[k], beam.Y[k], beam.W[k], beam.H[k]);
+            if (key != d.Layout) {
+                d.Layout = key;
+                d.Beam.Layout(w, h);
+                for (int k = 0; k < d.Strips.Length; k++) d.Strips[k].SetSize(d.Beam.X[k], d.Beam.Y[k], d.Beam.W[k], d.Beam.H[k]);
             }
-            last = r;
-            foreach (BeamStrip s in strips) s.MoveTo(r.Left + (int)Math.Round(s.X * zoom), r.Top + (int)Math.Round(s.Y * zoom));
-            Paint(true);
+            d.Left = r.Left; d.Top = r.Top; d.Right = r.Right; d.Bottom = r.Bottom;
+            foreach (BeamStrip s in d.Strips) s.MoveTo(r.Left + (int)Math.Round(s.X * d.Zoom), r.Top + (int)Math.Round(s.Y * d.Zoom));
+            Paint(d, true);
+            // HWND_TOPMOST (-1); SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40.
+            // (The strips are already where they belong.)
+            foreach (BeamStrip s in d.Strips) {
+                if (s.W > 0 && s.H > 0) SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0053u);
+                else ShowWindow(s.Handle, 0);
+            }
+            d.Shown = true;
         }
-        // HWND_TOPMOST (-1), raised again only when the target (itself always-on-top, then) has come over it.
-        // SWP_NOSIZE 0x01 | SWP_NOMOVE 0x02 | SWP_NOACTIVATE 0x10 | SWP_SHOWWINDOW 0x40, and SWP_NOZORDER 0x04 when it
-        // is already above the target. (The strips are already where they belong.)
-        foreach (BeamStrip s in strips) {
-            if (s.W > 0 && s.H > 0) SetWindowPos(s.Handle, new IntPtr(-1), 0, 0, 0, 0, placed ? 0x0057u : 0x0053u);
-            else ShowWindow(s.Handle, 0);
-        }
-        shown = true;
     }
 
-    // One frame: the beam as it is now, faded in over .6 s when it has just come up (a still beam just appears).
-    // `all`: every pixel goes to the screen (a new size or place, the first frame, the fade); otherwise only where the
-    // beam is or was.
-    void Paint(bool all) {
+    // One frame of a display: the beam as it is now, faded in over .6 s when it has just come up (a still beam just
+    // appears). `all`: every pixel goes to the screen (a new size or place, the first frame, the fade); otherwise only
+    // where the beam is or was.
+    void Paint(Display d, bool all) {
         double now = clock.Elapsed.TotalSeconds;
-        double risen = turning ? Math.Max(0, Math.Min(1, (now - shownAt) / Beam.FadeInSeconds)) : 1;
-        beam.Paint(now, turning, all || risen < 1);
+        double risen = turning ? Math.Max(0, Math.Min(1, (now - d.ShownAt) / Beam.FadeInSeconds)) : 1;
+        d.Beam.Paint(now, turning, all || risen < 1);
         byte opacity = (byte)(255 * risen * risen * (3 - 2 * risen));
-        int[] d = beam.Dirty;
-        for (int k = 0; k < strips.Length; k++)
-            if (strips[k].W > 0 && strips[k].H > 0) strips[k].Push(beam.Pixels[k], opacity, d[4 * k], d[4 * k + 1], d[4 * k + 2], d[4 * k + 3]);
+        int[] dirty = d.Beam.Dirty;
+        for (int k = 0; k < d.Strips.Length; k++)
+            if (d.Strips[k].W > 0 && d.Strips[k].H > 0) d.Strips[k].Push(d.Beam.Pixels[k], opacity, dirty[4 * k], dirty[4 * k + 1], dirty[4 * k + 2], dirty[4 * k + 3]);
     }
 }
 '@
@@ -849,7 +822,7 @@ try {
     Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition $source
 }
 
-# This thread is not DPI aware, as the strips are; where the frame is on screen is read per-monitor-v2, in PHYSICAL
+# This thread is not DPI aware, as the strips are; where the monitors are is read per-monitor-v2, in PHYSICAL
 # pixels on every monitor (WindowOutline.Follow), like ps-bridge.ps1.
 [void][WindowOutline]::SetThreadDpiAwarenessContext([IntPtr](-1))
 

@@ -5,6 +5,13 @@ All notable changes to Clawd Cursor will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- **The beam is back on the screen's edge, on every monitor** (#392). The border beam goes round the whole display
+  again, not the agent's window: on each monitor, from the moment the overlay starts, the gold `pulse-inner` beam
+  (unchanged: radius 23, 3.9 s, glow 28 px deep) lies just inside the screen's edge. It tracks no window, so it can no
+  longer frame a hidden window, be left around a closed one, or sit behind a full-screen one; the drawer lays it out
+  again when a monitor is plugged in or out or changes resolution. While a pause asks you for a step it is blue and
+  still, as before. `TARGET` lines on the outline's stdin are ignored. This replaces the window-following outline
+  described in the next entry, on Windows, macOS and Linux.
 - **The outline is a border beam, and the pill has a thinking orb** (#392). The border around the agent's window is
   now the Border Beam of [libraries.dev](https://libraries.dev/beam) as `<BorderBeam size="pulse-inner"
   colorVariant="gold" borderRadius={23} duration={3.9} hueRange={46}>`, with the library's defaults for the rest (dark
