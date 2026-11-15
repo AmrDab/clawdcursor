@@ -164,6 +164,16 @@ describe('getFocusedElement', () => {
     expect(execFileCalls).toHaveLength(0);
   });
 
+  // smart_type reads the focus through the bridge: without the flag TextEdit's document (AXTextArea, "Edit") read as a
+  // one-line field, and its whole text was selected and replaced (review of #435).
+  it('a text area keeps its multiline flag, which smart_type needs to leave a document alone', async () => {
+    fake.ax.focusedElement.mockResolvedValue({ name: '', controlType: 'Edit', multiline: true, bounds: R, value: 'y', enabled: true, processId: 4242 });
+    const el = await bridge.getFocusedElement();
+    expect(el?.multiline).toBe(true);
+    const { selectAllScope } = await import('../tools/paste-guard');
+    expect(selectAllScope(el)).toBe('document');
+  });
+
   it('nothing focused, or a failed read, is null', async () => {
     fake.ax.focusedElement.mockResolvedValueOnce(null);
     expect(await bridge.getFocusedElement()).toBeNull();

@@ -855,6 +855,35 @@ describe('Smart Tools', () => {
       expect(result.text).toMatch(/replaced/);
     });
 
+    // Owner 2026-11-15 (Mac run: TextEdit's document was replaced; a page turned blue): select-all only inside a field.
+    it.each([
+      ['a document (Notepad, Word)', { controlType: 'Document', name: 'Text editor' }],
+      ['a macOS text area (TextEdit)', { controlType: 'Edit', name: '', multiline: true }],
+      ['a list item', { controlType: 'ListItem', name: 'Inbox' }],
+    ])('with a target, %s keeps its text: typed at the cursor, no select-all', async (_what, focused) => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue(focused);
+      const result = await smartType.handler({ text: 'hello', target: 'Body' }, createCtx());
+      mockGetFocusedElement.mockReset();
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual([]);
+      expect(mockTypeText).toHaveBeenCalledWith('hello');
+      expect(result.text).toMatch(/typed at the cursor/);
+      expect(result.text).not.toMatch(/replaced its content/);
+    });
+
+    it('mode:"replace" replaces a document when asked; a list item still gets no select-all', async () => {
+      mockInvokeElement.mockResolvedValue({ success: true });
+      mockGetFocusedElement.mockResolvedValue({ controlType: 'Edit', name: '', multiline: true });
+      await smartType.handler({ text: 'new', target: 'Body', mode: 'replace' }, createCtx());
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual(['mod+a']);
+      mockKeyPress.mockClear();
+      mockGetFocusedElement.mockResolvedValue({ controlType: 'ListItem', name: 'Inbox' });
+      const r = await smartType.handler({ text: 'new', target: 'Body', mode: 'replace' }, createCtx());
+      mockGetFocusedElement.mockReset();
+      expect(mockKeyPress.mock.calls.map(c => c[0])).toEqual([]);
+      expect(r.text).toMatch(/nothing was selected/);
+    });
+
     it('mode:"append" types at the cursor without clearing the field', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
       await smartType.handler({ text: '.bak', target: 'Save As', mode: 'append' }, createCtx());
@@ -865,7 +894,7 @@ describe('Smart Tools', () => {
     // Live (a CAD field that ignores Ctrl+A): replacing "100" with "30" left "1003300", reported "read back ✓".
     it('replace: a field that only CONTAINS the text is a mismatch, never "read back ✓"', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
-      mockGetFocusedElement.mockResolvedValue({ value: '1003300' });
+      mockGetFocusedElement.mockResolvedValue({ controlType: 'Edit', value: '1003300' });
       const result = await smartType.handler({ text: '30', target: 'Distance' }, createCtx());
       mockGetFocusedElement.mockReset();
       expect(result.isError).toBe(true);
@@ -877,7 +906,7 @@ describe('Smart Tools', () => {
 
     it('replace: an inline autocomplete suggestion after the text is a warning, not a failure', async () => {
       mockInvokeElement.mockResolvedValue({ success: true });
-      mockGetFocusedElement.mockResolvedValue({ value: 'github.com/login' });
+      mockGetFocusedElement.mockResolvedValue({ controlType: 'Edit', value: 'github.com/login' });
       const result = await smartType.handler({ text: 'github.com', target: 'Address and search bar' }, createCtx());
       mockGetFocusedElement.mockReset();
       expect(result.isError).toBeFalsy();
