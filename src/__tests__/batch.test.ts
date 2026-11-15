@@ -144,6 +144,10 @@ describe('executeBatch — halting', () => {
     expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
     const miss = await executeBatch([{ name: 'mcp__clawdcursor__nope' }], ctx);
     expect(miss.steps[0].status).toBe('unknown_tool');
+    // Another server's tool never runs as clawdcursor's, whatever its bare name.
+    const other = await executeBatch([{ name: 'mcp__claude-in-chrome__mouse_click' }], ctx);
+    expect(other.steps[0].status).toBe('unknown_tool');
+    expect(tools.mouse_click.handler).toHaveBeenCalledTimes(1);
   });
 
   it('caps the number of executed steps', async () => {
