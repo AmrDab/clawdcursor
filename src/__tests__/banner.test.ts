@@ -260,6 +260,22 @@ describe('no overlay outlives its parent', () => {
   });
 });
 
+// Mac run 2026-11-15: with the Claude desktop app in front, a click into the pause card's box gave it no keyboard.
+describe('the macOS pause card takes the keyboard for an answer', () => {
+  const swift = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'mac', 'overlay.swift'), 'utf8');
+  it('a click into the box takes the keyboard whenever the card is not key, not only the first time', () => {
+    expect(swift).toMatch(/class ClickToTypeField[\s\S]*?if let panel = window as\? PillPanel, !panel\.isKeyWindow \{ takeKeyboard\(panel, self\) \}/);
+  });
+  it('when the panel still is not key, this app is activated for the answer; "Something else" goes the same way', () => {
+    const take = swift.slice(swift.indexOf('func takeKeyboard('), swift.indexOf('final class PillView'));
+    expect(take).toMatch(/guard typingReply, !panel\.isKeyWindow else \{ return \}[\s\S]*NSApp\.activate\(\)[\s\S]*panel\.makeFirstResponder\(field\)/);
+    // NSApp.activate() exists only in the macOS 14 SDK: older toolchains (macOS 12 is supported) get the old call.
+    expect(take).toMatch(/#if compiler\(>=5\.9\)\s*\n\s*if #available\(macOS 14\.0, \*\) \{ NSApp\.activate\(\) \}[^\n]*\n\s*#else\s*\n\s*NSApp\.activate\(ignoringOtherApps: true\)\s*\n\s*#endif/);
+    expect(swift.match(/NSApp\.activate\(\)/g)).toHaveLength(1);
+    expect(swift).toMatch(/if on, let panel = pillPanel, let field = replyField \{\s*takeKeyboard\(panel, field\)/);
+  });
+});
+
 // The drawers put real windows on screen, so these read the source: nothing draws on a whole screen any more.
 describe('no full-screen glow', () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
