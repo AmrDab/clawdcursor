@@ -90,13 +90,27 @@ final class FirstClickButton: NSButton {
 final class ClickToTypeField: NSTextField {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
-        if let panel = window as? PillPanel, !panel.allowKey {
-            typingReply = true
-            panel.allowKey = true
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(self)
-        }
+        // Not "!allowKey": after the user clicks back into their app the panel is no longer key but allowKey stays
+        // set, and a second click into the box must take the keyboard again.
+        if let panel = window as? PillPanel, !panel.isKeyWindow { takeKeyboard(panel, self) }
         super.mouseDown(with: event)
+    }
+}
+
+/// Give the card the keyboard for the user's answer. A non-activating panel normally becomes key without activating
+/// this app; when the app in front keeps the keyboard anyway (the Claude desktop app in front, Mac run 2026-11-15:
+/// no focus ring, keys went nowhere), this app is activated for the answer. Focus goes back on Send (sendReply ->
+/// giveFocusBack), Esc (releaseKeyboard) or a choice.
+func takeKeyboard(_ panel: PillPanel, _ field: NSView) {
+    typingReply = true
+    panel.allowKey = true
+    panel.makeKeyAndOrderFront(nil)
+    panel.makeFirstResponder(field)
+    DispatchQueue.main.async {
+        guard typingReply, !panel.isKeyWindow else { return }
+        if #available(macOS 14.0, *) { NSApp.activate() } else { NSApp.activate(ignoringOtherApps: true) }
+        panel.makeKeyAndOrderFront(nil)
+        panel.makeFirstResponder(field)
     }
 }
 
@@ -326,9 +340,7 @@ final class Overlay: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         sendButton?.isHidden = !on
         typingReply = on
         if on, let panel = pillPanel, let field = replyField {
-            panel.allowKey = true
-            panel.makeKeyAndOrderFront(nil)
-            panel.makeFirstResponder(field)
+            takeKeyboard(panel, field)
         } else {
             pillPanel?.allowKey = false
             giveFocusBack()
